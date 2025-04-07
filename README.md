@@ -3,7 +3,7 @@
 [![PyPI downloads](https://img.shields.io/pypi/dm/uipath-langchain.svg)](https://pypi.org/project/uipath-langchain/)
 [![Python versions](https://img.shields.io/pypi/pyversions/uipath-langchain.svg)](https://pypi.org/project/uipath-langchain/)
 
-A Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Platform. This package provides programmatic interaction with UiPath Platform Services and human-in-the-loop (HITL) semantics through Action Center integration.
+A Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Platform. This package provides programmatic interaction with UiPath Platform services and human-in-the-loop (HITL) semantics through Action Center integration.
 
 This package is an extension to the [UiPath Python SDK](https://github.com/UiPath/uipath-python).
 
@@ -42,10 +42,10 @@ The SDK provides a command-line interface for creating, packaging, and deploying
 ### Initialize a Project
 
 ```bash
-uipath init [AGENT]
+uipath init [GRAPH]
 ```
 
-Creates a `uipath.json` configuration file for your project, based on the `langgraph.json` file. If [AGENT] is not specified, it will create an entrypoint for each agent specified in the `langgraph.json` file.
+Creates a `uipath.json` configuration file for your project. If `[GRAPH]` is omitted, it will create an entrypoint for each graph specified in the `langgraph.json` file.
 
 ### Authentication
 
@@ -58,7 +58,7 @@ This command opens a browser for authentication and creates/updates your `.env` 
 ### Debug a Project
 
 ```bash
-uipath run AGENT [INPUT]
+uipath run GRAPH [INPUT]
 ```
 
 Executes the agent with the provided JSON input arguments.
