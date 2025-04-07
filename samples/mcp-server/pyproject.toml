@@ -1,9 +1,0 @@
-[project]
-name = "mcp-server"
-version = "0.0.1"
-description = "Demo MCP Server"
-authors = [{ name = "John Doe" }]
-dependencies = [
-    "mcp>=1.6.0",
-]
-requires-python = ">=3.10"
