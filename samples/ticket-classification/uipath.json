@@ -2,12 +2,20 @@
   "entryPoints": [
     {
       "filePath": "agent",
-      "uniqueId": "59a8e85c-cec2-414c-9201-3f6b076e05dd",
+      "uniqueId": "525ea50d-c54f-4185-94e2-501fe9ab341a",
       "type": "agent",
       "input": {
         "type": "object",
         "properties": {
           "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "ticket_id": {
+            "title": "Ticket Id",
+            "type": "string"
+          },
+          "assignee": {
             "anyOf": [
               {
                 "type": "string"
@@ -16,11 +24,8 @@
                 "type": "null"
               }
             ],
-            "title": "Message"
-          },
-          "ticket_id": {
-            "title": "Ticket Id",
-            "type": "string"
+            "default": null,
+            "title": "Assignee"
           }
         },
         "required": [
