@@ -74,7 +74,7 @@ class UiPathTracer(BaseTracer):
         trace_data = {
             "id": self.trace_parent,
             "name": re.sub(
-                "[!@#$<>\.]", "", run_name
+                r"[!@#$<>\.]", "", run_name
             ),  # if we use these characters the Agents UI throws some error (but llmops backend seems fine)
             "referenceId": self.referenceId,
             "attributes": "{}",

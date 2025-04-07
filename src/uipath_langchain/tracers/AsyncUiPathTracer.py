@@ -118,7 +118,7 @@ class AsyncUiPathTracer(AsyncBaseTracer):
         trace_data = {
             "id": self.context.trace_id,
             "name": re.sub(
-                "[!@#$<>\.]", "", run_name
+                r"[!@#$<>\.]", "", run_name
             ),  # if we use these characters the Agents UI throws some error (but llmops backend seems fine)
             "referenceId": self.context.reference_id,
             "attributes": "{}",
