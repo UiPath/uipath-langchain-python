@@ -1,5 +1,8 @@
 # UiPath LangChain Python SDK
 
+[![PyPI downloads](https://img.shields.io/pypi/dm/uipath-langchain.svg)](https://pypi.org/project/uipath-langchain/)
+[![Python versions](https://img.shields.io/pypi/pyversions/uipath-langchain.svg)](https://pypi.org/project/uipath-langchain/)
+
 A Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Platform. This package provides programmatic interaction with UiPath Platform Services and human-in-the-loop (HITL) semantics through Action Center integration.
 
 This package is an extension to the [UiPath Python SDK](https://github.com/UiPath/uipath-python).
