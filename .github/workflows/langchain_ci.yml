@@ -1,0 +1,34 @@
+name: Langchain CI
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+    paths:
+      - "src/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/**"
+
+
+jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+    with:
+      folder_path: "."
+
+  test:
+    uses: ./.github/workflows/test.yml
+    with:
+      folder_path: "."
+
+  build:
+    needs: [lint, test]
+    uses: ./.github/workflows/build.yml
+    with:
+      folder_path: "."
+    secrets:
+      token: ${{ secrets.PYPI_TOKEN }}

@@ -1,0 +1,71 @@
+{
+  "entryPoints": [
+    {
+      "filePath": "agent",
+      "uniqueId": "59a8e85c-cec2-414c-9201-3f6b076e05dd",
+      "type": "agent",
+      "input": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "ticket_id": {
+            "title": "Ticket Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "ticket_id"
+        ]
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "confidence": {
+            "title": "Confidence",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "confidence"
+        ]
+      }
+    }
+  ],
+  "bindings": {
+    "version": "2.0",
+    "resources": [
+      {
+        "resource": "asset",
+        "key": "AZURE_OPENAI_API_KEY",
+        "value": {
+          "name": {
+            "defaultValue": "AZURE_OPENAI_API_KEY",
+            "isExpression": false,
+            "displayName": "Name"
+          }
+        },
+        "metadata": {
+          "ActivityName": "retrieve_credential",
+          "BindingsVersion": "2.1",
+          "DisplayLabel": "FullName"
+        }
+      }
+    ]
+  }
+}
