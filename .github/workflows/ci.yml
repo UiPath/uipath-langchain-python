@@ -1,0 +1,22 @@
+name: Core CI
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+
+jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  test:
+    uses: ./.github/workflows/test.yml
+    secrets:
+      UIPATH_URL: ${{ secrets.UIPATH_URL }}
+      UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
+      UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
