@@ -243,7 +243,7 @@ class LangGraphOutputProcessor:
                                 if job:
                                     self._resume_trigger = UiPathResumeTrigger(
                                         trigger_type=UiPathResumeTriggerType.JOB,
-                                        item_key=job.Key,
+                                        item_key=job.key,
                                     )
                             elif isinstance(self.interrupt_value, WaitJob):
                                 self._resume_trigger = UiPathResumeTrigger(
