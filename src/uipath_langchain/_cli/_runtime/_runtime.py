@@ -8,7 +8,7 @@ from langchain_core.tracers.langchain import wait_for_all_tracers
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph
-from uipath_sdk._cli._runtime._contracts import (
+from uipath._cli._runtime._contracts import (
     UiPathBaseRuntime,
     UiPathErrorCategory,
     UiPathRuntimeResult,

@@ -2,7 +2,7 @@ from typing import Any, Optional, Union
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import StateGraph
-from uipath_sdk._cli._runtime._contracts import UiPathRuntimeContext
+from uipath._cli._runtime._contracts import UiPathRuntimeContext
 
 from .._utils._graph import LangGraphConfig
 

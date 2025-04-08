@@ -3,8 +3,8 @@ import logging
 from typing import Any, Optional, cast
 
 from langgraph.types import Command
-from uipath_sdk import UiPathSDK
-from uipath_sdk._cli._runtime._contracts import (
+from uipath import UiPath
+from uipath._cli._runtime._contracts import (
     UiPathErrorCategory,
     UiPathResumeTriggerType,
     UiPathRuntimeStatus,
@@ -39,7 +39,7 @@ class LangGraphInputProcessor:
         """
         self.context = context
         self.escalation = Escalation(self.context.config_path)
-        self.uipath = UiPathSDK()
+        self.uipath = UiPath()
 
     async def process(self) -> Any:
         """
