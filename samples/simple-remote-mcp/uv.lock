@@ -1,5 +1,4 @@
 version = 1
-revision = 1
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.12.4'",
@@ -626,7 +625,7 @@ wheels = [
 
 [[package]]
 name = "langchain"
-version = "0.3.22"
+version = "0.3.23"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "async-timeout", marker = "python_full_version < '3.11'" },
@@ -638,9 +637,9 @@ dependencies = [
     { name = "requests" },
     { name = "sqlalchemy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/66/36ccbd6285b29473ada883b0e06fdc0973ca181431d6a0175e473160fbfb/langchain-0.3.22.tar.gz", hash = "sha256:fd7781ef02cac6f074f9c6a902236482c61976e21da96ab577874d4e5396eeda", size = 10225573 }
+sdist = { url = "https://files.pythonhosted.org/packages/47/ea/b0de568ca17614d5c00275c4ca506af4139cc7c51d0418802b2447055c00/langchain-0.3.23.tar.gz", hash = "sha256:d95004afe8abebb52d51d6026270248da3f4b53d93e9bf699f76005e0c83ad34", size = 10225576 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/36/0e/032de736a8f9b5b5fcfec77bd92831f9f2c8a8b5072289dd1e5cc95e6edc/langchain-0.3.22-py3-none-any.whl", hash = "sha256:2e7f71a1b0280eb70af9c332c7580f6162a97fb9d5e3e87e9d579ad167f50129", size = 1011714 },
+    { url = "https://files.pythonhosted.org/packages/d4/49/6e933837da1931c9db745967282ff8bfff51bc3faec0eade846b12203b75/langchain-0.3.23-py3-none-any.whl", hash = "sha256:084f05ee7e80b7c3f378ebadd7309f2a37868ce2906fa0ae64365a67843ade3d", size = 1011778 },
 ]
 
 [[package]]
@@ -659,7 +658,7 @@ wheels = [
 
 [[package]]
 name = "langchain-community"
-version = "0.3.20"
+version = "0.3.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -675,14 +674,14 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "tenacity" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/86/bb/a07609679781199738934226bb2764c12541573bc4feeaf21e9f3ad5caf4/langchain_community-0.3.20.tar.gz", hash = "sha256:bd83b4f2f818338423439aff3b5be362e1d686342ffada0478cd34c6f5ef5969", size = 33221203 }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/be/5288a737069570741d46390028b4e8518354329345294ca89fcb2d44a9c1/langchain_community-0.3.21.tar.gz", hash = "sha256:b87b9992cbeea7553ed93e3d39faf9893a8690318485f7dc861751c7878729f7", size = 33226597 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ab/4b/2652cfd2baa482cb3cdbec1ccccae1674418b7576f21ba7724d8730de9db/langchain_community-0.3.20-py3-none-any.whl", hash = "sha256:ea3dbf37fbc21020eca8850627546f3c95a8770afc06c4142b40b9ba86b970f7", size = 2524455 },
+    { url = "https://files.pythonhosted.org/packages/bb/72/4046a132a180b569265bc8aa7ecd6f958f6c11085bdf68c7e1bbe52f1907/langchain_community-0.3.21-py3-none-any.whl", hash = "sha256:8cb9bbb7ef15e5eea776193528dd0e0e1299047146d0c78b6c696ae2dc62e81f", size = 2526687 },
 ]
 
 [[package]]
 name = "langchain-core"
-version = "0.3.50"
+version = "0.3.51"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonpatch" },
@@ -693,9 +692,9 @@ dependencies = [
     { name = "tenacity" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/eb/af/19315212ba44db8062a394bc3a44de72292e8df11802e8b6d341eee20149/langchain_core-0.3.50.tar.gz", hash = "sha256:8e141b89f2be6020e94c32d7d5141fc6eb5acf1e04e4d80ebd2c74bf30de9f77", size = 542071 }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/24/74dfce829f63aaf09885ae569121335a62ecfa5043a35d9e819cd0e046f0/langchain_core-0.3.51.tar.gz", hash = "sha256:db76b9cc331411602cb40ba0469a161febe7a0663fbcaddbc9056046ac2d22f4", size = 542003 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/01/78/39209de2ccc45a18e4bfa644a9846ec72831b464172b27dee156a622b599/langchain_core-0.3.50-py3-none-any.whl", hash = "sha256:76b7ff99125d160427801ea47c4b5202363856603e8382208a889fdd914d7d4d", size = 423393 },
+    { url = "https://files.pythonhosted.org/packages/a9/bf/3464d759bf8687a3bbdfeb9af2f2aeb0a265c6d5ef5fd9274c2a70449f77/langchain_core-0.3.51-py3-none-any.whl", hash = "sha256:4bd71e8acd45362aa428953f2a91d8162318014544a2216e4b769463caf68e13", size = 423303 },
 ]
 
 [[package]]
@@ -727,14 +726,14 @@ wheels = [
 
 [[package]]
 name = "langchain-text-splitters"
-version = "0.3.7"
+version = "0.3.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5a/e7/638b44a41e56c3e32cc90cab3622ac2e4c73645252485427d6b2742fcfa8/langchain_text_splitters-0.3.7.tar.gz", hash = "sha256:7dbf0fb98e10bb91792a1d33f540e2287f9cc1dc30ade45b7aedd2d5cd3dc70b", size = 42180 }
+sdist = { url = "https://files.pythonhosted.org/packages/e7/ac/b4a25c5716bb0103b1515f1f52cc69ffb1035a5a225ee5afe3aed28bf57b/langchain_text_splitters-0.3.8.tar.gz", hash = "sha256:116d4b9f2a22dda357d0b79e30acf005c5518177971c66a9f1ab0edfdb0f912e", size = 42128 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d3/85/b7a34b6d34bcc89a2252f5ffea30b94077ba3d7adf72e31b9e04e68c901a/langchain_text_splitters-0.3.7-py3-none-any.whl", hash = "sha256:31ba826013e3f563359d7c7f1e99b1cdb94897f665675ee505718c116e7e20ad", size = 32513 },
+    { url = "https://files.pythonhosted.org/packages/8b/a3/3696ff2444658053c01b6b7443e761f28bb71217d82bb89137a978c5f66f/langchain_text_splitters-0.3.8-py3-none-any.whl", hash = "sha256:e75cc0f4ae58dcf07d9f18776400cf8ade27fadd4ff6d264df6278bb302f6f02", size = 32440 },
 ]
 
 [[package]]
@@ -1555,7 +1554,6 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "requests" },
     { name = "uipath-langchain" },
-    { name = "uipath-sdk" },
 ]
 
 [package.metadata]
@@ -1567,8 +1565,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=0.3.21" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.31.0" },
-    { name = "uipath-langchain", specifier = "==0.0.81" },
-    { name = "uipath-sdk", specifier = "==0.0.110" },
+    { name = "uipath-langchain", specifier = "==0.0.87" },
 ]
 
 [[package]]
@@ -1793,8 +1790,28 @@ wheels = [
 ]
 
 [[package]]
+name = "uipath"
+version = "2.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pytest-asyncio" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "tenacity" },
+    { name = "tomli" },
+    { name = "types-requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1b/74/3d0e8c9c133492af75cc47d64b76e9ef9b108b4d709ea98e039aec0ff289/uipath-2.0.1.tar.gz", hash = "sha256:869637a976cca6058c4ee0b2ed79a85d4a9eb19a3306bee5e24a6dd49979c550", size = 206254 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/80/a6/c45c040b5a2ab86da0e4312b20208a5df68100d04be7f2e69c17f18ccc04/uipath-2.0.1-py3-none-any.whl", hash = "sha256:992a34bef5aef8c9a98fa188d1cff165e8271b9de93e25d3ed0b18d0f16c65c4", size = 84375 },
+]
+
+[[package]]
 name = "uipath-langchain"
-version = "0.0.81"
+version = "0.0.87"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1809,31 +1826,11 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "requests" },
     { name = "types-requests" },
-    { name = "uipath-sdk" },
+    { name = "uipath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/48/e4/8b942ab7b085984c272ad6a8bd19e75304f760ba3e6e173bd710570d8d03/uipath_langchain-0.0.81.tar.gz", hash = "sha256:65971178bbc7a059a7ecbe414fc1b832b2c087579b2f4aac8597e40734c5bfef", size = 24753 }
+sdist = { url = "https://files.pythonhosted.org/packages/4a/f0/f9ac644bcb818efd2b1e35e50eeb8d20980177aabf1d359dda4e5a6c77a5/uipath_langchain-0.0.87.tar.gz", hash = "sha256:07f61284e0c734fddb7dfbdc020e16d439a319adb306a453fa8d55aebcc78cab", size = 1309008 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bf/0e/e7fb8172320ede4efe38075c5628cc9c2f50a48ccbe798d642ca13c2d0fd/uipath_langchain-0.0.81-py3-none-any.whl", hash = "sha256:6a0c59591457e9dab144242b55af013c7f83266f6f2ddce0da94904a2efc91fb", size = 37429 },
-]
-
-[[package]]
-name = "uipath-sdk"
-version = "0.0.110"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click" },
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "pytest-asyncio" },
-    { name = "python-dotenv" },
-    { name = "requests" },
-    { name = "tenacity" },
-    { name = "tomli" },
-    { name = "types-requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/60/3b/a5cd20f4b3c65d7f1bc230a2f1bed746afca847c4135d2d44d21bda03aa0/uipath_sdk-0.0.110.tar.gz", hash = "sha256:f105e1b68da4b2cab2cbb2474af3353dd386289b353cc76dc159a9ec2f71813d", size = 54527 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/33/fe962907adb5ac7dea08661d81e030ef67abeb54d6a8e32fb65d3a855ffa/uipath_sdk-0.0.110-py3-none-any.whl", hash = "sha256:a8d5a817b200f56e1f02d999b73cf680609cc9270f37804e520491eb303e73cf", size = 79517 },
+    { url = "https://files.pythonhosted.org/packages/98/1a/4e34819ac42413b8a4650dcb05c698da7114909584c0205d66b4fe4a4424/uipath_langchain-0.0.87-py3-none-any.whl", hash = "sha256:92dd352c985ed580a9a93bcede2232205c9700bcec7ec62b1835ae372d184084", size = 50642 },
 ]
 
 [[package]]
