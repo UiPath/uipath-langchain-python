@@ -23,7 +23,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Build Tools",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -38,7 +37,7 @@ register = "uipath_langchain.middlewares:register_middleware"
 
 [project.urls]
 Homepage = "https://uipath.com"
-Repository = "https://github.com/UiPath/uipath-python"
+Repository = "https://github.com/UiPath/uipath-langchain-python"
 
 [build-system]
 requires = ["hatchling"]
