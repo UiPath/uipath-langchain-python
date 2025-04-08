@@ -1,6 +1,6 @@
 from typing import Optional
 
-from uipath_sdk._cli._runtime._contracts import UiPathErrorCategory, UiPathRuntimeError
+from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathRuntimeError
 
 
 class LangGraphRuntimeError(UiPathRuntimeError):

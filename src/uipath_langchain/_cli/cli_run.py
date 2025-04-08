@@ -4,8 +4,8 @@ from os import environ as env
 from typing import Optional
 
 from dotenv import load_dotenv
-from uipath_sdk._cli._runtime._contracts import UiPathTraceContext
-from uipath_sdk._cli.middlewares import MiddlewareResult
+from uipath._cli._runtime._contracts import UiPathTraceContext
+from uipath._cli.middlewares import MiddlewareResult
 
 from ._runtime._context import LangGraphRuntimeContext
 from ._runtime._exception import LangGraphRuntimeError

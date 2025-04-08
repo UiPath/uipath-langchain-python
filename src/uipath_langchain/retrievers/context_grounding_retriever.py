@@ -6,12 +6,12 @@ from langchain_core.callbacks import (
 )
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
-from uipath_sdk import UiPathSDK
+from uipath import UiPath
 
 
 class ContextGroundingRetriever(BaseRetriever):
     index_name: str
-    uipath_sdk: Optional[UiPathSDK] = None
+    uipath_sdk: Optional[UiPath] = None
     number_of_results: Optional[int] = 10
 
     def _get_relevant_documents(
@@ -19,7 +19,7 @@ class ContextGroundingRetriever(BaseRetriever):
     ) -> List[Document]:
         """Sync implementations for retriever calls context_grounding API to search the requested index."""
 
-        sdk = self.uipath_sdk if self.uipath_sdk is not None else UiPathSDK()
+        sdk = self.uipath_sdk if self.uipath_sdk is not None else UiPath()
         results = sdk.context_grounding.search(
             self.index_name,
             query,
@@ -42,7 +42,7 @@ class ContextGroundingRetriever(BaseRetriever):
     ) -> List[Document]:
         """Async implementations for retriever calls context_grounding API to search the requested index."""
 
-        sdk = self.uipath_sdk if self.uipath_sdk is not None else UiPathSDK()
+        sdk = self.uipath_sdk if self.uipath_sdk is not None else UiPath()
         results = await sdk.context_grounding.search_async(
             self.index_name,
             query,

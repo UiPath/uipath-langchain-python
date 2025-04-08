@@ -12,7 +12,7 @@ import httpx
 from langchain_core.tracers.base import AsyncBaseTracer
 from langchain_core.tracers.schemas import Run
 from pydantic import PydanticDeprecationWarning
-from uipath_sdk._cli._runtime._contracts import UiPathTraceContext
+from uipath._cli._runtime._contracts import UiPathTraceContext
 
 from ._events import CustomTraceEvents, FunctionCallEventData
 from ._utils import _setup_tracer_httpx_logging, _simple_serialize_defaults

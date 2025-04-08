@@ -16,7 +16,7 @@ from typing import Any, Optional, TypeVar
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
-from uipath_sdk import UiPathSDK
+from uipath import UiPath
 
 VST = TypeVar("VST", bound="ContextGroundingVectorStore")
 
@@ -44,7 +44,7 @@ class ContextGroundingVectorStore(VectorStore):
     def __init__(
         self,
         index_name: str,
-        uipath_sdk: Optional[UiPathSDK] = None,
+        uipath_sdk: Optional[UiPath] = None,
     ):
         """Initialize the ContextGroundingVectorStore.
 
@@ -53,7 +53,7 @@ class ContextGroundingVectorStore(VectorStore):
             uipath_sdk: Optional SDK instance to use. If not provided, a new instance will be created.
         """
         self.index_name = index_name
-        self.sdk = uipath_sdk or UiPathSDK()
+        self.sdk = uipath_sdk or UiPath()
 
     def similarity_search_with_score(
         self, query: str, k: int = 4, **kwargs: Any

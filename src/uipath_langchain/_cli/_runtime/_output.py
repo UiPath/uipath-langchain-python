@@ -6,8 +6,8 @@ from functools import cached_property
 from typing import Any, Dict, Optional, Union, cast
 
 from langgraph.types import Interrupt, StateSnapshot
-from uipath_sdk import UiPathSDK
-from uipath_sdk._cli._runtime._contracts import (
+from uipath import UiPath
+from uipath._cli._runtime._contracts import (
     UiPathApiTrigger,
     UiPathErrorCategory,
     UiPathResumeTrigger,
@@ -15,8 +15,8 @@ from uipath_sdk._cli._runtime._contracts import (
     UiPathRuntimeResult,
     UiPathRuntimeStatus,
 )
-from uipath_sdk._models import CreateAction, InvokeProcess, WaitAction, WaitJob
-from uipath_sdk._models.actions import Action
+from uipath._models import CreateAction, InvokeProcess, WaitAction, WaitJob
+from uipath._models.actions import Action
 
 from ._context import LangGraphRuntimeContext
 from ._escalation import Escalation
@@ -256,7 +256,7 @@ class LangGraphOutputProcessor:
                             )
                         return
                     if isinstance(self.interrupt_info, InterruptInfo):
-                        uipath_sdk = UiPathSDK()
+                        uipath_sdk = UiPath()
                         if self.interrupt_info.type is UiPathResumeTriggerType.JOB:
                             if isinstance(self.interrupt_value, InvokeProcess):
                                 job = await uipath_sdk.processes.invoke_async(
