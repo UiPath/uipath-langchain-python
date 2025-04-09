@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 from uipath import UiPath
-from uipath._models.actions import Action
+from uipath.models.actions import Action
 
 logger = logging.getLogger(__name__)
 

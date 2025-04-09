@@ -15,8 +15,8 @@ from uipath._cli._runtime._contracts import (
     UiPathRuntimeResult,
     UiPathRuntimeStatus,
 )
-from uipath._models import CreateAction, InvokeProcess, WaitAction, WaitJob
-from uipath._models.actions import Action
+from uipath.models import CreateAction, InvokeProcess, WaitAction, WaitJob
+from uipath.models.actions import Action
 
 from ._context import LangGraphRuntimeContext
 from ._escalation import Escalation
