@@ -7,14 +7,14 @@ from typing import List, Optional
 import httpx
 import uuid
 from datetime import datetime
-from uipath_sdk import UiPathSDK
+from uipath import UiPath
 
 # Database models and setup
 from database import SessionLocal, engine
 import models
 import schemas
 
-sdk = UiPathSDK()
+sdk = UiPath()
 
 # Create database tables
 models.Base.metadata.create_all(bind=engine)

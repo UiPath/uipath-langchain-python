@@ -68,7 +68,7 @@ graph TD;
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
 - LangGraph
 - Anthropic API key (for Claude)
 - Tavily API key (for web search)

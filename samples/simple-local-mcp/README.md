@@ -42,7 +42,7 @@ The workflow follows a ReAct pattern:
 
 ## Prerequisites
 
-- Python 3.9+
+- Python 3.10+
 - `langchain-anthropic`
 - `langchain-mcp-adapters`
 - `langgraph`

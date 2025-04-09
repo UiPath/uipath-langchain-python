@@ -158,7 +158,7 @@ The system is implemented using:
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
 - LangGraph
 - LangChain
 - Anthropic API key
