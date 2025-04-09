@@ -9,11 +9,11 @@ from langgraph.graph import START, END, StateGraph
 from langgraph.types import interrupt, Command
 from pydantic import BaseModel, Field
 
-from uipath_sdk import UiPathSDK
+from uipath import UiPath
 
 logger = logging.getLogger(__name__)
 
-uipath = UiPathSDK()
+uipath = UiPath()
 
 class GraphInput(BaseModel):
     message: str

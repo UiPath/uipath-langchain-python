@@ -5,15 +5,14 @@ description = "Supervisor agent that coordinates between a researcher and a code
 authors = [
     { name = "Radu Mocanu" }
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "langgraph>=0.2.55",
     "langchain-community>=0.3.9",
     "langchain-anthropic>=0.3.8",
     "langchain-experimental>=0.3.4",
     "tavily-python>=0.5.0",
-    "uipath-sdk==0.0.110",
-    "uipath-langchain==0.0.81"
+    "uipath-langchain==0.0.87"
 ]
 
 [project.optional-dependencies]
