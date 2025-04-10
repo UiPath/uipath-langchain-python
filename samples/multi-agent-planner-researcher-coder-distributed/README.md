@@ -1,18 +1,18 @@
 # Multi-Agent Task Execution System
 
-This repository contains a multi-agent system that breaks down complex tasks into discrete steps and routes them to specialized agents for execution. The system consists of three main components:
+This repository implements a multi-agent system that decomposes complex tasks into discrete steps, routing them to specialized agents for execution. The system comprises three main components:
 
-1. **Planner agent**: Orchestrates the workflow by planning task execution and routing subtasks to worker agents
-2. **Researcher Agent**: Finds information, formulas, and reference material without performing calculations
-3. **Coder Agent**: Performs calculations and evaluates formulas with specific values
+1. **Planner Agent**: Orchestrates the workflow by planning task execution and routing subtasks to worker agents.
+2. **Researcher Agent**: Gathers information, formulas, and reference materials without performing calculations.
+3. **Coder Agent**: Executes calculations and evaluates formulas with specific values.
 
-Each agent functions as an independent entrypoint and can be deployed as a separate process, while still being packaged together as part of an Orchestrator Agent Package.
+Each agent operates as an independent entry point and can be deployed as a separate process, while still being packaged together as part of an Orchestrator Agent Package.
 
 ## System Architecture
 
-The system uses LangGraph to create a directed graph of agents that can communicate and pass state to each other.
+The system utilizes LangGraph to create a directed graph of agents that can communicate and share state.
 
-### Planner Graph
+### Planner Agent Graph
 ```mermaid
 ---
 config:
@@ -34,7 +34,7 @@ graph TD;
 	classDef last fill:#bfb6fc
 ```
 
-### Researcher Agent
+### Researcher Agent Graph
 ```mermaid
 ---
 config:
@@ -61,7 +61,7 @@ graph TD;
 	classDef last fill:#bfb6fc
 ```
 
-### Coder Agent
+### Coder Agent Graph
 ```mermaid
 ---
 config:
@@ -91,20 +91,20 @@ graph TD;
 ## Agent Responsibilities
 
 - **Planner Agent**:
-  - Takes user questions and creates execution plans
-  - Routes tasks to appropriate worker agents
-  - Manages the execution flow and state tracking
-  - Returns final results to the user
+  - Takes user questions and formulates execution plans.
+  - Routes tasks to appropriate worker agents.
+  - Manages execution flow and state tracking.
+  - Returns final results to the user.
 
 - **Researcher Agent**:
-  - Retrieves information using a Tavily search tool
-  - Provides factual content, definitions, and formulas
-  - Never performs calculations (strictly enforced)
+  - Retrieves information using a Tavily search tool.
+  - Provides factual content, definitions, and formulas.
+  - Does not perform calculations (strictly enforced).
 
 - **Coder Agent**:
-  - Performs calculations using Python code execution
-  - Evaluates formulas with specific input values
-  - Returns precise numerical results
+  - Executes calculations using Python code.
+  - Evaluates formulas with specific input values.
+  - Returns precise numerical results.
 
 ## Usage
 
@@ -118,7 +118,7 @@ uipath run planner '{"question": "First, please state the Pythagorean theorem. G
 
 ### Debugging Individual Agents
 
-You can debug individual agents by directly invoking them:
+You can debug individual agents by invoking them directly:
 
 #### Researcher Agent
 Run the researcher agent with:
@@ -136,15 +136,100 @@ uipath run coder '{"messages":[{"content":"Let me help you state the Pythagorean
 
 ## Sample Workflow
 
-1. User submits a question about the Pythagorean theorem
+1. User submits a question about the Pythagorean theorem.
 2. Planner creates an execution plan with two steps:
-   - Step 1: Researcher agent retrieves the Pythagorean theorem formula
-   - Step 2: Coder agent applies the formula to calculate the result for a=2, b=3
-3. Planner executes Step 1 by invoking the researcher agent
-4. Researcher agent returns the formula a² + b² = c²
-5. Planner executes Step 2 by invoking the coder agent
-6. Coder agent calculates c = √(2² + 3²) = √(4 + 9) = √13 ≈ 3.606
-7. Planner combines the responses and returns the final answer to the user
+   - Step 1: Researcher agent retrieves the Pythagorean theorem formula.
+   - Step 2: Coder agent applies the formula to calculate the result for a=2, b=3.
+3. Planner executes Step 1 by invoking the researcher agent.
+4. Researcher agent returns the formula a² + b² = c².
+5. Planner executes Step 2 by invoking the coder agent.
+6. Coder agent calculates c = √(2² + 3²) = √(4 + 9) = √13 ≈ 3.606.
+7. Planner combines the responses and returns the final answer to the user.
+
+## Steps to Execute Project on UiPath Cloud Platform
+
+1. **Clone the Repository**
+   ```bash
+   git clone https://github.com/UiPath/uipath-langchain-python.git
+   ```
+
+2. **Navigate to the Sample Directory**
+   - **Windows:**
+     ```bash
+     cd .\uipath-langchain-python\samples\multi-agent-planner-researcher-coder-distributed
+     ```
+
+   - **Unix-like Systems (Linux, macOS):**
+     ```bash
+     cd ./uipath-langchain-python/samples/multi-agent-planner-researcher-coder-distributed
+     ```
+
+3. **Create and Activate a Virtual Python Environment**
+   ```bash
+   pip install uv
+   uv venv -p 3.11 .venv
+   .venv\Scripts\activate  # Windows
+   source .venv/bin/activate  # Unix-like Systems
+   uv sync
+   ```
+
+4. **Authenticate with UiPath Cloud Platform**
+   ```bash
+   uipath auth
+   ```
+   > **Note:** After successful authentication in the browser, select the tenant for publishing the agent package.
+   ```
+   Received log data
+   Received authentication information
+   Available tenants:
+     0: cosmin
+     1: DefaultTenant
+     2: Demo
+     3: lucian
+     4: Solutions
+     5: SolutionsTest
+     6: Test
+     7: TestRoles
+   Select tenant: 2
+   ```
+
+5. **Package and Publish Agents**
+   ```bash
+   uipath pack
+   uipath publish
+   ```
+   > **Note:** You will need to select the feed for publishing:
+   ```
+   Select feed type:
+     0: Tenant package feed
+     1: Personal workspace
+   Select feed: 0
+   ```
+
+6. **Create Agent Processes in Orchestrator**
+   - **Planner Agent**
+     ![planner-agent-package-overview](../../docs/sample_images/planner-agent-package-overview.png)
+     ![planner-agent-process-configuration](../../docs/sample_images/planner-agent-process-configuration.png)
+
+   - **Researcher Agent**
+     ![researcher-agent-package-overview](../../docs/sample_images/researcher-agent-package-overview.png)
+     ![researcher-agent-process-configuration](../../docs/sample_images/researcher-agent-process-configuration.png)
+
+   - **Coder Agent**
+     ![coder-agent-package-overview](../../docs/sample_images/coder-agent-package-overview.png)
+     ![coder-agent-process-configuration](../../docs/sample_images/coder-agent-process-configuration.png)
+
+   > **Note:** Ensure that the display names for the coder and researcher agent processes are *coder-agent* and *researcher-agent*.
+
+7. **Run the Planner Agent with Any Input Question**
+   > **Tip:** For a five-step action plan, consider using the following input:
+   ```
+   Could you find a Python solution for the N-Queens puzzle for N=8? Please analyze why this solution works,
+   considering the key programming concepts it employs.
+   Then, revise the solution to handle a dynamic value of N, where N is any positive integer.
+   After that, research the time and space complexity of this new solution.
+   Lastly, demonstrate this revised Python solution with N=10.
+   ```
 
 ## Implementation Details
 

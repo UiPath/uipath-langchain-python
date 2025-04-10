@@ -9,7 +9,9 @@ UiPath platform and the Langchain coded agents.
 
 ### 1. InvokeProcess
 
-The `InvokeProcess` model is utilized to invoke a process within UiPath cloud platform. Upon completion of the invoked process, the current agent will automatically resume execution.
+The `InvokeProcess` model is utilized to invoke a process within the UiPath cloud platform.
+This process can be of various types, including API workflows, Agents or RPA automation.
+Upon completion of the invoked process, the current agent will automatically resume execution.
 
 #### Attributes:
 - **name** (str): The name of the process to invoke.
@@ -19,6 +21,8 @@ The `InvokeProcess` model is utilized to invoke a process within UiPath cloud pl
 ```python
 process_output = interrupt(InvokeProcess(name="MyProcess", input_arguments={"arg1": "value1"}))
 ```
+
+For a practical implementation of the `InvokeProcess` model, refer to the sample usage in the [planner.py](../../samples/multi-agent-planner-researcher-coder-distributed/src/multi-agent-distributed/planner.py#L184) file. This example demonstrates how to invoke a process with dynamic input arguments, showcasing the integration of the interrupt functionality within a multi-agent system or a system where an agent integrates with RPA processes and API workflows.
 
 ---
 
