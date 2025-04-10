@@ -3,7 +3,7 @@ name = "multi-agents-distributed"
 version = "0.0.1"
 description = "Supervisor agent that coordinates between a researcher and a coder"
 authors = [
-    { name = "Radu Mocanu" }
+    { name = "Radu Mocanu", email = "radu.mocanu@uipath.com" }
 ]
 requires-python = ">=3.10"
 dependencies = [
