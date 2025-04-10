@@ -8,7 +8,7 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
-from uipath._models import InvokeProcess
+from uipath.models import InvokeProcess
 
 worker_agents = {"researcher": "researcher-agent", "coder": "coder-agent"}
 agent_names = list(worker_agents.values())

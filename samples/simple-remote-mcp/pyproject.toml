@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "simple-remote-mcp"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 dependencies = [
-    "uipath-langchain==0.0.87",
+    "uipath-langchain==0.0.88",
     "langchain>=0.1.0",
     "langchain-anthropic>=0.0.1",
     "langgraph>=0.3.21",

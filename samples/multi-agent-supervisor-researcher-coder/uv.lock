@@ -863,7 +863,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.1" },
     { name = "tavily-python", specifier = ">=0.5.0" },
-    { name = "uipath-langchain", specifier = "==0.0.87" },
+    { name = "uipath-langchain", specifier = "==0.0.88" },
 ]
 provides-extras = ["dev"]
 
@@ -1818,7 +1818,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.0.1"
+version = "2.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1831,14 +1831,14 @@ dependencies = [
     { name = "tomli" },
     { name = "types-requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1b/74/3d0e8c9c133492af75cc47d64b76e9ef9b108b4d709ea98e039aec0ff289/uipath-2.0.1.tar.gz", hash = "sha256:869637a976cca6058c4ee0b2ed79a85d4a9eb19a3306bee5e24a6dd49979c550", size = 206254 }
+sdist = { url = "https://files.pythonhosted.org/packages/6c/0d/4ae746ca61ec42ca6ab449692bacfbb34e013a97224e6f175715b448ab9b/uipath-2.0.4.tar.gz", hash = "sha256:9ac7abbc2e1f53207e11cb1235e99efc6cf7c265595e0f1ac981512a443e70bc", size = 207150 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/a6/c45c040b5a2ab86da0e4312b20208a5df68100d04be7f2e69c17f18ccc04/uipath-2.0.1-py3-none-any.whl", hash = "sha256:992a34bef5aef8c9a98fa188d1cff165e8271b9de93e25d3ed0b18d0f16c65c4", size = 84375 },
+    { url = "https://files.pythonhosted.org/packages/0f/d9/e4c2d3ba7d87e59937ca5980f4bc2b7d06c68578df33a9a0d4eb99764d44/uipath-2.0.4-py3-none-any.whl", hash = "sha256:698680eb2f8fd885dbc9e13856028cdd10cfac525698375022ff484629f3f778", size = 85424 },
 ]
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.87"
+version = "0.0.88"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -1855,9 +1855,9 @@ dependencies = [
     { name = "types-requests" },
     { name = "uipath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4a/f0/f9ac644bcb818efd2b1e35e50eeb8d20980177aabf1d359dda4e5a6c77a5/uipath_langchain-0.0.87.tar.gz", hash = "sha256:07f61284e0c734fddb7dfbdc020e16d439a319adb306a453fa8d55aebcc78cab", size = 1309008 }
+sdist = { url = "https://files.pythonhosted.org/packages/80/0e/e05ecfc5a5b6b7f277dca18e61724c1a923ae4c9af39f71f2c8dce52343d/uipath_langchain-0.0.88.tar.gz", hash = "sha256:f06cc80c9499ae4309275119a9abf5d74c881aaef6731c6efb5b525a1291ef33", size = 1188502 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/98/1a/4e34819ac42413b8a4650dcb05c698da7114909584c0205d66b4fe4a4424/uipath_langchain-0.0.87-py3-none-any.whl", hash = "sha256:92dd352c985ed580a9a93bcede2232205c9700bcec7ec62b1835ae372d184084", size = 50642 },
+    { url = "https://files.pythonhosted.org/packages/3a/7a/68ec6fcb4698af7f27c30a2107c349fb6115b84373dba38413346e8c5a57/uipath_langchain-0.0.88-py3-none-any.whl", hash = "sha256:78c92bebbd4a3651adcf914d3563a551222bef86f54cb3eb270d93a39ede7d28", size = 50641 },
 ]
 
 [[package]]
