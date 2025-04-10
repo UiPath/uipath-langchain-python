@@ -1,16 +1,17 @@
 import logging
 import os
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
 from langchain_core.output_parsers import PydanticOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langgraph.graph import START, END, StateGraph
+from langgraph.graph import START, END, StateGraph, MessagesState
 from langgraph.types import interrupt, Command
 from pydantic import BaseModel, Field
 
 from uipath import UiPath
 
+from uipath.models import CreateAction
 logger = logging.getLogger(__name__)
 
 uipath = UiPath()
@@ -18,17 +19,20 @@ uipath = UiPath()
 class GraphInput(BaseModel):
     message: str
     ticket_id: str
+    assignee: Optional[str] = None
 
 class GraphOutput(BaseModel):
     label: str
     confidence: float
 
-class GraphState(BaseModel):
+class GraphState(MessagesState):
     message: str
     ticket_id: str
+    assignee: Optional[str]
     label: Optional[str] = None
     confidence: Optional[float] = None
-
+    last_predicted_category: Optional[str]
+    human_approval: Optional[bool] = None
 
 class TicketClassification(BaseModel):
     label: Literal["security", "error", "system", "billing", "performance"] = Field(
@@ -40,12 +44,7 @@ class TicketClassification(BaseModel):
 
 
 output_parser = PydanticOutputParser(pydantic_object=TicketClassification)
-
-prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            """You are a support ticket classifier. Classify tickets into exactly one category and provide a confidence score.
+system_message = """You are a support ticket classifier. Classify tickets into exactly one category and provide a confidence score.
 
 {format_instructions}
 
@@ -56,12 +55,20 @@ Categories:
 - billing: Payment and subscription related issues
 - performance: Speed and resource usage concerns
 
-Respond with the classification in the requested JSON format.""",
-        ),
-        ("user", "{ticket_text}"),
-    ]
-)
+Respond with the classification in the requested JSON format."""
 
+def prepare_input(graph_input: GraphInput) -> GraphState:
+    return GraphState(
+        message=graph_input.message,
+        ticket_id=graph_input.ticket_id,
+        assignee=graph_input.assignee,
+        messages=[
+            SystemMessage(content=system_message.format(format_instructions=output_parser.get_format_instructions())),
+            HumanMessage(content=graph_input.message)  # Add the initial human message
+        ],
+        last_predicted_category=None,
+        human_approval=None,
+    )
 
 def get_azure_openai_api_key() -> str:
     """Get Azure OpenAI API key from environment or UiPath."""
@@ -78,8 +85,13 @@ def get_azure_openai_api_key() -> str:
 
     return api_key
 
+def decide_next_node(state: GraphState) -> Literal["classify", "notify_team"]:
+    if state["human_approval"] is True:
+        return "notify_team"
 
-async def classify(state: GraphState) -> GraphState:
+    return "classify"
+
+async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
     llm = AzureChatOpenAI(
         azure_deployment="gpt-4o-mini",
@@ -87,51 +99,77 @@ async def classify(state: GraphState) -> GraphState:
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_version="2024-10-21"
     )
-    _prompt = prompt.partial(
-        format_instructions=output_parser.get_format_instructions()
-    )
-    chain = _prompt | llm | output_parser
+
+    if state.get("last_predicted_category", None):
+        predicted_category = state["last_predicted_category"]
+        state["messages"].append(HumanMessage(content=f"The ticket is 100% not part of the category '{predicted_category}'. Choose another one."))
+    chain = llm | output_parser
 
     try:
-        result = await chain.ainvoke({"ticket_text": state.message})
-        print(result)
-        state.label = result.label
-        state.confidence = result.confidence
+        result = await chain.ainvoke(state["messages"])
         logger.info(
             f"Ticket classified with label: {result.label} confidence score: {result.confidence}"
         )
-        return state
+        return Command(
+           update={
+               "confidence": result.confidence,
+               "label": result.label,
+               "last_predicted_category": result.label,
+               "messages": state["messages"],
+           }
+        )
     except Exception as e:
         logger.error(f"Classification failed: {str(e)}")
-        state.label = "error"
-        state.confidence = 0.0
-        return state
+        return Command(
+            update={
+                "label": "error",
+                "confidence": "0.0",
+            }
+        )
 
-async def wait_for_human(state: GraphState) -> GraphState:
+async def wait_for_human(state: GraphState) -> Command:
     logger.info("Wait for human approval")
-    feedback = interrupt(f"Label: {state.label} Confidence: {state.confidence}")
+    ticket_id = state["ticket_id"]
+    ticket_message = state["messages"][1].content
+    label = state["label"]
+    confidence = state["confidence"]
+    action_data = interrupt(CreateAction(name="escalation_agent_app",
+                                         title="Action Required: Review classification",
+                                         data={
+                                             "AgentOutput": (
+                                                 f"This is how I classified the ticket: '{ticket_id}',"
+                                                 f" with message '{ticket_message}' \n"
+                                                 f"Label: '{label}'"
+                                                 f" Confidence: '{confidence}'"
+                                             ),
+                                             "AgentName": "ticket-classification "},
+                                         app_version=1,
+                                         assignee=state.get("assignee", None),
+                                         ))
 
-    if isinstance(feedback, bool) and feedback is True:
-        return Command(goto="notify_team")
-    else:
-        return Command(goto=END)
+    return Command(
+        update={
+            "human_approval": isinstance(action_data["Answer"], bool) and action_data["Answer"] is True
+    }
+    )
 
-async def notify_team(state: GraphState) -> GraphState:
+async def notify_team(state: GraphState) -> GraphOutput:
     logger.info("Send team email notification")
-    print(state)
-    return state
+    return GraphOutput(label=state["label"], confidence=state["confidence"])
 
 """Process a support ticket through the workflow."""
 
 builder = StateGraph(GraphState, input=GraphInput, output=GraphOutput)
 
+builder.add_node("prepare_input", prepare_input)
 builder.add_node("classify", classify)
-builder.add_node("human_approval", wait_for_human)
+builder.add_node("human_approval_node", wait_for_human)
 builder.add_node("notify_team", notify_team)
 
-builder.add_edge(START, "classify")
-builder.add_edge("classify", "human_approval")
-builder.add_edge("human_approval", "notify_team")
+builder.add_edge(START, "prepare_input")
+builder.add_edge("prepare_input", "classify")
+builder.add_edge("classify", "human_approval_node")
+builder.add_conditional_edges("human_approval_node", decide_next_node)
 builder.add_edge("notify_team", END)
 
 
