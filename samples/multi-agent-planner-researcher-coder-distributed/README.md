@@ -219,7 +219,8 @@ uipath run coder '{"messages":[{"content":"Let me help you state the Pythagorean
      ![coder-agent-package-overview](../../docs/sample_images/coder-agent-package-overview.png)
      ![coder-agent-process-configuration](../../docs/sample_images/coder-agent-process-configuration.png)
 
-   > **Note:** Ensure that the display names for the coder and researcher agent processes are *coder-agent* and *researcher-agent*.
+   > **Note:** Ensure that the display names for the coder and researcher agent processes are *coder-agent* and *researcher-agent*,
+        and that all 3 agents are placed in the same folder.
 
 7. **Run the Planner Agent with Any Input Question**
    > **Tip:** For a five-step action plan, consider using the following input:
