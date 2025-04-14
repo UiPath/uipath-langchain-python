@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import List, Optional
 
 from langchain_core.callbacks.base import BaseCallbackHandler
@@ -54,6 +55,11 @@ class LangGraphRuntime(UiPathBaseRuntime):
         tracer = None
 
         try:
+            if self.context.resume is False and self.context.job_id is None:
+                # Delete the previous graph state file at debug time
+                if os.path.exists(self.state_file_path):
+                    os.remove(self.state_file_path)
+
             async with AsyncSqliteSaver.from_conn_string(
                 self.state_file_path
             ) as memory:
