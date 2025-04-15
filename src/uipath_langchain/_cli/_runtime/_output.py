@@ -277,11 +277,11 @@ class LangGraphOutputProcessor:
                             if isinstance(self.interrupt_value, CreateAction):
                                 action = uipath_sdk.actions.create(
                                     title=self.interrupt_value.title,
-                                    app_name=self.interrupt_value.name
-                                    if self.interrupt_value.name
+                                    app_name=self.interrupt_value.app_name
+                                    if self.interrupt_value.app_name
                                     else "",
-                                    app_key=self.interrupt_value.key
-                                    if self.interrupt_value.key
+                                    app_key=self.interrupt_value.app_key
+                                    if self.interrupt_value.app_key
                                     else "",
                                     app_version=self.interrupt_value.app_version
                                     if self.interrupt_value.app_version
