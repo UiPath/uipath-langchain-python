@@ -1,0 +1,403 @@
+{
+  "entryPoints": [
+    {
+      "filePath": "agent",
+      "uniqueId": "8dba8e17-b6e4-454a-a0e3-8e48a1fef9a6",
+      "type": "agent",
+      "input": {
+        "type": "object",
+        "properties": {
+          "application_id": {
+            "title": "Application Id",
+            "type": "string"
+          },
+          "submission_timestamp": {
+            "title": "Submission Timestamp",
+            "type": "string"
+          },
+          "applicant": {
+            "properties": {
+              "typed_info": {
+                "properties": {
+                  "name": {
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "address": {
+                    "properties": {
+                      "street": {
+                        "title": "Street",
+                        "type": "string"
+                      },
+                      "city": {
+                        "title": "City",
+                        "type": "string"
+                      },
+                      "state": {
+                        "title": "State",
+                        "type": "string"
+                      },
+                      "zip_code": {
+                        "title": "Zip Code",
+                        "type": "string"
+                      }
+                    },
+                    "title": "Address",
+                    "type": "object"
+                  },
+                  "email": {
+                    "title": "Email",
+                    "type": "string"
+                  },
+                  "phone": {
+                    "title": "Phone",
+                    "type": "string"
+                  },
+                  "employment_status": {
+                    "title": "Employment Status",
+                    "type": "string"
+                  },
+                  "employer_name": {
+                    "title": "Employer Name",
+                    "type": "string"
+                  },
+                  "annual_income": {
+                    "title": "Annual Income",
+                    "type": "integer"
+                  },
+                  "monthly_income": {
+                    "title": "Monthly Income",
+                    "type": "integer"
+                  },
+                  "credit_score": {
+                    "title": "Credit Score",
+                    "type": "integer"
+                  },
+                  "residency_duration_years": {
+                    "title": "Residency Duration Years",
+                    "type": "integer"
+                  },
+                  "portal_document_status": {
+                    "title": "Portal Document Status",
+                    "type": "string"
+                  }
+                },
+                "title": "TypedInfo",
+                "type": "object"
+              },
+              "uploaded_documents": {
+                "items": {
+                  "properties": {
+                    "doc_type": {
+                      "title": "Doc Type",
+                      "type": "string"
+                    },
+                    "doc_name": {
+                      "title": "Doc Name",
+                      "type": "string"
+                    },
+                    "doc_metadata": {
+                      "properties": {
+                        "issue_state": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Issue State"
+                        },
+                        "name_on_doc": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Name On Doc"
+                        },
+                        "expiration_date": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Expiration Date"
+                        },
+                        "signature_sample": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Signature Sample"
+                        },
+                        "doc_quality": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Doc Quality"
+                        },
+                        "capture_date": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Capture Date"
+                        },
+                        "pay_period_end": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Pay Period End"
+                        },
+                        "net_pay": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Net Pay"
+                        },
+                        "employer_address": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Employer Address"
+                        },
+                        "doc_date": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Doc Date"
+                        },
+                        "account_holder": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Account Holder"
+                        },
+                        "statement_date": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Statement Date"
+                        },
+                        "address_on_statement": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Address On Statement"
+                        },
+                        "pages_scanned": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Pages Scanned"
+                        },
+                        "insured_property_address": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Insured Property Address"
+                        },
+                        "policy_expiration": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Policy Expiration"
+                        },
+                        "coverage_amount": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Coverage Amount"
+                        }
+                      },
+                      "title": "DocumentMetadata",
+                      "type": "object"
+                    }
+                  },
+                  "title": "UploadedDocument",
+                  "type": "object"
+                },
+                "title": "Uploaded Documents",
+                "type": "array"
+              }
+            },
+            "title": "ApplicantData",
+            "type": "object"
+          },
+          "loan_request": {
+            "properties": {
+              "amount_requested": {
+                "title": "Amount Requested",
+                "type": "integer"
+              },
+              "purpose": {
+                "title": "Purpose",
+                "type": "string"
+              },
+              "term_years": {
+                "title": "Term Years",
+                "type": "integer"
+              },
+              "interest_rate": {
+                "title": "Interest Rate",
+                "type": "number"
+              }
+            },
+            "title": "LoanRequest",
+            "type": "object"
+          },
+          "review_display": {
+            "properties": {
+              "summary": {
+                "title": "Summary",
+                "type": "string"
+              },
+              "additional_metadata": {
+                "title": "Additional Metadata",
+                "type": "string"
+              }
+            },
+            "title": "ReviewDisplay",
+            "type": "object"
+          }
+        }
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "response": {
+            "properties": {
+              "is_valid": {
+                "title": "Is Valid",
+                "type": "boolean"
+              },
+              "general_checks": {
+                "additionalProperties": true,
+                "title": "General Checks",
+                "type": "object"
+              },
+              "state_specific_checks": {
+                "additionalProperties": true,
+                "title": "State Specific Checks",
+                "type": "object"
+              },
+              "discrepancies": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Discrepancies",
+                "type": "array"
+              },
+              "recommendations": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Recommendations",
+                "type": "array"
+              }
+            },
+            "title": "Report",
+            "type": "object"
+          }
+        }
+      }
+    }
+  ],
+  "bindings": {
+    "version": "2.0",
+    "resources": []
+  }
+}
