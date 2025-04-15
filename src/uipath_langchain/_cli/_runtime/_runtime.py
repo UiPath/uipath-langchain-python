@@ -94,6 +94,14 @@ class LangGraphRuntime(UiPathBaseRuntime):
                     "callbacks": callbacks,
                 }
 
+                recursion_limit = os.environ.get("LANGCHAIN_RECURSION_LIMIT", None)
+                max_concurrency = os.environ.get("LANGCHAIN_MAX_CONCURRENCY", None)
+
+                if recursion_limit is not None:
+                    graph_config["recursion_limit"] = int(recursion_limit)
+                if max_concurrency is not None:
+                    graph_config["max_concurrency"] = int(max_concurrency)
+
                 # Stream the output at debug time
                 if self.context.job_id is None:
                     # Get final chunk while streaming
