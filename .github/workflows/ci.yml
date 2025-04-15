@@ -12,6 +12,7 @@ on:
 
 jobs:
   commit-lint:
+    if: ${{ github.event_name == 'pull_request' }}
     uses: ./.github/workflows/commitlint.yml
   lint:
     uses: ./.github/workflows/lint.yml
