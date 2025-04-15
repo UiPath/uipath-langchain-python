@@ -232,6 +232,9 @@ class LangGraphOutputProcessor:
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             type TEXT NOT NULL,
                             key TEXT,
+                            folder_key TEXT,
+                            folder_path TEXT,
+                            payload TEXT,
                             timestamp DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'utc'))
                         )
                     """)
@@ -280,6 +283,12 @@ class LangGraphOutputProcessor:
                                     app_name=self.interrupt_value.app_name
                                     if self.interrupt_value.app_name
                                     else "",
+                                    app_folder_path=self.interrupt_value.app_folder_path
+                                    if self.interrupt_value.app_folder_path
+                                    else "",
+                                    app_folder_key=self.interrupt_value.app_folder_key
+                                    if self.interrupt_value.app_folder_key
+                                    else "",
                                     app_key=self.interrupt_value.app_key
                                     if self.interrupt_value.app_key
                                     else "",
@@ -295,11 +304,25 @@ class LangGraphOutputProcessor:
                                     self._resume_trigger = UiPathResumeTrigger(
                                         trigger_type=UiPathResumeTriggerType.ACTION,
                                         item_key=action.key,
+                                        payload=self.interrupt_value.model_dump_json(),
+                                        folder_path=self.interrupt_value.app_folder_path
+                                        if self.interrupt_value.app_folder_path
+                                        else None,
+                                        folder_key=self.interrupt_value.app_folder_key
+                                        if self.interrupt_value.app_folder_key
+                                        else None,
                                     )
                             elif isinstance(self.interrupt_value, WaitAction):
                                 self._resume_trigger = UiPathResumeTrigger(
                                     triggerType=UiPathResumeTriggerType.ACTION,
                                     itemKey=self.interrupt_value.action.key,
+                                    payload=self.interrupt_value.model_dump_json(),
+                                    folder_path=self.interrupt_value.app_folder_path
+                                    if self.interrupt_value.app_folder_path
+                                    else None,
+                                    folder_key=self.interrupt_value.app_folder_key
+                                    if self.interrupt_value.app_folder_key
+                                    else None,
                                 )
 
                 except Exception as e:
@@ -324,8 +347,14 @@ class LangGraphOutputProcessor:
                 try:
                     logger.debug(f"ResumeTrigger: {trigger_type} {trigger_key}")
                     await cur.execute(
-                        f"INSERT INTO {self.context.resume_triggers_table} (type, key) VALUES (?, ?)",
-                        (trigger_type, trigger_key),
+                        f"INSERT INTO {self.context.resume_triggers_table} (type, key, payload, folder_path, folder_key) VALUES (?, ?, ?, ?, ?)",
+                        (
+                            trigger_type,
+                            trigger_key,
+                            self.resume_trigger.payload,
+                            self.resume_trigger.folder_path,
+                            self.resume_trigger.folder_key,
+                        ),
                     )
                     await self.context.memory.conn.commit()
                 except Exception as e:

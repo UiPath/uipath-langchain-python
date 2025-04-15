@@ -58,10 +58,12 @@ class LangGraphInputProcessor:
         if not trigger:
             return Command(resume=self.context.input_json)
 
-        type, key = trigger
+        type, key, folder_path, folder_key, payload = trigger
         logger.debug(f"ResumeTrigger: {type} {key}")
         if type == UiPathResumeTriggerType.ACTION.value and key:
-            action = self.uipath.actions.retrieve(key)
+            action = await self.uipath.actions.retrieve_async(
+                key, app_folder_key=folder_key, app_folder_path=folder_path
+            )
             logger.debug(f"Action: {action}")
             if action.data is None:
                 return Command(resume={})
@@ -95,7 +97,7 @@ class LangGraphInputProcessor:
                 return Command(resume=try_convert_to_json_format(job.output_arguments))
         return Command(resume=self.context.input_json)
 
-    async def _get_latest_trigger(self) -> Optional[tuple[str, str]]:
+    async def _get_latest_trigger(self) -> Optional[tuple[str, str, str, str, str]]:
         """Fetch the most recent trigger from the database."""
         if self.context.memory is None:
             return None
@@ -106,7 +108,7 @@ class LangGraphInputProcessor:
                 self.context.memory.conn.cursor() as cur,
             ):
                 await cur.execute(f"""
-                    SELECT type, key
+                    SELECT type, key, folder_path, folder_key, payload
                     FROM {self.context.resume_triggers_table}
                     ORDER BY timestamp DESC
                     LIMIT 1
@@ -114,7 +116,7 @@ class LangGraphInputProcessor:
                 result = await cur.fetchone()
                 if result is None:
                     return None
-                return cast(tuple[str, str], tuple(result))
+                return cast(tuple[str, str, str, str, str], tuple(result))
         except Exception as e:
             raise LangGraphRuntimeError(
                 "DB_QUERY_FAILED",
