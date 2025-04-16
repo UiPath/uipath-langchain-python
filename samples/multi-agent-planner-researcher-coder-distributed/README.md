@@ -208,16 +208,16 @@ uipath run coder '{"messages":[{"content":"Let me help you state the Pythagorean
 
 6. **Create Agent Processes in Orchestrator**
    - **Planner Agent**
-     ![planner-agent-package-overview](../../docs/sample_images/planner-agent-package-overview.png)
-     ![planner-agent-process-configuration](../../docs/sample_images/planner-agent-process-configuration.png)
+     ![planner-agent-package-overview](../../docs/sample_images/multi-agent-distributed/planner-agent-package-overview.png)
+     ![planner-agent-process-configuration](../../docs/sample_images/multi-agent-distributed/planner-agent-process-configuration.png)
 
    - **Researcher Agent**
-     ![researcher-agent-package-overview](../../docs/sample_images/researcher-agent-package-overview.png)
-     ![researcher-agent-process-configuration](../../docs/sample_images/researcher-agent-process-configuration.png)
+     ![researcher-agent-package-overview](../../docs/sample_images/multi-agent-distributed/researcher-agent-package-overview.png)
+     ![researcher-agent-process-configuration](../../docs/sample_images/multi-agent-distributed/researcher-agent-process-configuration.png)
 
    - **Coder Agent**
-     ![coder-agent-package-overview](../../docs/sample_images/coder-agent-package-overview.png)
-     ![coder-agent-process-configuration](../../docs/sample_images/coder-agent-process-configuration.png)
+     ![coder-agent-package-overview](../../docs/sample_images/multi-agent-distributed/coder-agent-package-overview.png)
+     ![coder-agent-process-configuration](../../docs/sample_images/multi-agent-distributed/coder-agent-process-configuration.png)
 
    > **Note:** Ensure that the display names for the coder and researcher agent processes are *coder-agent* and *researcher-agent*,
         and that all 3 agents are placed in the same folder.
