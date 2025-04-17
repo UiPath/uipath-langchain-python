@@ -3,7 +3,7 @@ import os
 from typing import Literal, Optional, List
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import AzureChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import PydanticOutputParser
 from langgraph.graph import START, END, StateGraph, MessagesState
 from langgraph.types import interrupt, Command
@@ -70,21 +70,6 @@ def prepare_input(graph_input: GraphInput) -> GraphState:
         human_approval=None,
     )
 
-def get_azure_openai_api_key() -> str:
-    """Get Azure OpenAI API key from environment or UiPath."""
-    api_key = os.getenv("AZURE_OPENAI_API_KEY")
-
-    if not api_key:
-        try:
-            api_key = uipath.assets.retrieve_credential("AZURE_OPENAI_API_KEY")
-            if not api_key:
-                raise ValueError("No API key found in credentials")
-        except Exception as e:
-            logger.error(f"Failed to get API key: {str(e)}")
-            raise RuntimeError("Failed to get Azure OpenAI API key")
-
-    return api_key
-
 def decide_next_node(state: GraphState) -> Literal["classify", "notify_team"]:
     if state["human_approval"] is True:
         return "notify_team"
@@ -93,12 +78,7 @@ def decide_next_node(state: GraphState) -> Literal["classify", "notify_team"]:
 
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    llm = AzureChatOpenAI(
-        azure_deployment="gpt-4o-mini",
-        api_key=get_azure_openai_api_key(),
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_version="2024-10-21"
-    )
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
     if state.get("last_predicted_category", None):
         predicted_category = state["last_predicted_category"]
@@ -133,7 +113,7 @@ async def wait_for_human(state: GraphState) -> Command:
     ticket_message = state["messages"][1].content
     label = state["label"]
     confidence = state["confidence"]
-    action_data = interrupt(CreateAction(name="escalation_agent_app",
+    action_data = interrupt(CreateAction(app_name="escalation_agent_app",
                                          title="Action Required: Review classification",
                                          data={
                                              "AgentOutput": (
@@ -145,6 +125,7 @@ async def wait_for_human(state: GraphState) -> Command:
                                              "AgentName": "ticket-classification "},
                                          app_version=1,
                                          assignee=state.get("assignee", None),
+                                         app_folder_path="Shared/escalation_app",
                                          ))
 
     return Command(

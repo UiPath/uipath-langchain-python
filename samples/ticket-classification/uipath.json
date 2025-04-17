@@ -2,7 +2,7 @@
   "entryPoints": [
     {
       "filePath": "agent",
-      "uniqueId": "525ea50d-c54f-4185-94e2-501fe9ab341a",
+      "uniqueId": "f5678e12-7aa8-4a4c-bf62-b98dad8d9145",
       "type": "agent",
       "input": {
         "type": "object",
@@ -54,23 +54,6 @@
   ],
   "bindings": {
     "version": "2.0",
-    "resources": [
-      {
-        "resource": "asset",
-        "key": "AZURE_OPENAI_API_KEY",
-        "value": {
-          "name": {
-            "defaultValue": "AZURE_OPENAI_API_KEY",
-            "isExpression": false,
-            "displayName": "Name"
-          }
-        },
-        "metadata": {
-          "ActivityName": "retrieve_credential",
-          "BindingsVersion": "2.1",
-          "DisplayLabel": "FullName"
-        }
-      }
-    ]
+    "resources": []
   }
 }
