@@ -19,10 +19,11 @@ Upon completion of the invoked process, the current agent will automatically res
 
 #### Example:
 ```python
+from uipath.models import InvokeProcess
 process_output = interrupt(InvokeProcess(name="MyProcess", input_arguments={"arg1": "value1"}))
 ```
 
-For a practical implementation of the `InvokeProcess` model, refer to the sample usage in the [planner.py](../../samples/multi-agent-planner-researcher-coder-distributed/src/multi-agent-distributed/planner.py#L184) file. This example demonstrates how to invoke a process with dynamic input arguments, showcasing the integration of the interrupt functionality within a multi-agent system or a system where an agent integrates with RPA processes and API workflows.
+For a practical implementation of the `InvokeProcess` model, refer to the sample usage in the [planner.py](../samples/multi-agent-planner-researcher-coder-distributed/src/multi-agent-distributed/planner.py#L181) file. This example demonstrates how to invoke a process with dynamic input arguments, showcasing the integration of the interrupt functionality within a multi-agent system or a system where an agent integrates with RPA processes and API workflows.
 
 ---
 
@@ -36,6 +37,7 @@ The `WaitJob` model is used to wait for a job completion. Unlike `InvokeProcess`
 
 #### Example:
 ```python
+from uipath.models import WaitJob
 job_output = interrupt(WaitJob(job=my_job_instance))
 ```
 
@@ -57,8 +59,10 @@ For more information on UiPath apps, refer to the [UiPath Apps User Guide](https
 
 #### Example:
 ```python
+from uipath.models import CreateAction
 action_output = interrupt(CreateAction(name="AppName", title="Escalate Issue", data={"key": "value"}, app_version=1, assignee="user@example.com"))
 ```
+For a practical implementation of the `CreateAction` model, refer to the sample usage in the [ticket-classification/main.py](../samples/ticket-classification/main.py#L116) file. This example demonstrates how to create an action with dynamic input.
 
 ---
 
@@ -71,6 +75,7 @@ The `WaitAction` model is used to wait for an action to be handled. This model i
 
 #### Example:
 ```python
+from uipath.models import WaitAction
 action_output = interrupt(WaitAction(action=my_action_instance))
 ```
 
