@@ -36,8 +36,8 @@ def python_repl_tool(
 code_agent = create_react_agent(llm, tools=[python_repl_tool])
 
 
-def code_node(state: MessagesState) -> GraphOutput:
-    result = code_agent.invoke(state)
+async def code_node(state: MessagesState) -> GraphOutput:
+    result = await code_agent.ainvoke(state)
     return GraphOutput(answer=result["messages"][-1].content)
 
 
