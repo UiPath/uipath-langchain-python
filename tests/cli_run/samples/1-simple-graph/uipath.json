@@ -1,0 +1,18 @@
+{
+  "entryPoints": [
+    {
+      "filePath": "agent",
+      "uniqueId": "dcc7a309-fbcc-4999-af4f-2a75a844b49a",
+      "type": "agent",
+      "input": {
+        "type": "string",
+        "title": "graph_state"
+      },
+      "output": {}
+    }
+  ],
+  "bindings": {
+    "version": "2.0",
+    "resources": []
+  }
+}
