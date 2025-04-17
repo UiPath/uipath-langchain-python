@@ -70,7 +70,7 @@ def input(state: GraphInput):
 llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 
 
-def create_plan(state: State) -> Command:
+async def create_plan(state: State) -> Command:
     """Create an execution plan based on the user's question."""
     parser = PydanticOutputParser(pydantic_object=ExecutionPlan)
 
@@ -104,7 +104,7 @@ def create_plan(state: State) -> Command:
         format_instructions=parser.get_format_instructions(),
     )
 
-    plan_response = llm.invoke(formatted_prompt)
+    plan_response = await llm.ainvoke(formatted_prompt)
 
     try:
         plan_output = parser.parse(plan_response.content)

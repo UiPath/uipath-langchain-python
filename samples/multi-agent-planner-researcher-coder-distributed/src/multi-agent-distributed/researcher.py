@@ -18,8 +18,8 @@ class GraphOutput(BaseModel):
     answer: str
 
 
-def research_node(state: MessagesState) -> GraphOutput:
-    result = research_agent.invoke(state)
+async def research_node(state: MessagesState) -> GraphOutput:
+    result = await research_agent.ainvoke(state)
     return GraphOutput(answer=result["messages"][-1].content)
 
 
