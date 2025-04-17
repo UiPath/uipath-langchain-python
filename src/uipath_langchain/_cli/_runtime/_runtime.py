@@ -15,7 +15,7 @@ from uipath._cli._runtime._contracts import (
     UiPathRuntimeResult,
 )
 
-from ..._utils import _instrument_traceable
+from ..._utils import _instrument_traceable_attributes
 from ...tracers import AsyncUiPathTracer
 from ._context import LangGraphRuntimeContext
 from ._exception import LangGraphRuntimeError
@@ -45,7 +45,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
         Raises:
             LangGraphRuntimeError: If execution fails
         """
-        _instrument_traceable()
+        _instrument_traceable_attributes()
 
         await self.validate()
 
