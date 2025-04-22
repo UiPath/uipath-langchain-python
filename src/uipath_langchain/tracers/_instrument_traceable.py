@@ -7,7 +7,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 from langchain_core.callbacks import dispatch_custom_event
-from uipath.tracing import TracedDecoratorRegistry
+from uipath.tracing import TracingManager
 
 from ._events import CustomTraceEvents, FunctionCallEventData
 
@@ -373,7 +373,8 @@ def patched_traceable(*decorator_args, **decorator_kwargs):
 # Register the UIPath traced decorator
 def register_uipath_tracing():
     """Register the UIPath tracing decorator with TracedDecoratorRegistry."""
-    TracedDecoratorRegistry.register_decorator("uipath", _uipath_traced)
+    # Reapply to all previously decorated functions
+    TracingManager.reapply_traced_decorator(_uipath_traced)
 
 
 # Apply the patch

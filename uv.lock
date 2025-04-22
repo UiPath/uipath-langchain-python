@@ -1972,7 +1972,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.0.13"
+version = "2.0.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -1987,14 +1987,14 @@ dependencies = [
     { name = "tomli" },
     { name = "types-requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8a/1e/aca04979a66e3b6395f9833e635a7088195ebb4d0774347798bcd34e93a1/uipath-2.0.13.tar.gz", hash = "sha256:f1a011f61b588b991f90923cc73058eaf17737a3dd2589039fcc191fc1457ec9", size = 228212 }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/1e/3505402a877b78004d57129ced372ec87900de4bc2a6fbdedfce44326b48/uipath-2.0.14.tar.gz", hash = "sha256:d81cc33adb53ea06177ebc9becc4c098313724b9be07711f68d7732300383dca", size = 240793 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/76/ea/778a77f2152bfdf5db2bbb63ee3c021a33d562d1526c109395abffdbb584/uipath-2.0.13-py3-none-any.whl", hash = "sha256:a613a36ebf49df06a4cc74c777b40f817f6a2538537a135a25432d3d85d754a5", size = 93434 },
+    { url = "https://files.pythonhosted.org/packages/2b/15/10801a67609f14293d93f0333697cefd4eb7c92c077a985fef63e2e41b3e/uipath-2.0.14-py3-none-any.whl", hash = "sha256:191728fd63187bb164c2d704c150a48778bec2c97737e813b5a89a7d9d0e6eaf", size = 94389 },
 ]
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.90"
+version = "0.0.91"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -2037,7 +2037,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "requests", specifier = ">=2.23.3" },
     { name = "types-requests", specifier = ">=2.32.0.20241016" },
-    { name = "uipath", specifier = ">=2.0.13,<2.1.0" },
+    { name = "uipath", specifier = ">=2.0.14,<2.1.0" },
     { name = "uipath-langchain", marker = "extra == 'langchain'", specifier = ">=0.0.2" },
 ]
 provides-extras = ["langchain"]
