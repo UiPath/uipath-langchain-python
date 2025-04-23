@@ -18,7 +18,7 @@ from pydantic import BaseModel, ValidationError
 
 from uipath_langchain.chat import (
     UiPathAzureChatOpenAI,
-    UiPathNormalizedChatModel,
+    UiPathChat,
 )
 from uipath_langchain.embeddings import (
     UiPathAzureOpenAIEmbeddings,
@@ -131,7 +131,7 @@ def test_cached_call_tokens(cached_llmgw_calls: Optional[SQLiteCache]):
 
 
 def test_normalized_cached_call(cached_llmgw_calls: Optional[SQLiteCache]):
-    model = UiPathNormalizedChatModel(
+    model = UiPathChat(
         model="anthropic.claude-3-5-sonnet-20240620-v1:0", cache=cached_llmgw_calls
     )
     messages = [
@@ -143,7 +143,7 @@ def test_normalized_cached_call(cached_llmgw_calls: Optional[SQLiteCache]):
 
 
 def test_normalized_cached_call_tokens(cached_llmgw_calls: Optional[SQLiteCache]):
-    model = UiPathNormalizedChatModel(
+    model = UiPathChat(
         model="anthropic.claude-3-5-sonnet-20240620-v1:0", cache=cached_llmgw_calls
     )
     messages = [
