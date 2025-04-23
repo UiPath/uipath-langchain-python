@@ -32,19 +32,24 @@ def dispatch_trace_event(
     metadata: Optional[Dict[str, Any]] = None,
 ):
     """Dispatch trace event to our server."""
+    try:
+        event_data = FunctionCallEventData(
+            function_name=func_name,
+            event_type=event_type,
+            inputs=inputs,
+            call_uuid=call_uuid,
+            output=result,
+            error=str(exception) if exception else None,
+            run_type=run_type,
+            tags=tags,
+            metadata=metadata,
+        )
 
-    event_data = FunctionCallEventData(
-        function_name=func_name,
-        event_type=event_type,
-        inputs=inputs,
-        call_uuid=call_uuid,
-        output=result,
-        error=str(exception) if exception else None,
-        run_type=run_type,
-        tags=tags,
-        metadata=metadata,
-    )
-    dispatch_custom_event(CustomTraceEvents.UIPATH_TRACE_FUNCTION_CALL, event_data)
+        dispatch_custom_event(CustomTraceEvents.UIPATH_TRACE_FUNCTION_CALL, event_data)
+    except Exception as e:
+        logger.debug(
+            f"Error dispatching trace event: {e}. Function name: {func_name} Event type: {event_type}"
+        )
 
 
 def format_args_for_trace(
