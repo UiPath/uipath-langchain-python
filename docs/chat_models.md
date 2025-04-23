@@ -81,7 +81,7 @@ llm = UiPathNormalizedChatModel(
 )
 ```
 
-Currently the following models can be used with `UiPathAzureChatOpenAI` (this list can be updated in the future): 
+Currently the following models can be used with `UiPathNormalizedChatModel` (this list can be updated in the future): 
 - `anthropic.claude-3-5-sonnet-20240620-v1:0`, `anthropic.claude-3-5-sonnet-20241022-v2:0`, `anthropic.claude-3-7-sonnet-20250219-v1:0`, `anthropic.claude-3-haiku-20240307-v1:0`, `gemini-1.5-pro-001`, `gemini-2.0-flash-001`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini-2024-07-18`, `o3-mini-2025-01-31`
 
 ### Note 
