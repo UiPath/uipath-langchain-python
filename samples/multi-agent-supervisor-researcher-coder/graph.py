@@ -71,8 +71,8 @@ def input(state: GraphInput):
         "next": "",
     }
 
-def supervisor_node(state: State) -> Command[Literal[*members]] | GraphOutput:
-    response = llm.with_structured_output(Router).invoke(state["messages"])
+async def supervisor_node(state: State) -> Command[Literal[*members]] | GraphOutput:
+    response = await llm.with_structured_output(Router).ainvoke(state["messages"])
     goto = response["next"]
     if goto == "FINISH":
         return GraphOutput(answer=state["messages"][-1].content)
@@ -84,8 +84,8 @@ research_agent = create_react_agent(
 )
 
 
-def research_node(state: State) -> Command[Literal["supervisor"]]:
-    result = research_agent.invoke(state)
+async def research_node(state: State) -> Command[Literal["supervisor"]]:
+    result = await research_agent.ainvoke(state)
     return Command(
         update={
             "messages": [
@@ -100,8 +100,8 @@ def research_node(state: State) -> Command[Literal["supervisor"]]:
 code_agent = create_react_agent(llm, tools=[python_repl_tool])
 
 
-def code_node(state: State) -> Command[Literal["supervisor"]]:
-    result = code_agent.invoke(state)
+async def code_node(state: State) -> Command[Literal["supervisor"]]:
+    result = await code_agent.ainvoke(state)
     return Command(
         update={
             "messages": [

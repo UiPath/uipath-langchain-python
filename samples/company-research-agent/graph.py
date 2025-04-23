@@ -43,7 +43,7 @@ class GraphOutput(BaseModel):
     response: str
 
 
-def research_node(state: GraphInput) -> GraphOutput:
+async def research_node(state: GraphInput) -> GraphOutput:
     # Format the user message with the company name
     user_message = f"""Please provide a comprehensive analysis and outreach strategy for the company: {state.company_name}. Use the TavilySearchResults tool to gather information. Include detailed research on the company's background, organizational structure, key decision-makers, and a tailored outreach strategy. Format your response using the following section headers:
 
@@ -58,7 +58,7 @@ Ensure that each section is clearly labeled and contains relevant, concise infor
 
     new_state = MessagesState(messages=[{"role": "user", "content": user_message}])
 
-    result = research_agent.invoke(new_state)
+    result = await research_agent.ainvoke(new_state)
 
     return GraphOutput(response=result["messages"][-1].content)
 
