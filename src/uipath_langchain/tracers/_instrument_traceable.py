@@ -334,16 +334,20 @@ def _create_appropriate_wrapper(
 
 
 def _uipath_traced(
+    name: Optional[str] = None,
     run_type: Optional[str] = None,
     span_type: Optional[str] = None,
     input_processor: Optional[Callable[..., Any]] = None,
     output_processor: Optional[Callable[..., Any]] = None,
+    *args: Any,
+    **kwargs: Any,
 ):
     """Decorator factory that creates traced functions using dispatch_trace_event."""
 
     def decorator(func):
         return _create_traced_wrapper(
             func=func,
+            func_name=name,
             run_type=run_type,
             span_type=span_type,
             input_processor=input_processor,
