@@ -26,16 +26,16 @@ def generate_script(target_directory):
 def generate_pyproject(target_directory, project_name):
     project_toml_path = os.path.join(target_directory, "pyproject.toml")
     toml_content = f"""[project]
-                        name = "{project_name}"
-                        version = "0.0.1"
-                        description = "{project_name}"
-                        authors = [{{ name = "John Doe", email = "john.doe@myemail.com" }}]
-                        dependencies = [
-                            "uipath-langchain>=0.0.95",
-                            "langchain-anthropic>=0.3.8",
-                        ]
-                        requires-python = ">=3.10"
-                    """
+name = "{project_name}"
+version = "0.0.1"
+description = "{project_name}"
+authors = [{{ name = "John Doe", email = "john.doe@myemail.com" }}]
+dependencies = [
+    "uipath-langchain>=0.0.95",
+    "langchain-anthropic>=0.3.8",
+]
+requires-python = ">=3.10"
+"""
 
     with open(project_toml_path, "w") as f:
         f.write(toml_content)

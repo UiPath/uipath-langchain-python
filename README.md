@@ -7,6 +7,8 @@ A Python SDK that enables developers to build and deploy LangGraph agents to the
 
 This package is an extension to the [UiPath Python SDK](https://github.com/UiPath/uipath-python).
 
+This [quickstart guide](docs/quick_start.md) walks you through deploying your first agent to UiPath Cloud Platform.
+
 ## Requirements
 
 - Python 3.10 or higher
