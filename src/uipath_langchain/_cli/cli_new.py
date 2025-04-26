@@ -2,8 +2,10 @@ import os
 import shutil
 
 import click
+from uipath._cli._utils._console import ConsoleLogger
 from uipath._cli.middlewares import MiddlewareResult
-from uipath._cli.spinner import Spinner
+
+console = ConsoleLogger()
 
 
 def generate_script(target_directory):
@@ -41,36 +43,29 @@ def generate_pyproject(target_directory, project_name):
 
 def langgraph_new_middleware(name: str) -> MiddlewareResult:
     """Middleware to create demo langchain agent"""
-    spinner = Spinner("Creating demo agent...")
+
     directory = os.getcwd()
 
     try:
-        generate_script(directory)
-        click.echo(click.style("✓ ", fg="green", bold=True) + "Created main.py file")
-        click.echo(
-            click.style("✓ ", fg="green", bold=True) + "Created langgraph.json file"
-        )
-        generate_pyproject(directory, name)
-        click.echo(
-            click.style("✓ ", fg="green", bold=True) + "Created pyproject.toml file"
-        )
-        os.system("uv sync")
-        spinner.start()
-        ctx = click.get_current_context()
-        init_cmd = ctx.parent.command.get_command(ctx, "init")  # type: ignore
-        ctx.invoke(init_cmd)
-        spinner.stop()
-        click.echo(
-            click.style("✓ ", fg="green", bold=True) + " Agent created successfully."
-        )
-        return MiddlewareResult(
-            should_continue=False,
-            info_message="""Usage example: ` uipath run agent '{"topic": "UiPath"}' `""",
-        )
+        with console.spinner(f"Creating new agent {name} in current directory ..."):
+            generate_pyproject(directory, name)
+            generate_script(directory)
+            console.success("Created 'main.py' file.")
+            console.success("Created 'langgraph.json' file.")
+            generate_pyproject(directory, name)
+            console.success("Created 'pyproject.toml' file.")
+            os.system("uv sync")
+            ctx = click.get_current_context()
+            init_cmd = ctx.parent.command.get_command(ctx, "init")  # type: ignore
+            ctx.invoke(init_cmd)
+            console.config(
+                " Please ensure to define either ANTHROPIC_API_KEY or OPENAI_API_KEY in your .env file."
+            )
+            console.hint(""" Run agent: uipath run agent '{"topic": "UiPath"}'""")
+        return MiddlewareResult(should_continue=False)
     except Exception as e:
-        spinner.stop()
+        console.error(f"Error creating demo agent {str(e)}")
         return MiddlewareResult(
             should_continue=False,
-            error_message=f"❌ Error creating demo agent {str(e)}",
             should_include_stacktrace=True,
         )

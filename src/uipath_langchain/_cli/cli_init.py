@@ -4,13 +4,14 @@ import os
 import uuid
 from typing import Any, Dict
 
-import click
 from langgraph.graph.state import CompiledStateGraph
+from uipath._cli._utils._console import ConsoleLogger
 from uipath._cli._utils._parse_ast import generate_bindings_json  # type: ignore
 from uipath._cli.middlewares import MiddlewareResult
-from uipath._cli.spinner import Spinner
 
 from ._utils._graph import LangGraphConfig
+
+console = ConsoleLogger()
 
 
 def resolve_refs(schema, root=None):
@@ -95,7 +96,6 @@ def generate_schema_from_graph(graph: CompiledStateGraph) -> Dict[str, Any]:
 
 async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
     """Middleware to check for langgraph.json and create uipath.json with schemas"""
-    spinner = Spinner("Initializing UiPath project...")
     config = LangGraphConfig()
     if not config.exists:
         return MiddlewareResult(
@@ -103,7 +103,6 @@ async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
         )  # Continue with normal flow if no langgraph.json
 
     try:
-        spinner.start()
         config.load_config()
         entrypoints = []
         all_bindings = {"version": "2.0", "resources": []}
@@ -134,8 +133,8 @@ async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
                         if "resources" in file_bindings:
                             all_bindings["resources"] = file_bindings["resources"]
                 except Exception as e:
-                    print(
-                        f"⚠️ Warning: Could not generate bindings for {graph.file_path}: {str(e)}"
+                    console.warning(
+                        f"Warning: Could not generate bindings for {graph.file_path}: {str(e)}"
                     )
 
                 new_entrypoint: dict[str, Any] = {
@@ -148,21 +147,18 @@ async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
                 entrypoints.append(new_entrypoint)
 
             except Exception as e:
-                spinner.stop()
-                print(f"Error during graph load: {e}")
+                console.error(f"Error during graph load: {e}")
                 return MiddlewareResult(
                     should_continue=False,
-                    error_message=f"❌ Failed to load graph '{graph.name}': {str(e)}",
                     should_include_stacktrace=True,
                 )
             finally:
                 await graph.cleanup()
 
         if entrypoint and not entrypoints:
-            spinner.stop()
+            console.error(f"Error: No graph found with name '{entrypoint}'")
             return MiddlewareResult(
                 should_continue=False,
-                error_message=f"❌ Error: No graph found with name '{entrypoint}'",
             )
 
         uipath_config = {"entryPoints": entrypoints, "bindings": all_bindings}
@@ -177,25 +173,22 @@ async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
             try:
                 with open(mermaid_file_path, "w") as f:
                     f.write(mermaid_content)
+                console.success(f" Created '{mermaid_file_path}' file.")
             except Exception as write_error:
-                spinner.stop()
+                console.error(
+                    f"Error writing mermaid file for '{graph_name}': {str(write_error)}"
+                )
                 return MiddlewareResult(
                     should_continue=False,
-                    error_message=f"❌ Error writing mermaid file for '{graph_name}': {str(write_error)}",
                     should_include_stacktrace=True,
                 )
-        spinner.stop()
-        return MiddlewareResult(
-            should_continue=False,
-            info_message=click.style("✓ ", fg="green", bold=True)
-            + f" Configuration file {config_path} created successfully.",
-        )
+        console.success(f" Created '{config_path}' file.")
+        return MiddlewareResult(should_continue=False)
 
     except Exception as e:
-        spinner.stop()
+        console.error(f"Error processing langgraph configuration: {str(e)}")
         return MiddlewareResult(
             should_continue=False,
-            error_message=f"❌ Error processing langgraph configuration: {str(e)}",
             should_include_stacktrace=True,
         )
 
