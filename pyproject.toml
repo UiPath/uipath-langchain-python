@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.0.97"
+version = "0.0.98"
 description = "UiPath Langchain"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
@@ -58,6 +58,9 @@ dev = [
 langchain = [
   "uipath-langchain>=0.0.2"
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/uipath_langchain"]
 
 [tool.ruff]
 line-length = 88
