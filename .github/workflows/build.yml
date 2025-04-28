@@ -42,9 +42,9 @@ jobs:
         env:
           HATCH_BUILD_HOOK_VCS_VERSION: ${{ steps.gitversion.outputs.semVer }}
 
-      - name: Publish
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
-        run: |
-          uv publish
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.token }}
+      # - name: Publish
+      #   if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+      #   run: |
+      #     uv publish
+      #   env:
+      #     UV_PUBLISH_TOKEN: ${{ secrets.token }}

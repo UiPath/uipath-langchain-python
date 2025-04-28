@@ -1,5 +1,5 @@
 mode: Mainline
-next-version: 0.0.99
+next-version: 0.0.98
 major-version-bump-message: '\+semver:\s?(breaking|major)'
 minor-version-bump-message: '\+semver:\s?(feature|minor)'
 patch-version-bump-message: '\+semver:\s?(fix|patch)'
@@ -9,7 +9,7 @@ commit-message-incrementing: Enabled
 branches:
   main:
     regex: ^main$|^master$
-    tag: ''
+    tag: 'alpha'
     increment: Patch
   feature:
     regex: ^feature?\/
@@ -22,6 +22,12 @@ branches:
   release:
     regex: ^release?\/
     tag: 'rc'
+    increment: None
+  release-tag:
+    regex: ^v[0-9]+\.[0-9]+\.[0-9]+$
+    tag: ''
+    source-branches: ['main']
+    is-release-branch: true
     increment: None
 ignore:
   sha: []

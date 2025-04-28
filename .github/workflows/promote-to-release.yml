@@ -1,0 +1,66 @@
+name: Promote Alpha to Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to promote (without alpha suffix, e.g., 0.0.98)'
+        required: true
+        type: string
+
+jobs:
+  promote:
+    name: Promote alpha to release
+    runs-on: "ubuntu-24.04"
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set Git User
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+      
+      - name: Create and Push Tag
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          echo "Creating release tag v$VERSION"
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+      
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v0.10.2
+        with:
+          versionSpec: '5.x'
+          
+      - name: Determine Version
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v0.10.2
+        with:
+          useConfigFile: true
+      
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Setup venv
+        run: |
+          uv venv
+          uv sync --all-extras
+
+      - name: Build
+        run: |
+          uv build
+        env:
+          HATCH_BUILD_HOOK_VCS_VERSION: ${{ github.event.inputs.version }}
+
+      # - name: Publish
+      #   run: |
+      #     uv publish
+      #   env:
+      #     UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
