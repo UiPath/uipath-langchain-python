@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.0.98"
+version = "0.0.98"  # This will be overridden by GitVersion
 description = "UiPath Langchain"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
@@ -40,8 +40,14 @@ Homepage = "https://uipath.com"
 Repository = "https://github.com/UiPath/uipath-langchain-python"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/uipath_langchain/_version.py"
 
 [dependency-groups]
 dev = [
@@ -52,6 +58,7 @@ dev = [
     "pytest-mock>=3.11.1",
     "pre-commit>=4.1.0",
     "numpy>=1.24.0",
+    "hatch-vcs>=0.3.0",
 ]
 
 [project.optional-dependencies]

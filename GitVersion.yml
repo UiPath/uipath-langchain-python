@@ -1,0 +1,34 @@
+mode: Mainline
+next-version: 0.0.98
+major-version-bump-message: '\+semver:\s?(breaking|major)'
+minor-version-bump-message: '\+semver:\s?(feature|minor)'
+patch-version-bump-message: '\+semver:\s?(fix|patch)'
+no-bump-message: '\+semver:\s?(none|skip)'
+tag-prefix: 'v'
+commit-message-incrementing: Enabled
+branches:
+  main:
+    regex: ^main$|^master$
+    tag: 'alpha'
+    increment: Patch
+  feature:
+    regex: ^feature?\/
+    tag: 'alpha'
+    increment: Inherit
+  hotfix:
+    regex: ^hotfix?\/
+    tag: 'beta'
+    increment: Patch
+  release:
+    regex: ^release?\/
+    tag: 'rc'
+    increment: None
+  release-tag:
+    regex: ^v[0-9]+\.[0-9]+\.[0-9]+$
+    tag: ''
+    source-branches: ['main']
+    is-release-branch: true
+    increment: None
+ignore:
+  sha: []
+merge-message-formats: {}
