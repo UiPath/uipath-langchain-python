@@ -13,6 +13,17 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for GitVersion to accurately determine version
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v0.10.2
+        with:
+          versionSpec: '5.x'
+
+      - name: Determine Version
+        id: gitversion
+        uses: gittools/actions/gitversion/execute@v0.10.2
 
       - uses: astral-sh/setup-uv@v5
 
@@ -28,18 +39,11 @@ jobs:
       - name: Build
         run: |
           uv build
+        env:
+          HATCH_BUILD_HOOK_VCS_VERSION: ${{ steps.gitversion.outputs.semVer }}
 
-      - name: Check if version in pyproject.toml was modified
-        id: check_version
-        run: |
-          if git diff --name-only ${{ github.sha }} ${{ github.event.before }} | grep -q 'pyproject.toml'; then
-            echo "modified=true" >> $GITHUB_OUTPUT
-          else
-            echo "modified=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: "Publish"
-        if: ${{ steps.check_version.outputs.modified }} == 'true'
+      - name: Publish
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         run: |
           uv publish
         env:
