@@ -6,7 +6,7 @@ This repository implements a multi-agent system that decomposes complex tasks in
 2. **Researcher Agent**: Gathers information, formulas, and reference materials without performing calculations.
 3. **Coder Agent**: Executes calculations and evaluates formulas with specific values.
 
-Each agent operates as an independent entry point and can be deployed as a separate process, while still being packaged together as part of an Orchestrator Agent Package.
+Each agent operates independently and can be deployed as a separate process, while still being packaged together as part of an Orchestrator Agent Package.
 
 ## System Architecture
 

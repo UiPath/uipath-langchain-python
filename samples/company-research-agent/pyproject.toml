@@ -1,17 +1,14 @@
 [project]
 name = "company-research-agent"
-version = "0.0.2"
+version = "0.0.1"
 description = "Company research agent with Tavily web search"
-authors = [
-    { name = "John Doe" }
-]
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.10"
 dependencies = [
     "langgraph>=0.2.55",
-    "langchain-community>=0.3.9",
     "langchain-anthropic>=0.3.8",
     "tavily-python>=0.5.0",
-    "uipath-langchain==0.0.88"
+    "uipath-langchain==0.0.100"
 ]
 
 [project.optional-dependencies]
