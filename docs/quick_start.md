@@ -11,6 +11,13 @@ Ensure you have the following installed before proceeding:
 -   Python 3.10 or higher
 -   `pip` or `uv` package manager
 -   A UiPath Platform account with appropriate permissions
+-   Either Anthropic or OpenAI API key
+
+### (Optional) Generating API keys
+
+> If you already have either an Anthropic or OpenAi API key you can skip this section.
+1. **Anthropic** -  Generate an Anthropic API key [here](https://console.anthropic.com/settings/keys).
+2. **OpenAi** - Generate an OpenAI API key [here](https://platform.openai.com).
 
 ## Step-by-Step Guide
 
