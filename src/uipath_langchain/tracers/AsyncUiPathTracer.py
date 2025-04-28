@@ -284,7 +284,7 @@ class AsyncUiPathTracer(AsyncBaseTracer):
             warnings.simplefilter("ignore", category=PydanticDeprecationWarning)
 
             return {
-                **run.dict(exclude={"child_runs", "inputs", "outputs"}),
+                **run.dict(exclude={"child_runs", "inputs", "outputs", "serialized"}),
                 "inputs": run.inputs.copy() if run.inputs is not None else None,
                 "outputs": run.outputs.copy() if run.outputs is not None else None,
             }
