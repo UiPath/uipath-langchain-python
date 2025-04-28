@@ -1,6 +1,6 @@
-from .models import UiPathAzureChatOpenAI, UiPathNormalizedChatModel
+from .models import UiPathAzureChatOpenAI, UiPathChat
 
 __all__ = [
-    "UiPathNormalizedChatModel",
+    "UiPathChat",
     "UiPathAzureChatOpenAI",
 ]

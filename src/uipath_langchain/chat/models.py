@@ -76,7 +76,7 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
         )
 
 
-class UiPathNormalizedChatModel(UiPathRequestMixin, AzureChatOpenAI):
+class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
     """Custom LLM connector for LangChain integration with UiPath Normalized."""
 
     def _create_chat_result(

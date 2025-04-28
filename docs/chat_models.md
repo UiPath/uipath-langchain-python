@@ -1,6 +1,6 @@
 # UiPath chat models
 
-UiPath provides two chat models `UiPathAzureChatOpenAI` and `UiPathNormalizedChatModel`. These are compatible with langgraph as drop in replacements. You do not need to add tokens from OpenAI or Anthropic, usage of these chat models will consume `AI Units` on your account.
+UiPath provides two chat models `UiPathAzureChatOpenAI` and `UiPathChat`. These are compatible with langgraph as drop in replacements. You do not need to add tokens from OpenAI or Anthropic, usage of these chat models will consume `AI Units` on your account.
 
 ## UiPathAzureChatOpenAI
 
@@ -15,8 +15,8 @@ from langchain_openai import ChatOpenAI
 llm = ChatOpenAI(
     model="gpt-4o",
     temperature=0,
-    max_tokens=None,
-    timeout=None,
+    max_tokens=4000,
+    timeout=30,
     max_retries=2,
     # api_key="...",  # if you prefer to pass api key in directly instaed of using env vars
     # base_url="...",
@@ -32,10 +32,10 @@ You can simply change `ChatOpenAi` with `UiPathAzureChatOpenAI`, you don't have 
 from uipath_langchain.chat.models import UiPathAzureChatOpenAI
 
 llm = UiPathAzureChatOpenAI(
-    model="gpt-4o",
+    model="gpt-4o-2024-08-06",
     temperature=0,
-    max_tokens=None,
-    timeout=None,
+    max_tokens=4000,
+    timeout=30,
     max_retries=2,
     # other params...
 )
@@ -45,9 +45,9 @@ Currently the following models can be used with `UiPathAzureChatOpenAI` (this li
 - `gpt-4`, `gpt-4-1106-Preview`, `gpt-4-32k`, `gpt-4-turbo-2024-04-09`, `gpt-4-vision-preview`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-mini-2024-07-18`, `o3-mini-2025-01-31`
 
 
-## UiPathNormalizedChatModel
+## UiPathChat
 
-`UiPathNormalizedChatModel` is a more versatile clas that can suport models from diferent vendors including OpenAI.
+`UiPathChat` is a more versatile clas that can suport models from diferent vendors including OpenAI.
 
 ### Example usage
 
@@ -66,12 +66,12 @@ llm = ChatAnthropic(
 )
 ```
 
-You can replace it with `UiPathNormalizedChatModel` like so:
+You can replace it with `UiPathChat` like so:
 
 ```python
-from uipath_langchain.chat.models import UiPathNormalizedChatModel
+from uipath_langchain.chat.models import UiPathChat
 
-llm = UiPathNormalizedChatModel(
+llm = UiPathChat(
     model="anthropic.claude-3-opus-20240229-v1:0",
     temperature=0,
     max_tokens=1024,
@@ -81,7 +81,7 @@ llm = UiPathNormalizedChatModel(
 )
 ```
 
-Currently the following models can be used with `UiPathNormalizedChatModel` (this list can be updated in the future): 
+Currently the following models can be used with `UiPathChat` (this list can be updated in the future): 
 - `anthropic.claude-3-5-sonnet-20240620-v1:0`, `anthropic.claude-3-5-sonnet-20241022-v2:0`, `anthropic.claude-3-7-sonnet-20250219-v1:0`, `anthropic.claude-3-haiku-20240307-v1:0`, `gemini-1.5-pro-001`, `gemini-2.0-flash-001`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini-2024-07-18`, `o3-mini-2025-01-31`
 
 ### Note 
