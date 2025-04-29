@@ -1,6 +1,7 @@
 # Context Grounding
 
 Context Grounding Service allows you to:
+
 - Search through indexed documents using natural language queries
 - Ground LLM responses in your organization's specific information
 - Retrieve context-relevant documents for various applications
@@ -9,11 +10,11 @@ Context Grounding Service allows you to:
 You will need to create an index in `Context Grounding` to use this feature. To create an index go to organization `Admin` -> `AI Trust Layer` -> `Context Grounding`. There you can create a new index and add documents to it. See the full documentation [here](https://docs.uipath.com/automation-cloud/automation-cloud/latest/admin-guide/about-context-grounding) for more details.
 
 
-# ContextGroundingRetriever
+## ContextGroundingRetriever
 
 The `ContextGroundingRetriever` is a document retrieval system that uses vector search to efficiently find and retrieve relevant information from your document store.
 
-## Basic Usage
+### Basic Usage
 
 Create a simple retriever by specifying an index name:
 
@@ -24,7 +25,7 @@ retriever = ContextGroundingRetriever(index_name = "Company Policy Context")
 print(retriever.invoke("What is the company policy on remote work?"))
 ```
 
-## Integration with LangChain Tools
+### Integration with LangChain Tools
 
 You can easily integrate the retriever with LangChain's tool system:
 
@@ -50,17 +51,17 @@ agent = create_react_agent(model, tools, prompt="Answer user questions as best a
 ```
 
 
-## Advanced Usage
+### Advanced Usage
 
 For complex applications, the retriever can be combined with other LangChain components to create robust document QA systems, agents, or knowledge bases.
 
 
 
-# ContextGroundingVectorStore
+## ContextGroundingVectorStore
 
 `ContextGroundingVectorStore` is a vector store implementation designed for context-aware document retrieval. It allows you to perform semantic searches and create retrieval chains with language models.
 
-## Searching Documents
+### Searching Documents
 
 The vector store supports various search methods:
 
@@ -76,7 +77,7 @@ docs_with_scores = vectorstore.asimilarity_search_with_score(query="What is the 
 docs_with_relevance_scores = await vectorstore.asimilarity_search_with_relevance_scores(query=query, k=5)
 ```
 
-## Creating a Retrieval Chain
+### Creating a Retrieval Chain
 
 You can integrate the vector store into a retrieval chain with a language model:
 
