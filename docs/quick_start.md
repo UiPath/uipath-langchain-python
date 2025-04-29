@@ -2,11 +2,11 @@
 
 ## Introduction
 
-This guide walks you through the process of setting up, creating, publishing, and running your first UiPath-LangChain Agent.
+This guide provides step-by-step instructions for setting up, creating, publishing, and running your first UiPath-LangChain Agent.
 
 ## Prerequisites
 
-Ensure you have the following installed before proceeding:
+Before proceeding, ensure you have the following installed:
 
 -   Python 3.10 or higher
 -   `pip` or `uv` package manager
@@ -17,11 +17,8 @@ Ensure you have the following installed before proceeding:
 
 1. **Anthropic** - Generate an Anthropic API key [here](https://console.anthropic.com/settings/keys).
 
-2. **OpenAi** - Generate an OpenAI API key [here](https://platform.openai.com).
-
-///
-
-## Step-by-Step Guide
+2. **OpenAI** - Generate an OpenAI API key [here](https://platform.openai.com).
+   ///
 
 ## Creating a New Project
 
@@ -108,7 +105,7 @@ uipath-langchain version 0.0.100
 
 ## Create Your First UiPath Agent
 
-Generate your first UiPath LangChain:
+Generate your first UiPath LangChain agent:
 
 <!-- termynal -->
 
@@ -137,13 +134,13 @@ This command creates the following files:
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `.env`           | Environment variables and secrets (this file will not be packed & published).                                                     |
 | `main.py`        | LangGraph agent code.                                                                                                             |
-| `uipath.json`    | Input/output json schemas and bindings.                                                                                           |
+| `uipath.json`    | Input/output JSON schemas and bindings.                                                                                           |
 | `langgraph.json` | [LangGraph](https://langchain-ai.github.io/langgraph/concepts/application_structure/#file-structure) specific configuration file. |
 | `agent.mermaid`  | Graph visual representation.                                                                                                      |
 
 ## Set Up Environment Variables
 
-Before running the agent, set either `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the previously created `.env` file:
+Before running the agent, configure either `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the `.env` file:
 
 //// tab | Open AI
 
@@ -177,9 +174,9 @@ Execute the agent with a sample input:
 [2025-04-29 12:32:07,689][INFO] ((), {'topic': 'UiPath', 'report': "..."})
 ```
 
-This command runs your agent locally and generates the report at standard output.
+This command runs your agent locally and displays the report in the standard output.
 
-## Pack and Publish the agent on UiPath Cloud Platform
+## Deploy The Agent On UiPath Cloud Platform
 
 Follow these steps to publish and run your agent on UiPath Cloud Platform:
 
@@ -199,13 +196,15 @@ Selected tenant: Tenant1
 ✓  Authentication successful.
 ```
 
-### (Optional) Update author details in `pyproject.toml`
+### (Optional) Customize Package
+
+Update author details in `pyproject.toml`:
 
 ```toml
 authors = [{ name = "Your Name", email = "your.name@example.com" }]
 ```
 
-### Package your project:
+### Package Your Project
 
 <!-- termynal -->
 
@@ -219,7 +218,7 @@ Authors    : Your Name
 ✓  Project successfully packaged.
 ```
 
-### Publish to your workspace
+### Publish to Your Workspace
 
 <!-- termynal -->
 
@@ -234,13 +233,11 @@ Authors    : Your Name
 
 > Please note that a process will be auto-created only upon publishing to **my-workspace** package feed.
 
-### Configure environment variables using the provided link
+Set the environment variables using the provided link:
 
 ![Set Environment Variables](quick_start_images/cloud_env_var.png)
 
 ## Invoke the Agent on UiPath Cloud Platform
-
-Invoke the agent in UiPath Cloud Platform:
 
 <!-- termynal -->
 
@@ -254,7 +251,7 @@ Invoke the agent in UiPath Cloud Platform:
 
 Use the provided link to monitor your job and view detailed traces.
 
-## Next steps
+## Next Steps
 
 Congratulations! You have successfully set up, created, published, and run a UiPath LangChain Agent. 🚀
 
