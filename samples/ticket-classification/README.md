@@ -152,19 +152,13 @@ uv sync
 ```bash
 uipath auth
 ```
-After successful authentication in the browser, select the tenant for publishing the agent package:
+> **Note:** After successful authentication in the browser, select the tenant for publishing the agent package.
 ```
-Received log data
-Received authentication information
-Available tenants:
-  0: cosmin
-  1: DefaultTenant
-  2: Demo
-  3: lucian
-  4: Solutions
-  5: SolutionsTest
-  6: Test
-  7: TestRoles
+👇 Select tenant:
+  0: DefaultTenant
+  1: Tenant2
+  2: Tenant3
+...
 Select tenant: 2
 ```
 
@@ -174,14 +168,17 @@ Select tenant: 2
 uipath pack
 uipath publish
 ```
-Select your preferred feed type when prompted:
+Select the feed to publish your package:
 ```
-Select feed type:
-  0: Tenant package feed
-  1: Personal workspace
-Select feed: 1
+👇 Select package feed:
+  0: Orchestrator Tenant Processes Feed
+  1: Orchestrator Folder1 Feed
+  2: Orchestrator Folder2 Feed
+  3: Orchestrator Personal Workspace Feed
+  ...
+Select feed number: 3
 ```
-Note: When publishing to personal workspace feed, the process will be auto-created for you.
+> Note: When publishing to personal workspace feed, the process will be auto-created for you.
 
 ### 4. Running and Monitoring the Agent
 

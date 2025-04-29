@@ -1,6 +1,6 @@
 # Human In The Loop
 
-This README offers a guide for **Human-In-The-Loop** scenarios within the UiPath-Langchain integration.
+Guide for **Human-In-The-Loop** scenarios within the UiPath-Langchain integration.
 It focuses on the **interrupt(model)** functionality, illustrating its role as a symbolic representation of an agent's
 wait state within the Langchain framework.
 
@@ -27,7 +27,7 @@ For more information on UiPath apps, refer to the [UiPath Apps User Guide](https
 from uipath.models import CreateAction
 action_output = interrupt(CreateAction(name="AppName", title="Escalate Issue", data={"key": "value"}, app_version=1, assignee="user@example.com"))
 ```
-For a practical implementation of the `CreateAction` model, refer to the sample usage in the [ticket-classification/main.py](../samples/ticket-classification/main.py#L116) file. This example demonstrates how to create an action with dynamic input.
+For a practical implementation of the `CreateAction` model, refer to the [ticket-classification sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/ticket-classification). This sample demonstrates how to create an action with dynamic input.
 
 ---
 
@@ -63,7 +63,7 @@ from uipath.models import InvokeProcess
 process_output = interrupt(InvokeProcess(name="MyProcess", input_arguments={"arg1": "value1"}))
 ```
 
-For a practical implementation of the `InvokeProcess` model, refer to the sample usage in the [planner.py](../samples/multi-agent-planner-researcher-coder-distributed/src/multi-agent-distributed/planner.py#L181) file. This example demonstrates how to invoke a process with dynamic input arguments, showcasing the integration of the interrupt functionality within a multi-agent system or a system where an agent integrates with RPA processes and API workflows.
+For a practical implementation of the `InvokeProcess` model, refer to the [multi-agent-planner-researcher-coder-distributed sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/multi-agent-planner-researcher-coder-distributed). This sample demonstrates how to invoke a process with dynamic input arguments, showcasing the integration of the interrupt functionality within a multi-agent system or a system where an agent integrates with RPA processes and API workflows.
 
 ---
 
