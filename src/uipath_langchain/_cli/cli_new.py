@@ -59,9 +59,10 @@ def langgraph_new_middleware(name: str) -> MiddlewareResult:
             init_cmd = ctx.parent.command.get_command(ctx, "init")  # type: ignore
             ctx.invoke(init_cmd)
             console.config(
-                " Please ensure to define either ANTHROPIC_API_KEY or OPENAI_API_KEY in your .env file."
+                f""" Please ensure to define either {click.style("ANTHROPIC_API_KEY", fg="bright_yellow")} or {click.style("OPENAI_API_KEY", fg="bright_yellow")} in your .env file. """
             )
-            console.hint(""" Run agent: uipath run agent '{"topic": "UiPath"}'""")
+            run_command = """uipath run agent '{"topic": "UiPath"}'"""
+            console.hint(f""" Run agent: {click.style(run_command, fg="cyan")}""")
         return MiddlewareResult(should_continue=False)
     except Exception as e:
         console.error(f"Error creating demo agent {str(e)}")
