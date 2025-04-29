@@ -10,11 +10,12 @@ Ensure you have the following installed before proceeding:
 
 -   Python 3.10 or higher
 -   `pip` or `uv` package manager
--   A UiPath Platform account with appropriate permissions
+-   A UiPath Cloud Platform account with appropriate permissions
 -   Either Anthropic or OpenAI API key
 
 /// info
-1. **Anthropic** -  Generate an Anthropic API key [here](https://console.anthropic.com/settings/keys).
+
+1. **Anthropic** - Generate an Anthropic API key [here](https://console.anthropic.com/settings/keys).
 
 2. **OpenAi** - Generate an OpenAI API key [here](https://platform.openai.com).
 
@@ -27,24 +28,32 @@ Ensure you have the following installed before proceeding:
 We recommend using `uv` for package management. To create a new project:
 
 //// tab | Linux, macOS, Windows Bash
+
 <!-- termynal -->
+
 ```shell
 > mkdir example
 > cd example
 ```
+
 ////
 
 //// tab | Windows PowerShell
+
 <!-- termynal -->
+
 ```powershell
 > New-Item -ItemType Directory -Path example
 > Set-Location example
 ```
+
 ////
 
 //// tab | uv
     new: true
+
 <!-- termynal -->
+
 ```shell
 # Initialize a new uv project in the current directory
 > uv init . --python 3.10
@@ -68,10 +77,13 @@ Activate with: source .venv/bin/activate
 > uipath --lv
 uipath-langchain version 0.0.100
 ```
+
 ////
 
 //// tab | pip
+
 <!-- termynal -->
+
 ```shell
 # Create a new virtual environment
 > python -m venv .venv
@@ -91,14 +103,15 @@ uipath-langchain version 0.0.100
 > uipath --lv
 uipath-langchain version 0.0.100
 ```
-////
 
+////
 
 ## Create Your First UiPath Agent
 
 Generate your first UiPath LangChain:
 
 <!-- termynal -->
+
 ```shell
 > uipath new my-agent
 ⠋ Creating new agent my-agent in current directory ...
@@ -117,10 +130,11 @@ Installed 2 packages in 3ms
 🔧  Please ensure to define either ANTHROPIC_API_KEY or OPENAI_API_KEY in your .env file.
 💡  Run agent: uipath run agent '{"topic": "UiPath"}'
 ```
+
 This command creates the following files:
 
 | File Name        | Description                                                                                                                       |
-|------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `.env`           | Environment variables and secrets (this file will not be packed & published).                                                     |
 | `main.py`        | LangGraph agent code.                                                                                                             |
 | `uipath.json`    | Input/output json schemas and bindings.                                                                                           |
@@ -132,27 +146,31 @@ This command creates the following files:
 Before running the agent, set either `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the previously created `.env` file:
 
 //// tab | Open AI
+
 ```hl_lines="3"
 UIPATH_ACCESS_TOKEN=YOUR_TOKEN_HERE
 UIPATH_URL=https://cloud.uipath.com/ACCOUNT_NAME/TENANT_NAME
 OPENAI_API_KEY=sk-proj-......
 ```
+
 ////
 
 //// tab | ANTHROPIC_API_KEY
+
 ```hl_lines="3"
 UIPATH_ACCESS_TOKEN=YOUR_TOKEN_HERE
 UIPATH_URL=https://cloud.uipath.com/ACCOUNT_NAME/TENANT_NAME
 ANTHROPIC_API_KEY=your_api_key_here
 ```
-////
 
+////
 
 ## Run the Agent Locally
 
 Execute the agent with a sample input:
 
 <!-- termynal -->
+
 ```shell
 > uipath run agent '{"topic": "UiPath"}'
 [2025-04-29 12:31:57,756][INFO] ((), {'topic': 'UiPath'})
@@ -168,6 +186,7 @@ Follow these steps to publish and run your agent on UiPath Cloud Platform:
 ### Authenticate with UiPath
 
 <!-- termynal -->
+
 ```shell
 > uipath auth
 ⠋ Authenticating with UiPath ...
@@ -189,6 +208,7 @@ authors = [{ name = "Your Name", email = "your.name@example.com" }]
 ### Package your project:
 
 <!-- termynal -->
+
 ```shell
 > uipath pack
 ⠋ Packaging project ...
@@ -202,31 +222,34 @@ Authors    : Your Name
 ### Publish to your workspace
 
 <!-- termynal -->
+
 ```shell
 > uipath publish --my-workspace
 ⠙ Publishing most recent package: my-agent.0.0.1.nupkg ...
 ✓  Package published successfully!
 ⠦ Getting process information ...
-🔗 Process configuration link:[LINK]
+🔗 Process configuration link: [LINK]
 💡 Use the link above to configure any environment variables
 ```
+
 > Please note that a process will be auto-created only upon publishing to **my-workspace** package feed.
 
 ### Configure environment variables using the provided link
 
 ![Set Environment Variables](quick_start_images/cloud_env_var.png)
 
-## Invoke the Agent on UiPath Platform
+## Invoke the Agent on UiPath Cloud Platform
 
 Invoke the agent in UiPath Cloud Platform:
 
 <!-- termynal -->
+
 ```shell
 > uipath invoke agent '{"topic": "UiPath"}'
 ⠴ Loading configuration ...
 ⠴ Starting job ...
 ✨ Job started successfully!
-🔗 Monitor your job here:  [LINK]
+🔗 Monitor your job here: [LINK]
 ```
 
 Use the provided link to monitor your job and view detailed traces.
