@@ -20,7 +20,7 @@ Before proceeding, ensure you have the following installed:
 2. **OpenAI** - Generate an OpenAI API key [here](https://platform.openai.com).
    ///
 
-## Creating a New Project
+## Creating A New Project
 
 We recommend using `uv` for package management. To create a new project:
 
@@ -162,7 +162,7 @@ ANTHROPIC_API_KEY=your_api_key_here
 
 ////
 
-## Run the Agent Locally
+## Run The Agent Locally
 
 Execute the agent with a sample input:
 
@@ -180,7 +180,7 @@ This command runs your agent locally and displays the report in the standard out
 
 Follow these steps to publish and run your agent on UiPath Cloud Platform:
 
-### Authenticate with UiPath
+### Authenticating With UiPath
 
 <!-- termynal -->
 
@@ -196,7 +196,7 @@ Selected tenant: Tenant1
 ✓  Authentication successful.
 ```
 
-### (Optional) Customize Package
+### (Optional) Customize The Package
 
 Update author details in `pyproject.toml`:
 
@@ -218,7 +218,7 @@ Authors    : Your Name
 ✓  Project successfully packaged.
 ```
 
-### Publish to Your Workspace
+### Publish To Your Workspace
 
 <!-- termynal -->
 
@@ -237,7 +237,7 @@ Set the environment variables using the provided link:
 
 ![Set Environment Variables](quick_start_images/cloud_env_var.png)
 
-## Invoke the Agent on UiPath Cloud Platform
+## Invoke The Agent On UiPath Cloud Platform
 
 <!-- termynal -->
 
