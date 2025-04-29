@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import queue
-import re
 import uuid
 import warnings
 from os import environ as env
@@ -43,9 +42,7 @@ class AsyncUiPathTracer(AsyncBaseTracer):
 
         self.context = context or UiPathTraceContext()
 
-        llm_ops_pattern = self._get_base_url() + "{orgId}/llmops_"
-
-        self.url = llm_ops_pattern.format(orgId=self.context.org_id).rstrip("/")
+        self.base_url = self._get_base_url()
 
         auth_token = env.get("UNATTENDED_USER_ACCESS_TOKEN") or env.get(
             "UIPATH_ACCESS_TOKEN"
@@ -103,44 +100,6 @@ class AsyncUiPathTracer(AsyncBaseTracer):
                     )
                     self._send_span(previous_run)
 
-    async def init_trace(self, run_name, trace_id=None) -> None:
-        if self.context.trace_id:
-            # trace id already set no need to do anything
-            return
-
-        # no trace id, start a new trace
-        await self.start_trace(run_name, trace_id)
-
-    async def start_trace(self, run_name, trace_id=None) -> None:
-        self.context.trace_id = str(uuid.uuid4())
-
-        run_name = run_name or f"Job Run: {self.context.trace_id}"
-        trace_data = {
-            "id": self.context.trace_id,
-            "name": re.sub(
-                r"[!@#$<>\.]", "", run_name
-            ),  # if we use these characters the Agents UI throws some error (but llmops backend seems fine)
-            "referenceId": self.context.reference_id,
-            "attributes": "{}",
-            "organizationId": self.context.org_id,
-            "tenantId": self.context.tenant_id,
-        }
-
-        for attempt in range(self.retries):
-            response = await self.client.post(
-                f"{self.url}/api/Agent/trace/", headers=self.headers, json=trace_data
-            )
-
-            if response.is_success:
-                break
-
-            await asyncio.sleep(0.5 * (2**attempt))  # Exponential backoff
-
-        if 400 <= response.status_code < 600:
-            logger.warning(
-                f"Error when sending trace: {response}. Body is: {response.text}"
-            )
-
     async def wait_for_all_tracers(self) -> None:
         """
         Wait for all pending log requests to complete
@@ -159,11 +118,13 @@ class AsyncUiPathTracer(AsyncBaseTracer):
 
                 span_data = self.log_queue.get_nowait()
 
+                url = self._build_url(self.context.trace_id)
+
                 for attempt in range(self.retries):
                     response = await self.client.post(
-                        f"{self.url}/api/Agent/span/",
+                        url,
                         headers=self.headers,
-                        json=span_data,
+                        json=[span_data],  # api expects a list of spans
                         timeout=10,
                     )
 
@@ -189,11 +150,12 @@ class AsyncUiPathTracer(AsyncBaseTracer):
                     break
 
                 span_data = self.log_queue.get_nowait()
+                url = self._build_url(self.context.trace_id)
 
                 response = await self.client.post(
-                    f"{self.url}/api/Agent/span/",
+                    url,
                     headers=self.headers,
-                    json=span_data,
+                    json=[span_data],  # api expects a list of spans
                     timeout=10,
                 )
             except Exception as e:
@@ -239,6 +201,7 @@ class AsyncUiPathTracer(AsyncBaseTracer):
                 "jobKey": self.context.job_id,
                 "folderKey": self.context.folder_key,
                 "processKey": self.context.folder_key,
+                "expiryTimeUtc": None,
             }
 
             self.log_queue.put(span_data)
@@ -293,16 +256,11 @@ class AsyncUiPathTracer(AsyncBaseTracer):
         uipath_url = (
             env.get("UIPATH_URL") or "https://cloud.uipath.com/dummyOrg/dummyTennant/"
         )
+
         uipath_url = uipath_url.rstrip("/")
 
-        # split by "//" to get ['', 'https:', 'alpha.uipath.com/ada/byoa']
-        parts = uipath_url.split("//")
+        return uipath_url
 
-        # after splitting by //, the base URL will be at index 1 along with the rest,
-        # hence split it again using "/" to get ['https:', 'alpha.uipath.com', 'ada', 'byoa']
-        base_url_parts = parts[1].split("/")
-
-        # combine scheme and netloc to get the base URL
-        base_url = parts[0] + "//" + base_url_parts[0] + "/"
-
-        return base_url
+    def _build_url(self, trace_id: Optional[str]) -> str:
+        """Construct the URL for the API request."""
+        return f"{self.base_url}/llmopstenant_/api/Traces/spans?traceId={trace_id}&source=Robots"
