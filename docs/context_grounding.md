@@ -1,16 +1,17 @@
-# ContextGroundingRetriever
+# Context Grounding
 
-The `ContextGroundingRetriever` is a document retrieval system that uses vector search to efficiently find and retrieve relevant information from your document store.
-
-## Overview
-
-`ContextGroundingRetriever` allows you to:
+Context Grounding Service allows you to:
 - Search through indexed documents using natural language queries
 - Ground LLM responses in your organization's specific information
 - Retrieve context-relevant documents for various applications
 
 
 You will need to create an index in `Context Grounding` to use this feature. To create an index go to organization `Admin` -> `AI Trust Layer` -> `Context Grounding`. There you can create a new index and add documents to it. See the full documentation [here](https://docs.uipath.com/automation-cloud/automation-cloud/latest/admin-guide/about-context-grounding) for more details.
+
+
+# ContextGroundingRetriever
+
+The `ContextGroundingRetriever` is a document retrieval system that uses vector search to efficiently find and retrieve relevant information from your document store.
 
 ## Basic Usage
 
@@ -52,3 +53,38 @@ agent = create_react_agent(model, tools, prompt="Answer user questions as best a
 ## Advanced Usage
 
 For complex applications, the retriever can be combined with other LangChain components to create robust document QA systems, agents, or knowledge bases.
+
+
+
+# ContextGroundingVectorStore
+
+`ContextGroundingVectorStore` is a vector store implementation designed for context-aware document retrieval. It allows you to perform semantic searches and create retrieval chains with language models.
+
+## Searching Documents
+
+The vector store supports various search methods:
+
+```python
+from uipath_langchain.vectorstores.context_grounding_vectorstore import ContextGroundingVectorStore
+
+vectorstore = ContextGroundingVectorStore(index_name="Company policy")
+
+# Perform semantic searches with distance scores
+docs_with_scores = vectorstore.asimilarity_search_with_score(query="What is the company policy on data storage?", k=5)
+
+# Perform a similarity search with relevance scores
+docs_with_relevance_scores = await vectorstore.asimilarity_search_with_relevance_scores(query=query, k=5)
+```
+
+## Creating a Retrieval Chain
+
+You can integrate the vector store into a retrieval chain with a language model:
+
+```python
+# Run a retrieval chain
+model = UiPathAzureChatOpenAI(model="gpt-4o-2024-08-06", max_retries=3)
+retrieval_chain = create_retrieval_chain(vectorstore=vectorstore, model=model)
+
+query = "What is the ECCN for a laptop?"
+result = retrieval_chain(query)
+```
