@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from os import environ as env
 from typing import Optional
 
@@ -12,7 +11,6 @@ from ._runtime._exception import LangGraphRuntimeError
 from ._runtime._runtime import LangGraphRuntime
 from ._utils._graph import LangGraphConfig
 
-logger = logging.getLogger(__name__)
 load_dotenv()
 
 

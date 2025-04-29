@@ -17,7 +17,7 @@ async def generate_report(state: GraphInput) -> GraphOutput:
     elif os.getenv("OPENAI_API_KEY"):
         llm_model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
     else:
-        raise Exception("Error: Missing API Key. Please define either ANTHROPIC_API_KEY or OPENAI_API_KEY.")
+        raise Exception("Missing API Key. Please define either ANTHROPIC_API_KEY or OPENAI_API_KEY.")
 
     system_prompt = "You are a report generator. Please provide a brief report based on the given topic."
     output = await llm_model.ainvoke([SystemMessage(system_prompt), HumanMessage(state.topic)])
