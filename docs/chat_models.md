@@ -1,4 +1,4 @@
-# UiPath Chat Models
+# Chat Models
 
 UiPath provides two chat models `UiPathAzureChatOpenAI` and `UiPathChat`. These are compatible with langgraph as drop in replacements. You do not need to add tokens from OpenAI or Anthropic, usage of these chat models will consume `AI Units` on your account.
 
