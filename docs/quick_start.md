@@ -63,7 +63,7 @@ Creating virtual environment at: .venv
 Activate with: source .venv/bin/activate
 
 # Activate the virtual environment
-# For Windows PowerShell: .venv\Scripts\Activate.ps1
+# For Windows PowerShell/ Windows CMD: .venv\Scripts\activate
 # For Windows Bash: source .venv/Scripts/activate
 > source .venv/bin/activate
 
@@ -71,7 +71,7 @@ Activate with: source .venv/bin/activate
 > uv add uipath-langchain
 
 # Verify the uipath installation
-> uipath --lv
+> uipath -lv
 uipath-langchain version 0.0.100
 ```
 
@@ -97,7 +97,7 @@ uipath-langchain version 0.0.100
 > pip install uipath-langchain
 
 # Verify the uipath installation
-> uipath --lv
+> uipath -lv
 uipath-langchain version 0.0.100
 ```
 
@@ -144,9 +144,7 @@ Before running the agent, configure either `OPENAI_API_KEY` or `ANTHROPIC_API_KE
 
 //// tab | Open AI
 
-```hl_lines="3"
-UIPATH_ACCESS_TOKEN=YOUR_TOKEN_HERE
-UIPATH_URL=https://cloud.uipath.com/ACCOUNT_NAME/TENANT_NAME
+```
 OPENAI_API_KEY=sk-proj-......
 ```
 
@@ -154,46 +152,13 @@ OPENAI_API_KEY=sk-proj-......
 
 //// tab | ANTHROPIC_API_KEY
 
-```hl_lines="3"
-UIPATH_ACCESS_TOKEN=YOUR_TOKEN_HERE
-UIPATH_URL=https://cloud.uipath.com/ACCOUNT_NAME/TENANT_NAME
-ANTHROPIC_API_KEY=your_api_key_here
+```
+ANTHROPIC_API_KEY=sk-ant-a.....
 ```
 
 ////
 
-## Run The Agent Locally
-
-Execute the agent with a sample input:
-
-<!-- termynal -->
-
-```shell
-> uipath run agent '{"topic": "UiPath"}'
-[2025-04-29 12:31:57,756][INFO] ((), {'topic': 'UiPath'})
-[2025-04-29 12:32:07,689][INFO] ((), {'topic': 'UiPath', 'report': "..."})
-```
-
-This command runs your agent locally and displays the report in the standard output.
-/// warning
-
-Depending on the shell you are using, it may be necessary to escape the input json:
->uipath run agent "{""topic"": ""UiPath""}"
-
-   ///
-
-/// info
-
-Run command also accepts a _.json_ file as input:
->uipath run agent -f <path_to_input_json_file>
-
-   ///
-
-## Deploy The Agent On UiPath Cloud Platform
-
-Follow these steps to publish and run your agent on UiPath Cloud Platform:
-
-### Authenticating With UiPath
+## Authenticate With UiPath
 
 <!-- termynal -->
 
@@ -208,6 +173,54 @@ Select tenant number: 0
 Selected tenant: Tenant1
 ✓  Authentication successful.
 ```
+
+## Run The Agent Locally
+
+Execute the agent with a sample input:
+
+<!-- termynal -->
+
+```shell
+> uipath run agent '{"topic": "UiPath"}'
+[2025-04-29 12:31:57,756][INFO] ((), {'topic': 'UiPath'})
+[2025-04-29 12:32:07,689][INFO] ((), {'topic': 'UiPath', 'report': "..."})
+```
+
+This command runs your agent locally and displays the report in the standard output.
+
+/// warning
+Depending on the shell you are using, it may be necessary to escape the input json:
+
+/// tab | Bash/ZSH/PowerShell
+```console
+uipath run agent '{"topic": "UiPath"}'
+```
+///
+
+/// tab | Windows CMD
+```console
+uipath run agent "{""topic"": ""UiPath""}"
+```
+///
+
+/// tab | Windows PowerShell
+```console
+uipath run agent '{\"topic\":\"uipath\"}'
+```
+///
+
+///
+
+/// info
+
+Run command also accepts a _.json_ file as input:
+>uipath run agent -f <path_to_input_json_file>
+
+   ///
+
+## Deploy The Agent On UiPath Cloud Platform
+
+Follow these steps to publish and run your agent on UiPath Cloud Platform:
 
 ### (Optional) Customize The Package
 
@@ -231,7 +244,7 @@ Authors    : Your Name
 ✓  Project successfully packaged.
 ```
 
-### Publish To Your Workspace
+### Publish To My Workspace
 
 <!-- termynal -->
 
