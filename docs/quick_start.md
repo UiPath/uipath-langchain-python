@@ -175,6 +175,19 @@ Execute the agent with a sample input:
 ```
 
 This command runs your agent locally and displays the report in the standard output.
+/// warning
+
+Depending on the shell you are using, it may be necessary to escape the input json:
+>uipath run agent "{""topic"": ""UiPath""}"
+
+   ///
+
+/// info
+
+Run command also accepts a _.json_ file as input:
+>uipath run agent -f <path_to_input_json_file>
+
+   ///
 
 ## Deploy The Agent On UiPath Cloud Platform
 
@@ -235,7 +248,15 @@ Authors    : Your Name
 
 Set the environment variables using the provided link:
 
-![Set Environment Variables](quick_start_images/cloud_env_var.png)
+<picture data-light="quick_start_images/cloud_env_var_light.png" data-dark="quick_start_images/cloud_env_var_dark.png">
+  <source
+    media="(prefers-color-scheme: dark)"
+    srcset="quick_start_images/cloud_env_var_dark.png"
+  />
+  <img
+    src="quick_start_images/cloud_env_var_light.png"
+  />
+</picture>
 
 ## Invoke The Agent On UiPath Cloud Platform
 
@@ -250,6 +271,16 @@ Set the environment variables using the provided link:
 ```
 
 Use the provided link to monitor your job and view detailed traces.
+
+<picture data-light="quick_start_images/invoke_output_light.png" data-dark="quick_start_images/invoke_output_dark.png">
+  <source
+    media="(prefers-color-scheme: dark)"
+    srcset="quick_start_images/invoke_output_dark.png"
+  />
+  <img
+    src="quick_start_images/invoke_output_light.png"
+  />
+</picture>
 
 ## Next Steps
 
