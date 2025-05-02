@@ -47,7 +47,7 @@ Currently the following models can be used with `UiPathAzureChatOpenAI` (this li
 
 ## UiPathChat
 
-`UiPathChat` is a more versatile clas that can suport models from diferent vendors including OpenAI.
+`UiPathChat` is a more versatile class that can suport models from diferent vendors including OpenAI.
 
 ### Example usage
 
