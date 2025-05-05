@@ -31,7 +31,7 @@ version = "0.0.1"
 description = "{project_name}"
 authors = [{{ name = "John Doe", email = "john.doe@myemail.com" }}]
 dependencies = [
-    "uipath-langchain>=0.0.95",
+    "uipath-langchain>=0.0.106",
     "langchain-anthropic>=0.3.8",
 ]
 requires-python = ">=3.10"
@@ -54,14 +54,14 @@ def langgraph_new_middleware(name: str) -> MiddlewareResult:
             console.success("Created 'langgraph.json' file.")
             generate_pyproject(directory, name)
             console.success("Created 'pyproject.toml' file.")
-            os.system("uv sync")
-            ctx = click.get_current_context()
-            init_cmd = ctx.parent.command.get_command(ctx, "init")  # type: ignore
-            ctx.invoke(init_cmd)
             console.config(
                 f""" Please ensure to define either {click.style("ANTHROPIC_API_KEY", fg="bright_yellow")} or {click.style("OPENAI_API_KEY", fg="bright_yellow")} in your .env file. """
             )
+            init_command = """uipath init"""
             run_command = """uipath run agent '{"topic": "UiPath"}'"""
+            console.hint(
+                f""" Initialize project: {click.style(init_command, fg="cyan")}"""
+            )
             console.hint(f""" Run agent: {click.style(run_command, fg="cyan")}""")
         return MiddlewareResult(should_continue=False)
     except Exception as e:

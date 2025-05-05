@@ -67,6 +67,9 @@ Activate with: source .venv/bin/activate
 # For Windows Bash: source .venv/Scripts/activate
 > source .venv/bin/activate
 
+# Install the langchain anthropic package
+> uv add langchain-anthropic
+
 # Install the uipath package
 > uv add uipath-langchain
 
@@ -93,6 +96,9 @@ uipath-langchain version 0.0.100
 # Upgrade pip to the latest version
 > python -m pip install --upgrade pip
 
+# Install the langchain anthropic package
+> pip install langchain-anthropic
+
 # Install the uipath package
 > pip install uipath-langchain
 
@@ -115,16 +121,8 @@ Generate your first UiPath LangChain agent:
 ✓  Created 'main.py' file.
 ✓  Created 'langgraph.json' file.
 ✓  Created 'pyproject.toml' file.
-Resolved 90 packages in 351ms
-Prepared 2 packages in 213ms
-Installed 2 packages in 3ms
- + anthropic==0.50.0
- + langchain-anthropic==0.3.12
-⠧ Initializing UiPath project ...
-✓   Created '.env' file.
-✓   Created 'agent.mermaid' file.
-✓   Created 'uipath.json' file.
 🔧  Please ensure to define either ANTHROPIC_API_KEY or OPENAI_API_KEY in your .env file.
+💡  Initialize project: uipath init
 💡  Run agent: uipath run agent '{"topic": "UiPath"}'
 ```
 
@@ -137,6 +135,18 @@ This command creates the following files:
 | `uipath.json`    | Input/output JSON schemas and bindings.                                                                                           |
 | `langgraph.json` | [LangGraph](https://langchain-ai.github.io/langgraph/concepts/application_structure/#file-structure) specific configuration file. |
 | `agent.mermaid`  | Graph visual representation.                                                                                                      |
+
+## Initialize project
+
+<!-- termynal -->
+
+```shell
+> uipath init
+⠋ Initializing UiPath project ...
+✓   Created '.env' file.
+✓   Created 'agent.mermaid' file.
+✓   Created 'uipath.json' file.
+```
 
 ## Set Up Environment Variables
 
