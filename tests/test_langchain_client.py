@@ -16,6 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, ValidationError
 
+from uipath_langchain._utils._settings import UiPathCachedPathsSettings
 from uipath_langchain.chat import (
     UiPathAzureChatOpenAI,
     UiPathChat,
@@ -24,7 +25,6 @@ from uipath_langchain.embeddings import (
     UiPathAzureOpenAIEmbeddings,
     UiPathOpenAIEmbeddings,
 )
-from uipath_langchain.utils._settings import UiPathCachedPathsSettings
 
 test_cache_settings = UiPathCachedPathsSettings(
     CACHED_COMPLETION_DB="tests/llm_cache/tests_uipath_cache.sqlite",
