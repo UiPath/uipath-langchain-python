@@ -155,9 +155,11 @@ class LangGraphConfig:
                 env_path = os.path.abspath(os.path.normpath(env_file))
                 if os.path.exists(env_path):
                     if not load_dotenv(env_path):
-                        logger.warning(
-                            f"Could not load environment variables from {env_path}"
-                        )
+                        # log warning only if dotenv is not empty
+                        if os.path.getsize(env_path) > 0:
+                            logger.warning(
+                                f"Could not load environment variables from {env_path}"
+                            )
                     else:
                         logger.debug(f"Loaded environment variables from {env_path}")
 
