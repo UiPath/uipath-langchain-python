@@ -11,6 +11,8 @@ from uipath import UiPath
 
 class ContextGroundingRetriever(BaseRetriever):
     index_name: str
+    folder_path: Optional[str] = None
+    folder_key: Optional[str] = None
     uipath_sdk: Optional[UiPath] = None
     number_of_results: Optional[int] = 10
 
@@ -24,6 +26,8 @@ class ContextGroundingRetriever(BaseRetriever):
             self.index_name,
             query,
             self.number_of_results if self.number_of_results is not None else 10,
+            folder_path=self.folder_path,
+            folder_key=self.folder_key,
         )
 
         return [
@@ -47,6 +51,8 @@ class ContextGroundingRetriever(BaseRetriever):
             self.index_name,
             query,
             self.number_of_results if self.number_of_results is not None else 10,
+            folder_path=self.folder_path,
+            folder_key=self.folder_key,
         )
 
         return [
