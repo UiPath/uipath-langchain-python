@@ -128,13 +128,12 @@ Generate your first UiPath LangChain agent:
 
 This command creates the following files:
 
-| File Name        | Description                                                                                                                       |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `.env`           | Environment variables and secrets (this file will not be packed & published).                                                     |
-| `main.py`        | LangGraph agent code.                                                                                                             |
-| `uipath.json`    | Input/output JSON schemas and bindings.                                                                                           |
+| File Name        | Description                                                                                                                      |
+|------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| `main.py`        | LangGraph agent code.                                                                                                            |
 | `langgraph.json` | [LangGraph](https://langchain-ai.github.io/langgraph/concepts/application_structure/#file-structure) specific configuration file. |
-| `agent.mermaid`  | Graph visual representation.                                                                                                      |
+| `pyproject.toml` | Project metadata and dependencies as per [PEP 518](https://peps.python.org/pep-0518/).                                           |
+
 
 ## Initialize project
 
@@ -147,6 +146,14 @@ This command creates the following files:
 ✓   Created 'agent.mermaid' file.
 ✓   Created 'uipath.json' file.
 ```
+
+This command creates the following files:
+
+| File Name        | Description                                                                                                                       |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `.env`           | Environment variables and secrets (this file will not be packed & published).                                                     |
+| `uipath.json`    | Input/output JSON schemas and bindings.                                                                                           |
+| `agent.mermaid`  | Graph visual representation.                                                                                                      |
 
 ## Set Up Environment Variables
 
