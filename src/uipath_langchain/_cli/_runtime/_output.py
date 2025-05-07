@@ -257,7 +257,6 @@ class LangGraphOutputProcessor:
                                 trigger_type=UiPathResumeTriggerType.ACTION,
                                 item_key=action.key,
                             )
-                        return
                     if isinstance(self.interrupt_info, InterruptInfo):
                         uipath_sdk = UiPath()
                         if self.interrupt_info.type is UiPathResumeTriggerType.JOB:
