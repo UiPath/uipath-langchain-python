@@ -138,7 +138,7 @@ class AsyncUiPathTracer(AsyncBaseTracer):
                             f"Error when sending trace: {response}. Body is: {response.text}"
                         )
             except Exception as e:
-                logger.warning(f"Exception when sending trace: {e}.")
+                logger.warning(f"Exception when sending trace: {e}", exc_info=e)
 
         # wait for a bit to ensure all logs are sent
         await asyncio.sleep(1)
@@ -159,7 +159,7 @@ class AsyncUiPathTracer(AsyncBaseTracer):
                     timeout=10,
                 )
             except Exception as e:
-                logger.warning(f"Exception when sending trace: {e}.")
+                logger.warning(f"Exception when sending trace: {e}", exc_info=e)
 
     async def _persist_run(self, run: Run) -> None:
         # Determine if this is a start or end trace based on whether end_time is set
