@@ -1,20 +1,17 @@
-name: Reusable Lint Workflow
+name: Lint
 
 on:
-  workflow_call:
-    inputs:
-      should_skip:
-        description: 'Whether to skip the linting step'
-        required: false
-        type: boolean
-        default: false
+  push:
+    branches:
+      - 'refs/heads/main'
+  pull_request_target:
+    branches:
+      - 'refs/heads/main'
 
 jobs:
   lint:
     name: Lint
     runs-on: "ubuntu-24.04"
-    if: inputs.should_skip == false
-
 
     steps:
       - uses: actions/checkout@v4

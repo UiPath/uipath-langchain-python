@@ -1,7 +1,9 @@
 name: Commit Lint
 
 on:
-  workflow_call:
+  pull_request_target:
+    branches:
+      - 'refs/heads/main'
 
 jobs:
   commit-lint:

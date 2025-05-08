@@ -1,26 +1,19 @@
-name: Reusable Test Workflow
+name: Test
 
 on:
-  workflow_call:
-    secrets:
-      UIPATH_URL:
-        required: true
-      UIPATH_CLIENT_ID:
-        required: true
-      UIPATH_CLIENT_SECRET:
-        required: true
-    inputs:
-      should_skip:
-          description: 'Whether to skip the linting step'
-          required: false
-          type: boolean
-          default: false
+  push:
+    branches:
+      - 'refs/heads/main'
+      - 'refs/heads/**'
+
+  pull_request_review:
+    types: [submitted]
 
 jobs:
   test:
     name: Test
     runs-on: "ubuntu-24.04"
-    if: inputs.should_skip == false
+    if: ${{ (github.event_name == 'pull_request_review' && github.event.review.state == 'approved') || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.event.pull_request.state == 'open')) }}
 
     steps:
       - uses: actions/checkout@v4

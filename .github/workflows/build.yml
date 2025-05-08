@@ -1,15 +1,16 @@
-name: Reusable Build Workflow
+name: Build
 
 on:
-  workflow_call:
-    secrets:
-      token:
-        required: true
+  workflow_run:
+    workflows: ["Lint", "Commit Lint", "Test"]
+    types:
+      - completed
 
 jobs:
   build:
     name: Build and publish
     runs-on: "ubuntu-24.04"
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -43,4 +44,4 @@ jobs:
         run: |
           uv publish
         env:
-          UV_PUBLISH_TOKEN: ${{ secrets.token }}
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
