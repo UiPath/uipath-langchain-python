@@ -1,4 +1,4 @@
-name: Reusable Test Workflow
+name: Test
 
 on:
   workflow_call:
@@ -9,18 +9,11 @@ on:
         required: true
       UIPATH_CLIENT_SECRET:
         required: true
-    inputs:
-      should_skip:
-          description: 'Whether to skip the linting step'
-          required: false
-          type: boolean
-          default: false
 
 jobs:
   test:
     name: Test
-    runs-on: "ubuntu-24.04"
-    if: inputs.should_skip == false
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -31,16 +24,15 @@ jobs:
         with:
           python-version-file: ".python-version"
 
-      - name: "Setup venv"
+      - name: Setup venv
         run: |
           uv venv
           uv sync --all-extras
 
-      - name: "Run tests"
+      - name: Run tests
         run: |
           uv run pytest
         env:
           UIPATH_URL: ${{ secrets.UIPATH_URL }}
           UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
           UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
-
