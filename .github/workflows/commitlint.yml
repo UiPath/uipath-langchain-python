@@ -5,6 +5,7 @@ on:
 
 jobs:
   commitlint:
+    name: Commit Lint
     runs-on: ubuntu-latest
 
     steps:
