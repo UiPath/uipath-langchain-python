@@ -1,26 +1,40 @@
 name: Commit Lint
 
 on:
-  workflow_call:
+  workflow_call
 
 jobs:
-  commit-lint:
+  commitlint:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Lint commits
-        uses: wagoid/commitlint-github-action@v3
-
-      - name: Block fixup commits
-        if: ${{ github.event_name != 'merge_group' }}
-        uses: 13rac1/block-fixup-merge-action@v2.0.0
-
-      - name: Block Merge Commits
-        if: ${{ github.event_name != 'merge_group' }}
-        uses: Morishiri/block-merge-commits-action@v1.0.1
+      - uses: actions/setup-node@v3
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          node-version: 22
+
+      - name: Install Git
+        run: |
+          if ! command -v git &> /dev/null; then
+              echo "Git is not installed. Installing..."
+              sudo apt-get update
+              sudo apt-get install -y git
+          else
+              echo "Git is already installed."
+          fi
+
+      - name: Install commitlint
+        run: |
+          npm install conventional-changelog-conventionalcommits
+          npm install commitlint@latest
+          npm install @commitlint/config-conventional
+
+      - name: Configure
+        run: |
+          echo "export default { extends: ['@commitlint/config-conventional'] };" > commitlint.config.js
+
+      - name: Validate PR commits with commitlint
+        run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }} --verbose

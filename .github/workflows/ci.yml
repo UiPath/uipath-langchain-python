@@ -1,18 +1,20 @@
-name: Core CI
+name: CI
 
 on:
-  workflow_dispatch: {}
   push:
     branches:
       - main
-  pull_request:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
     branches:
       - main
 
 
 jobs:
   commit-lint:
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ github.event_name == 'pull_request_target' }}
     uses: ./.github/workflows/commitlint.yml
   lint:
     uses: ./.github/workflows/lint.yml
