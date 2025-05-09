@@ -26,7 +26,7 @@ llm = ChatOpenAI(
 )
 ```
 
-You can simply change `ChatOpenAi` with `UiPathAzureChatOpenAI`, you don't have to provide an `OPEN_AI_TOKEN`
+You can simply change `ChatOpenAi` with `UiPathAzureChatOpenAI`, you don't have to provide an OpenAI token.
 
 ```python
 from uipath_langchain.chat.models import UiPathAzureChatOpenAI
@@ -41,7 +41,7 @@ llm = UiPathAzureChatOpenAI(
 )
 ```
 
-Currently the following models can be used with `UiPathAzureChatOpenAI` (this list can be updated in the future):
+Currently, the following models can be used with `UiPathAzureChatOpenAI` (this list can be updated in the future):
 
 -   `gpt-4`, `gpt-4-1106-Preview`, `gpt-4-32k`, `gpt-4-turbo-2024-04-09`, `gpt-4-vision-preview`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-mini-2024-07-18`, `o3-mini-2025-01-31`
 
@@ -85,8 +85,9 @@ Currently the following models can be used with `UiPathChat` (this list can be u
 
 -   `anthropic.claude-3-5-sonnet-20240620-v1:0`, `anthropic.claude-3-5-sonnet-20241022-v2:0`, `anthropic.claude-3-7-sonnet-20250219-v1:0`, `anthropic.claude-3-haiku-20240307-v1:0`, `gemini-1.5-pro-001`, `gemini-2.0-flash-001`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini-2024-07-18`, `o3-mini-2025-01-31`
 
-### Note
-
+/// warning
 Please note that that you may get errors related to data residency, as some models are not available on all regions.
 
 Example: `[Enforced Region] No model configuration found for product uipath-python-sdk in EU using model anthropic.claude-3-opus-20240229-v1:0`.
+
+///
