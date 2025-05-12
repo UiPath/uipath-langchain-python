@@ -246,10 +246,18 @@ class AsyncUiPathTracer(AsyncBaseTracer):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=PydanticDeprecationWarning)
 
+            # Helper function to safely copy values
+            def safe_copy(value):
+                if value is None:
+                    return None
+                if hasattr(value, "copy") and callable(value.copy):
+                    return value.copy()
+                return value
+
             return {
                 **run.dict(exclude={"child_runs", "inputs", "outputs", "serialized"}),
-                "inputs": run.inputs.copy() if run.inputs is not None else None,
-                "outputs": run.outputs.copy() if run.outputs is not None else None,
+                "inputs": safe_copy(run.inputs),
+                "outputs": safe_copy(run.outputs),
             }
 
     def _get_base_url(self) -> str:
