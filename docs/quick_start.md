@@ -228,12 +228,27 @@ uipath run agent '{\"topic\":\"uipath\"}'
 
 ///
 
-/// info
+/// attention
 
-Run command also accepts a _.json_ file as input:
->uipath run agent -f <path_to_input_json_file>
+For a shell agnostic option, please refer to the next section.
 
-   ///
+///
+
+### (Optional) Run The Agent with a json File as Input
+
+The `run` command can also take a .json file as an input. You can create a file named `input.json` having the following content:
+
+```json
+{
+  "topic": "UiPath"
+}
+```
+
+Use this file as agent input:
+
+```shell
+> uipath run agent --file input.json
+```
 
 ## Deploy The Agent On UiPath Cloud Platform
 
@@ -311,6 +326,16 @@ Use the provided link to monitor your job and view detailed traces.
     src="quick_start_images/invoke_output_light.png"
   />
 </picture>
+
+### (Optional) Invoke The Agent with a json File as Input
+
+The `invoke` command operates similarly to the `run` command, allowing you to use the same .json file defined
+in the [(Optional) Run the agent with a .json file as input](#optional-run-the-agent-with-a-json-file-as-input)
+section, as agent input:
+
+```shell
+> uipath invoke agent --file input.json
+```
 
 ## Next Steps
 
