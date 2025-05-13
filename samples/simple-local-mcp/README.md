@@ -1,6 +1,6 @@
 # LangGraph Agent with Claude and Tool MCP Servers
 
-This project demonstrates how to create an agent using LangGraph with Claude 3.5 Sonnet and multiple tool servers using the MCP (Model-Calling Protocol) standard.
+This project demonstrates how to create an agent using LangGraph with Claude 3.5 Sonnet and multiple tool servers using the MCP (Model Context Protocol) standard.
 
 ## Overview
 

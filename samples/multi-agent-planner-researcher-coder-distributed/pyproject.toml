@@ -2,7 +2,7 @@
 name = "multi-agents-distributed"
 version = "0.0.1"
 description = "Supervisor agent that coordinates between a researcher and a coder"
-authors = [[{ name = "John Doe", email = "john.doe@myemail.com" }]]
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.10"
 dependencies = [
     "langgraph>=0.2.55",
