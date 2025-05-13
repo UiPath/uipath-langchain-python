@@ -146,7 +146,10 @@ class LangGraphOutputProcessor:
             if self.context.output is None:
                 return {}
 
-            return self._serialize_object(self.context.output)
+            normalized = self._serialize_object(self.context.output)
+
+            # Round-trip through json.dumps/loads to ensure valid JSON encoding (escape \n, etc.)
+            return json.loads(json.dumps(normalized, default=str))
 
         except Exception as e:
             raise LangGraphRuntimeError(
