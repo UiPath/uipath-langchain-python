@@ -10,8 +10,8 @@ Before proceeding, ensure you have the following installed:
 
 -   Python 3.10 or higher
 -   `pip` or `uv` package manager
--   A UiPath Cloud Platform account with appropriate permissions
--   Either Anthropic or OpenAI API key
+-   A UiPath Automation Cloud account with appropriate permissions
+-   An Anthropic or OpenAI API key
 
 /// info
 
@@ -20,7 +20,7 @@ Before proceeding, ensure you have the following installed:
 2. **OpenAI** - Generate an OpenAI API key [here](https://platform.openai.com).
    ///
 
-## Creating A New Project
+## Creating a New Project
 
 We recommend using `uv` for package management. To create a new project:
 
@@ -135,7 +135,7 @@ This command creates the following files:
 | `pyproject.toml` | Project metadata and dependencies as per [PEP 518](https://peps.python.org/pep-0518/).                                           |
 
 
-## Initialize project
+## Initialize Project
 
 <!-- termynal -->
 
@@ -250,11 +250,11 @@ Use this file as agent input:
 > uipath run agent --file input.json
 ```
 
-## Deploy The Agent On UiPath Cloud Platform
+## Deploy the Agent to UiPath Automation Cloud
 
-Follow these steps to publish and run your agent on UiPath Cloud Platform:
+Follow these steps to publish and run your agent to UiPath Automation Cloud:
 
-### (Optional) Customize The Package
+### (Optional) Customize the Package
 
 Update author details in `pyproject.toml`:
 
@@ -289,7 +289,9 @@ Authors    : Your Name
 💡 Use the link above to configure any environment variables
 ```
 
-> Please note that a process will be auto-created only upon publishing to **my-workspace** package feed.
+/// info
+Please note that a process will be auto-created only upon publishing to **my-workspace** package feed.
+   ///
 
 Set the environment variables using the provided link:
 
@@ -303,7 +305,7 @@ Set the environment variables using the provided link:
   />
 </picture>
 
-## Invoke The Agent On UiPath Cloud Platform
+## Invoke the Agent on UiPath Automation Cloud
 
 <!-- termynal -->
 
@@ -341,4 +343,4 @@ section, as agent input:
 
 Congratulations! You have successfully set up, created, published, and run a UiPath LangChain Agent. 🚀
 
-For more advanced agents and examples, please refer to our [samples section](https://github.com/UiPath/uipath-langchain-python/tree/main/samples).
+For more advanced agents and agent samples, please refer to our [samples section](https://github.com/UiPath/uipath-langchain-python/tree/main/samples) in GitHub.
