@@ -4,6 +4,7 @@ import os
 from typing import List, Optional
 
 from langchain_core.callbacks.base import BaseCallbackHandler
+from langchain_core.messages import BaseMessage
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tracers.langchain import wait_for_all_tracers
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -103,48 +104,16 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 if self.context.job_id is None:
                     # Get final chunk while streaming
                     final_chunk = None
-                    async for chunk in graph.astream(
+                    async for stream_chunk in graph.astream(
                         processed_input,
                         graph_config,
-                        stream_mode="values",
+                        stream_mode="updates",
                         subgraphs=True,
                     ):
-                        logger.info("%s", chunk)
-                        final_chunk = chunk
+                        self._pretty_print(stream_chunk)
+                        final_chunk = stream_chunk
 
-                    # Extract data from the subgraph tuple format (namespace, data)
-                    if isinstance(final_chunk, tuple) and len(final_chunk) == 2:
-                        final_chunk = final_chunk[1]
-
-                    # Process the final chunk to match ainvoke's output format
-                    if isinstance(final_chunk, dict) and hasattr(
-                        graph, "output_channels"
-                    ):
-                        output_channels = graph.output_channels
-
-                        # Case 1: Single output channel as string
-                        if (
-                            isinstance(output_channels, str)
-                            and output_channels in final_chunk
-                        ):
-                            self.context.output = final_chunk[output_channels]
-
-                        # Case 2: Sequence of output channels
-                        elif hasattr(output_channels, "__iter__") and not isinstance(
-                            output_channels, str
-                        ):
-                            # Check if all channels are present in the chunk
-                            if all(ch in final_chunk for ch in output_channels):
-                                result = {}
-                                for channel in output_channels:
-                                    result[channel] = final_chunk[channel]
-                                self.context.output = result
-                            else:
-                                # Fallback if not all channels are present
-                                self.context.output = final_chunk
-                    else:
-                        # Use the whole chunk as output if we can't determine output channels
-                        self.context.output = final_chunk
+                    self.context.output = self._extract_graph_result(final_chunk, graph)
                 else:
                     # Execute the graph normally at runtime
                     self.context.output = await graph.ainvoke(
@@ -301,3 +270,102 @@ class LangGraphRuntime(UiPathBaseRuntime):
     async def cleanup(self):
         if hasattr(self, "graph_config") and self.graph_config:
             await self.graph_config.cleanup()
+
+    def _extract_graph_result(self, final_chunk, graph: CompiledStateGraph):
+        """
+        Extract the result from a LangGraph output chunk according to the graph's output channels.
+
+        Args:
+            final_chunk: The final chunk from graph.astream()
+            graph: The LangGraph instance
+
+        Returns:
+            The extracted result according to the graph's output_channels configuration
+        """
+        # Unwrap from subgraph tuple format if needed
+        if isinstance(final_chunk, tuple) and len(final_chunk) == 2:
+            final_chunk = final_chunk[
+                1
+            ]  # Extract data part from (namespace, data) tuple
+
+        # If the result isn't a dict or graph doesn't define output channels, return as is
+        if not isinstance(final_chunk, dict) or not hasattr(graph, "output_channels"):
+            return final_chunk
+
+        output_channels = graph.output_channels
+
+        # Case 1: Single output channel as string
+        if isinstance(output_channels, str):
+            if output_channels in final_chunk:
+                return final_chunk[output_channels]
+            else:
+                return final_chunk
+
+        # Case 2: Multiple output channels as sequence
+        elif hasattr(output_channels, "__iter__") and not isinstance(
+            output_channels, str
+        ):
+            # Check which channels are present
+            available_channels = [ch for ch in output_channels if ch in final_chunk]
+
+            if available_channels:
+                # Create a dict with the available channels
+                return {channel: final_chunk[channel] for channel in available_channels}
+
+        # Fallback for any other case
+        return final_chunk
+
+    def _pretty_print(self, stream_chunk: tuple):
+        """
+        Pretty print a chunk from a LangGraph stream with stream_mode="updates" and subgraphs=True.
+
+        Args:
+            stream_chunk: A tuple of (namespace, updates) from graph.astream()
+        """
+        if not stream_chunk or len(stream_chunk) < 2:
+            return
+
+        node_namespace = ""
+        chunk_namespace = stream_chunk[0]
+        node_updates = stream_chunk[1]
+
+        # Extract namespace if available
+        if chunk_namespace and len(chunk_namespace) > 0:
+            node_namespace = chunk_namespace[0]
+
+        if not isinstance(node_updates, dict):
+            logger.info("Raw update: %s", node_updates)
+            return
+
+        # Process each node's updates
+        for node_name, node_result in node_updates.items():
+            # Log node identifier with appropriate namespace context
+            if node_namespace:
+                logger.info("[%s][%s]", node_namespace, node_name)
+            else:
+                logger.info("[%s]", node_name)
+
+            # Handle non-dict results
+            if not isinstance(node_result, dict):
+                logger.info("%s", node_result)
+                continue
+
+            # Process messages specially
+            messages = node_result.get("messages", [])
+            if isinstance(messages, list):
+                for message in messages:
+                    if isinstance(message, BaseMessage):
+                        logger.info("%s", message.pretty_print())
+
+            # Exclude "messages" from node_result and pretty-print the rest
+            metadata = {k: v for k, v in node_result.items() if k != "messages"}
+            if metadata:
+                try:
+                    formatted_metadata = json.dumps(
+                        metadata,
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                    logger.info("%s", formatted_metadata)
+                except (TypeError, ValueError):
+                    pass
