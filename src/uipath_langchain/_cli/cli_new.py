@@ -55,7 +55,7 @@ def langgraph_new_middleware(name: str) -> MiddlewareResult:
             generate_pyproject(directory, name)
             console.success("Created 'pyproject.toml' file.")
             console.config(
-                f""" Please ensure to define either {click.style("ANTHROPIC_API_KEY", fg="bright_yellow")} or {click.style("OPENAI_API_KEY", fg="bright_yellow")} in your .env file. """
+                f""" Please ensure to define either {click.style("ANTHROPIC_API_KEY", fg="bright_yellow")}, {click.style("OPENAI_API_KEY", fg="bright_yellow")} or set {click.style("USE_UIPATH_AI_UNITS=true", fg="bright_yellow")} in your .env file. """
             )
             init_command = """uipath init"""
             run_command = """uipath run agent '{"topic": "UiPath"}'"""

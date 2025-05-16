@@ -6,15 +6,34 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import PydanticOutputParser
 from langgraph.graph import START, END, StateGraph, MessagesState
+from uipath_langchain.chat.models import UiPathChat
 from langgraph.types import interrupt, Command
 from pydantic import BaseModel, Field
-
 from uipath import UiPath
-
 from uipath.models import CreateAction
+
 logger = logging.getLogger(__name__)
 
 uipath = UiPath()
+
+if os.getenv("USE_UIPATH_AI_UNITS") and os.getenv("USE_UIPATH_AI_UNITS") == "true":
+    # other available UiPath chat models
+    # "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    # "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    # "anthropic.claude-3-7-sonnet-20250219-v1:0",
+    # "anthropic.claude-3-haiku-20240307-v1:0",
+    # "gemini-1.5-pro-001",
+    # "gemini-2.0-flash-001",
+    # "gpt-4o-2024-05-13",
+    # "gpt-4o-2024-08-06",
+    # "gpt-4o-2024-11-20",
+    # "gpt-4o-mini-2024-07-18",
+    # "o3-mini-2025-01-31",
+    llm = UiPathChat(
+        model="anthropic.claude-3-5-sonnet-20240620-v1:0",
+    )
+else:
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 class GraphInput(BaseModel):
     message: str
@@ -78,7 +97,6 @@ def decide_next_node(state: GraphState) -> Literal["classify", "notify_team"]:
 
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
     if state.get("last_predicted_category", None):
         predicted_category = state["last_predicted_category"]
