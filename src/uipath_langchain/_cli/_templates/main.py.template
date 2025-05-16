@@ -3,6 +3,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import START, StateGraph, END
 from pydantic import BaseModel
+from uipath_langchain.chat.models import UiPathChat
 import os
 
 class GraphInput(BaseModel):
@@ -16,8 +17,14 @@ async def generate_report(state: GraphInput) -> GraphOutput:
         llm_model = ChatAnthropic(model="claude-3-5-sonnet-latest")
     elif os.getenv("OPENAI_API_KEY"):
         llm_model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    elif os.getenv("USE_UIPATH_AI_UNITS") and os.getenv("USE_UIPATH_AI_UNITS") == "true":
+        llm_model = UiPathChat(
+            model="anthropic.claude-3-5-sonnet-20240620-v1:0",
+        )
+
     else:
-        raise Exception("Missing API Key. Please define either ANTHROPIC_API_KEY or OPENAI_API_KEY.")
+        raise Exception(
+            "Missing API Key. Please define either ANTHROPIC_API_KEY or OPENAI_API_KEY, or USE_UIPATH_AI_UNITS.")
 
     system_prompt = "You are a report generator. Please provide a brief report based on the given topic."
     output = await llm_model.ainvoke([SystemMessage(system_prompt), HumanMessage(state.topic)])
