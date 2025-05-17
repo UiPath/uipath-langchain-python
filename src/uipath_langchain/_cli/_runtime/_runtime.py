@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
@@ -315,14 +315,14 @@ class LangGraphRuntime(UiPathBaseRuntime):
         # Fallback for any other case
         return final_chunk
 
-    def _pretty_print(self, stream_chunk: tuple):
+    def _pretty_print(self, stream_chunk: Union[Tuple[Any, Any], Dict[str, Any], Any]):
         """
         Pretty print a chunk from a LangGraph stream with stream_mode="updates" and subgraphs=True.
 
         Args:
             stream_chunk: A tuple of (namespace, updates) from graph.astream()
         """
-        if not stream_chunk or len(stream_chunk) < 2:
+        if not isinstance(stream_chunk, tuple) or len(stream_chunk) < 2:
             return
 
         node_namespace = ""
@@ -355,7 +355,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
             if isinstance(messages, list):
                 for message in messages:
                     if isinstance(message, BaseMessage):
-                        logger.info("%s", message.pretty_print())
+                        message.pretty_print()
 
             # Exclude "messages" from node_result and pretty-print the rest
             metadata = {k: v for k, v in node_result.items() if k != "messages"}
