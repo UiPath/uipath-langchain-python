@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-  pull_request_target:
+  pull_request:
     types:
       - opened
       - synchronize
@@ -14,7 +14,7 @@ on:
 
 jobs:
   commit-lint:
-    if: ${{ github.event_name == 'pull_request_target' }}
+    if: ${{ github.event_name == 'pull_request' }}
     uses: ./.github/workflows/commitlint.yml
   lint:
     uses: ./.github/workflows/lint.yml
