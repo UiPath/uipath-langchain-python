@@ -4,10 +4,14 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "docs/**"
+      - "pyproject.toml"
 
 jobs:
   publish-docs:
     runs-on: ubuntu-latest
+    if: ${{ github.repository == 'UiPath/uipath-langchain-python' }}
     steps:
       - name: Trigger Publish Docs
         run: |
