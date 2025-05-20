@@ -2,7 +2,7 @@
   "entryPoints": [
     {
       "filePath": "agent",
-      "uniqueId": "e728db57-9280-4222-84e8-72e9a7adb9e7",
+      "uniqueId": "35ccd28e-c612-4395-9076-ff0b0db2a104",
       "type": "agent",
       "input": {
         "type": "object",
@@ -24,6 +24,7 @@
                             "type": "string"
                           },
                           {
+                            "additionalProperties": true,
                             "type": "object"
                           }
                         ]
@@ -34,10 +35,12 @@
                   "title": "Content"
                 },
                 "additional_kwargs": {
+                  "additionalProperties": true,
                   "title": "Additional Kwargs",
                   "type": "object"
                 },
                 "response_metadata": {
+                  "additionalProperties": true,
                   "title": "Response Metadata",
                   "type": "object"
                 },
@@ -46,28 +49,10 @@
                   "type": "string"
                 },
                 "name": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "default": null,
-                  "title": "Name"
+                  "type": "string"
                 },
                 "id": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "default": null,
-                  "title": "Id"
+                  "type": "string"
                 }
               },
               "required": [
@@ -105,6 +90,7 @@
                             "type": "string"
                           },
                           {
+                            "additionalProperties": true,
                             "type": "object"
                           }
                         ]
@@ -115,10 +101,12 @@
                   "title": "Content"
                 },
                 "additional_kwargs": {
+                  "additionalProperties": true,
                   "title": "Additional Kwargs",
                   "type": "object"
                 },
                 "response_metadata": {
+                  "additionalProperties": true,
                   "title": "Response Metadata",
                   "type": "object"
                 },
@@ -127,28 +115,10 @@
                   "type": "string"
                 },
                 "name": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "default": null,
-                  "title": "Name"
+                  "type": "string"
                 },
                 "id": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ],
-                  "default": null,
-                  "title": "Id"
+                  "type": "string"
                 }
               },
               "required": [
