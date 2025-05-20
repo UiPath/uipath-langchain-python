@@ -10,8 +10,7 @@ model = ChatAnthropic(model="claude-3-5-sonnet-latest")
 
 @asynccontextmanager
 async def make_graph():
-    async with MultiServerMCPClient(
-        {
+    client = MultiServerMCPClient({
             "math": {
                 "command": sys.executable,
                 "args": ["src/simple-local-mcp/math_server.py"],
@@ -22,7 +21,6 @@ async def make_graph():
                 "args": ["src/simple-local-mcp/weather_server.py"],
                 "transport": "stdio",
             },
-        }
-    ) as client:
-        agent = create_react_agent(model, client.get_tools())
-        yield agent
+        })
+    agent = create_react_agent(model, await client.get_tools())
+    yield agent
