@@ -7,7 +7,7 @@ Context Grounding Service allows you to:
 - Retrieve context-relevant documents for various applications
 
 
-You will need to create an index in `Context Grounding` to use this feature. To create an index go to organization `Admin` -> `AI Trust Layer` -> `Context Grounding`. There you can create a new index and add documents to it. See the full documentation [here](https://docs.uipath.com/automation-cloud/automation-cloud/latest/admin-guide/about-context-grounding) for more details.
+You will need to create an index in `Context Grounding` to use this feature. To create an index go to organization `Orchestrator` -> the folder where you'd like to create an index -> `Indexes`. There you can create a new index from a storage bucket which you've added documents to. See the full documentation [here](https://docs.uipath.com/automation-cloud/automation-cloud/latest/admin-guide/about-context-grounding) for more details.
 
 
 ## ContextGroundingRetriever
