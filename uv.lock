@@ -572,11 +572,14 @@ wheels = [
 
 [[package]]
 name = "exceptiongroup"
-version = "1.2.2"
+version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/09/35/2495c4ac46b980e4ca1f6ad6db102322ef3ad2410b79fdde159a4b0f3b92/exceptiongroup-1.2.2.tar.gz", hash = "sha256:47c2edf7c6738fafb49fd34290706d1a1a2f4d1c6df275526b62cbb4aa5393cc", size = 28883 }
+dependencies = [
+    { name = "typing-extensions", marker = "python_full_version < '3.12.4'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0b/9f/a65090624ecf468cdca03533906e7c69ed7588582240cfe7cc9e770b50eb/exceptiongroup-1.3.0.tar.gz", hash = "sha256:b241f5885f560bc56a59ee63ca4c6a8bfa46ae4ad651af316d4e81817bb9fd88", size = 29749 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/cc/b7e31358aac6ed1ef2bb790a9746ac2c69bcb3c8588b41616914eb106eaf/exceptiongroup-1.2.2-py3-none-any.whl", hash = "sha256:3111b9d131c238bec2f8f516e123e14ba243563fb135d3fe885990585aa7795b", size = 16453 },
+    { url = "https://files.pythonhosted.org/packages/36/f4/c6e662dade71f56cd2f3735141b265c3c79293c109549c1e6933b0651ffc/exceptiongroup-1.3.0-py3-none-any.whl", hash = "sha256:4d111e6e0c13d0644cad6ddaa7ed0261a0b36971f6d23e7ec9b4b9097da78a10", size = 16674 },
 ]
 
 [[package]]
@@ -2038,6 +2041,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-httpx"
+version = "0.35.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1f/89/5b12b7b29e3d0af3a4b9c071ee92fa25a9017453731a38f08ba01c280f4c/pytest_httpx-0.35.0.tar.gz", hash = "sha256:d619ad5d2e67734abfbb224c3d9025d64795d4b8711116b1a13f72a251ae511f", size = 54146 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b0/ed/026d467c1853dd83102411a78126b4842618e86c895f93528b0528c7a620/pytest_httpx-0.35.0-py3-none-any.whl", hash = "sha256:ee11a00ffcea94a5cbff47af2114d34c5b231c326902458deed73f9c459fd744", size = 19442 },
+]
+
+[[package]]
 name = "pytest-mock"
 version = "3.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2445,7 +2461,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.0.55"
+version = "2.0.63"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-monitor-opentelemetry" },
@@ -2459,14 +2475,14 @@ dependencies = [
     { name = "tenacity" },
     { name = "tomli" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/33/d5/2dad25adf64e91a472845b3238d61541b021b2a9f8d0429dbbdaf4fbc5c0/uipath-2.0.55.tar.gz", hash = "sha256:8bc91f318f9613e56259a869373ba720eec33d6977841112ed4081740bda36fa", size = 1824186 }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/bb/9d921247c7a154699f0b62e5e9acd67b8848441d03fed7345f986371c68c/uipath-2.0.63.tar.gz", hash = "sha256:74a6aef0d0889f93d5b0d2bb3be498e45b589fd71918fa5e44a2fdeab92ab571", size = 1833004 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/f3/bbee2e0b3f1e47f117efc8c3f4fecb7c23ce0b363f27808f4661a2afd8c8/uipath-2.0.55-py3-none-any.whl", hash = "sha256:094dfab5c877272d01cb620ef9a795ed52671aa1ed9af53dd190d1a27fc0f7c7", size = 113762 },
+    { url = "https://files.pythonhosted.org/packages/d7/4f/5afe52f10ecc645acd87a6e9d4b117cb2a7e938d0b6574a933d1703b2c9f/uipath-2.0.63-py3-none-any.whl", hash = "sha256:06f89864ba287638f568938e2654294456369e87fc006e7ca8925b0044a40128", size = 117341 },
 ]
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.110"
+version = "0.0.112"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -2489,6 +2505,7 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pytest-httpx" },
     { name = "pytest-mock" },
     { name = "ruff" },
 ]
@@ -2505,9 +2522,10 @@ requires-dist = [
     { name = "openai", specifier = ">=1.65.5" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.0.55,<2.1.0" },
+    { name = "uipath", specifier = ">=2.0.63" },
     { name = "uipath-langchain", marker = "extra == 'langchain'", specifier = ">=0.0.2" },
 ]
+provides-extras = ["langchain"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2516,6 +2534,7 @@ dev = [
     { name = "pre-commit", specifier = ">=4.1.0" },
     { name = "pytest", specifier = ">=7.4.0" },
     { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "pytest-httpx", specifier = ">=0.35.0" },
     { name = "pytest-mock", specifier = ">=3.11.1" },
     { name = "ruff", specifier = ">=0.9.4" },
 ]
