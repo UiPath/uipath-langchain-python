@@ -139,7 +139,7 @@ Follow these steps to deploy the pre-built application using [UiPath Solutions M
 
     ![copy-folder-path](../../docs/sample_images/ticket-classification/copy-folder-path.png)
 
-    - Update the `_PLACEHOLDER` string in `main.py` (line 148) with the copied folder path
+    - Update the `FOLDER_PATH_PLACEHOLDER` string in `main.py` (line 148) with the copied folder path
 
 ### 3. Agent Setup and Publishing
 
