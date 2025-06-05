@@ -125,7 +125,7 @@ async def wait_for_human(state: GraphState) -> Command:
                                              "AgentName": "ticket-classification "},
                                          app_version=1,
                                          assignee=state.get("assignee", None),
-                                         app_folder_path="Shared/escalation_app",
+                                         app_folder_path="FOLDER_PATH_PLACEHOLDER",
                                          ))
 
     return Command(
