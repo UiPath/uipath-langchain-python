@@ -36,8 +36,12 @@ class UiPathClientSettings(BaseSettings):
     base_url: str = Field(default="", alias="UIPATH_BASE_URL")
     org_id: str = Field(default="", alias="UIPATH_ORGANIZATION_ID")
     tenant_id: str = Field(default="", alias="UIPATH_TENANT_ID")
-    requesting_product: str = Field(default="", alias="UIPATH_REQUESTING_PRODUCT")
-    requesting_feature: str = Field(default="", alias="UIPATH_REQUESTING_FEATURE")
+    requesting_product: str = Field(
+        default="uipath-python-sdk", alias="UIPATH_REQUESTING_PRODUCT"
+    )
+    requesting_feature: str = Field(
+        default="langgraph-agent", alias="UIPATH_REQUESTING_FEATURE"
+    )
     timeout_seconds: str = Field(default="120", alias="UIPATH_TIMEOUT_SECONDS")
     action_name: str = Field(default="DefaultActionName", alias="UIPATH_ACTION_NAME")
     action_id: str = Field(default="DefaultActionId", alias="UIPATH_ACTION_ID")
