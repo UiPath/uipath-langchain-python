@@ -23,21 +23,31 @@ jobs:
       contents: read
 
     steps:
+      - name: Check for custom version label
+        if: contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')
+        run: |
+          echo "Custom version testing enabled - skipping normal tests"
+
       - name: Checkout
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
         uses: actions/checkout@v4
 
       - name: Setup uv
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
         uses: astral-sh/setup-uv@v5
 
       - name: Setup Python
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
         uses: actions/setup-python@v5
         with:
           python-version-file: ".python-version"
 
       - name: Install dependencies
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
         run: uv sync --all-extras
 
       - name: Run tests
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
         run: uv run pytest
         env:
           UIPATH_URL: ${{ secrets.UIPATH_URL }}

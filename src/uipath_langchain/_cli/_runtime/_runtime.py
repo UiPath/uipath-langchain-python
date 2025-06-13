@@ -126,7 +126,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 except Exception:
                     pass
 
-                output_processor = LangGraphOutputProcessor(context=self.context)
+                output_processor = await LangGraphOutputProcessor.create(self.context)
 
                 self.context.result = await output_processor.process()
 

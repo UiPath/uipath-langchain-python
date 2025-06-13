@@ -25,12 +25,15 @@ def langgraph_run_middleware(
         )  # Continue with normal flow if no langgraph.json
 
     try:
+        bool_map = {"true": True, "false": False}
+        tracing = env.get("UIPATH_TRACING_ENABLED", True)
+        if isinstance(tracing, str) and tracing.lower() in bool_map:
+            tracing = bool_map[tracing.lower()]
 
         async def execute():
             context = LangGraphRuntimeContext.from_config(
                 env.get("UIPATH_CONFIG_PATH", "uipath.json")
             )
-
             context.entrypoint = entrypoint
             context.input = input
             context.resume = resume
@@ -38,9 +41,9 @@ def langgraph_run_middleware(
             context.logs_min_level = env.get("LOG_LEVEL", "INFO")
             context.job_id = env.get("UIPATH_JOB_KEY")
             context.trace_id = env.get("UIPATH_TRACE_ID")
-            context.tracing_enabled = env.get("UIPATH_TRACING_ENABLED", True)
+            context.tracing_enabled = tracing
             context.trace_context = UiPathTraceContext(
-                enabled=env.get("UIPATH_TRACING_ENABLED", True),
+                enabled=tracing,
                 trace_id=env.get("UIPATH_TRACE_ID"),
                 parent_span_id=env.get("UIPATH_PARENT_SPAN_ID"),
                 root_span_id=env.get("UIPATH_ROOT_SPAN_ID"),
