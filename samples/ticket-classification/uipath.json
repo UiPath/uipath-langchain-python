@@ -2,7 +2,7 @@
   "entryPoints": [
     {
       "filePath": "agent",
-      "uniqueId": "f5678e12-7aa8-4a4c-bf62-b98dad8d9145",
+      "uniqueId": "50da3849-733d-499c-b7cb-e6ff0f2dbc36",
       "type": "agent",
       "input": {
         "type": "object",
@@ -16,16 +16,7 @@
             "type": "string"
           },
           "assignee": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Assignee"
+            "type": "string"
           }
         },
         "required": [
