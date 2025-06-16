@@ -1,0 +1,107 @@
+name: Publish Fixed Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      good_version:
+        description: 'Version number of the good/fixed version from PyPI (e.g., 0.0.110)'
+        required: true
+        type: string
+
+jobs:
+  publish-prior-stable-version:
+    name: Publish Fixed Version
+    runs-on: ubuntu-latest
+    environment: pypi
+
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Get current version and increment
+        id: version
+        shell: pwsh
+        run: |
+          $pyprojcontent = Get-Content pyproject.toml -Raw
+          $CURRENT_VERSION = ($pyprojcontent | Select-String -Pattern '(?m)^\[project\][^\[]*?version\s*=\s*"([^"]*)"' -AllMatches).Matches[0].Groups[1].Value
+
+          # Parse version and increment patch number
+          $versionParts = $CURRENT_VERSION.Split('.')
+          $major = [int]$versionParts[0]
+          $minor = [int]$versionParts[1]
+          $patch = [int]$versionParts[2] + 1
+
+          $NEW_VERSION = "$major.$minor.$patch"
+
+          Write-Output "current_version=$CURRENT_VERSION" >> $env:GITHUB_OUTPUT
+          Write-Output "new_version=$NEW_VERSION" >> $env:GITHUB_OUTPUT
+          Write-Output "good_version=${{ github.event.inputs.good_version }}" >> $env:GITHUB_OUTPUT
+
+          Write-Host "Current version: $CURRENT_VERSION"
+          Write-Host "New version: $NEW_VERSION"
+          Write-Host "Good version: ${{ github.event.inputs.good_version }}"
+
+      - name: Download and extract good version from PyPI
+        shell: pwsh
+        run: |
+          $goodVersion = "${{ github.event.inputs.good_version }}"
+          $packageName = "uipath-langchain"
+
+          Write-Host "Downloading $packageName==$goodVersion from PyPI..."
+
+          # Download the source package (tar.gz preferred for easier extraction)
+          pip download "$packageName==$goodVersion" --no-deps --no-binary=:all: --dest .
+
+          # Find the downloaded tar.gz file
+          $downloadedFile = Get-ChildItem | Where-Object { $_.Name -match "uipath.langchain.*\.tar\.gz$" } | Select-Object -First 1
+
+          if ($downloadedFile) {
+            Write-Host "Found downloaded file: $($downloadedFile.FullName)"
+
+            # Extract the tar.gz file
+            tar -xzf $downloadedFile.FullName --strip-components=1
+
+            Write-Host "Extracted good version content to current directory"
+
+            # Remove the downloaded tar.gz file
+            Remove-Item $downloadedFile.FullName
+          } else {
+            Write-Error "Could not find downloaded package file"
+            exit 1
+          }
+
+      - name: Update version to new version in pyproject.toml
+        shell: pwsh
+        run: |
+          (Get-Content pyproject.toml) -replace 'version = "${{ github.event.inputs.good_version }}"', 'version = "${{ steps.version.outputs.new_version }}"' | Set-Content pyproject.toml
+          Write-Host "Updated version from ${{ github.event.inputs.good_version }} to ${{ steps.version.outputs.new_version }}"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Build and publish fixed version
+        run: |
+          echo "Building version ${{ steps.version.outputs.new_version }} (republishing PyPI version ${{ github.event.inputs.good_version }})..."
+          uv build
+          echo "Publishing fixed version to PyPI..."
+          uv publish
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "✅ Successfully published version ${{ steps.version.outputs.new_version }} with content from PyPI version ${{ github.event.inputs.good_version }}"
