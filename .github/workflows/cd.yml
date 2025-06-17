@@ -14,6 +14,10 @@ jobs:
 
   test:
     uses: ./.github/workflows/test.yml
+    secrets:
+      UIPATH_URL: ${{ secrets.UIPATH_URL }}
+      UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
+      UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
 
   build:
     name: Build
