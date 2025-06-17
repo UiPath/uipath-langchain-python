@@ -1,27 +1,20 @@
-import json
 import logging
 from typing import Any, Optional, cast
 
 from langgraph.types import Command
 from uipath import UiPath
 from uipath._cli._runtime._contracts import (
+    UiPathApiTrigger,
     UiPathErrorCategory,
+    UiPathResumeTrigger,
     UiPathResumeTriggerType,
-    UiPathRuntimeStatus,
 )
+from uipath._cli._runtime._hitl import HitlReader
 
 from ._context import LangGraphRuntimeContext
-from ._escalation import Escalation
 from ._exception import LangGraphRuntimeError
 
 logger = logging.getLogger(__name__)
-
-
-def try_convert_to_json_format(value: str) -> str:
-    try:
-        return json.loads(value)
-    except json.decoder.JSONDecodeError:
-        return value
 
 
 class LangGraphInputProcessor:
@@ -38,13 +31,29 @@ class LangGraphInputProcessor:
             context: The runtime context for the graph execution.
         """
         self.context = context
-        self.escalation = Escalation(self.context.config_path)
         self.uipath = UiPath()
 
     async def process(self) -> Any:
         """
-        Process the input data, handling resume scenarios by fetching
-        necessary data from UiPath if needed.
+        Process the input data for graph execution, handling both fresh starts and resume scenarios.
+
+        This method determines whether the graph is being executed fresh or resumed from a previous state.
+        For fresh executions, it returns the input JSON directly. For resume scenarios, it fetches
+        the latest trigger information from the database and constructs a Command object with the
+        appropriate resume data.
+
+        The method handles different types of resume triggers:
+        - API triggers: Creates an UiPathApiTrigger with inbox_id and request payload
+        - Other triggers: Uses the HitlReader to process the resume data
+
+        Returns:
+            Any: For fresh executions, returns the input JSON data directly.
+                 For resume scenarios, returns a Command object containing the resume data
+                 processed through the appropriate trigger handler.
+
+        Raises:
+            LangGraphRuntimeError: If there's an error fetching trigger data from the database
+                during resume processing.
         """
         logger.debug(f"Resumed: {self.context.resume} Input: {self.context.input_json}")
 
@@ -58,47 +67,48 @@ class LangGraphInputProcessor:
         if not trigger:
             return Command(resume=self.context.input_json)
 
-        type, key, folder_path, folder_key, payload = trigger
-        logger.debug(f"ResumeTrigger: {type} {key}")
-        if type == UiPathResumeTriggerType.ACTION.value and key:
-            action = await self.uipath.actions.retrieve_async(
-                key, app_folder_key=folder_key, app_folder_path=folder_path
+        trigger_type, key, folder_path, folder_key, payload = trigger
+        resume_trigger = UiPathResumeTrigger(
+            trigger_type=trigger_type,
+            item_key=key,
+            folder_path=folder_path,
+            folder_key=folder_key,
+            payload=payload,
+        )
+        logger.debug(f"ResumeTrigger: {trigger_type} {key}")
+
+        # populate back expected fields for api_triggers
+        if resume_trigger.trigger_type == UiPathResumeTriggerType.API:
+            resume_trigger.api_resume = UiPathApiTrigger(
+                inbox_id=resume_trigger.item_key, request=resume_trigger.payload
             )
-            logger.debug(f"Action: {action}")
-            if action.data is None:
-                return Command(resume={})
-            if self.escalation and self.escalation.enabled:
-                extracted_value = self.escalation.extract_response_value(action.data)
-                return Command(resume=extracted_value)
-            return Command(resume=action.data)
-        elif type == UiPathResumeTriggerType.API.value and key:
-            payload = await self._get_api_payload(key)
-            if payload:
-                return Command(resume=payload)
-        elif type == UiPathResumeTriggerType.JOB.value and key:
-            job = await self.uipath.jobs.retrieve_async(key)
-            if (
-                job.state
-                and not job.state.lower()
-                == UiPathRuntimeStatus.SUCCESSFUL.value.lower()
-            ):
-                error_code = "INVOKED_PROCESS_FAILURE"
-                error_title = "Invoked process did not finish successfully."
-                error_detail = try_convert_to_json_format(
-                    str(job.job_error or job.info)
-                )
-                raise LangGraphRuntimeError(
-                    error_code,
-                    error_title,
-                    error_detail,
-                    UiPathErrorCategory.USER,
-                )
-            if job.output_arguments:
-                return Command(resume=try_convert_to_json_format(job.output_arguments))
-        return Command(resume=self.context.input_json)
+        return Command(resume=await HitlReader.read(resume_trigger))
 
     async def _get_latest_trigger(self) -> Optional[tuple[str, str, str, str, str]]:
-        """Fetch the most recent trigger from the database."""
+        """
+        Fetch the most recent resume trigger from the database.
+
+        This private method queries the resume triggers table to retrieve the latest trigger
+        information based on timestamp. It handles database connection setup and executes
+        a SQL query to fetch trigger data needed for resume operations.
+
+        The method returns trigger information as a tuple containing:
+        - type: The type of trigger (e.g., 'API', 'MANUAL', etc.)
+        - key: The unique identifier for the trigger/item
+        - folder_path: The path to the folder containing the trigger
+        - folder_key: The unique identifier for the folder
+        - payload: The serialized payload data associated with the trigger
+
+        Returns:
+            Optional[tuple[str, str, str, str, str]]: A tuple containing (type, key, folder_path,
+                folder_key, payload) for the most recent trigger, or None if no triggers are found
+                or if the memory context is not available.
+
+        Raises:
+            LangGraphRuntimeError: If there's an error during database connection setup, query
+                execution, or result fetching. The original exception is wrapped with context
+                about the database operation failure.
+        """
         if self.context.memory is None:
             return None
         try:
@@ -123,31 +133,4 @@ class LangGraphInputProcessor:
                 "Database query failed",
                 f"Error querying resume trigger information: {str(e)}",
                 UiPathErrorCategory.SYSTEM,
-            ) from e
-
-    async def _get_api_payload(self, inbox_id: str) -> Any:
-        """
-        Fetch payload data for API triggers.
-
-        Args:
-            inbox_id: The Id of the inbox to fetch the payload for.
-
-        Returns:
-            The value field from the API response payload, or None if an error occurs.
-        """
-        try:
-            response = self.uipath.api_client.request(
-                "GET",
-                f"/orchestrator_/api/JobTriggers/GetPayload/{inbox_id}",
-                include_folder_headers=True,
-            )
-            data = response.json()
-            return data.get("payload")
-        except Exception as e:
-            raise LangGraphRuntimeError(
-                "API_CONNECTION_ERROR",
-                "Failed to get trigger payload",
-                f"Error fetching API trigger payload for inbox {inbox_id}: {str(e)}",
-                UiPathErrorCategory.SYSTEM,
-                response.status_code,
             ) from e
