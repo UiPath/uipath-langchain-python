@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from langgraph.graph.state import CompiledStateGraph
 from uipath._cli._utils._console import ConsoleLogger
@@ -93,8 +93,27 @@ def generate_schema_from_graph(graph: CompiledStateGraph) -> Dict[str, Any]:
 
     return schema
 
+def get_existing_settings(config_path: str) -> Optional[Dict[str, Any]]:
+    """Read existing settings from uipath.json if it exists.
 
-async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
+    Args:
+        config_path: Path to the uipath.json file.
+
+    Returns:
+        The settings dictionary if it exists, None otherwise.
+    """
+    if not os.path.exists(config_path):
+        return None
+
+    try:
+        with open(config_path, "r") as config_file:
+            existing_config = json.load(config_file)
+            return existing_config.get("settings")
+    except (json.JSONDecodeError, IOError):
+        return None
+
+
+async def langgraph_init_middleware_async(entrypoint: str, infer_bindings: bool = True) -> MiddlewareResult:
     """Middleware to check for langgraph.json and create uipath.json with schemas"""
     config = LangGraphConfig()
     if not config.exists:
@@ -127,7 +146,10 @@ async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
                 try:
                     # Make sure the file path exists
                     if os.path.exists(graph.file_path):
-                        file_bindings = generate_bindings_json(graph.file_path)
+                        if infer_bindings:
+                            file_bindings = generate_bindings_json(graph.file_path)
+                        else:
+                            file_bindings = {}
 
                         # Merge bindings
                         if "resources" in file_bindings:
@@ -161,10 +183,16 @@ async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
                 should_continue=False,
             )
 
-        uipath_config = {"entryPoints": entrypoints, "bindings": all_bindings}
-
         # Save the uipath.json file
         config_path = "uipath.json"
+
+        uipath_config = {"entryPoints": entrypoints, "bindings": all_bindings}
+
+        existing_settings = get_existing_settings(config_path)
+        if existing_settings is not None:
+            uipath_config["settings"] = existing_settings
+
+
         with open(config_path, "w") as f:
             json.dump(uipath_config, f, indent=2)
 
