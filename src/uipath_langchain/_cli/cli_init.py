@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import uuid
-from typing import Any, Dict
+from typing import Any, Callable, Dict, overload
 
 from langgraph.graph.state import CompiledStateGraph
 from uipath._cli._utils._console import ConsoleLogger
@@ -94,8 +94,14 @@ def generate_schema_from_graph(graph: CompiledStateGraph) -> Dict[str, Any]:
     return schema
 
 
-async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
+async def langgraph_init_middleware_async(
+    entrypoint: str,
+    options: dict[str, Any] | None = None,
+    write_config: Callable[[Any], str] | None = None,
+) -> MiddlewareResult:
     """Middleware to check for langgraph.json and create uipath.json with schemas"""
+    options = options or {}
+
     config = LangGraphConfig()
     if not config.exists:
         return MiddlewareResult(
@@ -125,8 +131,9 @@ async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
                 mermaids[graph.name] = compiled_graph.get_graph(xray=1).draw_mermaid()
 
                 try:
+                    should_infer_bindings = options.get("infer_bindings", True)
                     # Make sure the file path exists
-                    if os.path.exists(graph.file_path):
+                    if os.path.exists(graph.file_path) and should_infer_bindings:
                         file_bindings = generate_bindings_json(graph.file_path)
 
                         # Merge bindings
@@ -163,10 +170,13 @@ async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
 
         uipath_config = {"entryPoints": entrypoints, "bindings": all_bindings}
 
-        # Save the uipath.json file
-        config_path = "uipath.json"
-        with open(config_path, "w") as f:
-            json.dump(uipath_config, f, indent=2)
+        if write_config:
+            config_path = write_config(uipath_config)
+        else:
+            # Save the uipath.json file
+            config_path = "uipath.json"
+            with open(config_path, "w") as f:
+                json.dump(uipath_config, f, indent=4)
 
         for graph_name, mermaid_content in mermaids.items():
             mermaid_file_path = f"{graph_name}.mermaid"
@@ -193,6 +203,26 @@ async def langgraph_init_middleware_async(entrypoint: str) -> MiddlewareResult:
         )
 
 
-def langgraph_init_middleware(entrypoint: str) -> MiddlewareResult:
+@overload
+def langgraph_init_middleware(
+    entrypoint: str,
+) -> MiddlewareResult: ...
+
+
+@overload
+def langgraph_init_middleware(
+    entrypoint: str,
+    options: dict[str, Any],
+    write_config: Callable[[Any], str],
+) -> MiddlewareResult: ...
+
+
+def langgraph_init_middleware(
+    entrypoint: str,
+    options: dict[str, Any] | None = None,
+    write_config: Callable[[Any], str] | None = None,
+) -> MiddlewareResult:
     """Middleware to check for langgraph.json and create uipath.json with schemas"""
-    return asyncio.run(langgraph_init_middleware_async(entrypoint))
+    return asyncio.run(
+        langgraph_init_middleware_async(entrypoint, options, write_config)
+    )
