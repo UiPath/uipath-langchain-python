@@ -44,6 +44,7 @@ class ContextGroundingVectorStore(VectorStore):
     def __init__(
         self,
         index_name: str,
+        folder_path: Optional[str] = None,
         uipath_sdk: Optional[UiPath] = None,
     ):
         """Initialize the ContextGroundingVectorStore.
@@ -53,6 +54,7 @@ class ContextGroundingVectorStore(VectorStore):
             uipath_sdk: Optional SDK instance to use. If not provided, a new instance will be created.
         """
         self.index_name = index_name
+        self.folder_path = folder_path
         self.sdk = uipath_sdk or UiPath()
 
     def similarity_search_with_score(
@@ -73,6 +75,7 @@ class ContextGroundingVectorStore(VectorStore):
             name=self.index_name,
             query=query,
             number_of_results=k,
+            folder_path=self.folder_path,
         )
 
         # Convert the results to Documents with scores
@@ -142,6 +145,7 @@ class ContextGroundingVectorStore(VectorStore):
             name=self.index_name,
             query=query,
             number_of_results=k,
+            folder_path=self.folder_path,
         )
 
         # Convert the results to Documents with scores
