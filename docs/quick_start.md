@@ -295,13 +295,13 @@ Please note that a process will be auto-created only upon publishing to **my-wor
 
 Set the environment variables using the provided link:
 
-<picture data-light="quick_start_images/cloud_env_var_light.png" data-dark="quick_start_images/cloud_env_var_dark.png">
+<picture data-light="../quick_start_images/cloud_env_var_light.png" data-dark="../quick_start_images/cloud_env_var_dark.png">
   <source
     media="(prefers-color-scheme: dark)"
-    srcset="quick_start_images/cloud_env_var_dark.png"
+    srcset="../quick_start_images/cloud_env_var_dark.png"
   />
   <img
-    src="quick_start_images/cloud_env_var_light.png"
+    src="../quick_start_images/cloud_env_var_light.png"
   />
 </picture>
 
@@ -319,13 +319,13 @@ Set the environment variables using the provided link:
 
 Use the provided link to monitor your job and view detailed traces.
 
-<picture data-light="quick_start_images/invoke_output_light.png" data-dark="quick_start_images/invoke_output_dark.png">
+<picture data-light="../quick_start_images/invoke_output_light.png" data-dark="../quick_start_images/invoke_output_dark.png">
   <source
     media="(prefers-color-scheme: dark)"
-    srcset="quick_start_images/invoke_output_dark.png"
+    srcset="../quick_start_images/invoke_output_dark.png"
   />
   <img
-    src="quick_start_images/invoke_output_light.png"
+    src="../quick_start_images/invoke_output_light.png"
   />
 </picture>
 
