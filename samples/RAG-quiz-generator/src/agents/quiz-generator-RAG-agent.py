@@ -167,7 +167,7 @@ def return_quiz(state: GraphState) -> GraphOutput:
     return GraphOutput(quiz=state["quiz"])
 
 # Build the state graph
-builder = StateGraph(input=GraphInput, output=GraphOutput)
+builder = StateGraph(GraphState, input=GraphInput, output=GraphOutput)
 builder.add_node("invoke_researcher", invoke_researcher)
 builder.add_node("create_quiz", create_quiz)
 builder.add_node("return_quiz", return_quiz)
@@ -178,7 +178,6 @@ builder.add_edge("prepare_input", "create_quiz")
 builder.add_conditional_edges("create_quiz", check_quiz_creation)
 builder.add_edge("invoke_researcher", "create_quiz")
 builder.add_edge("return_quiz", END)
-import os
 
 # Compile the graph
 graph = builder.compile()

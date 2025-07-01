@@ -5,13 +5,13 @@ from langgraph.graph import START, StateGraph, END
 from pydantic import BaseModel
 import os
 
-class GraphInput(BaseModel):
+class GraphState(BaseModel):
     topic: str
 
 class GraphOutput(BaseModel):
     report: str
 
-async def generate_report(state: GraphInput) -> GraphOutput:
+async def generate_report(state: GraphState) -> GraphOutput:
     if os.getenv("ANTHROPIC_API_KEY"):
         llm_model = ChatAnthropic(model="claude-3-5-sonnet-latest")
     elif os.getenv("OPENAI_API_KEY"):
@@ -23,7 +23,7 @@ async def generate_report(state: GraphInput) -> GraphOutput:
     output = await llm_model.ainvoke([SystemMessage(system_prompt), HumanMessage(state.topic)])
     return GraphOutput(report=output.content)
 
-builder = StateGraph(input=GraphInput, output=GraphOutput)
+builder = StateGraph(GraphState, output=GraphOutput)
 
 builder.add_node("generate_report", generate_report)
 

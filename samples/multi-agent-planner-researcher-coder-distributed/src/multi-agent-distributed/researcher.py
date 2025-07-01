@@ -24,7 +24,7 @@ async def research_node(state: MessagesState) -> GraphOutput:
 
 
 # Build the state graph
-builder = StateGraph(input=MessagesState, output=GraphOutput)
+builder = StateGraph(MessagesState, output=GraphOutput)
 builder.add_node("researcher", research_node)
 
 builder.add_edge(START, "researcher")
