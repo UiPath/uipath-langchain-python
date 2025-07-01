@@ -35,7 +35,7 @@ llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 research_agent = create_react_agent(llm, tools=[tavily_tool], prompt=system_prompt)
 
 
-class GraphInput(BaseModel):
+class GraphState(BaseModel):
     company_name: str
 
 
@@ -43,7 +43,7 @@ class GraphOutput(BaseModel):
     response: str
 
 
-async def research_node(state: GraphInput) -> GraphOutput:
+async def research_node(state: GraphState) -> GraphOutput:
     # Format the user message with the company name
     user_message = f"""Please provide a comprehensive analysis and outreach strategy for the company: {state.company_name}. Use the TavilySearchResults tool to gather information. Include detailed research on the company's background, organizational structure, key decision-makers, and a tailored outreach strategy. Format your response using the following section headers:
 
@@ -64,7 +64,7 @@ Ensure that each section is clearly labeled and contains relevant, concise infor
 
 
 # Build the state graph
-builder = StateGraph(input=GraphInput, output=GraphOutput)
+builder = StateGraph(GraphState, output=GraphOutput)
 builder.add_node("researcher", research_node)
 
 builder.add_edge(START, "researcher")

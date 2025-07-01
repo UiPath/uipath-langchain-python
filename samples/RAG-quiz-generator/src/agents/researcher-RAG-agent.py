@@ -90,7 +90,7 @@ async def add_data_to_context_grounding_index(state: GraphState) -> MessagesStat
 
 
 # Build the state graph
-builder = StateGraph(input=GraphInput, output=MessagesState)
+builder = StateGraph(GraphState ,input=GraphInput, output=MessagesState)
 builder.add_node("research", research_node)
 builder.add_node("add_data_to_context_grounding_index", add_data_to_context_grounding_index)
 builder.add_node("prepare_input", prepare_input)
