@@ -40,6 +40,8 @@ class UiPathRequestMixin(BaseModel):
 
     default_headers: Optional[Mapping[str, str]] = {
         "X-UiPath-Streaming-Enabled": "false",
+        "X-UiPath-JobKey": os.getenv("UIPATH_JOB_KEY", ""),
+        "X-UiPath-ProcessKey": os.getenv("UIPATH_PROCESS_KEY", ""),
     }
     model_name: Optional[str] = Field(
         default_factory=lambda: os.getenv("UIPATH_MODEL_NAME", "gpt-4o-2024-08-06"),

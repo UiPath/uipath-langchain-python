@@ -1,4 +1,6 @@
 import json
+import logging
+from os import environ as env
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from langchain_core.callbacks import (
@@ -12,9 +14,11 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_openai.chat_models import AzureChatOpenAI
 from pydantic import BaseModel
+from uipath.utils import EndpointManager
 
 from uipath_langchain._utils._request_mixin import UiPathRequestMixin
-from uipath_langchain._utils._settings import UiPathEndpoints
+
+logger = logging.getLogger(__name__)
 
 
 class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
@@ -71,13 +75,24 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
 
     @property
     def endpoint(self) -> str:
-        return UiPathEndpoints.PASSTHROUGH_COMPLETION_ENDPOINT.value.format(
+        endpoint = EndpointManager.get_passthrough_endpoint()
+        logger.debug("Using endpoint: %s", endpoint)
+        return endpoint.format(
             model=self.model_name, api_version=self.openai_api_version
         )
 
 
 class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
     """Custom LLM connector for LangChain integration with UiPath Normalized."""
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        """Initialize the UiPath Azure Chat OpenAI model."""
+
+        super().__init__(*args, **kwargs)
+        self.default_headers = {
+            "X-UiPath-JobKey": env.get("UIPATH_JOB_KEY", ""),
+            "X-UiPath-ProcessKey": env.get("UIPATH_PROCESS_KEY", ""),
+        }
 
     def _create_chat_result(
         self,
@@ -252,7 +267,11 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
 
     @property
     def endpoint(self) -> str:
-        return UiPathEndpoints.NORMALIZED_COMPLETION_ENDPOINT.value
+        endpoint = EndpointManager.get_passthrough_endpoint()
+        logger.debug("Using endpoint: %s", endpoint)
+        return endpoint.format(
+            model=self.model_name, api_version=self.openai_api_version
+        )
 
     @property
     def is_normalized(self) -> bool:
