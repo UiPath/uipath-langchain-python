@@ -1,4 +1,6 @@
 import json
+import logging
+from os import environ as env
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from langchain_core.callbacks import (
@@ -12,9 +14,34 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import Runnable
 from langchain_openai.chat_models import AzureChatOpenAI
 from pydantic import BaseModel
+from uipath.utils import EndpointManager
 
 from uipath_langchain._utils._request_mixin import UiPathRequestMixin
-from uipath_langchain._utils._settings import UiPathEndpoints
+
+logger = logging.getLogger(__name__)
+
+
+class ChatAgentHubUiPath(AzureChatOpenAI):
+    def __init__(
+        self,
+        token=None,
+        model_name="gpt-4o-mini-2024-07-18",
+        http_client=None,
+        api_version="2024-12-01-preview",
+    ):
+        token = token or env.get("UIPATH_ACCESS_TOKEN")
+
+        endpoint = f"{env.get('UIPATH_URL')}/agenthub_/llm/"
+
+        super().__init__(
+            azure_endpoint=endpoint,
+            azure_deployment=model_name,
+            model_name=model_name,
+            default_headers={"Authorization": "Bearer " + token},
+            http_client=http_client,
+            api_key="none",
+            api_version=api_version,
+        )
 
 
 class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
@@ -71,7 +98,9 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
 
     @property
     def endpoint(self) -> str:
-        return UiPathEndpoints.PASSTHROUGH_COMPLETION_ENDPOINT.value.format(
+        endpoint = EndpointManager.get_passthrough_endpoint()
+        logger.info("Using endpoint: %s", endpoint)
+        return endpoint.format(
             model=self.model_name, api_version=self.openai_api_version
         )
 
@@ -227,8 +256,8 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
             not self.model_name or not self.model_name.startswith("gpt")
         ):
             method = "function_calling"
-            if self.logger:
-                self.logger.warning(
+            if logger:
+                logger.warning(
                     "The json_schema output is not supported for non-GPT models. Using function_calling instead.",
                     extra={
                         "ActionName": self.settings.action_name,
@@ -252,7 +281,11 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
 
     @property
     def endpoint(self) -> str:
-        return UiPathEndpoints.NORMALIZED_COMPLETION_ENDPOINT.value
+        endpoint = EndpointManager.get_passthrough_endpoint()
+        logger.info("Using endpoint: %s", endpoint)
+        return endpoint.format(
+            model=self.model_name, api_version=self.openai_api_version
+        )
 
     @property
     def is_normalized(self) -> bool:
