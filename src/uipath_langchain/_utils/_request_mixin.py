@@ -83,13 +83,13 @@ class UiPathRequestMixin(BaseModel):
         default_factory=lambda data: getattr(
             data["settings"], "requesting_product", None
         )
-        or os.getenv("UIPATH_REQUESTING_PRODUCT", "")
+        or os.getenv("UIPATH_REQUESTING_PRODUCT", "uipath-python-sdk")
     )
     requesting_feature: Any = Field(
         default_factory=lambda data: getattr(
             data["settings"], "requesting_feature", None
         )
-        or os.getenv("UIPATH_REQUESTING_FEATURE", "")
+        or os.getenv("UIPATH_REQUESTING_FEATURE", "langgraph-agent")
     )
     default_request_timeout: Any = Field(
         default_factory=lambda data: float(
