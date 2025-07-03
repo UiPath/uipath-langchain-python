@@ -1,0 +1,172 @@
+name: Publish Dev Build
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    secrets:
+      PYPI_TOKEN_NIGHTLY:
+        required: true
+
+
+jobs:
+  publish-dev:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    # Only run if PR has the build:dev label
+    if: contains(github.event.pull_request.labels.*.name, 'build:dev')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Modify pyproject.toml for custom UiPath version
+        if: contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')
+        shell: bash
+        run: |
+          # Backup original pyproject.toml
+          cp pyproject.toml pyproject.toml.backup
+
+          # Extract custom version from PR title
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          VERSION=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+' | head -1)
+
+          if [ -z "$VERSION" ]; then
+            echo "No version found in PR title. Please include version like: 2.0.65.dev1004030443"
+            exit 1
+          fi
+
+          echo "Extracted version: $VERSION"
+
+                      # Update the uipath dependency to the custom version (match both == and >= patterns)
+            # Target only the dependency lines in dependencies arrays, not project name
+            sed -i '/dependencies = \[/,/\]/ s|"uipath[=><^~!]*[^"]*"|"uipath=='$VERSION'"|' pyproject.toml
+            sed -i '/\[project\.optional-dependencies\]/,/^\[/ s|"uipath[=><^~!]*[^"]*"|"uipath=='$VERSION'"|' pyproject.toml
+
+
+
+          # Add or update [tool.uv.sources] section if it doesn't exist
+          if ! grep -q "\[tool\.uv\.sources\]" pyproject.toml; then
+            echo "" >> pyproject.toml
+            echo "[tool.uv.sources]" >> pyproject.toml
+            echo 'uipath = { index = "testpypi" }' >> pyproject.toml
+          else
+            # Update existing sources if needed
+            if ! grep -q 'uipath = { index = "testpypi" }' pyproject.toml; then
+              sed -i '/\[tool\.uv\.sources\]/a uipath = { index = "testpypi" }' pyproject.toml
+            fi
+          fi
+
+          echo "Modified pyproject.toml to use UiPath version $VERSION from testpypi"
+          echo "=== Modified pyproject.toml content ==="
+          grep -A5 -B5 "uipath\|testpypi" pyproject.toml || true
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Set development version
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $pyprojcontent = Get-Content pyproject.toml -Raw
+
+          $PROJECT_NAME    = ($pyprojcontent | Select-String -Pattern '(?m)^\[(project|tool\.poetry)\][^\[]*?name\s*=\s*"([^"]*)"' -AllMatches).Matches[0].Groups[2].Value
+          $CURRENT_VERSION = ($pyprojcontent | Select-String -Pattern '(?m)^\[(project|tool\.poetry)\][^\[]*?version\s*=\s*"([^"]*)"' -AllMatches).Matches[0].Groups[2].Value
+
+          # Get PR number and run number with proper padding
+          $PR_NUM = [int]"${{ github.event.pull_request.number }}"
+          $PADDED_PR  = "{0:D5}" -f [int]"${{ github.event.pull_request.number }}"
+          $PADDED_RUN = "{0:D4}" -f [int]"${{ github.run_number }}"
+          $PADDED_NEXT_PR = "{0:D5}" -f ($PR_NUM + 1)
+
+          # Create version range strings for PR
+          $MIN_VERSION = "$CURRENT_VERSION.dev1$PADDED_PR" + "0000"
+          $MAX_VERSION = "$CURRENT_VERSION.dev1$PADDED_NEXT_PR" + "0000"
+
+          # Create unique dev version with PR number and run ID
+          $DEV_VERSION = "$CURRENT_VERSION.dev1$PADDED_PR$PADDED_RUN"
+
+          # Update version in pyproject.toml
+          (Get-Content pyproject.toml) -replace "version = `"$CURRENT_VERSION`"", "version = `"$DEV_VERSION`"" | Set-Content pyproject.toml
+
+          Write-Output "Package version set to $DEV_VERSION"
+
+          $dependencyMessage = @"
+          ## Development Package
+
+          - Add this package as a dependency in your pyproject.toml:
+
+          ``````toml
+          [project]
+          dependencies = [
+            # Exact version:
+            "$PROJECT_NAME==$DEV_VERSION",
+
+            # Any version from PR
+            "$PROJECT_NAME>=$MIN_VERSION,<$MAX_VERSION"
+          ]
+
+          [[tool.uv.index]]
+          name = "testpypi"
+          url = "https://test.pypi.org/simple/"
+          publish-url = "https://test.pypi.org/legacy/"
+          explicit = true
+
+          [tool.uv.sources]
+          $PROJECT_NAME = { index = "testpypi" }
+          ``````
+          "@
+
+          # Get the owner and repo from the GitHub repository
+          $owner = "${{ github.repository_owner }}"
+          $repo = "${{ github.repository }}".Split('/')[1]
+          $prNumber = $PR_NUM
+
+          # Get the current PR description
+          $prUri = "https://api.github.com/repos/$owner/$repo/pulls/$prNumber"
+          $headers = @{
+            Authorization = "token $env:GITHUB_TOKEN"
+            Accept = "application/vnd.github.v3+json"
+          }
+
+          $pr = Invoke-RestMethod -Uri $prUri -Method Get -Headers $headers
+          $currentBody = $pr.body
+
+          # Check if there's already a development package section
+          if ($currentBody -match '## Development Package') {
+            # Replace the existing section with the new dependency message
+            $newBody = $currentBody -replace '## Development Package(\r?\n|.)*?(?=##|$)', $dependencyMessage
+          } else {
+            # Append the dependency message to the end of the description
+            $newBody = if ($currentBody) { "$currentBody`n`n$dependencyMessage" } else { $dependencyMessage }
+          }
+
+          # Update the PR description
+          $updateBody = @{
+            body = $newBody
+          } | ConvertTo-Json
+
+          Invoke-RestMethod -Uri $prUri -Method Patch -Headers $headers -Body $updateBody -ContentType "application/json"
+
+          Write-Output "Updated PR description with development package information"
+
+      - name: Build package
+        run: uv build
+
+      - name: Publish
+        run: uv publish --index testpypi
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.TEST_PYPI_TOKEN }}

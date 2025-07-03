@@ -1,0 +1,92 @@
+name: Lint Custom Version
+
+on:
+  workflow_call:
+  pull_request:
+    types: [opened, synchronize, labeled, unlabeled]
+
+jobs:
+  lint-with-custom-version:
+    name: Lint with Custom UiPath Version
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from PR
+        id: extract-version
+        shell: bash
+        run: |
+          # Extract version from PR title only
+          PR_TITLE="${{ github.event.pull_request.title }}"
+
+          # Search for version pattern in title (any x.y.z.dev version)
+          VERSION=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+' | head -1)
+
+          if [ -z "$VERSION" ]; then
+            echo "No version found in PR title. Please include version in title like: 2.0.65.dev1004030443"
+            exit 1
+          fi
+
+          echo "Extracted version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Modify pyproject.toml for custom UiPath version
+        shell: bash
+        run: |
+          # Backup original pyproject.toml
+          cp pyproject.toml pyproject.toml.backup
+
+          # Update the uipath dependency to the custom version
+          sed -i 's|"uipath>=.*"|"uipath==${{ steps.extract-version.outputs.version }}"|' pyproject.toml
+
+
+
+          # Add or update [tool.uv.sources] section if it doesn't exist
+          if ! grep -q "\[tool\.uv\.sources\]" pyproject.toml; then
+            echo "" >> pyproject.toml
+            echo "[tool.uv.sources]" >> pyproject.toml
+            echo 'uipath = { index = "testpypi" }' >> pyproject.toml
+          else
+            # Update existing sources if needed
+            if ! grep -q 'uipath = { index = "testpypi" }' pyproject.toml; then
+              sed -i '/\[tool\.uv\.sources\]/a uipath = { index = "testpypi" }' pyproject.toml
+            fi
+          fi
+
+          echo "Modified pyproject.toml to use UiPath version ${{ steps.extract-version.outputs.version }} from testpypi"
+          echo "=== Modified pyproject.toml content ==="
+          grep -A5 -B5 "uipath\|testpypi" pyproject.toml || true
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Check static types
+        run: uv run mypy --config-file pyproject.toml .
+
+      - name: Check linting
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Restore original pyproject.toml
+        if: always()
+        shell: bash
+        run: |
+          mv pyproject.toml.backup pyproject.toml

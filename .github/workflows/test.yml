@@ -1,0 +1,59 @@
+name: Test
+
+on:
+  workflow_call:
+    secrets:
+        UIPATH_URL:
+          required: true
+        UIPATH_CLIENT_ID:
+          required: true
+        UIPATH_CLIENT_SECRET:
+          required: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, windows-latest]
+
+    permissions:
+      contents: read
+
+    steps:
+      # NOTE: Conditions are duplicated on each step instead of using job-level conditionals
+      # because GitHub expects ALL matrix combinations to report back when using matrix strategies.
+      # If we use job-level conditionals, matrix jobs won't run at all, leaving them in "pending"
+      # state and blocking PR merging. Step-level conditionals allow all matrix jobs to start
+      # and complete successfully, even when steps are skipped.
+
+      - name: Checkout
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
+        uses: astral-sh/setup-uv@v5
+
+      - name: Setup Python
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install dependencies
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
+        run: uv sync --all-extras
+
+      - name: Run tests
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
+        run: uv run pytest
+        env:
+          UIPATH_URL: ${{ secrets.UIPATH_URL }}
+          UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
+          UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
+
+    continue-on-error: true
+

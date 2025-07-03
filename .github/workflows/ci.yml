@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - pyproject.toml
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  commit-lint:
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/commitlint.yml
+
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  test:
+    uses: ./.github/workflows/test.yml
+    secrets:
+      UIPATH_URL: ${{ secrets.UIPATH_URL }}
+      UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
+      UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
