@@ -209,6 +209,7 @@ class AsyncUiPathTracer(AsyncBaseTracer):
             logger.warning(f"Exception when adding trace to queue: {e}.")
 
     async def _start_trace(self, run: Run) -> None:
+        logger.info("Starting trace", stack_info=True)
         await super()._start_trace(run)
         await self._persist_run(run)
 

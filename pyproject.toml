@@ -5,7 +5,7 @@ description = "UiPath Langchain"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 dependencies = [
-    "uipath>=2.0.71, <2.1.0",
+    "uipath>=2.0.74.dev1004340000,<2.0.74.dev1004350000",
     "langgraph>=0.2.70",
     "langchain-core>=0.3.34",
     "langgraph-checkpoint-sqlite>=2.0.3",
@@ -27,7 +27,7 @@ classifiers = [
 ]
 maintainers = [
     { name = "Marius Cosareanu", email = "marius.cosareanu@uipath.com" },
-    { name = "Cristian Pufu", email = "cristian.pufu@uipath.com" }
+    { name = "Cristian Pufu", email = "cristian.pufu@uipath.com" },
 ]
 
 [project.entry-points."uipath.middlewares"]
@@ -51,13 +51,11 @@ dev = [
     "pytest-mock>=3.11.1",
     "pre-commit>=4.1.0",
     "numpy>=1.24.0",
-    "pytest_httpx>=0.35.0"
+    "pytest_httpx>=0.35.0",
 ]
 
 [project.optional-dependencies]
-langchain = [
-  "uipath-langchain>=0.0.2"
-]
+langchain = ["uipath-langchain>=0.0.2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/uipath_langchain"]
@@ -80,12 +78,8 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-plugins = [
-  "pydantic.mypy"
-]
-exclude = [
-    "samples/.*"
-]
+plugins = ["pydantic.mypy"]
+exclude = ["samples/.*"]
 
 follow_imports = "silent"
 warn_redundant_casts = true
@@ -106,3 +100,6 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+[tool.uv.sources]
+uipath = { index = "testpypi" }

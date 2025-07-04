@@ -47,14 +47,6 @@ class UiPathClientSettings(BaseSettings):
     action_id: str = Field(default="DefaultActionId", alias="UIPATH_ACTION_ID")
 
 
-class UiPathEndpoints(Enum):
-    NORMALIZED_COMPLETION_ENDPOINT = "llmgateway_/api/chat/completions"
-    PASSTHROUGH_COMPLETION_ENDPOINT = "llmgateway_/openai/deployments/{model}/chat/completions?api-version={api_version}"
-    EMBEDDING_ENDPOINT = (
-        "llmgateway_/openai/deployments/{model}/embeddings?api-version={api_version}"
-    )
-
-
 def get_uipath_token_header(
     settings: Any = None,
 ) -> str:
