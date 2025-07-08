@@ -2,7 +2,7 @@
 
 Guide for **Human-In-The-Loop** scenarios within the UiPath-Langchain integration.
 It focuses on the **interrupt(model)** functionality, illustrating its role as a symbolic representation of an agent's
-wait state within the Langchain framework.
+wait state within the LangGraph framework.
 
 ## Models Overview
 
@@ -49,7 +49,7 @@ action_output = interrupt(WaitAction(action=my_action_instance))
 
 ---
 
-> 💡 UiPath Langchain sdk also supports **Robot/Agent-in-the-loop** scenarios. In this context, the execution of one agent
+> 💡The UiPath-LangChain SDK also supports **Robot/Agent-in-the-loop** scenarios. In this context, the execution of one agent
 > can be suspended until another robot or agent finishes its execution.
 
 ### 3. InvokeProcess

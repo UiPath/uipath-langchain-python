@@ -1,6 +1,6 @@
 # Chat Models
 
-UiPath provides two chat models `UiPathAzureChatOpenAI` and `UiPathChat`. These are compatible with langgraph as drop in replacements. You do not need to add tokens from OpenAI or Anthropic, usage of these chat models will consume `AI Units` on your account.
+UiPath provides two chat models `UiPathAzureChatOpenAI` and `UiPathChat`. These are compatible with LangGraph as drop in replacements. You do not need to add tokens from OpenAI or Anthropic, usage of these chat models will consume `Agent Units` on your account.
 
 ## UiPathAzureChatOpenAI
 
@@ -86,7 +86,7 @@ Currently the following models can be used with `UiPathChat` (this list can be u
 -   `anthropic.claude-3-5-sonnet-20240620-v1:0`, `anthropic.claude-3-5-sonnet-20241022-v2:0`, `anthropic.claude-3-7-sonnet-20250219-v1:0`, `anthropic.claude-3-haiku-20240307-v1:0`, `gemini-1.5-pro-001`, `gemini-2.0-flash-001`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini-2024-07-18`, `o3-mini-2025-01-31`
 
 /// warning
-Please note that that you may get errors related to data residency, as some models are not available on all regions.
+Please note that you may get errors related to data residency, as some models are not available on all regions.
 
 Example: `[Enforced Region] No model configuration found for product uipath-python-sdk in EU using model anthropic.claude-3-opus-20240229-v1:0`.
 
