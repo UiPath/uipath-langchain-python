@@ -11,7 +11,7 @@ class LangGraphRuntimeContext(UiPathRuntimeContext):
     """Context information passed throughout the runtime execution."""
 
     langgraph_config: Optional[LangGraphConfig] = None
-    state_graph: Optional[StateGraph] = None
+    state_graph: Optional[StateGraph[Any, Any]] = None
     output: Optional[Any] = None
     state: Optional[Any] = (
         None  # TypedDict issue, the actual type is: Optional[langgraph.types.StateSnapshot]

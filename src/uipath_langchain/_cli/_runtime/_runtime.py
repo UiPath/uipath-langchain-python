@@ -271,7 +271,9 @@ class LangGraphRuntime(UiPathBaseRuntime):
         if hasattr(self, "graph_config") and self.graph_config:
             await self.graph_config.cleanup()
 
-    def _extract_graph_result(self, final_chunk, graph: CompiledStateGraph):
+    def _extract_graph_result(
+        self, final_chunk, graph: CompiledStateGraph[Any, Any, Any]
+    ):
         """
         Extract the result from a LangGraph output chunk according to the graph's output channels.
 

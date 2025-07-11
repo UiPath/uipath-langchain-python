@@ -49,6 +49,7 @@ dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.11.1",
+    "pytest-asyncio>=1.0.0",
     "pre-commit>=4.1.0",
     "numpy>=1.24.0",
     "pytest_httpx>=0.35.0"
@@ -100,6 +101,8 @@ disallow_untyped_defs = false
 testpaths = ["tests"]
 python_files = "test_*.py"
 addopts = "-ra -q"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
 
 [[tool.uv.index]]
 name = "testpypi"

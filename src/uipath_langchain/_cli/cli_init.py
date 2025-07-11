@@ -54,7 +54,9 @@ def process_nullable_types(
     return schema
 
 
-def generate_schema_from_graph(graph: CompiledStateGraph) -> Dict[str, Any]:
+def generate_schema_from_graph(
+    graph: CompiledStateGraph[Any, Any, Any],
+) -> Dict[str, Any]:
     """Extract input/output schema from a LangGraph graph"""
     schema = {
         "input": {"type": "object", "properties": {}, "required": []},

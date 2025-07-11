@@ -21,14 +21,18 @@ class GraphConfig:
     path: str
     file_path: str
     graph_var: str
-    _graph: Optional[Union[StateGraph, CompiledStateGraph]] = None
+    _graph: Optional[Union[StateGraph[Any, Any], CompiledStateGraph[Any, Any, Any]]] = (
+        None
+    )
 
     @classmethod
     def from_config(cls, name: str, path: str) -> "GraphConfig":
         file_path, graph_var = path.split(":")
         return cls(name=name, path=path, file_path=file_path, graph_var=graph_var)
 
-    async def load_graph(self) -> Union[StateGraph, CompiledStateGraph]:
+    async def load_graph(
+        self,
+    ) -> Union[StateGraph[Any, Any], CompiledStateGraph[Any, Any, Any]]:
         """Load graph from the specified path"""
         try:
             cwd = os.path.abspath(os.getcwd())
