@@ -59,7 +59,7 @@ class UiPathOpenAIEmbeddings(UiPathRequestMixin, OpenAIEmbeddings):
     )
 
     def embed_documents(
-        self, texts: List[str], chunk_size: Optional[int] = None
+        self, texts: List[str], chunk_size: Optional[int] = None, **kwargs
     ) -> List[List[float]]:
         """Embed a list of documents using the UiPath."""
         embeddings = []
@@ -83,6 +83,7 @@ class UiPathOpenAIEmbeddings(UiPathRequestMixin, OpenAIEmbeddings):
         self,
         texts: List[str],
         chunk_size: Optional[int] = None,
+        **kwargs,
     ) -> List[List[float]]:
         """Async version of embed_documents."""
         embeddings = []

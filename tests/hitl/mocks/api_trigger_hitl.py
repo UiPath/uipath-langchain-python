@@ -1,26 +1,20 @@
-import dataclasses
+from typing import TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 
-@dataclasses.dataclass
-class Input:
-    pass
-
-
-@dataclasses.dataclass
-class Output:
+class State(TypedDict):
     message: str
 
 
-def main_node(input: Input) -> Output:
+def main_node(state: State) -> State:
     response = interrupt("interrupt message")
-    return Output(message=response)
+    return {"message": response}
 
 
-builder = StateGraph(input=Input, output=Output)
+builder: StateGraph[State] = StateGraph(State)
 
 builder.add_node("main_node", main_node)
 
