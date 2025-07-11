@@ -17,6 +17,7 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
+from uipath._utils._ssl_context import get_httpx_client_kwargs
 
 from uipath_langchain._utils._settings import (
     UiPathClientFactorySettings,
@@ -135,11 +136,13 @@ class UiPathRequestMixin(BaseModel):
         """Run an asynchronous call to the LLM."""
         # if self.logger:
         #     self.logger.info(f"Completion request: {request_body['messages'][:2]}")
+        client_kwargs = get_httpx_client_kwargs()
         with httpx.Client(
+            **client_kwargs,  # Apply SSL configuration
             event_hooks={
                 "request": [self._log_request_duration],
                 "response": [self._log_response_duration],
-            }
+            },
         ) as client:
             response = client.post(
                 url,
@@ -212,11 +215,13 @@ class UiPathRequestMixin(BaseModel):
     ) -> Dict[str, Any]:
         # if self.logger:
         #     self.logger.info(f"Completion request: {request_body['messages'][:2]}")
+        client_kwargs = get_httpx_client_kwargs()
         async with httpx.AsyncClient(
+            **client_kwargs,  # Apply SSL configuration
             event_hooks={
                 "request": [self._alog_request_duration],
                 "response": [self._alog_response_duration],
-            }
+            },
         ) as client:
             response = await client.post(
                 url,
