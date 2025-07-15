@@ -34,4 +34,4 @@ ENV TAVILY_API_KEY=${TAVILY_API_KEY:-""}
 # Authenticate with UiPath during build
 RUN uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --base-url="$BASE_URL"
 
-RUN uv run uipath run agent '{\"company_name\":\"uipath\"}'
+RUN uv run uipath run agent '{"company_name":"uipath"}'
