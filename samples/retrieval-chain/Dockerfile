@@ -34,18 +34,18 @@ RUN cat > /app/startup.sh << 'EOF'
 #!/bin/bash
 set -e
 
-echo "🚀 Starting UiPath Retrieval Chain..."
+echo "Starting UiPath Retrieval Chain..."
 
 # Re-authenticate in case token expired
-echo "🔐 Authenticating with UiPath..."
+echo "Authenticating with UiPath..."
 uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --base-url="$BASE_URL"
 
 # Check if arguments are provided
 if [ $# -eq 0 ]; then
-    echo "📄 Running retrieval chain with default parameters..."
+    echo "Running retrieval chain with default parameters..."
     exec uv run python main.py
 else
-    echo "📄 Running retrieval chain with parameters: $@"
+    echo  "Running retrieval chain with parameters: $@"
     exec uv run python main.py "$@"
 fi
 EOF
