@@ -7,24 +7,6 @@ on:
       - 'samples/retrieval-chain/**'
   pull_request:
     branches: [ main ]
-  workflow_dispatch:
-    inputs:
-      index_name:
-        description: 'Index name to query'
-        required: false
-        default: 'ECCN'
-      query:
-        description: 'Query to search for'
-        required: false
-        default: 'What is the ECCN for a laptop?'
-      k:
-        description: 'Number of results to return'
-        required: false
-        default: '3'
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/retrieval-chain
 
 jobs:
   test-retrieval-chain:
@@ -33,9 +15,6 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
-    # - name: Change to retrieval-chain directory
-    #   run: cd samples/retrieval-chain
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -68,59 +47,3 @@ jobs:
           -e BASE_URL="${{ secrets.UIPATH_BASE_URL }}" \
           retrieval-chain:test \
           /app/startup.sh --index_name "${{ github.event.inputs.index_name }}" --query "${{ github.event.inputs.query }}" --k ${{ github.event.inputs.k }}
-
-  build-and-push:
-    runs-on: ubuntu-latest
-    needs: test-retrieval-chain
-    if: github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-      packages: write
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Log in to Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-        tags: |
-          type=ref,event=branch
-          type=ref,event=pr
-          type=sha,prefix=sha-
-          type=raw,value=latest,enable={{is_default_branch}}
-    
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: ./samples/retrieval-chain
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        build-args: |
-          CLIENT_ID=${{ secrets.UIPATH_CLIENT_ID }}
-          CLIENT_SECRET=${{ secrets.UIPATH_CLIENT_SECRET }}
-          BASE_URL=${{ secrets.UIPATH_BASE_URL }}
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    if: github.ref == 'refs/heads/main'
-    environment: production
-    
-    steps:
-    - name: Deploy to production
-      run: |
-        echo "🚀 Deploying retrieval chain to production..."
-        echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-        echo "Add your deployment commands here"
-        # Example: Deploy to Azure Container Instances, AWS ECS, or Kubernetes
