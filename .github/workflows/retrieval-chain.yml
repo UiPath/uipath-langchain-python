@@ -1,10 +1,8 @@
-name: Retrieval Chain CI/CD
+name: Integration testing
 
 on:
   push:
     branches: [ main, develop ]
-    paths:
-      - 'samples/retrieval-chain/**'
   pull_request:
     branches: [ main ]
 

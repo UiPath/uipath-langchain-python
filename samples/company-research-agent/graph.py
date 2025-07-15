@@ -11,7 +11,7 @@ from uipath_langchain.chat import UiPathAzureChatOpenAI
 if os.getenv("TAVILY_API_KEY"):
     tool = TavilySearchResults(max_results=5)
 else:
-    tool = DuckDuckGoSearchResults(max_results=5)
+    tool = DuckDuckGoSearchResults()
 
 # Define system prompt
 system_prompt = """You are an advanced AI assistant specializing in corporate research and outreach strategy development. Your primary functions are:
