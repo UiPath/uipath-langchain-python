@@ -20,11 +20,13 @@ jobs:
     - name: Build Docker image
       run: |
         docker build -t retrieval-chain:test \
-          --build-arg CLIENT_ID="${{ secrets.UIPATH_CLIENT_ID }}" \
-          --build-arg CLIENT_SECRET="${{ secrets.UIPATH_CLIENT_SECRET }}" \
-          --build-arg BASE_URL="${{ secrets.UIPATH_BASE_URL }}" \
+          --build-arg CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
+          --build-arg CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
+          --build-arg BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
           .
       working-directory: ./samples/company-research-agent
+      # env:
+      #     ALPHA_BASE_URL: ${{ secrets.ALPHA_BASE_URL }}
     
     - name: Test retrieval chain with default parameters
       run: |
