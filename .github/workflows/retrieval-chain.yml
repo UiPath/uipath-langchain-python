@@ -7,8 +7,6 @@ on:
       - 'samples/retrieval-chain/**'
   pull_request:
     branches: [ main ]
-    paths:
-      - 'samples/retrieval-chain/**'
   workflow_dispatch:
     inputs:
       index_name:
