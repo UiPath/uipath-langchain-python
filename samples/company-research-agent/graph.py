@@ -1,11 +1,17 @@
+import os
 from langchain_anthropic import ChatAnthropic
 from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_community.tools import DuckDuckGoSearchResults
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
+from uipath_langchain.chat import UiPathAzureChatOpenAI
 
 # Set up the Tavily search tool
-tavily_tool = TavilySearchResults(max_results=5)
+if os.getenv("TAVILY_API_KEY"):
+    tool = TavilySearchResults(max_results=5)
+else:
+    tool = DuckDuckGoSearchResults(max_results=5)
 
 # Define system prompt
 system_prompt = """You are an advanced AI assistant specializing in corporate research and outreach strategy development. Your primary functions are:
@@ -29,10 +35,10 @@ Always maintain a professional and objective tone in your research and recommend
 
 DO NOT do any math as specified in your instructions.
 """
+llm = UiPathAzureChatOpenAI(model="gpt-4o-2024-08-06")
+# llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 
-llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
-
-research_agent = create_react_agent(llm, tools=[tavily_tool], prompt=system_prompt)
+research_agent = create_react_agent(llm, tools=[tool], prompt=system_prompt)
 
 
 class GraphState(BaseModel):
