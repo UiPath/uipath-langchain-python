@@ -1,0 +1,52 @@
+name: Test Retrieval Chain
+
+on:
+  workflow_dispatch:
+    inputs:
+      index_name:
+        description: 'Index name to query'
+        required: true
+        default: 'ECCN'
+      query:
+        description: 'Query to search for'
+        required: true
+        default: 'What is the ECCN for a laptop?'
+      k:
+        description: 'Number of results to return'
+        required: false
+        default: '3'
+
+jobs:
+  run-retrieval-chain:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Build and run retrieval chain
+      run: |
+        cd samples/retrieval-chain
+        
+        # Build the image
+        docker build -t retrieval-chain \
+          --build-arg CLIENT_ID="${{ secrets.UIPATH_CLIENT_ID }}" \
+          --build-arg CLIENT_SECRET="${{ secrets.UIPATH_CLIENT_SECRET }}" \
+          --build-arg BASE_URL="${{ secrets.UIPATH_BASE_URL }}" \
+          .
+        
+        # Run with parameters
+        docker run --rm \
+          -e CLIENT_ID="${{ secrets.UIPATH_CLIENT_ID }}" \
+          -e CLIENT_SECRET="${{ secrets.UIPATH_CLIENT_SECRET }}" \
+          -e BASE_URL="${{ secrets.UIPATH_BASE_URL }}" \
+          retrieval-chain \
+          /app/startup.sh --index_name "${{ github.event.inputs.index_name }}" --query "${{ github.event.inputs.query }}" --k ${{ github.event.inputs.k }}
+    
+    - name: Show completion
+      run: |
+        echo "✅ Retrieval chain completed successfully!"
+        echo "📊 Parameters used:"
+        echo "   - Index: ${{ github.event.inputs.index_name }}"
+        echo "   - Query: ${{ github.event.inputs.query }}"
+        echo "   - Results: ${{ github.event.inputs.k }}"
