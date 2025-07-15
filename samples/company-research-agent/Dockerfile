@@ -7,9 +7,12 @@ WORKDIR /app
 # COPY pyproject.toml uv.lock ./
 # COPY main.py ./
 # COPY README.md ./
-COPY ./ ./
+COPY . .
+
+# RUN uv pip install --system --all-extras
 # Install dependencies
 RUN uv sync
+
 
 # Create environment file from build args
 ARG CLIENT_ID
