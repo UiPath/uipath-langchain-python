@@ -4,10 +4,10 @@ FROM ghcr.io/astral-sh/uv:python3.12-alpine
 WORKDIR /app
 
 # Copy project files
-COPY pyproject.toml uv.lock ./
-COPY main.py ./
-COPY README.md ./
-
+# COPY pyproject.toml uv.lock ./
+# COPY main.py ./
+# COPY README.md ./
+COPY ./ ./
 # Install dependencies
 RUN uv sync
 
