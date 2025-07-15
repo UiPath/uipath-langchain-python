@@ -34,20 +34,20 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Change to retrieval-chain directory
-      run: cd samples/retrieval-chain
+    # - name: Change to retrieval-chain directory
+    #   run: cd samples/retrieval-chain
     
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     
     - name: Build Docker image
       run: |
-        cd samples/retrieval-chain
         docker build -t retrieval-chain:test \
           --build-arg CLIENT_ID="${{ secrets.UIPATH_CLIENT_ID }}" \
           --build-arg CLIENT_SECRET="${{ secrets.UIPATH_CLIENT_SECRET }}" \
           --build-arg BASE_URL="${{ secrets.UIPATH_BASE_URL }}" \
           .
+      working-directory: ./samples/retrieval-chain
     
     - name: Test retrieval chain with default parameters
       run: |
