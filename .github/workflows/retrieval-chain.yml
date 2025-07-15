@@ -24,7 +24,7 @@ jobs:
           --build-arg CLIENT_SECRET="${{ secrets.UIPATH_CLIENT_SECRET }}" \
           --build-arg BASE_URL="${{ secrets.UIPATH_BASE_URL }}" \
           .
-      working-directory: ./samples/retrieval-chain
+      working-directory: ./samples/company-research-agent
     
     - name: Test retrieval chain with default parameters
       run: |
