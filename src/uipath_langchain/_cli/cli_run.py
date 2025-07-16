@@ -34,6 +34,13 @@ def langgraph_run_middleware(
             context = LangGraphRuntimeContext.from_config(
                 env.get("UIPATH_CONFIG_PATH", "uipath.json")
             )
+            config_path = env.get("UIPATH_CONFIG_PATH", "uipath.json")
+            console.info(f"[DEBUG] Using config path: {config_path}")
+            console.info(f"[DEBUG] Entrypoint argument: {entrypoint}")
+            console.info(f"[DEBUG] Entrypoint absolute path: {os.path.abspath(entrypoint) if entrypoint else None}")
+            console.info(f"[DEBUG] Entrypoint exists: {os.path.exists(entrypoint) if entrypoint else None}")
+            console.info(f"[DEBUG] Input: {input}")
+            
             context.entrypoint = entrypoint
             context.input = input
             context.resume = resume
@@ -67,12 +74,14 @@ def langgraph_run_middleware(
         return MiddlewareResult(should_continue=False, error_message=None)
 
     except LangGraphRuntimeError as e:
+        console.info(f"[DEBUG][UiPathRuntimeError] {type(e).__name__}: {e}")
         return MiddlewareResult(
             should_continue=False,
             error_message=e.error_info.detail,
             should_include_stacktrace=True,
         )
     except Exception as e:
+        console.info(f"[DEBUG][Exception] {type(e).__name__}: {e}")
         return MiddlewareResult(
             should_continue=False,
             error_message=f"Error: {str(e)}",
