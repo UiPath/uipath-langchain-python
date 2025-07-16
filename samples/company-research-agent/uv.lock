@@ -454,8 +454,8 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.1" },
     { name = "tavily-python", specifier = ">=0.5.0" },
-    { name = "uipath", specifier = ">=2.0.72" },
-    { name = "uipath-langchain", specifier = "==0.0.113" },
+    { name = "uipath", specifier = ">=2.0.79" },
+    { name = "uipath-langchain", specifier = "==0.0.117" },
 ]
 provides-extras = ["dev"]
 
@@ -2400,6 +2400,15 @@ wheels = [
 ]
 
 [[package]]
+name = "truststore"
+version = "0.10.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/a7/b7a43228762966a13598a404f3dfb4803ea29a906f449d8b0e73ed0bcd30/truststore-0.10.1.tar.gz", hash = "sha256:eda021616b59021812e800fa0a071e51b266721bef3ce092db8a699e21c63539", size = 26101, upload-time = "2025-02-07T18:57:38.201Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bc/df/8ad635bdcfa8214c399e5614f7c2121dced47defb755a85ea1fa702ffb1c/truststore-0.10.1-py3-none-any.whl", hash = "sha256:b64e6025a409a43ebdd2807b0c41c8bff49ea7ae6550b5087ac6df6619352d4c", size = 18496, upload-time = "2025-02-07T18:57:36.348Z" },
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.13.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2435,7 +2444,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.0.72"
+version = "2.0.79"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-monitor-opentelemetry" },
@@ -2448,15 +2457,16 @@ dependencies = [
     { name = "rich" },
     { name = "tenacity" },
     { name = "tomli" },
+    { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/42/9a/fff069ea00a82780bee6eec97751b820b1c57d43b24686c0d9668aef77bb/uipath-2.0.72.tar.gz", hash = "sha256:737e726cb3138d958a3d8587208b10b553c9ae72c283a9df45081ead70e3b56b", size = 1844307, upload-time = "2025-06-30T09:35:29.903Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/6a/035e47643a9d2d6aaaf602365a14323a46121a98d2b93174401e7739b519/uipath-2.0.79.tar.gz", hash = "sha256:dd44957161fc928cf616f1467a2954c8fd951f39fc85354092af0ed264eea7ab", size = 1855249, upload-time = "2025-07-15T16:47:09.149Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b5/1a/fea20372e6787144ae4a299118b461a55bfeaa744ebdd9d77d5087d6cdf8/uipath-2.0.72-py3-none-any.whl", hash = "sha256:8dff0492cba42d5636c0c7565dfb7f5c729d0528fe3d969dae8241c3fac5c68a", size = 126548, upload-time = "2025-06-30T09:35:28.355Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/18/b2780cd2b34340380ff924b47cd0cc35d836ba31e068612c9a742dc89cba/uipath-2.0.79-py3-none-any.whl", hash = "sha256:e972bbd947680f8c73a1d492fd2b8243877cab51ac1a34ca7b0c92333eaf49e1", size = 133948, upload-time = "2025-07-15T16:47:07.677Z" },
 ]
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.113"
+version = "0.0.117"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -2471,9 +2481,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "uipath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/93/3b/815ca08ed8e2eb3ad5d30e13f32f52fcc3f7bfd5aaecf74fdbb55a21c674/uipath_langchain-0.0.113.tar.gz", hash = "sha256:0be22535ef6a5834670ef014684f0d91ecadb94de1b5677cfdc8a288c0ec33b5", size = 4772760, upload-time = "2025-06-25T14:37:06.207Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/91/00/115fda6ab15350242d630ec56596fa3e18e8b2fcd1883b188bb13cdbb33a/uipath_langchain-0.0.117.tar.gz", hash = "sha256:bbca387e7b92462b46172d2f8684c133e6c81e19075753e29002d945930276a3", size = 4814151, upload-time = "2025-07-16T07:57:01.317Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5d/f0/480eeeb6662b99ea44b1682cff9b8a8f069ffb9e56d8e9e1c24b0b6621fc/uipath_langchain-0.0.113-py3-none-any.whl", hash = "sha256:30c8c38f225ab4ac8e6351e8edb25ac35df394cd78da42fec9300fadfd5ec432", size = 42973, upload-time = "2025-06-25T14:37:04.807Z" },
+    { url = "https://files.pythonhosted.org/packages/17/67/14f0e3da5c0125c65e94a8128a9cf645b500c774f2214fbfe17e6c37ac1d/uipath_langchain-0.0.117-py3-none-any.whl", hash = "sha256:57ab9c986ea18f0d82078e694861f98bcddf68946ace6f0f41c68c3f0cd84132", size = 43155, upload-time = "2025-07-16T07:56:59.449Z" },
 ]
 
 [[package]]
