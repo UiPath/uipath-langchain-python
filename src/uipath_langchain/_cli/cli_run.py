@@ -1,3 +1,4 @@
+import os
 import asyncio
 from os import environ as env
 from typing import Optional
