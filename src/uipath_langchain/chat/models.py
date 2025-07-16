@@ -1,6 +1,5 @@
 import json
 import logging
-from os import environ as env
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from langchain_core.callbacks import (
@@ -84,15 +83,6 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
 
 class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
     """Custom LLM connector for LangChain integration with UiPath Normalized."""
-
-    def __init__(self, *args: Any, **kwargs: Any):
-        """Initialize the UiPath Azure Chat OpenAI model."""
-
-        super().__init__(*args, **kwargs)
-        self.default_headers = {
-            "X-UiPath-JobKey": env.get("UIPATH_JOB_KEY", ""),
-            "X-UiPath-ProcessKey": env.get("UIPATH_PROCESS_KEY", ""),
-        }
 
     def _create_chat_result(
         self,
@@ -267,7 +257,7 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
 
     @property
     def endpoint(self) -> str:
-        endpoint = EndpointManager.get_passthrough_endpoint()
+        endpoint = EndpointManager.get_normalized_endpoint()
         logger.debug("Using endpoint: %s", endpoint)
         return endpoint.format(
             model=self.model_name, api_version=self.openai_api_version
