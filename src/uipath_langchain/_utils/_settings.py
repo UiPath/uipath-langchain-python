@@ -1,6 +1,5 @@
 # mypy: disable-error-code="syntax"
 import os
-from enum import Enum
 from typing import Any, Optional
 
 import httpx
@@ -45,14 +44,6 @@ class UiPathClientSettings(BaseSettings):
     timeout_seconds: str = Field(default="120", alias="UIPATH_TIMEOUT_SECONDS")
     action_name: str = Field(default="DefaultActionName", alias="UIPATH_ACTION_NAME")
     action_id: str = Field(default="DefaultActionId", alias="UIPATH_ACTION_ID")
-
-
-class UiPathEndpoints(Enum):
-    NORMALIZED_COMPLETION_ENDPOINT = "llmgateway_/api/chat/completions"
-    PASSTHROUGH_COMPLETION_ENDPOINT = "llmgateway_/openai/deployments/{model}/chat/completions?api-version={api_version}"
-    EMBEDDING_ENDPOINT = (
-        "llmgateway_/openai/deployments/{model}/embeddings?api-version={api_version}"
-    )
 
 
 def get_uipath_token_header(

@@ -5,9 +5,9 @@ import httpx
 from langchain_community.callbacks.manager import openai_callback_var
 from langchain_openai.embeddings import AzureOpenAIEmbeddings, OpenAIEmbeddings
 from pydantic import Field
+from uipath.utils import EndpointManager
 
 from uipath_langchain._utils._request_mixin import UiPathRequestMixin
-from uipath_langchain._utils._settings import UiPathEndpoints
 
 
 class UiPathAzureOpenAIEmbeddings(UiPathRequestMixin, AzureOpenAIEmbeddings):
@@ -43,7 +43,8 @@ class UiPathAzureOpenAIEmbeddings(UiPathRequestMixin, AzureOpenAIEmbeddings):
 
     @property
     def endpoint(self) -> str:
-        return UiPathEndpoints.EMBEDDING_ENDPOINT.value.format(
+        endpoint = EndpointManager.get_embeddings_endpoint()
+        return endpoint.format(
             model=self.model_name, api_version=self.openai_api_version
         )
 
@@ -105,6 +106,7 @@ class UiPathOpenAIEmbeddings(UiPathRequestMixin, OpenAIEmbeddings):
 
     @property
     def endpoint(self) -> str:
-        return UiPathEndpoints.EMBEDDING_ENDPOINT.value.format(
+        endpoint = EndpointManager.get_embeddings_endpoint()
+        return endpoint.format(
             model=self.model_name, api_version=self.openai_api_version
         )
