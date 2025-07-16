@@ -9,10 +9,11 @@ dependencies = [
     "langgraph>=0.2.55",
     "langchain-anthropic>=0.3.8",
     "tavily-python>=0.5.0",
-    "uipath-langchain==0.0.117",
     "uipath>=2.0.79",
+    "uipath-langchain==0.0.116",
     "duckduckgo-search>=8.1.1",
     "langchain-community>=0.3.21",
+    "debugpy>=1.8.15",
 ]
 
 [project.optional-dependencies]
@@ -45,3 +46,9 @@ lint.ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "UP"]
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
