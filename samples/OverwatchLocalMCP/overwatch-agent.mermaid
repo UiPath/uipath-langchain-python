@@ -1,0 +1,18 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	prepare_input(prepare_input)
+	execute_agent(execute_agent)
+	return_result(return_result)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> prepare_input;
+	execute_agent --> return_result;
+	prepare_input --> execute_agent;
+	return_result --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

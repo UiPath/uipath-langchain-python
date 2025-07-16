@@ -1,0 +1,9 @@
+{
+    "dependencies": [
+        "."
+    ],
+    "graphs": {
+        "overwatch-agent": "./src/overwatch-local-mcp/graph.py:graph"
+    },
+    "env": ".env"
+}
