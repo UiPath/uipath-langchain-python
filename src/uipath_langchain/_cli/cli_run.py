@@ -10,10 +10,11 @@ from ._runtime._context import LangGraphRuntimeContext
 from ._runtime._exception import LangGraphRuntimeError
 from ._runtime._runtime import LangGraphRuntime
 from ._utils._graph import LangGraphConfig
+from uipath._cli._utils._console import ConsoleLogger
 
 load_dotenv()
 
-
+console = ConsoleLogger()
 def langgraph_run_middleware(
     entrypoint: Optional[str], input: Optional[str], resume: bool
 ) -> MiddlewareResult:
