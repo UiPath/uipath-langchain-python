@@ -66,7 +66,7 @@ packages = ["src/uipath_langchain"]
 [tool.ruff]
 line-length = 88
 indent-width = 4
-exclude = ["samples/**"]
+exclude = ["samples/**", "testcases/**"]
 
 [tool.ruff.lint]
 select = ["E", "F", "B", "I"]
@@ -85,7 +85,8 @@ plugins = [
   "pydantic.mypy"
 ]
 exclude = [
-    "samples/.*"
+    "samples/.*",
+    "testcases/.*"
 ]
 
 follow_imports = "silent"

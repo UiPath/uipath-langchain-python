@@ -1,0 +1,49 @@
+name: Integration testing
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    strategy:
+      matrix:
+        include:
+          - build-dir: company-research-agent
+            context: ./testcases/company-research-agent
+            agent-input: '{"company_name":"uipath"}'
+          - build-dir: simple-local-mcp
+            context: ./testcases/simple-local-mcp
+            agent-input: '{"messages": [{"type": "human", "content": "What is 2+2"}]}'
+          - build-dir: ticket-classification
+            context: ./testcases/ticket-classification
+            agent-input: '{"message": "GET Assets API does not enforce proper permissions Assets.View", "ticket_id": "TICKET-2345"}'
+            has-human-loop: "true"
+          - build-dir: multi-agent-supervisor-researcher-coder
+            context: ./testcases/multi-agent-supervisor-researcher-coder
+            agent-input: '{"question": "First, please state the Pythagorean theorem. Give only the formula, using variables a, b, and c. Then apply this formula to calculate the value when a=2 and b=3."}'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image (${{ matrix.build-dir }})
+      run: |
+        docker build -f Dockerfile \
+          -t ${{ matrix.build-dir }}:test \
+          --build-arg CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
+          --build-arg CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
+          --build-arg BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
+          --build-arg AGENT_INPUT='${{ matrix.agent-input }}' \
+          ${{ matrix.has-human-loop == 'true' && '--build-arg SKIP_HUMAN_APPROVAL=false --build-arg USE_REGULAR_INTERRUPT=true' || '' }} \
+          ${{ matrix.context }}
