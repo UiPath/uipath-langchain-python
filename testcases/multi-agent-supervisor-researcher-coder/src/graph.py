@@ -151,7 +151,7 @@ def create_research_agent():
     """Create the research agent with search capabilities."""
     llm = create_llm()
     search_tool = get_search_tool()
-    return create_react_agent(
+    agent = create_react_agent(
         llm, 
         tools=[search_tool], 
         prompt="""You are a researcher. Your job is to gather information and provide comprehensive answers to questions.
@@ -163,6 +163,7 @@ Rules:
 - Once you've gathered sufficient information to answer the question, provide your findings
 - Be thorough but concise in your responses"""
     )
+    return agent.with_config({"recursion_limit": RECURSION_LIMIT})
 
 
 async def research_node(state: State) -> Command[Literal["supervisor"]]:
@@ -185,7 +186,7 @@ def create_code_agent():
     WARNING: This performs arbitrary code execution, which can be unsafe when not sandboxed.
     """
     llm = create_llm()
-    return create_react_agent(
+    agent = create_react_agent(
         llm, 
         tools=[python_repl_tool],
         prompt="""You are a coder. Your job is to write and execute Python code to solve problems, perform calculations, and generate visualizations.
@@ -197,6 +198,7 @@ Rules:
 - If you need data that should be researched first, let the supervisor know
 - Provide explanations of your code and results"""
     )
+    return agent.with_config({"recursion_limit": RECURSION_LIMIT})
 
 
 async def code_node(state: State) -> Command[Literal["supervisor"]]:

@@ -463,7 +463,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.1" },
     { name = "tavily-python", specifier = ">=0.5.0" },
     { name = "uipath", specifier = ">=2.0.79" },
-    { name = "uipath-langchain", specifier = ">=0.0.117" },
+    { name = "uipath-langchain", editable = "../../" },
 ]
 provides-extras = ["dev"]
 
@@ -2650,8 +2650,8 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.117"
-source = { registry = "https://pypi.org/simple" }
+version = "0.0.118"
+source = { editable = "../../" }
 dependencies = [
     { name = "httpx" },
     { name = "langchain" },
@@ -2665,9 +2665,35 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "uipath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/91/00/115fda6ab15350242d630ec56596fa3e18e8b2fcd1883b188bb13cdbb33a/uipath_langchain-0.0.117.tar.gz", hash = "sha256:bbca387e7b92462b46172d2f8684c133e6c81e19075753e29002d945930276a3", size = 4814151, upload-time = "2025-07-16T07:57:01.317Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/17/67/14f0e3da5c0125c65e94a8128a9cf645b500c774f2214fbfe17e6c37ac1d/uipath_langchain-0.0.117-py3-none-any.whl", hash = "sha256:57ab9c986ea18f0d82078e694861f98bcddf68946ace6f0f41c68c3f0cd84132", size = 43155, upload-time = "2025-07-16T07:56:59.449Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27.0" },
+    { name = "langchain", specifier = ">=0.3.4" },
+    { name = "langchain-community", specifier = ">=0.3.21" },
+    { name = "langchain-core", specifier = ">=0.3.34" },
+    { name = "langchain-openai", specifier = ">=0.3.3" },
+    { name = "langgraph", specifier = ">=0.2.70" },
+    { name = "langgraph-checkpoint-sqlite", specifier = ">=2.0.3" },
+    { name = "openai", specifier = ">=1.65.5" },
+    { name = "pydantic-settings", specifier = ">=2.6.0" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "uipath", specifier = ">=2.0.79,<2.1.0" },
+    { name = "uipath-langchain", marker = "extra == 'langchain'", specifier = ">=0.0.2" },
+]
+provides-extras = ["langchain"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.14.1" },
+    { name = "numpy", specifier = ">=1.24.0" },
+    { name = "pre-commit", specifier = ">=4.1.0" },
+    { name = "pytest", specifier = ">=7.4.0" },
+    { name = "pytest-asyncio", specifier = ">=1.0.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "pytest-httpx", specifier = ">=0.35.0" },
+    { name = "pytest-mock", specifier = ">=3.11.1" },
+    { name = "ruff", specifier = ">=0.9.4" },
 ]
 
 [[package]]
