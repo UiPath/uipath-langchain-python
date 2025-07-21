@@ -171,23 +171,17 @@ async def wait_for_human(state: GraphState) -> Command:
     confidence = state["confidence"]
     is_resume = state.get("human_approval") is not None
     
-    # Handle different approval modes
-    if get_environment_flag("SKIP_HUMAN_APPROVAL"):
-        if not is_resume:
-            logger.info("Skipping human approval")
-        action_data = {"Answer": True}
-        human_approved = True
-        
-    elif get_environment_flag("USE_REGULAR_INTERRUPT"):
-        if not is_resume:
-            logger.info("Waiting for human approval via regular interrupt")
-        interrupt_message = (
-            "Please review the classification of the ticket, then use "
-            "`uipath run agent '{\"Answer\": true}' --resume` to continue."
-        )
-        action_data = interrupt(interrupt_message)
-        human_approved = bool(action_data)
-        
+    
+    
+    if not is_resume:
+        logger.info("Waiting for human approval via regular interrupt")
+    interrupt_message = (
+        "Please review the classification of the ticket, then use "
+        "`uipath run agent '{\"Answer\": true}' --resume` to continue."
+    )
+    action_data = interrupt(interrupt_message)
+    human_approved = bool(action_data)
+   
     return Command(
         update={
             "human_approval": human_approved,
