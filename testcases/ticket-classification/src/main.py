@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from uipath import UiPath
 from uipath.models import CreateAction
-from uipath_langchain.chat import UiPathAzureChatOpenAI
+from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
 
 # Configuration
 logger = logging.getLogger(__name__)
@@ -115,8 +115,11 @@ def decide_next_node(state: GraphState) -> NextNode:
 
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    llm = UiPathAzureChatOpenAI(model=DEFAULT_MODEL)
-    
+    if os.getenv("USE_AZURE_CHAT", "false").lower() == "true":
+        llm = UiPathAzureChatOpenAI(model=DEFAULT_MODEL)
+    else:
+        llm = UiPathChat(model=DEFAULT_MODEL)
+
     # Add rejection message if there was a previous prediction
     if state.get("last_predicted_category"):
         predicted_category = state["last_predicted_category"]
@@ -125,16 +128,16 @@ async def classify(state: GraphState) -> Command:
             "Choose another one."
         )
         state["messages"].append(HumanMessage(content=rejection_message))
-    
+
     chain = llm | output_parser
-    
+
     try:
         result = await chain.ainvoke(state["messages"])
         logger.info(
             f"Ticket classified with label: {result.label}, "
             f"confidence score: {result.confidence}"
         )
-        
+
         return Command(
             update={
                 "confidence": result.confidence,

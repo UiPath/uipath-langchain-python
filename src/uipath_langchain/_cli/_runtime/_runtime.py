@@ -13,6 +13,7 @@ from langgraph.graph.state import CompiledStateGraph
 from uipath._cli._runtime._contracts import (
     UiPathBaseRuntime,
     UiPathErrorCategory,
+    UiPathRuntimeError,
     UiPathRuntimeResult,
 )
 
@@ -99,7 +100,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
                     graph_config["recursion_limit"] = int(recursion_limit)
                 if max_concurrency is not None:
                     graph_config["max_concurrency"] = int(max_concurrency)
-
+                
                 # Stream the output at debug time
                 if self.context.job_id is None:
                     # Get final chunk while streaming
@@ -112,7 +113,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
                     ):
                         self._pretty_print(stream_chunk)
                         final_chunk = stream_chunk
-
+                        
                     self.context.output = self._extract_graph_result(final_chunk, graph)
                 else:
                     # Execute the graph normally at runtime
@@ -134,6 +135,8 @@ class LangGraphRuntime(UiPathBaseRuntime):
 
         except Exception as e:
             if isinstance(e, LangGraphRuntimeError):
+                raise
+            if isinstance(e, UiPathRuntimeError):
                 raise
 
             detail = f"Error: {str(e)}"
