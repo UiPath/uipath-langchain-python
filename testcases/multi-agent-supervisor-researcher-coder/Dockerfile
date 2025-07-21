@@ -11,6 +11,7 @@ RUN uv sync
 ARG CLIENT_ID
 ARG CLIENT_SECRET
 ARG BASE_URL
+ARG USE_AZURE_CHAT
 
 RUN if [ -z "$CLIENT_ID" ]; then echo "CLIENT_ID build arg is required" && exit 1; fi
 RUN if [ -z "$CLIENT_SECRET" ]; then echo "CLIENT_SECRET build arg is required" && exit 1; fi
@@ -23,6 +24,7 @@ ENV BASE_URL=$BASE_URL
 ENV TAVILY_API_KEY=${TAVILY_API_KEY:-""}
 ENV UIPATH_TENANT_ID=${UIPATH_TENANT_ID:-""}
 ENV UIPATH_JOB_KEY=3a03d5cb-fa21-4021-894d-a8e2eda0afe0
+ENV USE_AZURE_CHAT=$USE_AZURE_CHAT
 
 # Authenticate with UiPath during build
 RUN uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --base-url="$BASE_URL"
