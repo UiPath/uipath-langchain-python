@@ -974,6 +974,674 @@ async def get_incidents_by_instance_id(
         raise ValueError(f"Error getting incidents for instance: {str(e)}")
 
 @mcp.tool()
+async def get_spans_by_process_key(
+    process_key: str,
+    max_instances: int = 3,  # Reduced default to prevent timeouts
+    *,
+    headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """Get raw spans for multiple UiPath process instances from the same process key.
+
+    This tool retrieves execution spans from multiple instances of the same process and returns them as a simple list.
+    Each span includes the instance ID and process key for context.
+
+    Args:
+        process_key: Process key to get instances for
+        max_instances: Maximum number of instances to retrieve spans for (default: 10)
+        headers: Request headers (automatically provided by MCP when published)
+
+    Returns:
+        Dictionary containing:
+        - status: Success/error status
+        - message: Description of the operation
+        - processKey: The process key that was queried
+        - instanceCount: Number of instances processed
+        - totalSpansCount: Total number of spans retrieved
+        - maxInstancesRequested: Maximum instances requested
+        - data.spans: List of all raw spans with instanceId and processKey added to each span
+    """
+    config.validate()
+    
+    # Use the existing get_all_instances function
+    instances_result = await get_all_instances(
+        process_key=process_key,
+        headers=headers
+    )
+    
+    if instances_result.get("status") != "success":
+        return {
+            "status": "error",
+            "message": f"Failed to get instances for process key {process_key}",
+            "error": instances_result.get("message", "Unknown error")
+        }
+
+    instances_data = instances_result.get("data", {})
+    instances = instances_data.get("instances", [])
+    
+    # Debug: Print instance information
+    print(f"=== DEBUG: get_spans_by_process_key ===")
+    print(f"Process Key: {process_key}")
+    print(f"Max Instances Requested: {max_instances}")
+    print(f"Total Instances Found: {len(instances)}")
+    
+    if instances:
+        print(f"Instance IDs found:")
+        for i, instance in enumerate(instances[:max_instances]):
+            # Try both "id" and "instanceId" fields
+            instance_id = instance.get("id") or instance.get("instanceId", "NO_ID")
+            status = instance.get("status", "UNKNOWN")
+            latest_run_status = instance.get("latestRunStatus", "UNKNOWN")
+            print(f"  {i+1}. Instance ID: {instance_id} (Status: {status}, Latest Run: {latest_run_status})")
+    else:
+        print("No instances found for this process key")
+    print("=== END DEBUG ===")
+    
+    if not instances:
+        return {
+            "status": "success",
+            "message": f"No instances found for process key {process_key}",
+            "processKey": process_key,
+            "instanceCount": 0,
+            "totalSpansCount": 0,
+            "data": {
+                "instances": [],
+                "combinedSpans": [],
+                "spanAnalysis": {
+                    "spanTypes": {},
+                    "statusDistribution": {},
+                    "operationTypes": {}
+                }
+            }
+        }
+
+    # Get spans for each instance
+    all_spans = []
+    
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for i, instance in enumerate(instances[:max_instances]):  # Limit to max_instances
+            print(f"  Processing instance {i+1}/{min(len(instances), max_instances)}...")
+            # Try both "id" and "instanceId" fields
+            instance_id = instance.get("id") or instance.get("instanceId")
+            if not instance_id:
+                print(f"  Skipping instance {i+1}: No instance ID found (tried 'id' and 'instanceId')")
+                print(f"    Available fields: {list(instance.keys())}")
+                continue
+            
+            print(f"  Processing instance {i+1}/{min(len(instances), max_instances)}: {instance_id}")
+            
+            # Get spans for this instance
+            spans_url = f"{config.pims_url}/v1/spans/{instance_id}"
+            print(f"    Requesting spans from: {spans_url}")
+            
+            try:
+                spans_response = await client.get(
+                    spans_url,
+                    headers=get_auth_headers(None, "", headers, content_type=False),
+                    timeout=15.0  # Reduced timeout
+                )
+            except Exception as e:
+                print(f"    Error getting spans for instance {instance_id}: {str(e)}")
+                continue
+            
+            instance_spans = []
+            print(f"    Response status: {spans_response.status_code}")
+            
+            if spans_response.status_code == 200:
+                try:
+                    spans_data = spans_response.json()
+                    if isinstance(spans_data, list):
+                        instance_spans = spans_data
+                        print(f"    Successfully retrieved {len(instance_spans)} spans")
+                        
+                        # Add instance context to each span
+                        for span in instance_spans:
+                            span["instanceId"] = instance_id
+                            span["processKey"] = process_key
+                        
+                        all_spans.extend(instance_spans)
+                    else:
+                        instance_spans = {"raw_response": spans_response.text}
+                        print(f"    Unexpected response format: {type(spans_data)}")
+                except Exception as e:
+                    instance_spans = {"raw_response": spans_response.text}
+                    print(f"    Error parsing response: {str(e)}")
+            else:
+                print(f"    Failed to get spans: HTTP {spans_response.status_code}")
+                print(f"    Response text: {spans_response.text[:200]}...")
+            
+            # Add instance context to each span and collect all spans
+            if isinstance(instance_spans, list):
+                for span in instance_spans:
+                    span["instanceId"] = instance_id
+                    span["processKey"] = process_key
+                all_spans.extend(instance_spans)
+
+    return {
+        "status": "success",
+        "message": f"Successfully retrieved spans for {len(instances[:max_instances])} instances of process key {process_key}",
+        "processKey": process_key,
+        "instanceCount": len(instances[:max_instances]),
+        "totalSpansCount": len(all_spans),
+        "maxInstancesRequested": max_instances,
+        "data": {
+            "spans": all_spans
+        }
+    }
+
+
+def organize_spans_hierarchically(spans: list) -> dict:
+    """Organize spans into a hierarchical structure based on parent-child relationships."""
+    if not spans:
+        return {}
+    
+    # Create a map of spans by ID
+    spans_by_id = {span["id"]: span for span in spans}
+    
+    # Find root spans (no parent or parent not in the list)
+    root_spans = []
+    child_spans = {}
+    
+    for span in spans:
+        parent_id = span.get("parentId")
+        if not parent_id or parent_id not in spans_by_id:
+            root_spans.append(span)
+        else:
+            if parent_id not in child_spans:
+                child_spans[parent_id] = []
+            child_spans[parent_id].append(span)
+    
+    # Build hierarchical structure
+    def build_tree(span):
+        span_id = span["id"]
+        children = child_spans.get(span_id, [])
+        return {
+            "span": span,
+            "children": [build_tree(child) for child in children]
+        }
+    
+    return {
+        "rootSpans": [build_tree(span) for span in root_spans],
+        "spanTypes": categorize_spans_by_type(spans),
+        "timeline": create_timeline(spans)
+    }
+
+
+def categorize_spans_by_type(spans: list) -> dict:
+    """Categorize spans by their type."""
+    categories = {}
+    for span in spans:
+        span_type = span.get("spanType", "Unknown")
+        if span_type not in categories:
+            categories[span_type] = []
+        categories[span_type].append(span)
+    return categories
+
+
+def create_timeline(spans: list) -> list:
+    """Create a chronological timeline of spans."""
+    timeline_spans = []
+    for span in spans:
+        timeline_spans.append({
+            "id": span["id"],
+            "name": span["name"],
+            "startTime": span.get("startTime"),
+            "endTime": span.get("endTime"),
+            "spanType": span.get("spanType"),
+            "status": span.get("status"),
+            "attributes": span.get("attributes", {})
+        })
+    
+    # Sort by start time
+    timeline_spans.sort(key=lambda x: x.get("startTime", ""))
+    return timeline_spans
+
+
+def create_span_summary(spans: list) -> dict:
+    """Create a comprehensive summary of spans for an instance.
+    
+    Args:
+        spans: List of span objects from UiPath PIMS API
+        
+    Returns:
+        Dictionary containing detailed span analysis and metrics
+    """
+    if not spans:
+        return {}
+    
+    summary = {
+        # Basic counts
+        "totalSpans": len(spans),
+        "spanTypes": {},
+        "statusCounts": {},
+        
+        # Timing and performance
+        "duration": None,
+        "executionMetrics": {
+            "totalExecutionTime": None,
+            "averageSpanDuration": None,
+            "longestSpan": None,
+            "shortestSpan": None
+        },
+        
+        # Process health indicators
+        "healthIndicators": {
+            "hasFailures": False,
+            "hasRetries": False,
+            "hasActionCenterTasks": False,
+            "hasSystemErrors": False,
+            "hasUserInteractions": False,
+            "failureRate": 0.0
+        },
+        
+        # Business logic insights
+        "businessMetrics": {
+            "userInteractions": [],
+            "externalSystemCalls": [],
+            "dataProcessingSteps": [],
+            "decisionPoints": []
+        },
+        
+        # Error analysis
+        "errorAnalysis": {
+            "failedElements": [],
+            "errorTypes": {},
+            "retryAttempts": [],
+            "systemErrors": []
+        },
+        
+        # Performance bottlenecks
+        "performanceBottlenecks": {
+            "slowestElements": [],
+            "longestOperations": [],
+            "resourceIntensiveSpans": []
+        },
+        
+        # Process flow analysis
+        "flowAnalysis": {
+            "startElements": [],
+            "endElements": [],
+            "decisionBranches": [],
+            "parallelExecutions": []
+        }
+    }
+    
+    # Find start and end times
+    start_times = [span.get("startTime") for span in spans if span.get("startTime")]
+    end_times = [span.get("endTime") for span in spans if span.get("endTime")]
+    
+    if start_times and end_times:
+        earliest_start = min(start_times)
+        latest_end = max(end_times)
+        summary["duration"] = {
+            "start": earliest_start,
+            "end": latest_end
+        }
+    
+    # Analyze spans for detailed insights
+    span_durations = []
+    failed_spans = []
+    
+    for span in spans:
+        # Basic counting
+        span_type = span.get("spanType", "Unknown")
+        summary["spanTypes"][span_type] = summary["spanTypes"].get(span_type, 0) + 1
+        
+        status = span.get("status")
+        if status is not None:
+            status_key = str(status)
+            summary["statusCounts"][status_key] = summary["statusCounts"].get(status_key, 0) + 1
+        
+        # Calculate span duration
+        start_time = span.get("startTime")
+        end_time = span.get("endTime")
+        if start_time and end_time:
+            try:
+                from datetime import datetime
+                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                duration_seconds = (end_dt - start_dt).total_seconds()
+                span_durations.append(duration_seconds)
+                
+                # Track longest operations
+                if duration_seconds > 5:  # Spans longer than 5 seconds
+                    summary["performanceBottlenecks"]["longestOperations"].append({
+                        "spanId": span.get("id"),
+                        "name": span.get("name"),
+                        "duration": duration_seconds,
+                        "spanType": span_type,
+                        "elementId": span.get("attributes", {}).get("elementId")
+                    })
+            except Exception:
+                pass
+        
+        # Analyze attributes for business insights
+        attributes = span.get("attributes", {})
+        
+        # Check for failures
+        if span.get("status") == 2:  # Failed status
+            summary["healthIndicators"]["hasFailures"] = True
+            failed_spans.append({
+                "spanId": span.get("id"),
+                "name": span.get("name"),
+                "elementId": attributes.get("elementId"),
+                "spanType": span_type,
+                "timestamp": start_time
+            })
+            
+            # Categorize failures
+            error_type = attributes.get("errorType", "Unknown")
+            summary["errorAnalysis"]["errorTypes"][error_type] = summary["errorAnalysis"]["errorTypes"].get(error_type, 0) + 1
+        
+        # Check for retries
+        if attributes.get("operationType") == "Retry":
+            summary["healthIndicators"]["hasRetries"] = True
+            summary["errorAnalysis"]["retryAttempts"].append({
+                "spanId": span.get("id"),
+                "timestamp": start_time,
+                "comment": attributes.get("comment", ""),
+                "elementId": attributes.get("elementId")
+            })
+        
+        # Check for Action Center tasks
+        if attributes.get("actionCenterTaskLink"):
+            summary["healthIndicators"]["hasActionCenterTasks"] = True
+            summary["businessMetrics"]["userInteractions"].append({
+                "spanId": span.get("id"),
+                "taskLink": attributes.get("actionCenterTaskLink"),
+                "timestamp": start_time,
+                "elementId": attributes.get("elementId")
+            })
+        
+        # Check for system errors
+        if attributes.get("errorType") == "System":
+            summary["healthIndicators"]["hasSystemErrors"] = True
+            summary["errorAnalysis"]["systemErrors"].append({
+                "spanId": span.get("id"),
+                "name": span.get("name"),
+                "timestamp": start_time,
+                "elementId": attributes.get("elementId")
+            })
+        
+        # Check for user interactions
+        if attributes.get("userInteraction") or attributes.get("actionCenterTaskLink"):
+            summary["healthIndicators"]["hasUserInteractions"] = True
+        
+        # Track external system calls
+        if attributes.get("externalSystemCall") or "http" in span.get("name", "").lower():
+            summary["businessMetrics"]["externalSystemCalls"].append({
+                "spanId": span.get("id"),
+                "name": span.get("name"),
+                "timestamp": start_time,
+                "elementId": attributes.get("elementId")
+            })
+        
+        # Track data processing steps
+        if "data" in span.get("name", "").lower() or "process" in span.get("name", "").lower():
+            summary["businessMetrics"]["dataProcessingSteps"].append({
+                "spanId": span.get("id"),
+                "name": span.get("name"),
+                "timestamp": start_time,
+                "elementId": attributes.get("elementId")
+            })
+        
+        # Track decision points
+        if "decision" in span.get("name", "").lower() or "if" in span.get("name", "").lower():
+            summary["businessMetrics"]["decisionPoints"].append({
+                "spanId": span.get("id"),
+                "name": span.get("name"),
+                "timestamp": start_time,
+                "elementId": attributes.get("elementId")
+            })
+        
+        # Track start/end elements
+        if "start" in span.get("name", "").lower():
+            summary["flowAnalysis"]["startElements"].append({
+                "spanId": span.get("id"),
+                "name": span.get("name"),
+                "timestamp": start_time
+            })
+        
+        if "end" in span.get("name", "").lower():
+            summary["flowAnalysis"]["endElements"].append({
+                "spanId": span.get("id"),
+                "name": span.get("name"),
+                "timestamp": start_time
+            })
+    
+    # Calculate execution metrics
+    if span_durations:
+        summary["executionMetrics"]["totalExecutionTime"] = sum(span_durations)
+        summary["executionMetrics"]["averageSpanDuration"] = sum(span_durations) / len(span_durations)
+        summary["executionMetrics"]["longestSpan"] = max(span_durations)
+        summary["executionMetrics"]["shortestSpan"] = min(span_durations)
+    
+    # Calculate failure rate
+    if summary["totalSpans"] > 0:
+        summary["healthIndicators"]["failureRate"] = len(failed_spans) / summary["totalSpans"]
+    
+    # Sort performance bottlenecks by duration
+    summary["performanceBottlenecks"]["longestOperations"].sort(key=lambda x: x["duration"], reverse=True)
+    summary["performanceBottlenecks"]["longestOperations"] = summary["performanceBottlenecks"]["longestOperations"][:5]  # Top 5
+    
+    # Add failed elements to error analysis
+    summary["errorAnalysis"]["failedElements"] = failed_spans
+    
+    return summary
+
+
+def analyze_spans_for_patterns(spans: list, analysis: dict, instance_id: str):
+    """Analyze spans for common patterns and failures across instances.
+    
+    Args:
+        spans: List of span objects from UiPath PIMS API
+        analysis: Dictionary to accumulate analysis across instances
+        instance_id: ID of the current instance being analyzed
+    """
+    # Initialize analysis structure if not present
+    if "spanTypes" not in analysis:
+        analysis["spanTypes"] = {}
+    if "statusDistribution" not in analysis:
+        analysis["statusDistribution"] = {}
+    if "operationTypes" not in analysis:
+        analysis["operationTypes"] = {}
+    if "elementFailures" not in analysis:
+        analysis["elementFailures"] = []
+    if "retryPatterns" not in analysis:
+        analysis["retryPatterns"] = []
+    if "performancePatterns" not in analysis:
+        analysis["performancePatterns"] = {
+            "slowElements": {},
+            "commonBottlenecks": [],
+            "executionTimes": []
+        }
+    if "businessPatterns" not in analysis:
+        analysis["businessPatterns"] = {
+            "userInteractionPoints": [],
+            "externalSystemDependencies": [],
+            "dataProcessingSteps": [],
+            "decisionPoints": []
+        }
+    if "errorPatterns" not in analysis:
+        analysis["errorPatterns"] = {
+            "commonErrorTypes": {},
+            "failureHotspots": {},
+            "systemErrorFrequency": 0
+        }
+    
+    instance_analysis = {
+        "instanceId": instance_id,
+        "totalSpans": len(spans),
+        "executionTime": None,
+        "failureCount": 0,
+        "retryCount": 0,
+        "userInteractions": 0,
+        "externalCalls": 0
+    }
+    
+    # Calculate instance execution time
+    start_times = [span.get("startTime") for span in spans if span.get("startTime")]
+    end_times = [span.get("endTime") for span in spans if span.get("endTime")]
+    
+    if start_times and end_times:
+        try:
+            from datetime import datetime
+            earliest_start = min(start_times)
+            latest_end = max(end_times)
+            start_dt = datetime.fromisoformat(earliest_start.replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(latest_end.replace('Z', '+00:00'))
+            instance_analysis["executionTime"] = (end_dt - start_dt).total_seconds()
+            analysis["performancePatterns"]["executionTimes"].append(instance_analysis["executionTime"])
+        except Exception:
+            pass
+    
+    for span in spans:
+        # Basic counting
+        span_type = span.get("spanType", "Unknown")
+        analysis["spanTypes"][span_type] = analysis["spanTypes"].get(span_type, 0) + 1
+        
+        status = span.get("status")
+        if status is not None:
+            status_key = str(status)
+            analysis["statusDistribution"][status_key] = analysis["statusDistribution"].get(status_key, 0) + 1
+        
+        # Track operation types
+        attributes = span.get("attributes", {})
+        operation_type = attributes.get("operationType")
+        if operation_type:
+            analysis["operationTypes"][operation_type] = analysis["operationTypes"].get(operation_type, 0) + 1
+        
+        # Track element failures with more context
+        if span.get("status") == 2:  # Failed
+            instance_analysis["failureCount"] += 1
+            element_id = attributes.get("elementId")
+            element_name = span.get("name")
+            
+            if element_id:
+                # Track failure hotspots
+                failure_key = f"{element_id}:{element_name}"
+                analysis["errorPatterns"]["failureHotspots"][failure_key] = analysis["errorPatterns"]["failureHotspots"].get(failure_key, 0) + 1
+                
+                analysis["elementFailures"].append({
+                    "instanceId": instance_id,
+                    "elementId": element_id,
+                    "elementName": element_name,
+                    "spanType": span_type,
+                    "errorType": attributes.get("errorType", "Unknown"),
+                    "timestamp": span.get("startTime")
+                })
+        
+        # Track retry patterns with more detail
+        if attributes.get("operationType") == "Retry":
+            instance_analysis["retryCount"] += 1
+            analysis["retryPatterns"].append({
+                "instanceId": instance_id,
+                "timestamp": span.get("startTime"),
+                "comment": attributes.get("comment", ""),
+                "elementId": attributes.get("elementId"),
+                "elementName": span.get("name"),
+                "retryCount": attributes.get("retryCount", 1)
+            })
+        
+        # Track performance patterns
+        start_time = span.get("startTime")
+        end_time = span.get("endTime")
+        if start_time and end_time:
+            try:
+                from datetime import datetime
+                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                duration = (end_dt - start_dt).total_seconds()
+                
+                # Track slow elements
+                element_id = attributes.get("elementId")
+                if element_id and duration > 2:  # Elements taking more than 2 seconds
+                    if element_id not in analysis["performancePatterns"]["slowElements"]:
+                        analysis["performancePatterns"]["slowElements"][element_id] = {
+                            "elementName": span.get("name"),
+                            "totalDuration": 0,
+                            "count": 0,
+                            "averageDuration": 0,
+                            "maxDuration": 0
+                        }
+                    
+                    slow_element = analysis["performancePatterns"]["slowElements"][element_id]
+                    slow_element["totalDuration"] += duration
+                    slow_element["count"] += 1
+                    slow_element["maxDuration"] = max(slow_element["maxDuration"], duration)
+                    slow_element["averageDuration"] = slow_element["totalDuration"] / slow_element["count"]
+            except Exception:
+                pass
+        
+        # Track business patterns
+        if attributes.get("actionCenterTaskLink"):
+            instance_analysis["userInteractions"] += 1
+            analysis["businessPatterns"]["userInteractionPoints"].append({
+                "instanceId": instance_id,
+                "elementId": attributes.get("elementId"),
+                "elementName": span.get("name"),
+                "taskLink": attributes.get("actionCenterTaskLink"),
+                "timestamp": start_time
+            })
+        
+        # Track external system calls
+        if attributes.get("externalSystemCall") or "http" in span.get("name", "").lower():
+            instance_analysis["externalCalls"] += 1
+            analysis["businessPatterns"]["externalSystemDependencies"].append({
+                "instanceId": instance_id,
+                "elementId": attributes.get("elementId"),
+                "elementName": span.get("name"),
+                "systemType": attributes.get("systemType", "Unknown"),
+                "timestamp": start_time
+            })
+        
+        # Track data processing steps
+        if "data" in span.get("name", "").lower() or "process" in span.get("name", "").lower():
+            analysis["businessPatterns"]["dataProcessingSteps"].append({
+                "instanceId": instance_id,
+                "elementId": attributes.get("elementId"),
+                "elementName": span.get("name"),
+                "timestamp": start_time
+            })
+        
+        # Track decision points
+        if "decision" in span.get("name", "").lower() or "if" in span.get("name", "").lower():
+            analysis["businessPatterns"]["decisionPoints"].append({
+                "instanceId": instance_id,
+                "elementId": attributes.get("elementId"),
+                "elementName": span.get("name"),
+                "timestamp": start_time
+            })
+        
+        # Track system errors
+        if attributes.get("errorType") == "System":
+            analysis["errorPatterns"]["systemErrorFrequency"] += 1
+    
+    # Add instance analysis to performance patterns
+    analysis["performancePatterns"]["instanceAnalyses"] = analysis["performancePatterns"].get("instanceAnalyses", [])
+    analysis["performancePatterns"]["instanceAnalyses"].append(instance_analysis)
+    
+    # Calculate common bottlenecks (elements that appear in multiple slow instances)
+    slow_elements = analysis["performancePatterns"]["slowElements"]
+    for element_id, element_data in slow_elements.items():
+        if element_data["count"] > 1:  # Element appears in multiple instances
+            analysis["performancePatterns"]["commonBottlenecks"].append({
+                "elementId": element_id,
+                "elementName": element_data["elementName"],
+                "occurrenceCount": element_data["count"],
+                "averageDuration": element_data["averageDuration"],
+                "maxDuration": element_data["maxDuration"]
+            })
+    
+    # Sort common bottlenecks by average duration
+    analysis["performancePatterns"]["commonBottlenecks"].sort(key=lambda x: x["averageDuration"], reverse=True)
+    
+    # Calculate error type frequencies
+    for failure in analysis["elementFailures"]:
+        error_type = failure.get("errorType", "Unknown")
+        analysis["errorPatterns"]["commonErrorTypes"][error_type] = analysis["errorPatterns"]["commonErrorTypes"].get(error_type, 0) + 1
+
+
+@mcp.tool()
 async def get_spans_by_instance_id(
     instance_id: str,
     *,

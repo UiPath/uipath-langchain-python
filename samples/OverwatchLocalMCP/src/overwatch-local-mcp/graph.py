@@ -16,15 +16,15 @@ model = ChatAnthropic(model_name="claude-3-5-sonnet-latest")
 
 class GraphInput(BaseModel):
     """Structured input for the Overwatch Agent - can be called from other processes."""
-    instance_id: str = Field(
+    instance_id: Optional[str] = Field(
         default=None,
         description="The UiPath process instance ID to analyze and manage (optional for task management operations)"
     )
-    user_prompt: str = Field(
+    user_prompt: Optional[str] = Field(
         default=None,
         description="Custom user prompt to override the default analysis prompt"
     )
-    user_ids: str = Field(
+    user_ids: Optional[str] = Field(
         default=None,
         description="Comma-separated list of user IDs for task assignment operations (e.g., '123,456,789')"
     )
@@ -37,8 +37,8 @@ class GraphOutput(BaseModel):
 
 class GraphState(MessagesState):
     """State for the Overwatch Agent graph."""
-    instance_id: str
-    user_ids: str
+    instance_id: Optional[str]
+    user_ids: Optional[str]
     result: Optional[str]
 
 
@@ -118,10 +118,27 @@ For summaries and diagnostics:
   - `get_spans(instance_id)`
   - `get_instances(process_key)` (to compare with past runs)
 
-  While summarizing it is crucial to analyze the spans results to understand what all actions have been taken place on the instance. Retry , Migrate , Pause , Resume , Cancel , Update Variables , Goto Transitions are the actions that users can carry out on process instances.
-  It is crucial to understand these actions and theier consequence to the instance.
+  **CRITICAL: Action Analysis is Essential**
+  
+  While analyzing process instances, it is CRITICAL to examine ALL actions performed on the process. These actions provide essential context about how the process was managed and what interventions were needed:
 
-  If you see a similar set of actions being taken on every instance of the process it is important to note and report that pattern which may be a root cause of the issue.
+  **Primary Actions to Analyze:**
+  - **Update Variables**: Runtime variable modifications that may indicate configuration issues or manual fixes
+  - **Pause**: Manual or automatic pauses due to failures, waiting conditions, or user interventions  
+  - **Resume**: Continuation after pauses or interventions, indicating recovery attempts
+  - **GoTo Transitions**: Manual flow redirections that bypass problematic elements
+  - **Migrate**: Version upgrades or environment changes that may resolve underlying issues
+  - **Cancel**: Process termination, often indicating unrecoverable failures
+  - **Retry**: System-initiated retries due to transient errors
+
+  **Action Analysis Guidelines:**
+  - **Timing**: When do these actions occur relative to failures?
+  - **Frequency**: How often are the same actions performed across instances?
+  - **Patterns**: Are certain actions consistently needed to resolve the same issues?
+  - **Root Causes**: Do repeated actions indicate underlying process design problems?
+  - **Interventions**: Which actions represent manual user interventions vs. automated responses?
+
+  If you see a similar set of actions being taken on every instance of the process, this is a strong indicator of a root cause issue that needs to be addressed.
 
 - Compare errors and task patterns across runs to surface:
   - Root causes
@@ -174,7 +191,7 @@ For summaries and diagnostics:
         user_message += f"\n\nAvailable user IDs for task assignment: {state.user_ids}"
 
     return GraphState(
-        instance_id=state.instance_id or "no-instance",
+        instance_id=state.instance_id,
         user_ids=state.user_ids,
         messages=[SystemMessage(content=generic_system_prompt), HumanMessage(content=user_message)],
         result=None
