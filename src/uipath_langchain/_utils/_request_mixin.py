@@ -26,6 +26,8 @@ from uipath_langchain._utils._settings import (
 )
 from uipath_langchain._utils._sleep_policy import before_sleep_log
 
+global_logger = logging.getLogger(__name__)
+
 
 def get_from_uipath_url():
     url = os.getenv("UIPATH_URL")
@@ -136,11 +138,9 @@ class UiPathRequestMixin(BaseModel):
         self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
     ) -> Dict[str, Any]:
         """Run an asynchronous call to the LLM."""
-        # if self.logger:
-        #     self.logger.info(f"Completion request: {request_body['messages'][:2]}")
         client_kwargs = get_httpx_client_kwargs()
         with httpx.Client(
-            **client_kwargs,  # Apply SSL configuration
+            **client_kwargs,
             event_hooks={
                 "request": [self._log_request_duration],
                 "response": [self._log_response_duration],
@@ -151,6 +151,11 @@ class UiPathRequestMixin(BaseModel):
                 headers=headers,
                 json=request_body,
                 timeout=self.default_request_timeout,
+            )
+
+            global_logger.info(
+                "[uipath_langchain_client] Full response text: %s",
+                response.text,
             )
 
             # Handle HTTP errors and map them to OpenAI exceptions
@@ -215,11 +220,10 @@ class UiPathRequestMixin(BaseModel):
     async def _arequest(
         self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
     ) -> Dict[str, Any]:
-        # if self.logger:
-        #     self.logger.info(f"Completion request: {request_body['messages'][:2]}")
+        """Run an asynchronous call to the LLM."""
         client_kwargs = get_httpx_client_kwargs()
         async with httpx.AsyncClient(
-            **client_kwargs,  # Apply SSL configuration
+            **client_kwargs,
             event_hooks={
                 "request": [self._alog_request_duration],
                 "response": [self._alog_response_duration],
@@ -231,6 +235,12 @@ class UiPathRequestMixin(BaseModel):
                 json=request_body,
                 timeout=self.default_request_timeout,
             )
+
+            global_logger.info(
+                "[uipath_langchain_client] Full response text: %s",
+                response.text,
+            )
+
             # Handle HTTP errors and map them to OpenAI exceptions
             try:
                 response.raise_for_status()
