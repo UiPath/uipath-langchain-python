@@ -34,7 +34,11 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
             del kwargs["tools"]
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
         response = self._call(self.url, payload, self.auth_headers)
-        return self._create_chat_result(response)
+        result = self._create_chat_result(response)
+
+        logger.info("[uipath_langchain_client] Result: %s", result)
+
+        return result
 
     async def _agenerate(
         self,
@@ -47,7 +51,9 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
             del kwargs["tools"]
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
         response = await self._acall(self.url, payload, self.auth_headers)
-        return self._create_chat_result(response)
+        result = self._create_chat_result(response)
+
+        logger.info("[uipath_langchain_client] Result: %s", result)
 
     def with_structured_output(
         self,
@@ -94,44 +100,36 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
 
         logger.info("[uipath_langchain_client] Response: %s", response)
 
-        try:
-            message = response["choices"][0]["message"]
-            usage = response["usage"]
+        message = response["choices"][0]["message"]
+        usage = response["usage"]
 
-            ai_message = AIMessage(
-                content=message.get("content", ""),
-                usage_metadata=UsageMetadata(
-                    input_tokens=usage.get("prompt_tokens", 0),
-                    output_tokens=usage.get("completion_tokens", 0),
-                    total_tokens=usage.get("total_tokens", 0),
-                ),
-                additional_kwargs={},
-                response_metadata={
-                    "token_usage": response["usage"],
-                    "model_name": self.model_name,
-                    "finish_reason": response["choices"][0].get("finish_reason", None),
-                    "system_fingerprint": response["id"],
-                    "created": response["created"],
-                },
-            )
+        ai_message = AIMessage(
+            content=message.get("content", ""),
+            usage_metadata=UsageMetadata(
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+            ),
+            additional_kwargs={},
+            response_metadata={
+                "token_usage": response["usage"],
+                "model_name": self.model_name,
+                "finish_reason": response["choices"][0].get("finish_reason", None),
+                "system_fingerprint": response["id"],
+                "created": response["created"],
+            },
+        )
 
-            if "tool_calls" in message:
-                ai_message.tool_calls = [
-                    {
-                        "id": tool["id"],
-                        "name": tool["name"],
-                        "args": tool["arguments"],
-                        "type": "tool_call",
-                    }
-                    for tool in message["tool_calls"]
-                ]
-        except Exception as e:
-            logger.error(
-                "[uipath_langchain_client] Error processing response: %s",
-                e,
-                exc_info=True,
-            )
-            raise ValueError("Invalid response format") from e
+        if "tool_calls" in message:
+            ai_message.tool_calls = [
+                {
+                    "id": tool["id"],
+                    "name": tool["name"],
+                    "args": tool["arguments"],
+                    "type": "tool_call",
+                }
+                for tool in message["tool_calls"]
+            ]
 
         logger.info("[uipath_langchain_client] AI message: %s", ai_message)
 
