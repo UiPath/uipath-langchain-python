@@ -117,6 +117,7 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
                     "id": tool["id"],
                     "name": tool["name"],
                     "args": tool["arguments"],
+                    "type": "tool_call",
                 }
                 for tool in message["tool_calls"]
             ]
