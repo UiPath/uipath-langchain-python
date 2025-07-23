@@ -15,7 +15,7 @@ load_dotenv()
 
 
 def langgraph_run_middleware(
-    entrypoint: Optional[str], input: Optional[str], resume: bool
+    entrypoint: Optional[str], input: Optional[str], resume: bool, **kwargs
 ) -> MiddlewareResult:
     """Middleware to handle langgraph execution"""
     config = LangGraphConfig()
@@ -38,10 +38,13 @@ def langgraph_run_middleware(
             context.input = input
             context.resume = resume
             context.langgraph_config = config
+            context.debug = kwargs.get("debug", False)
             context.logs_min_level = env.get("LOG_LEVEL", "INFO")
             context.job_id = env.get("UIPATH_JOB_KEY")
             context.trace_id = env.get("UIPATH_TRACE_ID")
             context.tracing_enabled = tracing
+            context.input_file = kwargs.get("input_file", None)
+            context.execution_output_file = kwargs.get("execution_output_file", None)
             context.trace_context = UiPathTraceContext(
                 enabled=tracing,
                 trace_id=env.get("UIPATH_TRACE_ID"),
@@ -64,7 +67,10 @@ def langgraph_run_middleware(
 
         asyncio.run(execute())
 
-        return MiddlewareResult(should_continue=False, error_message=None)
+        return MiddlewareResult(
+            should_continue=False,
+            error_message=None,
+        )
 
     except LangGraphRuntimeError as e:
         return MiddlewareResult(
