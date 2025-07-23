@@ -91,6 +91,9 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
     ) -> ChatResult:
         if not isinstance(response, dict):
             response = response.model_dump()
+
+        logger.info("[uipath_langchain_client] Response: %s", response)
+
         message = response["choices"][0]["message"]
         usage = response["usage"]
 
@@ -120,6 +123,9 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
                 }
                 for tool in message["tool_calls"]
             ]
+
+        logger.info("[uipath_langchain_client] AI message: %s", ai_message)
+
         generation = ChatGeneration(message=ai_message)
         return ChatResult(generations=[generation])
 
@@ -131,6 +137,8 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         **kwargs: Any,
     ) -> Dict[Any, Any]:
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+
+        logger.info("[uipath_langchain_client] Request payload before: %s", payload)
         # hacks to make the request work with uipath normalized
         for message in payload["messages"]:
             if message["content"] is None:
@@ -146,6 +154,9 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
                     "result": message["content"],
                     "call_id": message["tool_call_id"],
                 }
+
+        logger.info("[uipath_langchain_client] Request payload after: %s", payload)
+
         return payload
 
     def _generate(
