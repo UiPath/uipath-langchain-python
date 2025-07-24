@@ -25,6 +25,10 @@ echo "Running agent with $CHAT_MODE mode..."
 echo "Input: $AGENT_INPUT"
 uv run uipath run agent "$AGENT_INPUT"
 
+echo "Resuming agent run by default with {'Answer': true}..."
+uv run uipath run agent '{"Answer": true}' --resume;
+
+
 # Print the output file
 echo "Printing output file..."
 if [ -f "__uipath/output.json" ]; then

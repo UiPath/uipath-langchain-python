@@ -7,6 +7,9 @@ echo "USE_AZURE_CHAT=$USE_AZURE_CHAT"
 
 # Authenticate with UiPath
 echo "Authenticating with UiPath..."
+echo "CLIENT_ID being used: $CLIENT_ID"
+echo "BASE_URL being used: $BASE_URL"
+echo "CLIENT_SECRET (first 10 chars): ${CLIENT_SECRET:0:5}..."
 uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --base-url="$BASE_URL"
 
 cd /app/testcases/company-research-agent

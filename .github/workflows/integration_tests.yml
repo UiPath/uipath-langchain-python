@@ -32,34 +32,57 @@ jobs:
     - name: Run testcases
       run: |
         jobs=(
-          "company-research-agent:true"
-          "company-research-agent:false"
-          "simple-local-mcp:true"
-          "simple-local-mcp:false"
-          "ticket-classification:true"
-          "ticket-classification:false"
-          "multi-agent-supervisor-researcher-coder:true"
-          "multi-agent-supervisor-researcher-coder:false"
+          "company-research-agent:true:alpha"
+          "company-research-agent:false:alpha"
+          # "simple-local-mcp:true:alpha"
+          # "simple-local-mcp:false:alpha"
+          # "ticket-classification:true:alpha"
+          # "ticket-classification:false:alpha"
+          # "multi-agent-supervisor-researcher-coder:true:alpha"
+          # "multi-agent-supervisor-researcher-coder:false:alpha"
+          "company-research-agent:true:cloud"
+          "company-research-agent:false:cloud"
+          # "simple-local-mcp:true:cloud"
+          # "simple-local-mcp:false:cloud"
+          # "ticket-classification:true:cloud"
+          # "ticket-classification:false:cloud"
+          # "multi-agent-supervisor-researcher-coder:true:cloud"
+          # "multi-agent-supervisor-researcher-coder:false:cloud"
         )
 
         echo "=== STARTING TESTCASE EXECUTION ==="
         echo "Total testcases to run: ${#jobs[@]}"
-        echo "Testcases with UiPathAzureChatOpenAI: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':true' | wc -l)"
-        echo "Testcases with UiPathChat: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':false' | wc -l)"
+        echo "Alpha environment with UiPathAzureChatOpenAI: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':true:alpha' | wc -l)"
+        echo "Alpha environment with UiPathChat: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':false:alpha' | wc -l)"
+        echo "Cloud environment with UiPathAzureChatOpenAI: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':true:cloud' | wc -l)"
+        echo "Cloud environment with UiPathChat: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':false:cloud' | wc -l)"
         echo "======================================="
 
         for job in "${jobs[@]}"; do
-          IFS=":" read -r testcase use_azure_chat <<< "$job"
+          IFS=":" read -r testcase use_azure_chat environment <<< "$job"
           llm=$([ "$use_azure_chat" = "true" ] && echo "UiPathAzureChatOpenAI" || echo "UiPathChat")
-          log_file="run_${testcase}_${llm}.log"
+          log_file="run_${testcase}_${llm}_${environment}.log"
+          
+          # Set environment-specific credentials
+          if [ "$environment" = "alpha" ]; then
+            CLIENT_ID_VAR="${{ secrets.ALPHA_TEST_CLIENT_ID }}"
+            CLIENT_SECRET_VAR="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}"
+            BASE_URL_VAR="${{ secrets.ALPHA_BASE_URL }}"
+          else
+            CLIENT_ID_VAR="${{ secrets.CLOUD_TEST_CLIENT_ID }}"
+            CLIENT_SECRET_VAR="${{ secrets.CLOUD_TEST_CLIENT_SECRET }}"
+            BASE_URL_VAR="${{ secrets.CLOUD_BASE_URL }}"
+          fi
+          
           (
-            echo "[$(date)] STARTING: $testcase ($llm)"
+            echo "[$(date)] STARTING: $testcase ($llm) [$environment]"
             
             # Create log file with header
             {
               echo "========================================"
               echo "TESTCASE: $testcase"
-              echo "llm: $llm"
+              echo "LLM: $llm"
+              echo "ENVIRONMENT: $environment"
               echo "USE_AZURE_CHAT: $use_azure_chat"
               echo "STARTED_AT: $(date)"
               echo "========================================"
@@ -68,16 +91,19 @@ jobs:
             
             # Run the testcase and append to log file
             docker run --rm \
-              -e CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
-              -e CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
-              -e BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
+              -e CLIENT_ID="$CLIENT_ID_VAR" \
+              -e CLIENT_SECRET="$CLIENT_SECRET_VAR" \
+              -e BASE_URL="$BASE_URL_VAR" \
               -e USE_AZURE_CHAT="$use_azure_chat" \
               uipath-langchain-testbase:latest \
               bash /app/testcases/$testcase/run.sh >> "$log_file" 2>&1
             
+            # Capture the exit code immediately
+            exit_code=$?
+            
             # Add completion status to log file
-            if [ $? -eq 0 ]; then
-              echo "[$(date)] SUCCESS: $testcase ($llm)"
+            if [ $exit_code -eq 0 ]; then
+              echo "[$(date)] SUCCESS: $testcase ($llm) [$environment]"
               {
                 echo ""
                 echo "========================================"
@@ -86,12 +112,13 @@ jobs:
                 echo "========================================"
               } >> "$log_file"
             else
-              echo "[$(date)] FAILED: $testcase ($llm)"
+              echo "[$(date)] FAILED: $testcase ($llm) [$environment]"
               {
                 echo ""
                 echo "========================================"
                 echo "COMPLETED_AT: $(date)"
                 echo "STATUS: FAILED"
+                echo "EXIT_CODE: $exit_code"
                 echo "========================================"
               } >> "$log_file"
             fi
@@ -101,180 +128,102 @@ jobs:
         wait
         echo "All testcases execution completed."
 
-    - name: Display company-research-agent (UiPathAzureChatOpenAI) logs
+    - name: Display company-research-agent (UiPathAzureChatOpenAI) Alpha logs
       run: |
-        log_file="run_company-research-agent_UiPathAzureChatOpenAI.log"
-        output_file="output_company-research-agent_UiPathAzureChatOpenAI.json"
+        log_file="run_company-research-agent_UiPathAzureChatOpenAI_alpha.log"
         echo "================================================"
-        echo "COMPANY-RESEARCH-AGENT (UiPathAzureChatOpenAI) LOG"
+        echo "COMPANY-RESEARCH-AGENT (UiPathAzureChatOpenAI) ALPHA LOG"
         echo "Log file: $log_file"
         echo "================================================"
         if [ -f "$log_file" ]; then
           cat "$log_file"
         else
           echo "ERROR: Log file not found!"
-        fi
-        echo ""
-        echo "================================================"
-        echo "COMPANY-RESEARCH-AGENT (UiPathAzureChatOpenAI) OUTPUT"
-        echo "Output file: $output_file"
-        echo "================================================"
-        if [ -f "$output_file" ]; then
-          cat "$output_file"
-        else
-          echo "ERROR: Output file not found!"
         fi
 
-    - name: Display company-research-agent (UiPathChat) logs
+    - name: Display company-research-agent (UiPathChat) Alpha logs
       run: |
-        log_file="run_company-research-agent_UiPathChat.log"
-        output_file="output_company-research-agent_UiPathChat.json"
+        log_file="run_company-research-agent_UiPathChat_alpha.log"
         echo "================================================"
-        echo "COMPANY-RESEARCH-AGENT (UiPathChat) LOG"
+        echo "COMPANY-RESEARCH-AGENT (UiPathChat) ALPHA LOG"
         echo "Log file: $log_file"
         echo "================================================"
         if [ -f "$log_file" ]; then
           cat "$log_file"
         else
           echo "ERROR: Log file not found!"
-        fi
-        echo ""
-        echo "================================================"
-        echo "COMPANY-RESEARCH-AGENT (UiPathChat) OUTPUT"
-        echo "Output file: $output_file"
-        echo "================================================"
-        if [ -f "$output_file" ]; then
-          cat "$output_file"
-        else
-          echo "ERROR: Output file not found!"
         fi
 
-    - name: Display simple-local-mcp (UiPathAzureChatOpenAI) logs
+    - name: Display company-research-agent (UiPathAzureChatOpenAI) Cloud logs
       run: |
-        log_file="run_simple-local-mcp_UiPathAzureChatOpenAI.log"
-        output_file="output_simple-local-mcp_UiPathAzureChatOpenAI.json"
+        log_file="run_company-research-agent_UiPathAzureChatOpenAI_cloud.log"
         echo "================================================"
-        echo "SIMPLE-LOCAL-MCP (UiPathAzureChatOpenAI) LOG"
+        echo "COMPANY-RESEARCH-AGENT (UiPathAzureChatOpenAI) CLOUD LOG"
         echo "Log file: $log_file"
         echo "================================================"
         if [ -f "$log_file" ]; then
           cat "$log_file"
         else
           echo "ERROR: Log file not found!"
-        fi
-        echo ""
-        echo "================================================"
-        echo "SIMPLE-LOCAL-MCP (UiPathAzureChatOpenAI) OUTPUT"
-        echo "Output file: $output_file"
-        echo "================================================"
-        if [ -f "$output_file" ]; then
-          cat "$output_file"
-        else
-          echo "ERROR: Output file not found!"
         fi
 
-    - name: Display simple-local-mcp (UiPathChat) logs
+    - name: Display company-research-agent (UiPathChat) Cloud logs
       run: |
-        log_file="run_simple-local-mcp_UiPathChat.log"
-        output_file="output_simple-local-mcp_UiPathChat.json"
+        log_file="run_company-research-agent_UiPathChat_cloud.log"
         echo "================================================"
-        echo "SIMPLE-LOCAL-MCP (UiPathChat) LOG"
+        echo "COMPANY-RESEARCH-AGENT (UiPathChat) CLOUD LOG"
         echo "Log file: $log_file"
         echo "================================================"
         if [ -f "$log_file" ]; then
           cat "$log_file"
         else
           echo "ERROR: Log file not found!"
-        fi
-        echo ""
-        echo "================================================"
-        echo "SIMPLE-LOCAL-MCP (UiPathChat) OUTPUT"
-        echo "Output file: $output_file"
-        echo "================================================"
-        if [ -f "$output_file" ]; then
-          cat "$output_file"
-        else
-          echo "ERROR: Output file not found!"
         fi
 
-    - name: Display ticket-classification (UiPathAzureChatOpenAI) logs
+    - name: Display simple-local-mcp (UiPathAzureChatOpenAI) Alpha logs
       run: |
-        log_file="run_ticket-classification_UiPathAzureChatOpenAI.log"
-        output_file="output_ticket-classification_UiPathAzureChatOpenAI.json"
+        log_file="run_simple-local-mcp_UiPathAzureChatOpenAI_alpha.log"
         echo "================================================"
-        echo "TICKET-CLASSIFICATION (UiPathAzureChatOpenAI) LOG"
+        echo "SIMPLE-LOCAL-MCP (UiPathAzureChatOpenAI) ALPHA LOG"
         echo "Log file: $log_file"
         echo "================================================"
         if [ -f "$log_file" ]; then
           cat "$log_file"
         else
           echo "ERROR: Log file not found!"
-        fi
-        echo ""
-        echo "================================================"
-        echo "TICKET-CLASSIFICATION (UiPathAzureChatOpenAI) OUTPUT"
-        echo "Output file: $output_file"
-        echo "================================================"
-        if [ -f "$output_file" ]; then
-          cat "$output_file"
-        else
-          echo "ERROR: Output file not found!"
         fi
 
-    - name: Display ticket-classification (UiPathChat) logs
+    - name: Display simple-local-mcp (UiPathChat) Alpha logs
       run: |
-        log_file="run_ticket-classification_UiPathChat.log"
-        output_file="output_ticket-classification_UiPathChat.json"
+        log_file="run_simple-local-mcp_UiPathChat_alpha.log"
         echo "================================================"
-        echo "TICKET-CLASSIFICATION (UiPathChat) LOG"
+        echo "SIMPLE-LOCAL-MCP (UiPathChat) ALPHA LOG"
         echo "Log file: $log_file"
         echo "================================================"
         if [ -f "$log_file" ]; then
           cat "$log_file"
         else
           echo "ERROR: Log file not found!"
-        fi
-        echo ""
-        echo "================================================"
-        echo "TICKET-CLASSIFICATION (UiPathChat) OUTPUT"
-        echo "Output file: $output_file"
-        echo "================================================"
-        if [ -f "$output_file" ]; then
-          cat "$output_file"
-        else
-          echo "ERROR: Output file not found!"
         fi
 
-    - name: Display multi-agent-supervisor-researcher-coder (UiPathAzureChatOpenAI) logs
+    - name: Display simple-local-mcp (UiPathAzureChatOpenAI) Cloud logs
       run: |
-        log_file="run_multi-agent-supervisor-researcher-coder_UiPathAzureChatOpenAI.log"
-        output_file="output_multi-agent-supervisor-researcher-coder_UiPathAzureChatOpenAI.json"
+        log_file="run_simple-local-mcp_UiPathAzureChatOpenAI_cloud.log"
         echo "================================================"
-        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathAzureChatOpenAI) LOG"
+        echo "SIMPLE-LOCAL-MCP (UiPathAzureChatOpenAI) CLOUD LOG"
         echo "Log file: $log_file"
         echo "================================================"
         if [ -f "$log_file" ]; then
           cat "$log_file"
         else
           echo "ERROR: Log file not found!"
-        fi
-        echo ""
-        echo "================================================"
-        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathAzureChatOpenAI) OUTPUT"
-        echo "Output file: $output_file"
-        echo "================================================"
-        if [ -f "$output_file" ]; then
-          cat "$output_file"
-        else
-          echo "ERROR: Output file not found!"
         fi
 
-    - name: Display multi-agent-supervisor-researcher-coder (UiPathChat) logs
+    - name: Display simple-local-mcp (UiPathChat) Cloud logs
       run: |
-        log_file="run_multi-agent-supervisor-researcher-coder_UiPathChat.log"
-        output_file="output_multi-agent-supervisor-researcher-coder_UiPathChat.json"
+        log_file="run_simple-local-mcp_UiPathChat_cloud.log"
         echo "================================================"
-        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathChat) LOG"
+        echo "SIMPLE-LOCAL-MCP (UiPathChat) CLOUD LOG"
         echo "Log file: $log_file"
         echo "================================================"
         if [ -f "$log_file" ]; then
@@ -282,13 +231,107 @@ jobs:
         else
           echo "ERROR: Log file not found!"
         fi
-        echo ""
+
+    - name: Display ticket-classification (UiPathAzureChatOpenAI) Alpha logs
+      run: |
+        log_file="run_ticket-classification_UiPathAzureChatOpenAI_alpha.log"
         echo "================================================"
-        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathChat) OUTPUT"
-        echo "Output file: $output_file"
+        echo "TICKET-CLASSIFICATION (UiPathAzureChatOpenAI) ALPHA LOG"
+        echo "Log file: $log_file"
         echo "================================================"
-        if [ -f "$output_file" ]; then
-          cat "$output_file"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
         else
-          echo "ERROR: Output file not found!"
+          echo "ERROR: Log file not found!"
+        fi
+
+    - name: Display ticket-classification (UiPathChat) Alpha logs
+      run: |
+        log_file="run_ticket-classification_UiPathChat_alpha.log"
+        echo "================================================"
+        echo "TICKET-CLASSIFICATION (UiPathChat) ALPHA LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+
+    - name: Display ticket-classification (UiPathAzureChatOpenAI) Cloud logs
+      run: |
+        log_file="run_ticket-classification_UiPathAzureChatOpenAI_cloud.log"
+        echo "================================================"
+        echo "TICKET-CLASSIFICATION (UiPathAzureChatOpenAI) CLOUD LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+
+    - name: Display ticket-classification (UiPathChat) Cloud logs
+      run: |
+        log_file="run_ticket-classification_UiPathChat_cloud.log"
+        echo "================================================"
+        echo "TICKET-CLASSIFICATION (UiPathChat) CLOUD LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+
+    - name: Display multi-agent-supervisor-researcher-coder (UiPathAzureChatOpenAI) Alpha logs
+      run: |
+        log_file="run_multi-agent-supervisor-researcher-coder_UiPathAzureChatOpenAI_alpha.log"
+        echo "================================================"
+        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathAzureChatOpenAI) ALPHA LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+
+    - name: Display multi-agent-supervisor-researcher-coder (UiPathChat) Alpha logs
+      run: |
+        log_file="run_multi-agent-supervisor-researcher-coder_UiPathChat_alpha.log"
+        echo "================================================"
+        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathChat) ALPHA LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+
+    - name: Display multi-agent-supervisor-researcher-coder (UiPathAzureChatOpenAI) Cloud logs
+      run: |
+        log_file="run_multi-agent-supervisor-researcher-coder_UiPathAzureChatOpenAI_cloud.log"
+        echo "================================================"
+        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathAzureChatOpenAI) CLOUD LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+
+    - name: Display multi-agent-supervisor-researcher-coder (UiPathChat) Cloud logs
+      run: |
+        log_file="run_multi-agent-supervisor-researcher-coder_UiPathChat_cloud.log"
+        echo "================================================"
+        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathChat) CLOUD LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
         fi
