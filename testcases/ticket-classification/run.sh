@@ -5,6 +5,10 @@ CHAT_MODE=$([ "$USE_AZURE_CHAT" = "true" ] && echo "AZURE-CHAT" || echo "DEFAULT
 echo "Running ticket-classification testcase with $CHAT_MODE mode..."
 echo "USE_AZURE_CHAT=$USE_AZURE_CHAT"
 
+# Authenticate with UiPath
+echo "Authenticating with UiPath..."
+uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --base-url="$BASE_URL"
+
 cd /app/testcases/ticket-classification
 
 # Sync dependencies for this specific testcase
