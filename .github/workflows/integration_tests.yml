@@ -25,9 +25,6 @@ jobs:
         echo "Building common Docker image at $(date)"
         docker build -f testcases/Dockerfile \
           -t uipath-langchain-testbase:latest \
-          --build-arg CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
-          --build-arg CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
-          --build-arg BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
           --build-arg USE_AZURE_CHAT="true" \
           .
         echo "Common Docker image built at $(date)"
@@ -47,22 +44,22 @@ jobs:
 
         echo "=== STARTING TESTCASE EXECUTION ==="
         echo "Total testcases to run: ${#jobs[@]}"
-        echo "Testcases with Azure Chat: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':true' | wc -l)"
-        echo "Testcases without Azure Chat: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':false' | wc -l)"
+        echo "Testcases with UiPathAzureChatOpenAI: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':true' | wc -l)"
+        echo "Testcases with UiPathChat: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':false' | wc -l)"
         echo "======================================="
 
         for job in "${jobs[@]}"; do
           IFS=":" read -r testcase use_azure_chat <<< "$job"
-          chat_mode=$([ "$use_azure_chat" = "true" ] && echo "AZURE-CHAT" || echo "DEFAULT-CHAT")
-          log_file="run_${testcase}_${chat_mode}.log"
+          llm=$([ "$use_azure_chat" = "true" ] && echo "UiPathAzureChatOpenAI" || echo "UiPathChat")
+          log_file="run_${testcase}_${llm}.log"
           (
-            echo "[$(date)] STARTING: $testcase ($chat_mode)"
+            echo "[$(date)] STARTING: $testcase ($llm)"
             
             # Create log file with header
             {
               echo "========================================"
               echo "TESTCASE: $testcase"
-              echo "CHAT_MODE: $chat_mode"
+              echo "llm: $llm"
               echo "USE_AZURE_CHAT: $use_azure_chat"
               echo "STARTED_AT: $(date)"
               echo "========================================"
@@ -71,13 +68,16 @@ jobs:
             
             # Run the testcase and append to log file
             docker run --rm \
+              -e CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
+              -e CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
+              -e BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
               -e USE_AZURE_CHAT="$use_azure_chat" \
               uipath-langchain-testbase:latest \
               bash /app/testcases/$testcase/run.sh >> "$log_file" 2>&1
             
             # Add completion status to log file
             if [ $? -eq 0 ]; then
-              echo "[$(date)] SUCCESS: $testcase ($chat_mode)"
+              echo "[$(date)] SUCCESS: $testcase ($llm)"
               {
                 echo ""
                 echo "========================================"
@@ -86,7 +86,7 @@ jobs:
                 echo "========================================"
               } >> "$log_file"
             else
-              echo "[$(date)] FAILED: $testcase ($chat_mode)"
+              echo "[$(date)] FAILED: $testcase ($llm)"
               {
                 echo ""
                 echo "========================================"
@@ -101,8 +101,10 @@ jobs:
         wait
         echo "All testcases execution completed."
 
-    - name: Display all job logs
+    - name: Collect testcase outputs
       run: |
+        echo "=== COLLECTING TESTCASE OUTPUTS ==="
+        
         jobs=(
           "company-research-agent:true"
           "company-research-agent:false"
@@ -114,28 +116,222 @@ jobs:
           "multi-agent-supervisor-researcher-coder:false"
         )
         
-        echo ""
-        echo "=== DISPLAYING ALL JOB LOGS ==="
-        job_number=1
         for job in "${jobs[@]}"; do
           IFS=":" read -r testcase use_azure_chat <<< "$job"
-          chat_mode=$([ "$use_azure_chat" = "true" ] && echo "AZURE-CHAT" || echo "DEFAULT-CHAT")
-          log_file="run_${testcase}_${chat_mode}.log"
+          llm=$([ "$use_azure_chat" = "true" ] && echo "UiPathAzureChatOpenAI" || echo "UiPathChat")
+          output_file="output_${testcase}_${llm}.json"
           
-          echo ""
-          echo "================================================"
-          echo "JOB $job_number LOG FILE: $testcase ($chat_mode)"
-          echo "Log file: $log_file"
-          echo "================================================"
+          echo "Collecting output for $testcase ($llm)..."
           
-          if [ -f "$log_file" ]; then
-            cat "$log_file"
-          else
-            echo "ERROR: Log file not found!"
-          fi
-          
-          echo ""
-          
-          ((job_number++))
+          # Extract the output from the container
+          docker run --rm \
+            -e CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
+            -e CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
+            -e BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
+            -e USE_AZURE_CHAT="$use_azure_chat" \
+            uipath-langchain-testbase:latest \
+            bash -c "
+              cd /app/testcases/$testcase
+              if [ -f __uipath/output.json ]; then
+                cat __uipath/output.json
+              else
+                echo '{\"error\": \"__uipath/output.json not found\"}'
+              fi
+            " > "$output_file" 2>/dev/null || echo '{"error": "Failed to extract output"}' > "$output_file"
+            
+          echo "Output saved to $output_file"
         done
-        echo "=== ALL JOB LOGS DISPLAYED ==="
+        
+        echo "=== OUTPUT COLLECTION COMPLETED ==="
+
+    - name: Display company-research-agent (UiPathAzureChatOpenAI) logs
+      run: |
+        log_file="run_company-research-agent_UiPathAzureChatOpenAI.log"
+        output_file="output_company-research-agent_UiPathAzureChatOpenAI.json"
+        echo "================================================"
+        echo "COMPANY-RESEARCH-AGENT (UiPathAzureChatOpenAI) LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+        echo ""
+        echo "================================================"
+        echo "COMPANY-RESEARCH-AGENT (UiPathAzureChatOpenAI) OUTPUT"
+        echo "Output file: $output_file"
+        echo "================================================"
+        if [ -f "$output_file" ]; then
+          cat "$output_file"
+        else
+          echo "ERROR: Output file not found!"
+        fi
+
+    - name: Display company-research-agent (UiPathChat) logs
+      run: |
+        log_file="run_company-research-agent_UiPathChat.log"
+        output_file="output_company-research-agent_UiPathChat.json"
+        echo "================================================"
+        echo "COMPANY-RESEARCH-AGENT (UiPathChat) LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+        echo ""
+        echo "================================================"
+        echo "COMPANY-RESEARCH-AGENT (UiPathChat) OUTPUT"
+        echo "Output file: $output_file"
+        echo "================================================"
+        if [ -f "$output_file" ]; then
+          cat "$output_file"
+        else
+          echo "ERROR: Output file not found!"
+        fi
+
+    - name: Display simple-local-mcp (UiPathAzureChatOpenAI) logs
+      run: |
+        log_file="run_simple-local-mcp_UiPathAzureChatOpenAI.log"
+        output_file="output_simple-local-mcp_UiPathAzureChatOpenAI.json"
+        echo "================================================"
+        echo "SIMPLE-LOCAL-MCP (UiPathAzureChatOpenAI) LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+        echo ""
+        echo "================================================"
+        echo "SIMPLE-LOCAL-MCP (UiPathAzureChatOpenAI) OUTPUT"
+        echo "Output file: $output_file"
+        echo "================================================"
+        if [ -f "$output_file" ]; then
+          cat "$output_file"
+        else
+          echo "ERROR: Output file not found!"
+        fi
+
+    - name: Display simple-local-mcp (UiPathChat) logs
+      run: |
+        log_file="run_simple-local-mcp_UiPathChat.log"
+        output_file="output_simple-local-mcp_UiPathChat.json"
+        echo "================================================"
+        echo "SIMPLE-LOCAL-MCP (UiPathChat) LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+        echo ""
+        echo "================================================"
+        echo "SIMPLE-LOCAL-MCP (UiPathChat) OUTPUT"
+        echo "Output file: $output_file"
+        echo "================================================"
+        if [ -f "$output_file" ]; then
+          cat "$output_file"
+        else
+          echo "ERROR: Output file not found!"
+        fi
+
+    - name: Display ticket-classification (UiPathAzureChatOpenAI) logs
+      run: |
+        log_file="run_ticket-classification_UiPathAzureChatOpenAI.log"
+        output_file="output_ticket-classification_UiPathAzureChatOpenAI.json"
+        echo "================================================"
+        echo "TICKET-CLASSIFICATION (UiPathAzureChatOpenAI) LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+        echo ""
+        echo "================================================"
+        echo "TICKET-CLASSIFICATION (UiPathAzureChatOpenAI) OUTPUT"
+        echo "Output file: $output_file"
+        echo "================================================"
+        if [ -f "$output_file" ]; then
+          cat "$output_file"
+        else
+          echo "ERROR: Output file not found!"
+        fi
+
+    - name: Display ticket-classification (UiPathChat) logs
+      run: |
+        log_file="run_ticket-classification_UiPathChat.log"
+        output_file="output_ticket-classification_UiPathChat.json"
+        echo "================================================"
+        echo "TICKET-CLASSIFICATION (UiPathChat) LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+        echo ""
+        echo "================================================"
+        echo "TICKET-CLASSIFICATION (UiPathChat) OUTPUT"
+        echo "Output file: $output_file"
+        echo "================================================"
+        if [ -f "$output_file" ]; then
+          cat "$output_file"
+        else
+          echo "ERROR: Output file not found!"
+        fi
+
+    - name: Display multi-agent-supervisor-researcher-coder (UiPathAzureChatOpenAI) logs
+      run: |
+        log_file="run_multi-agent-supervisor-researcher-coder_UiPathAzureChatOpenAI.log"
+        output_file="output_multi-agent-supervisor-researcher-coder_UiPathAzureChatOpenAI.json"
+        echo "================================================"
+        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathAzureChatOpenAI) LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+        echo ""
+        echo "================================================"
+        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathAzureChatOpenAI) OUTPUT"
+        echo "Output file: $output_file"
+        echo "================================================"
+        if [ -f "$output_file" ]; then
+          cat "$output_file"
+        else
+          echo "ERROR: Output file not found!"
+        fi
+
+    - name: Display multi-agent-supervisor-researcher-coder (UiPathChat) logs
+      run: |
+        log_file="run_multi-agent-supervisor-researcher-coder_UiPathChat.log"
+        output_file="output_multi-agent-supervisor-researcher-coder_UiPathChat.json"
+        echo "================================================"
+        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathChat) LOG"
+        echo "Log file: $log_file"
+        echo "================================================"
+        if [ -f "$log_file" ]; then
+          cat "$log_file"
+        else
+          echo "ERROR: Log file not found!"
+        fi
+        echo ""
+        echo "================================================"
+        echo "MULTI-AGENT-SUPERVISOR-RESEARCHER-CODER (UiPathChat) OUTPUT"
+        echo "Output file: $output_file"
+        echo "================================================"
+        if [ -f "$output_file" ]; then
+          cat "$output_file"
+        else
+          echo "ERROR: Output file not found!"
+        fi
