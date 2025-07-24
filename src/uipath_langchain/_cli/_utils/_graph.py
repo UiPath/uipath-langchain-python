@@ -49,6 +49,12 @@ class GraphConfig:
             if cwd not in sys.path:
                 sys.path.insert(0, cwd)
 
+            # For src-layout projects, add src directory to sys.path
+            # This mimics an editable/dev install
+            src_dir = os.path.join(cwd, "src")
+            if os.path.isdir(src_dir) and src_dir not in sys.path:
+                sys.path.insert(0, src_dir)
+
             module_name = Path(abs_file_path).stem
             spec = importlib.util.spec_from_file_location(module_name, abs_file_path)
 
