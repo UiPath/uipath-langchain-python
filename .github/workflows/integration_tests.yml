@@ -37,15 +37,15 @@ jobs:
           IFS=":" read -r build_dir use_azure_chat <<< "$job"
           log_file="build_${build_dir}_${use_azure_chat}.log"
           (
-            echo "Starting build for $build_dir with USE_AZURE_CHAT=$use_azure_chat"
+            echo "Starting build for $build_dir with USE_AZURE_CHAT=$use_azure_chat at $(date)"
             docker build -f testcases/$build_dir/Dockerfile \
               -t $build_dir:test \
               --build-arg CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
               --build-arg CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
               --build-arg BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
               --build-arg USE_AZURE_CHAT="$use_azure_chat" \
-              . > "$log_file" 2>&1
-            echo "Build for $build_dir with USE_AZURE_CHAT=$use_azure_chat completed"
+              . > "$log_file" 2>&1 || echo "Build for $build_dir with USE_AZURE_CHAT=$use_azure_chat failed" >> "$log_file"
+            echo "Build for $build_dir with USE_AZURE_CHAT=$use_azure_chat completed at $(date)"
           ) &
         done
 
