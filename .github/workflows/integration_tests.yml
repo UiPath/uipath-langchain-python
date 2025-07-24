@@ -32,7 +32,7 @@ jobs:
           .
         echo "Common Docker image built at $(date)"
 
-    - name: Run testcases in parallel
+    - name: Run testcases
       run: |
         jobs=(
           "company-research-agent:true"
@@ -101,7 +101,7 @@ jobs:
         wait
         echo "All testcases execution completed."
 
-    - name: Display all job logs sequentially
+    - name: Display all job logs
       run: |
         jobs=(
           "company-research-agent:true"
@@ -115,7 +115,7 @@ jobs:
         )
         
         echo ""
-        echo "=== DISPLAYING ALL JOB LOGS SEQUENTIALLY ==="
+        echo "=== DISPLAYING ALL JOB LOGS ==="
         job_number=1
         for job in "${jobs[@]}"; do
           IFS=":" read -r testcase use_azure_chat <<< "$job"
@@ -134,9 +134,6 @@ jobs:
             echo "ERROR: Log file not found!"
           fi
           
-          echo "================================================"
-          echo "END OF JOB $job_number: $testcase ($chat_mode)"
-          echo "================================================"
           echo ""
           
           ((job_number++))

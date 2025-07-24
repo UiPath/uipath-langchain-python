@@ -28,5 +28,4 @@ ENV USE_AZURE_CHAT=$USE_AZURE_CHAT
 # Authenticate with UiPath during build
 RUN uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --base-url="$BASE_URL"
 
-# Default command - can be overridden
 CMD ["bash"]
