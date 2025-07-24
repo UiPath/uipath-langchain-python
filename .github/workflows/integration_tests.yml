@@ -20,7 +20,19 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker images in parallel
+    - name: Build common Docker image
+      run: |
+        echo "Building common Docker image at $(date)"
+        docker build -f testcases/Dockerfile \
+          -t uipath-langchain-testbase:latest \
+          --build-arg CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
+          --build-arg CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
+          --build-arg BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
+          --build-arg USE_AZURE_CHAT="true" \
+          .
+        echo "Common Docker image built at $(date)"
+
+    - name: Run testcases in parallel
       run: |
         jobs=(
           "company-research-agent:true"
@@ -33,28 +45,100 @@ jobs:
           "multi-agent-supervisor-researcher-coder:false"
         )
 
+        echo "=== STARTING TESTCASE EXECUTION ==="
+        echo "Total testcases to run: ${#jobs[@]}"
+        echo "Testcases with Azure Chat: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':true' | wc -l)"
+        echo "Testcases without Azure Chat: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':false' | wc -l)"
+        echo "======================================="
+
         for job in "${jobs[@]}"; do
-          IFS=":" read -r build_dir use_azure_chat <<< "$job"
-          log_file="build_${build_dir}_${use_azure_chat}.log"
+          IFS=":" read -r testcase use_azure_chat <<< "$job"
+          chat_mode=$([ "$use_azure_chat" = "true" ] && echo "AZURE-CHAT" || echo "DEFAULT-CHAT")
+          log_file="run_${testcase}_${chat_mode}.log"
           (
-            echo "Starting build for $build_dir with USE_AZURE_CHAT=$use_azure_chat at $(date)"
-            docker build -f testcases/$build_dir/Dockerfile \
-              -t $build_dir:test \
-              --build-arg CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
-              --build-arg CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
-              --build-arg BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
-              --build-arg USE_AZURE_CHAT="$use_azure_chat" \
-              . > "$log_file" 2>&1 || echo "Build for $build_dir with USE_AZURE_CHAT=$use_azure_chat failed" >> "$log_file"
-            echo "Build for $build_dir with USE_AZURE_CHAT=$use_azure_chat completed at $(date)"
+            echo "[$(date)] STARTING: $testcase ($chat_mode)"
+            
+            # Create log file with header
+            {
+              echo "========================================"
+              echo "TESTCASE: $testcase"
+              echo "CHAT_MODE: $chat_mode"
+              echo "USE_AZURE_CHAT: $use_azure_chat"
+              echo "STARTED_AT: $(date)"
+              echo "========================================"
+              echo ""
+            } > "$log_file"
+            
+            # Run the testcase and append to log file
+            docker run --rm \
+              -e USE_AZURE_CHAT="$use_azure_chat" \
+              uipath-langchain-testbase:latest \
+              bash /app/testcases/$testcase/run.sh >> "$log_file" 2>&1
+            
+            # Add completion status to log file
+            if [ $? -eq 0 ]; then
+              echo "[$(date)] SUCCESS: $testcase ($chat_mode)"
+              {
+                echo ""
+                echo "========================================"
+                echo "COMPLETED_AT: $(date)"
+                echo "STATUS: SUCCESS"
+                echo "========================================"
+              } >> "$log_file"
+            else
+              echo "[$(date)] FAILED: $testcase ($chat_mode)"
+              {
+                echo ""
+                echo "========================================"
+                echo "COMPLETED_AT: $(date)"
+                echo "STATUS: FAILED"
+                echo "========================================"
+              } >> "$log_file"
+            fi
           ) &
         done
 
         wait
+        echo "All testcases execution completed."
 
-        echo "All builds completed. Logs:"
+    - name: Display all job logs sequentially
+      run: |
+        jobs=(
+          "company-research-agent:true"
+          "company-research-agent:false"
+          "simple-local-mcp:true"
+          "simple-local-mcp:false"
+          "ticket-classification:true"
+          "ticket-classification:false"
+          "multi-agent-supervisor-researcher-coder:true"
+          "multi-agent-supervisor-researcher-coder:false"
+        )
+        
+        echo ""
+        echo "=== DISPLAYING ALL JOB LOGS SEQUENTIALLY ==="
+        job_number=1
         for job in "${jobs[@]}"; do
-          IFS=":" read -r build_dir use_azure_chat <<< "$job"
-          log_file="build_${build_dir}_${use_azure_chat}.log"
-          echo "Logs for $build_dir with USE_AZURE_CHAT=$use_azure_chat:"
-          cat "$log_file"
+          IFS=":" read -r testcase use_azure_chat <<< "$job"
+          chat_mode=$([ "$use_azure_chat" = "true" ] && echo "AZURE-CHAT" || echo "DEFAULT-CHAT")
+          log_file="run_${testcase}_${chat_mode}.log"
+          
+          echo ""
+          echo "================================================"
+          echo "JOB $job_number LOG FILE: $testcase ($chat_mode)"
+          echo "Log file: $log_file"
+          echo "================================================"
+          
+          if [ -f "$log_file" ]; then
+            cat "$log_file"
+          else
+            echo "ERROR: Log file not found!"
+          fi
+          
+          echo "================================================"
+          echo "END OF JOB $job_number: $testcase ($chat_mode)"
+          echo "================================================"
+          echo ""
+          
+          ((job_number++))
         done
+        echo "=== ALL JOB LOGS DISPLAYED ==="
