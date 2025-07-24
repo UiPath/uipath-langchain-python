@@ -101,49 +101,6 @@ jobs:
         wait
         echo "All testcases execution completed."
 
-    - name: Collect testcase outputs
-      run: |
-        echo "=== COLLECTING TESTCASE OUTPUTS ==="
-        
-        jobs=(
-          "company-research-agent:true"
-          "company-research-agent:false"
-          "simple-local-mcp:true"
-          "simple-local-mcp:false"
-          "ticket-classification:true"
-          "ticket-classification:false"
-          "multi-agent-supervisor-researcher-coder:true"
-          "multi-agent-supervisor-researcher-coder:false"
-        )
-        
-        for job in "${jobs[@]}"; do
-          IFS=":" read -r testcase use_azure_chat <<< "$job"
-          llm=$([ "$use_azure_chat" = "true" ] && echo "UiPathAzureChatOpenAI" || echo "UiPathChat")
-          output_file="output_${testcase}_${llm}.json"
-          
-          echo "Collecting output for $testcase ($llm)..."
-          
-          # Extract the output from the container
-          docker run --rm \
-            -e CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
-            -e CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
-            -e BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
-            -e USE_AZURE_CHAT="$use_azure_chat" \
-            uipath-langchain-testbase:latest \
-            bash -c "
-              cd /app/testcases/$testcase
-              if [ -f __uipath/output.json ]; then
-                cat __uipath/output.json
-              else
-                echo '{\"error\": \"__uipath/output.json not found\"}'
-              fi
-            " > "$output_file" 2>/dev/null || echo '{"error": "Failed to extract output"}' > "$output_file"
-            
-          echo "Output saved to $output_file"
-        done
-        
-        echo "=== OUTPUT COLLECTION COMPLETED ==="
-
     - name: Display company-research-agent (UiPathAzureChatOpenAI) logs
       run: |
         log_file="run_company-research-agent_UiPathAzureChatOpenAI.log"
