@@ -13,26 +13,6 @@ jobs:
       contents: read
       pull-requests: write
 
-    strategy:
-      matrix:
-        include:
-          - build-dir: company-research-agent
-            use-azure-chat: "true"
-          - build-dir: company-research-agent
-            use-azure-chat: "false"
-          - build-dir: simple-local-mcp
-            use-azure-chat: "true"
-          - build-dir: simple-local-mcp
-            use-azure-chat: "false"
-          - build-dir: ticket-classification
-            use-azure-chat: "true"
-          - build-dir: ticket-classification
-            use-azure-chat: "false"
-          - build-dir: multi-agent-supervisor-researcher-coder
-            use-azure-chat: "true"
-          - build-dir: multi-agent-supervisor-researcher-coder
-            use-azure-chat: "false"
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -40,12 +20,41 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker image (${{ matrix.build-dir }}, USE_AZURE_CHAT=${{ matrix.use-azure-chat }})
+    - name: Build Docker images in parallel
       run: |
-        docker build -f testcases/${{ matrix.build-dir }}/Dockerfile \
-          -t ${{ matrix.build-dir }}:test \
-          --build-arg CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
-          --build-arg CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
-          --build-arg BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
-          --build-arg USE_AZURE_CHAT="${{ matrix.use-azure-chat }}" \
-          .
+        jobs=(
+          "company-research-agent:true"
+          "company-research-agent:false"
+          "simple-local-mcp:true"
+          "simple-local-mcp:false"
+          "ticket-classification:true"
+          "ticket-classification:false"
+          "multi-agent-supervisor-researcher-coder:true"
+          "multi-agent-supervisor-researcher-coder:false"
+        )
+
+        for job in "${jobs[@]}"; do
+          IFS=":" read -r build_dir use_azure_chat <<< "$job"
+          log_file="build_${build_dir}_${use_azure_chat}.log"
+          (
+            echo "Starting build for $build_dir with USE_AZURE_CHAT=$use_azure_chat"
+            docker build -f testcases/$build_dir/Dockerfile \
+              -t $build_dir:test \
+              --build-arg CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
+              --build-arg CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
+              --build-arg BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
+              --build-arg USE_AZURE_CHAT="$use_azure_chat" \
+              . > "$log_file" 2>&1
+            echo "Build for $build_dir with USE_AZURE_CHAT=$use_azure_chat completed"
+          ) &
+        done
+
+        wait
+
+        echo "All builds completed. Logs:"
+        for job in "${jobs[@]}"; do
+          IFS=":" read -r build_dir use_azure_chat <<< "$job"
+          log_file="build_${build_dir}_${use_azure_chat}.log"
+          echo "Logs for $build_dir with USE_AZURE_CHAT=$use_azure_chat:"
+          cat "$log_file"
+        done
