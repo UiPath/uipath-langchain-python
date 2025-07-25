@@ -12,7 +12,7 @@ from langgraph.types import Command
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
-from uipath_langchain.chat import UiPathAzureChatOpenAI
+from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
 
 # Configuration constants
 MAX_SEARCH_RESULTS = 5
@@ -69,11 +69,11 @@ def create_supervisor_prompt() -> str:
     )
 
 
-def create_llm() -> UiPathAzureChatOpenAI:
-    """Create and configure the language model."""
-    return UiPathAzureChatOpenAI(model=DEFAULT_MODEL)
-    # Alternative model option:
-    # return ChatAnthropic(model=ALTERNATIVE_MODEL)
+def create_llm() -> Union[UiPathAzureChatOpenAI, UiPathChat]:
+    """Create and configure the language model based on an environment variable."""
+    if os.getenv("USE_AZURE_CHAT", "false").lower() == "true":
+        return UiPathAzureChatOpenAI(model=DEFAULT_MODEL)
+    return UiPathChat(model=DEFAULT_MODEL)
 
 
 # Type definitions
