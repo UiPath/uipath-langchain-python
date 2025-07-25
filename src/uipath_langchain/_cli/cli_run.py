@@ -31,8 +31,8 @@ def langgraph_run_middleware(
             tracing = bool_map[tracing.lower()]
 
         async def execute():
-            context = LangGraphRuntimeContext.from_config(
-                env.get("UIPATH_CONFIG_PATH", "uipath.json")
+            context: LangGraphRuntimeContext = LangGraphRuntimeContext.from_config(
+                env.get("UIPATH_CONFIG_PATH", "uipath.json"), **kwargs
             )
             context.entrypoint = entrypoint
             context.input = input
@@ -42,6 +42,7 @@ def langgraph_run_middleware(
             context.logs_min_level = env.get("LOG_LEVEL", "INFO")
             context.job_id = env.get("UIPATH_JOB_KEY")
             context.trace_id = env.get("UIPATH_TRACE_ID")
+            context.eval_run = kwargs.get("eval_run", False)
             context.tracing_enabled = tracing
             context.input_file = kwargs.get("input_file", None)
             context.execution_output_file = kwargs.get("execution_output_file", None)
