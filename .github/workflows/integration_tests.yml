@@ -13,14 +13,6 @@ jobs:
       contents: read
       pull-requests: write
 
-    strategy:
-      matrix:
-        include:
-          - build-dir: company-research-agent
-          - build-dir: simple-local-mcp
-          - build-dir: ticket-classification
-          - build-dir: multi-agent-supervisor-researcher-coder
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -28,11 +20,143 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker image (${{ matrix.build-dir }})
+    - name: Build common Docker image
       run: |
-        docker build -f testcases/${{ matrix.build-dir }}/Dockerfile \
-          -t ${{ matrix.build-dir }}:test \
-          --build-arg CLIENT_ID="${{ secrets.ALPHA_TEST_CLIENT_ID }}" \
-          --build-arg CLIENT_SECRET="${{ secrets.ALPHA_TEST_CLIENT_SECRET }}" \
-          --build-arg BASE_URL="${{ secrets.ALPHA_BASE_URL }}" \
+        echo "Building common Docker image at $(date)"
+        docker build -f testcases/Dockerfile \
+          -t uipath-langchain-testbase:latest \
           .
+        echo "Common Docker image built at $(date)"
+
+    - name: Set jobs variable
+      run: |
+        echo "Discovering testcase folders..."
+        
+        # Find all testcase folders (excluding common folders like README, etc.)
+        testcase_dirs=$(find testcases -maxdepth 1 -type d -name "*-*" | sed 's|testcases/||' | sort)
+        
+        echo "Found testcase directories:"
+        echo "$testcase_dirs"
+        
+        # Generate jobs array as a single line with space-separated values
+        jobs_list=""
+        for testcase in $testcase_dirs; do
+          # Add all 4 combinations for each testcase
+          jobs_list="${jobs_list} ${testcase}:true:alpha"
+          jobs_list="${jobs_list} ${testcase}:false:alpha"
+          jobs_list="${jobs_list} ${testcase}:true:cloud"
+          jobs_list="${jobs_list} ${testcase}:false:cloud"
+        done
+        
+        echo "Generated jobs list:"
+        echo "$jobs_list"
+        
+        # Save to GITHUB_ENV as a simple variable
+        echo "JOBS_LIST=$jobs_list" >> $GITHUB_ENV
+
+    - name: Run testcases
+      run: |
+        # Convert the jobs list back to an array
+        read -a jobs <<< "$JOBS_LIST"
+        
+        echo "=== STARTING TESTCASE EXECUTION ==="
+        echo "Total testcases to run: ${#jobs[@]}"
+        echo "Alpha environment with UiPathAzureChatOpenAI: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':true:alpha' | wc -l)"
+        echo "Alpha environment with UiPathChat: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':false:alpha' | wc -l)"
+        echo "Cloud environment with UiPathAzureChatOpenAI: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':true:cloud' | wc -l)"
+        echo "Cloud environment with UiPathChat: $(echo "${jobs[@]}" | tr ' ' '\n' | grep ':false:cloud' | wc -l)"
+        echo "======================================="
+
+        for job in "${jobs[@]}"; do
+          IFS=":" read -r testcase use_azure_chat environment <<< "$job"
+          llm=$([ "$use_azure_chat" = "true" ] && echo "UiPathAzureChatOpenAI" || echo "UiPathChat")
+          log_file="run_${testcase}_${llm}_${environment}.log"
+          
+          # Set environment-specific credentials
+          if [ "$environment" = "alpha" ]; then
+            CLIENT_ID_VAR='${{ secrets.ALPHA_TEST_CLIENT_ID }}'
+            CLIENT_SECRET_VAR='${{ secrets.ALPHA_TEST_CLIENT_SECRET }}'
+            BASE_URL_VAR='${{ secrets.ALPHA_BASE_URL }}'
+          else
+            CLIENT_ID_VAR='${{ secrets.CLOUD_TEST_CLIENT_ID }}'
+            CLIENT_SECRET_VAR='${{ secrets.CLOUD_TEST_CLIENT_SECRET }}'
+            BASE_URL_VAR='${{ secrets.CLOUD_BASE_URL }}'
+          fi
+          
+          (
+            echo "[$(date)] STARTING: $testcase ($llm) [$environment]"
+            
+            # Create log file with header
+            {
+              echo "========================================"
+              echo "TESTCASE: $testcase"
+              echo "LLM: $llm"
+              echo "ENVIRONMENT: $environment"
+              echo "USE_AZURE_CHAT: $use_azure_chat"
+              echo "STARTED_AT: $(date)"
+              echo "========================================"
+              echo ""
+            } > "$log_file"
+            
+            # Run the testcase and append to log file
+            docker run --rm \
+              -e CLIENT_ID="$CLIENT_ID_VAR" \
+              -e CLIENT_SECRET="$CLIENT_SECRET_VAR" \
+              -e BASE_URL="$BASE_URL_VAR" \
+              -e USE_AZURE_CHAT="$use_azure_chat" \
+              uipath-langchain-testbase:latest \
+              bash /app/testcases/$testcase/run.sh >> "$log_file" 2>&1
+            
+            # Capture the exit code immediately
+            exit_code=$?
+            
+            # Add completion status to log file
+            if [ $exit_code -eq 0 ]; then
+              echo "[$(date)] SUCCESS: $testcase ($llm) [$environment]"
+              {
+                echo ""
+                echo "========================================"
+                echo "COMPLETED_AT: $(date)"
+                echo "STATUS: SUCCESS"
+                echo "========================================"
+              } >> "$log_file"
+            else
+              echo "[$(date)] FAILED: $testcase ($llm) [$environment]"
+              {
+                echo ""
+                echo "========================================"
+                echo "COMPLETED_AT: $(date)"
+                echo "STATUS: FAILED"
+                echo "EXIT_CODE: $exit_code"
+                echo "========================================"
+              } >> "$log_file"
+            fi
+          ) &
+        done
+
+        wait
+        echo "All testcases execution completed."
+
+    - name: Display all testcase logs
+      run: |
+        # Convert the jobs list back to an array
+        read -a jobs <<< "$JOBS_LIST"
+        
+        for job in "${jobs[@]}"; do
+          IFS=":" read -r testcase use_azure_chat environment <<< "$job"
+          llm=$([ "$use_azure_chat" = "true" ] && echo "UiPathAzureChatOpenAI" || echo "UiPathChat")
+          log_file="run_${testcase}_${llm}_${environment}.log"
+          
+          # Create a collapsible group for each testcase log
+          echo "::group::${testcase^^} (${llm}) ${environment^^} LOG"
+          echo "Log file: $log_file"
+          
+          if [ -f "$log_file" ]; then
+            cat "$log_file"
+          else
+            echo "ERROR: Log file not found!"
+          fi
+          
+          echo "::endgroup::"
+          echo ""
+        done

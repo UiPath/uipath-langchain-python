@@ -7,7 +7,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
 
-from uipath_langchain.chat import UiPathAzureChatOpenAI
+from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat 
 
 # Configuration constants
 MAX_SEARCH_RESULTS = 5
@@ -46,11 +46,11 @@ DO NOT do any math as specified in your instructions.
 """
 
 
-def create_llm() -> UiPathAzureChatOpenAI:
-    """Create and configure the language model."""
-    return UiPathAzureChatOpenAI(model=DEFAULT_MODEL)
-    # Alternative model option:
-    # return ChatAnthropic(model=ALTERNATIVE_MODEL)
+def create_llm() -> Union[UiPathAzureChatOpenAI, UiPathChat]:
+    """Create and configure the language model based on an environment variable."""
+    if os.getenv("USE_AZURE_CHAT", "false").lower() == "true":
+        return UiPathAzureChatOpenAI(model=DEFAULT_MODEL)
+    return UiPathChat(model=DEFAULT_MODEL)
 
 
 def create_research_agent():
