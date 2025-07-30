@@ -101,7 +101,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
                     graph_config["max_concurrency"] = int(max_concurrency)
 
                 # Stream the output at debug time
-                if self.context.job_id is None:
+                if self.is_debug_run():
                     # Get final chunk while streaming
                     final_chunk = None
                     async for stream_chunk in graph.astream(
@@ -115,7 +115,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
 
                     self.context.output = self._extract_graph_result(final_chunk, graph)
                 else:
-                    # Execute the graph normally at runtime
+                    # Execute the graph normally at runtime or eval
                     self.context.output = await graph.ainvoke(
                         processed_input, graph_config
                     )
@@ -310,9 +310,23 @@ class LangGraphRuntime(UiPathBaseRuntime):
             # Check which channels are present
             available_channels = [ch for ch in output_channels if ch in final_chunk]
 
+            # if no available channels, output may contain the last_node name as key
+            unwrapped_final_chunk = {}
+            if not available_channels:
+                if len(final_chunk) == 1 and isinstance(
+                    unwrapped_final_chunk := next(iter(final_chunk.values())), dict
+                ):
+                    available_channels = [
+                        ch for ch in output_channels if ch in unwrapped_final_chunk
+                    ]
+
             if available_channels:
                 # Create a dict with the available channels
-                return {channel: final_chunk[channel] for channel in available_channels}
+                return {
+                    channel: final_chunk.get(channel, None)
+                    or unwrapped_final_chunk[channel]
+                    for channel in available_channels
+                }
 
         # Fallback for any other case
         return final_chunk

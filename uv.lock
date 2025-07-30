@@ -2642,7 +2642,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.1.0"
+version = "2.1.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-monitor-opentelemetry" },
@@ -2657,14 +2657,14 @@ dependencies = [
     { name = "tomli" },
     { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fc/93/c0b0f4a25331943f880c38029b99c6d8bbdf1a683f45ee9256008b164997/uipath-2.1.0.tar.gz", hash = "sha256:862999fa4eb7599a2cfb4dfa98741238ead89b450bb8ffcb1552af4c4270808d", size = 1902998 }
+sdist = { url = "https://files.pythonhosted.org/packages/fa/33/616d6342d54c2f5ee7fea43836c15e0ce90fca9f3cc72739fdcba32fb024/uipath-2.1.10.tar.gz", hash = "sha256:b01e3e4118c311d79b5feefeb07ac0912f3dd1f4fe50463cd1827a50d2d39397", size = 1942026 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c0/ff/a2fda98101d338727f17a517e143fb3b4ab99b41aaf067dd0940946b819d/uipath-2.1.0-py3-none-any.whl", hash = "sha256:16a02172676bf78b30bce8c20abcbcb2d282a0aa5fefffb6939319ccbff366f5", size = 136628 },
+    { url = "https://files.pythonhosted.org/packages/ba/a7/0c954a57d3559d5b35b80affa72e2f66490f12f29b14b2c792b402771c9f/uipath-2.1.10-py3-none-any.whl", hash = "sha256:ec1a8d5237c13b1dbb828613b36f3da7c3046d4119e8dc3d42c8bcef20ce817c", size = 174010 },
 ]
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.119"
+version = "0.0.121"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -2701,12 +2701,12 @@ requires-dist = [
     { name = "langchain-community", specifier = ">=0.3.21" },
     { name = "langchain-core", specifier = ">=0.3.34" },
     { name = "langchain-openai", specifier = ">=0.3.3" },
-    { name = "langgraph", specifier = ">=0.2.70" },
+    { name = "langgraph", specifier = ">=0.5.0,<0.7.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=2.0.3" },
     { name = "openai", specifier = ">=1.65.5" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.1.0,<2.2.0" },
+    { name = "uipath", specifier = ">=2.1.10,<2.2.0" },
     { name = "uipath-langchain", marker = "extra == 'langchain'", specifier = ">=0.0.2" },
 ]
 provides-extras = ["langchain"]
