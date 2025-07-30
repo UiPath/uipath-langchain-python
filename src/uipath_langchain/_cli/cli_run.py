@@ -42,7 +42,7 @@ def langgraph_run_middleware(
             context.logs_min_level = env.get("LOG_LEVEL", "INFO")
             context.job_id = env.get("UIPATH_JOB_KEY")
             context.trace_id = env.get("UIPATH_TRACE_ID")
-            context.eval_run = kwargs.get("eval_run", False)
+            context.is_eval_run = kwargs.get("is_eval_run", False)
             context.tracing_enabled = tracing
             context.input_file = kwargs.get("input_file", None)
             context.execution_output_file = kwargs.get("execution_output_file", None)
