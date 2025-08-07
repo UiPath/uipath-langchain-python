@@ -1,11 +1,11 @@
 [project]
 name = "uipath-langchain"
-version = "0.0.122"
+version = "0.0.123"
 description = "UiPath Langchain"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 dependencies = [
-    "uipath>=2.1.10, <2.2.0",
+    "uipath>=2.1.14, <2.2.0",
     "langgraph>=0.5.0, <0.7.0",
     "langchain-core>=0.3.34",
     "langgraph-checkpoint-sqlite>=2.0.3",

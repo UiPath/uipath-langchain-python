@@ -2,6 +2,7 @@ import os
 import shutil
 
 import click
+from uipath._cli._utils._common import clean_directory
 from uipath._cli._utils._console import ConsoleLogger
 from uipath._cli.middlewares import MiddlewareResult
 
@@ -31,7 +32,7 @@ version = "0.0.1"
 description = "{project_name}"
 authors = [{{ name = "John Doe", email = "john.doe@myemail.com" }}]
 dependencies = [
-    "uipath-langchain>=0.0.106",
+    "uipath-langchain>=0.0.123",
     "langchain-anthropic>=0.3.8",
 ]
 requires-python = ">=3.10"
@@ -48,6 +49,7 @@ def langgraph_new_middleware(name: str) -> MiddlewareResult:
 
     try:
         with console.spinner(f"Creating new agent {name} in current directory ..."):
+            clean_directory(directory)
             generate_pyproject(directory, name)
             generate_script(directory)
             console.success("Created 'main.py' file.")
