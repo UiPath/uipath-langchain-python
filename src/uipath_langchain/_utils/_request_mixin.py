@@ -17,8 +17,10 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
+from uipath._cli._runtime._contracts import UiPathErrorCategory
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 
+from uipath_langchain._cli._runtime._exception import LangGraphRuntimeError
 from uipath_langchain._utils._settings import (
     UiPathClientFactorySettings,
     UiPathClientSettings,
@@ -348,6 +350,19 @@ class UiPathRequestMixin(BaseModel):
             return openai.AuthenticationError(err_msg, response=response, body=data)
 
         if response.status_code == 403:
+            # Check if this is a license-specific error
+            if isinstance(body, dict):
+                title = body.get("title", "").lower()
+                if title == "license not available":
+                    raise LangGraphRuntimeError(
+                        code="LICENSE_NOT_AVAILABLE",
+                        title=body.get("title", "License Not Available"),
+                        detail=body.get(
+                            "detail", "License not available for this service"
+                        ),
+                        category=UiPathErrorCategory.DEPLOYMENT,
+                    )
+
             return openai.PermissionDeniedError(err_msg, response=response, body=data)
 
         if response.status_code == 404:
