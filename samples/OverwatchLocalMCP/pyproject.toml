@@ -1,6 +1,6 @@
 [project]
-name = "overwatch-local-maestro-action"
-version = "0.0.2.4"
+name = "AgentOverwatchAlpha"
+version = "0.0.1"
 description = "Overwatch Local MCP Server Agent for Instance Control. Also includes Action center MCP servers"
 authors = [{ name = "UiPath", email = "support@uipath.com" }]
 dependencies = [

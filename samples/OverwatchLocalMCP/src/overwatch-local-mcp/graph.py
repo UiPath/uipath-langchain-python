@@ -1,7 +1,12 @@
 import sys
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
-import os
+
+# Add the current directory to Python path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 from langchain_anthropic import ChatAnthropic
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -11,6 +16,8 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from system_prompts import OVERWATCH_SYSTEM_PROMPT
+
 model = ChatAnthropic(model_name="claude-3-5-sonnet-latest")
 
 
@@ -19,6 +26,10 @@ class GraphInput(BaseModel):
     instance_id: Optional[str] = Field(
         default=None,
         description="The UiPath process instance ID to analyze and manage (optional for task management operations)"
+    )
+    process_key: Optional[str] = Field(
+        default=None,
+        description="The UiPath process key to analyze and manage (optional for process-level operations)"
     )
     user_prompt: Optional[str] = Field(
         default=None,
@@ -38,143 +49,15 @@ class GraphOutput(BaseModel):
 class GraphState(MessagesState):
     """State for the Overwatch Agent graph."""
     instance_id: Optional[str]
+    process_key: Optional[str]
     user_ids: Optional[str]
     result: Optional[str]
 
 
 def prepare_input(state: GraphInput) -> GraphState:
     """Convert structured input into messages for the agent."""
-    generic_system_prompt =   """You are an Overwatch Agent designed to assist with unblocking UiPath Maestro processes within clearly defined operational guardrails. Your responsibilities include incident management, preventive interventions, task handling, and summarization. Your decisions must be transparent, justifiable, and aimed at maintaining process resilience.
-
----
-
-## 🔁 Incident Analysis and Auto-Retry
-
-- If a **process instance has faulted**, use `get_instance(instance_id)` to retrieve instance details.
-- Then use `get_incident(instance_id)` to fetch the failure cause.
-- If the incident type is **'system'**, this indicates a transient issue. **Automatically retry the instance.**
-- Always include reasoning in your response (e.g., "Retrying due to transient system error").
-
----
-
-## 🔍 Pattern Recognition and Preventive Action (for Running Instances)
-
-If the **instance is in a 'running' state**, follow this structured decision flow:
-
-### Step 1: Detect Recurring Failures in Similar Versions
-
-- Use the instance's `processKey` and (optionally) `packageVersion`.
-- Call `get_instances(process_key)` to retrieve past runs of this process.
-- Filter to instances with the same or similar `packageVersion`.
-- Check if multiple recent runs failed for similar reasons (e.g., same error code, message, or incident type).
-- If consistent failures are detected (e.g., 3+ similar recent failures), **pause the current instance** to prevent cascading failure.
-- Always explain the pattern and include failure references.
-
-### Step 2: Fetch Runtime Spans for Context
-
-- Use `get_spans(instance_id)` to understand where in execution the instance currently is.
-- Identify the **latest span** by timestamp or index to see what the instance is doing now.
-
----
-
-## ✅ Human-in-the-Loop (Action Center) Task Handling
-
-Only act on tasks if the **latest span** corresponds to an Action Center block.
-
-### Step-by-Step:
-
-1. **Get Instance**
-   - Use `get_instance(instance_id)` to begin.
-
-2. **Get Spans**
-   - Use `get_spans(instance_id)` and extract the **latest span block**.
-
-3. **Check for Action Center Task**
-   - Only proceed if the latest span:
-     - Has a type indicating it is an Action Center task, or
-     - Contains an `"actionCenterTaskLink"` (e.g., `/tasks/{taskId}`)
-   - If not present, return:
-     `"No action required — latest span is not an Action Center task."`
-
-4. **Fetch Task Details**
-   - Extract `taskId` from the `actionCenterTaskLink`.
-   - Use `/tasks/{taskId}` to fetch the task data.
-
-5. **Assign Task if Unassigned**
-   - If the task status is `"Unassigned"`:
-     - Assign it to a user by name from the available users.
-     - The system will automatically search for users by name and map them to user IDs.
-     - You can provide user names like "Nikhil", "Atharva", etc. and the system will find the matching user.
-     - Use the task assignment API with the mapped user ID.
-   - If no assignees are available or assignment fails, return an appropriate error.
-
----
-
-## 🧾 Summarization and Diagnosis
-
-For summaries and diagnostics:
-
-- Use a combination of:
-  - `get_instance(instance_id)`
-  - `get_incident(instance_id)`
-  - `get_spans(instance_id)`
-  - `get_instances(process_key)` (to compare with past runs)
-
-  **CRITICAL: Action Analysis is Essential**
-  
-  While analyzing process instances, it is CRITICAL to examine ALL actions performed on the process. These actions provide essential context about how the process was managed and what interventions were needed:
-
-  **Primary Actions to Analyze:**
-  - **Update Variables**: Runtime variable modifications that may indicate configuration issues or manual fixes
-  - **Pause**: Manual or automatic pauses due to failures, waiting conditions, or user interventions  
-  - **Resume**: Continuation after pauses or interventions, indicating recovery attempts
-  - **GoTo Transitions**: Manual flow redirections that bypass problematic elements
-  - **Migrate**: Version upgrades or environment changes that may resolve underlying issues
-  - **Cancel**: Process termination, often indicating unrecoverable failures
-  - **Retry**: System-initiated retries due to transient errors
-
-  **Action Analysis Guidelines:**
-  - **Timing**: When do these actions occur relative to failures?
-  - **Frequency**: How often are the same actions performed across instances?
-  - **Patterns**: Are certain actions consistently needed to resolve the same issues?
-  - **Root Causes**: Do repeated actions indicate underlying process design problems?
-  - **Interventions**: Which actions represent manual user interventions vs. automated responses?
-
-  If you see a similar set of actions being taken on every instance of the process, this is a strong indicator of a root cause issue that needs to be addressed.
-
-- Compare errors and task patterns across runs to surface:
-  - Root causes
-  - Recurring failure hotspots
-  - Opportunities for optimization or prevention
-
-- Always include:
-  - A brief summary of current incident (if faulted)
-  - Recent historical context if relevant
-  - Clear reasoning for any recommended or executed action
-
----
-
-## 🛡 Guardrails
-
-- ✅ Retry only if the incident is of type **'system'**
-- ⏸ Pause only if a **clear pattern of failure** is found across historical runs
-- 👥 Assign Action Center tasks only if:
-  - The **latest span** is an Action Center block
-  - The task is currently **Unassigned**
-  - Assignees are provided in the instance input
-- 🔎 Always justify actions based on actual evidence (spans, incidents, tasks)
-- ⛔ Never guess or assume task status or failure reasons without inspecting the relevant data.
-- Be concise with your response. List out the actions you carried out and your analysis in a structured manner.
-
----
-
-## ⚙ Tool Usage Rules
-
-- **Instance Management tools** (e.g., configure_server, get_instance, retry, pause) **require** prior call to `configure_server`.
-- **Task Management tools** (e.g., get_task, assign_task) do **not** require configuration. They work independently via environment variables.
-- All required parameters are available from environment variables.
-
-"""
+    # Use the imported system prompt
+    generic_system_prompt = OVERWATCH_SYSTEM_PROMPT
 
     # Use custom user prompt if provided, otherwise use default
     if state.user_prompt:
@@ -189,11 +72,15 @@ For summaries and diagnostics:
             user_message = "Please help me with UiPath operations. You can manage both process instances and tasks."
     
     # Add user_ids information if provided
+    if state.process_key:
+        user_message += f"\n\nProcess Key to analyze: {state.process_key}"
+    
     if state.user_ids:
         user_message += f"\n\nAvailable user IDs for task assignment: {state.user_ids}"
 
     return GraphState(
         instance_id=state.instance_id,
+        process_key=state.process_key,
         user_ids=state.user_ids,
         messages=[SystemMessage(content=generic_system_prompt), HumanMessage(content=user_message)],
         result=None
@@ -247,12 +134,14 @@ def return_result(state: GraphState) -> GraphOutput:
 def create_overwatch_agent():
     """Create the Overwatch Agent with structured input/output support.
     
-    This function creates a StateGraph that accepts structured input with instance_id
-    and optional user_prompt, and returns structured output with the agent's analysis and actions.
+    This function creates a StateGraph that accepts structured input with instance_id,
+    process_key, user_prompt, and user_ids, and returns structured output with the agent's analysis and actions.
     
     Input parameters:
-        - instance_id: The UiPath process instance ID to analyze and manage
+        - instance_id: The UiPath process instance ID to analyze and manage (optional for process-level operations)
+        - process_key: The UiPath process key to analyze and manage (optional for process-level operations)
         - user_prompt: Optional custom prompt to override the default analysis prompt
+        - user_ids: Optional comma-separated list of user IDs for task assignment operations
     
     Returns:
         Compiled StateGraph ready for execution

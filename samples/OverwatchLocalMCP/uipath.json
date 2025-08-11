@@ -2,27 +2,21 @@
     "entryPoints": [
         {
             "filePath": "overwatch-agent",
-            "uniqueId": "3eb4c303-2e2a-4412-95f2-71904488118e",
+            "uniqueId": "e4061886-a759-4ea4-8b93-92d71dd4d454",
             "type": "agent",
             "input": {
                 "type": "object",
                 "properties": {
                     "instance_id": {
-                        "default": null,
-                        "description": "The UiPath process instance ID to analyze and manage (optional for task management operations)",
-                        "title": "Instance Id",
+                        "type": "string"
+                    },
+                    "process_key": {
                         "type": "string"
                     },
                     "user_prompt": {
-                        "default": null,
-                        "description": "Custom user prompt to override the default analysis prompt",
-                        "title": "User Prompt",
                         "type": "string"
                     },
                     "user_ids": {
-                        "default": null,
-                        "description": "Comma-separated list of user IDs for task assignment operations (e.g., '123,456,789')",
-                        "title": "User Ids",
                         "type": "string"
                     }
                 },
