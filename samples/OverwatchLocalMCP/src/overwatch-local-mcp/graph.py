@@ -102,8 +102,10 @@ Only act on tasks if the **latest span** corresponds to an Action Center block.
 
 5. **Assign Task if Unassigned**
    - If the task status is `"Unassigned"`:
-     - Assign it to a user from the `input.assignees` list in the instance.
-     - Use the task assignment API.
+     - Assign it to a user by name from the available users.
+     - The system will automatically search for users by name and map them to user IDs.
+     - You can provide user names like "Nikhil", "Atharva", etc. and the system will find the matching user.
+     - Use the task assignment API with the mapped user ID.
    - If no assignees are available or assignment fails, return an appropriate error.
 
 ---
