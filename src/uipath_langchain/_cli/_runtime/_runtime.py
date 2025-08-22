@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from contextlib import suppress
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from langchain_core.callbacks.base import BaseCallbackHandler
@@ -10,6 +11,10 @@ from langchain_core.tracers.langchain import wait_for_all_tracers
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph
+from openinference.instrumentation.langchain import LangChainInstrumentor
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from uipath._cli._runtime._contracts import (
     UiPathBaseRuntime,
     UiPathErrorCategory,
@@ -17,8 +22,13 @@ from uipath._cli._runtime._contracts import (
 )
 
 from ..._utils import _instrument_traceable_attributes
-from ...tracers import AsyncUiPathTracer
-from .._utils._graph import LangGraphConfig
+from ...tracers import (
+    AsyncUiPathTracer,
+    JsonFileExporter,
+    LangchainExporter,
+    SqliteExporter,
+)
+from ...tracers.LangchainSpanProcessor import LangchainSpanProcessor
 from ._context import LangGraphRuntimeContext
 from ._conversation import map_message
 from ._exception import LangGraphRuntimeError
@@ -50,6 +60,27 @@ class LangGraphRuntime(UiPathBaseRuntime):
         """
         _instrument_traceable_attributes()
 
+        with suppress(Exception):
+            provider = TracerProvider()
+            trace.set_tracer_provider(provider)
+            provider.add_span_processor(BatchSpanProcessor(LangchainExporter()))  # type: ignore
+
+            provider.add_span_processor(
+                BatchSpanProcessor(
+                    JsonFileExporter(".uipath/traces.jsonl", LangchainSpanProcessor())
+                )
+            )
+
+            provider.add_span_processor(
+                BatchSpanProcessor(
+                    SqliteExporter(".uipath/traces.db", LangchainSpanProcessor())
+                )
+            )
+
+            LangChainInstrumentor().instrument(
+                tracer_provider=trace.get_tracer_provider()
+            )
+
         if self.context.state_graph is None:
             return None
 
@@ -74,9 +105,9 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 # Set up tracing if available
                 callbacks: List[BaseCallbackHandler] = []
 
-                if self.context.job_id and self.context.tracing_enabled:
-                    tracer = AsyncUiPathTracer(context=self.context.trace_context)
-                    callbacks = [tracer]
+                # if self.context.job_id and self.context.tracing_enabled:
+                #     tracer = AsyncUiPathTracer(context=self.context.trace_context)
+                #     callbacks = [tracer]
 
                 graph_config: RunnableConfig = {
                     "configurable": {
