@@ -1,4 +1,5 @@
 version = 1
+revision = 1
 requires-python = ">=3.10"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -1507,6 +1508,46 @@ wheels = [
 ]
 
 [[package]]
+name = "openinference-instrumentation"
+version = "0.1.37"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "openinference-semantic-conventions" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-sdk" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/26/e0/9d3fe148d27602f794840ba7e2353ba1f25ff6f43ad32fe4390fba393ba4/openinference_instrumentation-0.1.37.tar.gz", hash = "sha256:67fe1c83a864c0cb38a19165b63f28b7287f5c0d7924c47dad599e006a934fd1", size = 23012 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d8/68/acb8517ab0b1238114c9470dfb3825d30ab75c871f0f26dc0b28325a8f5c/openinference_instrumentation-0.1.37-py3-none-any.whl", hash = "sha256:4165642efbcad3b59b1fbf22914f8e600af51845aa5290c9b2683022795b4dfa", size = 28829 },
+]
+
+[[package]]
+name = "openinference-instrumentation-langchain"
+version = "0.1.50"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "openinference-instrumentation" },
+    { name = "openinference-semantic-conventions" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/88/7b/8b0b8ecb147f352363bfbe01202af8fbd69d3cbb4e5c5c40905688ab940f/openinference_instrumentation_langchain-0.1.50.tar.gz", hash = "sha256:9ef7ca19f72d6dd66dabcf84a0d0c5c4ec6fe659a846b6211beb486129a21e4e", size = 66966 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/91/4853bbe5c6df3606f3d660865ca14058cbd65971962f14581be6fcaa5242/openinference_instrumentation_langchain-0.1.50-py3-none-any.whl", hash = "sha256:5fe2f206c6ebd61a6a815042d763ac7dc2576a6033c99e6a54fe0b467192a022", size = 21312 },
+]
+
+[[package]]
+name = "openinference-semantic-conventions"
+version = "0.1.21"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/75/0f/b794eb009846d4b10af50e205a323ca359f284563ef4d1778f35a80522ac/openinference_semantic_conventions-0.1.21.tar.gz", hash = "sha256:328405b9f79ff72a659c7712b8429c0d7ea68c6a4a1679e3eb44372aa228119b", size = 12534 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6e/4d/092766f8e610f2c513e483c4adc892eea1634945022a73371fe01f621165/openinference_semantic_conventions-0.1.21-py3-none-any.whl", hash = "sha256:acde8282c20da1de900cdc0d6258a793ec3eb8031bfc496bd823dae17d32e326", size = 10167 },
+]
+
+[[package]]
 name = "opentelemetry-api"
 version = "1.31.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2664,7 +2705,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.121"
+version = "0.0.123"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -2675,6 +2716,7 @@ dependencies = [
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
     { name = "openai" },
+    { name = "openinference-instrumentation-langchain" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "uipath" },
@@ -2704,6 +2746,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=0.5.0,<0.7.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=2.0.3" },
     { name = "openai", specifier = ">=1.65.5" },
+    { name = "openinference-instrumentation-langchain", specifier = ">=0.1.50" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "uipath", specifier = ">=2.1.10,<2.2.0" },
