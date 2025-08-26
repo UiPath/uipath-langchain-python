@@ -1,0 +1,57 @@
+[project]
+name = "email-organizer-agent"
+version = "0.0.12"
+description = "Email Organizer Agent: Outlook rule creator"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph>=0.2.55",
+    "langchain-anthropic>=0.3.8",
+    "uipath>=2.0.79",
+    "langchain-community>=0.3.21",
+    "uipath-langchain>=0.0.123",
+]
+
+[project.optional-dependencies]
+dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
+
+[build-system]
+requires = ["setuptools>=73.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]
+
+[tool.ruff]
+lint.select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "D",    # pydocstyle
+    "D401", # First line should be in imperative mood
+    "T201",
+    "UP",
+]
+lint.ignore = [
+    "UP006",
+    "UP007",
+    "UP035",
+    "D417",
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "UP"]
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true

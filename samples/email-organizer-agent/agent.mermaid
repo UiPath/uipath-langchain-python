@@ -1,0 +1,27 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	get_token(get_token)
+	fetch_emails(fetch_emails)
+	fetch_folders(fetch_folders)
+	fetch_rules(fetch_rules)
+	llm_analysis(llm_analysis)
+	wait_for_approval(wait_for_approval)
+	create_rules(create_rules)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> get_token;
+	fetch_emails --> fetch_folders;
+	fetch_folders --> fetch_rules;
+	fetch_rules --> llm_analysis;
+	get_token --> fetch_emails;
+	llm_analysis --> wait_for_approval;
+	wait_for_approval -. &nbsp;END&nbsp; .-> __end__;
+	wait_for_approval -.-> create_rules;
+	create_rules --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

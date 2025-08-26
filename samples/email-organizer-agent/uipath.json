@@ -1,0 +1,54 @@
+{
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "aaf7045d-f4cc-4e8a-a31d-4d66198427e9",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "max_emails": {
+                        "title": "Max Emails",
+                        "type": "integer"
+                    },
+                    "max_rules": {
+                        "title": "Max Rules",
+                        "type": "integer"
+                    },
+                    "assignee": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "max_emails",
+                    "max_rules"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "success": {
+                        "default": null,
+                        "title": "Success",
+                        "type": "boolean"
+                    },
+                    "rules_created": {
+                        "default": null,
+                        "title": "Rules Created",
+                        "type": "integer"
+                    },
+                    "message": {
+                        "default": null,
+                        "title": "Message",
+                        "type": "string"
+                    }
+                },
+                "required": []
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": []
+    }
+}
