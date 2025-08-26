@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "agent": "./src/email_organizer/main.py:graph"
+  },
+  "env": ".env"
+}
