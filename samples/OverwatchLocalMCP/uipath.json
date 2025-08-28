@@ -1,0 +1,40 @@
+{
+    "entryPoints": [
+        {
+            "filePath": "overwatch-agent",
+            "uniqueId": "e4061886-a759-4ea4-8b93-92d71dd4d454",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "instance_id": {
+                        "type": "string"
+                    },
+                    "process_key": {
+                        "type": "string"
+                    },
+                    "user_prompt": {
+                        "type": "string"
+                    },
+                    "user_ids": {
+                        "type": "string"
+                    }
+                },
+                "required": []
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "type": "string"
+                    }
+                },
+                "required": []
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": []
+    }
+}
