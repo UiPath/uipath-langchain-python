@@ -1,7 +1,9 @@
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, MutableMapping, override
+from typing import Any, Dict, MutableMapping
+
+from typing_extensions import override
 
 logger = logging.getLogger(__name__)
 
@@ -209,14 +211,25 @@ class LangchainSpanProcessor(BaseSpanProcessor):
         for key in ["Attributes", "attributes"]:
             if key in span_data:
                 value = span_data.pop(key)
-                return safe_parse_json(value) if isinstance(value, str) else value
-        return None
+                if isinstance(value, str):
+                    try:
+                        parsed_value = json.loads(value)
+                        return parsed_value if isinstance(parsed_value, dict) else {}
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse attributes JSON: {value}")
+                        return {}
+                elif isinstance(value, dict):
+                    return value
+                else:
+                    return {}
+        return {}
 
     @override
     def process_span(self, span_data: MutableMapping[str, Any]) -> Dict[str, Any]:
+        logger.info(f"Processing span: {span_data}")
         attributes = self.extract_attributes(span_data)
 
-        if attributes:
+        if attributes and isinstance(attributes, dict):
             if "openinference.span.kind" in attributes:
                 # Remove the span kind attribute
                 span_type = attributes["openinference.span.kind"]

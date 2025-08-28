@@ -7,7 +7,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 from langchain_core.callbacks import dispatch_custom_event
-from uipath.tracing import TracingManager
+from uipath.tracing import TracingManager, traced
 
 from ._events import CustomTraceEvents, FunctionCallEventData
 
@@ -387,12 +387,112 @@ def register_uipath_tracing():
 
 
 # Apply the patch
-def _instrument_traceable_attributes():
+def _map_traceable_to_traced_args(
+    run_type: Optional[str] = None,
+    name: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """
+    Map LangSmith @traceable arguments to UiPath @traced() arguments.
+    
+    Args:
+        run_type: Function type (tool, chain, llm, retriever, etc.)
+        name: Custom name for the traced function
+        tags: List of tags for categorization
+        metadata: Additional metadata dictionary
+        **kwargs: Additional arguments (ignored)
+    
+    Returns:
+        Dict containing mapped arguments for @traced()
+    """
+    traced_args = {}
+    
+    # Direct mappings
+    if name is not None:
+        traced_args["name"] = name
+    
+    # Pass through run_type directly to UiPath @traced()
+    if run_type:
+        traced_args["run_type"] = run_type
+        
+    # For span_type, we can derive from run_type or use a default
+    if run_type:
+        # Map run_type to appropriate span_type for OpenTelemetry
+        span_type_mapping = {
+            "tool": "tool_call",
+            "chain": "chain_execution", 
+            "llm": "llm_call",
+            "retriever": "retrieval",
+            "embedding": "embedding",
+            "prompt": "prompt_template",
+            "parser": "output_parser"
+        }
+        traced_args["span_type"] = span_type_mapping.get(run_type, run_type)
+    
+    # Note: UiPath @traced() doesn't support custom attributes directly
+    # Tags and metadata information is lost in the current mapping
+    # This could be enhanced in future versions
+    
+    return traced_args
+
+
+def otel_traceable_adapter(
+    func: Optional[Callable] = None,
+    *,
+    run_type: Optional[str] = None,
+    name: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    **kwargs: Any,
+):
+    """
+    OTEL-based adapter that converts LangSmith @traceable decorator calls to UiPath @traced().
+    
+    This function maintains the same interface as LangSmith's @traceable but uses
+    UiPath's OpenTelemetry-based tracing system underneath.
+    
+    Args:
+        func: Function to be decorated (when used without parentheses)
+        run_type: Type of function (tool, chain, llm, etc.)
+        name: Custom name for tracing
+        tags: List of tags for categorization
+        metadata: Additional metadata dictionary
+        **kwargs: Additional arguments (for future compatibility)
+        
+    Returns:
+        Decorated function or decorator function
+    """
+    def decorator(f: Callable) -> Callable:
+        # Map arguments to @traced() format
+        traced_args = _map_traceable_to_traced_args(
+            run_type=run_type,
+            name=name,
+            tags=tags,
+            metadata=metadata,
+            **kwargs
+        )
+        
+        # Apply UiPath @traced() decorator
+        return traced(**traced_args)(f)
+    
+    # Handle both @traceable and @traceable(...) usage patterns
+    if func is None:
+        # Called as @traceable(...) - return decorator
+        return decorator
+    else:
+        # Called as @traceable - apply decorator directly
+        return decorator(func)
+
+
+def _instrument_traceable_attributes(useOtel: bool = False):
     """Apply the patch to langsmith module at import time."""
     global original_langsmith, original_traceable
 
-    # Register our custom tracing decorator
-    register_uipath_tracing()
+    if not useOtel:
+        # Register our custom tracing decorator when not using opentelemetry
+        register_uipath_tracing()
 
     # Import the original module if not already done
     if original_langsmith is None:
@@ -408,7 +508,12 @@ def _instrument_traceable_attributes():
         original_traceable = original_langsmith.traceable
 
         # Replace the traceable function with our patched version
-        original_langsmith.traceable = patched_traceable
+        if useOtel:
+            # Use OTEL-based adapter when OTEL is enabled
+            original_langsmith.traceable = otel_traceable_adapter
+        else:
+            # Use existing dispatch_event-based adapter
+            original_langsmith.traceable = patched_traceable
 
         # Put our modified module back
         sys.modules["langsmith"] = original_langsmith
