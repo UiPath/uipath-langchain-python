@@ -11,7 +11,10 @@ from langchain_core.tracers.langchain import wait_for_all_tracers
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph
-from openinference.instrumentation.langchain import LangChainInstrumentor
+from openinference.instrumentation.langchain import (
+    LangChainInstrumentor,
+    get_current_span,
+)
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -20,6 +23,7 @@ from uipath._cli._runtime._contracts import (
     UiPathErrorCategory,
     UiPathRuntimeResult,
 )
+from uipath.tracing import TracingManager
 
 from ..._utils import _instrument_traceable_attributes
 from ...tracers import (
@@ -57,30 +61,43 @@ class LangGraphRuntime(UiPathBaseRuntime):
         Raises:
             LangGraphRuntimeError: If execution fails
         """
-        _instrument_traceable_attributes()
+
+        use_otel_ff = os.getenv("UIPATH_USE_OTEL_TRACING", "false").lower() == "true"
+
+        # Instrument LangSmith @traceable to use appropriate adapter
+        # When OTEL is enabled: uses UiPath @traced() 
+        # When OTEL is disabled: uses existing dispatch_event system
+        _instrument_traceable_attributes(useOtel=use_otel_ff)
 
         await self.validate()
 
-        with suppress(Exception):
-            provider = TracerProvider()
-            trace.set_tracer_provider(provider)
-            provider.add_span_processor(BatchSpanProcessor(LangchainExporter()))  # type: ignore
+        if use_otel_ff:
+            try:
+                provider = TracerProvider()
+                trace.set_tracer_provider(provider)
+                provider.add_span_processor(BatchSpanProcessor(LangchainExporter()))  # type: ignore
 
-            provider.add_span_processor(
-                BatchSpanProcessor(
-                    JsonFileExporter(".uipath/traces.jsonl", LangchainSpanProcessor())
+                provider.add_span_processor(
+                    BatchSpanProcessor(
+                        JsonFileExporter(
+                            ".uipath/traces.jsonl", LangchainSpanProcessor()
+                        )
+                    )
                 )
-            )
 
-            provider.add_span_processor(
-                BatchSpanProcessor(
-                    SqliteExporter(".uipath/traces.db", LangchainSpanProcessor())
+                provider.add_span_processor(
+                    BatchSpanProcessor(
+                        SqliteExporter(".uipath/traces.db", LangchainSpanProcessor())
+                    )
                 )
-            )
 
-            LangChainInstrumentor().instrument(
-                tracer_provider=trace.get_tracer_provider()
-            )
+                LangChainInstrumentor().instrument(
+                    tracer_provider=trace.get_tracer_provider()
+                )
+
+                TracingManager.register_current_span_provider(get_current_span)
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenTelemetry tracing: {e}")
 
         if self.context.state_graph is None:
             return None
@@ -111,9 +128,10 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 # Set up tracing if available
                 callbacks: List[BaseCallbackHandler] = []
 
-                # if self.context.job_id and self.context.tracing_enabled:
-                #     tracer = AsyncUiPathTracer(context=self.context.trace_context)
-                #     callbacks = [tracer]
+                if not use_otel_ff:
+                    if self.context.job_id and self.context.tracing_enabled:
+                        tracer = AsyncUiPathTracer(context=self.context.trace_context)
+                        callbacks = [tracer]
 
                 graph_config: RunnableConfig = {
                     "configurable": {
