@@ -9,7 +9,7 @@ dependencies = [
     "langchain-anthropic>=0.3.8",
     "langchain-experimental>=0.3.4",
     "tavily-python>=0.5.0",
-    "uipath-langchain==0.0.113"
+    "uipath-langchain==0.0.123"
 ]
 
 [project.optional-dependencies]
