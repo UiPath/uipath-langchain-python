@@ -18,6 +18,7 @@ from uipath._cli._runtime._contracts import (
 
 from ..._utils import _instrument_traceable_attributes
 from ...tracers import AsyncUiPathTracer
+from .._utils._graph import LangGraphConfig
 from ._context import LangGraphRuntimeContext
 from ._exception import LangGraphRuntimeError
 from ._input import LangGraphInputProcessor
@@ -190,12 +191,14 @@ class LangGraphRuntime(UiPathBaseRuntime):
             ) from e
 
         if self.context.langgraph_config is None:
-            raise LangGraphRuntimeError(
-                "CONFIG_MISSING",
-                "Invalid configuration",
-                "Failed to load configuration",
-                UiPathErrorCategory.DEPLOYMENT,
-            )
+            self.context.langgraph_config = LangGraphConfig()
+            if not self.context.langgraph_config.exists:
+                raise LangGraphRuntimeError(
+                    "CONFIG_MISSING",
+                    "Invalid configuration",
+                    "Failed to load configuration",
+                    UiPathErrorCategory.DEPLOYMENT,
+                )
 
         try:
             self.context.langgraph_config.load_config()
