@@ -1,37 +1,36 @@
 {
-  "entryPoints": [
-    {
-      "filePath": "agent",
-      "uniqueId": "0bf221a3-6cf6-4b81-bce3-d0ce260521f2",
-      "type": "agent",
-      "input": {
-        "type": "object",
-        "properties": {
-          "company_name": {
-            "title": "Company Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "company_name"
-        ]
-      },
-      "output": {
-        "type": "object",
-        "properties": {
-          "response": {
-            "title": "Response",
-            "type": "string"
-          }
-        },
-        "required": [
-          "response"
-        ]
-      }
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "7eddbf91-0995-4254-beef-38cbe47f2297",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "company_name": {
+                        "title": "Company Name",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "company_name"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "response": {
+                        "default": null,
+                        "title": "Response",
+                        "type": "string"
+                    }
+                },
+                "required": []
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": []
     }
-  ],
-  "bindings": {
-    "version": "2.0",
-    "resources": []
-  }
 }

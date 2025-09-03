@@ -176,7 +176,6 @@ def invoke_agent(state: State) -> Command:
         if isinstance(msg, HumanMessage) and hasattr(msg, "name") and msg.name
     ]
     input_messages.append(HumanMessage(content=task))
-
     agent_response = interrupt(
         InvokeProcess(
             name=state["next"], input_arguments={"messages": input_messages}

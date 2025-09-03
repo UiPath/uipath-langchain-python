@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+from dataclasses import dataclass
 from pprint import pprint
 from typing import Any
 
@@ -15,6 +16,13 @@ from uipath_langchain.chat.models import UiPathAzureChatOpenAI
 from uipath_langchain.vectorstores.context_grounding_vectorstore import (
     ContextGroundingVectorStore,
 )
+
+@dataclass
+class MainInput:
+    """Input parameters for the main function."""
+    query: str
+    index_name: str
+    k: int
 
 
 def create_retrieval_chain(vectorstore: VectorStore, model: BaseChatModel, k: int = 3):
@@ -59,19 +67,19 @@ def create_retrieval_chain(vectorstore: VectorStore, model: BaseChatModel, k: in
     return retrieval_chain
 
 
-async def main(index_name: str, query: str, k: int = 3):
+async def main(input_data: MainInput):
     load_dotenv(find_dotenv())
 
     """Run a simple example of ContextGroundingVectorStore."""
     vectorstore = ContextGroundingVectorStore(
-        index_name=index_name,
+        index_name=input_data.index_name
     )
 
-    # Example query
-    query = "What is the ECCN for a laptop?"
+    # Use query from input
+    query = input_data.query
 
     # Perform semantic searches with distance scores
-    docs_with_scores = await vectorstore.asimilarity_search_with_score(query=query, k=5)
+    docs_with_scores = await vectorstore.asimilarity_search_with_score(query=query, k=input_data.k)
     print("==== Docs with distance scores ====")
     pprint(
         [
@@ -82,7 +90,7 @@ async def main(index_name: str, query: str, k: int = 3):
 
     # Perform a similarity search with relevance scores
     docs_with_relevance_scores = (
-        await vectorstore.asimilarity_search_with_relevance_scores(query=query, k=5)
+        await vectorstore.asimilarity_search_with_relevance_scores(query=query, k=input_data.k)
     )
     print("==== Docs with relevance scores ====")
     pprint(
@@ -132,4 +140,5 @@ if __name__ == "__main__":
         "--k", type=int, default=3, help="The number of documents to retrieve"
     )
     args = parser.parse_args()
-    asyncio.run(main(args.index_name, args.query, args.k))
+    input_data = MainInput(query=args.query, index_name=args.index_name, k=args.k)
+    asyncio.run(main(input_data))
