@@ -3,6 +3,7 @@ from langchain_tavily import TavilySearch
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
+from langchain_core.messages import HumanMessage
 
 # Set up the Tavily search tool
 tavily_tool = TavilySearch(max_results=5)
@@ -56,7 +57,7 @@ async def research_node(state: GraphState) -> GraphOutput:
 Ensure that each section is clearly labeled and contains relevant, concise information. If you need any additional specific information about {state.company_name} or its industry to enhance your analysis, please include your questions in the 'Additional Information Needed' section.
 """
 
-    new_state = MessagesState(messages=[{"role": "user", "content": user_message}])
+    new_state = MessagesState(messages=[HumanMessage(content=user_message)])
 
     result = await research_agent.ainvoke(new_state)
 
