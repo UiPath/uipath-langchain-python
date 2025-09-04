@@ -9,7 +9,7 @@ import httpx
 import openai
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import _cleanup_llm_representation
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from tenacity import (
     AsyncRetrying,
     Retrying,
@@ -37,8 +37,7 @@ def get_from_uipath_url():
 
 
 class UiPathRequestMixin(BaseModel):
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     default_headers: Optional[Mapping[str, str]] = {
         "X-UiPath-Streaming-Enabled": "false",
