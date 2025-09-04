@@ -1,4 +1,5 @@
 import asyncio
+import os
 from os import environ as env
 from typing import Optional
 
@@ -40,7 +41,8 @@ def langgraph_run_middleware(
             context.langgraph_config = config
             context.debug = kwargs.get("debug", False)
             context.logs_min_level = env.get("LOG_LEVEL", "INFO")
-            context.job_id = env.get("UIPATH_JOB_KEY")
+            context.job_id = env.get("UIPATH_JOB_KEY", None)
+            context.execution_id = env.get("UIPATH_JOB_KEY", None)
             context.trace_id = env.get("UIPATH_TRACE_ID")
             context.is_eval_run = kwargs.get("is_eval_run", False)
             context.tracing_enabled = tracing
@@ -64,6 +66,10 @@ def langgraph_run_middleware(
             env["UIPATH_REQUESTING_FEATURE"] = "langgraph-agent"
 
             async with LangGraphRuntime.from_context(context) as runtime:
+                if context.resume is False and context.job_id is None:
+                    # Delete the previous graph state file at debug time
+                    if os.path.exists(runtime.state_file_path):
+                        os.remove(runtime.state_file_path)
                 await runtime.execute()
 
         asyncio.run(execute())
