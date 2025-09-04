@@ -57,11 +57,6 @@ class LangGraphRuntime(UiPathBaseRuntime):
         tracer = None
 
         try:
-            if self.context.resume is False and self.context.job_id is None:
-                # Delete the previous graph state file at debug time
-                if os.path.exists(self.state_file_path):
-                    os.remove(self.state_file_path)
-
             async with AsyncSqliteSaver.from_conn_string(
                 self.state_file_path
             ) as memory:
@@ -86,9 +81,11 @@ class LangGraphRuntime(UiPathBaseRuntime):
 
                 graph_config: RunnableConfig = {
                     "configurable": {
-                        "thread_id": self.context.job_id
-                        if self.context.job_id
-                        else "default"
+                        "thread_id": (
+                            self.context.execution_id
+                            or self.context.job_id
+                            or "default"
+                        )
                     },
                     "callbacks": callbacks,
                 }
