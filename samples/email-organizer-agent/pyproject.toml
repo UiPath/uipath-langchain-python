@@ -10,7 +10,7 @@ dependencies = [
     "langchain-anthropic>=0.3.8",
     "uipath>=2.0.79",
     "langchain-community>=0.3.21",
-    "uipath-langchain>=0.0.123",
+    "uipath-langchain>=0.0.124",
 ]
 
 [project.optional-dependencies]
