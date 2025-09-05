@@ -18,5 +18,8 @@ This sample shows how to create an agent using LangGraph with multiple tool serv
 ## [Simple remote MCP](simple-remote-mcp)
 This sample demonstrates the creation of an agent using LangGraph, which connects to a remote MCP (Model Context Protocol) Server.
 
+## [OAuth external apps agent](oauth-external-apps-agent)
+This sample shows how to build a LangGraph agent that connects to a remote UiPath MCP server using OAuth authentication through an external UiPath application for dynamic access token management.
+
 ## [Ticket classification](ticket-classification)
 This sample demonstrates automatic classification of support tickets into categories. It includes a human approval step via UiPath Action Center.
