@@ -2230,6 +2230,12 @@ crypto = [
 ]
 
 [[package]]
+name = "pyperclip"
+version = "1.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/23/2f0a3efc4d6a32f3b63cdff36cd398d9701d26cda58e3ab97ac79fb5e60d/pyperclip-1.9.0.tar.gz", hash = "sha256:b7de0142ddc81bfc5c7507eea19da920b92252b548b96186caf94a5e2527d310", size = 20961, upload-time = "2024-06-18T20:38:48.401Z" }
+
+[[package]]
 name = "pytest"
 version = "8.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2740,7 +2746,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.1.33"
+version = "2.1.38"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-monitor-opentelemetry" },
@@ -2750,6 +2756,7 @@ dependencies = [
     { name = "opentelemetry-sdk" },
     { name = "pathlib" },
     { name = "pydantic" },
+    { name = "pyperclip" },
     { name = "python-dotenv" },
     { name = "rich" },
     { name = "tenacity" },
@@ -2757,14 +2764,14 @@ dependencies = [
     { name = "tomli" },
     { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fb/5b/6cdab558c7d34652c01a6f083e53c406f99bcedffd82a9097414db6d36e8/uipath-2.1.33.tar.gz", hash = "sha256:17f6a6062056ccf502d72770692c1ca96e5be6190e5648bb1ee0df93806caa6f", size = 1976249, upload-time = "2025-09-04T15:03:22.551Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2b/de/54ab0f9dc3081dff136271d19259162dbbfb0917a2ffcce16cc55062d715/uipath-2.1.38.tar.gz", hash = "sha256:d9d32e87dcafba89c642ba53c4bdb24100e7ca5efbdb7c4bfec3a8aee62fcd61", size = 1984272, upload-time = "2025-09-09T05:27:29.744Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/21/3b/ef1f1d1a23bba6aaa800fb74415dab56cdcb317b99d9c97392bd2043bbbd/uipath-2.1.33-py3-none-any.whl", hash = "sha256:6f9f8b35724517981bb14aa0b408e691eeefdf3b06cb7f8786562884639accff", size = 200206, upload-time = "2025-09-04T15:03:20.755Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/56/ee8e70825279938f7105edaa3ddc91c559c5c4e1f4b5df3cc86d7f31484c/uipath-2.1.38-py3-none-any.whl", hash = "sha256:cd78cb4b0cdab2ee8372dc573e3892684db08074586c2580c163f6a98dca05bb", size = 212810, upload-time = "2025-09-09T05:27:27.691Z" },
 ]
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.125"
+version = "0.0.126"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -2808,7 +2815,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.50" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.1.33,<2.2.0" },
+    { name = "uipath", specifier = ">=2.1.38,<2.2.0" },
     { name = "uipath-langchain", marker = "extra == 'langchain'", specifier = ">=0.0.2" },
 ]
 provides-extras = ["langchain"]

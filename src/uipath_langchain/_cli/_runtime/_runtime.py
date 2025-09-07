@@ -20,6 +20,7 @@ from ..._utils import _instrument_traceable_attributes
 from ...tracers import AsyncUiPathTracer
 from .._utils._graph import LangGraphConfig
 from ._context import LangGraphRuntimeContext
+from ._conversation import map_message
 from ._exception import LangGraphRuntimeError
 from ._input import LangGraphInputProcessor
 from ._output import LangGraphOutputProcessor
@@ -98,8 +99,27 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 if max_concurrency is not None:
                     graph_config["max_concurrency"] = int(max_concurrency)
 
+                if self.context.chat_handler:
+                    async for stream_chunk in graph.astream(
+                        processed_input,
+                        graph_config,
+                        stream_mode="messages",
+                        subgraphs=True,
+                    ):
+                        if not isinstance(stream_chunk, tuple) or len(stream_chunk) < 2:
+                            continue
+
+                        _, (message, _) = stream_chunk
+                        event = map_message(
+                            message=message,
+                            conversation_id=self.context.execution_id,
+                            exchange_id=self.context.execution_id,
+                        )
+                        if event:
+                            self.context.chat_handler.on_event(event)
+
                 # Stream the output at debug time
-                if self.is_debug_run():
+                elif self.is_debug_run():
                     # Get final chunk while streaming
                     final_chunk = None
                     async for stream_chunk in graph.astream(
