@@ -3,7 +3,7 @@ from langchain_tavily import TavilySearch
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, BaseMessage
 
 # Set up the Tavily search tool
 tavily_tool = TavilySearch(max_results=5)
@@ -35,6 +35,15 @@ llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 
 research_agent = create_react_agent(llm, tools=[tavily_tool], prompt=system_prompt)
 
+def get_message_text(msg: BaseMessage) -> str:
+    """LangChain-style safe message text extractor."""
+    if isinstance(msg.content, str):
+        return msg.content
+    if isinstance(msg.content, list):
+        return "".join(
+            block.get("text", "") for block in msg.content if block.get("type") == "text"
+        )
+    return ""
 
 class GraphState(BaseModel):
     company_name: str
@@ -61,7 +70,12 @@ Ensure that each section is clearly labeled and contains relevant, concise infor
 
     result = await research_agent.ainvoke(new_state)
 
-    return GraphOutput(response=result["messages"][-1].content)
+    if isinstance(result, dict) and "messages" in result:
+        msg = result["messages"][-1]
+    else:
+        msg = result
+
+    return GraphOutput(response=get_message_text(msg))
 
 
 # Build the state graph
