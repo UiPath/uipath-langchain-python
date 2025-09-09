@@ -8,7 +8,8 @@ from langgraph.prebuilt import create_react_agent
 from langchain_anthropic import ChatAnthropic
 from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession
-from typing import Optional, Literal, Any
+from uipath import UiPath
+from typing import Optional, Literal
 from mcp.client.streamable_http import streamablehttp_client
 import httpx
 from langchain.schema import SystemMessage, HumanMessage
@@ -31,33 +32,27 @@ class State(BaseModel):
 
 async def fetch_new_access_token(state: State) -> Command:
     """Fetches a new OAuth token if the current one is expired or missing."""
-    oauth_url = os.getenv("UIPATH_TOKEN_URL")
-    client_id = os.getenv("UIPATH_CLIENT_ID")
-    client_secret = os.getenv("UIPATH_CLIENT_SECRET")
-    scope = os.getenv("SCOPE")
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            oauth_url,
-            data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "scope": scope,
-                "grant_type": "client_credentials",
-            },
+    try:
+        uipath_client = UiPath(
+            base_url=os.getenv("UIPATH_TOKEN_URL"),
+            client_id=os.getenv("UIPATH_CLIENT_ID"),
+            client_secret=os.getenv("UIPATH_CLIENT_SECRET"),
+            scope=os.getenv("SCOPE"),
         )
-        response.raise_for_status()
+        # asset = uipath_client.assets.retrieve(name="test-asset", folder_path="TestFolder")
+        # print(f"Asset: {asset}")
 
-        token_data = response.json()
-        if "access_token" in token_data:
-            new_token = token_data["access_token"]
-            os.environ["UIPATH_ACCESS_TOKEN"] = new_token
-            env_path = find_dotenv(usecwd=True)
-            if env_path:
-                set_key(env_path, "UIPATH_ACCESS_TOKEN", new_token)
-            return Command(update={"access_token": new_token})
-        else:
-            raise Exception("Response does not contain 'access_token'.")
+        new_access_token = uipath_client._config.secret
+
+        os.environ["UIPATH_ACCESS_TOKEN"] = new_access_token
+        env_path = find_dotenv(usecwd=True)
+        if env_path:
+            set_key(env_path, "UIPATH_ACCESS_TOKEN", new_access_token, quote_mode="never")
+
+        return Command(update={"access_token": new_access_token})
+
+    except Exception as e:
+        raise Exception(f"Failed to fetch and update the new access token: {str(e)}")
 
 @asynccontextmanager
 async def agent_mcp(access_token: str):
