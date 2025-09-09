@@ -5,14 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="fc1c6313-e711-4568-aad3-e6e7f8372734" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/pyproject.toml" beforeDir="false" afterPath="$PROJECT_DIR$/pyproject.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/samples/RAG-quiz-generator/pyproject.toml" beforeDir="false" afterPath="$PROJECT_DIR$/samples/RAG-quiz-generator/pyproject.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/samples/RAG-quiz-generator/src/agents/researcher-RAG-agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/samples/RAG-quiz-generator/src/agents/researcher-RAG-agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/samples/RAG-quiz-generator/uv.lock" beforeDir="false" afterPath="$PROJECT_DIR$/samples/RAG-quiz-generator/uv.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/samples/multi-agent-planner-researcher-coder-distributed/pyproject.toml" beforeDir="false" afterPath="$PROJECT_DIR$/samples/multi-agent-planner-researcher-coder-distributed/pyproject.toml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/samples/multi-agent-planner-researcher-coder-distributed/src/multi-agent-distributed/researcher.py" beforeDir="false" afterPath="$PROJECT_DIR$/samples/multi-agent-planner-researcher-coder-distributed/src/multi-agent-distributed/researcher.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/samples/multi-agent-planner-researcher-coder-distributed/uv.lock" beforeDir="false" afterPath="$PROJECT_DIR$/samples/multi-agent-planner-researcher-coder-distributed/uv.lock" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/uv.lock" beforeDir="false" afterPath="$PROJECT_DIR$/uv.lock" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -53,7 +46,7 @@
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.git.unshallow": "true",
-    "git-widget-placeholder": "#157 on Rebasing chore/update-deprecated-lib",
+    "git-widget-placeholder": "#157 on chore/update-deprecated-lib",
     "junie.onboarding.icon.badge.shown": "true",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
