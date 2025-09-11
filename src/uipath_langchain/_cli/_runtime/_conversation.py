@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import (
     AIMessage,
@@ -16,6 +16,7 @@ from uipath.agent.conversation import (
     UiPathConversationContentPartStartEvent,
     UiPathConversationEvent,
     UiPathConversationExchangeEvent,
+    UiPathConversationMessage,
     UiPathConversationMessageEndEvent,
     UiPathConversationMessageEvent,
     UiPathConversationMessageStartEvent,
@@ -56,6 +57,47 @@ def _extract_text(content) -> str:
             if isinstance(part, dict) and part.get("type") == "text"
         )
     return str(content or "")
+
+
+def uipath_to_human_messages(
+    uipath_msg: UiPathConversationMessage,
+) -> List[HumanMessage]:
+    """
+    Converts a UiPathConversationMessage into a list of HumanMessages for LangGraph.
+    Supports multimodal content parts (text, external content) and preserves metadata.
+    """
+    human_messages = []
+
+    # Loop over each content part
+    if uipath_msg.content_parts:
+        for part in uipath_msg.content_parts:
+            data = part.data
+            content = ""
+            metadata: Dict[str, Any] = {
+                "message_id": uipath_msg.message_id,
+                "content_part_id": part.content_part_id,
+                "mime_type": part.mime_type,
+                "created_at": uipath_msg.created_at,
+                "updated_at": uipath_msg.updated_at,
+            }
+
+            if isinstance(data, UiPathInlineValue):
+                content = str(data.inline)
+
+            # Append a HumanMessage for this content part
+            human_messages.append(HumanMessage(content=content, metadata=metadata))
+
+    # Handle the case where there are no content parts
+    else:
+        metadata = {
+            "message_id": uipath_msg.message_id,
+            "role": uipath_msg.role,
+            "created_at": uipath_msg.created_at,
+            "updated_at": uipath_msg.updated_at,
+        }
+        human_messages.append(HumanMessage(content="", metadata=metadata))
+
+    return human_messages
 
 
 def map_message(

@@ -2746,7 +2746,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.1.38"
+version = "2.1.41"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-monitor-opentelemetry" },
@@ -2764,9 +2764,9 @@ dependencies = [
     { name = "tomli" },
     { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2b/de/54ab0f9dc3081dff136271d19259162dbbfb0917a2ffcce16cc55062d715/uipath-2.1.38.tar.gz", hash = "sha256:d9d32e87dcafba89c642ba53c4bdb24100e7ca5efbdb7c4bfec3a8aee62fcd61", size = 1984272, upload-time = "2025-09-09T05:27:29.744Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/38/e6/2577f69ba8d64c959794f3028c44aa83bcc1d1d0dcd7529b5de684d1e866/uipath-2.1.41.tar.gz", hash = "sha256:0dd6b59b44f03bfedd6285eeac0ccaa4c84334bad4442241e770fe107b6d2bb4", size = 1987987, upload-time = "2025-09-11T16:29:32.878Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/56/ee8e70825279938f7105edaa3ddc91c559c5c4e1f4b5df3cc86d7f31484c/uipath-2.1.38-py3-none-any.whl", hash = "sha256:cd78cb4b0cdab2ee8372dc573e3892684db08074586c2580c163f6a98dca05bb", size = 212810, upload-time = "2025-09-09T05:27:27.691Z" },
+    { url = "https://files.pythonhosted.org/packages/80/f2/1d2577a622cb20e6d4e9d86875034c5bf4fe16137bcbde9e409276238210/uipath-2.1.41-py3-none-any.whl", hash = "sha256:0cf4aeaf118e458163d20cad1d2b74faf1c8b6f2b6d4b0ee3926591fb39b2745", size = 214411, upload-time = "2025-09-11T16:29:30.896Z" },
 ]
 
 [[package]]
@@ -2815,7 +2815,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.50" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.1.38,<2.2.0" },
+    { name = "uipath", specifier = ">=2.1.41,<2.2.0" },
     { name = "uipath-langchain", marker = "extra == 'langchain'", specifier = ">=0.0.2" },
 ]
 provides-extras = ["langchain"]
