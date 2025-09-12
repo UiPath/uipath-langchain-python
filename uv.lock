@@ -2746,7 +2746,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.1.41"
+version = "2.1.44"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-monitor-opentelemetry" },
@@ -2764,14 +2764,14 @@ dependencies = [
     { name = "tomli" },
     { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/38/e6/2577f69ba8d64c959794f3028c44aa83bcc1d1d0dcd7529b5de684d1e866/uipath-2.1.41.tar.gz", hash = "sha256:0dd6b59b44f03bfedd6285eeac0ccaa4c84334bad4442241e770fe107b6d2bb4", size = 1987987, upload-time = "2025-09-11T16:29:32.878Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/09/62/c0d9d884c7b2b01eb78e9445874745eae0422673d9b89335ce890960eda5/uipath-2.1.44.tar.gz", hash = "sha256:4b544c467158d57f6f7b7ac001fa34b959e685830065bb717544b05b32ee237f", size = 1988099, upload-time = "2025-09-15T06:59:47.92Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/f2/1d2577a622cb20e6d4e9d86875034c5bf4fe16137bcbde9e409276238210/uipath-2.1.41-py3-none-any.whl", hash = "sha256:0cf4aeaf118e458163d20cad1d2b74faf1c8b6f2b6d4b0ee3926591fb39b2745", size = 214411, upload-time = "2025-09-11T16:29:30.896Z" },
+    { url = "https://files.pythonhosted.org/packages/51/fd/3ae9edea73f5a8223771924b90dbc390c43b70cebed101b27a05caad11fe/uipath-2.1.44-py3-none-any.whl", hash = "sha256:6988df9cac8a2b6bec505c7b816e5c1d80a990f36fe2e853997e8837e7572bfc", size = 215418, upload-time = "2025-09-15T06:59:46.071Z" },
 ]
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.126"
+version = "0.0.128"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -2815,7 +2815,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.50" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.1.41,<2.2.0" },
+    { name = "uipath", specifier = ">=2.1.44,<2.2.0" },
     { name = "uipath-langchain", marker = "extra == 'langchain'", specifier = ">=0.0.2" },
 ]
 provides-extras = ["langchain"]
