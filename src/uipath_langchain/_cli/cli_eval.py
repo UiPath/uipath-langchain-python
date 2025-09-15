@@ -4,15 +4,13 @@ from typing import List, Optional
 
 from uipath._cli._evals._runtime import UiPathEvalContext, UiPathEvalRuntime
 from uipath._cli._runtime._contracts import (
-    UiPathRuntimeContextBuilder,
     UiPathRuntimeFactory,
 )
+from uipath._cli._utils._eval_set import EvalHelpers
 from uipath._cli.middlewares import MiddlewareResult
+from uipath.eval._helpers import auto_discover_entrypoint
 
-from uipath_langchain._cli._runtime._context import (
-    LangGraphRuntimeContext,
-    LangGraphRuntimeContextBuilder,
-)
+from uipath_langchain._cli._runtime._context import LangGraphRuntimeContext
 from uipath_langchain._cli._runtime._runtime import LangGraphRuntime
 from uipath_langchain._cli._utils._graph import LangGraphConfig
 
@@ -20,37 +18,44 @@ from uipath_langchain._cli._utils._graph import LangGraphConfig
 def langgraph_eval_middleware(
     entrypoint: Optional[str], eval_set: Optional[str], eval_ids: List[str], **kwargs
 ) -> MiddlewareResult:
-    def generate_eval_context(
-        runtime_context: LangGraphRuntimeContext,
-    ) -> UiPathEvalContext[LangGraphRuntimeContext]:
-        base_context = UiPathRuntimeContextBuilder().with_defaults().build()
-        return UiPathEvalContext(
-            runtime_context=runtime_context,
-            **kwargs,
-            **base_context.model_dump(),
-        )
+    # Add default env variables
+    env["UIPATH_REQUESTING_PRODUCT"] = "uipath-python-sdk"
+    env["UIPATH_REQUESTING_FEATURE"] = "langgraph-agent"
+
+    config = LangGraphConfig()
+    if not config.exists:
+        return MiddlewareResult(
+            should_continue=True
+        )  # Continue with normal flow if no langgraph.json
+
+    eval_context = UiPathEvalContext.with_defaults(**kwargs)
+    eval_context.eval_set = eval_set or EvalHelpers.auto_discover_eval_set()
+    eval_context.eval_ids = eval_ids
 
     try:
-        runtime_factory = UiPathRuntimeFactory(
-            LangGraphRuntime, LangGraphRuntimeContext
-        )
-        # Add default env variables
-        env["UIPATH_REQUESTING_PRODUCT"] = "uipath-python-sdk"
-        env["UIPATH_REQUESTING_FEATURE"] = "langgraph-agent"
+        runtime_entrypoint = entrypoint or auto_discover_entrypoint()
 
-        context = (
-            LangGraphRuntimeContextBuilder()
-            .with_defaults(**kwargs)
-            .with_langgraph_config(LangGraphConfig())
-            .with_entrypoint(entrypoint)
-            .mark_eval_run()
-        ).build()
+        def generate_runtime_context(
+            context_entrypoint: str, langgraph_config: LangGraphConfig, **context_kwargs
+        ) -> LangGraphRuntimeContext:
+            context = LangGraphRuntimeContext.with_defaults(**context_kwargs)
+            context.langgraph_config = langgraph_config
+            context.entrypoint = context_entrypoint
+            return context
+
+        runtime_factory = UiPathRuntimeFactory(
+            LangGraphRuntime,
+            LangGraphRuntimeContext,
+            context_generator=lambda **context_kwargs: generate_runtime_context(
+                context_entrypoint=runtime_entrypoint,
+                langgraph_config=config,
+                **context_kwargs,
+            ),
+        )
 
         async def execute():
-            async with UiPathEvalRuntime[
-                LangGraphRuntime, LangGraphRuntimeContext
-            ].from_eval_context(
-                factory=runtime_factory, context=generate_eval_context(context)
+            async with UiPathEvalRuntime.from_eval_context(
+                factory=runtime_factory, context=eval_context
             ) as eval_runtime:
                 await eval_runtime.execute()
 

@@ -3,21 +3,20 @@ import os
 from os import environ as env
 from typing import Optional
 
-from dotenv import load_dotenv
 from uipath._cli.middlewares import MiddlewareResult
 
-from ._runtime._context import LangGraphRuntimeContextBuilder
 from ._runtime._exception import LangGraphRuntimeError
-from ._runtime._runtime import LangGraphRuntime
+from ._runtime._runtime import (  # type: ignore[attr-defined]
+    LangGraphRuntime,
+    LangGraphRuntimeContext,
+)
 from ._utils._graph import LangGraphConfig
-
-load_dotenv()
 
 
 def langgraph_run_middleware(
     entrypoint: Optional[str], input: Optional[str], resume: bool, **kwargs
 ) -> MiddlewareResult:
-    """Middleware to handle langgraph execution"""
+    """Middleware to handle LangGraph execution"""
     config = LangGraphConfig()
     if not config.exists:
         return MiddlewareResult(
@@ -29,14 +28,11 @@ def langgraph_run_middleware(
         env["UIPATH_REQUESTING_PRODUCT"] = "uipath-python-sdk"
         env["UIPATH_REQUESTING_FEATURE"] = "langgraph-agent"
 
-        context = (
-            LangGraphRuntimeContextBuilder()
-            .with_defaults(**kwargs)
-            .with_langgraph_config(config)
-            .with_entrypoint(entrypoint)
-            .with_input(input_data=input, input_file=kwargs.get("input_file"))
-            .with_resume(resume)
-        ).build()
+        context = LangGraphRuntimeContext.with_defaults(**kwargs)
+        context.langgraph_config = config
+        context.entrypoint = entrypoint
+        context.input = input
+        context.resume = resume
 
         async def execute():
             async with LangGraphRuntime.from_context(context) as runtime:
