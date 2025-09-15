@@ -121,7 +121,6 @@ Generate your first UiPath LangChain agent:
 ✓  Created 'main.py' file.
 ✓  Created 'langgraph.json' file.
 ✓  Created 'pyproject.toml' file.
-🔧  Please ensure to define either ANTHROPIC_API_KEY or OPENAI_API_KEY in your .env file.
 💡  Initialize project: uipath init
 💡  Run agent: uipath run agent '{"topic": "UiPath"}'
 ```
