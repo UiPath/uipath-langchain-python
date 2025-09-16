@@ -11,7 +11,6 @@ dependencies = [
     "tavily-python>=0.5.0",
     "uipath-langchain",
     "duckduckgo-search>=8.0.0",
-    "uipath>=2.0.82",
 ]
 
 [project.optional-dependencies]
