@@ -1,0 +1,148 @@
+{
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "633129eb-6f11-494b-a1e5-1d55a4dcd30b",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "items": {
+                            "additionalProperties": true,
+                            "description": "Base abstract message class.\n\nMessages are the inputs and outputs of ChatModels.",
+                            "properties": {
+                                "content": {
+                                    "anyOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "items": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string"
+                                                    },
+                                                    {
+                                                        "additionalProperties": true,
+                                                        "type": "object"
+                                                    }
+                                                ]
+                                            },
+                                            "type": "array"
+                                        }
+                                    ],
+                                    "title": "Content"
+                                },
+                                "additional_kwargs": {
+                                    "additionalProperties": true,
+                                    "title": "Additional Kwargs",
+                                    "type": "object"
+                                },
+                                "response_metadata": {
+                                    "additionalProperties": true,
+                                    "title": "Response Metadata",
+                                    "type": "object"
+                                },
+                                "type": {
+                                    "title": "Type",
+                                    "type": "string"
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "id": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "content",
+                                "type"
+                            ],
+                            "title": "BaseMessage",
+                            "type": "object"
+                        },
+                        "title": "Messages",
+                        "type": "array"
+                    },
+                    "remaining_steps": {
+                        "title": "Remaining Steps",
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "messages"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "messages": {
+                        "default": null,
+                        "items": {
+                            "additionalProperties": true,
+                            "description": "Base abstract message class.\n\nMessages are the inputs and outputs of ChatModels.",
+                            "properties": {
+                                "content": {
+                                    "anyOf": [
+                                        {
+                                            "type": "string"
+                                        },
+                                        {
+                                            "items": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string"
+                                                    },
+                                                    {
+                                                        "additionalProperties": true,
+                                                        "type": "object"
+                                                    }
+                                                ]
+                                            },
+                                            "type": "array"
+                                        }
+                                    ],
+                                    "title": "Content"
+                                },
+                                "additional_kwargs": {
+                                    "additionalProperties": true,
+                                    "title": "Additional Kwargs",
+                                    "type": "object"
+                                },
+                                "response_metadata": {
+                                    "additionalProperties": true,
+                                    "title": "Response Metadata",
+                                    "type": "object"
+                                },
+                                "type": {
+                                    "title": "Type",
+                                    "type": "string"
+                                },
+                                "name": {
+                                    "type": "string"
+                                },
+                                "id": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "content",
+                                "type"
+                            ],
+                            "title": "BaseMessage",
+                            "type": "object"
+                        },
+                        "title": "Messages",
+                        "type": "array"
+                    }
+                },
+                "required": []
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": []
+    }
+}

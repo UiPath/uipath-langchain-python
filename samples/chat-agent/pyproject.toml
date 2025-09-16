@@ -1,25 +1,20 @@
 [project]
-name = "company-research-agent"
+name = "chat-agent"
 version = "0.0.1"
-description = "Company research agent with Tavily web search"
+description = "Chat agent with Tavily web search"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
-
 requires-python = ">=3.10"
 dependencies = [
-    "langgraph>=0.2.55",
-    "langchain-anthropic>=0.3.8",
-    "tavily-python>=0.5.0",
-    "uipath-langchain",
-    "duckduckgo-search>=8.1.1",
-    "langchain-community>=0.3.21",
-    "debugpy>=1.8.15",
+    "langgraph>=0.6.5",
+    "langchain-anthropic>=0.3.19",
+    "tavily-python>=0.7.11",
+    "langchain-tavily>=0.2.11",
+    "uipath-langchain>=0.0.126",
+    "uipath>=2.1.41",
 ]
 
 [project.optional-dependencies]
 dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
-
-[tool.uv.sources]
-uipath-langchain = { path = "../../", editable = true }
 
 [build-system]
 requires = ["setuptools>=73.0.0", "wheel"]
@@ -48,9 +43,3 @@ lint.ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "UP"]
-
-[[tool.uv.index]]
-name = "testpypi"
-url = "https://test.pypi.org/simple/"
-publish-url = "https://test.pypi.org/legacy/"
-explicit = true

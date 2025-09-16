@@ -12,6 +12,7 @@ from uipath._cli._runtime._contracts import (
 from uipath._cli._runtime._hitl import HitlReader
 
 from ._context import LangGraphRuntimeContext
+from ._conversation import uipath_to_human_messages
 from ._exception import LangGraphRuntimeError
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,10 @@ class LangGraphInputProcessor:
         logger.debug(f"Resumed: {self.context.resume} Input: {self.context.input_json}")
 
         if not self.context.resume:
+            if self.context.input_message:
+                return {
+                    "messages": uipath_to_human_messages(self.context.input_message)
+                }
             return self.context.input_json
 
         if self.context.input_json:

@@ -50,8 +50,6 @@ class LangGraphRuntime(UiPathBaseRuntime):
         """
         _instrument_traceable_attributes()
 
-        await self.validate()
-
         if self.context.state_graph is None:
             return None
 
@@ -196,17 +194,6 @@ class LangGraphRuntime(UiPathBaseRuntime):
     async def validate(self) -> None:
         """Validate runtime inputs."""
         """Load and validate the graph configuration ."""
-        try:
-            if self.context.input:
-                self.context.input_json = json.loads(self.context.input)
-        except json.JSONDecodeError as e:
-            raise LangGraphRuntimeError(
-                "INPUT_INVALID_JSON",
-                "Invalid JSON input",
-                "The input data is not valid JSON.",
-                UiPathErrorCategory.USER,
-            ) from e
-
         if self.context.langgraph_config is None:
             self.context.langgraph_config = LangGraphConfig()
             if not self.context.langgraph_config.exists:
