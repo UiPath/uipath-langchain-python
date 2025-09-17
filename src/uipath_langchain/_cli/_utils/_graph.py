@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, cast
 
-from dotenv import load_dotenv
 from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
@@ -160,18 +159,6 @@ class LangGraphConfig:
                 raise ValueError(
                     f"Missing required fields in langgraph.json: {missing_fields}"
                 )
-
-            if env_file := config.get("env"):
-                env_path = os.path.abspath(os.path.normpath(env_file))
-                if os.path.exists(env_path):
-                    if not load_dotenv(env_path):
-                        # log warning only if dotenv is not empty
-                        if os.path.getsize(env_path) > 0:
-                            logger.warning(
-                                f"Could not load environment variables from {env_path}"
-                            )
-                    else:
-                        logger.debug(f"Loaded environment variables from {env_path}")
 
             self._config = config
             self._load_graphs()

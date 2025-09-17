@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pprint import pprint
 from typing import Any
 
-from dotenv import find_dotenv, load_dotenv
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -68,7 +67,6 @@ def create_retrieval_chain(vectorstore: VectorStore, model: BaseChatModel, k: in
 
 
 async def main(input_data: MainInput):
-    load_dotenv(find_dotenv())
 
     """Run a simple example of ContextGroundingVectorStore."""
     vectorstore = ContextGroundingVectorStore(
