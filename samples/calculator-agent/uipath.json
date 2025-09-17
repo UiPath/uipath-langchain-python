@@ -1,0 +1,52 @@
+{
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "5e1d7bfd-c1b3-4d4f-bd0d-62e3b975e30b",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "a": {
+                        "title": "A",
+                        "type": "number"
+                    },
+                    "b": {
+                        "title": "B",
+                        "type": "number"
+                    },
+                    "operator": {
+                        "enum": [
+                            "+",
+                            "-",
+                            "*",
+                            "/"
+                        ],
+                        "title": "Operator",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "a",
+                    "b",
+                    "operator"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "default": null,
+                        "title": "Result",
+                        "type": "number"
+                    }
+                },
+                "required": []
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": []
+    }
+}
