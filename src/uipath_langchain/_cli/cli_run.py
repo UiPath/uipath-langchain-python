@@ -27,7 +27,7 @@ def langgraph_run_middleware(
         # Add default env variables
         env["UIPATH_REQUESTING_PRODUCT"] = "uipath-python-sdk"
         env["UIPATH_REQUESTING_FEATURE"] = "langgraph-agent"
-
+        kwargs.pop("debug_port")
         context = LangGraphRuntimeContext.with_defaults(**kwargs)
         context.langgraph_config = config
         context.entrypoint = entrypoint

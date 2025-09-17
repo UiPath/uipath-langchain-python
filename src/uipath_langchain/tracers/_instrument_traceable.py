@@ -7,6 +7,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Literal, Optional
 
 from langchain_core.callbacks import dispatch_custom_event
+from opentelemetry import trace
 from uipath.tracing import TracingManager
 
 from ._events import CustomTraceEvents, FunctionCallEventData
@@ -136,10 +137,13 @@ def _create_traced_wrapper(
             )
 
             outputs = []
-            async_gen = target_func(*args, **kwargs)
-            async for item in async_gen:
-                outputs.append(item)
-                yield item
+            tracer = trace.get_tracer("uipath-runtime")
+            with tracer.start_as_current_span(actual_func_name, attributes={"inputs": str(inputs)}) as span:
+                async_gen = target_func(*args, **kwargs)
+                async for item in async_gen:
+                    outputs.append(item)
+                    yield item
+                span.set_attribute("outputs", str(outputs))
 
             # Process output if needed
             output_to_record = outputs
@@ -186,10 +190,13 @@ def _create_traced_wrapper(
             )
 
             outputs = []
-            gen = target_func(*args, **kwargs)
-            for item in gen:
-                outputs.append(item)
-                yield item
+            tracer = trace.get_tracer("uipath-runtime")
+            with tracer.start_as_current_span(actual_func_name, attributes={"inputs": str(inputs)}) as span:
+                gen = target_func(*args, **kwargs)
+                for item in gen:
+                    outputs.append(item)
+                    yield item
+                span.set_attribute("outputs", str(outputs))
 
             # Process output if needed
             output_to_record = outputs
@@ -232,8 +239,10 @@ def _create_traced_wrapper(
                 tags=tags,
                 metadata=actual_metadata,
             )
-
-            result = await target_func(*args, **kwargs)
+            tracer = trace.get_tracer("uipath-runtime")
+            with tracer.start_as_current_span(actual_func_name, attributes={"inputs": str(inputs)}) as span:
+                result = await target_func(*args, **kwargs)
+                span.set_attribute("outputs", str(result))
 
             # Process output if needed
             output_to_record = result
@@ -279,7 +288,10 @@ def _create_traced_wrapper(
                 metadata=actual_metadata,
             )
 
-            result = target_func(*args, **kwargs)
+            tracer = trace.get_tracer("uipath-runtime")
+            with tracer.start_as_current_span(actual_func_name, attributes={"inputs": str(inputs)}) as span:
+                result = target_func(*args, **kwargs)
+                span.set_attribute("outputs", str(result))
 
             # Process output if needed
             output_to_record = result
