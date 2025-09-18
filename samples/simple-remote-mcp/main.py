@@ -1,4 +1,3 @@
-import dotenv
 import os
 from contextlib import asynccontextmanager
 from langgraph.prebuilt import create_react_agent
@@ -7,7 +6,6 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-dotenv.load_dotenv()
 
 @asynccontextmanager
 async def make_graph():
