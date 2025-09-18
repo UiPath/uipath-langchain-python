@@ -11,7 +11,7 @@ from uipath._cli._runtime._contracts import (
 )
 from uipath._cli.middlewares import MiddlewareResult
 
-from .._tracing import LangchainExporter, _instrument_traceable_attributes
+from .._tracing import LangChainExporter, _instrument_traceable_attributes
 from ._runtime._exception import LangGraphRuntimeError
 from ._runtime._runtime import (  # type: ignore[attr-defined]
     LangGraphRuntime,
@@ -37,9 +37,9 @@ def langgraph_run_middleware(
         context.input = input
         context.resume = resume
 
-        def generate_runtime(ctx: LangGraphRuntimeContext) -> LangGraphRuntime:
-            _instrument_traceable_attributes()
+        _instrument_traceable_attributes()
 
+        def generate_runtime(ctx: LangGraphRuntimeContext) -> LangGraphRuntime:
             runtime = LangGraphRuntime(ctx)
             # If not resuming and no job id, delete the previous state file
             if not ctx.resume and ctx.job_id is None:
@@ -55,7 +55,7 @@ def langgraph_run_middleware(
             )
 
             if context.job_id:
-                runtime_factory.add_span_exporter(LangchainExporter())
+                runtime_factory.add_span_exporter(LangChainExporter())
 
             runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
 

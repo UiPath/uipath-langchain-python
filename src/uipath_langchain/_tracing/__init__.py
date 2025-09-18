@@ -1,4 +1,4 @@
 from ._instrument_traceable import _instrument_traceable_attributes
-from ._oteladapter import LangchainExporter
+from ._oteladapter import LangChainExporter
 
-__all__ = ["LangchainExporter", "_instrument_traceable_attributes"]
+__all__ = ["LangChainExporter", "_instrument_traceable_attributes"]

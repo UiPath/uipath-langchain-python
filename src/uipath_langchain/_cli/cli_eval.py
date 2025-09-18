@@ -1,6 +1,10 @@
 import asyncio
 from typing import List, Optional
 
+from openinference.instrumentation.langchain import (
+    LangChainInstrumentor,
+    get_current_span,
+)
 from uipath._cli._evals._runtime import UiPathEvalContext, UiPathEvalRuntime
 from uipath._cli._runtime._contracts import (
     UiPathRuntimeFactory,
@@ -12,7 +16,10 @@ from uipath.eval._helpers import auto_discover_entrypoint
 from uipath_langchain._cli._runtime._context import LangGraphRuntimeContext
 from uipath_langchain._cli._runtime._runtime import LangGraphRuntime
 from uipath_langchain._cli._utils._graph import LangGraphConfig
-from uipath_langchain._tracing import _instrument_traceable_attributes
+from uipath_langchain._tracing import (
+    LangChainExporter,
+    _instrument_traceable_attributes,
+)
 
 
 def langgraph_eval_middleware(
@@ -50,6 +57,11 @@ def langgraph_eval_middleware(
                 **context_kwargs,
             ),
         )
+
+        if eval_context.job_id:
+            runtime_factory.add_span_exporter(LangChainExporter())
+
+        runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
 
         async def execute():
             async with UiPathEvalRuntime.from_eval_context(
