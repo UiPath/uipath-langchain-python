@@ -2,7 +2,6 @@ import logging
 from typing import Any, Optional, cast
 
 from langgraph.types import Command
-from uipath import UiPath
 from uipath._cli._runtime._contracts import (
     UiPathApiTrigger,
     UiPathErrorCategory,
@@ -32,7 +31,6 @@ class LangGraphInputProcessor:
             context: The runtime context for the graph execution.
         """
         self.context = context
-        self.uipath = UiPath()
 
     async def process(self) -> Any:
         """
