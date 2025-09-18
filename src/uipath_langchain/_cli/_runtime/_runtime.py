@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables.config import RunnableConfig
-from langchain_core.tracers.langchain import wait_for_all_tracers
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph
@@ -16,8 +15,6 @@ from uipath._cli._runtime._contracts import (
     UiPathRuntimeResult,
 )
 
-from ..._utils import _instrument_traceable_attributes
-from ...tracers import AsyncUiPathTracer
 from .._utils._graph import LangGraphConfig
 from ._context import LangGraphRuntimeContext
 from ._conversation import map_message
@@ -48,12 +45,9 @@ class LangGraphRuntime(UiPathBaseRuntime):
         Raises:
             LangGraphRuntimeError: If execution fails
         """
-        _instrument_traceable_attributes()
 
         if self.context.state_graph is None:
             return None
-
-        tracer = None
 
         try:
             async with AsyncSqliteSaver.from_conn_string(
@@ -71,12 +65,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
 
                 processed_input = await input_processor.process()
 
-                # Set up tracing if available
                 callbacks: List[BaseCallbackHandler] = []
-
-                if self.context.job_id and self.context.tracing_enabled:
-                    tracer = AsyncUiPathTracer(context=self.context.trace_context)
-                    callbacks = [tracer]
 
                 graph_config: RunnableConfig = {
                     "configurable": {
@@ -185,11 +174,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 UiPathErrorCategory.USER,
             ) from e
         finally:
-            if tracer is not None:
-                await tracer.wait_for_all_tracers()
-
-            if self.context.langsmith_tracing_enabled:
-                wait_for_all_tracers()
+            pass
 
     async def validate(self) -> None:
         """Validate runtime inputs."""

@@ -1,10 +1,17 @@
 import asyncio
 import os
-from os import environ as env
 from typing import Optional
 
+from openinference.instrumentation.langchain import (
+    LangChainInstrumentor,
+    get_current_span,
+)
+from uipath._cli._runtime._contracts import (
+    UiPathRuntimeFactory,
+)
 from uipath._cli.middlewares import MiddlewareResult
 
+from .._tracing import LangchainExporter, _instrument_traceable_attributes
 from ._runtime._exception import LangGraphRuntimeError
 from ._runtime._runtime import (  # type: ignore[attr-defined]
     LangGraphRuntime,
@@ -24,23 +31,35 @@ def langgraph_run_middleware(
         )  # Continue with normal flow if no langgraph.json
 
     try:
-        # Add default env variables
-        env["UIPATH_REQUESTING_PRODUCT"] = "uipath-python-sdk"
-        env["UIPATH_REQUESTING_FEATURE"] = "langgraph-agent"
-
         context = LangGraphRuntimeContext.with_defaults(**kwargs)
         context.langgraph_config = config
         context.entrypoint = entrypoint
         context.input = input
         context.resume = resume
 
+        def generate_runtime(ctx: LangGraphRuntimeContext) -> LangGraphRuntime:
+            _instrument_traceable_attributes()
+
+            runtime = LangGraphRuntime(ctx)
+            # If not resuming and no job id, delete the previous state file
+            if not ctx.resume and ctx.job_id is None:
+                if os.path.exists(runtime.state_file_path):
+                    os.remove(runtime.state_file_path)
+            return runtime
+
         async def execute():
-            async with LangGraphRuntime.from_context(context) as runtime:
-                if context.resume is False and context.job_id is None:
-                    # Delete the previous graph state file at debug time
-                    if os.path.exists(runtime.state_file_path):
-                        os.remove(runtime.state_file_path)
-                await runtime.execute()
+            runtime_factory = UiPathRuntimeFactory(
+                LangGraphRuntime,
+                LangGraphRuntimeContext,
+                runtime_generator=generate_runtime,
+            )
+
+            if context.job_id:
+                runtime_factory.add_span_exporter(LangchainExporter())
+
+            runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
+
+            await runtime_factory.execute(context)
 
         asyncio.run(execute())
 
