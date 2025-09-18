@@ -182,7 +182,10 @@ class AsyncUiPathTracer(AsyncBaseTracer):
                 if run.parent_run_id is not None
                 else self.context.parent_span_id
             )
-            attributes = self._safe_jsons_dump(self._run_to_dict(run))
+            run_dict = self._run_to_dict(run)
+            if self.context.evaluation_id:
+                run_dict['evalId'] = self.context.evaluation_id
+            attributes = self._safe_jsons_dump(run_dict)
             status = self._determine_status(run.error)
 
             span_data = {
@@ -196,7 +199,7 @@ class AsyncUiPathTracer(AsyncBaseTracer):
                 "attributes": attributes,
                 "organizationId": self.context.org_id,
                 "tenantId": self.context.tenant_id,
-                "spanType": "LangGraphRun",
+                "spanType": self.context.span_type or "LangGraphRun",
                 "status": status,
                 "jobKey": self.context.job_id,
                 "folderKey": self.context.folder_key,
