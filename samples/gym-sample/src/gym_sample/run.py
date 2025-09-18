@@ -31,14 +31,15 @@ async def run_agent_with_tracing(agent_input: Dict[str, Any]) -> AgentExecution:
 
         # Extract output
         agent_output = result.get('result', {}) if isinstance(result, dict) else {}
+        spans = collector.get_spans()
 
         print(f"Agent completed. Result: {agent_output}")
-        print(f"Collected {len(collector.get_spans())} trace spans")
+        print(f"Collected {len(spans)} trace spans")
 
         return AgentExecution(
             agent_input=agent_input,
             agent_output=agent_output,
-            agent_trace=collector.get_spans()
+            agent_trace=spans
         )
 
 
@@ -134,7 +135,7 @@ async def main() -> None:
         "exact_match": {"answer": 36.0},
         "tool_call_order": ["multiply", "add"],
         "tool_call_count": {"multiply": 1, "add": 1},
-        "tool_call_arguments": {"multiply": {"a": 7, "b": 3}, "add": {"a": 15, "b": 21}},
+        "tool_call_arguments": [{"name": "multiply", "args": {"a": 7, "b": 3}}, {"name": "add", "args": {"a": 15, "b": 21}}],
     }
 
     await run_evaluation(agent_input, evaluation_criteria)

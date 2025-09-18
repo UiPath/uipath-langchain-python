@@ -1,23 +1,24 @@
 """Base evaluator abstract class for agent evaluation."""
 
 from collections import Counter
+from collections.abc import Callable, Coroutine
 import functools
 import json
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, TypeVar
+from typing import Any, Dict, Generic, List, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
 from gym_sample.evals_utils import AgentExecution, BooleanEvaluationResult, ErrorEvaluationResult, EvaluationResult, EvaluatorCategory, EvaluatorType, NumericEvaluationResult
-from gym_sample.trace_utils import extract_tool_calls_names, extract_tool_calls, lcs_score
+from gym_sample.trace_utils import extract_tool_calls_names, extract_tool_calls, lcs_score, tool_args_score
 
 
-def track_evaluation_metrics(func):
+def track_evaluation_metrics(func: Callable[..., Any]) -> Callable[[Any, Any], Coroutine[Any, Any, EvaluationResult]]:
     """Decorator to track evaluation metrics and handle errors gracefully."""
 
     @functools.wraps(func)
-    async def wrapper(*args, **kwargs) -> EvaluationResult:
+    async def wrapper(*args: Any, **kwargs: Any) -> EvaluationResult:
         start_time = time.time()
         try:
             result = await func(*args, **kwargs)
@@ -52,7 +53,7 @@ class BaseEvaluator(BaseModel, Generic[T], ABC):
     category: EvaluatorCategory
     evaluator_type: EvaluatorType
 
-    def __init_subclass__(cls, **kwargs):
+    def __init_subclass__(cls, **kwargs: Any):
         """Hook for subclass creation - automatically applies evaluation metrics tracking."""
         super().__init_subclass__(**kwargs)
 
@@ -62,7 +63,7 @@ class BaseEvaluator(BaseModel, Generic[T], ABC):
             cls.evaluate = track_evaluation_metrics(cls.evaluate)  # type: ignore[method-assign]
             cls.evaluate._has_metrics_decorator = True  # type: ignore[attr-defined]
 
-    def model_post_init(self, __context):
+    def model_post_init(self, __context: Any) -> None:
         """Post-initialization hook for Pydantic models."""
         pass
 
@@ -195,7 +196,7 @@ class ToolCallCountEvaluator(DeterministicEvaluatorBase[Dict[str, int]]):
         )
 
 
-class ToolCallArgumentsEvaluator(DeterministicEvaluatorBase[Dict[str, Dict[str, Any]]]):
+class ToolCallArgumentsEvaluator(DeterministicEvaluatorBase[List[Dict[str, Any]]]):
     """Evaluator that checks the correctness of the arguments of the tool calls
     The order does not matter for this evaluator.
 
@@ -211,7 +212,7 @@ class ToolCallArgumentsEvaluator(DeterministicEvaluatorBase[Dict[str, Dict[str, 
     """
 
     async def evaluate(
-        self, agent_execution: AgentExecution, evaluation_criteria: Dict[str, Dict[str, Any]]
+        self, agent_execution: AgentExecution, evaluation_criteria: List[Dict[str, Any]]
     ) -> EvaluationResult:
         """Evaluate if the tool calls are in the correct order.
         Args:
@@ -225,5 +226,5 @@ class ToolCallArgumentsEvaluator(DeterministicEvaluatorBase[Dict[str, Dict[str, 
         """
         tool_calls = extract_tool_calls(agent_execution.agent_trace)
         return NumericEvaluationResult(
-            score=float(tool_calls == evaluation_criteria)
+            score=tool_args_score(tool_calls, evaluation_criteria)
         )
