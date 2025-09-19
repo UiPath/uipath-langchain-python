@@ -1,5 +1,6 @@
 """OpenTelemetry trace collection utilities for agent evaluation."""
 
+from collections.abc import Sequence
 from typing import List
 
 from opentelemetry import trace
@@ -12,53 +13,47 @@ from opentelemetry.sdk.trace.export import (
 from openinference.instrumentation.langchain import LangChainInstrumentor
 
 
-class SpanCollector(SpanExporter):
-    """Span exporter that collects actual ReadableSpan objects."""
+class InMemorySpanExporter(SpanExporter):
+    """An OpenTelemetry span exporter that stores spans in memory for testing."""
 
-    def __init__(self) -> None:
-        """Initialize the span collector."""
-        self.spans: List[ReadableSpan] = []
+    def __init__(self):
+        self.spans = []
+        self.is_shutdown = False
 
-    def export(self, spans: List[ReadableSpan]) -> SpanExportResult:
-        """Export spans by collecting them."""
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        if self.is_shutdown:
+            return SpanExportResult.FAILURE
+
         self.spans.extend(spans)
         return SpanExportResult.SUCCESS
 
-    def shutdown(self) -> None:
-        """Shutdown the exporter."""
-        pass
+    def get_exported_spans(self) -> List[ReadableSpan]:
+        return self.spans
+
+    def clear_exported_spans(self) -> None:
+        self.spans = []
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
-        """Force flush spans."""
-        return True
+        return not self.is_shutdown
 
-    def get_spans(self) -> List[ReadableSpan]:
-        """Get all collected spans."""
-        return self.spans.copy()
-
-    def clear_spans(self) -> None:
-        """Clear all collected spans."""
-        self.spans.clear()
+    def shutdown(self) -> None:
+        self.is_shutdown = True
 
 
-def setup_tracing() -> SpanCollector:
+def setup_tracer() -> tuple[InMemorySpanExporter, TracerProvider]:
     """Set up OpenTelemetry tracing with LangChain instrumentation.
 
     Returns:
-        SpanCollector: The configured span collector for capturing traces.
+        InMemorySpanExporter: The configured span exporter for capturing traces.
+        TracerProvider: The configured tracer provider for capturing traces.
     """
-    # Create collector
-    collector = SpanCollector()
-
     # Set up OpenTelemetry trace collection
-    tracer_provider = TracerProvider()
-    span_processor = SimpleSpanProcessor(collector)
-    tracer_provider.add_span_processor(span_processor)
-
-    # Set the tracer provider
-    trace.set_tracer_provider(tracer_provider)
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    trace.set_tracer_provider(provider)
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
 
     # Initialize LangChain instrumentation (this creates the spans!)
     LangChainInstrumentor().instrument()
 
-    return collector
+    return exporter, provider

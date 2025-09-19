@@ -11,7 +11,6 @@ from gym_sample.uipath_gym_types import (
     BasicLoop,
 )
 
-# Model will be created lazily when needed
 def get_model() -> ChatAnthropic:
     """Get the ChatAnthropic model (created lazily to allow environment loading)."""
     return ChatAnthropic(model_name="claude-3-5-sonnet-latest", timeout=60, stop=None)

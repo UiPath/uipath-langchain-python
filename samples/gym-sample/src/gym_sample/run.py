@@ -14,7 +14,7 @@ from uipath.eval.evaluators import (
     ExactMatchEvaluator,
 )
 from gym_sample.graph import make_graph
-from gym_sample.trace_utils import setup_tracing
+from gym_sample.trace_utils import setup_tracer
 
 
 async def run_agent_with_tracing(agent_input: Dict[str, Any]) -> AgentExecution:
@@ -24,7 +24,7 @@ async def run_agent_with_tracing(agent_input: Dict[str, Any]) -> AgentExecution:
         AgentExecution: Contains agent input, output, and collected traces.
     """
     # Set up tracing
-    collector = setup_tracing()
+    exporter, _ = setup_tracer()
 
     print("Starting agent execution with trace collection...")
 
@@ -36,15 +36,15 @@ async def run_agent_with_tracing(agent_input: Dict[str, Any]) -> AgentExecution:
 
         # Extract output
         agent_output = result.get('result', {}) if isinstance(result, dict) else {}
-        spans = collector.get_spans()
+        agent_trace = exporter.get_exported_spans()
 
         print(f"Agent completed. Result: {agent_output}")
-        print(f"Collected {len(spans)} trace spans")
+        print(f"Collected {len(agent_trace)} trace spans")
 
         return AgentExecution(
             agent_input=agent_input,
             agent_output=agent_output,
-            agent_trace=spans
+            agent_trace=agent_trace
         )
 
 
