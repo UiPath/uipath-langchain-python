@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Literal, TypeAlias, override
+from typing import Annotated, Any, Dict, List, Literal, TypeAlias, override
 
 import jsonschema
 from langchain.tools import BaseTool, StructuredTool
@@ -26,10 +26,10 @@ class StateBaseClass(BaseModel):
     class Config:
         extra = "forbid"
 
-    messages: Annotated[list[Message], add_messages] = []
-    result: dict[str, Any] = {}
+    messages: Annotated[List[Message], add_messages] = []
+    result: Dict[str, Any] = {}
     raised_error: RaiseErrorInput | None = None
-    run_init_state: dict[str, str] = {}
+    run_init_state: Dict[str, str] = {}
 
 
 class EndExecutionTool(StructuredTool):
@@ -88,7 +88,7 @@ class AgentBaseClass(BaseModel):
     user_prompt: str
     end_execution_tool: EndExecutionTool
     raise_error_tool: RaiseErrorTool = RaiseErrorTool()
-    tools: list[BaseTool] = []
+    tools: List[BaseTool] = []
 
 
 async def chatbot_node(
@@ -151,7 +151,7 @@ class BasicLoop:
         self.debug = debug
 
 
-    def prepare_input_node(self, state: StateBaseClass, agent_input: dict[str, str]) -> StateBaseClass:
+    def prepare_input_node(self, state: StateBaseClass, agent_input: Dict[str, Any]) -> StateBaseClass:
         """Node to handle input preparation and ensure proper initial messages."""
         if self.debug:
             print(f"[DEBUG] prepare_input_node - Received state with {len(state.messages)} messages")
@@ -177,7 +177,7 @@ class BasicLoop:
 
         return state
 
-    def build_graph(self, agent_input: dict[str, Any] = {}) -> StateGraph:
+    def build_graph(self, agent_input: Dict[str, Any] = {}) -> StateGraph:
         """Build the graph with proper input handling for both unattended and interactive operation."""
         # Create graph with input/output schema specification
         graph = StateGraph(StateBaseClass)

@@ -5,9 +5,14 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from dotenv import find_dotenv, load_dotenv
+from uipath.eval.evaluators.base_evaluator import EvaluatorCategory, EvaluatorType
 
-from gym_sample.evals import BaseEvaluator, ExactMatchEvaluator, ToolCallArgumentsEvaluator, ToolCallCountEvaluator, ToolCallOrderEvaluator
-from gym_sample.evals_utils import AgentExecution, EvaluatorCategory, EvaluatorType
+from gym_sample.evals import ToolCallArgumentsEvaluator, ToolCallCountEvaluator, ToolCallOrderEvaluator
+from uipath.eval.evaluators.base_evaluator import AgentExecution
+from uipath.eval.evaluators import (
+    BaseEvaluator,
+    ExactMatchEvaluator,
+)
 from gym_sample.graph import make_graph
 from gym_sample.trace_utils import setup_tracing
 
@@ -69,6 +74,7 @@ def create_evaluators() -> List[BaseEvaluator]:
         description="Evaluates if the tool calls are in the correct order",
         category=EvaluatorCategory.Deterministic,
         evaluator_type=EvaluatorType.Trajectory,
+        strict=False,
     )
 
     tool_call_count_evaluator = ToolCallCountEvaluator(
@@ -79,6 +85,7 @@ def create_evaluators() -> List[BaseEvaluator]:
         description="Evaluates if the tool calls are in the correct count",
         category=EvaluatorCategory.Deterministic,
         evaluator_type=EvaluatorType.Trajectory,
+        strict=False,
     )
 
     tool_call_arguments_evaluator = ToolCallArgumentsEvaluator(
@@ -89,6 +96,8 @@ def create_evaluators() -> List[BaseEvaluator]:
         description="Evaluates if the tool calls are in the correct arguments",
         category=EvaluatorCategory.Deterministic,
         evaluator_type=EvaluatorType.Trajectory,
+        strict=False,
+        subset=False,
     )
 
     evaluators = [exact_match_evaluator, tool_call_order_evaluator, tool_call_count_evaluator, tool_call_arguments_evaluator]
@@ -96,7 +105,7 @@ def create_evaluators() -> List[BaseEvaluator]:
     return evaluators
 
 
-async def run_evaluation(graph_input: Dict[str, Any], evaluation_criteria: Dict[str, Any]) -> None:
+async def run_evaluation(graph_input: Dict[str, Any], evaluation_criteria: Dict[str, Any], evaluators: List[BaseEvaluator]) -> None:
     """Run the complete agent evaluation pipeline."""
     print("Running agent with real trace collection...")
 
@@ -107,9 +116,6 @@ async def run_evaluation(graph_input: Dict[str, Any], evaluation_criteria: Dict[
     print(f"Input: {agent_execution.agent_input}")
     print(f"Output: {agent_execution.agent_output}")
     print(f"Collected {len(agent_execution.agent_trace)} trace spans")
-
-    # Create evaluators and criteria
-    evaluators = create_evaluators()
 
     print("\nRunning evaluations...")
 
@@ -134,11 +140,13 @@ async def main() -> None:
     evaluation_criteria = {
         "exact_match": {"answer": 36.0},
         "tool_call_order": ["multiply", "add"],
-        "tool_call_count": {"multiply": 1, "add": 1},
+        "tool_call_count": {"multiply": "ge:1", "add": "ge:1"},
         "tool_call_arguments": [{"name": "multiply", "args": {"a": 7, "b": 3}}, {"name": "add", "args": {"a": 15, "b": 21}}],
     }
 
-    await run_evaluation(agent_input, evaluation_criteria)
+    evaluators = create_evaluators()
+
+    await run_evaluation(agent_input, evaluation_criteria, evaluators)
 
 
 if __name__ == "__main__":

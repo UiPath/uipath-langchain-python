@@ -1,4 +1,4 @@
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Dict
 from contextlib import asynccontextmanager
 
 from langchain_anthropic import ChatAnthropic
@@ -63,7 +63,7 @@ def get_agent_scenario() -> AgentBaseClass:
 
 
 @asynccontextmanager
-async def make_graph(agent_input: dict[str, Any] = {}) -> AsyncGenerator[StateGraph, None]:
+async def make_graph(agent_input: Dict[str, Any] = {}) -> AsyncGenerator[StateGraph, None]:
     """Create and return the LangGraph agent using the enhanced BasicLoop.
 
     Returns:
@@ -73,7 +73,7 @@ async def make_graph(agent_input: dict[str, Any] = {}) -> AsyncGenerator[StateGr
         scenario=get_agent_scenario(),
         llm=get_model(),
         print_trace=True,
-        debug=False,
+        parallel_tool_calls=False,
     )
 
     # Build and return the graph
