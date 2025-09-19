@@ -10,6 +10,7 @@ from uipath._cli._runtime._contracts import UiPathRuntimeFactory
 from uipath._cli._utils._console import ConsoleLogger
 from uipath._cli.middlewares import MiddlewareResult
 
+from .._tracing import _instrument_traceable_attributes
 from ._runtime._context import LangGraphRuntimeContext
 from ._runtime._runtime import LangGraphRuntime
 
@@ -24,6 +25,8 @@ def langgraph_dev_middleware(interface: Optional[str]) -> MiddlewareResult:
             runtime_factory = UiPathRuntimeFactory(
                 LangGraphRuntime, LangGraphRuntimeContext
             )
+
+            _instrument_traceable_attributes()
             runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
             app = UiPathDevTerminal(runtime_factory)
             asyncio.run(app.run_async())
