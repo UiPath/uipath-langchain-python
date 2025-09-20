@@ -285,7 +285,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.1" },
     { name = "uipath", specifier = ">=2.1.54" },
-    { name = "uipath-langchain", editable = "../../" },
+    { name = "uipath-langchain", directory = "../../" },
 ]
 provides-extras = ["dev"]
 
@@ -557,7 +557,7 @@ name = "exceptiongroup"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0b/9f/a65090624ecf468cdca03533906e7c69ed7588582240cfe7cc9e770b50eb/exceptiongroup-1.3.0.tar.gz", hash = "sha256:b241f5885f560bc56a59ee63ca4c6a8bfa46ae4ad651af316d4e81817bb9fd88", size = 29749 }
 wheels = [
@@ -2640,7 +2640,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.1.54"
+version = "2.1.56"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-monitor-opentelemetry" },
@@ -2658,15 +2658,15 @@ dependencies = [
     { name = "tomli" },
     { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e8/4f/5e34bde81c3ccd98a937101c4cd069901cb9f0158b53dea0f58bd4f908ec/uipath-2.1.54.tar.gz", hash = "sha256:bc3bedea41fa4517495eba6a14a6e794d8e93740ee1dd229f417ee0e325c367c", size = 2001743 }
+sdist = { url = "https://files.pythonhosted.org/packages/73/bd/058b5f5c1e8b41db0c1f4fd3d8eb73c88eb9ead4edb538ae7b2304fa65e1/uipath-2.1.56.tar.gz", hash = "sha256:3afdcf7ebab02d88115d6700d93da19a7cf50b93123a3faf1755c25e6adffcd3", size = 2006943 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/ce/dc6c7e8b20474761ec17c7e8fcfd3619880c921bcfbe3df3d1f6890c71d6/uipath-2.1.54-py3-none-any.whl", hash = "sha256:379105de535f1c3922794fb14574790aa7c1b4b63256ebcff7d28f486ef34df3", size = 228190 },
+    { url = "https://files.pythonhosted.org/packages/17/0e/58e805e67788859a4a6811a224f723436990058ca085905b2f3b0dd6aa3a/uipath-2.1.56-py3-none-any.whl", hash = "sha256:0ea1c738da38c2c808bf03d4590cd715cd187187f2972e5c5f38d1034ad84245", size = 228414 },
 ]
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.130"
-source = { editable = "../../" }
+version = "0.0.132"
+source = { directory = "../../" }
 dependencies = [
     { name = "httpx" },
     { name = "langchain" },
@@ -2695,7 +2695,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.50" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.1.49,<2.2.0" },
+    { name = "uipath", specifier = ">=2.1.56,<2.2.0" },
     { name = "uipath-langchain", marker = "extra == 'langchain'", specifier = ">=0.0.2" },
 ]
 provides-extras = ["langchain"]
