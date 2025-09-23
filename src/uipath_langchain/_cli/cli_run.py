@@ -14,8 +14,8 @@ from uipath._cli.middlewares import MiddlewareResult
 from .._tracing import LangChainExporter, _instrument_traceable_attributes
 from ._runtime._exception import LangGraphRuntimeError
 from ._runtime._runtime import (  # type: ignore[attr-defined]
-    LangGraphRuntime,
     LangGraphRuntimeContext,
+    LangGraphScriptRuntime,
 )
 from ._utils._graph import LangGraphConfig
 
@@ -32,15 +32,14 @@ def langgraph_run_middleware(
 
     try:
         context = LangGraphRuntimeContext.with_defaults(**kwargs)
-        context.langgraph_config = config
         context.entrypoint = entrypoint
         context.input = input
         context.resume = resume
 
         _instrument_traceable_attributes()
 
-        def generate_runtime(ctx: LangGraphRuntimeContext) -> LangGraphRuntime:
-            runtime = LangGraphRuntime(ctx)
+        def generate_runtime(ctx: LangGraphRuntimeContext) -> LangGraphScriptRuntime:
+            runtime = LangGraphScriptRuntime(ctx, ctx.entrypoint)
             # If not resuming and no job id, delete the previous state file
             if not ctx.resume and ctx.job_id is None:
                 if os.path.exists(runtime.state_file_path):
@@ -49,7 +48,7 @@ def langgraph_run_middleware(
 
         async def execute():
             runtime_factory = UiPathRuntimeFactory(
-                LangGraphRuntime,
+                LangGraphScriptRuntime,
                 LangGraphRuntimeContext,
                 runtime_generator=generate_runtime,
             )

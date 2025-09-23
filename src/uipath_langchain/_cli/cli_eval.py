@@ -17,7 +17,7 @@ from uipath._events._event_bus import EventBus
 from uipath.eval._helpers import auto_discover_entrypoint
 
 from uipath_langchain._cli._runtime._context import LangGraphRuntimeContext
-from uipath_langchain._cli._runtime._runtime import LangGraphRuntime
+from uipath_langchain._cli._runtime._runtime import LangGraphScriptRuntime
 from uipath_langchain._cli._utils._graph import LangGraphConfig
 from uipath_langchain._tracing import (
     LangChainExporter,
@@ -48,10 +48,9 @@ def langgraph_eval_middleware(
         asyncio.run(console_reporter.subscribe_to_eval_runtime_events(event_bus))
 
         def generate_runtime_context(
-            context_entrypoint: str, langgraph_config: LangGraphConfig, **context_kwargs
+            context_entrypoint: str, **context_kwargs
         ) -> LangGraphRuntimeContext:
             context = LangGraphRuntimeContext.with_defaults(**context_kwargs)
-            context.langgraph_config = langgraph_config
             context.entrypoint = context_entrypoint
             return context
 
@@ -63,14 +62,17 @@ def langgraph_eval_middleware(
         eval_context.eval_set = eval_set or EvalHelpers.auto_discover_eval_set()
         eval_context.eval_ids = eval_ids
 
+        def generate_runtime(ctx: LangGraphRuntimeContext) -> LangGraphScriptRuntime:
+            return LangGraphScriptRuntime(ctx, ctx.entrypoint)
+
         runtime_factory = UiPathRuntimeFactory(
-            LangGraphRuntime,
+            LangGraphScriptRuntime,
             LangGraphRuntimeContext,
             context_generator=lambda **context_kwargs: generate_runtime_context(
                 context_entrypoint=runtime_entrypoint,
-                langgraph_config=config,
                 **context_kwargs,
             ),
+            runtime_generator=generate_runtime,
         )
 
         if eval_context.job_id:
