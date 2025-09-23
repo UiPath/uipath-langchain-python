@@ -12,7 +12,7 @@ from uipath._cli.middlewares import MiddlewareResult
 
 from .._tracing import _instrument_traceable_attributes
 from ._runtime._context import LangGraphRuntimeContext
-from ._runtime._runtime import LangGraphRuntime
+from ._runtime._runtime import LangGraphScriptRuntime
 
 console = ConsoleLogger()
 
@@ -22,8 +22,14 @@ def langgraph_dev_middleware(interface: Optional[str]) -> MiddlewareResult:
 
     try:
         if interface == "terminal":
+
+            def generate_runtime(
+                ctx: LangGraphRuntimeContext,
+            ) -> LangGraphScriptRuntime:
+                return LangGraphScriptRuntime(ctx, ctx.entrypoint)
+
             runtime_factory = UiPathRuntimeFactory(
-                LangGraphRuntime, LangGraphRuntimeContext
+                LangGraphScriptRuntime, LangGraphRuntimeContext, generate_runtime
             )
 
             _instrument_traceable_attributes()
