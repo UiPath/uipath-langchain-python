@@ -1,28 +1,30 @@
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
-from langgraph.graph.state import CompiledStateGraph
+from langgraph.graph.state import CompiledStateGraph, StateGraph
 from uipath._cli._runtime._contracts import (
     UiPathBaseRuntime,
     UiPathErrorCategory,
     UiPathRuntimeResult,
 )
 
-from .._utils._graph import LangGraphConfig
 from ._context import LangGraphRuntimeContext
 from ._conversation import map_message
 from ._exception import LangGraphRuntimeError
+from ._graph_resolver import GraphResolver
 from ._input import LangGraphInputProcessor
 from ._output import LangGraphOutputProcessor
 
 logger = logging.getLogger(__name__)
+
+AsyncResolver = Callable[[], Awaitable[StateGraph[Any, Any, Any]]]
 
 
 class LangGraphRuntime(UiPathBaseRuntime):
@@ -31,9 +33,10 @@ class LangGraphRuntime(UiPathBaseRuntime):
     This allows using the class with 'async with' statements.
     """
 
-    def __init__(self, context: LangGraphRuntimeContext):
+    def __init__(self, context: LangGraphRuntimeContext, graph_resolver: AsyncResolver):
         super().__init__(context)
         self.context: LangGraphRuntimeContext = context
+        self.graph_resolver: AsyncResolver = graph_resolver
 
     async def execute(self) -> Optional[UiPathRuntimeResult]:
         """
@@ -46,7 +49,8 @@ class LangGraphRuntime(UiPathBaseRuntime):
             LangGraphRuntimeError: If execution fails
         """
 
-        if self.context.state_graph is None:
+        graph = await self.graph_resolver()
+        if not graph:
             return None
 
         try:
@@ -56,9 +60,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 self.context.memory = memory
 
                 # Compile the graph with the checkpointer
-                graph = self.context.state_graph.compile(
-                    checkpointer=self.context.memory
-                )
+                compiled_graph = graph.compile(checkpointer=self.context.memory)
 
                 # Process input, handling resume if needed
                 input_processor = LangGraphInputProcessor(context=self.context)
@@ -87,7 +89,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
                     graph_config["max_concurrency"] = int(max_concurrency)
 
                 if self.context.chat_handler:
-                    async for stream_chunk in graph.astream(
+                    async for stream_chunk in compiled_graph.astream(
                         processed_input,
                         graph_config,
                         stream_mode="messages",
@@ -109,7 +111,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 elif self.is_debug_run():
                     # Get final chunk while streaming
                     final_chunk = None
-                    async for stream_chunk in graph.astream(
+                    async for stream_chunk in compiled_graph.astream(
                         processed_input,
                         graph_config,
                         stream_mode="updates",
@@ -118,16 +120,18 @@ class LangGraphRuntime(UiPathBaseRuntime):
                         self._pretty_print(stream_chunk)
                         final_chunk = stream_chunk
 
-                    self.context.output = self._extract_graph_result(final_chunk, graph)
+                    self.context.output = self._extract_graph_result(
+                        final_chunk, compiled_graph
+                    )
                 else:
                     # Execute the graph normally at runtime or eval
-                    self.context.output = await graph.ainvoke(
+                    self.context.output = await compiled_graph.ainvoke(
                         processed_input, graph_config
                     )
 
                 # Get the state if available
                 try:
-                    self.context.state = await graph.aget_state(graph_config)
+                    self.context.state = await compiled_graph.aget_state(graph_config)
                 except Exception:
                     pass
 
@@ -177,91 +181,10 @@ class LangGraphRuntime(UiPathBaseRuntime):
             pass
 
     async def validate(self) -> None:
-        """Validate runtime inputs."""
-        """Load and validate the graph configuration ."""
-        if self.context.langgraph_config is None:
-            self.context.langgraph_config = LangGraphConfig()
-            if not self.context.langgraph_config.exists:
-                raise LangGraphRuntimeError(
-                    "CONFIG_MISSING",
-                    "Invalid configuration",
-                    "Failed to load configuration",
-                    UiPathErrorCategory.DEPLOYMENT,
-                )
-
-        try:
-            self.context.langgraph_config.load_config()
-        except Exception as e:
-            raise LangGraphRuntimeError(
-                "CONFIG_INVALID",
-                "Invalid configuration",
-                f"Failed to load configuration: {str(e)}",
-                UiPathErrorCategory.DEPLOYMENT,
-            ) from e
-
-        # Determine entrypoint if not provided
-        graphs = self.context.langgraph_config.graphs
-        if not self.context.entrypoint and len(graphs) == 1:
-            self.context.entrypoint = graphs[0].name
-        elif not self.context.entrypoint:
-            graph_names = ", ".join(g.name for g in graphs)
-            raise LangGraphRuntimeError(
-                "ENTRYPOINT_MISSING",
-                "Entrypoint required",
-                f"Multiple graphs available. Please specify one of: {graph_names}.",
-                UiPathErrorCategory.DEPLOYMENT,
-            )
-
-        # Get the specified graph
-        self.graph_config = self.context.langgraph_config.get_graph(
-            self.context.entrypoint
-        )
-        if not self.graph_config:
-            raise LangGraphRuntimeError(
-                "GRAPH_NOT_FOUND",
-                "Graph not found",
-                f"Graph '{self.context.entrypoint}' not found.",
-                UiPathErrorCategory.DEPLOYMENT,
-            )
-        try:
-            loaded_graph = await self.graph_config.load_graph()
-            self.context.state_graph = (
-                loaded_graph.builder
-                if isinstance(loaded_graph, CompiledStateGraph)
-                else loaded_graph
-            )
-        except ImportError as e:
-            raise LangGraphRuntimeError(
-                "GRAPH_IMPORT_ERROR",
-                "Graph import failed",
-                f"Failed to import graph '{self.context.entrypoint}': {str(e)}",
-                UiPathErrorCategory.USER,
-            ) from e
-        except TypeError as e:
-            raise LangGraphRuntimeError(
-                "GRAPH_TYPE_ERROR",
-                "Invalid graph type",
-                f"Graph '{self.context.entrypoint}' is not a valid StateGraph or CompiledStateGraph: {str(e)}",
-                UiPathErrorCategory.USER,
-            ) from e
-        except ValueError as e:
-            raise LangGraphRuntimeError(
-                "GRAPH_VALUE_ERROR",
-                "Invalid graph value",
-                f"Invalid value in graph '{self.context.entrypoint}': {str(e)}",
-                UiPathErrorCategory.USER,
-            ) from e
-        except Exception as e:
-            raise LangGraphRuntimeError(
-                "GRAPH_LOAD_ERROR",
-                "Failed to load graph",
-                f"Unexpected error loading graph '{self.context.entrypoint}': {str(e)}",
-                UiPathErrorCategory.USER,
-            ) from e
+        pass
 
     async def cleanup(self):
-        if hasattr(self, "graph_config") and self.graph_config:
-            await self.graph_config.cleanup()
+        pass
 
     def _extract_graph_result(
         self, final_chunk, graph: CompiledStateGraph[Any, Any, Any]
@@ -377,3 +300,19 @@ class LangGraphRuntime(UiPathBaseRuntime):
                     logger.info("%s", formatted_metadata)
                 except (TypeError, ValueError):
                     pass
+
+
+class LangGraphScriptRuntime(LangGraphRuntime):
+    """
+    Resolves the graph from langgraph.json config file and passes it to the base runtime.
+    """
+
+    def __init__(
+        self, context: LangGraphRuntimeContext, entrypoint: Optional[str] = None
+    ):
+        self.resolver = GraphResolver(entrypoint=entrypoint)
+        super().__init__(context, self.resolver)
+
+    async def cleanup(self):
+        await super().cleanup()
+        await self.resolver.cleanup()
