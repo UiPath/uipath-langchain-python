@@ -1,0 +1,226 @@
+{
+  "id": "agent-id",
+  "name": "agent-name",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string"
+      }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "content": {
+        "type": "string",
+        "description": "Output content"
+      }
+    }
+  },
+  "version": "1.0.0",
+  "resources": [
+    {
+      "name": "Integration",
+      "description": "Integration.",
+      "$resourceType": "tool",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Query.",
+            "title": "Query"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "type": "integration",
+      "properties": {
+        "toolPath": "/integration",
+        "objectName": "v2::integration",
+        "toolDisplayName": "Integration",
+        "toolDescription": "Integration.",
+        "method": "POST",
+        "connection": {
+          "id": "connection-id",
+          "name": "integration",
+          "owner": null,
+          "createTime": null,
+          "updateTime": null,
+          "state": "enabled",
+          "apiBaseUri": "https://example.uipath.com/",
+          "elementInstanceId": 0,
+          "connector": {
+            "key": "connector-key",
+            "name": "connector-name",
+            "image": "connector-image",
+            "enabled": true
+          },
+          "isDefault": false,
+          "lastUsedTime": null,
+          "connectionIdentity": null,
+          "pollingIntervalInMinutes": null,
+          "folder": {
+            "key": "folder-key",
+            "path": "folder-path"
+          },
+          "elementVersion": null,
+          "solutionProperties": {
+            "resourceKey": "solution-resource-key"
+          }
+        },
+        "bodyStructure": {
+          "contentType": "json"
+        }
+      },
+      "location": "external",
+      "settings": {},
+      "guardrail": {
+        "policies": []
+      },
+      "iconUrl": "icon-url",
+      "id": "resource-1",
+      "isPreview": false
+    },
+    {
+      "name": "Escalation",
+      "description": "Human review.",
+      "$resourceType": "escalation",
+      "channels": [
+        {
+          "id": "escalation",
+          "name": "Channel",
+          "type": "actionCenter",
+          "description": "Channel description",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name."
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "outputSchema": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "description": "Escalation status."
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "properties": {
+            "appName": "ActionApp",
+            "appVersion": 1,
+            "folderName": null,
+            "resourceKey": "resource-key",
+            "isActionableMessageEnabled": false,
+            "actionableMessageMetaData": null
+          },
+          "recipients": [
+            {
+              "type": 2,
+              "value": "test-group-id",
+              "displayName": "test-group"
+            }
+          ],
+          "inputSchemaDotnetTypeMapping": {
+            "name": "System.String"
+          },
+          "outputSchemaDotnetTypeMapping": {
+            "status": "System.String"
+          },
+          "outcomeMapping": {
+            "Submit": "continue"
+          }
+        }
+      ],
+      "isAgentMemoryEnabled": false,
+      "id": "resource-2",
+      "governanceProperties": {
+        "isEscalatedAtRuntime": false
+      },
+      "escalationType": 0,
+      "vsEscalationProperties": null
+    },
+    {
+      "name": "Agent",
+      "description": "Agent.",
+      "$resourceType": "tool",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "type": "agent",
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "str",
+            "description": "Output content"
+          }
+        },
+        "required": [
+          "content"
+        ]
+      },
+      "properties": {
+        "folderPath": "solution-folder",
+        "processName": "process-name"
+      },
+      "settings": {
+        "maxAttempts": null,
+        "retryDelay": null,
+        "timeout": null
+      },
+      "location": "external",
+      "guardrail": {
+        "policies": []
+      },
+      "id": "resource-3",
+      "referenceKey": "resource-3-reference-key"
+    },
+    {
+      "name": "Unknown",
+      "description": "Unknown.",
+      "$resourceType": "unknown"
+    }
+  ],
+  "type": "lowCode",
+  "messages": [
+    {
+      "role": "system",
+      "content": "System Prompt"
+    },
+    {
+      "role": "user",
+      "content": "User Prompt"
+    }
+  ],
+  "features": [],
+  "settings": {
+    "engine": "basic-v1",
+    "model": "model-1",
+    "max_tokens": 16384,
+    "temperature": 0.0
+  },
+  "metadata": {
+    "storageVersion": "22.0.0",
+    "isConversational": false
+  },
+  "guardrails": []
+}
