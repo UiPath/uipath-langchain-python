@@ -2,12 +2,14 @@
 
 import asyncio
 from datetime import datetime
+import json
 from typing import Any, Dict, List
 
 from dotenv import find_dotenv, load_dotenv
 from uipath.eval.evaluators.base_evaluator import EvaluatorCategory, EvaluatorType
+from uipath.eval.models import EvaluationResult
 
-from gym_sample.evals import LLMJudgeEvaluator, LLMJudgeSimulationTrajectoryEvaluator, LLMJudgeStrictJSONSimilarityEvaluator, LLMJudgeTrajectoryEvaluator, ToolCallArgumentsEvaluator, ToolCallCountEvaluator, ToolCallOrderEvaluator
+from gym_sample.evals import LLMJudgeEvaluator, LLMJudgeSimulationTrajectoryEvaluator, LLMJudgeStrictJSONSimilarityEvaluator, LLMJudgeTrajectoryEvaluator, ToolCallArgumentsEvaluator, ToolCallCountEvaluator, ToolCallOrderEvaluator, ToolCallOutputEvaluator
 from uipath.eval.evaluators import (
     BaseEvaluator,
     ExactMatchEvaluator,
@@ -17,7 +19,7 @@ from gym_sample.trace_utils import setup_tracer
 from gym_sample.evals_helpers import AgentExecution
 
 
-async def run_agent_with_tracing(agent_input: Dict[str, Any], simulation_instructions: str = "") -> AgentExecution:
+async def run_agent_with_tracing(agent_input: Dict[str, Any], simulation_instructions: str = "", verbose: bool = False) -> AgentExecution:
     """Run the agent with OpenTelemetry trace collection.
 
     Returns:
@@ -26,7 +28,8 @@ async def run_agent_with_tracing(agent_input: Dict[str, Any], simulation_instruc
     # Set up tracing
     exporter, _ = setup_tracer()
 
-    print("Starting agent execution with trace collection...")
+    if verbose:
+        print("Starting agent execution with trace collection...")
 
     # Run the agent through the actual graph
     async with make_graph(agent_input) as graph:
@@ -38,8 +41,9 @@ async def run_agent_with_tracing(agent_input: Dict[str, Any], simulation_instruc
         agent_output = result.get('result', {}) if isinstance(result, dict) else {}
         agent_trace = exporter.get_exported_spans()
 
-        print(f"Agent completed. Result: {agent_output}")
-        print(f"Collected {len(agent_trace)} trace spans")
+        if verbose:
+            print(f"Agent completed. Result: {agent_output}")
+            print(f"Collected {len(agent_trace)} trace spans")
 
         return AgentExecution(
             agent_input=agent_input,
@@ -101,6 +105,17 @@ def create_evaluators() -> List[BaseEvaluator]:
         subset=False,
     )
 
+    tool_call_output_evaluator = ToolCallOutputEvaluator(
+        id="tool_call_output",
+        name="Tool Call Output",
+        created_at=now,
+        updated_at=now,
+        description="Evaluates if the tool calls are in the correct output",
+        category=EvaluatorCategory.Deterministic,
+        evaluator_type=EvaluatorType.Trajectory,
+        strict=False,
+    )
+
     llm_judge_evaluator = LLMJudgeEvaluator(
         id="llm_judge",
         name="LLM Judge",
@@ -145,33 +160,40 @@ def create_evaluators() -> List[BaseEvaluator]:
         model="gpt-4o-2024-11-20",
     )
 
-    evaluators = [exact_match_evaluator, tool_call_order_evaluator, tool_call_count_evaluator, tool_call_arguments_evaluator, llm_judge_evaluator, llm_judge_strict_json_similarity_evaluator, llm_judge_trajectory_evaluator, llm_judge_simulation_trajectory_evaluator]
+    evaluators = [exact_match_evaluator, tool_call_order_evaluator, tool_call_count_evaluator, tool_call_arguments_evaluator, tool_call_output_evaluator, llm_judge_evaluator, llm_judge_strict_json_similarity_evaluator, llm_judge_trajectory_evaluator, llm_judge_simulation_trajectory_evaluator]
 
     return evaluators
 
 
-async def run_evaluation(agent_input: Dict[str, Any], evaluation_criteria: Dict[str, Any], evaluators: List[BaseEvaluator], simulation_instructions: str = "") -> None:
+async def run_evaluation(agent_input: Dict[str, Any], evaluation_criteria: Dict[str, Any], evaluators: List[BaseEvaluator], simulation_instructions: str = "", verbose: bool = False) -> Dict[str, EvaluationResult]:
     """Run the complete agent evaluation pipeline."""
-    print("Running agent with real trace collection...")
+    print("Running agent...")
 
     # Execute agent with tracing
-    agent_execution = await run_agent_with_tracing(agent_input, simulation_instructions)
+    agent_execution = await run_agent_with_tracing(agent_input, simulation_instructions, verbose)
 
-    print(f"\nAgent executed successfully!")
-    print(f"Input: {agent_execution.agent_input}")
-    print(f"Output: {agent_execution.agent_output}")
-    print(f"Collected {len(agent_execution.agent_trace)} trace spans")
+    if verbose:
+        print(f"\nAgent executed successfully!")
+        print(f"Input: {agent_execution.agent_input}")
+        print(f"Output: {agent_execution.agent_output}")
+        print(f"Collected {len(agent_execution.agent_trace)} trace spans")
 
     print("\nRunning evaluations...")
 
+    results: Dict[str, EvaluationResult] = {}
     # Run each evaluator
     for evaluator in evaluators:
-        print(f"\nEvaluating {evaluator.name} with criteria: {evaluation_criteria[evaluator.id]}")
+        if verbose:
+            print(f"\nEvaluating {evaluator.name} with criteria: {evaluation_criteria[evaluator.id]}")
         result = await evaluator.evaluate(
             agent_execution=agent_execution,
             evaluation_criteria=evaluation_criteria[evaluator.id]
         )
-        print(f"Result: {result}")
+        if verbose:
+            print(f"Result: {result}")
+        results[evaluator.id] = result
+
+    return results
 
 
 async def main() -> None:
@@ -189,6 +211,7 @@ async def main() -> None:
         "tool_call_order": ["multiply", "add"],
         "tool_call_count": {"multiply": "ge:1", "add": "ge:1"},
         "tool_call_arguments": [{"name": "multiply", "args": {"a": 7., "b":3.}}, {"name": "add", "args": {"a": 15., "b": 21.}}],
+        "tool_call_output": [{"name": "multiply", "output": "21.0"}, {"name": "add", "output": "36.0"}],
         "llm_judge": {"answer": 36.0},
         "llm_judge_strict_json_similarity": {"answer": 36.0},
         "llm_judge_trajectory": "The agent should have called the multiply tool with the arguments 7.0 and 3.0, and the add tool with the arguments 15.0 and 21.0.",
@@ -197,7 +220,8 @@ async def main() -> None:
 
     evaluators = create_evaluators()
 
-    await run_evaluation(agent_input, evaluation_criteria, evaluators, simulation_instructions)
+    results = await run_evaluation(agent_input, evaluation_criteria, evaluators, simulation_instructions, verbose=False)
+    print(json.dumps({k: v.score for k, v in results.items()}, indent=4))
 
 
 if __name__ == "__main__":

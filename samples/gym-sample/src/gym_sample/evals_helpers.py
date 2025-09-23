@@ -196,6 +196,45 @@ def tool_args_score(actual_tool_calls: List[Dict[str, Any]], expected_tool_calls
     return cnt / len(expected_tool_calls) if not strict else float(cnt == len(expected_tool_calls))
 
 
+def extract_tool_calls_outputs(spans: List[ReadableSpan]) -> List[Dict[str, Any]]:
+    """Extract the outputs of the tool calls from execution spans.
+    """
+    tool_calls_outputs = []
+    for span in spans:
+        if span.attributes and (tool_name := span.attributes.get('tool.name')):
+            tool_calls_outputs.append({"name": tool_name, "output": span.attributes.get('output.value', {})})
+    return tool_calls_outputs
+
+
+def tool_output_score(actual_tool_calls_outputs: List[Dict[str, Any]], expected_tool_calls_outputs: List[Dict[str, Any]], strict: bool = False) -> float:
+    """
+    Check if the expected tool calls are correctly called, where expected args must be a subset of actual args.
+    It does not check the order of the tool calls!
+    """
+    if (
+        not expected_tool_calls_outputs
+        and not actual_tool_calls_outputs
+    ):
+        return 1.0
+    elif (
+        not expected_tool_calls_outputs
+        or not actual_tool_calls_outputs
+        or strict
+        and actual_tool_calls_outputs != expected_tool_calls_outputs
+    ):
+        return 0.0
+
+    cnt = 0.0
+    for expected_tool_call_output in expected_tool_calls_outputs:
+        for actual_tool_call_output in actual_tool_calls_outputs:
+            if actual_tool_call_output.get('name') == expected_tool_call_output.get('name'):
+                if json.loads(actual_tool_call_output.get('output', '{}')).get('content') == expected_tool_call_output.get('output'):
+                    cnt += 1.0
+                elif strict:
+                    return 0.0
+    return cnt / len(expected_tool_calls_outputs) if not strict else float(cnt == len(expected_tool_calls_outputs))
+
+
 def trace_to_str(agent_trace: List[ReadableSpan]) -> str:
     """Convert OTEL spans to a platform-style agent run history string.
 

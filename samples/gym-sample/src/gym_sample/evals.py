@@ -12,7 +12,7 @@ from uipath.eval.evaluators.base_evaluator import (
     EvaluationResult,
 )
 from uipath.eval.models import NumericEvaluationResult
-from gym_sample.evals_helpers import AgentExecution, extract_tool_calls_names, extract_tool_calls, tool_calls_count_score, tool_calls_order_score, tool_args_score, trace_to_str
+from gym_sample.evals_helpers import AgentExecution, extract_tool_calls_names, extract_tool_calls, extract_tool_calls_outputs, tool_calls_count_score, tool_calls_order_score, tool_args_score, tool_output_score, trace_to_str
 from uipath.eval.evaluators.deterministic_evaluator_base import (
     DeterministicEvaluatorBase,
 )
@@ -105,6 +105,31 @@ class ToolCallArgumentsEvaluator(DeterministicEvaluatorBase[List[Dict[str, Any]]
         )
 
 
+class ToolCallOutputEvaluator(DeterministicEvaluatorBase[List[Dict[str, Any]]]):
+    """Evaluator that checks the correctness of the output of the tool calls
+    The order does not matter for this evaluator.
+    """
+    strict: bool = False
+
+    async def evaluate(
+        self, agent_execution: AgentExecution, evaluation_criteria: List[Dict[str, Any]]
+    ) -> EvaluationResult:
+        """Evaluate if the tool calls are in the correct order.
+        Args:
+            agent_execution: The execution details containing:
+                - agent_input: The input received by the agent
+                - agent_output: The final output of the agent
+                - agent_trace: The execution spans to use for the evaluation
+            evaluation_criteria: The criteria to evaluate
+        Returns:
+            EvaluationResult: Boolean result indicating correct tool call output (True/False)
+        """
+        tool_calls = extract_tool_calls_outputs(agent_execution.agent_trace)
+        return NumericEvaluationResult(
+            score=tool_output_score(tool_calls, evaluation_criteria, self.strict)
+        )
+
+
 class LLMJudgeEvaluator(BaseEvaluator[str | Dict[str, Any]]):
     """Evaluator that uses an LLM to judge the quality of agent output."""
 
@@ -165,7 +190,7 @@ class LLMJudgeEvaluator(BaseEvaluator[str | Dict[str, Any]]):
         llm_response = await self._get_llm_response(evaluation_prompt)
 
         return NumericEvaluationResult(
-            score=llm_response.score,
+            score=round(llm_response.score / 100.0, 2),
             details=llm_response.justification,
         )
 
