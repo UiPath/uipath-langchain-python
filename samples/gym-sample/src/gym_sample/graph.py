@@ -2,18 +2,20 @@ from typing import Any, AsyncGenerator, Dict
 from contextlib import asynccontextmanager
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import StateGraph
-from pydantic import BaseModel
+from uipath._services import UiPathLlmChatService
 from gym_sample.uipath_gym_types import (
     AgentBaseClass,
     EndExecutionTool,
     StructuredTool,
     BasicLoop,
 )
+from uipath_langchain.chat import UiPathAzureChatOpenAI
 
-def get_model() -> ChatAnthropic:
+def get_model() -> BaseChatModel:
     """Get the ChatAnthropic model (created lazily to allow environment loading)."""
-    return ChatAnthropic(model_name="claude-3-5-sonnet-latest", timeout=60, stop=None)
+    return UiPathAzureChatOpenAI(model="gpt-4o-2024-11-20")
 
 
 def get_agent_scenario() -> AgentBaseClass:
