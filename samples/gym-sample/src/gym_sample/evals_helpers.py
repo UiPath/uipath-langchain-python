@@ -1,9 +1,11 @@
 
 from collections.abc import Mapping
+from datetime import datetime
 import json
 from typing import Any, Dict, List, Set
 
 from opentelemetry.sdk.trace import ReadableSpan
+from uipath.eval.evaluators.base_evaluator import AgentExecution as BaseAgentExecution
 
 
 def extract_tool_calls_names(spans: List[ReadableSpan]) -> List[str]:
@@ -192,3 +194,82 @@ def tool_args_score(actual_tool_calls: List[Dict[str, Any]], expected_tool_calls
                     break
 
     return cnt / len(expected_tool_calls) if not strict else float(cnt == len(expected_tool_calls))
+
+
+def trace_to_str(agent_trace: List[ReadableSpan]) -> str:
+    """Convert OTEL spans to a platform-style agent run history string.
+
+    Creates a similar structure to LangChain message processing but using OTEL spans.
+    Only processes tool spans (spans with 'tool.name' attribute).
+
+    Args:
+        agent_trace: List of ReadableSpan objects from the agent execution
+
+    Returns:
+        String representation of the agent run history in platform format
+    """
+    platform_history = []
+    seen_tool_calls = set()
+
+    for span in agent_trace:
+        if span.attributes and (tool_name := span.attributes.get('tool.name')):
+            # Get span timing information
+            start_time = span.start_time
+            end_time = span.end_time
+
+            # Convert nanoseconds to datetime if needed
+            if isinstance(start_time, int):
+                start_timestamp = datetime.fromtimestamp(start_time / 1e9)
+            else:
+                start_timestamp = start_time
+
+            if isinstance(end_time, int):
+                end_timestamp = datetime.fromtimestamp(end_time / 1e9)
+            else:
+                end_timestamp = end_time
+
+            timestamp_str = (
+                start_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                if start_timestamp else ""
+            )
+
+            # Get tool call information
+            tool_args = span.attributes.get('input.value', {})
+            tool_result = span.attributes.get('output.value', '{}')
+            # Attempt to extract only the content of the tool result if it is a string
+            if isinstance(tool_result, str):
+                try:
+                    tool_result = json.loads(tool_result.replace("'", '"'))["content"]
+                except (json.JSONDecodeError, KeyError):
+                    tool_result = tool_result
+
+            span_id = span.context.span_id if span.context else str(hash(f"{tool_name}_{timestamp_str}"))
+
+            # De-duplicate tool calls based on span ID
+            if span_id in seen_tool_calls:
+                continue
+            seen_tool_calls.add(span_id)
+
+            # Add tool selection (equivalent to AIMessage with tool_calls)
+            platform_history.append(f"[{timestamp_str}] LLM Response:")
+            platform_history.append(f"  Agent Selected 1 Tool(s):")
+            platform_history.append("")
+            platform_history.append(f"  Tool: {tool_name}")
+            platform_history.append(f"  Arguments: {str(tool_args)}")
+            platform_history.append("")
+
+            # Add tool response (equivalent to ToolMessage)
+            end_timestamp_str = (
+                end_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                if end_timestamp else timestamp_str
+            )
+            platform_history.append(f"[{end_timestamp_str}] Tool Call Response - {tool_name}:")
+            platform_history.append(f"{str(tool_result).strip()}")
+            platform_history.append("")
+
+    return "\n".join(platform_history)
+
+
+class AgentExecution(BaseAgentExecution):
+    """Agent execution with additional fields."""
+    simulation_instructions: str = ""
