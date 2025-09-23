@@ -1,56 +1,75 @@
 """Agent execution and evaluation runner."""
 
 import asyncio
+import argparse
 from datetime import datetime
 import json
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from dotenv import find_dotenv, load_dotenv
 from uipath.eval.evaluators.base_evaluator import EvaluatorCategory, EvaluatorType
 from uipath.eval.models import EvaluationResult
 
-from gym_sample.evals import LLMJudgeEvaluator, LLMJudgeSimulationTrajectoryEvaluator, LLMJudgeStrictJSONSimilarityEvaluator, LLMJudgeTrajectoryEvaluator, ToolCallArgumentsEvaluator, ToolCallCountEvaluator, ToolCallOrderEvaluator, ToolCallOutputEvaluator
+from gym_sample.evaluators import LLMJudgeEvaluator, LLMJudgeSimulationTrajectoryEvaluator, LLMJudgeStrictJSONSimilarityEvaluator, LLMJudgeTrajectoryEvaluator, ToolCallArgumentsEvaluator, ToolCallCountEvaluator, ToolCallOrderEvaluator, ToolCallOutputEvaluator
 from uipath.eval.evaluators import (
     BaseEvaluator,
     ExactMatchEvaluator,
 )
 from gym_sample.graph import make_graph
 from gym_sample.trace_utils import setup_tracer
-from gym_sample.evals_helpers import AgentExecution
+from gym_sample.evaluators_helpers import AgentExecution
+from gym_sample.uipath_gym_types import AgentBaseClass
 
 
-async def run_agent_with_tracing(agent_input: Dict[str, Any], simulation_instructions: str = "", verbose: bool = False) -> AgentExecution:
-    """Run the agent with OpenTelemetry trace collection.
+async def run_agent_with_tracing(agent_name: str, verbose: bool = False) -> List[AgentExecution]:
+    """Run the agent with OpenTelemetry trace collection across all datapoints.
+
+    Args:
+        agent_name: Name of the agent to run
+        verbose: Whether to print verbose output
 
     Returns:
-        AgentExecution: Contains agent input, output, and collected traces.
+        List of AgentExecution: Contains agent input, output, and collected traces for each datapoint.
     """
-    # Set up tracing
-    exporter, _ = setup_tracer()
-
     if verbose:
         print("Starting agent execution with trace collection...")
 
-    # Run the agent through the actual graph
-    async with make_graph(agent_input) as graph:
-        # Compile and run the graph
-        compiled_graph = graph.compile()
-        result = await compiled_graph.ainvoke(agent_input)
+    results = []
 
-        # Extract output
-        agent_output = result.get('result', {}) if isinstance(result, dict) else {}
-        agent_trace = exporter.get_exported_spans()
+    # Set up tracing once for all runs
+    exporter, provider = setup_tracer()
 
-        if verbose:
-            print(f"Agent completed. Result: {agent_output}")
-            print(f"Collected {len(agent_trace)} trace spans")
+    # Run the agent through all graphs/datapoints
+    async with make_graph(agent_name) as graphs:
+        if not graphs:
+            raise ValueError(f"No graphs found for agent: {agent_name}")
 
-        return AgentExecution(
-            agent_input=agent_input,
-            agent_output=agent_output,
-            agent_trace=agent_trace,
-            simulation_instructions=simulation_instructions,
-        )
+        for i, (graph, datapoint) in enumerate(graphs):
+            if verbose:
+                print(f"\nRunning datapoint {i+1}/{len(graphs)}: {datapoint.input}")
+
+            # Clear previous spans before each run
+            exporter.clear_exported_spans()
+
+            compiled_graph = graph.compile()
+            result = await compiled_graph.ainvoke(datapoint.input)
+
+            # Extract output and get spans only from this run
+            agent_output = result.get('result', {}) if isinstance(result, dict) else {}
+            agent_trace = exporter.get_exported_spans().copy()  # Copy to avoid reference issues
+
+            if verbose:
+                print(f"Agent completed. Result: {agent_output}")
+                print(f"Collected {len(agent_trace)} trace spans")
+
+            results.append(AgentExecution(
+                agent_input=datapoint.input,
+                agent_output=agent_output,
+                agent_trace=agent_trace,
+                simulation_instructions=datapoint.simulation_instructions,
+            ))
+
+    return results
 
 
 def create_evaluators() -> List[BaseEvaluator]:
@@ -165,63 +184,78 @@ def create_evaluators() -> List[BaseEvaluator]:
     return evaluators
 
 
-async def run_evaluation(agent_input: Dict[str, Any], evaluation_criteria: Dict[str, Any], evaluators: List[BaseEvaluator], simulation_instructions: str = "", verbose: bool = False) -> Dict[str, EvaluationResult]:
-    """Run the complete agent evaluation pipeline."""
-    print("Running agent...")
+async def run_evaluation(agent_name: str, evaluators: List[BaseEvaluator], verbose: bool = False) -> Dict[str, Dict[str, EvaluationResult]]:
+    """Run the complete agent evaluation pipeline across all datapoints."""
+    if verbose:
+        print("Running agent across all datapoints...")
+    else:
+        print("Running agent...")
 
-    # Execute agent with tracing
-    agent_execution = await run_agent_with_tracing(agent_input, simulation_instructions, verbose)
+    # Execute agent with tracing for all datapoints
+    agent_executions = await run_agent_with_tracing(agent_name, verbose)
 
     if verbose:
-        print(f"\nAgent executed successfully!")
-        print(f"Input: {agent_execution.agent_input}")
-        print(f"Output: {agent_execution.agent_output}")
-        print(f"Collected {len(agent_execution.agent_trace)} trace spans")
+        print(f"\nAgent executed successfully across {len(agent_executions)} datapoints!")
+        print("\nRunning evaluations...")
+    else:
+        print("\nRunning evaluations...")
 
-    print("\nRunning evaluations...")
+    all_results: Dict[str, Dict[str, EvaluationResult]] = {}
 
-    results: Dict[str, EvaluationResult] = {}
-    # Run each evaluator
-    for evaluator in evaluators:
+    # Get datapoints to access their evaluation criteria
+    async with make_graph("calculator") as graphs:
+        datapoints = [datapoint for _, datapoint in graphs]
+
+    # Run evaluations for each datapoint execution
+    for i, agent_execution in enumerate(agent_executions):
+        datapoint = datapoints[i]
+        datapoint_key = f"datapoint_{i}"
         if verbose:
-            print(f"\nEvaluating {evaluator.name} with criteria: {evaluation_criteria[evaluator.id]}")
-        result = await evaluator.evaluate(
-            agent_execution=agent_execution,
-            evaluation_criteria=evaluation_criteria[evaluator.id]
-        )
-        if verbose:
-            print(f"Result: {result}")
-        results[evaluator.id] = result
+            print(f"\n--- Evaluating Datapoint {i+1}/{len(agent_executions)} ---")
+            print(f"Input: {agent_execution.agent_input}")
+            print(f"Output: {agent_execution.agent_output}")
+            print(f"Collected {len(agent_execution.agent_trace)} trace spans")
 
-    return results
+        datapoint_results: Dict[str, EvaluationResult] = {}
+
+        # Run each evaluator for this datapoint
+        for evaluator in evaluators:
+            # Use the datapoint's evaluation criteria
+            evaluator_criteria = datapoint.evaluation_criteria.get(evaluator.id, {})
+            if verbose:
+                print(f"  Evaluating {evaluator.name} with criteria: {evaluator_criteria}")
+            result = await evaluator.evaluate(
+                agent_execution=agent_execution,
+                evaluation_criteria=evaluator_criteria
+            )
+            if verbose:
+                print(f"  Result: {result}")
+            datapoint_results[evaluator.id] = result
+
+        all_results[datapoint_key] = datapoint_results
+
+    return all_results
 
 
 async def main() -> None:
     """Main entry point for agent evaluation."""
+    parser = argparse.ArgumentParser(description="Run agent evaluation")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
+    parser.add_argument("--agent_name", default="calculator", help="Name of the agent to run")
+    args = parser.parse_args()
+
     load_dotenv(find_dotenv())
-
-    agent_input = {
-        "expression": "15.0 + 7.0 * 3.0"
-    }
-
-    simulation_instructions = "Tool multiply should return 21.0 and tool add should return 36.0."
-
-    evaluation_criteria = {
-        "exact_match": {"answer": 36.0},
-        "tool_call_order": ["multiply", "add"],
-        "tool_call_count": {"multiply": "ge:1", "add": "ge:1"},
-        "tool_call_arguments": [{"name": "multiply", "args": {"a": 7., "b":3.}}, {"name": "add", "args": {"a": 15., "b": 21.}}],
-        "tool_call_output": [{"name": "multiply", "output": "21.0"}, {"name": "add", "output": "36.0"}],
-        "llm_judge": {"answer": 36.0},
-        "llm_judge_strict_json_similarity": {"answer": 36.0},
-        "llm_judge_trajectory": "The agent should have called the multiply tool with the arguments 7.0 and 3.0, and the add tool with the arguments 15.0 and 21.0.",
-        "llm_judge_simulation_trajectory": "The agent should have called the multiply tool with the arguments 7.0 and 3.0, and the add tool with the arguments 15.0 and 21.0.",
-    }
 
     evaluators = create_evaluators()
 
-    results = await run_evaluation(agent_input, evaluation_criteria, evaluators, simulation_instructions, verbose=False)
-    print(json.dumps({k: v.score for k, v in results.items()}, indent=4))
+    results = await run_evaluation(agent_name=args.agent_name, evaluators=evaluators, verbose=args.verbose)
+
+    # Print results for all datapoints
+    summary = {}
+    for datapoint_key, datapoint_results in results.items():
+        summary[datapoint_key] = {evaluator_id: result.score for evaluator_id, result in datapoint_results.items()}
+
+    print(json.dumps(summary, indent=4))
 
 
 if __name__ == "__main__":

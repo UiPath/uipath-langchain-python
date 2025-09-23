@@ -83,10 +83,17 @@ class RaiseErrorTool(StructuredTool):
         return agent_state
 
 
+class Datapoint(BaseModel):
+    input: Dict[str, str | Dict[str, Any]]
+    evaluation_criteria: Dict[str, Any]
+    simulation_instructions: str
+
+
 class AgentBaseClass(BaseModel):
     system_prompt: str
     user_prompt: str
     end_execution_tool: EndExecutionTool
+    datapoints: List[Datapoint] = []
     raise_error_tool: RaiseErrorTool = RaiseErrorTool()
     tools: List[BaseTool] = []
 
