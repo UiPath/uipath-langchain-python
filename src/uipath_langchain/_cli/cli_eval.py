@@ -1,16 +1,19 @@
 import asyncio
+import uuid
 from typing import List, Optional
 
 from openinference.instrumentation.langchain import (
     LangChainInstrumentor,
     get_current_span,
 )
+from uipath._cli._evals._progress_reporter import StudioWebProgressReporter
 from uipath._cli._evals._runtime import UiPathEvalContext, UiPathEvalRuntime
 from uipath._cli._runtime._contracts import (
     UiPathRuntimeFactory,
 )
 from uipath._cli._utils._eval_set import EvalHelpers
 from uipath._cli.middlewares import MiddlewareResult
+from uipath._events._event_bus import EventBus
 from uipath.eval._helpers import auto_discover_entrypoint
 
 from uipath_langchain._cli._runtime._context import LangGraphRuntimeContext
@@ -31,14 +34,16 @@ def langgraph_eval_middleware(
             should_continue=True
         )  # Continue with normal flow if no langgraph.json
 
-    eval_context = UiPathEvalContext.with_defaults(**kwargs)
-    eval_context.eval_set = eval_set or EvalHelpers.auto_discover_eval_set()
-    eval_context.eval_ids = eval_ids
-
     try:
         _instrument_traceable_attributes()
 
-        runtime_entrypoint = entrypoint or auto_discover_entrypoint()
+        event_bus = EventBus()
+
+        if not kwargs.get("no_report", False):
+            progress_reporter = StudioWebProgressReporter(
+                spans_exporter=LangChainExporter()
+            )
+            asyncio.run(progress_reporter.subscribe_to_eval_runtime_events(event_bus))
 
         def generate_runtime_context(
             context_entrypoint: str, langgraph_config: LangGraphConfig, **context_kwargs
@@ -47,6 +52,14 @@ def langgraph_eval_middleware(
             context.langgraph_config = langgraph_config
             context.entrypoint = context_entrypoint
             return context
+
+        runtime_entrypoint = entrypoint or auto_discover_entrypoint()
+
+        eval_context = UiPathEvalContext.with_defaults(
+            entrypoint=runtime_entrypoint, execution_id=str(uuid.uuid4()), **kwargs
+        )
+        eval_context.eval_set = eval_set or EvalHelpers.auto_discover_eval_set()
+        eval_context.eval_ids = eval_ids
 
         runtime_factory = UiPathRuntimeFactory(
             LangGraphRuntime,
@@ -65,9 +78,10 @@ def langgraph_eval_middleware(
 
         async def execute():
             async with UiPathEvalRuntime.from_eval_context(
-                factory=runtime_factory, context=eval_context
+                factory=runtime_factory, context=eval_context, event_bus=event_bus
             ) as eval_runtime:
                 await eval_runtime.execute()
+                await event_bus.wait_for_all()
 
         asyncio.run(execute())
         return MiddlewareResult(should_continue=False)
