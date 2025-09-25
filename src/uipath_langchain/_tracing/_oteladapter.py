@@ -166,7 +166,7 @@ class LangChainExporter(LlmOpsHttpExporter):
         if "Attributes" not in span_data:
             return span_data
 
-        logger.info(f"Processing span: {span_data}")
+        logger.debug(f"Processing span: {span_data}")
 
         attributes_val = span_data["Attributes"]
         if isinstance(attributes_val, str):
