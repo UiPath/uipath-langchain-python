@@ -35,7 +35,7 @@ def uipath_connection_mock(httpx_mock, response):
 @contextmanager
 def uipath_token_mock(httpx_mock, response):
     httpx_mock.add_response(
-        url="https://example.com/api/v1/Connections/connection-id/token?tokenType=direct",
+        url="https://example.com/api/v1/Connections/connection-id/token?tokenType=bearer",
         method="GET",
         json=response,
     )
