@@ -206,7 +206,7 @@ class LangChainExporter(LlmOpsHttpExporter):
 
         span_data["Attributes"] = json.dumps(processed_attributes)
 
-        logger.info(f"Transformed span: {span_data}")
+        logger.debug(f"Transformed span: {span_data}")
         return span_data
 
     def _send_with_retries(
