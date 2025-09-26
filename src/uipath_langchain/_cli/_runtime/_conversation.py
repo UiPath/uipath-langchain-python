@@ -173,6 +173,14 @@ def map_message(
                             content_part_sequence=idx,
                         ),
                     )
+        elif isinstance(message.content, str) and message.content:
+            msg_event.content_part = UiPathConversationContentPartEvent(
+                content_part_id=f"content-{message.id}",
+                chunk=UiPathConversationContentPartChunkEvent(
+                    data=message.content,
+                    content_part_sequence=0,
+                ),
+            )
 
         stop_reason = message.response_metadata.get("stop_reason")
         if not message.content and stop_reason in ("tool_use", "end_turn"):
