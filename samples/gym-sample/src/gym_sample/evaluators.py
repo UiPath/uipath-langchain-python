@@ -1,6 +1,7 @@
 """Base evaluator abstract class for agent evaluation."""
 
 from collections import Counter
+from collections.abc import Callable
 import json
 from typing import Any, Dict, List, Optional
 
@@ -140,7 +141,7 @@ class LLMJudgeEvaluator(BaseEvaluator[str | Dict[str, Any]]):
     output_schema: type[BaseModel] = LLMJudgeOutputSchema
     actual_output_placeholder: str = "{{ActualOutput}}"
     evaluation_criteria_placeholder: str = "{{ExpectedOutput}}"
-    llm: Optional[UiPathLlmChatService] = None
+    llm_service: Optional[Callable] = None
 
     @model_validator(mode="after")
     def validate_prompt_placeholders(self) -> "LLMJudgeEvaluator":
@@ -151,17 +152,18 @@ class LLMJudgeEvaluator(BaseEvaluator[str | Dict[str, Any]]):
             )
         return self
 
-    def model_post_init(self, __context: Any):
-        """Initialize the LLM service after model creation."""
+    def model_post_init(self, __context: Any) -> None:
+        """Initialize the LLM service if not provided."""
         super().model_post_init(__context)
-        self._initialize_llm()
+        if self.llm_service is None:
+            self.llm_service = self._get_llm_service()
 
-    def _initialize_llm(self):
-        """Initialize the LLM used for evaluation."""
+    def _get_llm_service(self):
+        """Get the LLM service from the UiPath instance."""
         from uipath import UiPath
 
         uipath = UiPath()
-        self.llm = uipath.llm
+        return uipath.llm.chat_completions
 
     async def evaluate(
         self,
@@ -241,7 +243,8 @@ class LLMJudgeEvaluator(BaseEvaluator[str | Dict[str, Any]]):
             },
         }
 
-        response = await self.llm.chat_completions(**request_data)  # type: ignore
+        assert self.llm_service is not None, "LLM service not initialized"
+        response = await self.llm_service(**request_data)
         return LLMResponse(**json.loads(str(response.choices[-1].message.content)))
 
 

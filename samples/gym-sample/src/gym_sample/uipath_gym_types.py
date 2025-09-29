@@ -32,6 +32,10 @@ class StateBaseClass(BaseModel):
     run_init_state: Dict[str, str] = {}
 
 
+class EndExecutionOutput(BaseModel):
+    result: Dict[str, Any] = {}
+
+
 class EndExecutionTool(StructuredTool):
     name: str = "end_execution"
     description: str = "Use this tool when you have gathered all required information and want to end execution. The input should match the expected output schema."
@@ -55,7 +59,7 @@ class EndExecutionTool(StructuredTool):
         )
         jsonschema.validate(arguments, schema)
         tool_input.result = arguments
-        return tool_input
+        return EndExecutionOutput(result=tool_input.result)
 
 
 class RaiseErrorTool(StructuredTool):
@@ -162,15 +166,29 @@ class BasicLoop:
         """Node to handle input preparation and ensure proper initial messages."""
         if self.debug:
             print(f"[DEBUG] prepare_input_node - Received state with {len(state.messages)} messages")
+            print(f"[DEBUG] prepare_input_node - agent_input: {agent_input}")
 
         # If no messages, use default scenario prompts (unattended mode)
         if not state.messages:
-            state.messages = [
-                SystemMessage(content=self.scenario.system_prompt),
-                HumanMessage(content=self.scenario.user_prompt.format_map(agent_input))
-            ]
-            if self.debug:
-                print("[DEBUG] No messages - using default scenario prompts (unattended mode)")
+            # Check if agent_input contains datapoint data (like 'expression', 'message', etc.)
+            assert agent_input, "Agent input is required to be non-empty when no messages are present"
+
+            # This looks like unattended mode with datapoint - use scenario prompts
+            try:
+                state.messages = [
+                        SystemMessage(content=self.scenario.system_prompt),
+                        HumanMessage(content=self.scenario.user_prompt.format_map(agent_input))
+                    ]
+                if self.debug:
+                    print("[DEBUG] Datapoint content detected - using scenario prompts (unattended mode)")
+            except KeyError as e:
+                # If format_map fails, fall back to basic setup
+                state.messages = [
+                    SystemMessage(content=self.scenario.system_prompt),
+                    HumanMessage(content=f"Help me with: {agent_input}")
+                ]
+                if self.debug:
+                    print(f"[DEBUG] Format error {e} - using fallback with agent_input")
         else:
             # Interactive mode: ensure system message is present
             has_system_message = any(isinstance(msg, SystemMessage) for msg in state.messages)

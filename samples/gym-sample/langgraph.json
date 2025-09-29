@@ -3,6 +3,7 @@
     "."
   ],
   "graphs": {
-    "agent": "./src/gym_sample/graph.py:agent"
-  }
+    "calculator": "./src/gym_sample/graph.py:calculator_agent"
+  },
+  "env": ".env"
 }

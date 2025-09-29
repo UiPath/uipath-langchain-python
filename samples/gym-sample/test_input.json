@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {
+      "type": "user",
+      "content": "Calculate 7 * 8"
+    }
+  ]
+}

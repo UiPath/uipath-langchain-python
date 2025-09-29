@@ -1,3 +1,4 @@
+import os
 from typing import Any, AsyncGenerator, Dict, List
 from contextlib import asynccontextmanager
 
@@ -69,7 +70,36 @@ def get_agents() -> Dict[str, AgentBaseClass]:
 
 
 @asynccontextmanager
-async def make_graph(agent_name: str = "calculator") -> AsyncGenerator[List[tuple[StateGraph, Datapoint]], None]:
+async def agent(agent_name: str = "calculator", agent_input: Dict[str, Any] | int | None = None, debug: bool = False) -> AsyncGenerator[StateGraph, None]:
+    """Entry point for uipath run agent command.
+
+    Args:
+        agent_name: Name of the agent to use
+        agent_input: Either a dict with input data, or int index of datapoint to use (default: None)
+
+    Returns:
+        Single StateGraph for the specified input or datapoint to maintain CLI compatibility.
+    """
+    if debug:
+        print(f"DEBUG: agent() called with agent_name={agent_name}, agent_input={agent_input}, type={type(agent_input)}")
+    agent_scenario = get_agents()[agent_name]
+    loop = BasicLoop(
+        scenario=agent_scenario,
+        llm=get_model(),
+        print_trace=True,
+        parallel_tool_calls=False,
+        debug=debug,
+    )
+    if agent_input is None:
+        agent_input = int(os.getenv("AGENT_INPUT", 0))
+    if isinstance(agent_input, int):
+        agent_input = agent_scenario.datapoints[agent_input].input
+    graph = loop.build_graph(agent_input)
+    yield graph
+
+
+@asynccontextmanager
+async def agents_with_datapoints(agent_name: str = "calculator") -> AsyncGenerator[List[tuple[StateGraph, Datapoint]], None]:
     """Create and return all LangGraph agents using the enhanced BasicLoop.
 
     Returns:
@@ -91,24 +121,9 @@ async def make_graph(agent_name: str = "calculator") -> AsyncGenerator[List[tupl
     yield graphs
 
 
-# For uipath run agent compatibility - returns single graph for first datapoint
-def agent(agent_input: Dict[str, Any] = {}) -> StateGraph:
-    """Entry point for uipath run agent command.
-
-    Returns a single StateGraph for the first datapoint to maintain CLI compatibility.
-    """
-    agent_scenario = get_agents()["calculator"]
-    loop = BasicLoop(
-        scenario=agent_scenario,
-        llm=get_model(),
-        print_trace=True,
-        parallel_tool_calls=False,
-    )
-
-    # Use first datapoint for CLI compatibility
-    first_datapoint = agent_scenario.datapoints[0] if agent_scenario.datapoints else Datapoint(
-        input={},
-        evaluation_criteria={},
-        simulation_instructions=""
-    )
-    return loop.build_graph(first_datapoint.input)
+@asynccontextmanager
+async def calculator_agent() -> AsyncGenerator[StateGraph, None]:
+    """Pre-configured calculator agent entry point that supports both chat and datapoint modes."""
+    # Don't force any datapoint - let the runtime determine the mode
+    async with agent(agent_name="calculator", agent_input=None) as graph:
+        yield graph
