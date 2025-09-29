@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Iterable, Optional, Type
+from typing import Any, Iterable, Optional, Type
 
 import httpx
 from jsonschema_pydantic import jsonschema_to_pydantic as create_model  # type: ignore
@@ -14,11 +14,13 @@ from uipath.agent.models.agent import (
     AgentDefinition,
     AgentEscalationChannel,
     AgentEscalationResourceConfig,
+    AgentIntegrationToolParameter,
     AgentIntegrationToolResourceConfig,
     AgentProcessToolResourceConfig,
     AgentResourceConfig,
 )
 from uipath.models import CreateAction, InvokeProcess
+from uipath.models.connections import ConnectionTokenType
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,27 @@ def create_escalation_tool(
         yield create_escalation_tool_from_channel(channel)
 
 
+METHOD_MAP = {"GETBYID": "GET"}
+
+
+def build_query_params(parameters: list[AgentIntegrationToolParameter]):
+    query_params = [
+        x for x in parameters if x.field_location == "query" and x.value is not None
+    ]
+    if query_params:
+        return "?" + "&".join(f"{q.name}={q.value}" for q in query_params)
+    return ""
+
+
+def filter_query_params(
+    kwargs: dict[str, Any], parameters: list[AgentIntegrationToolParameter]
+):
+    query_params = {x.name for x in parameters if x.field_location == "query"}
+    non_query_params = {x.name for x in parameters if x.field_location != "query"}
+    fields_to_ignore = query_params - non_query_params
+    return {k: v for k, v in kwargs.items() if k not in fields_to_ignore}
+
+
 def create_integration_tool(
     resource: AgentIntegrationToolResourceConfig,
 ) -> Iterable[BaseTool]:
@@ -100,15 +123,21 @@ def create_integration_tool(
             resource.properties.connection.id
         )
         token = await uipath.connections.retrieve_token_async(
-            resource.properties.connection.id
+            resource.properties.connection.id, ConnectionTokenType.BEARER
         )
         tool_url = f"{remote_connection.api_base_uri}/v3/element/instances/{remote_connection.element_instance_id}{resource.properties.tool_path}"
+        tool_url = f"{tool_url}{build_query_params(resource.properties.parameters)}"
+        tool_url = tool_url.format(**kwargs)
 
+        authorization = f"{token.token_type} {token.access_token}"
+        method = METHOD_MAP.get(resource.properties.method, resource.properties.method)
         response = await httpx.AsyncClient().request(
-            resource.properties.method,
+            method,
             tool_url,
-            headers={"Authorization": f"Bearer {token.access_token}"},
-            content=json.dumps(kwargs),
+            headers={"Authorization": authorization},
+            content=json.dumps(
+                filter_query_params(kwargs, resource.properties.parameters)
+            ),
         )
         return response.json()
 
