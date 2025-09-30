@@ -25,6 +25,10 @@ from gym_sample.uipath_gym_types import Datapoint
 async def run_agents_with_tracing(graphs: List[Tuple[StateGraph, Datapoint]], verbose: bool = False) -> List[AgentExecution]:
     """Run the agent with OpenTelemetry trace collection across all datapoints.
 
+    Note: This evaluation mode bypasses the CLI entry point and directly builds graphs
+    for each datapoint. This allows batch evaluation while the CLI mode (uipath run calculator)
+    accepts properly typed GraphInput models for single executions.
+
     Args:
         graphs: List of (StateGraph, Datapoint) tuples to run
         verbose: Whether to print verbose output
@@ -52,7 +56,8 @@ async def run_agents_with_tracing(graphs: List[Tuple[StateGraph, Datapoint]], ve
         exporter.clear_exported_spans()
 
         compiled_graph = graph.compile()
-        result = await compiled_graph.ainvoke(datapoint.input)
+        # Evaluation graphs have input pre-bound at build time, so pass empty dict
+        result = await compiled_graph.ainvoke({})
 
         # Extract output and get spans only from this run
         agent_output = result.get('result', {}) if isinstance(result, dict) else {}
@@ -244,7 +249,7 @@ async def main() -> None:
 
     load_dotenv(find_dotenv())
 
-    evaluators = create_evaluators(include_llm_judge=args.include_llm_judge)
+    evaluators = create_evaluators(include_llm_judge=True)
 
     results = await run_evaluation(agent_name=args.agent_name, evaluators=evaluators, verbose=args.verbose)
 

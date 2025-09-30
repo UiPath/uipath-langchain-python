@@ -6,7 +6,6 @@ import json
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, model_validator
-from uipath._services import UiPathLlmChatService
 from uipath._utils.constants import COMMUNITY_agents_SUFFIX
 from uipath.eval.evaluators.base_evaluator import (
     BaseEvaluator,
@@ -142,6 +141,8 @@ class LLMJudgeEvaluator(BaseEvaluator[str | Dict[str, Any]]):
     actual_output_placeholder: str = "{{ActualOutput}}"
     evaluation_criteria_placeholder: str = "{{ExpectedOutput}}"
     llm_service: Optional[Callable] = None
+    temperature: float = 0.0
+    max_tokens: int = 1000
 
     @model_validator(mode="after")
     def validate_prompt_placeholders(self) -> "LLMJudgeEvaluator":
@@ -241,6 +242,8 @@ class LLMJudgeEvaluator(BaseEvaluator[str | Dict[str, Any]]):
                     "schema": self.output_schema.model_json_schema(),
                 },
             },
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
         }
 
         assert self.llm_service is not None, "LLM service not initialized"

@@ -6,7 +6,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, START, StateGraph, add_messages
 from langgraph.prebuilt import ToolNode
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 from functools import partial
 from langchain_core.runnables import Runnable
 
@@ -24,7 +24,7 @@ class RaiseErrorInput(BaseModel):
 
 class StateBaseClass(BaseModel):
     class Config:
-        extra = "forbid"
+        extra = "allow"  # Allow extra fields from input_schema (like 'expression')
 
     messages: Annotated[List[Message], add_messages] = []
     result: Dict[str, Any] = {}
@@ -96,6 +96,8 @@ class Datapoint(BaseModel):
 class AgentBaseClass(BaseModel):
     system_prompt: str
     user_prompt: str
+    input_schema: type[BaseModel]
+    output_schema: type[BaseModel]
     end_execution_tool: EndExecutionTool
     datapoints: List[Datapoint] = []
     raise_error_tool: RaiseErrorTool = RaiseErrorTool()
@@ -142,6 +144,14 @@ def should_continue(state: StateBaseClass) -> Literal["tools", "raise_error", "e
     return "tools"
 
 
+class BasicLoopInput(BaseModel):
+    agent_input: Dict[str, Any]
+
+
+class BasicLoopOutput(BaseModel):
+    answer: str
+
+
 class BasicLoop:
     def __init__(
         self,
@@ -162,12 +172,9 @@ class BasicLoop:
         self.debug = debug
 
 
-    def prepare_input_node(self, state: StateBaseClass, agent_input: Dict[str, Any]) -> StateBaseClass:
-        """Node to handle input preparation and ensure proper initial messages."""
-        if self.debug:
-            print(f"[DEBUG] prepare_input_node - Received state with {len(state.messages)} messages")
-            print(f"[DEBUG] prepare_input_node - agent_input: {agent_input}")
-
+    def prepare_input_node(self, agent_input: BaseModel) -> StateBaseClass:
+        """Node to handle input preparation and ensure proper initial messages (evaluation mode)."""
+        state = StateBaseClass()
         # If no messages, use default scenario prompts (unattended mode)
         if not state.messages:
             # Check if agent_input contains datapoint data (like 'expression', 'message', etc.)
@@ -177,7 +184,7 @@ class BasicLoop:
             try:
                 state.messages = [
                         SystemMessage(content=self.scenario.system_prompt),
-                        HumanMessage(content=self.scenario.user_prompt.format_map(agent_input))
+                        HumanMessage(content=self.scenario.user_prompt.format_map(agent_input.model_dump()))
                     ]
                 if self.debug:
                     print("[DEBUG] Datapoint content detected - using scenario prompts (unattended mode)")
@@ -202,13 +209,77 @@ class BasicLoop:
 
         return state
 
-    def build_graph(self, agent_input: Dict[str, Any] = {}) -> StateGraph:
-        """Build the graph with proper input handling for both unattended and interactive operation."""
-        # Create graph with input/output schema specification
-        graph = StateGraph(StateBaseClass)
+    def prepare_input_from_runtime(self, graph_input: BaseModel) -> StateBaseClass:
+        """Node to handle runtime input from CLI invocation (following ticket-classification pattern).
 
-        # Add input preparation node as the first step
-        graph.add_node("prepare_input", partial(self.prepare_input_node, agent_input=agent_input))
+        With input_schema=, LangGraph passes the input_schema type directly to the first node!
+        This is like ticket-classification: prepare_input(graph_input: GraphInput) -> GraphState
+
+        Args:
+            graph_input: Typed input matching input_schema (e.g., CalculatorInput)
+
+        Returns:
+            StateBaseClass with messages prepared from the input
+        """
+        if self.debug:
+            print(f"[DEBUG] prepare_input_from_runtime received: {type(graph_input).__name__}")
+            print(f"[DEBUG] Input data: {graph_input.model_dump()}")
+
+        # Create new state with messages
+        state = StateBaseClass()
+
+        # Create initial messages using scenario prompts
+        try:
+            state.messages = [
+                SystemMessage(content=self.scenario.system_prompt),
+                HumanMessage(content=self.scenario.user_prompt.format_map(graph_input.model_dump()))
+            ]
+            if self.debug:
+                print(f"[DEBUG] Created messages from runtime input (CLI mode)")
+                print(f"[DEBUG] Messages: {[m.content[:50] for m in state.messages]}")
+        except KeyError as e:
+            # If format_map fails, fall back to basic setup
+            state.messages = [
+                SystemMessage(content=self.scenario.system_prompt),
+                HumanMessage(content=f"Help me with: {graph_input}")
+            ]
+            if self.debug:
+                print(f"[DEBUG] Format error {e} - using fallback")
+
+        if self.debug:
+            print(f"[DEBUG] Final {len(state.messages)} messages from runtime input")
+
+        return state
+
+    def build_cli_graph(self) -> StateGraph:
+        """Build graph for CLI mode - accepts input at runtime (like ticket-classification example).
+
+        Returns a graph that:
+        - Uses input= and output= parameters (separate from State)
+        - Dynamically creates a State class that includes input fields
+        - Has a prepare_input node that converts input → State
+        - Accepts typed input at runtime via `graph.ainvoke(CalculatorInput(...))`
+        """
+        # Dynamically create a State class that includes input fields
+        # This is necessary because LangGraph needs the State to have the same fields as the input
+        # (like ticket-classification where GraphState includes message, ticket_id, assignee from GraphInput)
+        input_fields = {
+            field_name: (field_info.annotation, field_info.default if field_info.is_required() else None)
+            for field_name, field_info in self.scenario.input_schema.model_fields.items()
+        }
+
+        # Create a new State class that inherits from StateBaseClass and adds input fields
+        StateWithInput = create_model(  # pyright: ignore[reportCallIssue]
+            'StateWith' + self.scenario.input_schema.__name__,
+            __base__=StateBaseClass,
+            **input_fields  # pyright: ignore[reportArgumentType]
+        )
+
+        # CLI mode: input and output are separate types from State
+        graph = StateGraph(StateWithInput, input_schema=self.scenario.input_schema, output_schema=self.scenario.output_schema)
+
+        # prepare_input node converts GraphInput → GraphState
+        graph.add_node("prepare_input", self.prepare_input_from_runtime)  # pyright: ignore
 
         graph.add_node(
             "chatbot",
@@ -223,7 +294,53 @@ class BasicLoop:
         graph.add_node("end_execution", self.scenario.end_execution_tool)
         graph.add_node("raise_error", self.scenario.raise_error_tool)
 
-        # Route through prepare_input first to handle JSON input conversion
+        # Route through prepare_input first
+        graph.add_edge(START, "prepare_input")
+        graph.add_edge("prepare_input", "chatbot")
+
+        graph.add_conditional_edges("chatbot", should_continue)
+        graph.add_edge("tools", "chatbot")
+        graph.add_edge("end_execution", END)
+        graph.add_edge("raise_error", END)
+        return graph
+
+    def build_evaluation_graph(self, agent_input: Dict[str, Any]) -> StateGraph:
+        """Build graph for evaluation mode - pre-binds input at build time.
+
+        Args:
+            agent_input: The input data from a datapoint
+
+        Returns a graph that:
+        - Pre-binds the input at graph build time
+        - No runtime input needed - just call graph.ainvoke({})
+        """
+        # Evaluation mode: use input_schema for validation but pre-bind the data
+        graph = StateGraph(StateBaseClass, input_schema=self.scenario.input_schema, output_schema=self.scenario.output_schema)
+
+        final_agent_input = self.scenario.input_schema.model_validate(agent_input)
+
+        # Create a closure that captures the input (avoids partial conflict with positional args)
+        def prepare_with_bound_input(state: StateBaseClass | None = None) -> StateBaseClass:
+            # Ignore incoming state, use pre-bound input instead
+            return self.prepare_input_node(agent_input=final_agent_input)
+
+        # Pre-bind input at build time via closure
+        graph.add_node("prepare_input", prepare_with_bound_input)  # pyright: ignore
+
+        graph.add_node(
+            "chatbot",
+            partial(
+                chatbot_node,
+                llm=self.llm_with_tools,
+                print_trace=self.print_trace,
+                parallel_tool_calls=self.parallel_tool_calls,
+            ),
+        )
+        graph.add_node("tools", ToolNode(self.scenario.tools))
+        graph.add_node("end_execution", self.scenario.end_execution_tool)
+        graph.add_node("raise_error", self.scenario.raise_error_tool)
+
+        # Route through prepare_input first
         graph.add_edge(START, "prepare_input")
         graph.add_edge("prepare_input", "chatbot")
 
