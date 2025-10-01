@@ -1,0 +1,13 @@
+{
+  "expense_id": "EXP-20251001-7FE84AD4",
+  "status": "approved",
+  "approval_level": "manager",
+  "final_amount": 2500,
+  "processing_notes": [
+    "Expense report EXP-20251001-7FE84AD4 created at 2025-10-01T10:00:00.000000",
+    "Exceeds $2000 limit for travel",
+    "Approved on 2025-10-01 10:05",
+    "Reimbursement by 2025-10-06"
+  ],
+  "reimbursement_eta": "2025-10-06"
+}
