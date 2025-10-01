@@ -59,8 +59,16 @@ async def run_agents_with_tracing(graphs: List[Tuple[StateGraph, Datapoint]], ve
         # Evaluation graphs have input pre-bound at build time, so pass empty dict
         result = await compiled_graph.ainvoke({})
 
-        # Extract output and get spans only from this run
-        agent_output = result.get('result', {}) if isinstance(result, dict) else {}
+        # Extract output - with output_schema, result is the typed output directly
+        if isinstance(result, dict):
+            # Try to get the output from the result (handle both old and new format)
+            agent_output = result if 'answer' in result or 'result' not in result else result.get('result', {})
+        elif hasattr(result, 'model_dump'):
+            # Result is a Pydantic model (output_schema) - convert to dict
+            agent_output = result.model_dump()
+        else:
+            agent_output = {}
+
         agent_trace = exporter.get_exported_spans().copy()  # Copy to avoid reference issues
 
         if verbose:
@@ -249,7 +257,7 @@ async def main() -> None:
 
     load_dotenv(find_dotenv())
 
-    evaluators = create_evaluators(include_llm_judge=True)
+    evaluators = create_evaluators(include_llm_judge=args.include_llm_judge)
 
     results = await run_evaluation(agent_name=args.agent_name, evaluators=evaluators, verbose=args.verbose)
 

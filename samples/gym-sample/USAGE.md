@@ -163,6 +163,35 @@ def prepare_with_bound_input(state: StateBaseClass | None = None) -> StateBaseCl
     return self.prepare_input_node(agent_input=final_agent_input)
 ```
 
+### How Output Schema Works
+
+The `output_schema` is returned by wrapping the `end_execution` tool in a node function:
+
+```python
+def end_execution_node(state: StateBaseClass) -> BaseModel:
+    """Wrapper node that calls end_execution tool and returns output_schema."""
+    self.scenario.end_execution_tool.run(state)
+    # Return the output_schema populated from state.result
+    return self.scenario.output_schema.model_validate(state.result)
+
+graph.add_node("end_execution", end_execution_node)
+```
+
+**Why this approach:**
+- The `end_execution` tool validates the LLM's args against the schema
+- Stores the validated data in `state.result`
+- The wrapper node converts `state.result` to the proper `output_schema` type
+- LangGraph recognizes this as the final output since it matches `output_schema=`
+
+**Result:** When the graph completes, you get properly typed output:
+```json
+{
+  "answer": 36.0
+}
+```
+
+Instead of just an empty dict `{}`.
+
 ## Adding New Agents
 
 To add a new agent with proper typing:
@@ -187,10 +216,24 @@ def get_agents() -> Dict[str, AgentBaseClass]:
             input_schema=MyAgentInput,
             output_schema=MyAgentOutput,
             tools=[...],
+            end_execution_tool=EndExecutionTool(
+                args_schema={
+                    "type": "object",
+                    "properties": {
+                        "results": {"type": "array", "items": {"type": "string"}}
+                    },
+                    "required": ["results"]
+                },
+                output_schema=MyAgentOutput,  # IMPORTANT: Pass output_schema here!
+            ),
             datapoints=get_my_datapoints(),
         ),
     }
 ```
+
+**Note:** The `end_execution_tool` needs both:
+- `args_schema`: JSON schema the LLM uses when calling the tool
+- `output_schema`: The Pydantic model for the final graph output
 
 3. **Create typed entry point in `graph.py`:**
 ```python

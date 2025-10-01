@@ -20,8 +20,10 @@ def get_model() -> BaseChatModel:
     """Get the ChatAnthropic model (created lazily to allow environment loading)."""
     return UiPathAzureChatOpenAI(model="gpt-4o-2024-11-20")
 
+
 class CalculatorInput(BaseModel):
     expression: str
+
 
 class CalculatorOutput(BaseModel):
     answer: float
@@ -71,7 +73,8 @@ def get_agents() -> Dict[str, AgentBaseClass]:
                             "answer": {"type": "number", "description": "The numerical answer to the calculation"}
                         },
                         "required": ["answer"]
-                    }
+                    },
+                    output_schema=CalculatorOutput,  # Pass output_schema so it returns the correct type
                 ),
                 datapoints=get_datapoints(),
             ),

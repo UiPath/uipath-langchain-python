@@ -39,6 +39,7 @@ class EndExecutionOutput(BaseModel):
 class EndExecutionTool(StructuredTool):
     name: str = "end_execution"
     description: str = "Use this tool when you have gathered all required information and want to end execution. The input should match the expected output schema."
+    output_schema: type[BaseModel] | None = None  # The final output schema to return
 
     @override
     def run(self, tool_input: StateBaseClass, *args: Any, **kwargs: Any):
@@ -59,6 +60,11 @@ class EndExecutionTool(StructuredTool):
         )
         jsonschema.validate(arguments, schema)
         tool_input.result = arguments
+
+        # Return the output_schema if provided, otherwise return EndExecutionOutput
+        if self.output_schema:
+            # Convert the result dict to the output_schema type
+            return self.output_schema.model_validate(tool_input.result)
         return EndExecutionOutput(result=tool_input.result)
 
 
@@ -172,9 +178,9 @@ class BasicLoop:
         self.debug = debug
 
 
-    def prepare_input_node(self, agent_input: BaseModel) -> StateBaseClass:
+    def prepare_input_node(self, agent_input: BaseModel, state: StateBaseClass | None = None) -> StateBaseClass:
         """Node to handle input preparation and ensure proper initial messages (evaluation mode)."""
-        state = StateBaseClass()
+        state = state or StateBaseClass()
         # If no messages, use default scenario prompts (unattended mode)
         if not state.messages:
             # Check if agent_input contains datapoint data (like 'expression', 'message', etc.)
@@ -251,6 +257,13 @@ class BasicLoop:
 
         return state
 
+    # Create a wrapper for end_execution that returns the proper output schema
+    def end_execution_node(self, state: StateBaseClass) -> BaseModel:
+        """Wrapper node that calls end_execution tool and returns output_schema."""
+        self.scenario.end_execution_tool.run(state)
+        # Return the output_schema populated from state.result
+        return self.scenario.output_schema.model_validate(state.result)
+
     def build_cli_graph(self) -> StateGraph:
         """Build graph for CLI mode - accepts input at runtime (like ticket-classification example).
 
@@ -291,7 +304,7 @@ class BasicLoop:
             ),
         )
         graph.add_node("tools", ToolNode(self.scenario.tools))
-        graph.add_node("end_execution", self.scenario.end_execution_tool)
+        graph.add_node("end_execution", self.end_execution_node)
         graph.add_node("raise_error", self.scenario.raise_error_tool)
 
         # Route through prepare_input first
@@ -322,7 +335,7 @@ class BasicLoop:
         # Create a closure that captures the input (avoids partial conflict with positional args)
         def prepare_with_bound_input(state: StateBaseClass | None = None) -> StateBaseClass:
             # Ignore incoming state, use pre-bound input instead
-            return self.prepare_input_node(agent_input=final_agent_input)
+            return self.prepare_input_node(agent_input=final_agent_input, state=state)
 
         # Pre-bind input at build time via closure
         graph.add_node("prepare_input", prepare_with_bound_input)  # pyright: ignore
@@ -337,7 +350,7 @@ class BasicLoop:
             ),
         )
         graph.add_node("tools", ToolNode(self.scenario.tools))
-        graph.add_node("end_execution", self.scenario.end_execution_tool)
+        graph.add_node("end_execution", self.end_execution_node)
         graph.add_node("raise_error", self.scenario.raise_error_tool)
 
         # Route through prepare_input first
