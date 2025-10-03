@@ -9,17 +9,9 @@ from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field, create_model
 from functools import partial
 from langchain_core.runnables import Runnable
+from .tools import EndExecutionTool, RaiseErrorTool, RaiseErrorInput
 
 Message: TypeAlias = BaseMessage | SystemMessage | ToolMessage | HumanMessage | AIMessage
-
-
-class RaiseErrorInput(BaseModel):
-    message: str = Field(
-        description="The error message to display to the user. This should be a brief on line message."
-    )
-    details: str | None = Field(
-        description="Optional additional details about the error. This can be a multiline text with more details. Only populate this if there are relevant details not already captured in the error message."
-    )
 
 
 class StateBaseClass(BaseModel):
@@ -30,67 +22,6 @@ class StateBaseClass(BaseModel):
     result: Dict[str, Any] = {}
     raised_error: RaiseErrorInput | None = None
     run_init_state: Dict[str, str] = {}
-
-
-class EndExecutionOutput(BaseModel):
-    result: Dict[str, Any] = {}
-
-
-class EndExecutionTool(StructuredTool):
-    name: str = "end_execution"
-    description: str = "Use this tool when you have gathered all required information and want to end execution. The input should match the expected output schema."
-    output_schema: type[BaseModel] | None = None  # The final output schema to return
-
-    @override
-    def run(self, tool_input: StateBaseClass, *args: Any, **kwargs: Any):
-        last_message = tool_input.messages[-1]
-        # If the last message is a ToolMessage, this was the result of a validation step,
-        # so we need to get the previous message.
-        if isinstance(last_message, ToolMessage):
-            last_message = tool_input.messages[-2]
-        if not isinstance(last_message, AIMessage):
-            raise ValueError(
-                "The last message passed as input to the EndExecutionTool should have been an AIMessage"
-            )
-        arguments = last_message.tool_calls[0]["args"]
-        schema = (
-            self.args_schema
-            if isinstance(self.args_schema, dict)
-            else self.args_schema.model_json_schema()
-        )
-        jsonschema.validate(arguments, schema)
-        tool_input.result = arguments
-
-        # Return the output_schema if provided, otherwise return EndExecutionOutput
-        if self.output_schema:
-            # Convert the result dict to the output_schema type
-            return self.output_schema.model_validate(tool_input.result)
-        return EndExecutionOutput(result=tool_input.result)
-
-
-class RaiseErrorTool(StructuredTool):
-    name: str = "raise_error"
-    description: str = "Raises an error and ends the execution of the agent"
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        kwargs["args_schema"] = RaiseErrorInput
-        super().__init__(*args, **kwargs)
-
-    @override
-    def run(self, agent_state: StateBaseClass, *args: Any, **kwargs: Any):
-        last_message = agent_state.messages[-1]
-        # If the last message is a ToolMessage, this was the result of a validation step,
-        # so we need to get the previous message.
-        if isinstance(last_message, ToolMessage):
-            last_message = agent_state.messages[-2]
-        if not isinstance(last_message, AIMessage):
-            raise ValueError(
-                "The last message passed as input to the EndExecutionTool should have been an AIMessage"
-            )
-        arguments = last_message.tool_calls[0]["args"]
-        arguments_model = RaiseErrorInput.model_validate(arguments)
-        agent_state.raised_error = arguments_model
-        return agent_state
 
 
 class Datapoint(BaseModel):
@@ -104,10 +35,13 @@ class AgentBaseClass(BaseModel):
     user_prompt: str
     input_schema: type[BaseModel]
     output_schema: type[BaseModel]
-    end_execution_tool: EndExecutionTool
     datapoints: List[Datapoint] = []
     raise_error_tool: RaiseErrorTool = RaiseErrorTool()
     tools: List[BaseTool] = []
+
+    @property
+    def end_execution_tool(self) -> EndExecutionTool:
+        return EndExecutionTool(args_schema=self.output_schema, output_schema=self.output_schema)
 
 
 async def chatbot_node(
@@ -148,14 +82,6 @@ def should_continue(state: StateBaseClass) -> Literal["tools", "raise_error", "e
         return "tools"
     # If no tool calls, route to tools anyway (agent needs to make a decision)
     return "tools"
-
-
-class BasicLoopInput(BaseModel):
-    agent_input: Dict[str, Any]
-
-
-class BasicLoopOutput(BaseModel):
-    answer: str
 
 
 class BasicLoop:

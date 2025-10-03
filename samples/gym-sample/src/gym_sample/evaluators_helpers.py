@@ -108,10 +108,18 @@ def tool_calls_order_score(
     return lcs_length / n
 
 
-def tool_calls_count_score(actual_tool_calls_count: Mapping[str, int | str], expected_tool_calls_count: Mapping[str, int | str], strict: bool = False) -> float:
+def tool_calls_count_score(actual_tool_calls_count: Mapping[str, int], expected_tool_calls_count: Mapping[str, tuple[str, int]], strict: bool = False) -> float:
     """
-    Check if the expected tool calls are correctly called, where expected args must be a subset of actual args.
+    Check if the expected tool calls are correctly called with the specified comparison operators.
     It does not check the order of the tool calls!
+
+    Args:
+        actual_tool_calls_count: Mapping of tool names to actual call counts
+        expected_tool_calls_count: Mapping of tool names to (operator, count) tuples like (">=", 1), ("==", 2), etc.
+        strict: If True, return 0 if any comparison fails
+
+    Returns:
+        float: Score based on the comparison results
     """
     if (
         not expected_tool_calls_count
@@ -124,23 +132,42 @@ def tool_calls_count_score(actual_tool_calls_count: Mapping[str, int | str], exp
     ):
         return 0.0
 
+    # Operator mapping to dunder methods
+    comparator_map = {
+        ">=": "__ge__",
+        ">": "__gt__",
+        "<=": "__le__",
+        "<": "__lt__",
+        "==": "__eq__",
+        "!=": "__ne__",
+    }
+
     score = 0.0
     for tool_name, expected_count in expected_tool_calls_count.items():
-        actual_count = actual_tool_calls_count.get(tool_name, 0.0)
-        if isinstance(expected_count, str):
-            try:
-                comparator, expected_count = expected_count.split(":")
-            except (IndexError, ValueError) as e:
-                raise ValueError(f"Wrong format for expected count for tool {tool_name}: {expected_count}") from e
-            comparator = f"__{comparator}__"
-        else:
-            comparator = "__eq__"
-        to_add = float(getattr(actual_count, comparator)(int(expected_count)))
+        actual_count = actual_tool_calls_count.get(tool_name, 0)
+
+        if not isinstance(expected_count, tuple) or len(expected_count) != 2:
+            raise ValueError(
+                f"Expected count for tool {tool_name} must be a tuple (operator, count), got: {expected_count}"
+            )
+
+        comparator, expected_value = expected_count
+
+        if comparator not in comparator_map:
+            raise ValueError(
+                f"Invalid comparator '{comparator}' for tool {tool_name}. "
+                f"Allowed operators: {', '.join(comparator_map.keys())}"
+            )
+
+        comparator_dunder = comparator_map[comparator]
+        to_add = float(getattr(actual_count, comparator_dunder)(expected_value))
+
         if strict:
             if to_add == 0.0:
                 return 0.0
         else:
             score += to_add
+
     return score / len(expected_tool_calls_count)
 
 

@@ -3,7 +3,7 @@
 from collections import Counter
 from collections.abc import Callable
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, model_validator
 from uipath._utils.constants import COMMUNITY_agents_SUFFIX
@@ -20,14 +20,44 @@ from gym_sample.llm_judge_types import LLMJudgeOutputSchema, LLMJudgeStrictJSONS
 from uipath.eval.evaluators.llm_as_judge_evaluator import LLMResponse
 
 
-class ToolCallOrderEvaluator(DeterministicEvaluatorBase[List[str]]):
+class ExactMatchEvaluator(DeterministicEvaluatorBase[dict[str, Any]]):
+    """Evaluator that performs exact structural matching between expected and actual outputs.
+
+    This evaluator returns True if the actual output exactly matches the expected output
+    after canonical JSON normalization, and False otherwise. Numbers are normalized
+    to floats for consistent comparison.
+    """
+
+    async def evaluate(
+        self, agent_execution: AgentExecution, evaluation_criteria: Dict[str, Any]
+    ) -> EvaluationResult:
+        """Evaluate whether actual output exactly matches expected output.
+
+        Args:
+            agent_execution: The execution details containing:
+                - agent_input: The input received by the agent
+                - actual_output: The actual output from the agent
+                - spans: The execution spans to use for the evaluation
+            evaluation_criteria: The criteria dict with 'expected_output' key
+
+        Returns:
+            EvaluationResult: Boolean result indicating exact match (True/False)
+        """
+        expected_output = evaluation_criteria.get("expected_output", {})
+        return NumericEvaluationResult(
+            score=float(self._canonical_json(agent_execution.agent_output) == self._canonical_json(expected_output))
+        )
+
+
+
+class ToolCallOrderEvaluator(DeterministicEvaluatorBase[Dict[str, Any]]):
     """Evaluator that checks if the tool calls are in the correct order.
     This evaluator returns True if the tool calls are in the correct order, and False otherwise.
     """
     strict: bool = False
 
     async def evaluate(
-        self, agent_execution: AgentExecution, evaluation_criteria: List[str]
+        self, agent_execution: AgentExecution, evaluation_criteria: Dict[str, Any]
     ) -> EvaluationResult:
         """Evaluate if the tool calls are in the correct order.
         Args:
@@ -35,24 +65,26 @@ class ToolCallOrderEvaluator(DeterministicEvaluatorBase[List[str]]):
                 - agent_input: The input received by the agent
                 - agent_output: The final output of the agent
                 - agent_trace: The execution spans to use for the evaluation
-            evaluation_criteria: The criteria to evaluate
+            evaluation_criteria: The criteria dict with 'tool_calls_order' key
         Returns:
             EvaluationResult: Boolean result indicating correct tool call order (True/False)
         """
+        # Extract the tool_calls_order from the structured criteria
+        expected_order = evaluation_criteria.get("tool_calls_order", [])
         tool_calls_order = extract_tool_calls_names(agent_execution.agent_trace)
         return NumericEvaluationResult(
-            score=tool_calls_order_score(tool_calls_order, evaluation_criteria, self.strict)
+            score=tool_calls_order_score(tool_calls_order, expected_order, self.strict)
         )
 
 
-class ToolCallCountEvaluator(DeterministicEvaluatorBase[Dict[str, int | str]]):
+class ToolCallCountEvaluator(DeterministicEvaluatorBase[Dict[str, Any]]):
     """Evaluator that checks if the tool calls are in the correct order.
     This evaluator returns True if the tool calls are in the correct order, and False otherwise.
     """
     strict: bool = False
 
     async def evaluate(
-        self, agent_execution: AgentExecution, evaluation_criteria: Dict[str, int | str]
+        self, agent_execution: AgentExecution, evaluation_criteria: Dict[str, Any]
     ) -> EvaluationResult:
         """Evaluate if the tool calls are in the correct order.
         Args:
@@ -60,17 +92,19 @@ class ToolCallCountEvaluator(DeterministicEvaluatorBase[Dict[str, int | str]]):
                 - agent_input: The input received by the agent
                 - agent_output: The final output of the agent
                 - agent_trace: The execution spans to use for the evaluation
-            evaluation_criteria: The criteria to evaluate
+            evaluation_criteria: The criteria dict with 'tool_calls_count' key
         Returns:
             EvaluationResult: Boolean result indicating correct tool call order (True/False)
         """
+        # Extract the tool_calls_count from the structured criteria
+        expected_counts = evaluation_criteria.get("tool_calls_count", {})
         tool_calls_count = Counter(extract_tool_calls_names(agent_execution.agent_trace))
         return NumericEvaluationResult(
-            score=tool_calls_count_score(tool_calls_count, evaluation_criteria, self.strict)
+            score=tool_calls_count_score(tool_calls_count, expected_counts, self.strict)
         )
 
 
-class ToolCallArgumentsEvaluator(DeterministicEvaluatorBase[List[Dict[str, Any]]]):
+class ToolCallArgumentsEvaluator(DeterministicEvaluatorBase[Dict[str, Any]]):
     """Evaluator that checks the correctness of the arguments of the tool calls
     The order does not matter for this evaluator.
 
@@ -79,7 +113,7 @@ class ToolCallArgumentsEvaluator(DeterministicEvaluatorBase[List[Dict[str, Any]]
             - agent_input: The input received by the agent
             - agent_output: The final output of the agent
             - agent_trace: The execution spans to use for the evaluation
-        evaluation_criteria: A dictionary of tool call names and their expected arguments.
+        evaluation_criteria: A dictionary with 'tool_calls' key containing expected tool calls.
 
     Returns:
         EvaluationResult: Boolean result indicating correct tool call arguments (True/False)
@@ -88,7 +122,7 @@ class ToolCallArgumentsEvaluator(DeterministicEvaluatorBase[List[Dict[str, Any]]
     subset: bool = False
 
     async def evaluate(
-        self, agent_execution: AgentExecution, evaluation_criteria: List[Dict[str, Any]]
+        self, agent_execution: AgentExecution, evaluation_criteria: Dict[str, Any]
     ) -> EvaluationResult:
         """Evaluate if the tool calls are in the correct order.
         Args:
@@ -96,24 +130,26 @@ class ToolCallArgumentsEvaluator(DeterministicEvaluatorBase[List[Dict[str, Any]]
                 - agent_input: The input received by the agent
                 - agent_output: The final output of the agent
                 - agent_trace: The execution spans to use for the evaluation
-            evaluation_criteria: The criteria to evaluate
+            evaluation_criteria: The criteria dict with 'tool_calls' key
         Returns:
             EvaluationResult: Boolean result indicating correct tool call order (True/False)
         """
+        # Extract the tool_calls from the structured criteria
+        expected_tool_calls = evaluation_criteria.get("tool_calls", [])
         tool_calls = extract_tool_calls(agent_execution.agent_trace)
         return NumericEvaluationResult(
-            score=tool_args_score(tool_calls, evaluation_criteria, self.strict, self.subset)
+            score=tool_args_score(tool_calls, expected_tool_calls, self.strict, self.subset)
         )
 
 
-class ToolCallOutputEvaluator(DeterministicEvaluatorBase[List[Dict[str, Any]]]):
+class ToolCallOutputEvaluator(DeterministicEvaluatorBase[Dict[str, Any]]):
     """Evaluator that checks the correctness of the output of the tool calls
     The order does not matter for this evaluator.
     """
     strict: bool = False
 
     async def evaluate(
-        self, agent_execution: AgentExecution, evaluation_criteria: List[Dict[str, Any]]
+        self, agent_execution: AgentExecution, evaluation_criteria: Dict[str, Any]
     ) -> EvaluationResult:
         """Evaluate if the tool calls are in the correct order.
         Args:
@@ -121,13 +157,15 @@ class ToolCallOutputEvaluator(DeterministicEvaluatorBase[List[Dict[str, Any]]]):
                 - agent_input: The input received by the agent
                 - agent_output: The final output of the agent
                 - agent_trace: The execution spans to use for the evaluation
-            evaluation_criteria: The criteria to evaluate
+            evaluation_criteria: The criteria dict with 'tool_outputs' key
         Returns:
             EvaluationResult: Boolean result indicating correct tool call output (True/False)
         """
+        # Extract the tool_outputs from the structured criteria
+        expected_tool_outputs = evaluation_criteria.get("tool_outputs", [])
         tool_calls = extract_tool_calls_outputs(agent_execution.agent_trace)
         return NumericEvaluationResult(
-            score=tool_output_score(tool_calls, evaluation_criteria, self.strict)
+            score=tool_output_score(tool_calls, expected_tool_outputs, self.strict)
         )
 
 
@@ -210,9 +248,10 @@ class LLMJudgeEvaluator(BaseEvaluator[str | Dict[str, Any]]):
             self.actual_output_placeholder,
             str(self._get_actual_output(agent_execution)),
         )
+        expected_output = evaluation_criteria.get("expected_output", {}) if isinstance(evaluation_criteria, dict) else evaluation_criteria
         formatted_prompt = formatted_prompt.replace(
             self.evaluation_criteria_placeholder,
-            str(evaluation_criteria),
+            str(expected_output),
         )
 
         return formatted_prompt

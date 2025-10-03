@@ -1,8 +1,3 @@
 {
-  "messages": [
-    {
-      "type": "user",
-      "content": "Calculate 7 * 8"
-    }
-  ]
+  "expression": "15 + 7 * 3"
 }

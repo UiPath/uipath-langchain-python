@@ -8,17 +8,30 @@ from typing import Dict, List, Tuple
 
 from dotenv import find_dotenv, load_dotenv
 from langgraph.graph import StateGraph
-from uipath.eval.evaluators.base_evaluator import EvaluatorCategory, EvaluatorType
-from uipath.eval.models import EvaluationResult
+from uipath.eval.evaluators.base_evaluator import EvaluatorCategory, EvaluatorType, EvaluationResult
+from eval.models import EvaluationResult as CodedEvaluationResult
 
-from gym_sample.evaluators import LLMJudgeEvaluator, LLMJudgeSimulationTrajectoryEvaluator, LLMJudgeStrictJSONSimilarityEvaluator, LLMJudgeTrajectoryEvaluator, ToolCallArgumentsEvaluator, ToolCallCountEvaluator, ToolCallOrderEvaluator, ToolCallOutputEvaluator
+from gym_sample.evaluators import ExactMatchEvaluator, LLMJudgeEvaluator, LLMJudgeSimulationTrajectoryEvaluator, LLMJudgeStrictJSONSimilarityEvaluator, LLMJudgeTrajectoryEvaluator, ToolCallArgumentsEvaluator, ToolCallCountEvaluator, ToolCallOrderEvaluator, ToolCallOutputEvaluator
 from uipath.eval.evaluators import (
     BaseEvaluator,
-    ExactMatchEvaluator,
 )
+from eval.coded_evaluators import (
+    BaseEvaluator as CodedBaseEvaluator,
+    ExactMatchEvaluator as CodedExactMatchEvaluator,
+    ContainsEvaluator as CodedContainsEvaluator,
+    JsonSimilarityEvaluator as CodedJsonSimilarityEvaluator,
+    ToolCallOrderEvaluator as CodedToolCallOrderEvaluator,
+    ToolCallCountEvaluator as CodedToolCallCountEvaluator,
+    ToolCallArgsEvaluator as CodedToolCallArgsEvaluator,
+    ToolCallOutputEvaluator as CodedToolCallOutputEvaluator,
+    LLMJudgeOutputEvaluator as CodedLLMJudgeOutputEvaluator,
+    LLMJudgeStrictJSONSimilarityOutputEvaluator as CodedLLMJudgeStrictJSONSimilarityOutputEvaluator,
+    LLMJudgeTrajectoryEvaluator as CodedLLMJudgeTrajectoryEvaluator,
+    LLMJudgeSimulationTrajectoryEvaluator as CodedLLMJudgeSimulationTrajectoryEvaluator,
+)
+from eval.models import AgentExecution
 from gym_sample.graph import agents_with_datapoints
 from gym_sample.trace_utils import setup_tracer
-from gym_sample.evaluators_helpers import AgentExecution
 from gym_sample.uipath_gym_types import Datapoint
 
 
@@ -85,8 +98,8 @@ async def run_agents_with_tracing(graphs: List[Tuple[StateGraph, Datapoint]], ve
     return results
 
 
-def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
-    """Create evaluators and their evaluation criteria.
+def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator | CodedBaseEvaluator]:
+    """Create evaluators using the old BaseEvaluator approach.
 
     Returns:
         List of evaluators.
@@ -94,8 +107,8 @@ def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
     now = datetime.now().isoformat()
 
     exact_match_evaluator = ExactMatchEvaluator(
-        id="exact_match",
-        name="Exact Match",
+        id="ExactMatchEvaluator",
+        name="ExactMatchEvaluator",
         created_at=now,
         updated_at=now,
         description="Evaluates if the actual output exactly matches the expected output",
@@ -104,8 +117,8 @@ def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
     )
 
     tool_call_order_evaluator = ToolCallOrderEvaluator(
-        id="tool_call_order",
-        name="Tool Call Order",
+        id="ToolCallOrderEvaluator",
+        name="ToolCallOrderEvaluator",
         created_at=now,
         updated_at=now,
         description="Evaluates if the tool calls are in the correct order",
@@ -115,8 +128,8 @@ def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
     )
 
     tool_call_count_evaluator = ToolCallCountEvaluator(
-        id="tool_call_count",
-        name="Tool Call Count",
+        id="ToolCallCountEvaluator",
+        name="ToolCallCountEvaluator",
         created_at=now,
         updated_at=now,
         description="Evaluates if the tool calls are in the correct count",
@@ -126,8 +139,8 @@ def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
     )
 
     tool_call_arguments_evaluator = ToolCallArgumentsEvaluator(
-        id="tool_call_arguments",
-        name="Tool Call Arguments",
+        id="ToolCallArgsEvaluator",
+        name="ToolCallArgsEvaluator",
         created_at=now,
         updated_at=now,
         description="Evaluates if the tool calls are in the correct arguments",
@@ -138,8 +151,8 @@ def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
     )
 
     tool_call_output_evaluator = ToolCallOutputEvaluator(
-        id="tool_call_output",
-        name="Tool Call Output",
+        id="ToolCallOutputEvaluator",
+        name="ToolCallOutputEvaluator",
         created_at=now,
         updated_at=now,
         description="Evaluates if the tool calls are in the correct output",
@@ -149,8 +162,8 @@ def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
     )
 
     llm_judge_evaluator = LLMJudgeEvaluator(
-        id="llm_judge",
-        name="LLM Judge",
+        id="LLMJudgeOutputEvaluator",
+        name="LLMJudgeOutputEvaluator",
         created_at=now,
         updated_at=now,
         description="Evaluates the output of the agent using an LLM",
@@ -160,8 +173,8 @@ def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
     )
 
     llm_judge_strict_json_similarity_evaluator = LLMJudgeStrictJSONSimilarityEvaluator(
-        id="llm_judge_strict_json_similarity",
-        name="LLM Judge Strict JSON Similarity",
+        id="LLMJudgeStrictJSONSimilarityOutputEvaluator",
+        name="LLMJudgeStrictJSONSimilarityOutputEvaluator",
         created_at=now,
         updated_at=now,
         description="Evaluates the output of the agent using an LLM",
@@ -171,8 +184,8 @@ def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
     )
 
     llm_judge_trajectory_evaluator = LLMJudgeTrajectoryEvaluator(
-        id="llm_judge_trajectory",
-        name="LLM Judge Trajectory",
+        id="LLMJudgeTrajectoryEvaluator",
+        name="LLMJudgeTrajectoryEvaluator",
         created_at=now,
         updated_at=now,
         description="Evaluates the output of the agent using an LLM",
@@ -182,8 +195,8 @@ def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
     )
 
     llm_judge_simulation_trajectory_evaluator = LLMJudgeSimulationTrajectoryEvaluator(
-        id="llm_judge_simulation_trajectory",
-        name="LLM Judge Simulation Trajectory",
+        id="LLMJudgeSimulationEvaluator",
+        name="LLMJudgeSimulationEvaluator",
         created_at=now,
         updated_at=now,
         description="Evaluates the output of the agent using an LLM",
@@ -199,7 +212,68 @@ def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator]:
     return evaluators
 
 
-async def run_evaluation(agent_name: str, evaluators: List[BaseEvaluator], verbose: bool = False) -> Dict[str, Dict[str, EvaluationResult]]:
+def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator | CodedBaseEvaluator]:
+    """Create evaluators using the new CodedEvaluator approach.
+    """
+    evaluators: List[BaseEvaluator | CodedBaseEvaluator] = [
+        CodedExactMatchEvaluator.model_validate({"config": {"negated": False}}),
+        CodedContainsEvaluator.model_validate({"config": {"negated": False}}),
+        CodedJsonSimilarityEvaluator.model_validate({"config": {}}),
+        CodedToolCallOrderEvaluator.model_validate({
+            "config": {
+                "strict": False,
+            },
+        }),
+        CodedToolCallCountEvaluator.model_validate({
+            "config": {
+                "strict": False,
+            },
+        }),
+        CodedToolCallArgsEvaluator.model_validate({
+            "config": {
+                "strict": False,
+                "subset": False,
+            },
+        }),
+        CodedToolCallOutputEvaluator.model_validate({
+            "config": {
+                "strict": False,
+            },
+        }),
+    ]
+
+    if include_llm_judge:
+        evaluators.extend([
+            CodedLLMJudgeOutputEvaluator.model_validate({
+                "config": {
+                    "model": "gpt-4o-2024-11-20",
+                    "temperature": 0.0,
+                },
+            }),
+            CodedLLMJudgeStrictJSONSimilarityOutputEvaluator.model_validate({
+                "config": {
+                    "model": "gpt-4o-2024-11-20",
+                    "temperature": 0.0,
+                },
+            }),
+            CodedLLMJudgeTrajectoryEvaluator.model_validate({
+                "config": {
+                    "model": "gpt-4o-2024-11-20",
+                    "temperature": 0.0,
+                },
+            }),
+            CodedLLMJudgeSimulationTrajectoryEvaluator.model_validate({
+                "config": {
+                    "model": "gpt-4o-2024-11-20",
+                    "temperature": 0.0,
+                },
+            }),
+        ])
+
+    return evaluators
+
+
+async def run_evaluation(agent_name: str, evaluators: List[BaseEvaluator | CodedBaseEvaluator], verbose: bool = False) -> Dict[str, Dict[str, EvaluationResult | CodedEvaluationResult]]:
     """Run the complete agent evaluation pipeline across all datapoints."""
     print(f"Running evaluation for agent: {agent_name}")
 
@@ -213,7 +287,7 @@ async def run_evaluation(agent_name: str, evaluators: List[BaseEvaluator], verbo
     else:
         print("\nRunning evaluations...")
 
-    all_results: Dict[str, Dict[str, EvaluationResult]] = {}
+    all_results: Dict[str, Dict[str, EvaluationResult | CodedEvaluationResult]] = {}
 
     # Get datapoints to access their evaluation criteria
     # Run evaluations for each datapoint execution
@@ -226,21 +300,37 @@ async def run_evaluation(agent_name: str, evaluators: List[BaseEvaluator], verbo
             print(f"Output: {agent_execution.agent_output}")
             print(f"Collected {len(agent_execution.agent_trace)} trace spans")
 
-        datapoint_results: Dict[str, EvaluationResult] = {}
+        datapoint_results: Dict[str, EvaluationResult | CodedEvaluationResult] = {}
 
         # Run each evaluator for this datapoint
         for evaluator in evaluators:
-            # Use the datapoint's evaluation criteria
-            evaluator_criteria = datapoint.evaluation_criteria.get(evaluator.id, {})
+            if evaluator.name not in datapoint.evaluation_criteria:
+                if verbose:
+                    print(f"  {evaluator.name} not found in datapoint evaluation criteria. Skipping.")
+                continue
+
+            # Use the datapoint's evaluation criteria - key by evaluator.name
+            evaluator_criteria = datapoint.evaluation_criteria[evaluator.name]
             if verbose:
                 print(f"  Evaluating {evaluator.name} with criteria: {evaluator_criteria}")
-            result = await evaluator.evaluate(
-                agent_execution=agent_execution,
-                evaluation_criteria=evaluator_criteria
-            )
+
+            # Use the appropriate evaluate method based on evaluator type
+            if isinstance(evaluator, BaseEvaluator):
+                # Old evaluators use evaluate method
+                result = await evaluator.evaluate(
+                    agent_execution=agent_execution, # type: ignore[reportArgumentType]
+                    evaluation_criteria=evaluator_criteria
+                )
+            else:
+                # New coded evaluators use validate_and_evaluate_criteria
+                result = await evaluator.validate_and_evaluate_criteria(
+                    agent_execution=agent_execution,
+                    evaluation_criteria=evaluator_criteria
+                )
+
             if verbose:
                 print(f"  Result: {result}")
-            datapoint_results[evaluator.id] = result
+            datapoint_results[evaluator.name] = result
 
         all_results[datapoint_key] = datapoint_results
 
@@ -252,19 +342,21 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Run agent evaluation")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
     parser.add_argument("--agent_name", default="calculator", help="Name of the agent to run")
+    parser.add_argument("--old_evaluators", action="store_true", help="Use old evaluators")
     parser.add_argument("--include_llm_judge", action="store_true", help="Include LLM judge evaluators")
     args = parser.parse_args()
 
     load_dotenv(find_dotenv())
 
-    evaluators = create_evaluators(include_llm_judge=args.include_llm_judge)
+    evaluators_generator = create_old_evaluators if args.old_evaluators else create_evaluators
+    evaluators = evaluators_generator(include_llm_judge=args.include_llm_judge)
 
     results = await run_evaluation(agent_name=args.agent_name, evaluators=evaluators, verbose=args.verbose)
 
     # Print results for all datapoints
     summary = {}
     for datapoint_key, datapoint_results in results.items():
-        summary[datapoint_key] = {evaluator_id: (result.score, result.details) for evaluator_id, result in datapoint_results.items()}
+        summary[datapoint_key] = {evaluator_id: (result.score, str(result.details)) for evaluator_id, result in datapoint_results.items()}
 
     print(json.dumps(summary, indent=4))
 
