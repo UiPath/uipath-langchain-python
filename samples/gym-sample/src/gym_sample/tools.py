@@ -1,15 +1,34 @@
-from typing import Any, Dict, override
+from typing import Annotated, Any, Dict, List, TypeAlias, override
 from langchain_core.tools import BaseTool, StructuredTool
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.graph import add_messages
 from pydantic import BaseModel, Field
 import jsonschema
-
-from .uipath_gym_types import StateBaseClass
-
 
 META_DESCRIPTION_ESCALATION_TOOL: str = """This is an escalation. This tool must be called separately from other tool calls (i.e. not in parallel with other tool calls).
 This is because you must wait for the response before deciding what tool to call next.
 """
+
+Message: TypeAlias = BaseMessage | SystemMessage | ToolMessage | HumanMessage | AIMessage
+
+
+class RaiseErrorInput(BaseModel):
+    message: str = Field(
+        description="The error message to display to the user. This should be a brief on line message."
+    )
+    details: str | None = Field(
+        description="Optional additional details about the error. This can be a multiline text with more details. Only populate this if there are relevant details not already captured in the error message."
+    )
+
+
+class StateBaseClass(BaseModel):
+    class Config:
+        extra = "allow"  # Allow extra fields from input_schema (like 'expression')
+
+    messages: Annotated[List[Message], add_messages] = []
+    result: Dict[str, Any] = {}
+    raised_error: RaiseErrorInput | None = None
+    run_init_state: Dict[str, str] = {}
 
 
 class EndExecutionDefaultOutput(BaseModel):
@@ -46,15 +65,6 @@ class EndExecutionTool(StructuredTool):
             # Convert the result dict to the output_schema type
             return self.output_schema.model_validate(tool_input.result)
         return EndExecutionDefaultOutput(result=tool_input.result)
-
-
-class RaiseErrorInput(BaseModel):
-    message: str = Field(
-        description="The error message to display to the user. This should be a brief on line message."
-    )
-    details: str | None = Field(
-        description="Optional additional details about the error. This can be a multiline text with more details. Only populate this if there are relevant details not already captured in the error message."
-    )
 
 
 class RaiseErrorTool(StructuredTool):

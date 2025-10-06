@@ -2,7 +2,7 @@
     "entryPoints": [
         {
             "filePath": "calculator",
-            "uniqueId": "fcac344d-13e8-4e50-bd0a-18bea3b2a4ec",
+            "uniqueId": "6fc36f85-b032-4a33-ad50-e8b7b64f26c3",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -23,6 +23,41 @@
                         "default": null,
                         "title": "Answer",
                         "type": "number"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "filePath": "loan",
+            "uniqueId": "e9ae1d41-2ebc-44a0-b61c-9daf8decd61d",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "EmailBody": {
+                        "description": "The body of the request email",
+                        "title": "Emailbody",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "EmailBody"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "ExecutionDetails": {
+                        "default": null,
+                        "title": "Executiondetails",
+                        "type": "string"
+                    },
+                    "ActionCenterTaskCreated": {
+                        "type": "boolean"
+                    },
+                    "ActionCenterTaskURL": {
+                        "type": "string"
                     }
                 },
                 "required": []

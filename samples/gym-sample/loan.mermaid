@@ -1,0 +1,24 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	prepare_input(prepare_input)
+	chatbot(chatbot)
+	tools(tools)
+	end_execution(end_execution)
+	raise_error(raise_error)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> prepare_input;
+	chatbot -.-> end_execution;
+	chatbot -.-> raise_error;
+	chatbot -.-> tools;
+	prepare_input --> chatbot;
+	tools --> chatbot;
+	end_execution --> __end__;
+	raise_error --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

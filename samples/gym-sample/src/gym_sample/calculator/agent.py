@@ -1,7 +1,8 @@
 from typing import List
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
-from ..uipath_gym_types import AgentBaseClass, Datapoint, StructuredTool, EndExecutionTool
+from ..uipath_gym_types import AgentBaseClass, Datapoint
+from langchain_core.tools import StructuredTool
 
 
 class CalculatorInput(BaseModel):
@@ -16,6 +17,7 @@ def get_datapoints() -> List[Datapoint]:
     """Get datapoints."""
     return [
         Datapoint(
+            name="datapoint_1",
             input={
                 "expression": "15.0 + 7.0 * 3.0"
             },
@@ -35,6 +37,7 @@ def get_datapoints() -> List[Datapoint]:
             simulation_instructions="Tool multiply should return 21.0 and tool add should return 36.0.",
         ),
         Datapoint(
+            name="datapoint_2",
             input={
                 "expression": "20 + 5 * 2.0"
             },

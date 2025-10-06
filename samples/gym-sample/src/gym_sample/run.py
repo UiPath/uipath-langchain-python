@@ -17,20 +17,9 @@ from uipath.eval.evaluators import (
 )
 from eval.coded_evaluators import (
     BaseEvaluator as CodedBaseEvaluator,
-    ExactMatchEvaluator as CodedExactMatchEvaluator,
-    ContainsEvaluator as CodedContainsEvaluator,
-    JsonSimilarityEvaluator as CodedJsonSimilarityEvaluator,
-    ToolCallOrderEvaluator as CodedToolCallOrderEvaluator,
-    ToolCallCountEvaluator as CodedToolCallCountEvaluator,
-    ToolCallArgsEvaluator as CodedToolCallArgsEvaluator,
-    ToolCallOutputEvaluator as CodedToolCallOutputEvaluator,
-    LLMJudgeOutputEvaluator as CodedLLMJudgeOutputEvaluator,
-    LLMJudgeStrictJSONSimilarityOutputEvaluator as CodedLLMJudgeStrictJSONSimilarityOutputEvaluator,
-    LLMJudgeTrajectoryEvaluator as CodedLLMJudgeTrajectoryEvaluator,
-    LLMJudgeSimulationTrajectoryEvaluator as CodedLLMJudgeSimulationTrajectoryEvaluator,
 )
 from eval.models import AgentExecution
-from gym_sample.graph import agents_with_datapoints
+from gym_sample.graph import agents_with_datapoints, get_evaluators
 from gym_sample.trace_utils import setup_tracer
 from gym_sample.uipath_gym_types import Datapoint
 
@@ -98,184 +87,12 @@ async def run_agents_with_tracing(graphs: List[Tuple[StateGraph, Datapoint]], ve
     return results
 
 
-def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator | CodedBaseEvaluator]:
-    """Create evaluators using the old BaseEvaluator approach.
-
-    Returns:
-        List of evaluators.
-    """
-    now = datetime.now().isoformat()
-
-    exact_match_evaluator = ExactMatchEvaluator(
-        id="ExactMatchEvaluator",
-        name="ExactMatchEvaluator",
-        created_at=now,
-        updated_at=now,
-        description="Evaluates if the actual output exactly matches the expected output",
-        category=EvaluatorCategory.Deterministic,
-        evaluator_type=EvaluatorType.Equals,
-    )
-
-    tool_call_order_evaluator = ToolCallOrderEvaluator(
-        id="ToolCallOrderEvaluator",
-        name="ToolCallOrderEvaluator",
-        created_at=now,
-        updated_at=now,
-        description="Evaluates if the tool calls are in the correct order",
-        category=EvaluatorCategory.Deterministic,
-        evaluator_type=EvaluatorType.Trajectory,
-        strict=False,
-    )
-
-    tool_call_count_evaluator = ToolCallCountEvaluator(
-        id="ToolCallCountEvaluator",
-        name="ToolCallCountEvaluator",
-        created_at=now,
-        updated_at=now,
-        description="Evaluates if the tool calls are in the correct count",
-        category=EvaluatorCategory.Deterministic,
-        evaluator_type=EvaluatorType.Trajectory,
-        strict=False,
-    )
-
-    tool_call_arguments_evaluator = ToolCallArgumentsEvaluator(
-        id="ToolCallArgsEvaluator",
-        name="ToolCallArgsEvaluator",
-        created_at=now,
-        updated_at=now,
-        description="Evaluates if the tool calls are in the correct arguments",
-        category=EvaluatorCategory.Deterministic,
-        evaluator_type=EvaluatorType.Trajectory,
-        strict=False,
-        subset=False,
-    )
-
-    tool_call_output_evaluator = ToolCallOutputEvaluator(
-        id="ToolCallOutputEvaluator",
-        name="ToolCallOutputEvaluator",
-        created_at=now,
-        updated_at=now,
-        description="Evaluates if the tool calls are in the correct output",
-        category=EvaluatorCategory.Deterministic,
-        evaluator_type=EvaluatorType.Trajectory,
-        strict=False,
-    )
-
-    llm_judge_evaluator = LLMJudgeEvaluator(
-        id="LLMJudgeOutputEvaluator",
-        name="LLMJudgeOutputEvaluator",
-        created_at=now,
-        updated_at=now,
-        description="Evaluates the output of the agent using an LLM",
-        category=EvaluatorCategory.LlmAsAJudge,
-        evaluator_type=EvaluatorType.Custom,
-        model="gpt-4o-2024-11-20",
-    )
-
-    llm_judge_strict_json_similarity_evaluator = LLMJudgeStrictJSONSimilarityEvaluator(
-        id="LLMJudgeStrictJSONSimilarityOutputEvaluator",
-        name="LLMJudgeStrictJSONSimilarityOutputEvaluator",
-        created_at=now,
-        updated_at=now,
-        description="Evaluates the output of the agent using an LLM",
-        category=EvaluatorCategory.LlmAsAJudge,
-        evaluator_type=EvaluatorType.Custom,
-        model="gpt-4o-2024-11-20",
-    )
-
-    llm_judge_trajectory_evaluator = LLMJudgeTrajectoryEvaluator(
-        id="LLMJudgeTrajectoryEvaluator",
-        name="LLMJudgeTrajectoryEvaluator",
-        created_at=now,
-        updated_at=now,
-        description="Evaluates the output of the agent using an LLM",
-        category=EvaluatorCategory.LlmAsAJudge,
-        evaluator_type=EvaluatorType.Custom,
-        model="gpt-4o-2024-11-20",
-    )
-
-    llm_judge_simulation_trajectory_evaluator = LLMJudgeSimulationTrajectoryEvaluator(
-        id="LLMJudgeSimulationEvaluator",
-        name="LLMJudgeSimulationEvaluator",
-        created_at=now,
-        updated_at=now,
-        description="Evaluates the output of the agent using an LLM",
-        category=EvaluatorCategory.Trajectory,
-        evaluator_type=EvaluatorType.Trajectory,
-        model="gpt-4o-2024-11-20",
-    )
-
-    evaluators = [exact_match_evaluator, tool_call_order_evaluator, tool_call_count_evaluator, tool_call_arguments_evaluator, tool_call_output_evaluator]
-    if include_llm_judge:
-        evaluators.extend([llm_judge_evaluator, llm_judge_strict_json_similarity_evaluator, llm_judge_trajectory_evaluator, llm_judge_simulation_trajectory_evaluator])
-
-    return evaluators
-
-
-def create_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator | CodedBaseEvaluator]:
-    """Create evaluators using the new CodedEvaluator approach.
-    """
-    evaluators: List[BaseEvaluator | CodedBaseEvaluator] = [
-        CodedExactMatchEvaluator.model_validate({"config": {"negated": False}}),
-        CodedContainsEvaluator.model_validate({"config": {"negated": False}}),
-        CodedJsonSimilarityEvaluator.model_validate({"config": {}}),
-        CodedToolCallOrderEvaluator.model_validate({
-            "config": {
-                "strict": False,
-            },
-        }),
-        CodedToolCallCountEvaluator.model_validate({
-            "config": {
-                "strict": False,
-            },
-        }),
-        CodedToolCallArgsEvaluator.model_validate({
-            "config": {
-                "strict": False,
-                "subset": False,
-            },
-        }),
-        CodedToolCallOutputEvaluator.model_validate({
-            "config": {
-                "strict": False,
-            },
-        }),
-    ]
-
-    if include_llm_judge:
-        evaluators.extend([
-            CodedLLMJudgeOutputEvaluator.model_validate({
-                "config": {
-                    "model": "gpt-4o-2024-11-20",
-                    "temperature": 0.0,
-                },
-            }),
-            CodedLLMJudgeStrictJSONSimilarityOutputEvaluator.model_validate({
-                "config": {
-                    "model": "gpt-4o-2024-11-20",
-                    "temperature": 0.0,
-                },
-            }),
-            CodedLLMJudgeTrajectoryEvaluator.model_validate({
-                "config": {
-                    "model": "gpt-4o-2024-11-20",
-                    "temperature": 0.0,
-                },
-            }),
-            CodedLLMJudgeSimulationTrajectoryEvaluator.model_validate({
-                "config": {
-                    "model": "gpt-4o-2024-11-20",
-                    "temperature": 0.0,
-                },
-            }),
-        ])
-
-    return evaluators
-
-
-async def run_evaluation(agent_name: str, evaluators: List[BaseEvaluator | CodedBaseEvaluator], verbose: bool = False) -> Dict[str, Dict[str, EvaluationResult | CodedEvaluationResult]]:
+async def run_evaluation(agent_name: str, include_llm_judge: bool = False, verbose: bool = False) -> Dict[str, Dict[str, EvaluationResult | CodedEvaluationResult]]:
     """Run the complete agent evaluation pipeline across all datapoints."""
     print(f"Running evaluation for agent: {agent_name}")
+
+    evaluators_generator = get_evaluators()[agent_name]
+    evaluators = evaluators_generator(include_llm_judge)
 
     async with agents_with_datapoints(agent_name) as graphs:
         agent_executions = await run_agents_with_tracing(graphs, verbose)
@@ -293,7 +110,7 @@ async def run_evaluation(agent_name: str, evaluators: List[BaseEvaluator | Coded
     # Run evaluations for each datapoint execution
     for i, agent_execution in enumerate(agent_executions):
         datapoint = datapoints[i]
-        datapoint_key = f"datapoint_{i}"
+        datapoint_key = datapoint.name
         if verbose:
             print(f"\n--- Evaluating Datapoint {i+1}/{len(agent_executions)} ---")
             print(f"Input: {agent_execution.agent_input}")
@@ -342,16 +159,12 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="Run agent evaluation")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
     parser.add_argument("--agent_name", default="calculator", help="Name of the agent to run")
-    parser.add_argument("--old_evaluators", action="store_true", help="Use old evaluators")
     parser.add_argument("--include_llm_judge", action="store_true", help="Include LLM judge evaluators")
     args = parser.parse_args()
 
     load_dotenv(find_dotenv())
 
-    evaluators_generator = create_old_evaluators if args.old_evaluators else create_evaluators
-    evaluators = evaluators_generator(include_llm_judge=args.include_llm_judge)
-
-    results = await run_evaluation(agent_name=args.agent_name, evaluators=evaluators, verbose=args.verbose)
+    results = await run_evaluation(agent_name=args.agent_name, include_llm_judge=args.include_llm_judge, verbose=args.verbose)
 
     # Print results for all datapoints
     summary = {}

@@ -2,8 +2,9 @@
 
 from collections import Counter
 from collections.abc import Callable
+from datetime import datetime
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, model_validator
 from uipath._utils.constants import COMMUNITY_agents_SUFFIX
@@ -12,12 +13,14 @@ from uipath.eval.evaluators.base_evaluator import (
     EvaluationResult,
 )
 from uipath.eval.models import NumericEvaluationResult
+from uipath.eval.models.models import EvaluatorCategory, EvaluatorType
 from gym_sample.evaluators_helpers import AgentExecution, extract_tool_calls_names, extract_tool_calls, extract_tool_calls_outputs, tool_calls_count_score, tool_calls_order_score, tool_args_score, tool_output_score, trace_to_str
 from uipath.eval.evaluators.deterministic_evaluator_base import (
     DeterministicEvaluatorBase,
 )
 from gym_sample.llm_judge_types import LLMJudgeOutputSchema, LLMJudgeStrictJSONSimilarityOutputSchema, LLMJudgeTrajectoryOutputSchema, PromptTemplates
 from uipath.eval.evaluators.llm_as_judge_evaluator import LLMResponse
+from eval.coded_evaluators import BaseEvaluator as CodedBaseEvaluator
 
 
 class ExactMatchEvaluator(DeterministicEvaluatorBase[dict[str, Any]]):
@@ -334,3 +337,117 @@ class LLMJudgeSimulationTrajectoryEvaluator(LLMJudgeTrajectoryEvaluator):
 
     prompt: str = PromptTemplates.LLM_JUDGE_SIMULATION_TRAJECTORY_DEFAULT_USER_PROMPT
     system_prompt: str = PromptTemplates.LLM_JUDGE_SIMULATION_TRAJECTORY_SYSTEM_PROMPT
+
+
+def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator | CodedBaseEvaluator]:
+    """Create evaluators using the old BaseEvaluator approach.
+
+    Returns:
+        List of evaluators.
+    """
+    now = datetime.now().isoformat()
+
+    exact_match_evaluator = ExactMatchEvaluator(
+        id="ExactMatchEvaluator",
+        name="ExactMatchEvaluator",
+        created_at=now,
+        updated_at=now,
+        description="Evaluates if the actual output exactly matches the expected output",
+        category=EvaluatorCategory.Deterministic,
+        evaluator_type=EvaluatorType.Equals,
+    )
+
+    tool_call_order_evaluator = ToolCallOrderEvaluator(
+        id="ToolCallOrderEvaluator",
+        name="ToolCallOrderEvaluator",
+        created_at=now,
+        updated_at=now,
+        description="Evaluates if the tool calls are in the correct order",
+        category=EvaluatorCategory.Deterministic,
+        evaluator_type=EvaluatorType.Trajectory,
+        strict=False,
+    )
+
+    tool_call_count_evaluator = ToolCallCountEvaluator(
+        id="ToolCallCountEvaluator",
+        name="ToolCallCountEvaluator",
+        created_at=now,
+        updated_at=now,
+        description="Evaluates if the tool calls are in the correct count",
+        category=EvaluatorCategory.Deterministic,
+        evaluator_type=EvaluatorType.Trajectory,
+        strict=False,
+    )
+
+    tool_call_arguments_evaluator = ToolCallArgumentsEvaluator(
+        id="ToolCallArgsEvaluator",
+        name="ToolCallArgsEvaluator",
+        created_at=now,
+        updated_at=now,
+        description="Evaluates if the tool calls are in the correct arguments",
+        category=EvaluatorCategory.Deterministic,
+        evaluator_type=EvaluatorType.Trajectory,
+        strict=False,
+        subset=False,
+    )
+
+    tool_call_output_evaluator = ToolCallOutputEvaluator(
+        id="ToolCallOutputEvaluator",
+        name="ToolCallOutputEvaluator",
+        created_at=now,
+        updated_at=now,
+        description="Evaluates if the tool calls are in the correct output",
+        category=EvaluatorCategory.Deterministic,
+        evaluator_type=EvaluatorType.Trajectory,
+        strict=False,
+    )
+
+    llm_judge_evaluator = LLMJudgeEvaluator(
+        id="LLMJudgeOutputEvaluator",
+        name="LLMJudgeOutputEvaluator",
+        created_at=now,
+        updated_at=now,
+        description="Evaluates the output of the agent using an LLM",
+        category=EvaluatorCategory.LlmAsAJudge,
+        evaluator_type=EvaluatorType.Custom,
+        model="gpt-4o-2024-11-20",
+    )
+
+    llm_judge_strict_json_similarity_evaluator = LLMJudgeStrictJSONSimilarityEvaluator(
+        id="LLMJudgeStrictJSONSimilarityOutputEvaluator",
+        name="LLMJudgeStrictJSONSimilarityOutputEvaluator",
+        created_at=now,
+        updated_at=now,
+        description="Evaluates the output of the agent using an LLM",
+        category=EvaluatorCategory.LlmAsAJudge,
+        evaluator_type=EvaluatorType.Custom,
+        model="gpt-4o-2024-11-20",
+    )
+
+    llm_judge_trajectory_evaluator = LLMJudgeTrajectoryEvaluator(
+        id="LLMJudgeTrajectoryEvaluator",
+        name="LLMJudgeTrajectoryEvaluator",
+        created_at=now,
+        updated_at=now,
+        description="Evaluates the output of the agent using an LLM",
+        category=EvaluatorCategory.LlmAsAJudge,
+        evaluator_type=EvaluatorType.Custom,
+        model="gpt-4o-2024-11-20",
+    )
+
+    llm_judge_simulation_trajectory_evaluator = LLMJudgeSimulationTrajectoryEvaluator(
+        id="LLMJudgeSimulationEvaluator",
+        name="LLMJudgeSimulationEvaluator",
+        created_at=now,
+        updated_at=now,
+        description="Evaluates the output of the agent using an LLM",
+        category=EvaluatorCategory.Trajectory,
+        evaluator_type=EvaluatorType.Trajectory,
+        model="gpt-4o-2024-11-20",
+    )
+
+    evaluators = [exact_match_evaluator, tool_call_order_evaluator, tool_call_count_evaluator, tool_call_arguments_evaluator, tool_call_output_evaluator]
+    if include_llm_judge:
+        evaluators.extend([llm_judge_evaluator, llm_judge_strict_json_similarity_evaluator, llm_judge_trajectory_evaluator, llm_judge_simulation_trajectory_evaluator])
+
+    return evaluators

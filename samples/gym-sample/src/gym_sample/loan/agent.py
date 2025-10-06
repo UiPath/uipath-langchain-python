@@ -102,7 +102,36 @@ def get_tools() -> List[BaseTool]:
 
 
 def get_datapoints() -> List[Datapoint]:
-    return []
+    return [
+        Datapoint(
+            name="CompleteJohnLoanApplicationScenario",
+            input={
+                "EmailBody": "I would like to apply for a loan of $50,000 for 5 years. My email is john.doe@example.com, my name is John Doe, my address is 123 Main St, Anytown, USA, my annual income is $75,000, and I am 35 years old."
+            },
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"ActionCenterTaskCreated": False}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["LoanAgent_ApplyUiBankLoan", "Google", "LoanAgent_ModifyLoanContract", "LoanAgent_SendSharepointDocumentViaDocuSign"]},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"LoanAgent_ApplyUiBankLoan": ("=", 1), "Google": ("=", 1), "LoanAgent_ModifyLoanContract": ("=", 1), "LoanAgent_SendSharepointDocumentViaDocuSign": ("=", 1)}},
+                "ToolCallArgsEvaluator": {"tool_calls": [{"name": "LoanAgent_ApplyUiBankLoan", "args": {"RequestorEmailAddress": "john.doe@example.com", "LoanAmount": 50000, "LoanTerm": 5, "Income": 75000, "Age": 35}}, {"name": "LoanAgent_ModifyLoanContract", "args": {"SharepointFolderURL": "https://uipath-my.sharepoint.com/:f:/r/personal/alina_capota_uipath_com/Documents/Documents?csf=1&web=1&e=HDt89e", "InterestRate": 4, "LoanAmount": 50000, "BorrowerName": "John Doe", "BorrowerAddress": "123 Main St, Anytown, USA"}}, {"name": "LoanAgent_SendSharepointDocumentViaDocuSign", "args": {"SharepointFileURL": "https://uipath-my.sharepoint.com/:f:/r/personal/alina_capota_uipath_com/Documents/Documents?csf=1&web=1&e=HDt89e/New_doc.pdf", "RecipientLegalName": "John Doe", "RecipientEmail": "john.doe@example.com"}}]},
+                "LLMJudgeOutputEvaluator": {"expected_output": {"ExecutionDetails": "Loan application process completed"}},
+            },
+            simulation_instructions="Tool LoanAgent_ApplyUiBankLoan should return a loan application process completed",
+        ),
+        Datapoint(
+            name="CompleteJoeLoanApplicationScenario",
+            input={
+                "EmailBody": "I would like to apply for a loan of $500,000 for 5 years. My email is joe.doe@example.com, my name is Joe Doe, my address is 123 Main St, Anytown, USA, my annual income is $735,000, and I am 55 years old."
+            },
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"ActionCenterTaskCreated": False}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["LoanAgent_ApplyUiBankLoan", "Google", "LoanAgent_ModifyLoanContract", "LoanAgent_SendSharepointDocumentViaDocuSign"]},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"LoanAgent_ApplyUiBankLoan": ("=", 1), "Google": ("=", 1), "LoanAgent_ModifyLoanContract": ("=", 1), "LoanAgent_SendSharepointDocumentViaDocuSign": ("=", 1)}},
+                "ToolCallArgsEvaluator": {"tool_calls": [{"name": "LoanAgent_ApplyUiBankLoan", "args": {"RequestorEmailAddress": "joe.doe@example.com", "LoanAmount": 500000, "LoanTerm": 5, "Income": 735000, "Age": 55}}, {"name": "LoanAgent_ModifyLoanContract", "args": {"SharepointFolderURL": "https://uipath-my.sharepoint.com/:f:/r/personal/alina_capota_uipath_com/Documents/Documents?csf=1&web=1&e=HDt89e", "InterestRate": 4, "LoanAmount": 500000, "BorrowerName": "Joe Doe", "BorrowerAddress": "123 Main St, Anytown, USA"}}, {"name": "LoanAgent_SendSharepointDocumentViaDocuSign", "args": {"SharepointFileURL": "https://uipath-my.sharepoint.com/:f:/r/personal/alina_capota_uipath_com/Documents/Documents?csf=1&web=1&e=HDt89e/New_doc.pdf", "RecipientLegalName": "Joe Doe", "RecipientEmail": "joe.doe@example.com"}}]},
+                "LLMJudgeOutputEvaluator": {"expected_output": {"ExecutionDetails": "Loan application process completed"}},
+            },
+            simulation_instructions="Tool LoanAgent_ApplyUiBankLoan should return a loan application process completed",
+        ),
+    ]
 
 
 def get_loan_agent() -> AgentBaseClass:
