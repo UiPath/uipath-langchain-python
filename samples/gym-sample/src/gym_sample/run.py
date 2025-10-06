@@ -11,7 +11,6 @@ from langgraph.graph import StateGraph
 from uipath.eval.evaluators.base_evaluator import EvaluatorCategory, EvaluatorType, EvaluationResult
 from eval.models import EvaluationResult as CodedEvaluationResult
 
-from gym_sample.evaluators import ExactMatchEvaluator, LLMJudgeEvaluator, LLMJudgeSimulationTrajectoryEvaluator, LLMJudgeStrictJSONSimilarityEvaluator, LLMJudgeTrajectoryEvaluator, ToolCallArgumentsEvaluator, ToolCallCountEvaluator, ToolCallOrderEvaluator, ToolCallOutputEvaluator
 from uipath.eval.evaluators import (
     BaseEvaluator,
 )
@@ -138,12 +137,14 @@ async def run_evaluation(agent_name: str, include_llm_judge: bool = False, verbo
                     agent_execution=agent_execution, # type: ignore[reportArgumentType]
                     evaluation_criteria=evaluator_criteria
                 )
-            else:
+            elif isinstance(evaluator, CodedBaseEvaluator):
                 # New coded evaluators use validate_and_evaluate_criteria
                 result = await evaluator.validate_and_evaluate_criteria(
                     agent_execution=agent_execution,
                     evaluation_criteria=evaluator_criteria
                 )
+            else:
+                raise ValueError(f"Evaluator {evaluator.__class__.__name__} is not a valid evaluator")
 
             if verbose:
                 print(f"  Result: {result}")

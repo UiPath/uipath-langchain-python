@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import StateGraph
-from gym_sample.evaluators import BaseEvaluator
+from uipath.eval.evaluators import BaseEvaluator
 from eval.coded_evaluators import BaseEvaluator as CodedBaseEvaluator
 from gym_sample.uipath_gym_types import (
     AgentBaseClass,
