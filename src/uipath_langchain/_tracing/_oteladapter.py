@@ -1,10 +1,8 @@
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from opentelemetry.sdk.trace.export import (
-    SpanExportResult,
-)
+from opentelemetry.sdk.trace.export import SpanExportResult
 from uipath.tracing import LlmOpsHttpExporter
 
 logger = logging.getLogger(__name__)
@@ -70,6 +68,11 @@ class LangChainExporter(LlmOpsHttpExporter):
         "TOOL": "toolCall",
         # Add more mappings as needed
     }
+
+    class Status:
+        SUCCESS = 1
+        ERROR = 2
+        INTERRUPTED = 3
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -161,12 +164,17 @@ class LangChainExporter(LlmOpsHttpExporter):
 
         return result
 
+    def _determine_status(self, error: Optional[str]) -> int:
+        if error:
+            if error and error.startswith("GraphInterrupt("):
+                return self.Status.INTERRUPTED
+            return self.Status.ERROR
+        return self.Status.SUCCESS
+
     def _process_span_attributes(self, span_data: Dict[str, Any]) -> Dict[str, Any]:
         """Extracts, transforms, and maps attributes for a span."""
         if "Attributes" not in span_data:
             return span_data
-
-        logger.debug(f"Processing span: {span_data}")
 
         attributes_val = span_data["Attributes"]
         if isinstance(attributes_val, str):
@@ -206,7 +214,11 @@ class LangChainExporter(LlmOpsHttpExporter):
 
         span_data["Attributes"] = json.dumps(processed_attributes)
 
-        logger.debug(f"Transformed span: {span_data}")
+        # Determine status based on error information
+        error = attributes.get("error") or attributes.get("exception.message")
+        status = self._determine_status(error)
+        span_data["Status"] = status
+
         return span_data
 
     def _send_with_retries(
