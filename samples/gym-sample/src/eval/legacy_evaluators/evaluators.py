@@ -14,11 +14,11 @@ from uipath.eval.evaluators.base_evaluator import (
 )
 from uipath.eval.models import NumericEvaluationResult
 from uipath.eval.models.models import EvaluatorCategory, EvaluatorType
-from gym_sample.evaluators_helpers import AgentExecution, extract_tool_calls_names, extract_tool_calls, extract_tool_calls_outputs, tool_calls_count_score, tool_calls_order_score, tool_args_score, tool_output_score, trace_to_str
+from eval.legacy_evaluators.evaluators_helpers import AgentExecution, extract_tool_calls_names, extract_tool_calls, extract_tool_calls_outputs, tool_calls_count_score, tool_calls_order_score, tool_args_score, tool_output_score, trace_to_str
 from uipath.eval.evaluators.deterministic_evaluator_base import (
     DeterministicEvaluatorBase,
 )
-from gym_sample.llm_judge_types import LLMJudgeOutputSchema, LLMJudgeStrictJSONSimilarityOutputSchema, LLMJudgeTrajectoryOutputSchema, PromptTemplates
+from eval.legacy_evaluators.llm_judge_types import LLMJudgeOutputSchema, LLMJudgeStrictJSONSimilarityOutputSchema, LLMJudgeTrajectoryOutputSchema, PromptTemplates
 from uipath.eval.evaluators.llm_as_judge_evaluator import LLMResponse
 from eval.coded_evaluators import BaseEvaluator as CodedBaseEvaluator
 
