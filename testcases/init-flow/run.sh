@@ -1,6 +1,3 @@
-#!/bin/bash
-cd /app/testcases/init-flow
-
 echo "Syncing dependencies..."
 uv sync
 
