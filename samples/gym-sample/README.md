@@ -1,6 +1,6 @@
-# UiPath LangGraph Calculator Agent
+# UiPath LlamaIndex Calculator Agent
 
-This project demonstrates how to create a calculator agent using UiPath LangGraph with Claude 3.5 Sonnet. The agent has been converted from the original gym-sample structure to work as a runnable unattended agent while retaining the ability to accept interactive user input.
+This project demonstrates how to create a calculator agent using UiPath LlamaIndex with Claude 3.5 Sonnet. The agent has been converted from the original gym-sample structure to work as a runnable unattended agent while retaining the ability to accept interactive user input.
 
 ## Key Features
 
@@ -12,11 +12,8 @@ This project demonstrates how to create a calculator agent using UiPath LangGrap
 ## Overview
 
 The agent uses:
-- Claude 3.5 Sonnet as the language model
-- LangGraph for orchestration
-- Multiple MCP tool servers:
-  - Math server for mathematical operations
-  - Weather server for weather data retrieval
+- LlamaIndex for orchestration
+- Python tools
 
 ## Architecture
 
@@ -28,13 +25,20 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
-	agent(agent)
+	prepare_input(prepare_input)
+	chatbot(chatbot)
 	tools(tools)
+	end_execution(end_execution)
+	raise_error(raise_error)
 	__end__([<p>__end__</p>]):::last
-	__start__ --> agent;
-	tools --> agent;
-	agent -.-> tools;
-	agent -.-> __end__;
+	__start__ --> prepare_input;
+	chatbot -.-> end_execution;
+	chatbot -.-> raise_error;
+	chatbot -.-> tools;
+	prepare_input --> chatbot;
+	tools --> chatbot;
+	end_execution --> __end__;
+	raise_error --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
@@ -50,10 +54,8 @@ The workflow follows a ReAct pattern:
 ## Prerequisites
 
 - Python 3.10+
-- `langchain-anthropic`
-- `langchain-mcp-adapters`
-- `langgraph`
-- Anthropic API key set as an environment variable
+- `LlamaIndex`
+- UiPath LLM auth parameters
 
 ## Installation
 
@@ -63,30 +65,13 @@ uv venv -p 3.11 .venv
 uv sync
 ```
 
-Set your API keys as environment variables in .env
-
-```bash
-ANTHROPIC_API_KEY=your_anthropic_api_key
-```
-
 ## Usage
-
-### Unattended Mode
-Run the agent in unattended mode using default scenario prompts. Both commands work:
-
-```bash
-# With no input
-uv run uipath run agent
-
-# With empty JSON
-uv run uipath run agent '{}'
-```
 
 ### Interactive Mode
 Run with custom user input by providing JSON with messages:
 
 ```bash
-uv run uipath run agent '{"messages": [{"type": "human", "content": "What is 25 * 4 + 10?"}]}'
+uv run uipath run agent '$AGENT_INPUT_SCHEMA'
 ```
 
 ### Development Mode
@@ -95,21 +80,6 @@ For interactive development and testing:
 ```bash
 uv run uipath dev
 ```
-
-## Debugging
-
-For debugging issues:
-
-1. Check that your MCP servers are running correctly:
-   ```bash
-   python math_server.py  # Run standalone to verify it works
-   python weather_server.py
-   ```
-
-2. Check logs for any connection or runtime errors:
-   ```bash
-   uipath run agent --debug '{"messages": [{"type": "human", "content": "What is 2+2"}]}'
-   ```
 
 ## How It Works
 
@@ -127,8 +97,8 @@ START -> prepare_input -> chatbot -> conditional_routing -> tools/end_execution/
 ```
 
 - `prepare_input`: Automatically detects unattended vs interactive mode and sets up appropriate messages
-  - **Unattended**: Uses default system + user prompts from `AgentBaseClass`
-  - **Interactive**: Adds system prompt to user-provided messages
+  - **Unattended**: Uses default system + user prompts from `AgentBaseClass` + datapoints for user prompt formatting
+  - **Interactive**: Formats the user prompt with the interactive input and then runs using the system prompt and user prompt templates from `AgentBaseClass`
 - `chatbot`: LLM interaction with tool calling capability
 - `conditional_routing`: Determines next action based on LLM response
 - `tools`: Executes mathematical operations (add, multiply)
@@ -144,7 +114,7 @@ To add a new tool to the AgentBaseClass:
 
 ## Agent Evaluation System
 
-This project includes a comprehensive evaluation system that captures traces from UiPath LangGraph agents and evaluates their performance.
+This project includes a comprehensive evaluation system that captures traces from UiPath LlamaIndex agents and evaluates their performance.
 
 ### How It Works
 
@@ -189,7 +159,7 @@ Collected 16 trace spans
 Running evaluations...
 
 Evaluating Exact Match with criteria: {'answer': 36.0}
-Result: score=True evaluation_time=0.00004 score_type=BOOLEAN
+Result: score=1.0 evaluation_time=0.00004 score_type=NUMERICAL
 
 Evaluating Tool Call Order with criteria: ['multiply', 'add']
 Result: score=1.0 evaluation_time=0.00001 score_type=NUMERICAL
