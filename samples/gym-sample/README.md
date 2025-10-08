@@ -1,6 +1,6 @@
-# UiPath LlamaIndex Calculator Agent
+# UiPath LangGraph Gym Agents
 
-This project demonstrates how to create a calculator agent using UiPath LlamaIndex with Claude 3.5 Sonnet. The agent has been converted from the original gym-sample structure to work as a runnable unattended agent while retaining the ability to accept interactive user input.
+This project demonstrates how to create a gym agent (e.g. calculator) using UiPath LangGraph with UiPath LLMGW. The agent has been converted from the original gym-sample structure to work as a runnable unattended agent while retaining the ability to accept interactive user input.
 
 ## Key Features
 
@@ -12,7 +12,7 @@ This project demonstrates how to create a calculator agent using UiPath LlamaInd
 ## Overview
 
 The agent uses:
-- LlamaIndex for orchestration
+- LangGraph for orchestration
 - Python tools
 
 ## Architecture
@@ -54,7 +54,7 @@ The workflow follows a ReAct pattern:
 ## Prerequisites
 
 - Python 3.10+
-- `LlamaIndex`
+- `LangGraph`
 - UiPath LLM auth parameters
 
 ## Installation
@@ -114,7 +114,7 @@ To add a new tool to the AgentBaseClass:
 
 ## Agent Evaluation System
 
-This project includes a comprehensive evaluation system that captures traces from UiPath LlamaIndex agents and evaluates their performance.
+This project includes a comprehensive evaluation system that captures traces from UiPath LangGraph agents and evaluates their performance.
 
 ### How It Works
 
