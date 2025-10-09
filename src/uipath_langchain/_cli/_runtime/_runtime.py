@@ -1,14 +1,12 @@
-import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Sequence
 
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
-from langgraph.graph.state import CompiledStateGraph
 from uipath._cli._runtime._contracts import (
     UiPathBaseRuntime,
     UiPathErrorCategory,
@@ -86,40 +84,40 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 if max_concurrency is not None:
                     graph_config["max_concurrency"] = int(max_concurrency)
 
-                if self.context.chat_handler:
+                if self.context.chat_handler or self.is_debug_run():
+                    final_chunk: Optional[dict[Any, Any]] = None
                     async for stream_chunk in compiled_graph.astream(
                         processed_input,
                         graph_config,
-                        stream_mode="messages",
+                        stream_mode=["messages", "updates"],
                         subgraphs=True,
                     ):
-                        if not isinstance(stream_chunk, tuple) or len(stream_chunk) < 2:
-                            continue
-
-                        _, (message, _) = stream_chunk
-                        event = map_message(
-                            message=message,
-                            conversation_id=self.context.execution_id,
-                            exchange_id=self.context.execution_id,
-                        )
-                        if event:
-                            self.context.chat_handler.on_event(event)
-
-                # Stream the output at debug time
-                elif self.is_debug_run():
-                    # Get final chunk while streaming
-                    final_chunk = None
-                    async for stream_chunk in compiled_graph.astream(
-                        processed_input,
-                        graph_config,
-                        stream_mode="updates",
-                        subgraphs=True,
-                    ):
-                        self._pretty_print(stream_chunk)
-                        final_chunk = stream_chunk
+                        _, chunk_type, data = stream_chunk
+                        if chunk_type == "messages":
+                            if self.context.chat_handler:
+                                if isinstance(data, tuple):
+                                    message, _ = data
+                                    event = map_message(
+                                        message=message,
+                                        conversation_id=self.context.execution_id,
+                                        exchange_id=self.context.execution_id,
+                                    )
+                                    if event:
+                                        self.context.chat_handler.on_event(event)
+                        elif chunk_type == "updates":
+                            if isinstance(data, dict):
+                                # data is a dict, e.g. {'agent': {'messages': [...]}}
+                                for agent_data in data.values():
+                                    if isinstance(agent_data, dict):
+                                        messages = agent_data.get("messages", [])
+                                        if isinstance(messages, list):
+                                            for message in messages:
+                                                if isinstance(message, BaseMessage):
+                                                    message.pretty_print()
+                                final_chunk = data
 
                     self.context.output = self._extract_graph_result(
-                        final_chunk, compiled_graph
+                        final_chunk, compiled_graph.output_channels
                     )
                 else:
                     # Execute the graph normally at runtime or eval
@@ -184,9 +182,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
     async def cleanup(self):
         pass
 
-    def _extract_graph_result(
-        self, final_chunk, graph: CompiledStateGraph[Any, Any, Any]
-    ):
+    def _extract_graph_result(self, final_chunk, output_channels: str | Sequence[str]):
         """
         Extract the result from a LangGraph output chunk according to the graph's output channels.
 
@@ -204,10 +200,8 @@ class LangGraphRuntime(UiPathBaseRuntime):
             ]  # Extract data part from (namespace, data) tuple
 
         # If the result isn't a dict or graph doesn't define output channels, return as is
-        if not isinstance(final_chunk, dict) or not hasattr(graph, "output_channels"):
+        if not isinstance(final_chunk, dict):
             return final_chunk
-
-        output_channels = graph.output_channels
 
         # Case 1: Single output channel as string
         if isinstance(output_channels, str):
@@ -243,61 +237,6 @@ class LangGraphRuntime(UiPathBaseRuntime):
 
         # Fallback for any other case
         return final_chunk
-
-    def _pretty_print(self, stream_chunk: Union[Tuple[Any, Any], Dict[str, Any], Any]):
-        """
-        Pretty print a chunk from a LangGraph stream with stream_mode="updates" and subgraphs=True.
-
-        Args:
-            stream_chunk: A tuple of (namespace, updates) from graph.astream()
-        """
-        if not isinstance(stream_chunk, tuple) or len(stream_chunk) < 2:
-            return
-
-        node_namespace = ""
-        chunk_namespace = stream_chunk[0]
-        node_updates = stream_chunk[1]
-
-        # Extract namespace if available
-        if chunk_namespace and len(chunk_namespace) > 0:
-            node_namespace = chunk_namespace[0]
-
-        if not isinstance(node_updates, dict):
-            logger.info("Raw update: %s", node_updates)
-            return
-
-        # Process each node's updates
-        for node_name, node_result in node_updates.items():
-            # Log node identifier with appropriate namespace context
-            if node_namespace:
-                logger.info("[%s][%s]", node_namespace, node_name)
-            else:
-                logger.info("[%s]", node_name)
-
-            # Handle non-dict results
-            if not isinstance(node_result, dict):
-                logger.info("%s", node_result)
-                continue
-
-            # Process messages specially
-            messages = node_result.get("messages", [])
-            if isinstance(messages, list):
-                for message in messages:
-                    if isinstance(message, BaseMessage):
-                        message.pretty_print()
-
-            # Exclude "messages" from node_result and pretty-print the rest
-            metadata = {k: v for k, v in node_result.items() if k != "messages"}
-            if metadata:
-                try:
-                    formatted_metadata = json.dumps(
-                        metadata,
-                        indent=2,
-                        ensure_ascii=False,
-                    )
-                    logger.info("%s", formatted_metadata)
-                except (TypeError, ValueError):
-                    pass
 
 
 class LangGraphScriptRuntime(LangGraphRuntime):
