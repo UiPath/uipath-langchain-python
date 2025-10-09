@@ -1,11 +1,11 @@
 import asyncio
-import uuid
 from typing import List, Optional
 
 from openinference.instrumentation.langchain import (
     LangChainInstrumentor,
     get_current_span,
 )
+from uipath._cli._evals._console_progress_reporter import ConsoleProgressReporter
 from uipath._cli._evals._progress_reporter import StudioWebProgressReporter
 from uipath._cli._evals._runtime import UiPathEvalContext, UiPathEvalRuntime
 from uipath._cli._runtime._contracts import (
@@ -39,11 +39,13 @@ def langgraph_eval_middleware(
 
         event_bus = EventBus()
 
-        if not kwargs.get("no_report", False):
+        if kwargs.get("register_progress_reporter", False):
             progress_reporter = StudioWebProgressReporter(
                 spans_exporter=LangChainExporter()
             )
             asyncio.run(progress_reporter.subscribe_to_eval_runtime_events(event_bus))
+        console_reporter = ConsoleProgressReporter()
+        asyncio.run(console_reporter.subscribe_to_eval_runtime_events(event_bus))
 
         def generate_runtime_context(
             context_entrypoint: str, langgraph_config: LangGraphConfig, **context_kwargs
@@ -56,7 +58,7 @@ def langgraph_eval_middleware(
         runtime_entrypoint = entrypoint or auto_discover_entrypoint()
 
         eval_context = UiPathEvalContext.with_defaults(
-            entrypoint=runtime_entrypoint, execution_id=str(uuid.uuid4()), **kwargs
+            entrypoint=runtime_entrypoint, **kwargs
         )
         eval_context.eval_set = eval_set or EvalHelpers.auto_discover_eval_set()
         eval_context.eval_ids = eval_ids
