@@ -9,7 +9,7 @@ import httpx
 import openai
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import _cleanup_llm_representation
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 from tenacity import (
     AsyncRetrying,
     Retrying,
@@ -17,7 +17,7 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
-from uipath._cli._runtime._contracts import UiPathErrorCategory
+from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathRuntimeError
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 
 from uipath_langchain._cli._runtime._exception import LangGraphRuntimeError
@@ -34,6 +34,33 @@ def get_from_uipath_url():
     if url:
         return "/".join(url.split("/", 3)[:3])
     return None
+
+
+def _get_access_token(data):
+    """Get access token from settings, environment variables, or UiPath client factory."""
+    token = (
+        getattr(data["settings"], "access_token", None)
+        or os.getenv("UIPATH_ACCESS_TOKEN")
+        or os.getenv("UIPATH_SERVICE_TOKEN")
+    )
+
+    if token:
+        return token
+
+    try:
+        settings = UiPathClientFactorySettings(
+            UIPATH_BASE_URL=data["base_url"],
+            UIPATH_CLIENT_ID=data["client_id"],
+            UIPATH_CLIENT_SECRET=data["client_secret"],
+        )
+        return get_uipath_token_header(settings)
+    except ValidationError:
+        raise UiPathRuntimeError(
+            code="AUTHENTICATION_REQUIRED",
+            title="Authorization required",
+            detail="Authorization required. Please run uipath auth",
+            category=UiPathErrorCategory.USER,
+        ) from None
 
 
 class UiPathRequestMixin(BaseModel):
@@ -62,19 +89,9 @@ class UiPathRequestMixin(BaseModel):
         alias="azure_endpoint",
     )
     access_token: Optional[str] = Field(
-        default_factory=lambda data: (
-            getattr(data["settings"], "access_token", None)
-            or os.getenv("UIPATH_ACCESS_TOKEN")  # Environment variable
-            or os.getenv("UIPATH_SERVICE_TOKEN")  # Environment variable
-            or get_uipath_token_header(
-                UiPathClientFactorySettings(
-                    UIPATH_BASE_URL=data["base_url"],
-                    UIPATH_CLIENT_ID=data["client_id"],
-                    UIPATH_CLIENT_SECRET=data["client_secret"],
-                )
-            )  # Get service token from UiPath
-        )
+        default_factory=lambda data: _get_access_token(data)
     )
+
     org_id: Any = Field(
         default_factory=lambda data: getattr(data["settings"], "org_id", None)
         or os.getenv("UIPATH_ORGANIZATION_ID", "")

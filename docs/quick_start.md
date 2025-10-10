@@ -134,6 +134,22 @@ This command creates the following files:
 | `pyproject.toml` | Project metadata and dependencies as per [PEP 518](https://peps.python.org/pep-0518/).                                           |
 
 
+## Authenticate With UiPath
+
+<!-- termynal -->
+
+```shell
+> uipath auth
+⠋ Authenticating with UiPath ...
+🔗 If a browser window did not open, please open the following URL in your browser: [LINK]
+👇 Select tenant:
+  0: Tenant1
+  1: Tenant2
+Select tenant number: 0
+Selected tenant: Tenant1
+✓  Authentication successful.
+```
+
 ## Initialize Project
 
 <!-- termynal -->
@@ -173,22 +189,6 @@ ANTHROPIC_API_KEY=sk-ant-a.....
 ```
 
 ////
-
-## Authenticate With UiPath
-
-<!-- termynal -->
-
-```shell
-> uipath auth
-⠋ Authenticating with UiPath ...
-🔗 If a browser window did not open, please open the following URL in your browser: [LINK]
-👇 Select tenant:
-  0: Tenant1
-  1: Tenant2
-Select tenant number: 0
-Selected tenant: Tenant1
-✓  Authentication successful.
-```
 
 ## Run The Agent Locally
 
