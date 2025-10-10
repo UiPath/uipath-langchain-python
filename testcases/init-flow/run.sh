@@ -1,24 +1,31 @@
 #!/bin/bash
-cd /app/testcases/ticket-classification
+cd /app/testcases/init-flow
 
 echo "Syncing dependencies..."
+uv sync
+
+echo "Backing up pyproject.toml..."
+cp pyproject.toml pyproject-overwrite.toml
+
+echo "Creating new UiPath agent..."
+uv run uipath new agent
+
+# uipath new overwrites pyproject.toml, so we need to copy it back
+echo "Restoring pyproject.toml..."
+cp pyproject-overwrite.toml pyproject.toml
 uv sync
 
 echo "Authenticating with UiPath..."
 uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --base-url="$BASE_URL"
 
-echo "Running uipath init..."
+echo "Initializing UiPath..."
 uv run uipath init
 
 echo "Packing agent..."
 uv run uipath pack
 
-# run and them resume the agent to simulate user interaction
 echo "Input from input.json file"
 uv run uipath run agent --file input.json
-
-echo "Resuming agent run by default with {'Answer': true}..."
-uv run uipath run agent '{"Answer": true}' --resume;
 
 source /app/testcases/common/print_output.sh
 print_uipath_output
