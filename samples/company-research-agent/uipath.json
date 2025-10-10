@@ -1,14 +1,15 @@
 {
     "entryPoints": [
         {
-            "filePath": "agent",
-            "uniqueId": "7eddbf91-0995-4254-beef-38cbe47f2297",
+            "filePath": "main",
+            "uniqueId": "e0aedf7b-c13d-4fdc-b0d5-44d3443d15c1",
             "type": "agent",
             "input": {
                 "type": "object",
                 "properties": {
                     "company_name": {
                         "title": "Company Name",
+                        "description": "The name of the company to research",
                         "type": "string"
                     }
                 },
@@ -19,13 +20,97 @@
             "output": {
                 "type": "object",
                 "properties": {
-                    "response": {
-                        "default": null,
-                        "title": "Response",
+                    "company_overview": {
+                        "title": "Company Overview",
+                        "description": "Comprehensive overview of the company",
                         "type": "string"
+                    },
+                    "industry_context": {
+                        "title": "Industry Context",
+                        "description": "Industry position and competitive landscape",
+                        "type": "string"
+                    },
+                    "key_personnel": {
+                        "title": "Key Personnel",
+                        "description": "Key decision makers and influencers",
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "title": "Name",
+                                    "type": "string"
+                                },
+                                "role": {
+                                    "title": "Role",
+                                    "type": "string"
+                                },
+                                "background": {
+                                    "title": "Background",
+                                    "type": "string"
+                                },
+                                "communication_style": {
+                                    "title": "Communication Style",
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "engagement_strategies": {
+                        "title": "Engagement Strategies",
+                        "description": "Tailored engagement strategies",
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "strategy_name": {
+                                    "title": "Strategy Name",
+                                    "type": "string"
+                                },
+                                "description": {
+                                    "title": "Description",
+                                    "type": "string"
+                                },
+                                "target_audience": {
+                                    "title": "Target Audience",
+                                    "type": "string"
+                                },
+                                "key_points": {
+                                    "title": "Key Points",
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "timing_recommendations": {
+                                    "title": "Timing Recommendations",
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "communication_recommendations": {
+                        "title": "Communication Recommendations",
+                        "description": "Overall communication approach",
+                        "type": "string"
+                    },
+                    "next_steps": {
+                        "title": "Next Steps",
+                        "description": "Recommended next steps for engagement",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
                     }
                 },
-                "required": []
+                "required": [
+                    "company_overview",
+                    "industry_context",
+                    "key_personnel",
+                    "engagement_strategies",
+                    "communication_recommendations",
+                    "next_steps"
+                ]
             }
         }
     ],

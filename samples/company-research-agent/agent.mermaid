@@ -5,19 +5,20 @@ config:
 ---
 graph TD;
 	__start__([<p>__start__</p>]):::first
+	research(research)
+	analyze(analyze)
+	identify_personnel(identify_personnel)
+	generate_strategies(generate_strategies)
+	create_recommendations(create_recommendations)
+	output(output)
 	__end__([<p>__end__</p>]):::last
-	__start__ --> researcher___start__;
-	researcher___end__ --> __end__;
-	subgraph researcher
-	researcher___start__(<p>__start__</p>)
-	researcher_agent(agent)
-	researcher_tools(tools)
-	researcher___end__(<p>__end__</p>)
-	researcher___start__ --> researcher_agent;
-	researcher_agent -.-> researcher___end__;
-	researcher_agent -.-> researcher_tools;
-	researcher_tools --> researcher_agent;
-	end
+	__start__ --> research;
+	analyze --> identify_personnel;
+	create_recommendations --> output;
+	generate_strategies --> create_recommendations;
+	identify_personnel --> generate_strategies;
+	research --> analyze;
+	output --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
