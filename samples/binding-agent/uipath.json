@@ -1,0 +1,40 @@
+{
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "ed17ee64-716a-46a3-ae30-91e921dfd23a",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            },
+            "output": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": [
+          {
+            "resource": "process",
+            "key": "A2ALoanCreditRatingTool",
+            "value": {
+              "name": {
+                "defaultValue": "A2ALoanCreditRatingTool",
+                "isExpression": false,
+                "displayName": "Process name"
+              }
+            },
+            "metadata": {
+              "subType": "agent",
+              "bindingsVersion": "2.2",
+              "solutionsSupport": "true"
+            }
+          }
+        ]
+    }
+}
