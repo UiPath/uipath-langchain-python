@@ -1,27 +1,38 @@
 {
     "entryPoints": [
         {
-            "filePath": "agent",
-            "uniqueId": "5e1d7bfd-c1b3-4d4f-bd0d-62e3b975e30b",
+            "filePath": "main",
+            "uniqueId": "7a8effb9-67f9-460e-8600-78cc2aaecef4",
             "type": "agent",
             "input": {
                 "type": "object",
                 "properties": {
                     "a": {
-                        "title": "A",
-                        "type": "number"
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "First number",
+                        "title": "A"
                     },
                     "b": {
-                        "title": "B",
-                        "type": "number"
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "number"
+                            }
+                        ],
+                        "description": "Second number",
+                        "title": "B"
                     },
                     "operator": {
-                        "enum": [
-                            "+",
-                            "-",
-                            "*",
-                            "/"
-                        ],
+                        "description": "Mathematical operator: +, -, *, /, **, %, //",
                         "title": "Operator",
                         "type": "string"
                     }
@@ -36,9 +47,29 @@
                 "type": "object",
                 "properties": {
                     "result": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "type": "string"
+                            }
+                        ],
                         "default": null,
-                        "title": "Result",
-                        "type": "number"
+                        "title": "Result"
+                    },
+                    "operation": {
+                        "default": null,
+                        "title": "Operation",
+                        "type": "string"
+                    },
+                    "success": {
+                        "default": null,
+                        "title": "Success",
+                        "type": "boolean"
                     }
                 },
                 "required": []
