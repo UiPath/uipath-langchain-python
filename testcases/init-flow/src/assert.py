@@ -32,9 +32,9 @@ print("Agent execution status: successful")
 assert "output" in output_data, "Missing 'output' field in agent response"
 
 output_content = output_data["output"]
-assert "messages" in output_content, "Missing 'messages' field in output"
+assert "report" in output_content, "Missing 'report' field in output"
 
-messages = output_content["messages"]
-assert messages and isinstance(messages, list), "Messages field is empty or not a list"
+report = output_content["report"]
+assert report and isinstance(report, str), "Report field is empty or not a string"
 
 print("Required fields validation passed")
