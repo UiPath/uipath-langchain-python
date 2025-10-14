@@ -10,5 +10,6 @@ dependencies = [
     "langchain-experimental>=0.3.4",
     "tavily-python>=0.5.0",
     "uipath-langchain==0.0.124",
+    "langchain-tavily>=0.2.11",
 ]
 requires-python = ">=3.10"
