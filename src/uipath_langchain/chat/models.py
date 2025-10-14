@@ -32,8 +32,17 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
     ) -> ChatResult:
         if "tools" in kwargs and not kwargs["tools"]:
             del kwargs["tools"]
+
+        logger.debug("Starting async generation with messages: %s", messages)
+
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
+
+        logger.debug("Request payload: %s, url: %s", payload, self.url)
+
         response = self._call(self.url, payload, self.auth_headers)
+
+        logger.debug("Received async response: %s", response)
+
         return self._create_chat_result(response)
 
     async def _agenerate(
@@ -45,8 +54,16 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
     ) -> ChatResult:
         if "tools" in kwargs and not kwargs["tools"]:
             del kwargs["tools"]
+
+        logger.debug("Starting async generation with messages: %s", messages)
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
+
+        logger.debug("Request payload: %s, url: %s", payload, self.url)
+
         response = await self._acall(self.url, payload, self.auth_headers)
+
+        logger.debug("Received async response: %s", response)
+
         return self._create_chat_result(response)
 
     def with_structured_output(
@@ -178,9 +195,14 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
                 "type": "tool",
                 "name": kwargs["tool_choice"]["function"]["name"],
             }
+
+        logger.debug("Starting async generation with messages: %s", messages)
+
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
 
+        logger.debug("Request payload: %s, url: %s", payload, self.url)
         response = self._call(self.url, payload, self.auth_headers)
+        logger.debug("Received response: %s", response)
         return self._create_chat_result(response)
 
     async def _agenerate(
@@ -212,9 +234,13 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
                 "type": "tool",
                 "name": kwargs["tool_choice"]["function"]["name"],
             }
+        logger.debug("Starting async generation with messages: %s", messages)
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
 
+        logger.debug("Request payload: %s, url: %s", payload, self.url)
+
         response = await self._acall(self.url, payload, self.auth_headers)
+        logger.debug("Received async response: %s", response)
         return self._create_chat_result(response)
 
     def with_structured_output(
