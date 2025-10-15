@@ -7,7 +7,6 @@ on:
       PYPI_TOKEN_NIGHTLY:
         required: true
 
-
 jobs:
   publish-dev:
     runs-on: ubuntu-latest
@@ -34,44 +33,43 @@ jobs:
 
       - name: Modify pyproject.toml for custom UiPath version
         if: contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')
-        shell: bash
+        shell: pwsh
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          # Backup original pyproject.toml
-          cp pyproject.toml pyproject.toml.backup
-
-          # Extract custom version from PR title
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          VERSION=$(echo "$PR_TITLE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+' | head -1)
-
-          if [ -z "$VERSION" ]; then
-            echo "No version found in PR title. Please include version like: 2.0.65.dev1004030443"
+          # Extract version from PR title (e.g., "2.0.65.dev1004030443")
+          if ($env:PR_TITLE -match '(\d+\.\d+\.\d+\.dev\d+)') {
+            $VERSION = $matches[1]
+          } else {
+            Write-Error "No version found in PR title. Example: 'chore: test (uipath version 2.0.65.dev1004030443)'"
             exit 1
-          fi
+          }
 
-          echo "Extracted version: $VERSION"
+          Write-Output "Using UiPath version: $VERSION"
 
-                      # Update the uipath dependency to the custom version (match both == and >= patterns)
-            # Target only the dependency lines in dependencies arrays, not project name
-            sed -i '/dependencies = \[/,/\]/ s|"uipath[=><^~!]*[^"]*"|"uipath=='$VERSION'"|' pyproject.toml
-            sed -i '/\[project\.optional-dependencies\]/,/^\[/ s|"uipath[=><^~!]*[^"]*"|"uipath=='$VERSION'"|' pyproject.toml
+          # Update uipath dependency to exact version (only in dependency arrays, not project name)
+          $content = Get-Content pyproject.toml -Raw
 
+          # Replace in main dependencies array
+          $content = $content -replace '(?s)(dependencies\s*=\s*\[.*?\])', {
+            param($match)
+            $match.Value -replace '"uipath([>=<\s,][^"]*|)"', "`"uipath==$VERSION`""
+          }
 
+          # Replace in optional-dependencies section (from [project.optional-dependencies] to next [)
+          $content = $content -replace '(?s)(\[project\.optional-dependencies\].*?)(?=\n\[|\z)', {
+            param($match)
+            $match.Value -replace '"uipath([>=<\s,][^"]*|)"', "`"uipath==$VERSION`""
+          }
 
-          # Add or update [tool.uv.sources] section if it doesn't exist
-          if ! grep -q "\[tool\.uv\.sources\]" pyproject.toml; then
-            echo "" >> pyproject.toml
-            echo "[tool.uv.sources]" >> pyproject.toml
-            echo 'uipath = { index = "testpypi" }' >> pyproject.toml
-          else
-            # Update existing sources if needed
-            if ! grep -q 'uipath = { index = "testpypi" }' pyproject.toml; then
-              sed -i '/\[tool\.uv\.sources\]/a uipath = { index = "testpypi" }' pyproject.toml
-            fi
-          fi
+          # Add [tool.uv.sources] if missing
+          if ($content -notmatch '\[tool\.uv\.sources\]') {
+            $content += "`n`n[tool.uv.sources]`n uipath = { index = `"testpypi`" }`n"
+          }
 
-          echo "Modified pyproject.toml to use UiPath version $VERSION from testpypi"
-          echo "=== Modified pyproject.toml content ==="
-          grep -A5 -B5 "uipath\|testpypi" pyproject.toml || true
+          # Save changes
+          $content | Set-Content pyproject.toml -NoNewline
+          Write-Output "✓ Updated pyproject.toml"
 
       - name: Install dependencies
         run: uv sync --all-extras
