@@ -1,5 +1,5 @@
+import random
 from enum import Enum
-
 from langgraph.constants import START, END
 from langgraph.graph import StateGraph
 from pydantic.dataclasses import dataclass
@@ -11,6 +11,8 @@ class Operator(Enum):
     SUBTRACT = "-"
     MULTIPLY = "*"
     DIVIDE = "/"
+    RANDOM = "random"
+
 
 @dataclass
 class CalculatorInput:
@@ -18,27 +20,51 @@ class CalculatorInput:
     b: float
     operator: Operator
 
+
 @dataclass
 class CalculatorOutput:
     result: float
 
-@traced(name="postprocess")
+
+@traced()
+async def get_random_operator() -> Operator:
+    """Return a random math operator."""
+    return random.choice([
+        Operator.ADD,
+        Operator.SUBTRACT,
+        Operator.MULTIPLY,
+        Operator.DIVIDE,
+    ])
+
+
+@traced()
 async def postprocess(x: float) -> float:
-    """
-    Example of nested traced invocation.
-    """
+    """Example of nested traced invocation."""
     return x
 
-@traced(name="calculate")
+
+@traced()
 async def calculate(input: CalculatorInput) -> CalculatorOutput:
-    result = 0
-    match input.operator:
-        case Operator.ADD: result = input.a + input.b
-        case Operator.SUBTRACT: result = input.a - input.b
-        case Operator.MULTIPLY: result = input.a * input.b
-        case Operator.DIVIDE: result = input.a / input.b if input.b != 0 else 0
+    if input.operator == Operator.RANDOM:
+        operator = await get_random_operator()
+    else:
+        operator = input.operator
+
+    match operator:
+        case Operator.ADD:
+            result = input.a + input.b
+        case Operator.SUBTRACT:
+            result = input.a - input.b
+        case Operator.MULTIPLY:
+            result = input.a * input.b
+        case Operator.DIVIDE:
+            result = input.a / input.b if input.b != 0 else 0
+        case _:
+            raise ValueError(f"Unknown operator: {operator}")
+
     result = await postprocess(result)
     return CalculatorOutput(result=result)
+
 
 builder = StateGraph(state_schema=CalculatorInput, input=CalculatorInput, output=CalculatorOutput)
 
