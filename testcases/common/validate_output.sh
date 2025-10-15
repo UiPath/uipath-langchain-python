@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Common utility to print UiPath output file
-# Usage: source /app/testcases/common/print_output.sh
+# Usage: source /app/testcases/common/validate_output.sh
 
-print_uipath_output() {
+debug_print_uipath_output() {
     echo "Printing output file..."
     if [ -f "__uipath/output.json" ]; then
         echo "=== OUTPUT FILE CONTENT ==="
@@ -21,3 +21,15 @@ print_uipath_output() {
         fi
     fi
 }
+
+validate_output() {
+    echo "Printing output file for validation..."
+    debug_print_uipath_output
+
+    echo "Validating output..."
+    python src/assert.py || { echo "Validation failed!"; exit 1; }
+
+    echo "Testcase completed successfully."
+}
+
+validate_output
