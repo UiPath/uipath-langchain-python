@@ -26,18 +26,22 @@ class CalculatorInput:
 class CalculatorOutput:
     result: float
 
+@dataclass
+class Wrapper:
+    result: Operator
+
 GET_RANDOM_OPERATOR_EXAMPLES = [ExampleCall(id="example", input="{}", output="{\"result\": \"*\"}")]
 
 @traced()
 @mockable(example_calls=GET_RANDOM_OPERATOR_EXAMPLES)
-async def get_random_operator() -> Operator:
+async def get_random_operator() -> Wrapper:
     """Return a random math operator."""
-    return random.choice([
+    return Wrapper(result=random.choice([
         Operator.ADD,
         Operator.SUBTRACT,
         Operator.MULTIPLY,
         Operator.DIVIDE,
-    ])
+    ]))
 
 
 @traced()
@@ -49,7 +53,7 @@ async def postprocess(x: float) -> float:
 @traced()
 async def calculate(input: CalculatorInput) -> CalculatorOutput:
     if input.operator == Operator.RANDOM:
-        operator = await get_random_operator()
+        operator = (await get_random_operator()).result
     else:
         operator = input.operator
 
