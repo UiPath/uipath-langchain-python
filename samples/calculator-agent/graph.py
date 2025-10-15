@@ -4,6 +4,7 @@ from langgraph.constants import START, END
 from langgraph.graph import StateGraph
 from pydantic.dataclasses import dataclass
 from uipath.tracing import traced
+from uipath.eval.mocks import mockable, ExampleCall
 
 
 class Operator(Enum):
@@ -25,8 +26,10 @@ class CalculatorInput:
 class CalculatorOutput:
     result: float
 
+GET_RANDOM_OPERATOR_EXAMPLES = [ExampleCall(id="example", input="{}", output="{\"result\": \"*\"}")]
 
 @traced()
+@mockable(example_calls=GET_RANDOM_OPERATOR_EXAMPLES)
 async def get_random_operator() -> Operator:
     """Return a random math operator."""
     return random.choice([
