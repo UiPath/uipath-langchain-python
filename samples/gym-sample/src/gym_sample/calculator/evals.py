@@ -1,44 +1,48 @@
 from typing import List
-from uipath.eval.evaluators import BaseEvaluator
-from eval.coded_evaluators import (
-    BaseEvaluator as CodedBaseEvaluator,
-    ExactMatchEvaluator as CodedExactMatchEvaluator,
-    ContainsEvaluator as CodedContainsEvaluator,
-    JsonSimilarityEvaluator as CodedJsonSimilarityEvaluator,
-    ToolCallOrderEvaluator as CodedToolCallOrderEvaluator,
-    ToolCallCountEvaluator as CodedToolCallCountEvaluator,
-    ToolCallArgsEvaluator as CodedToolCallArgsEvaluator,
-    ToolCallOutputEvaluator as CodedToolCallOutputEvaluator,
-    LLMJudgeOutputEvaluator as CodedLLMJudgeOutputEvaluator,
-    LLMJudgeStrictJSONSimilarityOutputEvaluator as CodedLLMJudgeStrictJSONSimilarityOutputEvaluator,
-    LLMJudgeTrajectoryEvaluator as CodedLLMJudgeTrajectoryEvaluator,
-    LLMJudgeSimulationTrajectoryEvaluator as CodedLLMJudgeSimulationTrajectoryEvaluator,
+from uipath.eval.evaluators import LegacyBaseEvaluator
+from uipath.eval.coded_evaluators import (
+    BaseEvaluator,
+    ExactMatchEvaluator,
+    ContainsEvaluator,
+    JsonSimilarityEvaluator,
+    ToolCallOrderEvaluator,
+    ToolCallCountEvaluator,
+    ToolCallArgsEvaluator,
+    ToolCallOutputEvaluator,
+    LLMJudgeOutputEvaluator,
+    LLMJudgeStrictJSONSimilarityOutputEvaluator,
+    LLMJudgeTrajectoryEvaluator,
+    LLMJudgeSimulationTrajectoryEvaluator,
 )
 
-def get_calculator_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator | CodedBaseEvaluator]:
-    """Create evaluators using the new CodedEvaluator approach.
+def get_evaluators(include_llm_judge: bool = False) -> List[LegacyBaseEvaluator | BaseEvaluator]:
+    """Create evaluators for calculator agent.
     """
-    evaluators: List[BaseEvaluator | CodedBaseEvaluator] = [
-        CodedExactMatchEvaluator.model_validate({"config": {"negated": False}}),
-        CodedContainsEvaluator.model_validate({"config": {"negated": False}}),
-        CodedJsonSimilarityEvaluator.model_validate({"config": {}}),
-        CodedToolCallOrderEvaluator.model_validate({
+    evaluators: List[LegacyBaseEvaluator | BaseEvaluator] = [
+        ExactMatchEvaluator.model_validate({"id": "ExactMatchEvaluator", "config": {"negated": False}}),
+        ContainsEvaluator.model_validate({"id": "ContainsEvaluator", "config": {"negated": False, "target_output_key": "answer"}}),
+        JsonSimilarityEvaluator.model_validate({"id": "JsonSimilarityEvaluator", "config": {}}),
+        ToolCallOrderEvaluator.model_validate({
+            "id": "ToolCallOrderEvaluator",
             "config": {
                 "strict": False,
             },
         }),
-        CodedToolCallCountEvaluator.model_validate({
+        ToolCallCountEvaluator.model_validate({
+            "id": "ToolCallCountEvaluator",
             "config": {
                 "strict": False,
             },
         }),
-        CodedToolCallArgsEvaluator.model_validate({
+        ToolCallArgsEvaluator.model_validate({
+            "id": "ToolCallArgsEvaluator",
             "config": {
                 "strict": False,
                 "subset": False,
             },
         }),
-        CodedToolCallOutputEvaluator.model_validate({
+        ToolCallOutputEvaluator.model_validate({
+            "id": "ToolCallOutputEvaluator",
             "config": {
                 "strict": False,
             },
@@ -47,25 +51,29 @@ def get_calculator_evaluators(include_llm_judge: bool = False) -> List[BaseEvalu
 
     if include_llm_judge:
         evaluators.extend([
-            CodedLLMJudgeOutputEvaluator.model_validate({
+            LLMJudgeOutputEvaluator.model_validate({
+                "id": "LLMJudgeOutputEvaluator",
                 "config": {
                     "model": "gpt-4o-2024-11-20",
                     "temperature": 0.0,
                 },
             }),
-            CodedLLMJudgeStrictJSONSimilarityOutputEvaluator.model_validate({
+            LLMJudgeStrictJSONSimilarityOutputEvaluator.model_validate({
+                "id": "LLMJudgeStrictJSONSimilarityOutputEvaluator",
                 "config": {
                     "model": "gpt-4o-2024-11-20",
                     "temperature": 0.0,
                 },
             }),
-            CodedLLMJudgeTrajectoryEvaluator.model_validate({
+            LLMJudgeTrajectoryEvaluator.model_validate({
+                "id": "LLMJudgeTrajectoryEvaluator",
                 "config": {
                     "model": "gpt-4o-2024-11-20",
                     "temperature": 0.0,
                 },
             }),
-            CodedLLMJudgeSimulationTrajectoryEvaluator.model_validate({
+            LLMJudgeSimulationTrajectoryEvaluator.model_validate({
+                "id": "LLMJudgeSimulationTrajectoryEvaluator",
                 "config": {
                     "model": "gpt-4o-2024-11-20",
                     "temperature": 0.0,

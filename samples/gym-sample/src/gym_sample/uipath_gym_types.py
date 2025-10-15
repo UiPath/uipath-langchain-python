@@ -16,7 +16,7 @@ class Datapoint(BaseModel):
     name: str = Field(description="The name of the datapoint")
     input: Dict[str, str | Dict[str, Any]]
     evaluation_criteria: Dict[str, Any]
-    simulation_instructions: str
+    simulation_instructions: str = ""
 
 
 class AgentBaseClass(BaseModel):

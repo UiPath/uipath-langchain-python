@@ -103,7 +103,7 @@ def LoanAgent_SendSharepointDocumentViaDocuSign(
         str: True if document is sent successfully, False otherwise
     """
     # Implementation goes here
-    return "Document New_doc.pdf was sent to: alina.capota@uipath.com"
+    return "Document New_doc.pdf was sent to: random@uipath.com"
 
 
 def Google(SearchText: Annotated[str, "Search text"]) -> str:

@@ -2,23 +2,16 @@
 
 import asyncio
 import argparse
-from datetime import datetime
 import json
 from typing import Dict, List, Tuple
 
 from dotenv import find_dotenv, load_dotenv
 from langgraph.graph import StateGraph
-from uipath.eval.evaluators.base_evaluator import EvaluatorCategory, EvaluatorType, EvaluationResult
-from eval.models import EvaluationResult as CodedEvaluationResult
-
-from uipath.eval.evaluators import (
-    BaseEvaluator,
-)
-from eval.coded_evaluators import (
-    BaseEvaluator as CodedBaseEvaluator,
-)
-from eval.models import AgentExecution
-from gym_sample.graph import agents_with_datapoints, get_evaluators
+from uipath.eval.evaluators.base_evaluator import LegacyEvaluatorCategory, LegacyEvaluatorType, EvaluationResult
+from uipath.eval.evaluators import LegacyBaseEvaluator
+from uipath.eval.coded_evaluators import BaseEvaluator
+from uipath.eval.models import AgentExecution
+from gym_sample.graph import agents_with_datapoints, get_all_evaluators
 from gym_sample.trace_utils import setup_tracer
 from gym_sample.uipath_gym_types import Datapoint
 
@@ -86,11 +79,11 @@ async def run_agents_with_tracing(graphs: List[Tuple[StateGraph, Datapoint]], ve
     return results
 
 
-async def run_evaluation(agent_name: str, include_llm_judge: bool = False, verbose: bool = False) -> Dict[str, Dict[str, EvaluationResult | CodedEvaluationResult]]:
+async def run_evaluation(agent_name: str, include_llm_judge: bool = False, verbose: bool = False) -> Dict[str, Dict[str, EvaluationResult]]:
     """Run the complete agent evaluation pipeline across all datapoints."""
     print(f"Running evaluation for agent: {agent_name}")
 
-    evaluators_generator = get_evaluators()[agent_name]
+    evaluators_generator = get_all_evaluators()[agent_name]
     evaluators = evaluators_generator(include_llm_judge)
 
     async with agents_with_datapoints(agent_name) as graphs:
@@ -103,7 +96,7 @@ async def run_evaluation(agent_name: str, include_llm_judge: bool = False, verbo
     else:
         print("\nRunning evaluations...")
 
-    all_results: Dict[str, Dict[str, EvaluationResult | CodedEvaluationResult]] = {}
+    all_results: Dict[str, Dict[str, EvaluationResult]] = {}
 
     # Get datapoints to access their evaluation criteria
     # Run evaluations for each datapoint execution
@@ -116,7 +109,7 @@ async def run_evaluation(agent_name: str, include_llm_judge: bool = False, verbo
             print(f"Output: {agent_execution.agent_output}")
             print(f"Collected {len(agent_execution.agent_trace)} trace spans")
 
-        datapoint_results: Dict[str, EvaluationResult | CodedEvaluationResult] = {}
+        datapoint_results: Dict[str, EvaluationResult] = {}
 
         # Run each evaluator for this datapoint
         for evaluator in evaluators:
@@ -131,14 +124,14 @@ async def run_evaluation(agent_name: str, include_llm_judge: bool = False, verbo
                 print(f"  Evaluating {evaluator.name} with criteria: {evaluator_criteria}")
 
             # Use the appropriate evaluate method based on evaluator type
-            if isinstance(evaluator, BaseEvaluator):
-                # Old evaluators use evaluate method
+            if isinstance(evaluator, LegacyBaseEvaluator):
+                # Legacy evaluators use evaluate method
                 result = await evaluator.evaluate(
-                    agent_execution=agent_execution, # type: ignore[reportArgumentType]
+                    agent_execution=agent_execution,
                     evaluation_criteria=evaluator_criteria
                 )
-            elif isinstance(evaluator, CodedBaseEvaluator):
-                # New coded evaluators use validate_and_evaluate_criteria
+            elif isinstance(evaluator, BaseEvaluator):
+                # New evaluators use validate_and_evaluate_criteria
                 result = await evaluator.validate_and_evaluate_criteria(
                     agent_execution=agent_execution,
                     evaluation_criteria=evaluator_criteria

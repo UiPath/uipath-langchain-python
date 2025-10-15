@@ -9,11 +9,11 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, model_validator
 from uipath._utils.constants import COMMUNITY_agents_SUFFIX
 from uipath.eval.evaluators.base_evaluator import (
-    BaseEvaluator,
+    LegacyBaseEvaluator,
     EvaluationResult,
 )
 from uipath.eval.models import NumericEvaluationResult
-from uipath.eval.models.models import EvaluatorCategory, EvaluatorType
+from uipath.eval.models.models import LegacyEvaluatorCategory, LegacyEvaluatorType
 from eval.legacy_evaluators.evaluators_helpers import AgentExecution, extract_tool_calls_names, extract_tool_calls, extract_tool_calls_outputs, tool_calls_count_score, tool_calls_order_score, tool_args_score, tool_output_score, trace_to_str
 from uipath.eval.evaluators.deterministic_evaluator_base import (
     DeterministicEvaluatorBase,
@@ -172,7 +172,7 @@ class ToolCallOutputEvaluator(DeterministicEvaluatorBase[Dict[str, Any]]):
         )
 
 
-class LLMJudgeEvaluator(BaseEvaluator[str | Dict[str, Any]]):
+class LLMJudgeEvaluator(LegacyBaseEvaluator[str | Dict[str, Any]]):
     """Evaluator that uses an LLM to judge the quality of agent output."""
 
     model: str
@@ -339,7 +339,7 @@ class LLMJudgeSimulationTrajectoryEvaluator(LLMJudgeTrajectoryEvaluator):
     system_prompt: str = PromptTemplates.LLM_JUDGE_SIMULATION_TRAJECTORY_SYSTEM_PROMPT
 
 
-def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator | CodedBaseEvaluator]:
+def create_old_evaluators(include_llm_judge: bool = False) -> List[LegacyBaseEvaluator | CodedBaseEvaluator]:
     """Create evaluators using the old BaseEvaluator approach.
 
     Returns:
@@ -353,8 +353,8 @@ def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator
         created_at=now,
         updated_at=now,
         description="Evaluates if the actual output exactly matches the expected output",
-        category=EvaluatorCategory.Deterministic,
-        evaluator_type=EvaluatorType.Equals,
+        category=LegacyEvaluatorCategory.Deterministic,
+        evaluator_type=LegacyEvaluatorType.Equals,
     )
 
     tool_call_order_evaluator = ToolCallOrderEvaluator(
@@ -363,8 +363,8 @@ def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator
         created_at=now,
         updated_at=now,
         description="Evaluates if the tool calls are in the correct order",
-        category=EvaluatorCategory.Deterministic,
-        evaluator_type=EvaluatorType.Trajectory,
+        category=LegacyEvaluatorCategory.Deterministic,
+        evaluator_type=LegacyEvaluatorType.Trajectory,
         strict=False,
     )
 
@@ -374,8 +374,8 @@ def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator
         created_at=now,
         updated_at=now,
         description="Evaluates if the tool calls are in the correct count",
-        category=EvaluatorCategory.Deterministic,
-        evaluator_type=EvaluatorType.Trajectory,
+        category=LegacyEvaluatorCategory.Deterministic,
+        evaluator_type=LegacyEvaluatorType.Trajectory,
         strict=False,
     )
 
@@ -385,8 +385,8 @@ def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator
         created_at=now,
         updated_at=now,
         description="Evaluates if the tool calls are in the correct arguments",
-        category=EvaluatorCategory.Deterministic,
-        evaluator_type=EvaluatorType.Trajectory,
+        category=LegacyEvaluatorCategory.Deterministic,
+        evaluator_type=LegacyEvaluatorType.Trajectory,
         strict=False,
         subset=False,
     )
@@ -397,8 +397,8 @@ def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator
         created_at=now,
         updated_at=now,
         description="Evaluates if the tool calls are in the correct output",
-        category=EvaluatorCategory.Deterministic,
-        evaluator_type=EvaluatorType.Trajectory,
+        category=LegacyEvaluatorCategory.Deterministic,
+        evaluator_type=LegacyEvaluatorType.Trajectory,
         strict=False,
     )
 
@@ -408,8 +408,8 @@ def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator
         created_at=now,
         updated_at=now,
         description="Evaluates the output of the agent using an LLM",
-        category=EvaluatorCategory.LlmAsAJudge,
-        evaluator_type=EvaluatorType.Custom,
+        category=LegacyEvaluatorCategory.LlmAsAJudge,
+        evaluator_type=LegacyEvaluatorType.Custom,
         model="gpt-4o-2024-11-20",
     )
 
@@ -419,8 +419,8 @@ def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator
         created_at=now,
         updated_at=now,
         description="Evaluates the output of the agent using an LLM",
-        category=EvaluatorCategory.LlmAsAJudge,
-        evaluator_type=EvaluatorType.Custom,
+        category=LegacyEvaluatorCategory.LlmAsAJudge,
+        evaluator_type=LegacyEvaluatorType.Custom,
         model="gpt-4o-2024-11-20",
     )
 
@@ -430,8 +430,8 @@ def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator
         created_at=now,
         updated_at=now,
         description="Evaluates the output of the agent using an LLM",
-        category=EvaluatorCategory.LlmAsAJudge,
-        evaluator_type=EvaluatorType.Custom,
+        category=LegacyEvaluatorCategory.LlmAsAJudge,
+        evaluator_type=LegacyEvaluatorType.Custom,
         model="gpt-4o-2024-11-20",
     )
 
@@ -441,8 +441,8 @@ def create_old_evaluators(include_llm_judge: bool = False) -> List[BaseEvaluator
         created_at=now,
         updated_at=now,
         description="Evaluates the output of the agent using an LLM",
-        category=EvaluatorCategory.Trajectory,
-        evaluator_type=EvaluatorType.Trajectory,
+        category=LegacyEvaluatorCategory.Trajectory,
+        evaluator_type=LegacyEvaluatorType.Trajectory,
         model="gpt-4o-2024-11-20",
     )
 

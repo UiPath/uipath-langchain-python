@@ -1,11 +1,12 @@
 from collections.abc import Callable
+import os
 from typing import AsyncGenerator, Dict, List
 from contextlib import asynccontextmanager
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import StateGraph
-from uipath.eval.evaluators import BaseEvaluator
-from eval.coded_evaluators import BaseEvaluator as CodedBaseEvaluator
+from uipath.eval.evaluators import LegacyBaseEvaluator
+from uipath.eval.coded_evaluators import BaseEvaluator
 from gym_sample.uipath_gym_types import (
     AgentBaseClass,
     BasicLoop,
@@ -14,8 +15,8 @@ from gym_sample.uipath_gym_types import (
 from uipath_langchain.chat import UiPathAzureChatOpenAI
 from gym_sample.calculator.agent import get_calculator_agent
 from gym_sample.loan.agent import get_loan_agent
-from gym_sample.calculator.evals import get_calculator_evaluators
-from gym_sample.loan.evals import get_loan_evaluators
+from gym_sample.calculator.evals import get_evaluators as get_calculator_evaluators
+from gym_sample.loan.evals import get_evaluators as get_loan_evaluators
 
 
 def get_model() -> BaseChatModel:
@@ -31,7 +32,7 @@ def get_agents() -> Dict[str, AgentBaseClass]:
     }
 
 
-def get_evaluators() -> Dict[str, Callable[[bool], List[BaseEvaluator | CodedBaseEvaluator]]]:
+def get_all_evaluators() -> Dict[str, Callable[[bool], List[LegacyBaseEvaluator | BaseEvaluator]]]:
     """Get the evaluators (created lazily to allow environment loading)."""
     return {
         "calculator": lambda include_llm_judge: get_calculator_evaluators(include_llm_judge),
@@ -44,20 +45,22 @@ async def agents_with_datapoints(agent_name: str = "calculator") -> AsyncGenerat
     """Create and return all LangGraph agents for evaluation mode.
 
     Each graph pre-binds its datapoint input at build time.
+    Each graph gets a fresh BasicLoop instance to avoid LLM state accumulation.
 
     Returns:
         A list of (StateGraph, Datapoint) tuples that can be executed.
     """
     agent_scenario = get_agents()[agent_name]
-    loop = BasicLoop(
-        scenario=agent_scenario,
-        llm=get_model(),
-        print_trace=True,
-        parallel_tool_calls=False,
-    )
 
     graphs = []
     for datapoint in agent_scenario.datapoints:
+        # Create a fresh BasicLoop for each datapoint to avoid LLM state accumulation
+        loop = BasicLoop(
+            scenario=agent_scenario,
+            llm=get_model(),
+            print_trace=True,
+            parallel_tool_calls=False,
+        )
         # Build evaluation graph with pre-bound input
         graph = loop.build_evaluation_graph(datapoint.input)
         graphs.append((graph, datapoint))
