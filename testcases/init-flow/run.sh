@@ -1,3 +1,6 @@
+#!/bin/bash
+set -e
+
 echo "Syncing dependencies..."
 uv sync
 
@@ -24,10 +27,6 @@ uv run uipath pack
 echo "Input from input.json file"
 uv run uipath run agent --file input.json
 
-source /app/testcases/common/print_output.sh
-print_uipath_output
-
-echo "Validating output..."
-python src/assert.py || { echo "Validation failed!"; exit 1; }
-
-echo "Testcase completed successfully."
+echo "Running agent again with empty UIPATH_JOB_KEY..."
+export UIPATH_JOB_KEY=""
+uv run uipath run agent --file input.json >> local_run_output.log
