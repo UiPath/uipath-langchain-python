@@ -28,8 +28,6 @@ from uipath_langchain._utils._settings import (
 )
 from uipath_langchain._utils._sleep_policy import before_sleep_log
 
-logger = logging.getLogger(__name__)
-
 
 def get_from_uipath_url():
     url = os.getenv("UIPATH_URL")
@@ -430,7 +428,7 @@ class UiPathRequestMixin(BaseModel):
 
     @property
     def _identifying_params(self) -> Dict[str, Any]:
-        result = {
+        return {
             "url": self.url,
             "model": self.model_name,
             "temperature": self.temperature,
@@ -438,11 +436,8 @@ class UiPathRequestMixin(BaseModel):
             "frequency_penalty": self.frequency_penalty,
             "presence_penalty": self.presence_penalty,
         }
-        logger.debug("Identifying params: %s", result)
-        return result
 
     def _prepare_url(self, url: str) -> httpx.URL:
-        logger.debug("Preparing URL: %s", url)
         return httpx.URL(self.url)
 
     def _build_headers(self, options, retries_taken: int = 0) -> httpx.Headers:
@@ -453,21 +448,11 @@ class UiPathRequestMixin(BaseModel):
         if not self._url:
             env_uipath_url = os.getenv("UIPATH_URL")
 
-            logger.debug("Building request URL. URL: %s", env_uipath_url)
-
             if env_uipath_url:
                 self._url = f"{env_uipath_url.rstrip('/')}/{self.endpoint}"
-                logger.debug(
-                    "Using UIPATH_URL environment variable for the request URL: %s",
-                    self._url,
-                )
             else:
                 self._url = (
                     f"{self.base_url}/{self.org_id}/{self.tenant_id}/{self.endpoint}"
-                )
-                logger.debug(
-                    "Constructing request URL from base_url, org_id, tenant_id, and endpoint. URL: %s",
-                    self._url,
                 )
         return self._url
 
