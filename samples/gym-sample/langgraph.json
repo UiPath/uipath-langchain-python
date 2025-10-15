@@ -1,0 +1,10 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "calculator": "./src/gym_sample/graph.py:calculator_agent",
+    "loan": "./src/gym_sample/graph.py:loan_agent"
+  },
+  "env": ".env"
+}

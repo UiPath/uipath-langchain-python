@@ -1,0 +1,71 @@
+{
+    "entryPoints": [
+        {
+            "filePath": "calculator",
+            "uniqueId": "dc614383-5fdd-4a4b-a868-c91a1ec61dad",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "title": "Expression",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "expression"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "answer": {
+                        "default": null,
+                        "title": "Answer",
+                        "type": "number"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "filePath": "loan",
+            "uniqueId": "c1ad922d-b6e5-4189-b13d-34cf9acb3cc8",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "EmailBody": {
+                        "description": "The body of the request email",
+                        "title": "Emailbody",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "EmailBody"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "ExecutionDetails": {
+                        "default": null,
+                        "title": "Executiondetails",
+                        "type": "string"
+                    },
+                    "ActionCenterTaskCreated": {
+                        "type": "boolean"
+                    },
+                    "ActionCenterTaskURL": {
+                        "type": "string"
+                    }
+                },
+                "required": []
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": []
+    }
+}
