@@ -1,3 +1,6 @@
+#!/bin/bash
+set -e
+
 echo "Syncing dependencies..."
 uv sync
 
@@ -11,6 +14,8 @@ echo "Packing agent..."
 uv run uipath pack
 
 echo "Running agent..."
-echo "Input from input.json file"
 uv run uipath run agent --file input.json
 
+echo "Running agent again with empty UIPATH_JOB_KEY..."
+export UIPATH_JOB_KEY=""
+uv run uipath run agent --file input.json >> local_run_output.log

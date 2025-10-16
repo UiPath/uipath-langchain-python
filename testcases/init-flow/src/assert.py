@@ -37,4 +37,10 @@ assert "report" in output_content, "Missing 'report' field in output"
 report = output_content["report"]
 assert report and isinstance(report, str), "Report field is empty or not a string"
 
+with open("local_run_output.log", 'r', encoding='utf-8') as f:
+    local_run_output = f.read()
+
+# Check if response contains 'Successful execution.'
+assert "Successful execution." in local_run_output, f"Response does not contain 'Successful execution.'. Actual response: {local_run_output}"
+
 print("Required fields validation passed")
