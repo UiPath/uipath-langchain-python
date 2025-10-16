@@ -1,12 +1,14 @@
 from langchain_anthropic import ChatAnthropic
+from langchain_community.tools import TavilySearchResults
+from langchain_core.tools import tool
 from langchain_tavily import TavilySearch
+from uipath.tracing import traced
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, BaseMessage
+from uipath.eval.mocks import mockable
 
-# Set up the Tavily search tool
-tavily_tool = TavilySearch(max_results=5)
 
 # Define system prompt
 system_prompt = """You are an advanced AI assistant specializing in corporate research and outreach strategy development. Your primary functions are:
@@ -33,7 +35,15 @@ DO NOT do any math as specified in your instructions.
 
 llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 
-research_agent = create_react_agent(llm, tools=[tavily_tool], prompt=system_prompt)
+@tool
+@traced()
+@mockable()
+def search_tool(query: str) -> str:
+    """Search the web for information about the company."""
+    print("search_tool actually invoked")
+    return "Search results for query: " + query
+
+research_agent = create_react_agent(llm, tools=[search_tool], prompt=system_prompt)
 
 def get_message_text(msg: BaseMessage) -> str:
     """LangChain-style safe message text extractor."""
@@ -75,7 +85,11 @@ Ensure that each section is clearly labeled and contains relevant, concise infor
     else:
         msg = result
 
-    return GraphOutput(response=get_message_text(msg))
+    response_text = get_message_text(msg)
+    print(f"[research_node] Response length: {len(response_text)} characters")
+    print(f"[research_node] Response: {response_text}")
+
+    return GraphOutput(response=response_text)
 
 
 # Build the state graph

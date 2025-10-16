@@ -1,0 +1,41 @@
+{
+  "fileName": "default.json",
+  "id": "default-eval-set-id",
+  "name": "Basic Company Research Evaluation Set",
+  "batchSize": 10,
+  "evaluatorRefs": [
+    "llm-as-a-judge"
+  ],
+  "evaluations": [
+    {
+      "id": "test-company-research-with-llm-mock",
+      "name": "Test Company Research With LLM Mock",
+      "inputs": {
+        "company_name": "Anthropic"
+      },
+      "expectedOutput": {
+        "response": "Anthropic is an AI safety company founded in 2021 by former OpenAI members, focusing on developing safe and beneficial AI systems. The company is known for creating Claude, a helpful and harmless AI assistant."
+      },
+      "expectedAgentBehavior": "The agent should use the search tool to gather information about Anthropic and provide a structured response covering company overview, organizational structure, key decision-makers, and outreach strategy.",
+      "mockingStrategy": {
+        "type": "llm",
+        "prompt": "You are simulating the TavilySearch tool. When asked about Anthropic, return the following information:\n\nAnthropic is an AI safety company founded in 2021 by former OpenAI members including Dario Amodei (CEO) and Daniela Amodei (President). The company focuses on developing safe, steerable, and beneficial AI systems. Their flagship product is Claude, an AI assistant designed to be helpful, harmless, and honest.\n\nKey Information:\n- Founded: 2021\n- Headquarters: San Francisco, California\n- CEO: Dario Amodei\n- President: Daniela Amodei\n- Main Product: Claude AI assistant\n- Focus: AI safety and alignment research\n- Funding: Series B led by Google, Spark Capital, and others\n- Mission: Build reliable, interpretable, and steerable AI systems",
+        "toolsToSimulate": [
+          {
+            "name": "search_tool"
+          }
+        ],
+        "model": {
+          "model": "gpt-4o-mini-2024-07-18",
+          "temperature": 0
+        }
+      },
+      "evalSetId": "default-eval-set-id",
+      "createdAt": "2025-09-04T18:54:58.378Z",
+      "updatedAt": "2025-09-04T18:55:55.416Z"
+    }
+  ],
+  "modelSettings": [],
+  "createdAt": "2025-09-04T18:54:58.379Z",
+  "updatedAt": "2025-09-04T18:55:55.416Z"
+}
