@@ -13,11 +13,11 @@ from uipath import UiPath
 from uipath.agent.models.agent import (
     AgentDefinition,
     AgentEscalationChannel,
-    AgentEscalationResourceConfig,
+    AgentEscalationResource,
     AgentIntegrationToolParameter,
-    AgentIntegrationToolResourceConfig,
-    AgentProcessToolResourceConfig,
-    AgentResourceConfig,
+    AgentIntegrationToolResource,
+    AgentProcessToolResource,
+    AgentResource,
 )
 from uipath.models import CreateAction, InvokeProcess
 from uipath.models.connections import ConnectionTokenType
@@ -25,7 +25,7 @@ from uipath.models.connections import ConnectionTokenType
 logger = logging.getLogger(__name__)
 
 
-def create_process_tool(resource: AgentProcessToolResourceConfig) -> Iterable[BaseTool]:
+def create_process_tool(resource: AgentProcessToolResource) -> Iterable[BaseTool]:
     async def process(**kwargs) -> BaseModel:
         return interrupt(
             InvokeProcess(
@@ -87,7 +87,7 @@ def create_escalation_tool_from_channel(channel: AgentEscalationChannel) -> Base
 
 
 def create_escalation_tool(
-    resource: AgentEscalationResourceConfig,
+    resource: AgentEscalationResource,
 ) -> Iterable[BaseTool]:
     for channel in resource.channels:
         yield create_escalation_tool_from_channel(channel)
@@ -115,7 +115,7 @@ def filter_query_params(
 
 
 def create_integration_tool(
-    resource: AgentIntegrationToolResourceConfig,
+    resource: AgentIntegrationToolResource,
 ) -> Iterable[BaseTool]:
     async def integration(**kwargs) -> BaseModel:
         uipath = UiPath()
@@ -194,14 +194,14 @@ def create_cached_wrapper(
 
 
 def create_resource_tool(
-    resource: AgentResourceConfig, cache: Optional[BaseCache] = None
+    resource: AgentResource, cache: Optional[BaseCache] = None
 ) -> Iterable[BaseTool]:
     match resource:
-        case AgentProcessToolResourceConfig():
+        case AgentProcessToolResource():
             return create_cached_wrapper(create_process_tool(resource), cache)
-        case AgentIntegrationToolResourceConfig():
+        case AgentIntegrationToolResource():
             return create_cached_wrapper(create_integration_tool(resource), cache)
-        case AgentEscalationResourceConfig():
+        case AgentEscalationResource():
             return create_cached_wrapper(create_escalation_tool(resource), cache)
         case _:
             raise NotImplementedError()
