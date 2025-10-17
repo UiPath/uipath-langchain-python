@@ -1,1 +1,12 @@
-{"messages": [{"type": "human", "content": "What is 2+2"}]}
+{
+    "messages": [
+        {
+            "type": "system",
+            "content": "You are a calculator assistant, you only use the provided tools to do math. DO NOT make up any answers on your own."
+        },
+        {
+            "type": "human",
+            "content": "What is 2+2"
+        }
+    ]
+}

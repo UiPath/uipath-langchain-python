@@ -1,0 +1,42 @@
+{
+  "description": "Simple trace assertions - just check key spans exist",
+  "required_spans": [
+    {
+      "name": "LangGraph",
+      "span_type": "OpenTelemetry",
+      "attributes": {
+        "openinference.span.kind": "CHAIN"
+      }
+    },
+    {
+      "name": "agent",
+      "span_type": "OpenTelemetry",
+      "attributes": {
+        "openinference.span.kind": "AGENT"
+      }
+    },
+    {
+      "name": "call_model",
+      "span_type": "OpenTelemetry",
+      "attributes": {
+        "openinference.span.kind": "CHAIN"
+      }
+    },
+    {
+      "name": ["UiPathChat", "UiPathAzureChatOpenAI"],
+      "span_type": "OpenTelemetry",
+      "attributes": {
+        "openinference.span.kind": "LLM",
+        "llm.provider": "azure"
+      }
+    },
+    {
+      "name": "add",
+      "span_type": "OpenTelemetry",
+      "attributes": {
+        "openinference.span.kind": "TOOL",
+        "tool.name": "add"
+      }
+    }
+  ]
+}
