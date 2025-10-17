@@ -1,0 +1,32 @@
+{
+    "description": "Ticket classification agent trace assertions - check key spans exist",
+    "required_spans": [
+        {
+            "name": "LangGraph",
+            "span_type": "OpenTelemetry",
+            "attributes": {
+                "openinference.span.kind": "CHAIN"
+            }
+        },
+        {
+            "name": [
+                "UiPathAzureChatOpenAI",
+                "UiPathChat"
+            ],
+            "span_type": "OpenTelemetry",
+            "attributes": {
+                "openinference.span.kind": "LLM",
+                "llm.provider": "azure",
+                "llm.model_name": "gpt-4o-2024-08-06",
+                "llm.system": "openai"
+            }
+        },
+        {
+            "name": "PydanticOutputParser",
+            "span_type": "OpenTelemetry",
+            "attributes": {
+                "openinference.span.kind": "UNKNOWN"
+            }
+        }
+    ]
+}

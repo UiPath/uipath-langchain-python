@@ -11,7 +11,11 @@ from uipath._cli._runtime._contracts import (
 )
 from uipath._cli.middlewares import MiddlewareResult
 
-from .._tracing import LangChainExporter, _instrument_traceable_attributes
+from .._tracing import (
+    JsonLinesFileExporter,
+    LangChainExporter,
+    _instrument_traceable_attributes,
+)
 from ._runtime._exception import LangGraphRuntimeError
 from ._runtime._runtime import (  # type: ignore[attr-defined]
     LangGraphRuntimeContext,
@@ -53,8 +57,17 @@ def langgraph_run_middleware(
                 runtime_generator=generate_runtime,
             )
 
-            if context.job_id:
-                runtime_factory.add_span_exporter(LangChainExporter())
+            use_json_exporter = (
+                os.getenv("UIPATH_USE_JSON_TRACE_EXPORTER", "false").lower() == "true"
+            )
+
+            if use_json_exporter:
+                runtime_factory.add_span_exporter(
+                    JsonLinesFileExporter(".uipath/traces.jsonl")
+                )
+            else:
+                if context.job_id:
+                    runtime_factory.add_span_exporter(LangChainExporter())
 
             runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
 

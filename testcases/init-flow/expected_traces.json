@@ -1,0 +1,32 @@
+{
+    "description": "Report generator agent - checks key spans exist",
+    "required_spans": [
+        {
+            "name": "LangGraph",
+            "span_type": "OpenTelemetry",
+            "attributes": {
+                "openinference.span.kind": "CHAIN"
+            }
+        },
+        {
+            "name": "generate_report",
+            "span_type": "OpenTelemetry",
+            "attributes": {
+                "openinference.span.kind": "CHAIN"
+            }
+        },
+        {
+            "name": [
+                "UiPathChat",
+                "UiPathAzureChatOpenAI"
+            ],
+            "span_type": "OpenTelemetry",
+            "attributes": {
+                "openinference.span.kind": "LLM",
+                "llm.provider": "azure",
+                "llm.system": "openai",
+                "llm.model_name": "gpt-4o-mini-2024-07-18"
+            }
+        }
+    ]
+}
