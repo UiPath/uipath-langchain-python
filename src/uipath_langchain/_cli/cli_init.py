@@ -1,9 +1,12 @@
 import asyncio
+import importlib.resources
 import json
 import os
+import shutil
 import uuid
 from typing import Any, Callable, Dict, overload
 
+import click
 from langgraph.graph.state import CompiledStateGraph
 from uipath._cli._utils._console import ConsoleLogger
 from uipath._cli._utils._parse_ast import generate_bindings_json  # type: ignore
@@ -96,6 +99,65 @@ def generate_schema_from_graph(
     return schema
 
 
+def generate_agent_md_file(
+    target_directory: str, file_name: str, resource_name: str
+) -> bool:
+    """Generate an agent-specific file from the packaged resource.
+
+    Args:
+        target_directory: The directory where the file should be created.
+        file_name: The name of the file should be created.
+        resource_name: The name of the resource folder where should be the file.
+    """
+    target_path = os.path.join(target_directory, file_name)
+    will_override = os.path.exists(target_path)
+    try:
+        source_path = importlib.resources.files(resource_name).joinpath(file_name)
+
+        with importlib.resources.as_file(source_path) as s_path:
+            shutil.copy(s_path, target_path)
+
+        if will_override:
+            console.info(f"File '{target_path}' has been overridden.")
+
+        return will_override
+
+    except Exception as e:
+        console.warning(f"Could not create {file_name}: {e}")
+
+    return False
+
+
+def generate_specific_agents_md_files(target_directory: str) -> None:
+    """Generate an agent-specific file from the packaged resource.
+
+    Args:
+        target_directory: The directory where the files should be created.
+    """
+    agent_dir = os.path.join(target_directory, ".agent")
+    os.makedirs(agent_dir, exist_ok=True)
+
+    any_overridden = any(
+        [
+            generate_agent_md_file(target_directory, "CLAUDE.md", "uipath._resources"),
+            generate_agent_md_file(agent_dir, "CLI_REFERENCE.md", "uipath._resources"),
+            generate_agent_md_file(agent_dir, "SDK_REFERENCE.md", "uipath._resources"),
+            generate_agent_md_file(
+                target_directory, "AGENTS.md", "uipath_langchain._resources"
+            ),
+            generate_agent_md_file(
+                agent_dir, "REQUIRED_STRUCTURE.md", "uipath_langchain._resources"
+            ),
+        ]
+    )
+
+    if any_overridden:
+        console.success(f"Updated {click.style('AGENTS.md', fg='cyan')} related files.")
+        return
+
+    console.success(f"Created {click.style('AGENTS.md', fg='cyan')} related files.")
+
+
 async def langgraph_init_middleware_async(
     entrypoint: str,
     options: dict[str, Any] | None = None,
@@ -185,7 +247,9 @@ async def langgraph_init_middleware_async(
             try:
                 with open(mermaid_file_path, "w") as f:
                     f.write(mermaid_content)
-                console.success(f" Created '{mermaid_file_path}' file.")
+                console.success(
+                    f"Created {click.style(mermaid_file_path, fg='cyan')} file."
+                )
             except Exception as write_error:
                 console.error(
                     f"Error writing mermaid file for '{graph_name}': {str(write_error)}"
@@ -194,7 +258,11 @@ async def langgraph_init_middleware_async(
                     should_continue=False,
                     should_include_stacktrace=True,
                 )
-        console.success(f" Created '{config_path}' file.")
+        console.success(f"Created {click.style(config_path, fg='cyan')} file.")
+
+        current_directory = os.getcwd()
+        generate_specific_agents_md_files(current_directory)
+
         return MiddlewareResult(should_continue=False)
 
     except Exception as e:
