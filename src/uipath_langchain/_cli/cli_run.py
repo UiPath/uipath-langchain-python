@@ -13,8 +13,11 @@ from uipath._cli._runtime._contracts import (
 )
 from uipath._cli.middlewares import MiddlewareResult
 from uipath._events._events import UiPathAgentStateEvent
+from uipath.tracing import JsonLinesFileExporter, LlmOpsHttpExporter
 
-from .._tracing import LangChainExporter, _instrument_traceable_attributes
+from .._tracing import (
+    _instrument_traceable_attributes,
+)
 from ._runtime._exception import LangGraphRuntimeError
 from ._runtime._runtime import (  # type: ignore[attr-defined]
     LangGraphRuntimeContext,
@@ -24,7 +27,11 @@ from ._utils._graph import LangGraphConfig
 
 
 def langgraph_run_middleware(
-    entrypoint: Optional[str], input: Optional[str], resume: bool, **kwargs
+    entrypoint: Optional[str],
+    input: Optional[str],
+    resume: bool,
+    trace_file: Optional[str] = None,
+    **kwargs,
 ) -> MiddlewareResult:
     """Middleware to handle LangGraph execution"""
     config = LangGraphConfig()
@@ -61,8 +68,13 @@ def langgraph_run_middleware(
 
             runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
 
+            if trace_file:
+                runtime_factory.add_span_exporter(JsonLinesFileExporter(trace_file))
+
             if context.job_id:
-                runtime_factory.add_span_exporter(LangChainExporter())
+                runtime_factory.add_span_exporter(
+                    LlmOpsHttpExporter(extra_process_spans=True)
+                )
                 await runtime_factory.execute(context)
             else:
                 debug_bridge: UiPathDebugBridge = ConsoleDebugBridge()

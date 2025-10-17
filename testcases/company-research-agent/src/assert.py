@@ -1,5 +1,6 @@
 import os
 import json
+from trace_assert import assert_traces
 
 print("Checking company research agent output...")
 
@@ -42,5 +43,7 @@ with open("local_run_output.log", 'r', encoding='utf-8') as f:
 
 # Check if response contains 'Successful execution.'
 assert "Successful execution." in local_run_output, f"Response does not contain 'Successful execution.'. Actual response: {local_run_output}"
+
+assert_traces(".uipath/traces.jsonl", "expected_traces.json")
 
 print("Required fields validation passed")

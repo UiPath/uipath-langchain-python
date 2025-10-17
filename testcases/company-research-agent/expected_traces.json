@@ -1,0 +1,41 @@
+{
+    "description": "Company research agent trace assertions - check key spans exist",
+    "required_spans": [
+        {
+            "name": "LangGraph",
+            "span_type": "OpenTelemetry",
+            "attributes": {
+                "openinference.span.kind": "CHAIN"
+            }
+        },
+        {
+            "name": "call_model",
+            "span_type": "OpenTelemetry",
+            "attributes": {
+                "openinference.span.kind": "CHAIN"
+            }
+        },
+        {
+            "name": [
+                "UiPathChat",
+                "UiPathAzureChatOpenAI"
+            ],
+            "span_type": "OpenTelemetry",
+            "attributes": {
+                "openinference.span.kind": "LLM",
+                "llm.provider": "azure",
+                "llm.system": "openai",
+                "llm.model_name": "gpt-4o-2024-08-06"
+            }
+        },
+        {
+            "name": "duckduckgo_results_json",
+            "span_type": "OpenTelemetry",
+            "attributes": {
+                "openinference.span.kind": "TOOL",
+                "tool.name": "duckduckgo_results_json",
+                "tool.description": "A wrapper around Duck Duck Go Search. Useful for when you need to answer questions about current events. Input should be a search query."
+            }
+        }
+    ]
+}

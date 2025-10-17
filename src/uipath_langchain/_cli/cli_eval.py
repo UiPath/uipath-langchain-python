@@ -15,12 +15,12 @@ from uipath._cli._utils._eval_set import EvalHelpers
 from uipath._cli.middlewares import MiddlewareResult
 from uipath._events._event_bus import EventBus
 from uipath.eval._helpers import auto_discover_entrypoint
+from uipath.tracing import LlmOpsHttpExporter
 
 from uipath_langchain._cli._runtime._context import LangGraphRuntimeContext
 from uipath_langchain._cli._runtime._runtime import LangGraphScriptRuntime
 from uipath_langchain._cli._utils._graph import LangGraphConfig
 from uipath_langchain._tracing import (
-    LangChainExporter,
     _instrument_traceable_attributes,
 )
 
@@ -41,7 +41,7 @@ def langgraph_eval_middleware(
 
         if kwargs.get("register_progress_reporter", False):
             progress_reporter = StudioWebProgressReporter(
-                spans_exporter=LangChainExporter()
+                spans_exporter=LlmOpsHttpExporter(extra_process_spans=True)
             )
             asyncio.run(progress_reporter.subscribe_to_eval_runtime_events(event_bus))
         console_reporter = ConsoleProgressReporter()
@@ -76,7 +76,9 @@ def langgraph_eval_middleware(
         )
 
         if eval_context.job_id:
-            runtime_factory.add_span_exporter(LangChainExporter())
+            runtime_factory.add_span_exporter(
+                LlmOpsHttpExporter(extra_process_spans=True)
+            )
 
         runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
 
