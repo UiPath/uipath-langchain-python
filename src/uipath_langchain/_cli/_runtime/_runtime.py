@@ -1,24 +1,27 @@
 import logging
 import os
-from typing import Any, List, Optional, Sequence
+from typing import Any, Optional, Sequence
 
-from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Interrupt, StateSnapshot
 from uipath._cli._runtime._contracts import (
     UiPathBaseRuntime,
     UiPathErrorCategory,
+    UiPathResumeTrigger,
     UiPathRuntimeResult,
+    UiPathRuntimeStatus,
 )
 
 from ._context import LangGraphRuntimeContext
 from ._conversation import map_message
 from ._exception import LangGraphRuntimeError
 from ._graph_resolver import AsyncResolver, LangGraphJsonResolver
-from ._input import LangGraphInputProcessor
-from ._output import LangGraphOutputProcessor
+from ._input import get_graph_input
+from ._output import create_and_save_resume_trigger, serialize_output
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
         super().__init__(context)
         self.context: LangGraphRuntimeContext = context
         self.graph_resolver: AsyncResolver = graph_resolver
+        self.resume_triggers_table: str = "__uipath_resume_triggers"
 
     async def execute(self) -> Optional[UiPathRuntimeResult]:
         """
@@ -44,7 +48,6 @@ class LangGraphRuntime(UiPathBaseRuntime):
         Raises:
             LangGraphRuntimeError: If execution fails
         """
-
         graph = await self.graph_resolver()
         if not graph:
             return None
@@ -55,132 +58,225 @@ class LangGraphRuntime(UiPathBaseRuntime):
             ) as memory:
                 self.context.memory = memory
 
-                # Compile the graph with the checkpointer
-                compiled_graph = graph.compile(checkpointer=self.context.memory)
+                # Compile the graph with the checkpointer and any debug interrupts
+                interrupt_before: list[str] = []
+                interrupt_after: list[str] = []
+
+                compiled_graph = graph.compile(
+                    checkpointer=self.context.memory,
+                    interrupt_before=interrupt_before,
+                    interrupt_after=interrupt_after,
+                )
 
                 # Process input, handling resume if needed
-                input_processor = LangGraphInputProcessor(context=self.context)
+                graph_input = await get_graph_input(
+                    context=self.context,
+                    memory=self.context.memory,
+                    resume_triggers_table=self.resume_triggers_table,
+                )
 
-                processed_input = await input_processor.process()
+                # Build graph config
+                graph_config: RunnableConfig = self._get_graph_config()
+                graph_output: Optional[Any] = None
 
-                callbacks: List[BaseCallbackHandler] = []
-
-                graph_config: RunnableConfig = {
-                    "configurable": {
-                        "thread_id": (
-                            self.context.execution_id
-                            or self.context.job_id
-                            or "default"
-                        )
-                    },
-                    "callbacks": callbacks,
-                }
-
-                recursion_limit = os.environ.get("LANGCHAIN_RECURSION_LIMIT", None)
-                max_concurrency = os.environ.get("LANGCHAIN_MAX_CONCURRENCY", None)
-
-                if recursion_limit is not None:
-                    graph_config["recursion_limit"] = int(recursion_limit)
-                if max_concurrency is not None:
-                    graph_config["max_concurrency"] = int(max_concurrency)
-
+                # Execute the graph
                 if self.context.chat_handler or self.is_debug_run():
-                    final_chunk: Optional[dict[Any, Any]] = None
-                    async for stream_chunk in compiled_graph.astream(
-                        processed_input,
-                        graph_config,
-                        stream_mode=["messages", "updates"],
-                        subgraphs=True,
-                    ):
-                        _, chunk_type, data = stream_chunk
-                        if chunk_type == "messages":
-                            if self.context.chat_handler:
-                                if isinstance(data, tuple):
-                                    message, _ = data
-                                    event = map_message(
-                                        message=message,
-                                        conversation_id=self.context.execution_id,
-                                        exchange_id=self.context.execution_id,
-                                    )
-                                    if event:
-                                        self.context.chat_handler.on_event(event)
-                        elif chunk_type == "updates":
-                            if isinstance(data, dict):
-                                # data is a dict, e.g. {'agent': {'messages': [...]}}
-                                for agent_data in data.values():
-                                    if isinstance(agent_data, dict):
-                                        messages = agent_data.get("messages", [])
-                                        if isinstance(messages, list):
-                                            for message in messages:
-                                                if isinstance(message, BaseMessage):
-                                                    message.pretty_print()
-                                final_chunk = data
-
-                    self.context.output = self._extract_graph_result(
-                        final_chunk, compiled_graph.output_channels
+                    # Stream mode for debugging or chat
+                    graph_output = await self._execute_streaming(
+                        compiled_graph, graph_input, graph_config
                     )
                 else:
-                    # Execute the graph normally at runtime or eval
-                    self.context.output = await compiled_graph.ainvoke(
-                        processed_input, graph_config
+                    # Normal mode
+                    graph_output = await compiled_graph.ainvoke(
+                        graph_input, graph_config
                     )
 
-                # Get the state if available
+                # Get the final state
+                graph_state: Optional[StateSnapshot] = None
                 try:
-                    self.context.state = await compiled_graph.aget_state(graph_config)
+                    graph_state = await compiled_graph.aget_state(graph_config)
                 except Exception:
                     pass
 
-                output_processor = await LangGraphOutputProcessor.create(self.context)
-
-                self.context.result = await output_processor.process()
+                # Check if execution was interrupted (static or dynamic)
+                if graph_state and self._is_interrupted(graph_state):
+                    self.context.result = await self._create_suspended_result(
+                        graph_state, self.context.memory, graph_output
+                    )
+                else:
+                    # Normal completion
+                    self.context.result = self._create_success_result(graph_output)
 
                 return self.context.result
 
         except Exception as e:
-            if isinstance(e, LangGraphRuntimeError):
-                raise
+            raise self._create_runtime_error(e) from e
 
-            detail = f"Error: {str(e)}"
+    async def _execute_streaming(
+        self,
+        compiled_graph: CompiledStateGraph[Any, Any, Any],
+        graph_input: Any,
+        graph_config: RunnableConfig,
+    ) -> Any:
+        """Execute graph in streaming mode for chat/debug."""
+        final_chunk: Optional[dict[Any, Any]] = None
 
-            if isinstance(e, GraphRecursionError):
-                raise LangGraphRuntimeError(
-                    "GRAPH_RECURSION_ERROR",
-                    "Graph recursion limit exceeded",
-                    detail,
-                    UiPathErrorCategory.USER,
-                ) from e
+        async for stream_chunk in compiled_graph.astream(
+            graph_input,
+            graph_config,
+            stream_mode=["messages", "updates"],
+            subgraphs=True,
+        ):
+            _, chunk_type, data = stream_chunk
 
-            if isinstance(e, InvalidUpdateError):
-                raise LangGraphRuntimeError(
-                    "GRAPH_INVALID_UPDATE",
-                    str(e),
-                    detail,
-                    UiPathErrorCategory.USER,
-                ) from e
+            if chunk_type == "messages" and self.context.chat_handler:
+                if isinstance(data, tuple):
+                    message, _ = data
+                    event = map_message(
+                        message=message,
+                        conversation_id=self.context.execution_id,
+                        exchange_id=self.context.execution_id,
+                    )
+                    if event:
+                        self.context.chat_handler.on_event(event)
 
-            if isinstance(e, EmptyInputError):
-                raise LangGraphRuntimeError(
-                    "GRAPH_EMPTY_INPUT",
-                    "The input data is empty",
-                    detail,
-                    UiPathErrorCategory.USER,
-                ) from e
+            elif chunk_type == "updates":
+                if isinstance(data, dict):
+                    # Print messages if in debug mode
+                    for agent_data in data.values():
+                        if isinstance(agent_data, dict):
+                            messages = agent_data.get("messages", [])
+                            if isinstance(messages, list):
+                                for message in messages:
+                                    if isinstance(message, BaseMessage):
+                                        message.pretty_print()
+                    final_chunk = data
 
-            raise LangGraphRuntimeError(
-                "EXECUTION_ERROR",
-                "Graph execution failed",
+        return self._extract_graph_result(final_chunk, compiled_graph.output_channels)
+
+    def _is_interrupted(self, state: StateSnapshot) -> bool:
+        """Check if execution was interrupted (static or dynamic)."""
+        # Check for static interrupts (interrupt_before/after)
+        if hasattr(state, "next") and state.next:
+            return True
+
+        # Check for dynamic interrupts (interrupt() inside node)
+        if hasattr(state, "tasks"):
+            for task in state.tasks:
+                if hasattr(task, "interrupts") and task.interrupts:
+                    return True
+
+        return False
+
+    def _get_dynamic_interrupt(self, state: StateSnapshot) -> Optional[Interrupt]:
+        """Get the first dynamic interrupt if any."""
+        if not hasattr(state, "tasks"):
+            return None
+
+        for task in state.tasks:
+            if hasattr(task, "interrupts") and task.interrupts:
+                for interrupt in task.interrupts:
+                    if isinstance(interrupt, Interrupt):
+                        return interrupt
+        return None
+
+    async def _create_suspended_result(
+        self,
+        graph_state: StateSnapshot,
+        graph_memory: AsyncSqliteSaver,
+        graph_output: Optional[Any],
+    ) -> UiPathRuntimeResult:
+        """Create result for suspended execution."""
+        # Check if it's a dynamic interrupt
+        dynamic_interrupt: Optional[Interrupt] = self._get_dynamic_interrupt(
+            graph_state
+        )
+        resume_trigger: Optional[UiPathResumeTrigger] = None
+
+        if dynamic_interrupt:
+            # Dynamic interrupt - create and save resume trigger
+            resume_trigger = await create_and_save_resume_trigger(
+                interrupt_value=dynamic_interrupt.value,
+                memory=graph_memory,
+                resume_triggers_table=self.resume_triggers_table,
+            )
+            output = serialize_output(graph_output)
+        else:
+            # Static interrupt (breakpoint)
+            # Output represents the current graph state values
+            output = serialize_output(graph_state.values)
+
+        return UiPathRuntimeResult(
+            output=output,
+            status=UiPathRuntimeStatus.SUSPENDED,
+            resume=resume_trigger,
+        )
+
+    def _create_success_result(self, output: Optional[Any]) -> UiPathRuntimeResult:
+        """Create result for successful completion."""
+        return UiPathRuntimeResult(
+            output=serialize_output(output),
+            status=UiPathRuntimeStatus.SUCCESSFUL,
+        )
+
+    def _create_runtime_error(self, e: Exception) -> Exception:
+        """Handle execution errors and raise appropriate LangGraphRuntimeError."""
+        if isinstance(e, LangGraphRuntimeError):
+            return e
+
+        detail = f"Error: {str(e)}"
+
+        if isinstance(e, GraphRecursionError):
+            return LangGraphRuntimeError(
+                "GRAPH_RECURSION_ERROR",
+                "Graph recursion limit exceeded",
                 detail,
                 UiPathErrorCategory.USER,
-            ) from e
-        finally:
-            pass
+            )
 
-    async def validate(self) -> None:
-        pass
+        if isinstance(e, InvalidUpdateError):
+            return LangGraphRuntimeError(
+                "GRAPH_INVALID_UPDATE",
+                str(e),
+                detail,
+                UiPathErrorCategory.USER,
+            )
 
-    async def cleanup(self):
-        pass
+        if isinstance(e, EmptyInputError):
+            return LangGraphRuntimeError(
+                "GRAPH_EMPTY_INPUT",
+                "The input data is empty",
+                detail,
+                UiPathErrorCategory.USER,
+            )
+
+        return LangGraphRuntimeError(
+            "EXECUTION_ERROR",
+            "Graph execution failed",
+            detail,
+            UiPathErrorCategory.USER,
+        )
+
+    def _get_graph_config(self) -> RunnableConfig:
+        graph_config: RunnableConfig = {
+            "configurable": {
+                "thread_id": (
+                    self.context.execution_id or self.context.job_id or "default"
+                )
+            },
+            "callbacks": [],
+        }
+
+        # Add optional config
+        recursion_limit = os.environ.get("LANGCHAIN_RECURSION_LIMIT", None)
+        max_concurrency = os.environ.get("LANGCHAIN_MAX_CONCURRENCY", None)
+
+        if recursion_limit is not None:
+            graph_config["recursion_limit"] = int(recursion_limit)
+        if max_concurrency is not None:
+            graph_config["max_concurrency"] = int(max_concurrency)
+
+        return graph_config
 
     def _extract_graph_result(self, final_chunk, output_channels: str | Sequence[str]):
         """
@@ -237,6 +333,12 @@ class LangGraphRuntime(UiPathBaseRuntime):
 
         # Fallback for any other case
         return final_chunk
+
+    async def validate(self) -> None:
+        pass
+
+    async def cleanup(self):
+        pass
 
 
 class LangGraphScriptRuntime(LangGraphRuntime):
