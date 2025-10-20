@@ -1,0 +1,17 @@
+[project]
+name = "oauth-external-apps-agent"
+version = "0.0.7"
+description = "Agent that connects to an MCP server implementing OAuth using an external application."
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+dependencies = [
+    "uipath-langchain>=0.0.140",
+    "langchain>=0.3.26",
+    "langchain-anthropic>=0.3.17",
+    "langgraph>=0.5.3",
+    "python-dotenv>=1.0.0",
+    "anthropic>=0.57.1",
+    "langchain-mcp-adapters>=0.1.9",
+    "mypy>=1.17.1",
+    "uipath>=2.1.38",
+]
+requires-python = ">=3.10"
