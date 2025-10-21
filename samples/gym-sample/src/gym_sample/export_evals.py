@@ -113,6 +113,12 @@ def export_evaluators(agent_name: str, output_dir: Path, only_supported: bool = 
         "JsonSimilarityEvaluator",
         "LLMJudgeOutputEvaluator",
         "LLMJudgeStrictJSONSimilarityOutputEvaluator",
+        "ToolCallOrderEvaluator",
+        "ToolCallCountEvaluator",
+        "ToolCallArgsEvaluator",
+        "ToolCallOutputEvaluator",
+        "LLMJudgeTrajectoryEvaluator",
+        "LLMJudgeTrajectorySimulationEvaluator",
     }
 
     evaluators_getter = get_all_evaluators()[agent_name]
