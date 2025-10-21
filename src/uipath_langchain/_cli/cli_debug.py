@@ -6,13 +6,12 @@ from openinference.instrumentation.langchain import (
     LangChainInstrumentor,
     get_current_span,
 )
-from uipath._cli._debug._bridge import ConsoleDebugBridge, UiPathDebugBridge
+from uipath._cli._debug._bridge import UiPathDebugBridge, get_debug_bridge
+from uipath._cli._debug._runtime import UiPathDebugRuntime
 from uipath._cli._runtime._contracts import (
     UiPathRuntimeFactory,
-    UiPathRuntimeResult,
 )
 from uipath._cli.middlewares import MiddlewareResult
-from uipath._events._events import UiPathAgentStateEvent
 
 from .._tracing import LangChainExporter, _instrument_traceable_attributes
 from ._runtime._exception import LangGraphRuntimeError
@@ -23,7 +22,7 @@ from ._runtime._runtime import (  # type: ignore[attr-defined]
 from ._utils._graph import LangGraphConfig
 
 
-def langgraph_run_middleware(
+def langgraph_debug_middleware(
     entrypoint: Optional[str], input: Optional[str], resume: bool, **kwargs
 ) -> MiddlewareResult:
     """Middleware to handle LangGraph execution"""
@@ -41,6 +40,7 @@ def langgraph_run_middleware(
             context.input = input
             context.resume = resume
             context.execution_id = context.job_id or "default"
+
             _instrument_traceable_attributes()
 
             def generate_runtime(
@@ -57,21 +57,22 @@ def langgraph_run_middleware(
                 LangGraphScriptRuntime,
                 LangGraphRuntimeContext,
                 runtime_generator=generate_runtime,
+                context_generator=lambda: context,
             )
-
-            runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
 
             if context.job_id:
                 runtime_factory.add_span_exporter(LangChainExporter())
-                await runtime_factory.execute(context)
-            else:
-                debug_bridge: UiPathDebugBridge = ConsoleDebugBridge()
-                await debug_bridge.emit_execution_started(context.execution_id)
-                async for event in runtime_factory.stream(context):
-                    if isinstance(event, UiPathRuntimeResult):
-                        await debug_bridge.emit_execution_completed(event)
-                    elif isinstance(event, UiPathAgentStateEvent):
-                        await debug_bridge.emit_state_update(event)
+
+            runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
+
+            debug_bridge: UiPathDebugBridge = get_debug_bridge(context)
+
+            async with UiPathDebugRuntime.from_debug_context(
+                factory=runtime_factory,
+                context=context,
+                debug_bridge=debug_bridge,
+            ) as debug_runtime:
+                await debug_runtime.execute()
 
         asyncio.run(execute())
 

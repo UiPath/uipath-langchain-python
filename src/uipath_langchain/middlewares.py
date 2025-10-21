@@ -1,5 +1,6 @@
 from uipath._cli.middlewares import Middlewares
 
+from ._cli.cli_debug import langgraph_debug_middleware
 from ._cli.cli_dev import langgraph_dev_middleware
 from ._cli.cli_eval import langgraph_eval_middleware
 from ._cli.cli_init import langgraph_init_middleware
@@ -14,3 +15,4 @@ def register_middleware():
     Middlewares.register("new", langgraph_new_middleware)
     Middlewares.register("dev", langgraph_dev_middleware)
     Middlewares.register("eval", langgraph_eval_middleware)
+    Middlewares.register("debug", langgraph_debug_middleware)

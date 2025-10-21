@@ -11,13 +11,13 @@ from langgraph.types import interrupt
 from pydantic import BaseModel
 from uipath import UiPath
 from uipath.agent.models.agent import (
-    AgentDefinition,
     AgentEscalationChannel,
     AgentEscalationResourceConfig,
     AgentIntegrationToolParameter,
     AgentIntegrationToolResourceConfig,
     AgentProcessToolResourceConfig,
     AgentResourceConfig,
+    LowCodeAgentDefinition,
 )
 from uipath.models import CreateAction, InvokeProcess
 from uipath.models.connections import ConnectionTokenType
@@ -208,7 +208,7 @@ def create_resource_tool(
 
 
 def safe_extract_tools(
-    agent_definition: AgentDefinition, cache: Optional[BaseCache] = None
+    agent_definition: LowCodeAgentDefinition, cache: Optional[BaseCache] = None
 ) -> list[BaseTool]:
     tools = []
     for resource in agent_definition.resources:
