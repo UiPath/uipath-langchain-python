@@ -285,6 +285,161 @@ def get_datapoints() -> List[Datapoint]:
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 311}},
             },
         ),
+        Datapoint(
+            name="TestToolCallOutput1",
+            input={"expression": "how much is 10 + 15"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 25.0}},
+                "ContainsEvaluator": {"search_text": "25"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 25.0}},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"add": ("=", 1)}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["add"]},
+                "ToolCallArgsEvaluator": {"tool_calls": [{"name": "add", "args": {"a": 10, "b": 15}}]},
+                "ToolCallOutputEvaluator": {"tool_outputs": [{"name": "add", "output": "25"}]},
+                "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 25}},
+            },
+        ),
+        Datapoint(
+            name="TestToolCallOutput2",
+            input={"expression": "how much is 6 * 7"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 42.0}},
+                "ContainsEvaluator": {"search_text": "42"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 42.0}},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"multiply": ("=", 1)}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["multiply"]},
+                "ToolCallArgsEvaluator": {"tool_calls": [{"name": "multiply", "args": {"a": 6, "b": 7}}]},
+                "ToolCallOutputEvaluator": {"tool_outputs": [{"name": "multiply", "output": "42"}]},
+                "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 42}},
+            },
+        ),
+        Datapoint(
+            name="TestToolCallOutput3",
+            input={"expression": "how much is 100 + 50 * 2"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 200.0}},
+                "ContainsEvaluator": {"search_text": "200"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 200.0}},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"multiply": ("=", 1), "add": ("=", 1)}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["multiply", "add"]},
+                "ToolCallArgsEvaluator": {"tool_calls": [
+                    {"name": "multiply", "args": {"a": 50, "b": 2}},
+                    {"name": "add", "args": {"a": 100, "b": 100}}
+                ]},
+                "ToolCallOutputEvaluator": {"tool_outputs": [
+                    {"name": "multiply", "output": "100"},
+                    {"name": "add", "output": "200"}
+                ]},
+                "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 200}},
+            },
+        ),
+        Datapoint(
+            name="TestStrictJSONSimilarity1",
+            input={"expression": "how much is 12 + 13"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 25.0}},
+                "ContainsEvaluator": {"search_text": "25"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 25.0}},
+                "LLMJudgeStrictJSONSimilarityOutputEvaluator": {"expected_output": {"answer": 25.0}},
+            },
+        ),
+        Datapoint(
+            name="TestStrictJSONSimilarity2",
+            input={"expression": "how much is 9 * 9"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 81.0}},
+                "ContainsEvaluator": {"search_text": "81"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 81.0}},
+                "LLMJudgeStrictJSONSimilarityOutputEvaluator": {"expected_output": {"answer": 81.0}},
+            },
+        ),
+        Datapoint(
+            name="TestTrajectory1",
+            input={"expression": "how much is 4 + 5 * 3"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 19.0}},
+                "ContainsEvaluator": {"search_text": "19"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 19.0}},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"multiply": ("=", 1), "add": ("=", 1)}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["multiply", "add"]},
+                "LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should follow the order of operations, first multiplying 5 and 3 to get 15, then adding 4 to get 19."
+                },
+            },
+        ),
+        Datapoint(
+            name="TestTrajectory2",
+            input={"expression": "how much is (1 + 2) * (3 + 4)"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 21.0}},
+                "ContainsEvaluator": {"search_text": "21"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 21.0}},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"add": ("=", 2), "multiply": ("=", 1)}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["add", "add", "multiply"]},
+                "LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should evaluate parentheses first: add 1 and 2 to get 3, add 3 and 4 to get 7, then multiply 3 and 7 to get 21."
+                },
+            },
+        ),
+        Datapoint(
+            name="TestTrajectory3",
+            input={"expression": "how much is 2 * 3 + 4 * 5"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 26.0}},
+                "ContainsEvaluator": {"search_text": "26"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 26.0}},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"multiply": ("=", 2), "add": ("=", 1)}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["multiply", "multiply", "add"]},
+                "LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should perform multiplications first (2*3=6 and 4*5=20), then add the results (6+20=26)."
+                },
+            },
+        ),
+        Datapoint(
+            name="TestTrajectorySimulation1",
+            input={"expression": "how much is a + 10"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 27.0}},
+                "ContainsEvaluator": {"search_text": "27"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 27.0}},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"escalation": ("=", 1), "add": ("=", 1)}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["escalation", "add"]},
+                "LLMJudgeTrajectorySimulationEvaluator": {
+                    "expected_agent_behavior": "The agent should recognize that 'a' is an unknown variable, escalate to get its value (17), then add 10 to get 27."
+                },
+            },
+            simulation_instructions="When the agent asks for the value of 'a', respond with 17.",
+        ),
+        Datapoint(
+            name="TestTrajectorySimulation2",
+            input={"expression": "how much is m * n + 5"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 294.0}},
+                "ContainsEvaluator": {"search_text": "294"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 294.0}},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"escalation": ("=", 2), "multiply": ("=", 1), "add": ("=", 1)}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["escalation", "escalation", "multiply", "add"]},
+                "LLMJudgeTrajectorySimulationEvaluator": {
+                    "expected_agent_behavior": "The agent should identify two missing variables (m and n), escalate twice to get their values (both 17), multiply them to get 289, then add 5 to get 294."
+                },
+            },
+            simulation_instructions="When the agent asks for missing values, respond with 17 for each variable.",
+        ),
+        Datapoint(
+            name="TestTrajectorySimulation3",
+            input={"expression": "how much is (p + q) * r"},
+            evaluation_criteria={
+                "ExactMatchEvaluator": {"expected_output": {"answer": 578.0}},
+                "ContainsEvaluator": {"search_text": "578"},
+                "JsonSimilarityEvaluator": {"expected_output": {"answer": 578.0}},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"escalation": ("=", 3), "add": ("=", 1), "multiply": ("=", 1)}},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["escalation", "escalation", "escalation", "add", "multiply"]},
+                "LLMJudgeTrajectorySimulationEvaluator": {
+                    "expected_agent_behavior": "The agent should recognize three missing variables (p, q, r), escalate three times to get their values (all 17), add p and q (17+17=34), then multiply by r (34*17=578)."
+                },
+            },
+            simulation_instructions="When the agent asks for missing values, respond with 17 for each variable (p, q, and r).",
+        ),
     ]
 
 
