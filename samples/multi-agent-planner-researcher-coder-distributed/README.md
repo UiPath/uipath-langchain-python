@@ -220,6 +220,8 @@ Select feed number: 3
    > **Note:** Ensure that the display names for the coder and researcher agent processes are *coder-agent* and *researcher-agent*,
         and that all 3 agents are placed in the same folder.
 
+    > **Warning:** An agent can invoke itself if needed, but this must be done with caution. Be mindful that using the same name for invocation may lead to unintentional loops. To prevent recursion issues, implement safeguards like exit conditions.
+
 7. **Run the Planner Agent with Any Input Question**
    > **Tip:** For a five-step action plan, consider using the following input:
    ```
