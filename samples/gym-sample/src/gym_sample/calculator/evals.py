@@ -59,13 +59,6 @@ def get_evaluators(include_llm_judge: bool = False) -> List[LegacyBaseEvaluator 
                     "temperature": 0.0,
                 },
             }),
-            LLMJudgeStrictJSONSimilarityOutputEvaluator.model_validate({
-                "id": "LLMJudgeStrictJSONSimilarityOutputEvaluator",
-                "config": {
-                    "model": "gpt-4o-2024-11-20",
-                    "temperature": 0.0,
-                },
-            }),
             LLMJudgeTrajectoryEvaluator.model_validate({
                 "id": "LLMJudgeTrajectoryEvaluator",
                 "config": {
