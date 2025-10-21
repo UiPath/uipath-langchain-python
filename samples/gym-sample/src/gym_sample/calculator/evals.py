@@ -5,6 +5,7 @@ from uipath.eval.coded_evaluators import (
     ExactMatchEvaluator,
     ContainsEvaluator,
     JsonSimilarityEvaluator,
+    LLMJudgeTrajectorySimulationEvaluator,
     ToolCallOrderEvaluator,
     ToolCallCountEvaluator,
     ToolCallArgsEvaluator,
@@ -12,7 +13,7 @@ from uipath.eval.coded_evaluators import (
     LLMJudgeOutputEvaluator,
     LLMJudgeStrictJSONSimilarityOutputEvaluator,
     LLMJudgeTrajectoryEvaluator,
-    LLMJudgeSimulationTrajectoryEvaluator,
+    LLMJudgeTrajectorySimulationEvaluator,
 )
 
 def get_evaluators(include_llm_judge: bool = False) -> List[LegacyBaseEvaluator | BaseEvaluator]:
@@ -72,8 +73,8 @@ def get_evaluators(include_llm_judge: bool = False) -> List[LegacyBaseEvaluator 
                     "temperature": 0.0,
                 },
             }),
-            LLMJudgeSimulationTrajectoryEvaluator.model_validate({
-                "id": "LLMJudgeSimulationTrajectoryEvaluator",
+            LLMJudgeTrajectorySimulationEvaluator.model_validate({
+                "id": "LLMJudgeTrajectorySimulationEvaluator",
                 "config": {
                     "model": "gpt-4o-2024-11-20",
                     "temperature": 0.0,

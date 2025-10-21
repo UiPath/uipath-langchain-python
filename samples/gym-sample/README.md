@@ -101,6 +101,14 @@ uv sync
 
 **Important**: After `uv sync`, the `gym_sample` package is properly installed and **no PYTHONPATH configuration is needed**. You can run Python modules directly, debug with F5 in VS Code, or use the convenience shell scripts.
 
+### Updating Git Dependencies
+
+This project uses a specific commit from the UiPath SDK that includes **tool call evaluators** (`ToolCallArgsEvaluator`, `ToolCallCountEvaluator`, `ToolCallOrderEvaluator`, `ToolCallOutputEvaluator`) and trajectory evaluators.
+
+When setting up **for the first time**, `uv sync` automatically installs this version.
+
+**Note:** We use a specific commit (not a branch) because later commits on the `mj/wire-tool` branch have configuration issues that prevent installation with `uv`. Once the upstream issue is resolved, this can be updated to track the branch directly.
+
 ## Authentication
 
 Before running any agents, authenticate with UiPath:
