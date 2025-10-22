@@ -7,7 +7,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel
 
-from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat 
+from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
 
 # Configuration constants
 MAX_SEARCH_RESULTS = 5
@@ -30,13 +30,14 @@ SYSTEM_PROMPT = """You are an advanced AI assistant specializing in corporate re
 4. Developing outreach strategies: Based on the gathered information, create tailored strategies for effective communication and engagement with the company and its key personnel.
 
 To accomplish these tasks, follow these steps:
-1. Use the TavilySearchResults tool to find recent and relevant information about the company.
+1. Use the search tool to find recent and relevant information about the company.
 2. Analyze the collected data to form insights about the company's structure, key decision-makers, and potential outreach strategies.
 
 When using the search tool:
 - Clearly state the purpose of each search.
 - Formulate effective search queries to find specific information about different aspects of the company.
-- If a search doesn't provide the expected information, try refining your query.
+- If a search doesn't provide the expected information, try refining your query up to 3 times maximum.
+- After 3 failed search attempts, stop trying and provide your response based on available information.
 
 When responding, structure your output as a comprehensive analysis. Use clear section headers to organize the information. Provide concise, actionable insights. If you need more information to complete any part of your analysis, clearly state what additional details would be helpful.
 
@@ -88,27 +89,27 @@ async def research_node(state: GraphState) -> GraphOutput:
     """Research node that performs company analysis."""
     research_agent = create_research_agent()
     user_message = create_user_message(state.company_name)
-    
+
     # Create message state for the agent
     message_state = MessagesState(messages=[{"role": "user", "content": user_message}])
-    
+
     # Invoke the research agent
     result = await research_agent.ainvoke(message_state)
-    
+
     return GraphOutput(response=result["messages"][-1].content)
 
 
 def build_research_graph() -> StateGraph:
     """Build and compile the research graph."""
     builder = StateGraph(GraphState, output=GraphOutput)
-    
+
     # Add nodes
     builder.add_node("researcher", research_node)
-    
+
     # Add edges
     builder.add_edge(START, "researcher")
     builder.add_edge("researcher", END)
-    
+
     return builder.compile()
 
 
