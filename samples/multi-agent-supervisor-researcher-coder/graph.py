@@ -1,8 +1,8 @@
 from typing import Annotated, Literal
 
 from langchain_anthropic import ChatAnthropic
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_tavily import TavilySearch
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_core.tools import tool
 from langchain_experimental.utilities import PythonREPL
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -11,7 +11,8 @@ from langgraph.types import Command
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
-tavily_tool = TavilySearchResults(max_results=5)
+
+tavily_tool = TavilySearch(max_results=5)
 
 # This executes code locally, which can be unsafe
 repl = PythonREPL()
@@ -28,7 +29,7 @@ def python_repl_tool(
         result = repl.run(code)
     except BaseException as e:
         return f"Failed to execute. Error: {repr(e)}"
-    result_str = f"Successfully executed:\n\`\`\`python\n{code}\n\`\`\`\nStdout: {result}"
+    result_str = f"Successfully executed:\n```python\n{code}\n```\nStdout: {result}"
     return result_str
 
 members = ["researcher", "coder"]
@@ -62,6 +63,16 @@ class GraphOutput(BaseModel):
 class State(MessagesState):
     next: str
 
+def get_message_text(msg: BaseMessage) -> str:
+    """LangChain-style safe message text extractor."""
+    if isinstance(msg.content, str):
+        return msg.content
+    if isinstance(msg.content, list):
+        return "".join(
+            block.get("text", "") for block in msg.content if block.get("type") == "text"
+        )
+    return ""
+
 def input(state: GraphInput):
     return {
         "messages": [
@@ -75,7 +86,7 @@ async def supervisor_node(state: State) -> Command[Literal[*members]] | GraphOut
     response = await llm.with_structured_output(Router).ainvoke(state["messages"])
     goto = response["next"]
     if goto == "FINISH":
-        return GraphOutput(answer=state["messages"][-1].content)
+        return GraphOutput(answer=get_message_text(state["messages"][-1]))
     else:
         return Command(goto=goto, update={"next": goto})
 

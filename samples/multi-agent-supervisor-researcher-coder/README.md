@@ -19,36 +19,37 @@ graph TD;
 	__start__([<p>__start__</p>]):::first
 	input(input)
 	supervisor(supervisor)
+	__end__([<p>__end__</p>]):::last
 	__start__ --> input;
+	coder\3a__end__ -.-> supervisor;
 	input --> supervisor;
-	supervisor -.-> researcher___start__;
-	supervisor -.-> coder___start__;
-	researcher___end__ -.-> supervisor;
-	coder___end__ -.-> supervisor;
+	researcher\3a__end__ -.-> supervisor;
+	supervisor -.-> coder\3a__start__;
+	supervisor -.-> researcher\3a__start__;
+	supervisor -.-> __end__;
 	subgraph researcher
-	researcher___start__(<p>__start__</p>)
-	researcher_agent(agent)
-	researcher_tools(tools)
-	researcher___end__(<p>__end__</p>)
-	researcher___start__ --> researcher_agent;
-	researcher_tools --> researcher_agent;
-	researcher_agent -.-> researcher_tools;
-	researcher_agent -.-> researcher___end__;
+	researcher\3a__start__(<p>__start__</p>)
+	researcher\3aagent(agent)
+	researcher\3atools(tools)
+	researcher\3a__end__(<p>__end__</p>)
+	researcher\3a__start__ --> researcher\3aagent;
+	researcher\3aagent -.-> researcher\3a__end__;
+	researcher\3aagent -.-> researcher\3atools;
+	researcher\3atools --> researcher\3aagent;
 	end
 	subgraph coder
-	coder___start__(<p>__start__</p>)
-	coder_agent(agent)
-	coder_tools(tools)
-	coder___end__(<p>__end__</p>)
-	coder___start__ --> coder_agent;
-	coder_tools --> coder_agent;
-	coder_agent -.-> coder_tools;
-	coder_agent -.-> coder___end__;
+	coder\3a__start__(<p>__start__</p>)
+	coder\3aagent(agent)
+	coder\3atools(tools)
+	coder\3a__end__(<p>__end__</p>)
+	coder\3a__start__ --> coder\3aagent;
+	coder\3aagent -.-> coder\3a__end__;
+	coder\3aagent -.-> coder\3atools;
+	coder\3atools --> coder\3aagent;
 	end
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc
-
 ```
 
 ## How It Works
@@ -68,7 +69,7 @@ graph TD;
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
 - LangGraph
 - Anthropic API key (for Claude)
 - Tavily API key (for web search)
