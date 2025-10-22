@@ -5,11 +5,12 @@ description = "Multi-agent system where a supervisor coordinates between a resea
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.10"
 dependencies = [
-    "langgraph>=0.2.55",
-    "langchain-anthropic>=0.3.8",
+    "langgraph>=0.6.11",
+    "langchain-anthropic>=0.3.22",
     "langchain-experimental>=0.3.4",
-    "tavily-python>=0.5.0",
-    "uipath-langchain==0.0.124"
+    "tavily-python>=0.7.12",
+    "uipath-langchain==0.0.141",
+    "langchain-tavily>=0.2.12",
 ]
 
 [project.optional-dependencies]
