@@ -4,7 +4,7 @@ from typing import Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from .state import AgentGraphState
+from .types import AgentGraphState
 
 
 def create_init_node(
