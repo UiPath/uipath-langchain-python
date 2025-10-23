@@ -40,7 +40,6 @@ def langgraph_run_middleware(
             context.entrypoint = entrypoint
             context.input = input
             context.resume = resume
-            context.execution_id = context.job_id or "default"
             _instrument_traceable_attributes()
 
             def generate_runtime(
@@ -66,7 +65,7 @@ def langgraph_run_middleware(
                 await runtime_factory.execute(context)
             else:
                 debug_bridge: UiPathDebugBridge = ConsoleDebugBridge()
-                await debug_bridge.emit_execution_started(context.execution_id)
+                await debug_bridge.emit_execution_started("default")
                 async for event in runtime_factory.stream(context):
                     if isinstance(event, UiPathRuntimeResult):
                         await debug_bridge.emit_execution_completed(event)

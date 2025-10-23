@@ -39,7 +39,6 @@ def langgraph_debug_middleware(
             context.entrypoint = entrypoint
             context.input = input
             context.resume = resume
-            context.execution_id = context.job_id or "default"
 
             _instrument_traceable_attributes()
 
