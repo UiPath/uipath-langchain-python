@@ -12,8 +12,9 @@ from uipath._cli._runtime._contracts import (
     UiPathRuntimeFactory,
 )
 from uipath._cli.middlewares import MiddlewareResult
+from uipath.tracing import LlmOpsHttpExporter
 
-from .._tracing import LangChainExporter, _instrument_traceable_attributes
+from .._tracing import _instrument_traceable_attributes
 from ._runtime._exception import LangGraphRuntimeError
 from ._runtime._runtime import (  # type: ignore[attr-defined]
     LangGraphRuntimeContext,
@@ -61,7 +62,9 @@ def langgraph_debug_middleware(
             )
 
             if context.job_id:
-                runtime_factory.add_span_exporter(LangChainExporter())
+                runtime_factory.add_span_exporter(
+                    LlmOpsHttpExporter(extra_process_spans=True)
+                )
 
             runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
 
