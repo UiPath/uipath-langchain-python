@@ -1,41 +1,118 @@
 {
-  "description": "Simple trace assertions - just check key spans exist",
+  "description": "Expected traces for simple-local-mcp test with MCP tools",
   "required_spans": [
     {
       "name": "LangGraph",
       "span_type": "OpenTelemetry",
       "attributes": {
-        "openinference.span.kind": "CHAIN"
+        "openinference.span.kind": "CHAIN",
+        "session.id": "default"
       }
     },
     {
-      "name": "agent",
+      "name": "model",
       "span_type": "OpenTelemetry",
+      "parent_name": "LangGraph",
       "attributes": {
-        "openinference.span.kind": "AGENT"
-      }
-    },
-    {
-      "name": "call_model",
-      "span_type": "OpenTelemetry",
-      "attributes": {
-        "openinference.span.kind": "CHAIN"
+        "openinference.span.kind": "CHAIN",
+        "session.id": "default",
+        "llm.input_messages.0.message.role": "system",
+        "llm.input_messages.0.message.content": "You are a helpful assistant that provides weather information. Use the provided tool to get the weather data."
       }
     },
     {
       "name": ["UiPathChat", "UiPathAzureChatOpenAI"],
       "span_type": "OpenTelemetry",
+      "parent_name": "model",
       "attributes": {
         "openinference.span.kind": "LLM",
-        "llm.provider": "azure"
+        "llm.provider": "azure",
+        "llm.system": "openai",
+        "llm.model_name": "gpt-4o-2024-08-06",
+        "llm.input_messages.0.message.role": "system",
+        "llm.input_messages.1.message.role": "user",
+        "llm.input_messages.1.message.content": "How is the weather today in New York?",
+        "llm.output_messages.0.message.role": "assistant",
+        "llm.output_messages.0.message.tool_calls.0.tool_call.function.name": "get_weather",
+        "session.id": "default"
       }
     },
     {
-      "name": "add",
+      "name": "model_to_tools",
       "span_type": "OpenTelemetry",
+      "parent_name": "model",
+      "attributes": {
+        "openinference.span.kind": "CHAIN",
+        "session.id": "default",
+        "llm.input_messages.0.message.role": "system",
+        "llm.input_messages.0.message.content": "You are a helpful assistant that provides weather information. Use the provided tool to get the weather data."
+      }
+    },
+    {
+      "name": "tools",
+      "span_type": "OpenTelemetry",
+      "parent_name": "LangGraph",
+      "attributes": {
+        "openinference.span.kind": "CHAIN",
+        "session.id": "default"
+      }
+    },
+    {
+      "name": "get_weather",
+      "span_type": "OpenTelemetry",
+      "parent_name": "tools",
       "attributes": {
         "openinference.span.kind": "TOOL",
-        "tool.name": "add"
+        "tool.name": "get_weather",
+        "tool.description": "Get weather for location.",
+        "session.id": "default"
+      }
+    },
+    {
+      "name": "tools_to_model",
+      "span_type": "OpenTelemetry",
+      "parent_name": "tools",
+      "attributes": {
+        "openinference.span.kind": "CHAIN",
+        "session.id": "default",
+        "llm.input_messages.0.message.role": "system",
+        "llm.input_messages.0.message.content": "You are a helpful assistant that provides weather information. Use the provided tool to get the weather data."
+      }
+    },
+    {
+      "name": "model",
+      "span_type": "OpenTelemetry",
+      "parent_name": "LangGraph",
+      "count": 2,
+      "attributes": {
+        "openinference.span.kind": "CHAIN",
+        "session.id": "default"
+      }
+    },
+    {
+      "name": ["UiPathChat", "UiPathAzureChatOpenAI"],
+      "span_type": "OpenTelemetry",
+      "parent_name": "model",
+      "count": 2,
+      "attributes": {
+        "openinference.span.kind": "LLM",
+        "llm.provider": "azure",
+        "llm.system": "openai",
+        "llm.model_name": "gpt-4o-2024-08-06",
+        "llm.output_messages.0.message.role": "assistant",
+        "llm.output_messages.0.message.content": "The weather in New York today is sunny with a high of 75°F.",
+        "session.id": "default"
+      }
+    },
+    {
+      "name": "model_to_tools",
+      "span_type": "OpenTelemetry",
+      "parent_name": "model",
+      "count": 2,
+      "attributes": {
+        "openinference.span.kind": "CHAIN",
+        "session.id": "default",
+        "output.value": "__end__"
       }
     }
   ]
