@@ -10,15 +10,11 @@ from pydantic import BaseModel
 from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
 
 # Configuration constants
-MAX_SEARCH_RESULTS = 5
 DEFAULT_MODEL = "gpt-4o-2024-08-06"
-ALTERNATIVE_MODEL = "claude-3-5-sonnet-latest"
 
 
 def get_search_tool() -> Union[TavilySearchResults, DuckDuckGoSearchResults]:
     """Get the appropriate search tool based on available API keys."""
-    if os.getenv("TAVILY_API_KEY"):
-        return TavilySearchResults(max_results=MAX_SEARCH_RESULTS)
     return DuckDuckGoSearchResults()
 
 
@@ -73,7 +69,7 @@ class GraphOutput(BaseModel):
 
 def create_user_message(company_name: str) -> str:
     """Create a formatted user message for company research."""
-    return f"""Please provide a comprehensive analysis and outreach strategy for the company: {company_name}. Use the TavilySearchResults tool to gather information. Include detailed research on the company's background, organizational structure, key decision-makers, and a tailored outreach strategy. Format your response using the following section headers:
+    return f"""Please provide a comprehensive analysis and outreach strategy for the company: {company_name}. Use the DuckDuckGoSearchResults tool to gather information. Include detailed research on the company's background, organizational structure, key decision-makers, and a tailored outreach strategy. Format your response using the following section headers:
 
 1. Company Overview
 2. Organizational Structure
