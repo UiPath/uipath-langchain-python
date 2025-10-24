@@ -2,12 +2,14 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, AsyncIterator, Optional, Sequence
+from uuid import uuid4
 
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Interrupt, StateSnapshot
+from typing_extensions import override
 from uipath._cli._runtime._contracts import (
     UiPathBaseRuntime,
     UiPathBreakpointResult,
@@ -17,12 +19,14 @@ from uipath._cli._runtime._contracts import (
     UiPathRuntimeResult,
     UiPathRuntimeStatus,
 )
+from uipath._cli.models.runtime_schema import Entrypoint
 from uipath._events._events import (
     UiPathAgentMessageEvent,
     UiPathAgentStateEvent,
     UiPathRuntimeEvent,
 )
 
+from .._utils._schema import generate_schema_from_graph
 from ._context import LangGraphRuntimeContext
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 from ._graph_resolver import AsyncResolver, LangGraphJsonResolver
@@ -480,6 +484,21 @@ class LangGraphScriptRuntime(LangGraphRuntime):
     ):
         self.resolver = LangGraphJsonResolver(entrypoint=entrypoint)
         super().__init__(context, self.resolver)
+
+    @override
+    async def get_entrypoint(self) -> Entrypoint:
+        """Get entrypoint for this LangGraph runtime."""
+        graph = await self.resolver()
+        compiled_graph = graph.compile()
+        schema = generate_schema_from_graph(compiled_graph)
+
+        return Entrypoint(
+            file_path=self.context.entrypoint,  # type: ignore[call-arg]
+            unique_id=str(uuid4()),
+            type="agent",
+            input=schema["input"],
+            output=schema["output"],
+        )
 
     async def cleanup(self) -> None:
         """Cleanup runtime resources including resolver."""
