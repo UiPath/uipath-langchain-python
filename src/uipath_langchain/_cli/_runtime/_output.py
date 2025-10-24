@@ -3,13 +3,10 @@ import logging
 from typing import Any
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from uipath._cli._runtime._contracts import (
-    UiPathErrorCategory,
-    UiPathResumeTrigger,
-)
+from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathResumeTrigger
 from uipath._cli._runtime._hitl import HitlProcessor
 
-from ._exception import LangGraphRuntimeError
+from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +90,7 @@ async def create_and_save_resume_trigger(
             """)
         except Exception as e:
             raise LangGraphRuntimeError(
-                "DB_TABLE_CREATION_FAILED",
+                LangGraphErrorCode.DB_TABLE_CREATION_FAILED,
                 "Failed to create resume triggers table",
                 f"Database error while creating table: {str(e)}",
                 UiPathErrorCategory.SYSTEM,
@@ -104,7 +101,7 @@ async def create_and_save_resume_trigger(
             resume_trigger = await hitl_processor.create_resume_trigger()
         except Exception as e:
             raise LangGraphRuntimeError(
-                "HITL_EVENT_CREATION_FAILED",
+                LangGraphErrorCode.HITL_EVENT_CREATION_FAILED,
                 "Failed to process HITL request",
                 f"Error while trying to process HITL request: {str(e)}",
                 UiPathErrorCategory.SYSTEM,
@@ -139,7 +136,7 @@ async def create_and_save_resume_trigger(
             await memory.conn.commit()
         except Exception as e:
             raise LangGraphRuntimeError(
-                "DB_INSERT_FAILED",
+                LangGraphErrorCode.DB_INSERT_FAILED,
                 "Failed to save resume trigger",
                 f"Database error while saving resume trigger: {str(e)}",
                 UiPathErrorCategory.SYSTEM,

@@ -2,12 +2,10 @@ import asyncio
 from typing import Any, Awaitable, Callable, Optional
 
 from langgraph.graph.state import CompiledStateGraph, StateGraph
-from uipath._cli._runtime._contracts import (
-    UiPathErrorCategory,
-)
+from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathErrorCode
 
 from .._utils._graph import GraphConfig, LangGraphConfig
-from ._exception import LangGraphRuntimeError
+from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 
 
 class LangGraphJsonResolver:
@@ -36,7 +34,7 @@ class LangGraphJsonResolver:
         config = LangGraphConfig()
         if not config.exists:
             raise LangGraphRuntimeError(
-                "CONFIG_MISSING",
+                LangGraphErrorCode.CONFIG_MISSING,
                 "Invalid configuration",
                 "Failed to load configuration",
                 UiPathErrorCategory.DEPLOYMENT,
@@ -46,7 +44,7 @@ class LangGraphJsonResolver:
             config.load_config()
         except Exception as e:
             raise LangGraphRuntimeError(
-                "CONFIG_INVALID",
+                LangGraphErrorCode.CONFIG_INVALID,
                 "Invalid configuration",
                 f"Failed to load configuration: {str(e)}",
                 UiPathErrorCategory.DEPLOYMENT,
@@ -59,7 +57,7 @@ class LangGraphJsonResolver:
         elif not entrypoint:
             graph_names = ", ".join(g.name for g in graphs)
             raise LangGraphRuntimeError(
-                "ENTRYPOINT_MISSING",
+                UiPathErrorCode.ENTRYPOINT_MISSING,
                 "Entrypoint required",
                 f"Multiple graphs available. Please specify one of: {graph_names}.",
                 UiPathErrorCategory.DEPLOYMENT,
@@ -69,7 +67,7 @@ class LangGraphJsonResolver:
         self.graph_config = config.get_graph(entrypoint)
         if not self.graph_config:
             raise LangGraphRuntimeError(
-                "GRAPH_NOT_FOUND",
+                LangGraphErrorCode.GRAPH_NOT_FOUND,
                 "Graph not found",
                 f"Graph '{entrypoint}' not found.",
                 UiPathErrorCategory.DEPLOYMENT,
@@ -83,28 +81,28 @@ class LangGraphJsonResolver:
             )
         except ImportError as e:
             raise LangGraphRuntimeError(
-                "GRAPH_IMPORT_ERROR",
+                LangGraphErrorCode.GRAPH_IMPORT_ERROR,
                 "Graph import failed",
                 f"Failed to import graph '{entrypoint}': {str(e)}",
                 UiPathErrorCategory.USER,
             ) from e
         except TypeError as e:
             raise LangGraphRuntimeError(
-                "GRAPH_TYPE_ERROR",
+                LangGraphErrorCode.GRAPH_TYPE_ERROR,
                 "Invalid graph type",
                 f"Graph '{entrypoint}' is not a valid StateGraph or CompiledStateGraph: {str(e)}",
                 UiPathErrorCategory.USER,
             ) from e
         except ValueError as e:
             raise LangGraphRuntimeError(
-                "GRAPH_VALUE_ERROR",
+                LangGraphErrorCode.GRAPH_VALUE_ERROR,
                 "Invalid graph value",
                 f"Invalid value in graph '{entrypoint}': {str(e)}",
                 UiPathErrorCategory.USER,
             ) from e
         except Exception as e:
             raise LangGraphRuntimeError(
-                "GRAPH_LOAD_ERROR",
+                LangGraphErrorCode.GRAPH_LOAD_ERROR,
                 "Failed to load graph",
                 f"Unexpected error loading graph '{entrypoint}': {str(e)}",
                 UiPathErrorCategory.USER,

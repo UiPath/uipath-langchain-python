@@ -20,7 +20,10 @@ from tenacity import (
 from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathRuntimeError
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 
-from uipath_langchain._cli._runtime._exception import LangGraphRuntimeError
+from uipath_langchain._cli._runtime._exception import (
+    LangGraphErrorCode,
+    LangGraphRuntimeError,
+)
 from uipath_langchain._utils._settings import (
     UiPathClientFactorySettings,
     UiPathClientSettings,
@@ -371,7 +374,7 @@ class UiPathRequestMixin(BaseModel):
                 title = body.get("title", "").lower()
                 if title == "license not available":
                     raise LangGraphRuntimeError(
-                        code="LICENSE_NOT_AVAILABLE",
+                        code=LangGraphErrorCode.LICENSE_NOT_AVAILABLE,
                         title=body.get("title", "License Not Available"),
                         detail=body.get(
                             "detail", "License not available for this service"

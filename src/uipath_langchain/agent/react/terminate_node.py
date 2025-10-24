@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel
+from uipath._cli._runtime._contracts import UiPathErrorCode
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
 from .exceptions import (
@@ -40,7 +41,9 @@ def create_terminate_node(
                 )
                 detail = tool_call["args"].get("details", "")
                 raise AgentTerminationException(
-                    code="400", title=error_message, detail=detail
+                    code=UiPathErrorCode.EXECUTION_ERROR,
+                    title=error_message,
+                    detail=detail,
                 )
 
         raise AgentNodeRoutingException(
