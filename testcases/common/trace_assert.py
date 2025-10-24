@@ -108,14 +108,22 @@ def assert_traces(traces_file: str, expected_file: str) -> None:
     for expected in expected_spans:
         # Find a matching span
         found = False
+        name = expected['name']
+        # Handle both string and list of names
+        name_str = name if isinstance(name, str) else f"[{' | '.join(name)}]"
+
         for span in traces:
             if matches_expected(span, expected):
                 found = True
-                print(f"✓ Found span: {expected['name']}")
+                print(f"✓ Found span: {name_str}")
                 break
         if not found:
-            missing_spans.append(expected['name'])
-            print(f"✗ Missing span: {expected['name']}")
+            missing_spans.append(name_str)
+            print(f"✗ Missing span: {name_str}")
+
+    print("Traces file content:")
+    with open(traces_file, 'r', encoding='utf-8') as f:
+        print(f.read())
     if missing_spans:
         raise AssertionError(
             f"Missing expected spans: {', '.join(missing_spans)}\n"

@@ -12,7 +12,6 @@ from uipath.runtime import (
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
-from ._conversation import uipath_to_human_messages
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 
 logger = logging.getLogger(__name__)
@@ -52,8 +51,6 @@ async def get_graph_input(
     """
     # Fresh execution - return input directly
     if not options or not options.resume:
-        if input and "messages" in input:
-            return {"messages": uipath_to_human_messages(input["messages"])}
         return input
 
     # Resume with explicit input provided
