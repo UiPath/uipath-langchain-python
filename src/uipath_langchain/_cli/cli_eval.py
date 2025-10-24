@@ -6,8 +6,9 @@ from openinference.instrumentation.langchain import (
     get_current_span,
 )
 from uipath._cli._evals._console_progress_reporter import ConsoleProgressReporter
+from uipath._cli._evals._evaluate import evaluate
 from uipath._cli._evals._progress_reporter import StudioWebProgressReporter
-from uipath._cli._evals._runtime import UiPathEvalContext, UiPathEvalRuntime
+from uipath._cli._evals._runtime import UiPathEvalContext
 from uipath._cli._runtime._contracts import (
     UiPathRuntimeFactory,
 )
@@ -82,14 +83,7 @@ def langgraph_eval_middleware(
 
         runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
 
-        async def execute():
-            async with UiPathEvalRuntime.from_eval_context(
-                factory=runtime_factory, context=eval_context, event_bus=event_bus
-            ) as eval_runtime:
-                await eval_runtime.execute()
-                await event_bus.wait_for_all()
-
-        asyncio.run(execute())
+        asyncio.run(evaluate(runtime_factory, eval_context, event_bus))
         return MiddlewareResult(should_continue=False)
 
     except Exception as e:
