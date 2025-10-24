@@ -116,6 +116,10 @@ def assert_traces(traces_file: str, expected_file: str) -> None:
             missing_spans.append(expected['name'])
             print(f"✗ Missing span: {expected['name']}")
 
+    print("Traces file content:")
+    with open(traces_file, 'r', encoding='utf-8') as f:
+        print(f.read())
+
     if missing_spans:
         raise AssertionError(
             f"Missing expected spans: {', '.join(missing_spans)}\n"
