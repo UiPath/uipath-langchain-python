@@ -44,6 +44,11 @@ with open("local_run_output.log", 'r', encoding='utf-8') as f:
 # Check if response contains 'Successful execution.'
 assert "Successful execution." in local_run_output, f"Response does not contain 'Successful execution.'. Actual response: {local_run_output}"
 
+with open("__uipath/execution.log", "r") as f:
+    log_output = f.read()
+    # Print the execution log content
+    print(log_output)
+
 assert_traces(".uipath/traces.jsonl", "expected_traces.json")
 
 print("Required fields validation passed")
