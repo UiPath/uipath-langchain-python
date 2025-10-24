@@ -12,6 +12,7 @@ from uipath._cli._runtime._contracts import (
     UiPathBaseRuntime,
     UiPathBreakpointResult,
     UiPathErrorCategory,
+    UiPathErrorCode,
     UiPathResumeTrigger,
     UiPathRuntimeResult,
     UiPathRuntimeStatus,
@@ -23,7 +24,7 @@ from uipath._events._events import (
 )
 
 from ._context import LangGraphRuntimeContext
-from ._exception import LangGraphRuntimeError
+from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 from ._graph_resolver import AsyncResolver, LangGraphJsonResolver
 from ._input import get_graph_input
 from ._output import create_and_save_resume_trigger, serialize_output
@@ -79,7 +80,11 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 graph_config = self._get_graph_config()
 
                 # Execute without streaming
-                graph_output = await compiled_graph.ainvoke(graph_input, graph_config)
+                graph_output = await compiled_graph.ainvoke(
+                    graph_input,
+                    graph_config,
+                    interrupt_before=self.context.breakpoints,
+                )
 
                 # Get final state and create result
                 self.context.result = await self._create_runtime_result(
@@ -140,6 +145,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 async for stream_chunk in compiled_graph.astream(
                     graph_input,
                     graph_config,
+                    interrupt_before=self.context.breakpoints,
                     stream_mode=["messages", "updates"],
                     subgraphs=True,
                 ):
@@ -426,7 +432,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
 
         if isinstance(e, GraphRecursionError):
             return LangGraphRuntimeError(
-                "GRAPH_RECURSION_ERROR",
+                LangGraphErrorCode.GRAPH_LOAD_ERROR,
                 "Graph recursion limit exceeded",
                 detail,
                 UiPathErrorCategory.USER,
@@ -434,7 +440,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
 
         if isinstance(e, InvalidUpdateError):
             return LangGraphRuntimeError(
-                "GRAPH_INVALID_UPDATE",
+                LangGraphErrorCode.GRAPH_INVALID_UPDATE,
                 str(e),
                 detail,
                 UiPathErrorCategory.USER,
@@ -442,14 +448,14 @@ class LangGraphRuntime(UiPathBaseRuntime):
 
         if isinstance(e, EmptyInputError):
             return LangGraphRuntimeError(
-                "GRAPH_EMPTY_INPUT",
+                LangGraphErrorCode.GRAPH_EMPTY_INPUT,
                 "The input data is empty",
                 detail,
                 UiPathErrorCategory.USER,
             )
 
         return LangGraphRuntimeError(
-            "EXECUTION_ERROR",
+            UiPathErrorCode.EXECUTION_ERROR,
             "Graph execution failed",
             detail,
             UiPathErrorCategory.USER,

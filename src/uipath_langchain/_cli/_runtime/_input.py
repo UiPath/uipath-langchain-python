@@ -13,7 +13,7 @@ from uipath._cli._runtime._hitl import HitlReader
 
 from ._context import LangGraphRuntimeContext
 from ._conversation import uipath_to_human_messages
-from ._exception import LangGraphRuntimeError
+from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ async def _get_latest_trigger(
             return cast(tuple[str, str, str, str, str], tuple(result))
     except Exception as e:
         raise LangGraphRuntimeError(
-            "DB_QUERY_FAILED",
+            LangGraphErrorCode.DB_QUERY_FAILED,
             "Database query failed",
             f"Error querying resume trigger information: {str(e)}",
             UiPathErrorCategory.SYSTEM,
