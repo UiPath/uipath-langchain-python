@@ -2,11 +2,11 @@
     "messages": [
         {
             "type": "system",
-            "content": "You are a calculator assistant, you only use the provided tools to do math. DO NOT make up any answers on your own."
+            "content": "You are a helpful assistant that provides weather information. Use the provided tool to get the weather data."
         },
         {
             "type": "human",
-            "content": "What is 2+2"
+            "content": "How is the weather today in New York?"
         }
     ]
 }

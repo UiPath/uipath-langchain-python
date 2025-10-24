@@ -1,24 +1,19 @@
 import os
 from typing import Union
 
-from langchain_community.tools import DuckDuckGoSearchResults
-from langchain_tavily import TavilySearch
-from langgraph.graph import END, START, MessagesState, StateGraph
 from langchain.agents import create_agent
+from langchain_community.tools import DuckDuckGoSearchResults
+from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import BaseModel
 
 from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
 
 # Configuration constants
-MAX_SEARCH_RESULTS = 5
 DEFAULT_MODEL = "gpt-4o-2024-08-06"
-ALTERNATIVE_MODEL = "claude-3-5-sonnet-latest"
 
 
-def get_search_tool() -> Union[TavilySearch, DuckDuckGoSearchResults]:
+def get_search_tool() -> Union[DuckDuckGoSearchResults]:
     """Get the appropriate search tool based on available API keys."""
-    if os.getenv("TAVILY_API_KEY"):
-        return TavilySearch(max_results=MAX_SEARCH_RESULTS)
     return DuckDuckGoSearchResults()
 
 
@@ -50,30 +45,32 @@ DO NOT do any math as specified in your instructions.
 def create_llm() -> Union[UiPathAzureChatOpenAI, UiPathChat]:
     """Create and configure the language model based on an environment variable."""
     if os.getenv("USE_AZURE_CHAT", "false").lower() == "true":
-        return UiPathAzureChatOpenAI(model=DEFAULT_MODEL)
-    return UiPathChat(model=DEFAULT_MODEL)
+        return UiPathAzureChatOpenAI(model=DEFAULT_MODEL, streaming=False)
+    return UiPathChat(model=DEFAULT_MODEL, streaming=False)
 
 
 def create_research_agent():
     """Create the research agent with configured LLM and tools."""
     llm = create_llm()
     search_tool = get_search_tool()
-    return create_agent(llm, tools=[search_tool], prompt=SYSTEM_PROMPT)
+    return create_agent(llm, tools=[search_tool], system_prompt=SYSTEM_PROMPT)
 
 
 class GraphState(BaseModel):
     """State model for the research graph."""
+
     company_name: str
 
 
 class GraphOutput(BaseModel):
     """Output model for the research graph."""
+
     response: str
 
 
 def create_user_message(company_name: str) -> str:
     """Create a formatted user message for company research."""
-    return f"""Please provide a comprehensive analysis and outreach strategy for the company: {company_name}. Use the TavilySearchResults tool to gather information. Include detailed research on the company's background, organizational structure, key decision-makers, and a tailored outreach strategy. Format your response using the following section headers:
+    return f"""Please provide a comprehensive analysis and outreach strategy for the company: {company_name}. Use the DuckDuckGoSearchResults tool to gather information. Include detailed research on the company's background, organizational structure, key decision-makers, and a tailored outreach strategy. Format your response using the following section headers:
 
 1. Company Overview
 2. Organizational Structure
