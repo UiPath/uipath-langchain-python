@@ -19,6 +19,7 @@ from uipath.agent.models.agent import (
     AgentResourceConfig,
     LowCodeAgentDefinition,
 )
+from uipath.eval.mocks import mockable
 from uipath.models import CreateAction, InvokeProcess
 from uipath.models.connections import ConnectionTokenType
 
@@ -26,21 +27,28 @@ logger = logging.getLogger(__name__)
 
 
 def create_process_tool(resource: AgentProcessToolResourceConfig) -> Iterable[BaseTool]:
-    async def process(**kwargs) -> BaseModel:
+    input_schema: Any = create_model(resource.input_schema)
+    output_schema: Any = create_model(resource.output_schema)
+
+    @mockable(
+        name=resource.name,
+        description=resource.description,
+        input_schema=input_schema.model_json_schema(),
+        output_schema=output_schema.model_json_schema(),
+        # example_calls=resource.properties.example_calls,
+    )
+    async def process(**kwargs) -> output_schema:
         return interrupt(
             InvokeProcess(
                 name=resource.name,
                 input_arguments=kwargs,
-                process_folder_path=resource.properties.folder_path,
             )
         )
-
-    input_schema = create_model(resource.input_schema)
 
     class ProcessTool(StructuredTool):
         @property
         def OutputType(self) -> type[Output]:
-            return create_model(resource.output_schema)
+            return output_schema
 
     yield ProcessTool(
         name=resource.name,
@@ -51,7 +59,17 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> Iterable[Ba
 
 
 def create_escalation_tool_from_channel(channel: AgentEscalationChannel) -> BaseTool:
-    async def escalate(**kwargs) -> BaseModel:
+    input_schema: Any = create_model(channel.input_schema)
+    output_schema: Any = create_model(channel.output_schema)
+
+    @mockable(
+        name=channel.name,
+        description=channel.description,
+        input_schema=input_schema.model_json_schema(),
+        output_schema=output_schema.model_json_schema(),
+        # example_calls=channel.properties.example_calls,
+    )
+    async def escalate(**kwargs) -> output_schema:
         recipients = channel.recipients
         if len(recipients) > 1:
             logger.warning(
@@ -64,19 +82,15 @@ def create_escalation_tool_from_channel(channel: AgentEscalationChannel) -> Base
                 data=kwargs,
                 assignee=assignee,
                 app_name=channel.properties.app_name,
-                app_folder_path=None,  # Channels specify folder name but not folder path.
-                app_folder_key=channel.properties.resource_key,
                 app_key=channel.properties.resource_key,
                 app_version=channel.properties.app_version,
             )
         )
 
-    input_schema = create_model(channel.input_schema)
-
     class EscalationTool(StructuredTool):
         @property
         def OutputType(self) -> type[Output]:
-            return create_model(channel.output_schema)
+            return output_schema
 
     return EscalationTool(
         name=channel.name,
@@ -117,7 +131,17 @@ def filter_query_params(
 def create_integration_tool(
     resource: AgentIntegrationToolResourceConfig,
 ) -> Iterable[BaseTool]:
-    async def integration(**kwargs) -> BaseModel:
+    input_schema: Any = create_model(resource.input_schema)
+    output_schema: Any = create_model({})  # to-fix
+
+    @mockable(
+        name=resource.name,
+        description=resource.description,
+        input_schema=input_schema.model_json_schema(),
+        output_schema=output_schema.model_json_schema(),
+        # example_calls=resource.properties.example_calls,
+    )
+    async def integration(**kwargs) -> output_schema:
         uipath = UiPath()
         remote_connection = await uipath.connections.retrieve_async(
             resource.properties.connection.id
@@ -127,7 +151,7 @@ def create_integration_tool(
         )
         tool_url = f"{remote_connection.api_base_uri}/v3/element/instances/{remote_connection.element_instance_id}{resource.properties.tool_path}"
         tool_url = f"{tool_url}{build_query_params(resource.properties.parameters)}"
-        tool_url = tool_url.format(**kwargs)
+        tool_url = tool_url.format(kwargs)
 
         authorization = f"{token.token_type} {token.access_token}"
         method = METHOD_MAP.get(resource.properties.method, resource.properties.method)
@@ -141,12 +165,10 @@ def create_integration_tool(
         )
         return response.json()
 
-    input_schema = create_model(resource.input_schema)
-
     class IntegrationTool(StructuredTool):
         @property
         def OutputType(self) -> type[Output]:
-            return create_model({})
+            return output_schema
 
     yield IntegrationTool(
         name=resource.name,
