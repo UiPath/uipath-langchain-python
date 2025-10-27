@@ -490,14 +490,14 @@ class LangGraphScriptRuntime(LangGraphRuntime):
         """Get entrypoint for this LangGraph runtime."""
         graph = await self.resolver()
         compiled_graph = graph.compile()
-        schema = generate_schema_from_graph(compiled_graph)
+        schema_details = generate_schema_from_graph(compiled_graph)
 
         return Entrypoint(
             file_path=self.context.entrypoint,  # type: ignore[call-arg]
             unique_id=str(uuid4()),
             type="agent",
-            input=schema["input"],
-            output=schema["output"],
+            input=schema_details.schema["input"],
+            output=schema_details.schema["output"],
         )
 
     async def cleanup(self) -> None:
