@@ -175,7 +175,7 @@ async def langgraph_init_middleware_async(
                     else loaded_graph
                 )
                 compiled_graph = state_graph.compile()
-                graph_schema = generate_schema_from_graph(compiled_graph)
+                schema_details = generate_schema_from_graph(compiled_graph)
 
                 mermaids[graph.name] = compiled_graph.get_graph(xray=1).draw_mermaid()
 
@@ -197,10 +197,16 @@ async def langgraph_init_middleware_async(
                     "filePath": graph.name,
                     "uniqueId": str(uuid.uuid4()),
                     "type": "agent",
-                    "input": graph_schema["input"],
-                    "output": graph_schema["output"],
+                    "input": schema_details.schema["input"],
+                    "output": schema_details.schema["output"],
                 }
                 entrypoints.append(new_entrypoint)
+
+                warning_circular_deps = f" schema of graph '{graph.name}' contains circular dependencies. Some types might not be correctly inferred."
+                if schema_details.has_input_circular_dependency:
+                    console.warning("Input" + warning_circular_deps)
+                if schema_details.has_output_circular_dependency:
+                    console.warning("Output" + warning_circular_deps)
 
             except Exception as e:
                 console.error(f"Error during graph load: {e}")
@@ -243,6 +249,7 @@ async def langgraph_init_middleware_async(
                     should_continue=False,
                     should_include_stacktrace=True,
                 )
+
         console.success(f"Created {click.style(config_path, fg='cyan')} file.")
 
         generate_agents_md_files(options)
