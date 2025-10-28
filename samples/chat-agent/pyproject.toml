@@ -5,12 +5,14 @@ description = "Chat agent with Tavily web search"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.10"
 dependencies = [
-    "langgraph>=0.6.5",
-    "langchain-anthropic>=0.3.19",
+    "langgraph>=0.6.10",
+    "langchain-anthropic>=1.0.0a5",
     "tavily-python>=0.7.11",
     "langchain-tavily>=0.2.11",
-    "uipath-langchain>=0.0.126",
+    "uipath-langchain>=0.0.140",
     "uipath>=2.1.41",
+    "langchain>=1.0.0a9",
+    "openinference-instrumentation-langchain>=0.1.53",
 ]
 
 [project.optional-dependencies]
