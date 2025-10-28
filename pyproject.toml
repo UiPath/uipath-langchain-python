@@ -3,11 +3,11 @@ name = "uipath-lowcode-python"
 version = "0.0.1"
 description = "UiPath LowCode"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
-    "langgraph>=0.6.6",
-    "uipath>=2.1.78",
-    "uipath-langchain>=0.0.138",
+    "uipath>=2.1.110, <2.2.0",
+    "uipath-langchain>=0.0.146",
+    "langgraph>=0.6.6, <0.7.0",
 ]
 maintainers = [
     { name = "Silviu Georgescu", email = "silviu.georgescu@uipath.com" },
@@ -20,7 +20,7 @@ register = "uipath_lowcode.middlewares:register_middleware"
 [project.urls]
 Homepage = "https://uipath.com"
 Repository = "https://github.com/UiPath/uipath-lowcode-python"
-Documentation = "http://todo" # TODO: add documentation
+Documentation = "https://github.com/UiPath/lowcode-as-coded/tree/main/uipath-lowcode-python#readme"
 
 [build-system]
 requires = ["hatchling"]
@@ -38,6 +38,7 @@ dev = [
     "pre-commit>=4.1.0",
     "datamodel-code-generator>=0.33.0",
     "requests>=2.32.5",
+    "debugpy>=1.8.17",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -91,3 +92,7 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+[tool.uv.sources]
+uipath = { path = "../uipath-python", editable = true }
+uipath-langchain = { path = "../uipath-langchain-python", editable = true }

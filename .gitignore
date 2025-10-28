@@ -12,3 +12,15 @@ wheels/
 # Custom
 .claude
 .vscode
+
+# UiPath Local Dev
+__uipath
+.uipath
+.env
+.ai-workspace
+
+# Tests
+htmlcov/*
+**/coverage.*
+**/.coverage
+**/*.log
