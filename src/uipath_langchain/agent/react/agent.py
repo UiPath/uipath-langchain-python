@@ -18,11 +18,11 @@ from .llm_node import (
 from .router import (
     route_agent,
 )
-from .state import AgentGraphNode, AgentGraphState
 from .terminate_node import (
     create_terminate_node,
 )
 from .tools import create_flow_control_tools
+from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState
 
 
 def create_agent(
@@ -32,13 +32,16 @@ def create_agent(
     *,
     state_schema: Type[AgentGraphState] = AgentGraphState,
     response_format: type[BaseModel] | None = None,
-    recursion_limit: int = 50,
+    config: AgentGraphConfig | None = None,
 ) -> StateGraph[AgentGraphState]:
     """Build agent graph with INIT -> AGENT <-> TOOLS loop, terminated by control flow tools.
 
     Control flow tools (end_execution, raise_error) are auto-injected alongside regular tools.
     """
-    os.environ["LANGCHAIN_RECURSION_LIMIT"] = str(recursion_limit)
+    if config is None:
+        config = AgentGraphConfig()
+
+    os.environ["LANGCHAIN_RECURSION_LIMIT"] = str(config.recursion_limit)
 
     agent_tools = list(tools)
     flow_control_tools: list[BaseTool] = create_flow_control_tools(response_format)

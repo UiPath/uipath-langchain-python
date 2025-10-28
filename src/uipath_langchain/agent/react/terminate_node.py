@@ -11,7 +11,7 @@ from .exceptions import (
     AgentNodeRoutingException,
     AgentTerminationException,
 )
-from .state import AgentGraphState
+from .types import AgentGraphState
 
 
 def create_terminate_node(

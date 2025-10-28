@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.tools import BaseTool
 
 from .constants import MAX_SUCCESSIVE_COMPLETIONS
-from .state import AgentGraphState
+from .types import AgentGraphState
 from .utils import count_successive_completions
 
 

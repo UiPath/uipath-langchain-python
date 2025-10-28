@@ -7,7 +7,7 @@ from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
 from .constants import MAX_SUCCESSIVE_COMPLETIONS
 from .exceptions import AgentNodeRoutingException
-from .state import AgentGraphNode, AgentGraphState
+from .types import AgentGraphNode, AgentGraphState
 from .utils import count_successive_completions
 
 FLOW_CONTROL_TOOLS = [END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name]

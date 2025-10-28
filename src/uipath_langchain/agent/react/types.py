@@ -3,6 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 
 from langgraph.graph import MessagesState
+from pydantic import BaseModel, Field
 
 
 class AgentGraphState(MessagesState):
@@ -16,3 +17,9 @@ class AgentGraphNode(StrEnum):
     AGENT = "agent"
     TOOLS = "tools"
     TERMINATE = "terminate"
+
+
+class AgentGraphConfig(BaseModel):
+    recursion_limit: int = Field(
+        default=50, ge=1, description="Maximum recursion limit for the agent graph"
+    )
