@@ -1,12 +1,11 @@
 from collections.abc import Callable
-import os
 from typing import AsyncGenerator, Dict, List
 from contextlib import asynccontextmanager
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import StateGraph
 from uipath.eval.evaluators import LegacyBaseEvaluator
-from uipath.eval.coded_evaluators import BaseEvaluator
+from uipath.eval.evaluators import BaseEvaluator
 from gym_sample.uipath_gym_types import (
     AgentBaseClass,
     BasicLoop,

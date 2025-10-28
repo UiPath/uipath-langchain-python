@@ -486,7 +486,7 @@ class MyAgentOutput(BaseModel):
 ### 2. Create Agent Configuration
 
 ```python
-from langchain.tools import StructuredTool
+from langchain_core.tools import StructuredTool
 from gym_sample.uipath_gym_types import AgentBaseClass, Datapoint
 from gym_sample.tools import EndExecutionTool
 
@@ -639,7 +639,7 @@ async with agents_with_datapoints("calculator") as graphs:
 ### Creating Custom Tools
 
 ```python
-from langchain.tools import StructuredTool
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 class DivideInput(BaseModel):

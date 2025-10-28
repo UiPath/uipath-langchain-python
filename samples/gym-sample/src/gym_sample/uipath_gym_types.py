@@ -6,7 +6,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 from pydantic import BaseModel, Field, create_model
-from pydantic.fields import FieldInfo
 from functools import partial
 from langchain_core.runnables import Runnable
 from .tools import EndExecutionTool, RaiseErrorTool, StateBaseClass

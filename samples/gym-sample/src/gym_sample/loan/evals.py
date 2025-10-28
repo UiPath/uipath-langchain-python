@@ -1,6 +1,6 @@
 from typing import List
 from uipath.eval.evaluators import LegacyBaseEvaluator
-from uipath.eval.coded_evaluators import (
+from uipath.eval.evaluators import (
     BaseEvaluator,
     ExactMatchEvaluator,
     ContainsEvaluator,

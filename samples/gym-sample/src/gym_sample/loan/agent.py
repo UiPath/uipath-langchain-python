@@ -1,6 +1,6 @@
 from typing import List
 
-from langchain.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field
 
 from ..tools import EscalationTool

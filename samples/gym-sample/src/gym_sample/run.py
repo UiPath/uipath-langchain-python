@@ -9,7 +9,7 @@ from dotenv import find_dotenv, load_dotenv
 from langgraph.graph import StateGraph
 from uipath.eval.evaluators.base_evaluator import EvaluationResult
 from uipath.eval.evaluators import LegacyBaseEvaluator
-from uipath.eval.coded_evaluators import BaseEvaluator
+from uipath.eval.evaluators import BaseEvaluator
 from uipath.eval.models import AgentExecution
 from gym_sample.graph import agents_with_datapoints, get_all_evaluators
 from gym_sample.trace_utils import setup_tracer
