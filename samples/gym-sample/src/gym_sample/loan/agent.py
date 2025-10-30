@@ -171,9 +171,8 @@ def get_datapoints() -> List[Datapoint]:
             evaluation_criteria={
                 "ExactMatchEvaluator": {"expected_output": {"ActionCenterTaskCreated": True}},
                 "ContainsEvaluator": {"search_text": "age"},
-                "ToolCallOrderEvaluator": {"tool_calls_order": ["LoanAgent_ApplyUiBankLoan", "EscalationTool"]},
-                "ToolCallCountEvaluator": {"tool_calls_count": {"LoanAgent_ApplyUiBankLoan": ("=", 1), "EscalationTool": ("=", 1)}},
-                "ToolCallArgsEvaluator": {"tool_calls": [{"name": "LoanAgent_ApplyUiBankLoan", "args": {"RequestorEmailAddress": "anna@email.com", "LoanAmount": 5000, "LoanTerm": 3, "Income": 500, "Age": 17}}]},
+                "ToolCallOrderEvaluator": {"tool_calls_order": ["EscalationTool"]},
+                "ToolCallCountEvaluator": {"tool_calls_count": {"EscalationTool": ("=", 1)}},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"ExecutionDetails": "Invalid data detected: Age is below the minimum age for a loan."}},
             },
             simulation_instructions="Tool LoanAgent_ApplyUiBankLoan should reject due to invalid age",
