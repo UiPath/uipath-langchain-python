@@ -17,7 +17,11 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
-from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathRuntimeError
+from uipath._cli._runtime._contracts import (
+    UiPathErrorCategory,
+    UiPathErrorCode,
+    UiPathRuntimeError,
+)
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 
 from uipath_langchain._cli._runtime._exception import (
@@ -59,7 +63,7 @@ def _get_access_token(data):
         return get_uipath_token_header(settings)
     except ValidationError:
         raise UiPathRuntimeError(
-            code="AUTHENTICATION_REQUIRED",
+            UiPathErrorCode.AUTHENTICATION_REQUIRED,
             title="Authorization required",
             detail="Authorization required. Please run uipath auth",
             category=UiPathErrorCategory.USER,
