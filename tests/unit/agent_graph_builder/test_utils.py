@@ -1,6 +1,6 @@
 """Tests for message utility functions."""
 
-from uipath_lowcode.lowcode_agent_graph_builder.message_utils import (
+from uipath_lowcode.agent_graph_builder.message_utils import (
     build_agent_messages,
     interpolate_message,
     safe_get_nested,

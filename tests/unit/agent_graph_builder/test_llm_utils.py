@@ -1,6 +1,6 @@
 """Tests for LLM utilities."""
 
-from uipath_lowcode.lowcode_agent_graph_builder.llm_utils import (
+from uipath_lowcode.agent_graph_builder.llm_utils import (
     LLM_MAX_RETRIES,
     create_llm,
 )

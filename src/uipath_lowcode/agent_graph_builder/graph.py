@@ -1,9 +1,9 @@
-"""LowCode Agent graph construction - wrapper delegating to uipath_langchain.agent.graph."""
+"""Agent graph construction - wrapper delegating to uipath_langchain.agent.graph."""
 
-from pathlib import Path
 from typing import Any, Optional, Union
 
 from langgraph.graph import StateGraph
+from uipath.agent.models.agent import LowCodeAgentDefinition
 from uipath_langchain.agent.react import (
     AgentGraphConfig,
     AgentGraphState,
@@ -12,25 +12,20 @@ from uipath_langchain.agent.react import (
 )
 from uipath_langchain.agent.tools import create_tools_from_resources
 
-from .constants import (
-    AGENT_CONFIG_FILENAME,
-    AGENT_LOOP_RECURSION_LIMIT,
-)
-from .input_loader import load_agent_configuration, load_input_arguments
+from .input_utils import validate_input_data
 from .llm_utils import create_llm
 from .message_utils import build_agent_messages
 
+AGENT_LOOP_RECURSION_LIMIT = 50
 
-async def build_lowcode_agent_graph(
+
+async def build_agent_graph(
+    agent_definition: LowCodeAgentDefinition,
     input_data: Optional[Union[str, dict[str, Any]]] = None,
 ) -> StateGraph[AgentGraphState]:
     """Build LangGraph agent from agent.json configuration and optional input data."""
 
-    agent_json_path = Path.cwd() / AGENT_CONFIG_FILENAME
-    agent_definition = load_agent_configuration(agent_json_path)
-    input_arguments = load_input_arguments(
-        agent_definition.input_schema, input_data=input_data
-    )
+    input_arguments = validate_input_data(agent_definition.input_schema, input_data)
 
     tools = await create_tools_from_resources(agent_definition)
     llm = create_llm(

@@ -1,6 +1,5 @@
 from uipath_langchain.chat.models import UiPathChat
 
-# LLM configuration defaults
 LLM_TIMEOUT_SECONDS = 300
 LLM_MAX_RETRIES = 2
 

@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import Path
 from typing import Optional
 
 from openinference.instrumentation.langchain import (
@@ -28,7 +29,10 @@ from uipath_langchain._tracing import (
     _instrument_traceable_attributes,
 )
 
-from ..lowcode_agent_graph_builder import build_lowcode_agent_graph
+from ..agent_graph_builder import build_agent_graph
+from .constants import AGENT_FILENAME
+from .input_loader import load_agent_configuration
+from .runtime import AgentLangGraphRuntime
 
 
 def lowcode_run_middleware(
@@ -51,9 +55,13 @@ def lowcode_run_middleware(
 
         def generate_runtime(ctx: LangGraphRuntimeContext) -> LangGraphRuntime:
             async def graph_builder():
-                return await build_lowcode_agent_graph(input_data=ctx.input)
+                agent_json_path = Path.cwd() / AGENT_FILENAME
+                agent_definition = load_agent_configuration(agent_json_path)
 
-            runtime = LangGraphRuntime(ctx, graph_builder)
+                return await build_agent_graph(agent_definition, input_data=ctx.input)
+
+            runtime = AgentLangGraphRuntime(ctx, graph_builder)
+
             # If not resuming and no job id, delete the previous state file
             if not ctx.resume and ctx.job_id is None:
                 if os.path.exists(runtime.state_file_path):
