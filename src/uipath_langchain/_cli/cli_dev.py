@@ -13,12 +13,18 @@ from uipath._cli.middlewares import MiddlewareResult
 from .._tracing import _instrument_traceable_attributes
 from ._runtime._context import LangGraphRuntimeContext
 from ._runtime._runtime import LangGraphScriptRuntime
+from ._utils._graph import LangGraphConfig
 
 console = ConsoleLogger()
 
 
 def langgraph_dev_middleware(interface: Optional[str]) -> MiddlewareResult:
     """Middleware to launch the developer terminal"""
+    config = LangGraphConfig()
+    if not config.exists:
+        return MiddlewareResult(
+            should_continue=True
+        )  # Continue with normal flow if no langgraph.json
 
     try:
         if interface == "terminal":
