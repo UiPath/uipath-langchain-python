@@ -1,38 +1,17 @@
 import asyncio
-import os
-from pathlib import Path
 from typing import Optional
 
-from openinference.instrumentation.langchain import (
-    LangChainInstrumentor,
-    get_current_span,
-)
 from uipath._cli._debug._bridge import ConsoleDebugBridge, UiPathDebugBridge
-from uipath._cli._runtime._contracts import (
-    UiPathRuntimeFactory,
-    UiPathRuntimeResult,
-)
+from uipath._cli._runtime._contracts import UiPathRuntimeResult
+from uipath._cli._utils._common import read_resource_overwrites_from_file
 from uipath._cli.middlewares import MiddlewareResult
 from uipath._events._events import UiPathAgentStateEvent
+from uipath._utils._bindings import ResourceOverwritesContext
 from uipath.tracing import JsonLinesFileExporter, LlmOpsHttpExporter
-from uipath_langchain._cli._runtime._context import (
-    LangGraphRuntimeContext,
-)
-from uipath_langchain._cli._runtime._exception import (
-    LangGraphRuntimeError,
-)
-from uipath_langchain._cli._runtime._runtime import (
-    LangGraphRuntime,
-    LangGraphScriptRuntime,
-)
-from uipath_langchain._tracing import (
-    _instrument_traceable_attributes,
-)
+from uipath_langchain._cli._runtime._context import LangGraphRuntimeContext
+from uipath_langchain._cli._runtime._exception import LangGraphRuntimeError
 
-from ..agent_graph_builder import build_agent_graph
-from .constants import AGENT_FILENAME
-from .input_loader import load_agent_configuration
-from .runtime import AgentLangGraphRuntime
+from .runtime import create_agent_langgraph_runtime, setup_runtime_factory
 
 
 def lowcode_run_middleware(
@@ -51,40 +30,20 @@ def lowcode_run_middleware(
         context.resume = resume
         context.execution_id = context.job_id or "default"
 
-        _instrument_traceable_attributes()
-
-        def generate_runtime(ctx: LangGraphRuntimeContext) -> LangGraphRuntime:
-            async def graph_builder():
-                agent_json_path = Path.cwd() / AGENT_FILENAME
-                agent_definition = load_agent_configuration(agent_json_path)
-
-                return await build_agent_graph(agent_definition, input_data=ctx.input)
-
-            runtime = AgentLangGraphRuntime(ctx, graph_builder)
-
-            # If not resuming and no job id, delete the previous state file
-            if not ctx.resume and ctx.job_id is None:
-                if os.path.exists(runtime.state_file_path):
-                    os.remove(runtime.state_file_path)
-            return runtime
-
         async def execute():
-            runtime_factory = UiPathRuntimeFactory(
-                LangGraphScriptRuntime,
-                LangGraphRuntimeContext,
-                runtime_generator=generate_runtime,
-            )
-
-            runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
+            runtime_factory = setup_runtime_factory(runtime_generator=create_agent_langgraph_runtime)
 
             if trace_file:
                 runtime_factory.add_span_exporter(JsonLinesFileExporter(trace_file))
 
             if context.job_id:
-                runtime_factory.add_span_exporter(
-                    LlmOpsHttpExporter(extra_process_spans=True)
-                )
-                await runtime_factory.execute(context)
+                async with ResourceOverwritesContext(
+                    lambda: read_resource_overwrites_from_file(context.runtime_dir)
+                ):
+                    runtime_factory.add_span_exporter(
+                        LlmOpsHttpExporter(extra_process_spans=True)
+                    )
+                    await runtime_factory.execute(context)
             else:
                 debug_bridge: UiPathDebugBridge = ConsoleDebugBridge()
                 await debug_bridge.emit_execution_started(context.execution_id)
