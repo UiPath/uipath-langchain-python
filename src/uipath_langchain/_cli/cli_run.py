@@ -11,8 +11,11 @@ from uipath._cli._runtime._contracts import (
     UiPathRuntimeFactory,
     UiPathRuntimeResult,
 )
+from uipath._cli._utils._common import read_resource_overwrites_from_file
+from uipath._cli._utils._console import ConsoleLogger
 from uipath._cli.middlewares import MiddlewareResult
 from uipath._events._events import UiPathAgentStateEvent
+from uipath._utils._bindings import ResourceOverwritesContext
 from uipath.tracing import JsonLinesFileExporter, LlmOpsHttpExporter
 
 from .._tracing import (
@@ -25,6 +28,7 @@ from ._runtime._runtime import (  # type: ignore[attr-defined]
 )
 from ._utils._graph import LangGraphConfig
 
+console = ConsoleLogger.get_instance()
 
 def langgraph_run_middleware(
     entrypoint: Optional[str],
@@ -72,10 +76,16 @@ def langgraph_run_middleware(
                 runtime_factory.add_span_exporter(JsonLinesFileExporter(trace_file))
 
             if context.job_id:
-                runtime_factory.add_span_exporter(
-                    LlmOpsHttpExporter(extra_process_spans=True)
-                )
-                await runtime_factory.execute(context)
+                async with ResourceOverwritesContext(
+                    lambda: read_resource_overwrites_from_file(context.runtime_dir)
+                ) as ctx:
+                    console.info(
+                        f"Applied {ctx.overwrites_count} resource overwrite(s)"
+                    )
+                    runtime_factory.add_span_exporter(
+                        LlmOpsHttpExporter(extra_process_spans=True)
+                    )
+                    await runtime_factory.execute(context)
             else:
                 debug_bridge: UiPathDebugBridge = ConsoleDebugBridge()
                 await debug_bridge.emit_execution_started(context.execution_id)
