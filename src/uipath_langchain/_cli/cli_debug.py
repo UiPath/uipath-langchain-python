@@ -11,7 +11,11 @@ from uipath._cli._debug._runtime import UiPathDebugRuntime
 from uipath._cli._runtime._contracts import (
     UiPathRuntimeFactory,
 )
+from uipath._cli._utils._console import ConsoleLogger
+from uipath._cli._utils._studio_project import StudioClient
 from uipath._cli.middlewares import MiddlewareResult
+from uipath._config import UiPathConfig
+from uipath._utils._bindings import ResourceOverwritesContext
 from uipath.tracing import LlmOpsHttpExporter
 
 from .._tracing import _instrument_traceable_attributes
@@ -22,7 +26,7 @@ from ._runtime._runtime import (  # type: ignore[attr-defined]
 )
 from ._utils._graph import LangGraphConfig
 
-
+console = ConsoleLogger.get_instance()
 def langgraph_debug_middleware(
     entrypoint: Optional[str], input: Optional[str], resume: bool, **kwargs
 ) -> MiddlewareResult:
@@ -65,17 +69,29 @@ def langgraph_debug_middleware(
                 runtime_factory.add_span_exporter(
                     LlmOpsHttpExporter(extra_process_spans=True)
                 )
+            async def execute_debug_runtime():
+                async with UiPathDebugRuntime.from_debug_context(
+                    factory=runtime_factory,
+                    context=context,
+                    debug_bridge=debug_bridge,
+                ) as debug_runtime:
+                    await debug_runtime.execute()
 
             runtime_factory.add_instrumentor(LangChainInstrumentor, get_current_span)
 
             debug_bridge: UiPathDebugBridge = get_debug_bridge(context)
+            project_id = UiPathConfig.project_id
 
-            async with UiPathDebugRuntime.from_debug_context(
-                factory=runtime_factory,
-                context=context,
-                debug_bridge=debug_bridge,
-            ) as debug_runtime:
-                await debug_runtime.execute()
+            if project_id:
+                studio_client = StudioClient(project_id)
+
+                async with ResourceOverwritesContext(
+                    lambda: studio_client.get_resource_overwrites()
+                ) as ctx:
+                    console.info(f"Applied {ctx.overwrites_count} overwrite(s)")
+                    await execute_debug_runtime()
+            else:
+                await execute_debug_runtime()
 
         asyncio.run(execute())
 
