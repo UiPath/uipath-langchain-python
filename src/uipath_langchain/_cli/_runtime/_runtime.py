@@ -25,7 +25,7 @@ from uipath._events._events import (
     UiPathAgentStateEvent,
     UiPathRuntimeEvent,
 )
-
+from ._conversation import map_message
 from .._utils._schema import generate_schema_from_graph
 from ._context import LangGraphRuntimeContext
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
@@ -159,11 +159,24 @@ class LangGraphRuntime(UiPathBaseRuntime):
                     if chunk_type == "messages":
                         if isinstance(data, tuple):
                             message, _ = data
-                            event = UiPathAgentMessageEvent(
-                                payload=message,
-                                execution_id=self.context.execution_id,
+
+                            # Use stored conversation/exchange IDs from input, or fallback to execution_id
+                            conversation_id = getattr(self.context, "conversation_id", None) or self.context.execution_id
+                            exchange_id = getattr(self.context, "exchange_id", None) or self.context.execution_id
+
+                            conversation_event = map_message(
+                                message=message,
+                                exchange_id=exchange_id,
+                                conversation_id=conversation_id,
                             )
-                            yield event
+
+                            # Only emit if conversion was successful
+                            if conversation_event:
+                                event = UiPathAgentMessageEvent(
+                                    payload=conversation_event,
+                                    execution_id=self.context.execution_id,
+                                )
+                                yield event
 
                     # Emit UiPathAgentStateEvent for state updates
                     elif chunk_type == "updates":

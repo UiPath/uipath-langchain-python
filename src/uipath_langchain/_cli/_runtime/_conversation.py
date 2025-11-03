@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -9,6 +10,7 @@ from langchain_core.messages import (
     HumanMessage,
     ToolMessage,
 )
+from pydantic import TypeAdapter, ValidationError
 from uipath.agent.conversation import (
     UiPathConversationContentPartChunkEvent,
     UiPathConversationContentPartEndEvent,
@@ -25,6 +27,15 @@ from uipath.agent.conversation import (
     UiPathConversationToolCallStartEvent,
     UiPathInlineValue,
 )
+
+from uipath_langchain.chat.content_blocks import (
+    ContentBlock,
+    TextContent,
+    ToolCallChunkContent,
+    ToolCallContent,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _new_id() -> str:
@@ -125,54 +136,68 @@ def map_message(
             )
 
         elif isinstance(message.content, list) and message.content:
-            for chunk in message.content:
-                if not isinstance(chunk, dict):
+            content_adapter = TypeAdapter(ContentBlock)
+
+            for raw_chunk in message.content:
+                if not isinstance(raw_chunk, dict):
                     continue
-                idx = chunk.get("index", 0)
-                ctype = chunk.get("type")
-                id = chunk.get("id", f"chunk-{message.id}-{idx}")
 
-                # Start of a tool call
-                if ctype == "tool_use":
-                    msg_event.tool_call = UiPathConversationToolCallEvent(
-                        tool_call_id=id,
-                        start=UiPathConversationToolCallStartEvent(
-                            tool_name=chunk.get("name") or "",
-                            arguments=UiPathInlineValue(inline=""),
-                            timestamp=timestamp,
-                        ),
-                    )
+                try:
+                    # Parse chunk
+                    chunk = content_adapter.validate_python(raw_chunk)
 
-                # JSON args streaming (content part for tool args)
-                elif ctype == "input_json_delta":
-                    text = chunk.get("partial_json", "")
-                    # first delta: emit content part start + first chunk
-                    if text == "":
+                    if isinstance(chunk, TextContent):
+                        chunk_id = raw_chunk.get("id", f"chunk-{message.id}-0")
                         msg_event.content_part = UiPathConversationContentPartEvent(
-                            content_part_id=id,
-                            start=UiPathConversationContentPartStartEvent(
-                                mime_type="application/json"
-                            ),
-                        )
-                    else:
-                        msg_event.content_part = UiPathConversationContentPartEvent(
-                            content_part_id=id,
+                            content_part_id=chunk_id,
                             chunk=UiPathConversationContentPartChunkEvent(
-                                data=text,
-                                content_part_sequence=idx,
+                                data=chunk.text,
+                                content_part_sequence=0,
                             ),
                         )
 
-                # Plain text from assistant
-                elif ctype == "text":
-                    text = chunk.get("text", "")
-                    msg_event.content_part = UiPathConversationContentPartEvent(
-                        content_part_id=id,
-                        chunk=UiPathConversationContentPartChunkEvent(
-                            data=text,
-                            content_part_sequence=idx,
-                        ),
+                    elif isinstance(chunk, ToolCallContent):
+                        # Complete tool call (non-streaming)
+                        msg_event.tool_call = UiPathConversationToolCallEvent(
+                            tool_call_id=chunk.id,
+                            start=UiPathConversationToolCallStartEvent(
+                                tool_name=chunk.name,
+                                arguments=UiPathInlineValue(inline=str(chunk.args)),
+                                timestamp=timestamp,
+                            ),
+                            end=UiPathConversationToolCallEndEvent(timestamp=timestamp),
+                        )
+
+                    elif isinstance(chunk, ToolCallChunkContent):
+                        # Streaming tool call chunk
+                        chunk_id = chunk.id or f"chunk-{message.id}-{chunk.index or 0}"
+
+                        if chunk.name and not chunk.args:
+                            # Tool call start
+                            msg_event.tool_call = UiPathConversationToolCallEvent(
+                                tool_call_id=chunk_id,
+                                start=UiPathConversationToolCallStartEvent(
+                                    tool_name=chunk.name,
+                                    arguments=UiPathInlineValue(inline=""),
+                                    timestamp=timestamp,
+                                ),
+                            )
+                        elif chunk.args:
+                            # Streaming tool arguments
+                            msg_event.content_part = UiPathConversationContentPartEvent(
+                                content_part_id=chunk_id,
+                                chunk=UiPathConversationContentPartChunkEvent(
+                                    data=str(chunk.args),
+                                    content_part_sequence=chunk.index or 0,
+                                ),
+                            )
+
+                except ValidationError as e:
+                    # Log and skip unknown/invalid chunk types
+                    logger.warning(
+                        f"Failed to parse content chunk: {raw_chunk}. Error: {e}"
                     )
+                    continue
         elif isinstance(message.content, str) and message.content:
             msg_event.content_part = UiPathConversationContentPartEvent(
                 content_part_id=f"content-{message.id}",
