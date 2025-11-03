@@ -8,10 +8,10 @@ from uipath._cli._runtime._contracts import (
     UiPathErrorCategory,
     UiPathResumeTrigger,
     UiPathResumeTriggerType,
+    UiPathRuntimeContext,
 )
 from uipath._cli._runtime._hitl import HitlReader
 
-from ._context import LangGraphRuntimeContext
 from ._conversation import uipath_to_human_messages
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 async def get_graph_input(
-    context: LangGraphRuntimeContext,
+    context: UiPathRuntimeContext,
     memory: AsyncSqliteSaver,
     resume_triggers_table: str = "__uipath_resume_triggers",
 ) -> Any:
