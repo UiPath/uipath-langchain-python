@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import os
+import json
 from typing import Optional
 
 from openinference.instrumentation.langchain import (
@@ -14,9 +16,10 @@ from uipath._cli._runtime._contracts import (
     UiPathRuntimeResult,
 )
 from uipath._cli.middlewares import MiddlewareResult
-from uipath._events._events import UiPathAgentStateEvent
+from uipath._events._events import UiPathAgentStateEvent, UiPathAgentMessageEvent
 from uipath.tracing import JsonLinesFileExporter, LlmOpsHttpExporter
-from uipath._events._events import UiPathAgentMessageEvent
+from uipath.agent.conversation import UiPathConversationMessage
+from pydantic import TypeAdapter
 
 from .._tracing import (
     _instrument_traceable_attributes,
@@ -29,6 +32,8 @@ from ._runtime._runtime import (  # type: ignore[attr-defined]
 from ._utils._config import UiPathConfig
 from ._utils._graph import LangGraphConfig
 
+
+logger = logging.getLogger(__name__)
 
 def langgraph_run_middleware(
     entrypoint: Optional[str],
@@ -60,6 +65,24 @@ def langgraph_run_middleware(
             if uipath_config.exists:
                 is_conversational = uipath_config.is_conversational
                 context.is_conversational = is_conversational
+
+                if is_conversational and context.input:
+                    try:
+                        input_dict = json.loads(context.input)
+
+                        conversation_id = input_dict.get("conversation_id") or input_dict.get("conversationId")
+                        exchange_id = input_dict.get("exchange_id") or input_dict.get("exchangeId")
+
+                        # Store IDs in context for reuse in output
+                        if conversation_id:
+                            context.conversation_id = conversation_id
+                        if exchange_id:
+                            context.exchange_id = exchange_id
+
+                        context.input_message = TypeAdapter(UiPathConversationMessage).validate_python(input_dict)
+                        logger.info(f"Parsed conversational input: message_id={context.input_message.message_id}, conversation_id={conversation_id}, exchange_id={exchange_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to parse input as UiPathConversationMessage: {e}. Using as plain JSON.")
 
             def generate_runtime(
                 ctx: LangGraphRuntimeContext,
