@@ -1,7 +1,6 @@
 import logging
 import os
-from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, AsyncIterator, Optional, Sequence
+from typing import Any, AsyncGenerator, Optional, Sequence
 from uuid import uuid4
 
 from langchain_core.runnables.config import RunnableConfig
@@ -16,6 +15,7 @@ from uipath._cli._runtime._contracts import (
     UiPathErrorCategory,
     UiPathErrorCode,
     UiPathResumeTrigger,
+    UiPathRuntimeContext,
     UiPathRuntimeResult,
     UiPathRuntimeStatus,
 )
@@ -27,7 +27,6 @@ from uipath._events._events import (
 )
 
 from .._utils._schema import generate_schema_from_graph
-from ._context import LangGraphRuntimeContext
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 from ._graph_resolver import AsyncResolver, LangGraphJsonResolver
 from ._input import get_graph_input
@@ -42,34 +41,17 @@ class LangGraphRuntime(UiPathBaseRuntime):
     This allows using the class with 'async with' statements.
     """
 
-    def __init__(self, context: LangGraphRuntimeContext, graph_resolver: AsyncResolver):
+    def __init__(
+        self,
+        context: UiPathRuntimeContext,
+        graph_resolver: AsyncResolver,
+        memory: AsyncSqliteSaver,
+    ):
         super().__init__(context)
-        self.context: LangGraphRuntimeContext = context
+        self.context: UiPathRuntimeContext = context
         self.graph_resolver: AsyncResolver = graph_resolver
+        self.memory: AsyncSqliteSaver = memory
         self.resume_triggers_table: str = "__uipath_resume_triggers"
-
-    @asynccontextmanager
-    async def _get_or_create_memory(self) -> AsyncIterator[AsyncSqliteSaver]:
-        """
-        Get existing memory from context or create a new one.
-
-        If memory is created, it will be automatically disposed at the end.
-        If memory already exists in context, it will be reused without disposal.
-
-        Yields:
-            AsyncSqliteSaver instance
-        """
-        # Check if memory already exists in context
-        if self.context.memory is not None:
-            # Use existing memory, don't dispose
-            yield self.context.memory
-        else:
-            # Create new memory and dispose at the end
-            async with AsyncSqliteSaver.from_conn_string(
-                self.state_file_path
-            ) as memory:
-                yield memory
-                # Memory is automatically disposed by the context manager
 
     async def execute(self) -> Optional[UiPathRuntimeResult]:
         """Execute the graph with the provided input and configuration."""
@@ -78,22 +60,21 @@ class LangGraphRuntime(UiPathBaseRuntime):
             return None
 
         try:
-            async with self._get_or_create_memory() as memory:
-                compiled_graph = await self._setup_graph(memory, graph)
-                graph_input = await self._get_graph_input(memory)
-                graph_config = self._get_graph_config()
+            compiled_graph = await self._setup_graph(self.memory, graph)
+            graph_input = await self._get_graph_input(self.memory)
+            graph_config = self._get_graph_config()
 
-                # Execute without streaming
-                graph_output = await compiled_graph.ainvoke(
-                    graph_input,
-                    graph_config,
-                    interrupt_before=self.context.breakpoints,
-                )
+            # Execute without streaming
+            graph_output = await compiled_graph.ainvoke(
+                graph_input,
+                graph_config,
+                interrupt_before=self.context.breakpoints,
+            )
 
-                # Get final state and create result
-                self.context.result = await self._create_runtime_result(
-                    compiled_graph, graph_config, memory, graph_output
-                )
+            # Get final state and create result
+            self.context.result = await self._create_runtime_result(
+                compiled_graph, graph_config, self.memory, graph_output
+            )
 
             return self.context.result
 
@@ -137,61 +118,60 @@ class LangGraphRuntime(UiPathBaseRuntime):
             return
 
         try:
-            async with self._get_or_create_memory() as memory:
-                compiled_graph = await self._setup_graph(memory, graph)
-                graph_input = await self._get_graph_input(memory)
-                graph_config = self._get_graph_config()
+            compiled_graph = await self._setup_graph(self.memory, graph)
+            graph_input = await self._get_graph_input(self.memory)
+            graph_config = self._get_graph_config()
 
-                # Track final chunk for result creation
-                final_chunk: Optional[dict[Any, Any]] = None
+            # Track final chunk for result creation
+            final_chunk: Optional[dict[Any, Any]] = None
 
-                # Stream events from graph
-                async for stream_chunk in compiled_graph.astream(
-                    graph_input,
-                    graph_config,
-                    interrupt_before=self.context.breakpoints,
-                    stream_mode=["messages", "updates"],
-                    subgraphs=True,
-                ):
-                    _, chunk_type, data = stream_chunk
+            # Stream events from graph
+            async for stream_chunk in compiled_graph.astream(
+                graph_input,
+                graph_config,
+                interrupt_before=self.context.breakpoints,
+                stream_mode=["messages", "updates"],
+                subgraphs=True,
+            ):
+                _, chunk_type, data = stream_chunk
 
-                    # Emit UiPathAgentMessageEvent for messages
-                    if chunk_type == "messages":
-                        if isinstance(data, tuple):
-                            message, _ = data
-                            event = UiPathAgentMessageEvent(
-                                payload=message,
-                                execution_id=self.context.execution_id,
-                            )
-                            yield event
+                # Emit UiPathAgentMessageEvent for messages
+                if chunk_type == "messages":
+                    if isinstance(data, tuple):
+                        message, _ = data
+                        event = UiPathAgentMessageEvent(
+                            payload=message,
+                            execution_id=self.context.execution_id,
+                        )
+                        yield event
 
-                    # Emit UiPathAgentStateEvent for state updates
-                    elif chunk_type == "updates":
-                        if isinstance(data, dict):
-                            final_chunk = data
+                # Emit UiPathAgentStateEvent for state updates
+                elif chunk_type == "updates":
+                    if isinstance(data, dict):
+                        final_chunk = data
 
-                            # Emit state update event for each node
-                            for node_name, agent_data in data.items():
-                                if isinstance(agent_data, dict):
-                                    state_event = UiPathAgentStateEvent(
-                                        payload=agent_data,
-                                        node_name=node_name,
-                                        execution_id=self.context.execution_id,
-                                    )
-                                    yield state_event
+                        # Emit state update event for each node
+                        for node_name, agent_data in data.items():
+                            if isinstance(agent_data, dict):
+                                state_event = UiPathAgentStateEvent(
+                                    payload=agent_data,
+                                    node_name=node_name,
+                                    execution_id=self.context.execution_id,
+                                )
+                                yield state_event
 
-                # Extract output from final chunk
-                graph_output = self._extract_graph_result(
-                    final_chunk, compiled_graph.output_channels
-                )
+            # Extract output from final chunk
+            graph_output = self._extract_graph_result(
+                final_chunk, compiled_graph.output_channels
+            )
 
-                # Get final state and create result
-                self.context.result = await self._create_runtime_result(
-                    compiled_graph, graph_config, memory, graph_output
-                )
+            # Get final state and create result
+            self.context.result = await self._create_runtime_result(
+                compiled_graph, graph_config, self.memory, graph_output
+            )
 
-                # Yield the final result as last event
-                yield self.context.result
+            # Yield the final result as last event
+            yield self.context.result
 
         except Exception as e:
             raise self._create_runtime_error(e) from e
@@ -480,10 +460,13 @@ class LangGraphScriptRuntime(LangGraphRuntime):
     """
 
     def __init__(
-        self, context: LangGraphRuntimeContext, entrypoint: Optional[str] = None
+        self,
+        context: UiPathRuntimeContext,
+        memory: AsyncSqliteSaver,
+        entrypoint: Optional[str] = None,
     ):
         self.resolver = LangGraphJsonResolver(entrypoint=entrypoint)
-        super().__init__(context, self.resolver)
+        super().__init__(context, self.resolver, memory=memory)
 
     @override
     async def get_entrypoint(self) -> Entrypoint:
