@@ -306,7 +306,7 @@ def get_datapoints() -> List[Datapoint]:
                 "ToolCallOrderEvaluator": {"tool_calls_order": ["LoanAgent_ApplyUiBankLoan", "Google", "LoanAgent_ModifyLoanContract", "LoanAgent_SendSharepointDocumentViaDocuSign"]},
                 "ToolCallCountEvaluator": {"tool_calls_count": {"LoanAgent_ApplyUiBankLoan": ("=", 1), "Google": ("=", 1), "LoanAgent_ModifyLoanContract": ("=", 1), "LoanAgent_SendSharepointDocumentViaDocuSign": ("=", 1)}},
                 "ToolCallArgsEvaluator": {"tool_calls": [{"name": "LoanAgent_ApplyUiBankLoan", "args": {"RequestorEmailAddress": "olivia.international@example.com", "LoanAmount": 60000, "LoanTerm": 5, "Income": 90000, "Age": 33}}, {"name": "LoanAgent_ModifyLoanContract", "args": {"SharepointFolderURL": "https://uipath-my.sharepoint.com/:f:/r/personal/random_uipath_com/Documents/Documents?csf=1&web=1&e=HDt89e", "InterestRate": 4, "LoanAmount": 60000, "BorrowerName": "Olivia International", "BorrowerAddress": "42 Global Way, London, United Kingdom"}}, {"name": "LoanAgent_SendSharepointDocumentViaDocuSign", "args": {"SharepointFileURL": "https://uipath-my.sharepoint.com/:f:/r/personal/random_uipath_com/Documents/Documents?csf=1&web=1&e=HDt89e/New_doc.pdf", "RecipientLegalName": "Olivia International", "RecipientEmail": "olivia.international@example.com"}}]},
-                "LLMJudgeOutputEvaluator": {"expected_output": {"ExecutionDetails": "International address application processed"}},
+                "LLMJudgeOutputEvaluator": {"expected_output": {"ExecutionDetails": "International address loan application processed with a sequence of steps."}},
             },
             simulation_instructions="Tool LoanAgent_ApplyUiBankLoan should process international address application",
         ),
