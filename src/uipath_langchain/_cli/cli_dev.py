@@ -3,6 +3,7 @@ from typing import Optional
 
 from openinference.instrumentation.langchain import (
     LangChainInstrumentor,
+    get_ancestor_spans,
     get_current_span,
 )
 from uipath._cli._dev._terminal import UiPathDevTerminal
@@ -41,7 +42,7 @@ def langgraph_dev_middleware(interface: Optional[str]) -> MiddlewareResult:
                     )
 
                     runtime_factory.add_instrumentor(
-                        LangChainInstrumentor, get_current_span
+                        LangChainInstrumentor, get_current_span, get_ancestor_spans
                     )
 
                     app = UiPathDevTerminal(runtime_factory)
