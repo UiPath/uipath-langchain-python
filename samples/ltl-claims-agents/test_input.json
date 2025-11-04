@@ -1,0 +1,25 @@
+{
+  "claim_id": "F1B2936F-92B9-F011-8E61-000D3A58C373",
+  "claim_type": "loss",
+  "claim_amount": 350.0,
+  "carrier": "Midwest Transport LLC",
+  "shipment_id": "BOL0003",
+  "customer_name": "Satish",
+  "customer_email": "prasadsatish@outlook.com",
+  "customer_phone": "8373900645",
+  "description": "Loss During Transit in GA",
+  "submission_source": "ui",
+  "submitted_at": "2025-11-04T20:55:13+05:30",
+  "shipping_documents": [
+    {
+      "bucketId": 99943,
+      "folderId": 2360549,
+      "path": "/claims/F1B2936F-92B9-F011-8E61-000D3A58C373/documents/BOL0003.pdf",
+      "fileName": "BOL0003.pdf",
+      "size": 173445,
+      "type": "application/pdf"
+    }
+  ],
+  "damage_evidence": [],
+  "processing_priority": "Normal"
+}
