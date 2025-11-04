@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from openinference.instrumentation.langchain import (
     LangChainInstrumentor,
+    get_ancestor_spans,
     get_current_span,
 )
 from uipath._cli._evals._console_progress_reporter import ConsoleProgressReporter
@@ -85,7 +86,7 @@ def langgraph_eval_middleware(
                     )
 
                 runtime_factory.add_instrumentor(
-                    LangChainInstrumentor, get_current_span
+                    LangChainInstrumentor, get_current_span, get_ancestor_spans
                 )
 
                 await evaluate(runtime_factory, eval_context, event_bus)

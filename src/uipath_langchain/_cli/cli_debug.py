@@ -3,6 +3,7 @@ from typing import Optional
 
 from openinference.instrumentation.langchain import (
     LangChainInstrumentor,
+    get_ancestor_spans,
     get_current_span,
 )
 from uipath._cli._debug._bridge import UiPathDebugBridge, get_debug_bridge
@@ -57,7 +58,7 @@ def langgraph_debug_middleware(
                     )
 
                 runtime_factory.add_instrumentor(
-                    LangChainInstrumentor, get_current_span
+                    LangChainInstrumentor, get_current_span, get_ancestor_spans
                 )
 
                 debug_bridge: UiPathDebugBridge = get_debug_bridge(context)
