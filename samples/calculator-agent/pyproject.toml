@@ -5,8 +5,8 @@ description = "Calculator Agent"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.10"
 dependencies = [
-    "uipath-langchain>=0.0.130",
-    "uipath>=2.1.54",
+    "uipath-langchain>=0.0.130, <0.1.0",
+    "uipath>=2.1.54, <2.2.0",
 ]
 
 [project.optional-dependencies]
