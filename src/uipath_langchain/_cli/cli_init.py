@@ -11,8 +11,12 @@ from typing import Any, Callable, overload
 import click
 from langgraph.graph.state import CompiledStateGraph
 from uipath._cli._utils._console import ConsoleLogger
-from uipath._cli._utils._parse_ast import generate_bindings_json  # type: ignore
+from uipath._cli._utils._parse_ast import (  # type: ignore
+    generate_bindings,
+    write_bindings_file,
+)
 from uipath._cli.middlewares import MiddlewareResult
+from uipath._cli.models.runtime_schema import Bindings
 
 from uipath_langchain._cli._utils._schema import generate_schema_from_graph
 
@@ -160,9 +164,11 @@ async def langgraph_init_middleware_async(
     try:
         config.load_config()
         entrypoints = []
-        all_bindings = {"version": "2.0", "resources": []}
         mermaids = {}
-
+        bindings = Bindings(
+            version="2.0",
+            resources=[],
+        )
         for graph in config.graphs:
             if entrypoint and graph.name != entrypoint:
                 continue
@@ -183,11 +189,10 @@ async def langgraph_init_middleware_async(
                     should_infer_bindings = options.get("infer_bindings", True)
                     # Make sure the file path exists
                     if os.path.exists(graph.file_path) and should_infer_bindings:
-                        file_bindings = generate_bindings_json(graph.file_path)
+                        bindings.resources.extend(
+                            generate_bindings(graph.file_path).resources
+                        )
 
-                        # Merge bindings
-                        if "resources" in file_bindings:
-                            all_bindings["resources"] = file_bindings["resources"]
                 except Exception as e:
                     console.warning(
                         f"Warning: Could not generate bindings for {graph.file_path}: {str(e)}"
@@ -223,7 +228,7 @@ async def langgraph_init_middleware_async(
                 should_continue=False,
             )
 
-        uipath_config = {"entryPoints": entrypoints, "bindings": all_bindings}
+        uipath_config = {"entryPoints": entrypoints}
 
         if write_config:
             config_path = write_config(uipath_config)
@@ -232,6 +237,7 @@ async def langgraph_init_middleware_async(
             config_path = "uipath.json"
             with open(config_path, "w") as f:
                 json.dump(uipath_config, f, indent=4)
+        console.success(f"Created {click.style(config_path, fg='cyan')} file.")
 
         for graph_name, mermaid_content in mermaids.items():
             mermaid_file_path = f"{graph_name}.mermaid"
@@ -250,7 +256,8 @@ async def langgraph_init_middleware_async(
                     should_include_stacktrace=True,
                 )
 
-        console.success(f"Created {click.style(config_path, fg='cyan')} file.")
+        bindings_path = write_bindings_file(bindings)
+        console.success(f"Created {click.style(bindings_path, fg='cyan')} file.")
 
         generate_agents_md_files(options)
 
