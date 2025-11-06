@@ -38,14 +38,13 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
 
         return result
 
-    class ProcessTool(StructuredTool):
-        """Process tool with OutputType for schema compatibility."""
-
-        OutputType: Type[BaseModel] = output_model
-
-    return ProcessTool(
+    tool = StructuredTool(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
         coroutine=process_tool_fn,
     )
+
+    tool.__dict__["OutputType"] = output_model
+
+    return tool

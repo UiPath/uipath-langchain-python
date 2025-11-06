@@ -1,5 +1,5 @@
 import os
-from typing import Sequence, Type
+from typing import Callable, Sequence, Type
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -28,7 +28,8 @@ from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState
 def create_agent(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
-    messages: Sequence[SystemMessage | HumanMessage],
+    messages: Sequence[SystemMessage | HumanMessage]
+    | Callable[[AgentGraphState], Sequence[SystemMessage | HumanMessage]],
     *,
     state_schema: Type[AgentGraphState] = AgentGraphState,
     response_format: type[BaseModel] | None = None,
