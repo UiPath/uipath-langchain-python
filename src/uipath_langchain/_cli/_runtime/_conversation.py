@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import (
@@ -115,10 +115,12 @@ def map_message(
     message: BaseMessage,
     exchange_id: Optional[str] = None,
     conversation_id: Optional[str] = None,
+    tool_chunks_dict: Optional[Dict[str, ToolCallChunkContent]] = None,
 ) -> Optional[UiPathConversationEvent]:
     """Convert LangGraph BaseMessage (chunk or full) into a UiPathConversationEvent."""
     message_id = getattr(message, "id", None) or _new_id()
-    timestamp = datetime.now().isoformat()
+    # Format timestamp as ISO 8601 UTC with milliseconds: 2025-01-04T10:30:00.123Z
+    timestamp = datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
     # --- Streaming AIMessageChunk ---
     if isinstance(message, AIMessageChunk):
@@ -126,12 +128,22 @@ def map_message(
             message_id=message.id or _new_id(),
         )
 
+        # Check if this is the last chunk by examining chunk_position
+        chunk = AIMessageChunk(**message.model_dump())
+        if hasattr(chunk, "chunk_position") and getattr(chunk, "chunk_position") == "last":
+            msg_event.end = UiPathConversationMessageEndEvent(timestamp=timestamp)
+            msg_event.content_part = UiPathConversationContentPartEvent(
+                content_part_id=f"chunk-{message.id}-0",
+                end=UiPathConversationContentPartEndEvent()
+            )
+            return _wrap_in_conversation_event(msg_event, exchange_id, conversation_id)
+
         if message.content == []:
             msg_event.start = UiPathConversationMessageStartEvent(
                 role="assistant", timestamp=timestamp
             )
             msg_event.content_part = UiPathConversationContentPartEvent(
-                content_part_id=f"chunk-{message.id}-{0}",
+                content_part_id=f"chunk-{message.id}-0",
                 start=UiPathConversationContentPartStartEvent(mime_type="text/plain"),
             )
 
@@ -147,6 +159,7 @@ def map_message(
                     chunk = content_adapter.validate_python(raw_chunk)
 
                     if isinstance(chunk, TextContent):
+                        logger.warning("MAPPED TO TextContentChunk")
                         chunk_id = raw_chunk.get("id", f"chunk-{message.id}-0")
                         msg_event.content_part = UiPathConversationContentPartEvent(
                             content_part_id=chunk_id,
@@ -156,41 +169,51 @@ def map_message(
                             ),
                         )
 
-                    elif isinstance(chunk, ToolCallContent):
-                        # Complete tool call (non-streaming)
-                        msg_event.tool_call = UiPathConversationToolCallEvent(
-                            tool_call_id=chunk.id,
-                            start=UiPathConversationToolCallStartEvent(
-                                tool_name=chunk.name,
-                                arguments=UiPathInlineValue(inline=str(chunk.args)),
-                                timestamp=timestamp,
-                            ),
-                            end=UiPathConversationToolCallEndEvent(timestamp=timestamp),
-                        )
+                    #elif isinstance(chunk, ToolCallContent):
+                    #    # Complete tool call (non-streaming)
+                    #    msg_event.tool_call = UiPathConversationToolCallEvent(
+                    #        tool_call_id=chunk.id,
+                    #        start=UiPathConversationToolCallStartEvent(
+                    #            tool_name=chunk.name,
+                    #            arguments=UiPathInlineValue(inline=str(chunk.args)),
+                    #            timestamp=timestamp,
+                    #        ),
+                    #        end=UiPathConversationToolCallEndEvent(timestamp=timestamp),
+                    #    )
 
                     elif isinstance(chunk, ToolCallChunkContent):
-                        # Streaming tool call chunk
-                        chunk_id = chunk.id or f"chunk-{message.id}-{chunk.index or 0}"
+                        # Streaming tool call chunk - accumulate in dictionary instead of emitting
+                        if tool_chunks_dict is not None and chunk.id:
+                            # Add or accumulate chunk using the __add__ operator
+                            if chunk.id in tool_chunks_dict:
+                                tool_chunks_dict[chunk.id] = tool_chunks_dict[chunk.id] + chunk
+                            else:
+                                tool_chunks_dict[chunk.id] = chunk
+                        # Don't emit any events for tool call chunks - they'll be processed when ToolMessage arrives
+                        continue
 
-                        if chunk.name and not chunk.args:
-                            # Tool call start
-                            msg_event.tool_call = UiPathConversationToolCallEvent(
-                                tool_call_id=chunk_id,
-                                start=UiPathConversationToolCallStartEvent(
-                                    tool_name=chunk.name,
-                                    arguments=UiPathInlineValue(inline=""),
-                                    timestamp=timestamp,
-                                ),
-                            )
-                        elif chunk.args:
-                            # Streaming tool arguments
-                            msg_event.content_part = UiPathConversationContentPartEvent(
-                                content_part_id=chunk_id,
-                                chunk=UiPathConversationContentPartChunkEvent(
-                                    data=str(chunk.args),
-                                    content_part_sequence=chunk.index or 0,
-                                ),
-                            )
+                        # OLD CODE (commented out - now accumulating chunks in dict):
+                        # chunk_id = chunk.id or f"chunk-{message.id}-{chunk.index or 0}"
+                        #
+                        # if chunk.name and not chunk.args:
+                        #     # Tool call start
+                        #     msg_event.tool_call = UiPathConversationToolCallEvent(
+                        #         tool_call_id=chunk_id,
+                        #         start=UiPathConversationToolCallStartEvent(
+                        #             tool_name=chunk.name,
+                        #             arguments=UiPathInlineValue(inline=""),
+                        #             timestamp=timestamp,
+                        #         ),
+                        #     )
+                        # elif chunk.args:
+                        #     # Streaming tool arguments
+                        #     msg_event.content_part = UiPathConversationContentPartEvent(
+                        #         content_part_id=chunk_id,
+                        #         chunk=UiPathConversationContentPartChunkEvent(
+                        #             data=str(chunk.args),
+                        #             content_part_sequence=chunk.index or 0,
+                        #         ),
+                        #     )
 
                 except ValidationError as e:
                     # Log and skip unknown/invalid chunk types
@@ -198,6 +221,7 @@ def map_message(
                         f"Failed to parse content chunk: {raw_chunk}. Error: {e}"
                     )
                     continue
+
         elif isinstance(message.content, str) and message.content:
             msg_event.content_part = UiPathConversationContentPartEvent(
                 content_part_id=f"content-{message.id}",
@@ -206,10 +230,6 @@ def map_message(
                     content_part_sequence=0,
                 ),
             )
-
-        stop_reason = message.response_metadata.get("stop_reason")
-        if not message.content and stop_reason in ("tool_use", "end_turn"):
-            msg_event.end = UiPathConversationMessageEndEvent(timestamp=timestamp)
 
         if (
             msg_event.start
@@ -221,86 +241,31 @@ def map_message(
 
         return None
 
-    text_content = _extract_text(message.content)
-
-    # --- HumanMessage ---
-    if isinstance(message, HumanMessage):
-        return _wrap_in_conversation_event(
-            UiPathConversationMessageEvent(
-                message_id=message_id,
-                start=UiPathConversationMessageStartEvent(
-                    role="user", timestamp=timestamp
-                ),
-                content_part=UiPathConversationContentPartEvent(
-                    content_part_id=f"cp-{message_id}",
-                    start=UiPathConversationContentPartStartEvent(
-                        mime_type="text/plain"
-                    ),
-                    chunk=UiPathConversationContentPartChunkEvent(data=text_content),
-                    end=UiPathConversationContentPartEndEvent(),
-                ),
-                end=UiPathConversationMessageEndEvent(),
-            ),
-            exchange_id,
-            conversation_id,
-        )
-
-    # --- AIMessage ---
-    if isinstance(message, AIMessage):
-        # Extract first tool call if present
-        tool_calls = getattr(message, "tool_calls", []) or []
-        first_tc = tool_calls[0] if tool_calls else None
-
-        return _wrap_in_conversation_event(
-            UiPathConversationMessageEvent(
-                message_id=message_id,
-                start=UiPathConversationMessageStartEvent(
-                    role="assistant", timestamp=timestamp
-                ),
-                content_part=(
-                    UiPathConversationContentPartEvent(
-                        content_part_id=f"cp-{message_id}",
-                        start=UiPathConversationContentPartStartEvent(
-                            mime_type="text/plain"
-                        ),
-                        chunk=UiPathConversationContentPartChunkEvent(
-                            data=text_content
-                        ),
-                        end=UiPathConversationContentPartEndEvent(),
-                    )
-                    if text_content
-                    else None
-                ),
-                tool_call=(
-                    UiPathConversationToolCallEvent(
-                        tool_call_id=first_tc.get("id") or _new_id(),
-                        start=UiPathConversationToolCallStartEvent(
-                            tool_name=first_tc.get("name"),
-                            arguments=UiPathInlineValue(
-                                inline=str(first_tc.get("args", ""))
-                            ),
-                            timestamp=timestamp,
-                        ),
-                    )
-                    if first_tc
-                    else None
-                ),
-                end=UiPathConversationMessageEndEvent(),
-            ),
-            exchange_id,
-            conversation_id,
-        )
-
     # --- ToolMessage ---
     if isinstance(message, ToolMessage):
+        tool_name = message.name or ""
+        arguments = ""
+
+        # Retrieve accumulated chunks if available
+        if tool_chunks_dict is not None and message.tool_call_id:
+            accumulated_chunk = tool_chunks_dict.get(message.tool_call_id)
+            if accumulated_chunk:
+                # Use the accumulated chunk's name and args
+                if accumulated_chunk.name:
+                    tool_name = accumulated_chunk.name
+                if accumulated_chunk.args:
+                    arguments = accumulated_chunk.args
+                # Delete the entry from the dict after processing
+                del tool_chunks_dict[message.tool_call_id]
+
         return _wrap_in_conversation_event(
             UiPathConversationMessageEvent(
                 message_id=message_id,
                 tool_call=UiPathConversationToolCallEvent(
                     tool_call_id=message.tool_call_id,
                     start=UiPathConversationToolCallStartEvent(
-                        tool_name=message.name or "",
-                        arguments=UiPathInlineValue(inline=""),
+                        tool_name=tool_name,
+                        arguments=UiPathInlineValue(inline=arguments),
                         timestamp=timestamp,
                     ),
                     end=UiPathConversationToolCallEndEvent(
@@ -313,7 +278,30 @@ def map_message(
             conversation_id,
         )
 
+        # OLD CODE (commented out - now using accumulated chunks):
+        # return _wrap_in_conversation_event(
+        #     UiPathConversationMessageEvent(
+        #         message_id=message_id,
+        #         tool_call=UiPathConversationToolCallEvent(
+        #             tool_call_id=message.tool_call_id,
+        #             start=UiPathConversationToolCallStartEvent(
+        #                 tool_name=message.name or "",
+        #                 arguments=UiPathInlineValue(inline=""),
+        #                 timestamp=timestamp,
+        #             ),
+        #             end=UiPathConversationToolCallEndEvent(
+        #                 timestamp=timestamp,
+        #                 result=UiPathInlineValue(inline=message.content),
+        #             ),
+        #         ),
+        #     ),
+        #     exchange_id,
+        #     conversation_id,
+        # )
+
+    text_content = _extract_text(message.content)
     # --- Fallback ---
+    logger.warning(f"MAPPED TO FALLBACK \n")
     return _wrap_in_conversation_event(
         UiPathConversationMessageEvent(
             message_id=message_id,

@@ -145,6 +145,10 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 # Track final chunk for result creation
                 final_chunk: Optional[dict[Any, Any]] = None
 
+                # Dictionary to accumulate tool call chunks across streaming messages
+                from uipath_langchain.chat.content_blocks import ToolCallChunkContent
+                tool_chunks_dict: dict[str, ToolCallChunkContent] = {}
+
                 # Stream events from graph
                 async for stream_chunk in compiled_graph.astream(
                     graph_input,
@@ -161,13 +165,14 @@ class LangGraphRuntime(UiPathBaseRuntime):
                             message, _ = data
 
                             # Use stored conversation/exchange IDs from input, or fallback to execution_id
-                            conversation_id = getattr(self.context, "conversation_id", None) or self.context.execution_id
-                            exchange_id = getattr(self.context, "exchange_id", None) or self.context.execution_id
+                            conversation_id ="b2c6e7df-41cd-4144-b637-96db39b90e2b" or getattr(self.context, "conversation_id", None)
+                            exchange_id = "9dae98ea-c940-4aa2-9f3c-894584b8f358" or getattr(self.context, "exchange_id", None)
 
                             conversation_event = map_message(
                                 message=message,
                                 exchange_id=exchange_id,
                                 conversation_id=conversation_id,
+                                tool_chunks_dict=tool_chunks_dict,
                             )
 
                             # Only emit if conversion was successful
