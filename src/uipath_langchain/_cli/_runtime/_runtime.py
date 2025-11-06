@@ -25,7 +25,7 @@ from uipath._events._events import (
     UiPathAgentStateEvent,
     UiPathRuntimeEvent,
 )
-from ._conversation import map_message
+from ._conversation import MessageMapper
 from .._utils._schema import generate_schema_from_graph
 from ._context import LangGraphRuntimeContext
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
@@ -145,9 +145,8 @@ class LangGraphRuntime(UiPathBaseRuntime):
                 # Track final chunk for result creation
                 final_chunk: Optional[dict[Any, Any]] = None
 
-                # Dictionary to accumulate tool call chunks across streaming messages
-                from uipath_langchain.chat.content_blocks import ToolCallChunkContent
-                tool_chunks_dict: dict[str, ToolCallChunkContent] = {}
+                # Create a stateful message mapper to track state across messages
+                message_mapper = MessageMapper()
 
                 # Stream events from graph
                 async for stream_chunk in compiled_graph.astream(
@@ -168,11 +167,10 @@ class LangGraphRuntime(UiPathBaseRuntime):
                             conversation_id ="b2c6e7df-41cd-4144-b637-96db39b90e2b" or getattr(self.context, "conversation_id", None)
                             exchange_id = "9dae98ea-c940-4aa2-9f3c-894584b8f358" or getattr(self.context, "exchange_id", None)
 
-                            conversation_event = map_message(
+                            conversation_event = message_mapper.map_message(
                                 message=message,
                                 exchange_id=exchange_id,
                                 conversation_id=conversation_id,
-                                tool_chunks_dict=tool_chunks_dict,
                             )
 
                             # Only emit if conversion was successful
