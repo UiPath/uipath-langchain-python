@@ -23,3 +23,6 @@ This sample shows how to build a LangGraph agent that connects to a remote UiPat
 
 ## [Ticket classification](ticket-classification)
 This sample demonstrates automatic classification of support tickets into categories. It includes a human approval step via UiPath Action Center.
+
+## [AssistmAIgic customer care agent](assistmAIgic-customer-care-agent)
+This sample demonstrates agent that automates customer support by handling queries received via email. It can understand and process emails, extract relevant information like order IDs, retrieve order details, categorize emails, analyze sentiment, and generate responses using a knowledge base. It also supports multilingual communication and can escalate complex cases to human agents.
