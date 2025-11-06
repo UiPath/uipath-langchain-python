@@ -9,11 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_azure_exporter() -> Optional[AzureMonitorTraceExporter]:
-    """Get Azure Monitor trace exporter if connection string is configured.
-
-    Returns:
-        AzureMonitorTraceExporter if APPLICATIONINSIGHTS_CONNECTION_STRING is set, None otherwise.
-    """
+    """Get Azure Monitor trace exporter if connection string is configured."""
     connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
 
     if not connection_string:
@@ -22,8 +18,6 @@ def get_azure_exporter() -> Optional[AzureMonitorTraceExporter]:
             "Azure Monitor exporter will not be configured"
         )
         return None
-
-    logger.info("Configuring Azure Monitor trace exporter")
     return AzureMonitorTraceExporter(connection_string=connection_string)
 
 
