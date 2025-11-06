@@ -1,0 +1,131 @@
+{
+  "version": "2.0",
+  "resources": [
+    {
+      "resource": "process",
+      "key": "Basic Http and Log API Wf",
+      "value": {
+        "name": {
+          "defaultValue": "Basic Http and Log API Wf",
+          "isExpression": false,
+          "displayName": "Process name"
+        }
+      },
+      "metadata": {
+        "subType": "api",
+        "bindingsVersion": "2.2",
+        "solutionsSupport": "true"
+      }
+    },
+    {
+      "resource": "process",
+      "key": "Basic RPA Process",
+      "value": {
+        "name": {
+          "defaultValue": "Basic RPA Process",
+          "isExpression": false,
+          "displayName": "Process name"
+        }
+      },
+      "metadata": {
+        "subType": "process",
+        "bindingsVersion": "2.2",
+        "solutionsSupport": "true"
+      }
+    },
+    {
+      "resource": "process",
+      "key": "Current Date Agent",
+      "value": {
+        "name": {
+          "defaultValue": "Current Date Agent",
+          "isExpression": false,
+          "displayName": "Process name"
+        }
+      },
+      "metadata": {
+        "subType": "agent",
+        "bindingsVersion": "2.2",
+        "solutionsSupport": "true"
+      }
+    },
+    {
+      "resource": "connection",
+      "key": "601384b6-19aa-470f-885e-b66667be375c",
+      "value": {
+        "connectionId": {
+          "defaultValue": "601384b6-19aa-470f-885e-b66667be375c",
+          "isExpression": false,
+          "displayName": "Connection ID"
+        }
+      },
+      "metadata": {
+        "connector": "uipath-salesforce-slack",
+        "useConnectionService": "true",
+        "bindingsVersion": "2.2",
+        "solutionsSupport": "true"
+      }
+    },
+    {
+      "resource": "process",
+      "key": "Basic.Agentic.Process.with.In.and.Out.Arguments",
+      "value": {
+        "name": {
+          "defaultValue": "Basic.Agentic.Process.with.In.and.Out.Arguments",
+          "isExpression": false,
+          "displayName": "Process name"
+        }
+      },
+      "metadata": {
+        "subType": "processOrchestration",
+        "bindingsVersion": "2.2",
+        "solutionsSupport": "true"
+      }
+    },
+    {
+      "resource": "index",
+      "key": "MCP Documentation Index",
+      "value": {
+        "name": {
+          "defaultValue": "MCP Documentation Index",
+          "isExpression": false,
+          "displayName": "Index name"
+        }
+      },
+      "metadata": {
+        "bindingsVersion": "2.2",
+        "solutionsSupport": "true"
+      }
+    },
+    {
+      "resource": "app",
+      "key": "AgentQuestionApp",
+      "value": {
+        "name": {
+          "defaultValue": "AgentQuestionApp",
+          "isExpression": false,
+          "displayName": "App name"
+        }
+      },
+      "metadata": {
+        "bindingsVersion": "2.2",
+        "solutionsSupport": "true"
+      }
+    },
+    {
+      "resource": "mcpServer",
+      "key": "time-mcp",
+      "value": {
+        "name": {
+          "defaultValue": "time-mcp",
+          "isExpression": false,
+          "displayName": "Slug"
+        }
+      },
+      "metadata": {
+        "bindingsVersion": "2.2",
+        "solutionsSupport": "true"
+      }
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Optional
 
 from uipath._cli._debug._bridge import ConsoleDebugBridge, UiPathDebugBridge
@@ -11,7 +12,10 @@ from uipath.tracing import JsonLinesFileExporter, LlmOpsHttpExporter
 from uipath_langchain._cli._runtime._context import LangGraphRuntimeContext
 from uipath_langchain._cli._runtime._exception import LangGraphRuntimeError
 
+from .._observability import get_azure_exporter, shutdown_telemetry
 from .runtime import create_agent_langgraph_runtime, setup_runtime_factory
+
+logger = logging.getLogger(__name__)
 
 
 def lowcode_run_middleware(
@@ -22,7 +26,6 @@ def lowcode_run_middleware(
     **kwargs,
 ) -> MiddlewareResult:
     """Middleware to handle LangGraph execution"""
-
     try:
         context = LangGraphRuntimeContext.with_defaults(**kwargs)
         context.entrypoint = entrypoint
@@ -31,7 +34,9 @@ def lowcode_run_middleware(
         context.execution_id = context.job_id or "default"
 
         async def execute():
-            runtime_factory = setup_runtime_factory(runtime_generator=create_agent_langgraph_runtime)
+            runtime_factory = setup_runtime_factory(
+                runtime_generator=create_agent_langgraph_runtime
+            )
 
             if trace_file:
                 runtime_factory.add_span_exporter(JsonLinesFileExporter(trace_file))
@@ -43,6 +48,11 @@ def lowcode_run_middleware(
                     runtime_factory.add_span_exporter(
                         LlmOpsHttpExporter(extra_process_spans=True)
                     )
+
+                    azure_exporter = get_azure_exporter()
+                    if azure_exporter:
+                        runtime_factory.add_span_exporter(azure_exporter)
+
                     await runtime_factory.execute(context)
             else:
                 debug_bridge: UiPathDebugBridge = ConsoleDebugBridge()
@@ -72,3 +82,8 @@ def lowcode_run_middleware(
             error_message=f"Error: {str(e)}",
             should_include_stacktrace=True,
         )
+    finally:
+        try:
+            shutdown_telemetry()
+        except Exception as e:
+            logger.error(f"Error during telemetry shutdown: {e}")

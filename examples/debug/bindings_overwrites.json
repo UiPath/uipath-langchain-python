@@ -1,0 +1,34 @@
+{
+  "process.Basic Http and Log API Wf": {
+    "folderPath": "CristiFolder/Solution with Basic API Workflow",
+    "name": "Basic Http and Log API Wf"
+  },
+  "process.Basic RPA Process": {
+    "folderPath": "CristiFolder/Solution Basic RPA",
+    "name": "Basic RPA Process"
+  },
+  "process.Current Date Agent": {
+    "folderPath": "CristiFolder/Solution 145",
+    "name": "Current Date Agent"
+  },
+  "connection.601384b6-19aa-470f-885e-b66667be375c": {
+    "connectionId": "601384b6-19aa-470f-885e-b66667be375c",
+    "folderKey": "2d19f686-cb56-41fe-bdde-e7d081cc425f"
+  },
+  "process.Basic.Agentic.Process.with.In.and.Out.Arguments": {
+    "folderPath": "CristiFolder",
+    "name": "Basic.Agentic.Process.with.In.and.Out.Arguments"
+  },
+  "index.MCP Documentation Index": {
+    "folderPath": "CristiFolder",
+    "name": "MCP Documentation Index"
+  },
+  "app.AgentQuestionApp": {
+    "folderPath": "CristiFolder",
+    "name": "AgentQuestionApp"
+  },
+  "mcpServer.time-mcp": {
+    "folderPath": "CristiFolder/Conversational Pirate Solution",
+    "name": "time-mcp"
+  }
+}

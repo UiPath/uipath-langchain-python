@@ -15,6 +15,8 @@ from uipath_langchain.agent.tools import create_tools_from_resources
 from .llm_utils import create_llm
 from .message_utils import build_agent_messages
 
+# Maximum number of agent loop iterations before termination
+# Set to 50 to prevent infinite loops while allowing complex reasoning chains
 AGENT_LOOP_RECURSION_LIMIT = 50
 
 

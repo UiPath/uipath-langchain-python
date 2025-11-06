@@ -127,7 +127,7 @@ class TestBuildAgentGraph:
             assert "analysis" in messages[0].content
 
     async def test_handles_input_data_json_string(self):
-        """Test building graph with JSON string input data."""
+        """Test building graph with dict input data (JSON parsing happens in runtime.py)."""
         agent_def = create_test_agent_definition(
             messages=[
                 AgentMessage(role="system", content="Count: {{count}}"),
@@ -152,7 +152,8 @@ class TestBuildAgentGraph:
         ):
             mock_create.return_value = MagicMock()
 
-            await build_agent_graph(agent_def, input_data='{"count": 42}')
+            # build_agent_graph expects a dict - JSON parsing happens in runtime.py
+            await build_agent_graph(agent_def, input_data={"count": 42})
 
             mock_create.assert_called_once()
             messages = mock_create.call_args.kwargs["messages"]

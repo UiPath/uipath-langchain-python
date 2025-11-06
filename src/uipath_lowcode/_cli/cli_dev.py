@@ -15,12 +15,17 @@ def lowcode_dev_middleware(interface: Optional[str]) -> MiddlewareResult:
 
     try:
         if interface == "terminal":
-            runtime_factory = setup_runtime_factory(runtime_generator=create_agent_langgraph_runtime)
+            runtime_factory = setup_runtime_factory(
+                runtime_generator=create_agent_langgraph_runtime
+            )
 
             app = UiPathDevTerminal(runtime_factory)
             asyncio.run(app.run_async())
         else:
             console.error(f"Unknown interface: {interface}")
+            return MiddlewareResult(
+                should_continue=False, error_message=f"Unknown interface: {interface}"
+            )
     except KeyboardInterrupt:
         console.info("Debug session interrupted by user")
     except Exception as e:

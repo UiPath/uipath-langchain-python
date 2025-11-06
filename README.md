@@ -188,8 +188,15 @@ If you're developing against local versions of the UiPath SDK and UiPath LangCha
 ### Development Workflow
 
 1. **Install pre-commit hooks** (optional but recommended)
+
+   Pre-commit automatically runs ruff linting and formatting before each commit:
    ```bash
    uv run pre-commit install
+   ```
+
+   # Run manually on all files
+   ```bash
+   pre-commit run --all-files
    ```
 
 2. **Make changes** to the code

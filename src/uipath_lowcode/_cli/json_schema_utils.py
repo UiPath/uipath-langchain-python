@@ -1,6 +1,7 @@
 from typing import Any, Optional, Union
 
 from jsonschema_pydantic import jsonschema_to_pydantic
+from pydantic import ValidationError
 
 from .exceptions import InputValidationError
 
@@ -22,8 +23,13 @@ def validate_json_against_json_schema(
             parsed_data = pydantic_model.model_validate(arguments)
 
         return parsed_data.model_dump()
-    except Exception as e:
+    except ValidationError as e:
         raise InputValidationError(
             "Data failed json schema validation",
             validation_errors=e.errors(),
+        ) from e
+    except (ValueError, TypeError) as e:
+        raise InputValidationError(
+            f"Invalid input data: {e}",
+            validation_errors=None,
         ) from e

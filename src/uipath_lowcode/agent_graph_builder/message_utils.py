@@ -1,13 +1,16 @@
 """Message creation and template interpolation utilities."""
 
 import json
+import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, List, Pattern
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from uipath.agent.models.agent import AgentMessage
 from uipath.agent.react import AGENT_SYSTEM_PROMPT_TEMPLATE
+
+logger = logging.getLogger(__name__)
 
 # Whitelist pattern: only allow alphanumeric, dots, and underscores in arguments syntax
 SAFE_ARGUMENT_PATTERN: Pattern[str] = re.compile(r"^[a-zA-Z0-9_.]+$")
@@ -15,7 +18,7 @@ SAFE_ARGUMENT_PATTERN: Pattern[str] = re.compile(r"^[a-zA-Z0-9_.]+$")
 
 def apply_system_prompt_template(system_prompt_content: str, agent_name: str) -> str:
     """Apply AGENT_SYSTEM_PROMPT_TEMPLATE with systemPrompt, currentDate, and agentName."""
-    current_date = datetime.now().strftime("%Y-%m-%d")
+    current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     return (
         AGENT_SYSTEM_PROMPT_TEMPLATE.replace("{{systemPrompt}}", system_prompt_content)
@@ -33,9 +36,17 @@ def build_agent_messages(
 
     System messages are wrapped in AGENT_SYSTEM_PROMPT_TEMPLATE with currentDate and agentName.
     Expects exactly one system message and one user message.
+
+    Raises:
+        ValueError: If system or user message is missing
     """
-    system_message = next(msg for msg in agent_messages if msg.role == "system")
-    user_message = next(msg for msg in agent_messages if msg.role == "user")
+    system_message = next((msg for msg in agent_messages if msg.role == "system"), None)
+    if system_message is None:
+        raise ValueError("Agent configuration must contain exactly one system message")
+
+    user_message = next((msg for msg in agent_messages if msg.role == "user"), None)
+    if user_message is None:
+        raise ValueError("Agent configuration must contain exactly one user message")
 
     system_prompt_content = interpolate_message(
         system_message.content or "", input_arguments
@@ -88,7 +99,10 @@ def interpolate_message(content: str, input_values: dict[str, Any]) -> str:
 
         # Validate field path to prevent injection
         if not SAFE_ARGUMENT_PATTERN.match(field_path):
-            # Skip this placeholder rather than raising to avoid breaking execution
+            logger.warning(
+                f"Skipping unsafe placeholder '{{{{{field_path}}}}}' - "
+                f"only alphanumeric, dots, and underscores are allowed"
+            )
             continue
 
         value = safe_get_nested(input_values, field_path)

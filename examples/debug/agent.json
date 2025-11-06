@@ -1,0 +1,36 @@
+{
+  "id": "da7485d2-bf6c-4689-9841-f3ee3c54000b",
+  "version": "0.0.0",
+  "name": "",
+  "metadata": {
+    "storageVersion": "0.0.0",
+    "isConversational": false
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "",
+      "contentTokens": []
+    },
+    {
+      "role": "user",
+      "content": "",
+      "contentTokens": []
+    }
+  ],
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "settings": {
+    "model": "",
+    "maxTokens": 0,
+    "temperature": 0,
+    "engine": "basic-v1"
+  },
+  "resources": []
+}
