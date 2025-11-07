@@ -221,11 +221,13 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         """
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
-        if "tool_choice" in kwargs and kwargs["tool_choice"]["type"] == "function":
-            kwargs["tool_choice"] = {
-                "type": "tool",
-                "name": kwargs["tool_choice"]["function"]["name"],
-            }
+        if "tool_choice" in kwargs:
+            tool_choice = kwargs["tool_choice"]
+            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+                kwargs["tool_choice"] = {
+                    "type": "tool",
+                    "name": tool_choice["function"]["name"],
+                }
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
 
         response = self._call(self.url, payload, self.auth_headers)
@@ -255,11 +257,13 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         """
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
-        if "tool_choice" in kwargs and kwargs["tool_choice"]["type"] == "function":
-            kwargs["tool_choice"] = {
-                "type": "tool",
-                "name": kwargs["tool_choice"]["function"]["name"],
-            }
+        if "tool_choice" in kwargs:
+            tool_choice = kwargs["tool_choice"]
+            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+                kwargs["tool_choice"] = {
+                    "type": "tool",
+                    "name": tool_choice["function"]["name"],
+                }
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
 
         response = await self._acall(self.url, payload, self.auth_headers)
@@ -285,11 +289,13 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         """
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
-        if "tool_choice" in kwargs and kwargs["tool_choice"]["type"] == "function":
-            kwargs["tool_choice"] = {
-                "type": "tool",
-                "name": kwargs["tool_choice"]["function"]["name"],
-            }
+        if "tool_choice" in kwargs:
+            tool_choice = kwargs["tool_choice"]
+            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+                kwargs["tool_choice"] = {
+                    "type": "tool",
+                    "name": tool_choice["function"]["name"],
+                }
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
         response = self._call(self.url, payload, self.auth_headers)
 
@@ -328,11 +334,13 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         """
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
-        if "tool_choice" in kwargs and kwargs["tool_choice"]["type"] == "function":
-            kwargs["tool_choice"] = {
-                "type": "tool",
-                "name": kwargs["tool_choice"]["function"]["name"],
-            }
+        if "tool_choice" in kwargs:
+            tool_choice = kwargs["tool_choice"]
+            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+                kwargs["tool_choice"] = {
+                    "type": "tool",
+                    "name": tool_choice["function"]["name"],
+                }
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
         response = await self._acall(self.url, payload, self.auth_headers)
 
