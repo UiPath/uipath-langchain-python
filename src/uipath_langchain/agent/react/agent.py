@@ -65,15 +65,13 @@ def create_agent(
     builder.add_edge(START, AgentGraphNode.INIT)
     builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
-    tool_node_names = list(tool_nodes.keys())
-    builder.add_conditional_edges(
-        AgentGraphNode.AGENT,
-        route_agent,
-        [AgentGraphNode.AGENT, *tool_node_names, AgentGraphNode.TERMINATE],
-    )
+    tool_names = list(tool_nodes)
+    targets = [AgentGraphNode.AGENT, *tool_names, AgentGraphNode.TERMINATE]
 
-    for tool_name in tool_node_names:
-        builder.add_edge(tool_name, AgentGraphNode.AGENT)
+    builder.add_conditional_edges(AgentGraphNode.AGENT, route_agent, targets)
+
+    for name in tool_names:
+        builder.add_edge(name, AgentGraphNode.AGENT)
 
     builder.add_edge(AgentGraphNode.TERMINATE, END)
 

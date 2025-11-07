@@ -5,6 +5,10 @@ from typing import Sequence
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.tools import BaseTool
+from uipath.agent.react import (
+    END_EXECUTION_TOOL,
+    RAISE_ERROR_TOOL,
+)
 
 from .constants import MAX_SUCCESSIVE_COMPLETIONS
 from .types import AgentGraphState
@@ -23,12 +27,15 @@ def create_llm_node(
     bindable_tools = list(tools) if tools else []
     base_llm = model.bind_tools(bindable_tools) if bindable_tools else model
 
+    control_tool_names = {END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name}
+    tools_present = any(t.name not in control_tool_names for t in bindable_tools)
+
     async def llm_node(state: AgentGraphState):
         messages: list[AnyMessage] = state["messages"]
 
         successive_completions = count_successive_completions(messages)
 
-        if successive_completions >= MAX_SUCCESSIVE_COMPLETIONS and bindable_tools:
+        if successive_completions >= MAX_SUCCESSIVE_COMPLETIONS and tools_present:
             llm = base_llm.bind(tool_choice="required")
         else:
             llm = base_llm
