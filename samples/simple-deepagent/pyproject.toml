@@ -1,0 +1,47 @@
+[project]
+name = "simple-deepagent"
+version = "0.0.1"
+description = "Simple DeepAgent for research tasks using Tavily search"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "deepagents>=0.2.5",
+    "langchain-anthropic>=1.0.1",
+    "langchain-tavily>=0.2.13",
+    "langgraph>=1.0.2",
+    "tavily-python>=0.7.12",
+    "uipath>=2.1.140",
+    "uipath-langchain>=0.0.120",
+    "openinference-instrumentation-langchain>=0.1.50",
+]
+
+[project.optional-dependencies]
+dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
+
+[build-system]
+requires = ["setuptools>=73.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]
+
+[tool.ruff]
+lint.select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "D",    # pydocstyle
+    "D401", # First line should be in imperative mood
+    "T201",
+    "UP",
+]
+lint.ignore = [
+    "UP006",
+    "UP007",
+    "UP035",
+    "D417",
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "UP"]
