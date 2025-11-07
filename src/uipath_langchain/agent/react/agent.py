@@ -53,7 +53,9 @@ def create_agent(
     tool_nodes = create_tool_node(agent_tools)
     terminate_node = create_terminate_node(response_format)
 
-    builder: StateGraph[AgentGraphState] = StateGraph(state_schema)
+    builder: StateGraph[AgentGraphState] = StateGraph(
+        state_schema, output_channels=["output"]
+    )
     builder.add_node(AgentGraphNode.INIT, init_node)
     builder.add_node(AgentGraphNode.AGENT, agent_node)
 
