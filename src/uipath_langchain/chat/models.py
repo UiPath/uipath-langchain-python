@@ -197,6 +197,35 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
                 }
         return payload
 
+    def _normalize_tool_choice(self, kwargs: Dict[str, Any]) -> None:
+        """Normalize tool_choice for UiPath Gateway compatibility.
+
+        Converts LangChain tool_choice formats to UiPath Gateway format:
+        - String "required" -> {"type": "required"}
+        - String "auto" -> {"type": "auto"}
+        - Dict with function -> {"type": "tool", "name": "function_name"}
+        """
+        if "tool_choice" in kwargs:
+            tool_choice = kwargs["tool_choice"]
+
+            if isinstance(tool_choice, str):
+                if tool_choice in ("required", "auto", "none"):
+                    logger.debug(
+                        f"Converting tool_choice from '{tool_choice}' to {{'type': '{tool_choice}'}}"
+                    )
+                    kwargs["tool_choice"] = {"type": tool_choice}
+            elif (
+                isinstance(tool_choice, dict) and tool_choice.get("type") == "function"
+            ):
+                function_name = tool_choice["function"]["name"]
+                logger.debug(
+                    f"Converting tool_choice from function '{function_name}' to tool format"
+                )
+                kwargs["tool_choice"] = {
+                    "type": "tool",
+                    "name": function_name,
+                }
+
     def _generate(
         self,
         messages: List[BaseMessage],
@@ -221,13 +250,7 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         """
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
-        if "tool_choice" in kwargs:
-            tool_choice = kwargs["tool_choice"]
-            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
-                kwargs["tool_choice"] = {
-                    "type": "tool",
-                    "name": tool_choice["function"]["name"],
-                }
+        self._normalize_tool_choice(kwargs)
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
 
         response = self._call(self.url, payload, self.auth_headers)
@@ -257,13 +280,7 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         """
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
-        if "tool_choice" in kwargs:
-            tool_choice = kwargs["tool_choice"]
-            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
-                kwargs["tool_choice"] = {
-                    "type": "tool",
-                    "name": tool_choice["function"]["name"],
-                }
+        self._normalize_tool_choice(kwargs)
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
 
         response = await self._acall(self.url, payload, self.auth_headers)
@@ -289,13 +306,7 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         """
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
-        if "tool_choice" in kwargs:
-            tool_choice = kwargs["tool_choice"]
-            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
-                kwargs["tool_choice"] = {
-                    "type": "tool",
-                    "name": tool_choice["function"]["name"],
-                }
+        self._normalize_tool_choice(kwargs)
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
         response = self._call(self.url, payload, self.auth_headers)
 
@@ -334,13 +345,7 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         """
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
-        if "tool_choice" in kwargs:
-            tool_choice = kwargs["tool_choice"]
-            if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
-                kwargs["tool_choice"] = {
-                    "type": "tool",
-                    "name": tool_choice["function"]["name"],
-                }
+        self._normalize_tool_choice(kwargs)
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
         response = await self._acall(self.url, payload, self.auth_headers)
 
