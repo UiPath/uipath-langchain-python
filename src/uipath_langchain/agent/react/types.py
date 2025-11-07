@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 from langgraph.graph import MessagesState
 from pydantic import BaseModel, Field
+from typing_extensions import NotRequired
 
 
 class AgentGraphState(MessagesState):
     """Agent Graph state for standard loop execution."""
 
-    pass
+    output: NotRequired[dict[str, Any]]
 
 
 class AgentGraphNode(StrEnum):
