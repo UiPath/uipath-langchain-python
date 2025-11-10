@@ -6,7 +6,9 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage
 from langchain_core.tools import BaseTool
 
+from .constants import MAX_SUCCESSIVE_COMPLETIONS
 from .types import AgentGraphState
+from .utils import count_successive_completions
 
 
 def create_llm_node(
@@ -24,7 +26,13 @@ def create_llm_node(
     async def llm_node(state: AgentGraphState):
         messages: list[AnyMessage] = state["messages"]
 
-        response = await base_llm.ainvoke(messages)
+        successive_completions = count_successive_completions(messages)
+        if successive_completions >= MAX_SUCCESSIVE_COMPLETIONS:
+            llm = base_llm.bind(tool_choice="required")
+        else:
+            llm = base_llm
+
+        response = await llm.ainvoke(messages)
         if not isinstance(response, AIMessage):
             raise TypeError(
                 f"LLM returned {type(response).__name__} instead of AIMessage"
