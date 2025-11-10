@@ -287,19 +287,13 @@ def main() -> None:
     if args.include_not_supported:
         print("   (Including not supported evaluators)")
 
-    for agent_name in ["calculator", "loan"]:
-        export_agent(agent_name, base_dir, only_supported=not args.include_not_supported, include_llm_judge=not args.exclude_llm_judge, small_set_size=args.small_set_size)
-
-    print("✅ All exports completed!")
     print(f"\n📁 Files exported to: {base_dir.absolute()}")
-    print("   ├── evaluators/")
-    print("   │   ├── evaluator-calculator_*.json")
-    print("   └── eval-sets/")
-    print("       ├── evaluation-set-calculator.json")
-    if args.small_set_size > 0:
-        print(f"       └── evaluation-set-calculator-small.json")
-        print(f"       └── evaluation-set-loan-small.json")
-
+    for agent_name in get_agents().keys():
+        export_agent(agent_name, base_dir, only_supported=not args.include_not_supported, include_llm_judge=not args.exclude_llm_judge, small_set_size=args.small_set_size)
+        print(f"       └── evaluation-set-{agent_name}.json")
+        if args.small_set_size > 0:
+            print(f"       └── evaluation-set-{agent_name}-small.json")
+    print("\n✅ All exports completed!")
 
 if __name__ == "__main__":
     main()
