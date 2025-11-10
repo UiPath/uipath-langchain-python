@@ -7,15 +7,18 @@ This script exports:
 
 import argparse
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List
 from dotenv import load_dotenv, find_dotenv
+from gym_sample.uipath_gym_types import Datapoint
+from uipath.eval.evaluators import BaseEvaluator
 
 from gym_sample.graph import get_agents, get_all_evaluators
 
 
-def evaluator_to_spec(evaluator: Any, agent_name: str) -> Dict[str, Any]:
+def evaluator_to_spec(evaluator: BaseEvaluator, agent_name: str) -> Dict[str, Any]:
     """Convert an evaluator instance to UiPath evaluator spec format.
 
     Args:
@@ -30,7 +33,8 @@ def evaluator_to_spec(evaluator: Any, agent_name: str) -> Dict[str, Any]:
 
     # Use agent-specific evaluator ID to avoid conflicts between agents
     # Each agent may need different config (e.g., targetOutputKey)
-    evaluator_id = f"{agent_name}_{evaluator.name}"
+    # Use evaluator.id (not .name) to preserve numeric suffixes like _1, _2
+    evaluator_id = f"{agent_name}_{evaluator.id}"
 
     # Use the evaluator_config (Pydantic model) and dump with aliases (camelCase)
     evaluator_config = evaluator.evaluator_config.model_dump(
@@ -39,17 +43,50 @@ def evaluator_to_spec(evaluator: Any, agent_name: str) -> Dict[str, Any]:
         exclude_unset=False  # Include defaults like targetOutputKey
     )
 
-    return {
+    spec = {
         "version": "1.0",
         "id": evaluator_id,
-        "description": f"{evaluator.name} for {agent_name} agent",
+        "description": f"{evaluator.id} for {agent_name} agent",
         "evaluatorTypeId": evaluator_type_id,
         "evaluatorConfig": evaluator_config,
     }
 
+    # Check if this is a custom evaluator (not in the standard SUPPORTED_EVALUATORS list)
+    # For custom evaluators, we need to add the evaluatorSchema field
+    BUILT_IN_EVALUATORS = {
+        "ContainsEvaluator",
+        "ExactMatchEvaluator",
+        "JsonSimilarityEvaluator",
+        "LLMJudgeOutputEvaluator",
+        "LLMJudgeStrictJSONSimilarityOutputEvaluator",
+        "ToolCallOrderEvaluator",
+        "ToolCallCountEvaluator",
+        "ToolCallArgsEvaluator",
+        "ToolCallOutputEvaluator",
+        "LLMJudgeTrajectoryEvaluator",
+        "LLMJudgeTrajectorySimulationEvaluator",
+    }
+
+    # Check if this is a custom evaluator by checking if the base evaluator name is in built-ins
+    # Remove numeric suffix (e.g., "ToolCallOrderEvaluator_1" -> "ToolCallOrderEvaluator")
+    base_evaluator_name = re.sub(r'_\d+$', '', evaluator.id)
+
+    if base_evaluator_name not in BUILT_IN_EVALUATORS:
+        # For custom evaluators, determine the Python file and class name
+        # This assumes custom evaluators follow a naming convention
+        class_name = evaluator.__class__.__name__
+
+        # Derive the filename from agent name (can be customized as needed)
+        # For thermofisher_warranty custom evaluators, they're in thermofisher_warranty_evaluators.py
+        file_name = f"{agent_name}_evaluators.py"
+
+        spec["evaluatorSchema"] = f"file://{file_name}:{class_name}"
+
+    return spec
+
 
 def datapoint_to_evaluation(
-    datapoint: Any,
+    datapoint: Datapoint,
     eval_set_id: str,
     evaluator_refs: List[str],
     agent_name: str
@@ -129,7 +166,10 @@ def export_evaluators(agent_name: str, output_dir: Path, only_supported: bool = 
 
     for evaluator in evaluators:
         # Skip unsupported evaluators if only_supported flag is set
-        if only_supported and evaluator.name not in SUPPORTED_EVALUATORS:
+        # Extract base name by removing numeric suffix (e.g., "ToolCallOrderEvaluator_1" -> "ToolCallOrderEvaluator")
+        base_name = re.sub(r'_\d+$', '', evaluator.name)
+
+        if only_supported and base_name not in SUPPORTED_EVALUATORS:
             print(f"  ⊘ Skipped {evaluator.name} (not yet supported in PR)")
             continue
         spec = evaluator_to_spec(evaluator, agent_name)
@@ -254,10 +294,8 @@ def main() -> None:
     print(f"\n📁 Files exported to: {base_dir.absolute()}")
     print("   ├── evaluators/")
     print("   │   ├── evaluator-calculator_*.json")
-    print("   │   └── evaluator-loan_*.json")
     print("   └── eval-sets/")
     print("       ├── evaluation-set-calculator.json")
-    print("       └── evaluation-set-loan.json")
     if args.small_set_size > 0:
         print(f"       └── evaluation-set-calculator-small.json")
         print(f"       └── evaluation-set-loan-small.json")
