@@ -11,8 +11,7 @@ from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrument
 from opentelemetry.instrumentation.asyncio import AsyncioInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
-from uipath._cli._runtime._contracts import UiPathRuntimeFactory
-from uipath_langchain._cli._runtime._context import LangGraphRuntimeContext
+from uipath._cli._runtime._contracts import UiPathRuntimeContext, UiPathRuntimeFactory
 from uipath_langchain._cli._runtime._runtime import (
     LangGraphRuntime,
     LangGraphScriptRuntime,
@@ -33,8 +32,18 @@ class AgentLangGraphRuntime(LangGraphRuntime):
     pass
 
 
-def create_agent_langgraph_runtime(ctx: LangGraphRuntimeContext) -> LangGraphRuntime:
-    """Create runtime for low-code agents with input validation and state cleanup."""
+def create_agent_langgraph_runtime(
+    ctx: UiPathRuntimeContext, memory
+) -> LangGraphRuntime:
+    """Create runtime for low-code agents with input validation.
+
+    Args:
+        ctx: Runtime context containing input, resume flag, and other metadata
+        memory: AsyncSqliteSaver instance for checkpoint/state management
+
+    Returns:
+        LangGraphRuntime instance configured for the low-code agent
+    """
 
     async def graph_builder():
         """Load agent config and validate input (on new run) and build graph."""
@@ -49,27 +58,17 @@ def create_agent_langgraph_runtime(ctx: LangGraphRuntimeContext) -> LangGraphRun
 
         return await build_agent_graph(agent_definition, input_data=agent_input)
 
-    if not ctx.resume:
-        if ctx.runtime_dir and ctx.state_file:
-            state_path = os.path.join(ctx.runtime_dir, ctx.state_file)
-            try:
-                os.remove(state_path)
-                logger.debug(f"Deleted old state file: {state_path}")
-            except FileNotFoundError:
-                pass
-            except OSError as e:
-                logger.warning(f"Could not delete state file {state_path}: {e}")
-
-    runtime = AgentLangGraphRuntime(ctx, graph_builder)
+    # LangGraphRuntime expects: (context, resolver, memory)
+    runtime = AgentLangGraphRuntime(ctx, graph_builder, memory)
 
     return runtime
 
 
 def setup_runtime_factory(
     runtime_generator: Optional[
-        Callable[[LangGraphRuntimeContext], LangGraphRuntime]
+        Callable[[UiPathRuntimeContext], LangGraphRuntime]
     ] = None,
-    context_generator: Optional[Callable[[], LangGraphRuntimeContext]] = None,
+    context_generator: Optional[Callable[[], UiPathRuntimeContext]] = None,
 ) -> UiPathRuntimeFactory:
     """Set up runtime factory with instrumentation for low-code agents."""
     if runtime_generator is None:
@@ -81,8 +80,8 @@ def setup_runtime_factory(
     _instrument_traceable_attributes()
 
     runtime_factory = UiPathRuntimeFactory(
-        runtime_class=LangGraphScriptRuntime,
-        context_class=LangGraphRuntimeContext,
+        LangGraphScriptRuntime,
+        UiPathRuntimeContext,
         runtime_generator=runtime_generator,
         context_generator=context_generator,
     )
