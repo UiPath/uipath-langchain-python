@@ -17,7 +17,7 @@ from .types import AgentGraphState
 def create_terminate_node(
     response_schema: type[BaseModel] | None = None,
 ):
-    """Validates and returns end_execution args, or raises AgentTerminationException for raise_error."""
+    """Validates and extracts end_execution args to state output field."""
 
     def terminate_node(state: AgentGraphState):
         last_message = state["messages"][-1]
@@ -33,7 +33,7 @@ def create_terminate_node(
                 args = tool_call["args"]
                 output_schema = response_schema or END_EXECUTION_TOOL.args_schema
                 validated = output_schema.model_validate(args)
-                return validated.model_dump()
+                return {"output": validated.model_dump()}
 
             if tool_name == RAISE_ERROR_TOOL.name:
                 error_message = tool_call["args"].get(

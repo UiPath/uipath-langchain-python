@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any, Optional
 
 from langgraph.graph import MessagesState
 from pydantic import BaseModel, Field
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 class AgentGraphState(MessagesState):
     """Agent Graph state for standard loop execution."""
 
-    pass
+    output: Optional[dict[str, Any]] = None
 
 
 class AgentGraphNode(StrEnum):
