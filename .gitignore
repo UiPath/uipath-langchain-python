@@ -179,3 +179,6 @@ cython_debug/
 **/**.nupkg
 **/__uipath/
 **/.langgraph_api
+
+samples/*/evals/
+samples/*/results/
