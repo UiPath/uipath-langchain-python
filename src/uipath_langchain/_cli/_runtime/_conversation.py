@@ -47,13 +47,12 @@ class MessageMapper:
 
     Maintains state across multiple message conversions to properly track:
     - Tool call chunks that are accumulated until the ToolMessage arrives
-    - The last AI message ID for associating tool results with their originating message
+    - The AI message ID associated with each tool call for proper correlation
     """
 
     def __init__(self):
         """Initialize the mapper with empty state."""
-        self.tool_chunks_dict: Dict[str, ToolCallChunkContent] = {}
-        self.last_ai_message_id: Optional[str] = None
+        self.tool_chunks_dict: Dict[str, tuple[str, ToolCallChunkContent]] = {}
 
     def _wrap_in_conversation_event(
         self,
@@ -104,11 +103,11 @@ class MessageMapper:
 
         # --- Streaming AIMessageChunk ---
         if isinstance(message, AIMessageChunk):
-            # Track this AI message ID for future tool message references
-            self.last_ai_message_id = message.id or _new_id()
+            # Track this AI message ID for associating tool calls
+            ai_message_id = message.id or _new_id()
 
             msg_event = UiPathConversationMessageEvent(
-                message_id=self.last_ai_message_id,
+                message_id=ai_message_id,
             )
 
             # Check if this is the last chunk by examining chunk_position
@@ -152,12 +151,15 @@ class MessageMapper:
                             )
 
                         elif isinstance(chunk, ToolCallChunkContent):
-                            # Streaming tool call chunk - accumulate in dictionary instead of emitting
+                            # Streaming tool call chunk - accumulate in dictionary with AI message ID
                             if chunk.id:
                                 if chunk.id in self.tool_chunks_dict:
-                                    self.tool_chunks_dict[chunk.id] = self.tool_chunks_dict[chunk.id] + chunk
+                                    # Accumulate the chunk, keeping the same AI message ID
+                                    stored_ai_id, stored_chunk = self.tool_chunks_dict[chunk.id]
+                                    self.tool_chunks_dict[chunk.id] = (stored_ai_id, stored_chunk + chunk)
                                 else:
-                                    self.tool_chunks_dict[chunk.id] = chunk
+                                    # Store new chunk with AI message ID
+                                    self.tool_chunks_dict[chunk.id] = (ai_message_id, chunk)
                             continue
 
                     except ValidationError as e:
@@ -188,13 +190,18 @@ class MessageMapper:
 
         # --- ToolMessage ---
         if isinstance(message, ToolMessage):
-            tool_name = message.name or ""
-            arguments = ""
+            result_message_id: Optional[str] = None
+            tool_name = message.name
+            arguments = None
 
-            # Retrieve accumulated chunks if available
+            # Retrieve accumulated chunks and AI message ID
             if message.tool_call_id:
-                accumulated_chunk = self.tool_chunks_dict.get(message.tool_call_id)
-                if accumulated_chunk:
+                tool_data = self.tool_chunks_dict.get(message.tool_call_id)
+                if tool_data:
+                    # Unpack the AI message ID and accumulated chunk
+                    stored_ai_id, accumulated_chunk = tool_data
+                    result_message_id = stored_ai_id
+
                     # Use the accumulated chunk's name and args
                     if accumulated_chunk.name:
                         tool_name = accumulated_chunk.name
@@ -203,9 +210,12 @@ class MessageMapper:
                     # Delete the entry from the dict after processing
                     del self.tool_chunks_dict[message.tool_call_id]
 
-            # Use the last AI message ID instead of the ToolMessage's own ID
-            # This associates the tool result with the message that initiated the tool call
-            result_message_id = self.last_ai_message_id or message_id
+            # If no AI message ID was found, we cannot properly associate this tool result
+            if not result_message_id:
+                logger.warning(
+                    f"Tool message {message.tool_call_id} has no associated AI message ID. Skipping."
+                )
+                return None
 
             return self._wrap_in_conversation_event(
                 UiPathConversationMessageEvent(
