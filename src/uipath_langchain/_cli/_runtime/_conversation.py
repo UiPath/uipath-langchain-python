@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -46,13 +47,13 @@ class MessageMapper:
     """Stateful mapper that converts LangChain messages to UiPath conversation events.
 
     Maintains state across multiple message conversions to properly track:
-    - Tool call chunks that are accumulated until the ToolMessage arrives
-    - The AI message ID associated with each tool call for proper correlation
+    - The AI message ID associated with each tool call for proper correlation with ToolMessage
     """
 
     def __init__(self):
         """Initialize the mapper with empty state."""
-        self.tool_chunks_dict: Dict[str, tuple[str, ToolCallChunkContent]] = {}
+        self.tool_call_to_ai_message: Dict[str, str] = {}
+        self.seen_message_ids: set[str] = set()
 
     def _wrap_in_conversation_event(
         self,
@@ -97,14 +98,13 @@ class MessageMapper:
         Returns:
             A UiPathConversationEvent if the message should be emitted, None otherwise
         """
-        message_id = message.id or _new_id()
         # Format timestamp as ISO 8601 UTC with milliseconds: 2025-01-04T10:30:00.123Z
         timestamp = datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
         # --- Streaming AIMessageChunk ---
         if isinstance(message, AIMessageChunk):
             # Track this AI message ID for associating tool calls
-            ai_message_id = message.id or _new_id()
+            ai_message_id = message.id
 
             msg_event = UiPathConversationMessageEvent(
                 message_id=ai_message_id,
@@ -120,7 +120,9 @@ class MessageMapper:
                 )
                 return self._wrap_in_conversation_event(msg_event, exchange_id, conversation_id)
 
-            if message.content == []:
+            # For every new message_id, start a new message
+            if ai_message_id not in self.seen_message_ids:
+                self.seen_message_ids.add(ai_message_id)
                 msg_event.start = UiPathConversationMessageStartEvent(
                     role="assistant", timestamp=timestamp
                 )
@@ -141,9 +143,8 @@ class MessageMapper:
                         chunk = content_adapter.validate_python(raw_chunk)
 
                         if isinstance(chunk, TextContent):
-                            chunk_id = raw_chunk.get("id", f"chunk-{message.id}-0")
                             msg_event.content_part = UiPathConversationContentPartEvent(
-                                content_part_id=chunk_id,
+                                content_part_id=f"chunk-{message.id}-0",
                                 chunk=UiPathConversationContentPartChunkEvent(
                                     data=chunk.text,
                                     content_part_sequence=0,
@@ -151,15 +152,17 @@ class MessageMapper:
                             )
 
                         elif isinstance(chunk, ToolCallChunkContent):
-                            # Streaming tool call chunk - accumulate in dictionary with AI message ID
+                            # Track tool_call_id -> ai_message_id mapping
                             if chunk.id:
-                                if chunk.id in self.tool_chunks_dict:
-                                    # Accumulate the chunk, keeping the same AI message ID
-                                    stored_ai_id, stored_chunk = self.tool_chunks_dict[chunk.id]
-                                    self.tool_chunks_dict[chunk.id] = (stored_ai_id, stored_chunk + chunk)
-                                else:
-                                    # Store new chunk with AI message ID
-                                    self.tool_chunks_dict[chunk.id] = (ai_message_id, chunk)
+                                self.tool_call_to_ai_message[chunk.id] = ai_message_id
+
+                            msg_event.content_part = UiPathConversationContentPartEvent(
+                                content_part_id=f"chunk-{message.id}-0",
+                                chunk=UiPathConversationContentPartChunkEvent(
+                                    data=chunk.args,
+                                    content_part_sequence=0,
+                                ),
+                            )
                             continue
 
                     except ValidationError as e:
@@ -190,25 +193,8 @@ class MessageMapper:
 
         # --- ToolMessage ---
         if isinstance(message, ToolMessage):
-            result_message_id: Optional[str] = None
-            tool_name = message.name
-            arguments = None
-
-            # Retrieve accumulated chunks and AI message ID
-            if message.tool_call_id:
-                tool_data = self.tool_chunks_dict.get(message.tool_call_id)
-                if tool_data:
-                    # Unpack the AI message ID and accumulated chunk
-                    stored_ai_id, accumulated_chunk = tool_data
-                    result_message_id = stored_ai_id
-
-                    # Use the accumulated chunk's name and args
-                    if accumulated_chunk.name:
-                        tool_name = accumulated_chunk.name
-                    if accumulated_chunk.args:
-                        arguments = accumulated_chunk.args
-                    # Delete the entry from the dict after processing
-                    del self.tool_chunks_dict[message.tool_call_id]
+            # Look up the AI message ID using the tool_call_id
+            result_message_id = self.tool_call_to_ai_message.get(message.tool_call_id) if message.tool_call_id else None
 
             # If no AI message ID was found, we cannot properly associate this tool result
             if not result_message_id:
@@ -217,19 +203,30 @@ class MessageMapper:
                 )
                 return None
 
+            # Clean up the mapping after use
+            if message.tool_call_id:
+                del self.tool_call_to_ai_message[message.tool_call_id]
+
+            content_value = message.content
+            if isinstance(content_value, str):
+                try:
+                    content_value = json.loads(content_value)
+                except (json.JSONDecodeError, TypeError):
+                    pass  # Keep as string if not valid JSON
+
             return self._wrap_in_conversation_event(
                 UiPathConversationMessageEvent(
                     message_id=result_message_id,
                     tool_call=UiPathConversationToolCallEvent(
                         tool_call_id=message.tool_call_id,
                         start=UiPathConversationToolCallStartEvent(
-                            tool_name=tool_name,
-                            arguments=UiPathInlineValue(inline=arguments),
+                            tool_name=message.name,
+                            arguments=None,
                             timestamp=timestamp,
                         ),
                         end=UiPathConversationToolCallEndEvent(
                             timestamp=timestamp,
-                            result=UiPathInlineValue(inline=message.content),
+                            result=content_value,
                         ),
                     ),
                 ),
@@ -241,12 +238,12 @@ class MessageMapper:
         # --- Fallback ---
         return self._wrap_in_conversation_event(
             UiPathConversationMessageEvent(
-                message_id=message_id,
+                message_id=message.id,
                 start=UiPathConversationMessageStartEvent(
                     role="assistant", timestamp=timestamp
                 ),
                 content_part=UiPathConversationContentPartEvent(
-                    content_part_id=f"cp-{message_id}",
+                    content_part_id=f"cp-{message.id}",
                     chunk=UiPathConversationContentPartChunkEvent(data=text_content),
                 ),
                 end=UiPathConversationMessageEndEvent(),
