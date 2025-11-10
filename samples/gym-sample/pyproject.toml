@@ -12,7 +12,7 @@ dependencies = [
     "langchain-core>=0.3.34",
     "langgraph-checkpoint-sqlite>=2.0.3",
     "python-dotenv>=1.0.1",
-    "uipath-langchain>=0.0.142.dev1002350000,<0.0.142.dev1002360000",
+    "uipath-langchain>=0.0.149",
     "uipath",
     "pydantic>=2.10.6",
     "aiohttp>=3.11.12",
@@ -25,15 +25,6 @@ requires-python = ">=3.10"
 [project.scripts]
 gym-eval = "gym_sample.run:main"
 gym-export = "gym_sample.export_evals:main"
-
-[[tool.uv.index]]
-name = "testpypi"
-url = "https://test.pypi.org/simple/"
-publish-url = "https://test.pypi.org/legacy/"
-explicit = true
-
-[tool.uv.sources]
-uipath-langchain = { index = "testpypi" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
