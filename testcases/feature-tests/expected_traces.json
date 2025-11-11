@@ -1,0 +1,23 @@
+{
+    "description": "Feature tests agent trace assertions - check key spans exist for streaming and invoke tests",
+    "required_spans": [
+        {
+            "name": "LangGraph",
+            "attributes": {
+                "openinference.span.kind": "CHAIN"
+            }
+        },
+        {
+            "name": [
+                "UiPathAzureChatOpenAI",
+                "UiPathChat"
+            ],
+            "attributes": {
+                "openinference.span.kind": "LLM",
+                "llm.provider": "azure",
+                "llm.model_name": "gpt-4o-mini-2024-07-18",
+                "llm.system": "openai"
+            }
+        }
+    ]
+}

@@ -7,6 +7,10 @@ from langchain_core.callbacks import (
     CallbackManagerForLLMRun,
 )
 from langchain_core.language_models import LanguageModelInput
+from langchain_core.language_models.chat_models import (
+    agenerate_from_stream,
+    generate_from_stream,
+)
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 from langchain_core.messages.ai import UsageMetadata
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
@@ -32,6 +36,13 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
     ) -> ChatResult:
         if "tools" in kwargs and not kwargs["tools"]:
             del kwargs["tools"]
+
+        if self.streaming:
+            stream_iter = self._stream(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
+            return generate_from_stream(stream_iter)
+
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
         response = self._call(self.url, payload, self.auth_headers)
         return self._create_chat_result(response)
@@ -45,6 +56,13 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
     ) -> ChatResult:
         if "tools" in kwargs and not kwargs["tools"]:
             del kwargs["tools"]
+
+        if self.streaming:
+            stream_iter = self._astream(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
+            return await agenerate_from_stream(stream_iter)
+
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
         response = await self._acall(self.url, payload, self.auth_headers)
         return self._create_chat_result(response)
@@ -58,20 +76,34 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
     ) -> Iterator[ChatGenerationChunk]:
         if "tools" in kwargs and not kwargs["tools"]:
             del kwargs["tools"]
+        kwargs["stream"] = True
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
-        response = self._call(self.url, payload, self.auth_headers)
 
-        # For non-streaming response, yield single chunk
-        chat_result = self._create_chat_result(response)
-        chunk = ChatGenerationChunk(
-            message=AIMessageChunk(
-                content=chat_result.generations[0].message.content,
-                additional_kwargs=chat_result.generations[0].message.additional_kwargs,
-                response_metadata=chat_result.generations[0].message.response_metadata,
-                usage_metadata=chat_result.generations[0].message.usage_metadata,  # type: ignore
+        default_chunk_class = AIMessageChunk
+
+        for chunk in self._stream_request(self.url, payload, self.auth_headers):
+            if self.logger:
+                self.logger.debug(f"[Stream] Got chunk from _stream_request: {chunk}")
+            generation_chunk = self._convert_chunk(
+                chunk, default_chunk_class, include_tool_calls=True
             )
-        )
-        yield chunk
+            if generation_chunk is None:
+                if self.logger:
+                    self.logger.debug("[Stream] Skipping None generation_chunk")
+                continue
+
+            if self.logger:
+                self.logger.debug(
+                    f"[Stream] Yielding generation_chunk: {generation_chunk}"
+                )
+
+            if run_manager:
+                run_manager.on_llm_new_token(
+                    generation_chunk.text,
+                    chunk=generation_chunk,
+                )
+
+            yield generation_chunk
 
     async def _astream(
         self,
@@ -82,20 +114,25 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
     ) -> AsyncIterator[ChatGenerationChunk]:
         if "tools" in kwargs and not kwargs["tools"]:
             del kwargs["tools"]
+        kwargs["stream"] = True
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
-        response = await self._acall(self.url, payload, self.auth_headers)
 
-        # For non-streaming response, yield single chunk
-        chat_result = self._create_chat_result(response)
-        chunk = ChatGenerationChunk(
-            message=AIMessageChunk(
-                content=chat_result.generations[0].message.content,
-                additional_kwargs=chat_result.generations[0].message.additional_kwargs,
-                response_metadata=chat_result.generations[0].message.response_metadata,
-                usage_metadata=chat_result.generations[0].message.usage_metadata,  # type: ignore
+        default_chunk_class = AIMessageChunk
+
+        async for chunk in self._astream_request(self.url, payload, self.auth_headers):
+            generation_chunk = self._convert_chunk(
+                chunk, default_chunk_class, include_tool_calls=True
             )
-        )
-        yield chunk
+            if generation_chunk is None:
+                continue
+
+            if run_manager:
+                await run_manager.on_llm_new_token(
+                    generation_chunk.text,
+                    chunk=generation_chunk,
+                )
+
+            yield generation_chunk
 
     def with_structured_output(
         self,
@@ -251,8 +288,14 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
         self._normalize_tool_choice(kwargs)
-        payload = self._get_request_payload(messages, stop=stop, **kwargs)
 
+        if self.streaming:
+            stream_iter = self._stream(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
+            return generate_from_stream(stream_iter)
+
+        payload = self._get_request_payload(messages, stop=stop, **kwargs)
         response = self._call(self.url, payload, self.auth_headers)
         return self._create_chat_result(response)
 
@@ -281,8 +324,14 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
         self._normalize_tool_choice(kwargs)
-        payload = self._get_request_payload(messages, stop=stop, **kwargs)
 
+        if self.streaming:
+            stream_iter = self._astream(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
+            return await agenerate_from_stream(stream_iter)
+
+        payload = self._get_request_payload(messages, stop=stop, **kwargs)
         response = await self._acall(self.url, payload, self.auth_headers)
         return self._create_chat_result(response)
 
@@ -307,23 +356,34 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
         self._normalize_tool_choice(kwargs)
+        kwargs["stream"] = True
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
-        response = self._call(self.url, payload, self.auth_headers)
 
-        # For non-streaming response, yield single chunk
-        chat_result = self._create_chat_result(response)
-        chunk = ChatGenerationChunk(
-            message=AIMessageChunk(
-                content=chat_result.generations[0].message.content,
-                additional_kwargs=chat_result.generations[0].message.additional_kwargs,
-                response_metadata=chat_result.generations[0].message.response_metadata,
-                usage_metadata=chat_result.generations[0].message.usage_metadata,  # type: ignore
-                tool_calls=getattr(
-                    chat_result.generations[0].message, "tool_calls", None
-                ),
+        default_chunk_class = AIMessageChunk
+
+        for chunk in self._stream_request(self.url, payload, self.auth_headers):
+            if self.logger:
+                self.logger.debug(f"[Stream] Got chunk from _stream_request: {chunk}")
+            generation_chunk = self._convert_chunk(
+                chunk, default_chunk_class, include_tool_calls=True
             )
-        )
-        yield chunk
+            if generation_chunk is None:
+                if self.logger:
+                    self.logger.debug("[Stream] Skipping None generation_chunk")
+                continue
+
+            if self.logger:
+                self.logger.debug(
+                    f"[Stream] Yielding generation_chunk: {generation_chunk}"
+                )
+
+            if run_manager:
+                run_manager.on_llm_new_token(
+                    generation_chunk.text,
+                    chunk=generation_chunk,
+                )
+
+            yield generation_chunk
 
     async def _astream(
         self,
@@ -346,23 +406,29 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         if kwargs.get("tools"):
             kwargs["tools"] = [tool["function"] for tool in kwargs["tools"]]
         self._normalize_tool_choice(kwargs)
+        kwargs["stream"] = True
         payload = self._get_request_payload(messages, stop=stop, **kwargs)
-        response = await self._acall(self.url, payload, self.auth_headers)
 
-        # For non-streaming response, yield single chunk
-        chat_result = self._create_chat_result(response)
-        chunk = ChatGenerationChunk(
-            message=AIMessageChunk(
-                content=chat_result.generations[0].message.content,
-                additional_kwargs=chat_result.generations[0].message.additional_kwargs,
-                response_metadata=chat_result.generations[0].message.response_metadata,
-                usage_metadata=chat_result.generations[0].message.usage_metadata,  # type: ignore
-                tool_calls=getattr(
-                    chat_result.generations[0].message, "tool_calls", None
-                ),
+        # Update headers to enable streaming
+        headers = {**self.auth_headers}
+        headers["X-UiPath-Streaming-Enabled"] = "true"
+
+        default_chunk_class = AIMessageChunk
+
+        async for chunk in self._astream_request(self.url, payload, headers):
+            generation_chunk = self._convert_chunk(
+                chunk, default_chunk_class, include_tool_calls=True
             )
-        )
-        yield chunk
+            if generation_chunk is None:
+                continue
+
+            if run_manager:
+                await run_manager.on_llm_new_token(
+                    generation_chunk.text,
+                    chunk=generation_chunk,
+                )
+
+            yield generation_chunk
 
     def with_structured_output(
         self,
