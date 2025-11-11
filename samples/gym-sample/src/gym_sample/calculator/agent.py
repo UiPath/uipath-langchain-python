@@ -27,6 +27,7 @@ def get_datapoints() -> List[Datapoint]:
                 "ToolCallOrderEvaluator": {"tool_calls_order": ["add"]},
                 "ToolCallArgsEvaluator": {"tool_calls": [{"name": "add", "args": {"a": 2, "b": 5}}]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 7}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the add tool to add 2 and 5 to get 7."},
             },
         ),
         Datapoint(
@@ -40,6 +41,7 @@ def get_datapoints() -> List[Datapoint]:
                 "ToolCallOrderEvaluator": {"tool_calls_order": ["multiply"]},
                 "ToolCallArgsEvaluator": {"tool_calls": [{"name": "multiply", "args": {"a": 2, "b": 5}}]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 10}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the multiply tool to multiply 2 and 5 to get 10."},
             },
         ),
         Datapoint(
@@ -53,6 +55,7 @@ def get_datapoints() -> List[Datapoint]:
                 "ToolCallOrderEvaluator": {"tool_calls_order": ["add"]},
                 "ToolCallArgsEvaluator": {"tool_calls": [{"name": "add", "args": {"a": 5, "b": -2}}]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 3}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the add tool to add 5 and -2 to get 3."},
             },
         ),
         Datapoint(
@@ -69,6 +72,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "add", "args": {"a": 2, "b": 10}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 12}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the multiply tool to multiply 2 and 5 to get 10, then use the add tool to add 2 and 10 to get 12."},
             },
         ),
         Datapoint(
@@ -86,6 +90,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "add", "args": {"a": 15, "b": 10}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 25}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the multiply tool to multiply 3 and 5 to get 15, then use the multiply tool to multiply 2 and 5 to get 10, then use the add tool to add 15 and 10 to get 25."},
             },
         ),
         Datapoint(
@@ -103,6 +108,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "multiply", "args": {"a": 30, "b": 5}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 150}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the add tool to add 5 and 5 to get 10, then use the multiply tool to multiply 3 and 10 to get 30, then use the multiply tool to multiply 30 and 5 to get 150."},
             },
         ),
         Datapoint(
@@ -119,6 +125,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "add", "args": {"a": 2, "b": 12}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 14}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the multiply tool to multiply 3 and 4 to get 12, then use the add tool to add 2 and 12 to get 14."},
             },
         ),
         Datapoint(
@@ -136,6 +143,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "multiply", "args": {"a": 5, "b": 5}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 25}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the add tool to add 2 and 3 to get 5, then use the add tool to add 4 and 1 to get 5, then use the multiply tool to multiply 5 and 5 to get 25."},
             },
         ),
         Datapoint(
@@ -152,6 +160,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "add", "args": {"a": 5, "b": 3}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 8}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the multiply tool to multiply 10 and 0.5 to get 5, then use the add tool to add 5 and 3 to get 8."},
             },
         ),
         Datapoint(
@@ -168,6 +177,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "add", "args": {"a": 25, "b": -10}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 15}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the multiply tool to multiply 5 and 5 to get 25, then use the add tool to add 25 and -10 to get 15."},
             },
         ),
         Datapoint(
@@ -185,6 +195,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "multiply", "args": {"a": 5, "b": 4}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 20}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the add tool to add 8 and -3 to get 5, then use the add tool to add 2 and 2 to get 4, then use the multiply tool to multiply 5 and 4 to get 20."},
             },
         ),
         Datapoint(
@@ -203,6 +214,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "multiply", "args": {"a": 14, "b": 2}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 28}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the add tool to add 3 and 4 to get 7, then use the multiply tool to multiply 2 and 7 to get 14, then use the add tool to add 1 and 1 to get 2, then use the multiply tool to multiply 14 and 2 to get 28."},
             },
         ),
         Datapoint(
@@ -219,6 +231,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "add", "args": {"a": 6, "b": -5}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 1}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the multiply tool to multiply -2 and -3 to get 6, then use the add tool to add 6 and -5 to get 1."},
             },
         ),
         Datapoint(
@@ -235,6 +248,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "multiply", "args": {"a": 2, "b": 2.5}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 5}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the add tool to add 0.5 and 1.5 to get 2, then use the multiply tool to multiply 2 and 2.5 to get 5."},
             },
         ),
         Datapoint(
@@ -250,6 +264,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "add", "args": {"a": 17, "b": 5}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 22}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the escalation tool to escalate 17 and 5 to get 22."},
             },
         ),
         Datapoint(
@@ -266,6 +281,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "add", "args": {"a": 17, "b": 85}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 102}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the escalation tool to escalate 17 and 5 to get 22, then use the escalation tool to escalate 22 and 5 to get 27, then use the multiply tool to multiply 27 and 17 to get 459, then use the add tool to add 459 and 85 to get 544."},
             },
         ),
         Datapoint(
@@ -283,6 +299,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "add", "args": {"a": 306, "b": 5}}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 311}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the escalation tool to escalate 17 and 17 to get 289, then use the escalation tool to escalate 289 and 17 to get 306, then use the escalation tool to escalate 306 and 5 to get 311."},
             },
         ),
         Datapoint(
@@ -297,6 +314,7 @@ def get_datapoints() -> List[Datapoint]:
                 "ToolCallArgsEvaluator": {"tool_calls": [{"name": "add", "args": {"a": 10, "b": 15}}]},
                 "ToolCallOutputEvaluator": {"tool_outputs": [{"name": "add", "output": "25"}]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 25}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the add tool to add 10 and 15 to get 25."},
             },
         ),
         Datapoint(
@@ -311,6 +329,7 @@ def get_datapoints() -> List[Datapoint]:
                 "ToolCallArgsEvaluator": {"tool_calls": [{"name": "multiply", "args": {"a": 6, "b": 7}}]},
                 "ToolCallOutputEvaluator": {"tool_outputs": [{"name": "multiply", "output": "42"}]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 42}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the multiply tool to multiply 6 and 7 to get 42."},
             },
         ),
         Datapoint(
@@ -331,6 +350,7 @@ def get_datapoints() -> List[Datapoint]:
                     {"name": "add", "output": "200"}
                 ]},
                 "LLMJudgeOutputEvaluator": {"expected_output": {"answer": 200}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the multiply tool to multiply 50 and 2 to get 100, then use the add tool to add 100 and 100 to get 200."},
             },
         ),
         Datapoint(
@@ -341,6 +361,7 @@ def get_datapoints() -> List[Datapoint]:
                 "ContainsEvaluator": {"search_text": "25"},
                 "JsonSimilarityEvaluator": {"expected_output": {"answer": 25.0}},
                 "LLMJudgeStrictJSONSimilarityOutputEvaluator": {"expected_output": {"answer": 25.0}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the add tool to add 12 and 13 to get 25."},
             },
         ),
         Datapoint(
@@ -351,6 +372,7 @@ def get_datapoints() -> List[Datapoint]:
                 "ContainsEvaluator": {"search_text": "81"},
                 "JsonSimilarityEvaluator": {"expected_output": {"answer": 81.0}},
                 "LLMJudgeStrictJSONSimilarityOutputEvaluator": {"expected_output": {"answer": 81.0}},
+                "LLMJudgeTrajectoryEvaluator": {"expected_agent_behavior": "The agent should use the multiply tool to multiply 9 and 9 to get 81."},
             },
         ),
         Datapoint(
