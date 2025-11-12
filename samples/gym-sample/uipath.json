@@ -2,7 +2,7 @@
     "entryPoints": [
         {
             "filePath": "calculator",
-            "uniqueId": "dc614383-5fdd-4a4b-a868-c91a1ec61dad",
+            "uniqueId": "b02d84f4-77a9-4e06-8406-9c2baf6eb92b",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -30,7 +30,7 @@
         },
         {
             "filePath": "loan",
-            "uniqueId": "c1ad922d-b6e5-4189-b13d-34cf9acb3cc8",
+            "uniqueId": "7695a816-1c9e-40fc-a3fd-f62a36b032b1",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -63,9 +63,5 @@
                 "required": []
             }
         }
-    ],
-    "bindings": {
-        "version": "2.0",
-        "resources": []
-    }
+    ]
 }

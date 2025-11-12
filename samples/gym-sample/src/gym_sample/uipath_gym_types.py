@@ -1,3 +1,4 @@
+from langchain_core.tools.base import BaseTool
 from typing import Any, Callable, Dict, List, Literal
 
 from langchain.tools import BaseTool
@@ -71,7 +72,6 @@ def should_continue(state: StateBaseClass) -> Literal["tools", "raise_error", "e
     # If no tool calls, route to tools anyway (agent needs to make a decision)
     return "tools"
 
-
 class BasicLoop:
     def __init__(
         self,
@@ -82,7 +82,7 @@ class BasicLoop:
         debug: bool = False,
     ):
         self.llm_with_tools = llm.bind_tools(
-            list(scenario.tools) + [scenario.end_execution_tool, scenario.raise_error_tool],
+            list[BaseTool](scenario.tools) + [scenario.end_execution_tool, scenario.raise_error_tool],
             parallel_tool_calls=parallel_tool_calls,
             tool_choice="any",
         )
@@ -120,14 +120,12 @@ class BasicLoop:
             if self.debug:
                 print(f"[DEBUG] Created messages from input")
                 print(f"[DEBUG] Messages: {[m.content[:50] for m in new_state.messages]}")
-        except KeyError as e:
+        except KeyError:
             # If format_map fails, fall back to basic setup
             new_state.messages = [
                 SystemMessage(content=self.scenario.system_prompt),
-                HumanMessage(content=f"Help me with: {state}")
+                HumanMessage(content=f"Help me with: {state.model_dump_json()}")
             ]
-            if self.debug:
-                print(f"[DEBUG] Format error {e} - using fallback")
 
         if self.debug:
             print(f"[DEBUG] Final {len(new_state.messages)} messages")
@@ -207,53 +205,39 @@ class BasicLoop:
         graph.add_edge("end_execution", END)
         graph.add_edge("raise_error", END)
 
-    def build_cli_graph(self) -> StateGraph:
-        """Build graph for CLI mode - accepts input at runtime (like ticket-classification example).
+    def build_graph(self) -> StateGraph:
+        """Build a unified graph that can accept input either programmatically or via LangGraph primitives.
 
         Returns a graph that:
-        - Uses input= and output= parameters (separate from State)
+        - Uses input_schema and output_schema parameters
         - Dynamically creates a State class that includes input fields
         - Has a prepare_input node that converts input → State
-        - Accepts typed input at runtime via `graph.ainvoke(CalculatorInput(...))`
+        - Accepts typed input at runtime via `graph.ainvoke(input_data)`
+
+        Usage:
+            # Programmatic (evaluation mode):
+            graph = builder.build_graph()
+            agent_input = scenario.input_schema.model_validate(datapoint.input)
+            result = await graph.compile().ainvoke(agent_input)
+
+            # Via UIPath/LangChain (CLI mode):
+            graph = builder.build_graph()
+            # LangGraph will prompt for input or accept it from UIPath
+            # result = await graph.compile().ainvoke(CalculatorInput(...))
+
+        Returns:
+            StateGraph configured to accept input at runtime (both CLI and programmatic use)
         """
-        # Create State class with input fields for CLI mode
+        # Create State class with input fields
         StateWithInput = self._create_state_with_input()
 
-        # CLI mode: input and output are separate types from State
+        # Unified mode: input and output are separate types from State
         graph = StateGraph(
             StateWithInput,
             input_schema=self.scenario.input_schema,
             output_schema=self.scenario.output_schema
         )
         graph.add_node("prepare_input", self.prepare_input)
-
-        # Add all worker nodes and edges
-        self.add_worker_graph(graph)
-
-        return graph
-
-    def build_evaluation_graph(self, agent_input: Dict[str, Any]) -> StateGraph:
-        """Build graph for evaluation mode - pre-binds input at build time.
-
-        Args:
-            agent_input: The input data from a datapoint
-
-        Returns a graph that:
-        - Pre-binds the input at graph build time
-        - No runtime input needed - just call graph.ainvoke({})
-        """
-        # Validate input data against schema
-        final_agent_input = self.scenario.input_schema.model_validate(agent_input)
-
-        # Evaluation mode: use input_schema for validation but pre-bind the data
-        graph = StateGraph(
-            StateBaseClass,
-            input_schema=self.scenario.input_schema,
-            output_schema=self.scenario.output_schema
-        )
-
-        # Lambda captures the pre-bound input and ignores incoming state from LangGraph
-        graph.add_node("prepare_input", lambda state=None: self.prepare_input(final_agent_input))
 
         # Add all worker nodes and edges
         self.add_worker_graph(graph)

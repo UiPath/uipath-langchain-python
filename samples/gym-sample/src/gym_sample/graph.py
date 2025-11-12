@@ -43,7 +43,7 @@ def get_all_evaluators() -> Dict[str, Callable[[bool], List[LegacyBaseEvaluator 
 async def agents_with_datapoints(agent_name: str = "calculator") -> AsyncGenerator[List[tuple[StateGraph, Datapoint]], None]:
     """Create and return all LangGraph agents for evaluation mode.
 
-    Each graph pre-binds its datapoint input at build time.
+    Uses the unified graph that accepts input at runtime.
     Each graph gets a fresh BasicLoop instance to avoid LLM state accumulation.
 
     Returns:
@@ -60,8 +60,8 @@ async def agents_with_datapoints(agent_name: str = "calculator") -> AsyncGenerat
             print_trace=True,
             parallel_tool_calls=False,
         )
-        # Build evaluation graph with pre-bound input
-        graph = loop.build_evaluation_graph(datapoint.input)
+        # Build unified graph that accepts input at runtime
+        graph = loop.build_graph()
         graphs.append((graph, datapoint))
 
     yield graphs
@@ -85,8 +85,8 @@ async def agent(agent_name: str = "calculator") -> StateGraph:
         debug=False,
     )
 
-    # Build CLI graph that accepts input at runtime
-    return loop.build_cli_graph()
+    # Build unified graph that accepts input at runtime
+    return loop.build_graph()
 
 
 async def calculator_agent() -> StateGraph:
