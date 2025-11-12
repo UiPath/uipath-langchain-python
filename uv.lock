@@ -305,6 +305,21 @@ wheels = [
 ]
 
 [[package]]
+name = "azure-storage-blob"
+version = "12.27.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "azure-core" },
+    { name = "cryptography" },
+    { name = "isodate" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/36/7c/2fd872e11a88163f208b9c92de273bf64bb22d0eef9048cc6284d128a77a/azure_storage_blob-12.27.1.tar.gz", hash = "sha256:a1596cc4daf5dac9be115fcb5db67245eae894cf40e4248243754261f7b674a6", size = 597579, upload-time = "2025-10-29T12:27:16.185Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3d/9e/1c90a122ea6180e8c72eb7294adc92531b0e08eb3d2324c2ba70d37f4802/azure_storage_blob-12.27.1-py3-none-any.whl", hash = "sha256:65d1e25a4628b7b6acd20ff7902d8da5b4fde8e46e19c8f6d213a3abc3ece272", size = 428954, upload-time = "2025-10-29T12:27:18.072Z" },
+]
+
+[[package]]
 name = "backports-asyncio-runner"
 version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3364,6 +3379,7 @@ name = "uipath-langchain"
 version = "0.0.152"
 source = { editable = "." }
 dependencies = [
+    { name = "azure-storage-blob" },
     { name = "httpx" },
     { name = "jsonschema-pydantic" },
     { name = "langchain" },
@@ -3395,6 +3411,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "azure-storage-blob", specifier = ">=12.27.1" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jsonschema-pydantic", specifier = ">=0.6" },
     { name = "langchain", specifier = ">=0.3.4" },

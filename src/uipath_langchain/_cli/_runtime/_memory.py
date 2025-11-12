@@ -1,8 +1,9 @@
 import os
 from contextlib import asynccontextmanager
 
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from uipath._cli._runtime._contracts import UiPathRuntimeContext
+
+from ..._checkpointers.blob_sqlite_saver import AsyncBlobSqliteSaver
 
 
 def get_connection_string(context: UiPathRuntimeContext) -> str:
@@ -20,7 +21,9 @@ def get_connection_string(context: UiPathRuntimeContext) -> str:
 @asynccontextmanager
 async def get_memory(context: UiPathRuntimeContext):
     """Create and manage the AsyncSqliteSaver instance."""
-    async with AsyncSqliteSaver.from_conn_string(
-        get_connection_string(context)
+    async with AsyncBlobSqliteSaver.from_filesystem(
+        sqlite_path=get_connection_string(context),
+        storage_path=".uipath/checkpointers/",
+        job_guid=context.job_id,
     ) as memory:
         yield memory
