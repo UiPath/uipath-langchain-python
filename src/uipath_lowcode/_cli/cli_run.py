@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from pathlib import Path
 from typing import Optional
 
 from uipath._cli._debug._bridge import ConsoleDebugBridge, UiPathDebugBridge
@@ -46,7 +47,9 @@ def lowcode_run_middleware(
 
                 if context.job_id:
                     async with ResourceOverwritesContext(
-                        lambda: read_resource_overwrites_from_file(context.runtime_dir)
+                        lambda: read_resource_overwrites_from_file(
+                            Path(context.runtime_dir) if context.runtime_dir else None
+                        )
                     ):
                         runtime_factory.add_span_exporter(
                             LlmOpsHttpExporter(extra_process_spans=True)
@@ -59,7 +62,9 @@ def lowcode_run_middleware(
                         await runtime_factory.execute(context)
                 else:
                     debug_bridge: UiPathDebugBridge = ConsoleDebugBridge()
-                    await debug_bridge.emit_execution_started(context.execution_id)
+                    await debug_bridge.emit_execution_started(
+                        context.execution_id or "default"
+                    )
                     async for event in runtime_factory.stream(context):
                         if isinstance(event, UiPathRuntimeResult):
                             await debug_bridge.emit_execution_completed(event)

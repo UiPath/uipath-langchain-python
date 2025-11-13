@@ -1,5 +1,7 @@
 """Tests for message utility functions."""
 
+from uipath.agent.models.agent import AgentMessageRole
+
 from uipath_lowcode.agent_graph_builder.message_utils import (
     build_agent_messages,
     interpolate_message,
@@ -137,8 +139,8 @@ class TestBuildAgentMessages:
         from uipath.agent.models.agent import AgentMessage
 
         messages = [
-            AgentMessage(role="system", content="You are helpful"),
-            AgentMessage(role="user", content="Hello"),
+            AgentMessage(role=AgentMessageRole.SYSTEM, content="You are helpful"),
+            AgentMessage(role=AgentMessageRole.USER, content="Hello"),
         ]
         result = build_agent_messages(messages, {}, "TestAgent")
 
@@ -154,8 +156,11 @@ class TestBuildAgentMessages:
         from uipath.agent.models.agent import AgentMessage
 
         messages = [
-            AgentMessage(role="system", content="Process {{task}} for {{user.name}}"),
-            AgentMessage(role="user", content="Start processing"),
+            AgentMessage(
+                role=AgentMessageRole.SYSTEM,
+                content="Process {{task}} for {{user.name}}",
+            ),
+            AgentMessage(role=AgentMessageRole.USER, content="Start processing"),
         ]
         input_data = {"task": "analysis", "user": {"name": "Alice"}}
         result = build_agent_messages(messages, input_data, "TestAgent")
@@ -168,8 +173,8 @@ class TestBuildAgentMessages:
         from uipath.agent.models.agent import AgentMessage
 
         messages = [
-            AgentMessage(role="system", content="System prompt"),
-            AgentMessage(role="user", content="User input"),
+            AgentMessage(role=AgentMessageRole.SYSTEM, content="System prompt"),
+            AgentMessage(role=AgentMessageRole.USER, content="User input"),
         ]
         result = build_agent_messages(messages, {}, "TestAgent")
 

@@ -108,7 +108,7 @@ class TestGetTracer:
             mock_tracer = MagicMock()
             mock_get_tracer.return_value = mock_tracer
 
-            result = tracing.get_tracer("test_module")
+            result = tracing.trace.get_tracer("test_module")
 
             mock_get_tracer.assert_called_once_with("test_module")
             assert result == mock_tracer

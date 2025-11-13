@@ -1,5 +1,7 @@
 """Tests for JSON schema validation utilities."""
 
+from typing import Any
+
 import pytest
 
 from uipath_lowcode._cli.exceptions import InputValidationError
@@ -93,7 +95,7 @@ class TestValidateJsonAgainstJsonSchema:
             "properties": {"name": {"type": "string"}},
             "required": ["name"],
         }
-        data = {}
+        data: dict[str, Any] = {}
 
         with pytest.raises(InputValidationError) as exc_info:
             validate_json_against_json_schema(schema, data)

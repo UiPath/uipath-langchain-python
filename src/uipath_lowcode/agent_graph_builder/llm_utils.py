@@ -11,18 +11,16 @@ def create_llm(
     timeout: int = LLM_TIMEOUT_SECONDS,
     max_retries: int = LLM_MAX_RETRIES,
     disable_streaming: bool = True,
-    parallel_tool_calls: bool = False,
 ) -> UiPathChat:
     """Create and configure UiPathChat LLM instance."""
 
     llm = UiPathChat(
-        model=model,
+        model_name=model,
         temperature=temperature,
         max_tokens=max_tokens,
-        timeout=timeout,
+        request_timeout=timeout,
         max_retries=max_retries,
         disable_streaming=disable_streaming,
-        parallel_tool_calls=parallel_tool_calls,
     )
 
     return llm

@@ -44,11 +44,6 @@ class TestCreateLLM:
         llm = create_llm(model="gpt-4", disable_streaming=False)
         assert llm.disable_streaming is False
 
-    def test_create_with_parallel_tool_calls(self):
-        """Test creating LLM with parallel tool calls enabled."""
-        llm = create_llm(model="gpt-4", parallel_tool_calls=True)
-        assert llm.model_kwargs.get("parallel_tool_calls") is True
-
     def test_create_with_all_custom_params(self):
         """Test creating LLM with all custom parameters."""
         llm = create_llm(
@@ -58,7 +53,6 @@ class TestCreateLLM:
             timeout=120,
             max_retries=3,
             disable_streaming=False,
-            parallel_tool_calls=True,
         )
 
         assert llm.model_name == "gpt-3.5-turbo"
@@ -67,4 +61,3 @@ class TestCreateLLM:
         assert llm.request_timeout == 120
         assert llm.max_retries == 3
         assert llm.disable_streaming is False
-        assert llm.model_kwargs.get("parallel_tool_calls") is True

@@ -1,6 +1,6 @@
 """Agent graph construction - wrapper delegating to uipath_langchain.agent.graph."""
 
-from typing import Any, Optional, Union
+from typing import Any
 
 from langgraph.graph import StateGraph
 from uipath.agent.models.agent import LowCodeAgentDefinition
@@ -22,7 +22,7 @@ AGENT_LOOP_RECURSION_LIMIT = 50
 
 async def build_agent_graph(
     agent_definition: LowCodeAgentDefinition,
-    input_data: Optional[Union[str, dict[str, Any]]] = None,
+    input_data: dict[str, Any],
 ) -> StateGraph[AgentGraphState]:
     """Build LangGraph agent from agent.json configuration and optional input data.
 
@@ -34,8 +34,6 @@ async def build_agent_graph(
         StateGraph configured with the agent definition and feature flags.
     """
 
-    agent_input_args = input_data if isinstance(input_data, dict) else {}
-
     tools = await create_tools_from_resources(agent_definition)
     llm = create_llm(
         model=agent_definition.settings.model,
@@ -44,7 +42,7 @@ async def build_agent_graph(
     )
 
     agent_messages = build_agent_messages(
-        agent_definition.messages, agent_input_args, agent_definition.name
+        agent_definition.messages, input_data, agent_definition.name
     )
     output_model = resolve_output_model(agent_definition.output_schema)
 

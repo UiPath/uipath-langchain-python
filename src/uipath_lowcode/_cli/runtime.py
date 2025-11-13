@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from typing import Callable, Optional
 
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from openinference.instrumentation.langchain import (
     LangChainInstrumentor,
     get_current_span,
@@ -11,10 +12,10 @@ from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrument
 from opentelemetry.instrumentation.asyncio import AsyncioInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
+from typing_extensions import Any
 from uipath._cli._runtime._contracts import UiPathRuntimeContext, UiPathRuntimeFactory
 from uipath_langchain._cli._runtime._runtime import (
     LangGraphRuntime,
-    LangGraphScriptRuntime,
 )
 from uipath_langchain._tracing import _instrument_traceable_attributes
 
@@ -33,7 +34,7 @@ class AgentLangGraphRuntime(LangGraphRuntime):
 
 
 def create_agent_langgraph_runtime(
-    ctx: UiPathRuntimeContext, memory
+    ctx: UiPathRuntimeContext, memory: AsyncSqliteSaver
 ) -> LangGraphRuntime:
     """Create runtime for low-code agents with input validation.
 
@@ -50,7 +51,7 @@ def create_agent_langgraph_runtime(
         agent_json_path = Path.cwd() / AGENT_FILENAME
         agent_definition = load_agent_configuration(agent_json_path)
 
-        agent_input = ctx.input
+        agent_input: dict[str, Any] = {}
         if not ctx.resume:
             agent_input = validate_json_against_json_schema(
                 agent_definition.input_schema, ctx.input
@@ -65,14 +66,10 @@ def create_agent_langgraph_runtime(
 
 
 def setup_runtime_factory(
-    runtime_generator: Optional[
-        Callable[[UiPathRuntimeContext], LangGraphRuntime]
-    ] = None,
+    runtime_generator: Callable[[UiPathRuntimeContext], LangGraphRuntime],
     context_generator: Optional[Callable[[], UiPathRuntimeContext]] = None,
-) -> UiPathRuntimeFactory:
+) -> UiPathRuntimeFactory[LangGraphRuntime, UiPathRuntimeContext]:
     """Set up runtime factory with instrumentation for low-code agents."""
-    if runtime_generator is None:
-        runtime_generator = create_agent_langgraph_runtime
 
     os.environ.setdefault("OTEL_SERVICE_NAME", "uipath-lowcode-python")
     os.environ.setdefault("OTEL_SERVICE_VERSION", "0.0.1")
@@ -80,7 +77,7 @@ def setup_runtime_factory(
     _instrument_traceable_attributes()
 
     runtime_factory = UiPathRuntimeFactory(
-        LangGraphScriptRuntime,
+        LangGraphRuntime,
         UiPathRuntimeContext,
         runtime_generator=runtime_generator,
         context_generator=context_generator,

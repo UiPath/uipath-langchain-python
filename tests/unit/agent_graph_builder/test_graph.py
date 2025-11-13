@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from uipath.agent.models.agent import (
     AgentMessage,
+    AgentMessageRole,
     AgentSettings,
     LowCodeAgentDefinition,
 )
@@ -15,12 +16,12 @@ from uipath_lowcode.agent_graph_builder import build_agent_graph
 
 def create_test_agent_definition(**overrides: Any) -> LowCodeAgentDefinition:
     """Create a test agent definition."""
-    defaults = {
+    defaults: dict[str, Any] = {
         "id": "test-agent",
         "name": "Test Agent",
         "messages": [
-            AgentMessage(role="system", content="Test system message"),
-            AgentMessage(role="user", content="Test user message"),
+            AgentMessage(role=AgentMessageRole.SYSTEM, content="Test system message"),
+            AgentMessage(role=AgentMessageRole.USER, content="Test user message"),
         ],
         "settings": AgentSettings(
             engine="azure_openai",
@@ -56,7 +57,7 @@ class TestBuildAgentGraph:
         ):
             mock_create.return_value = MagicMock()
 
-            graph = await build_agent_graph(agent_def)
+            graph = await build_agent_graph(agent_def, {})
 
             assert graph is not None
             mock_create.assert_called_once()
@@ -86,7 +87,7 @@ class TestBuildAgentGraph:
             mock_llm.return_value = MagicMock()
             mock_create.return_value = MagicMock()
 
-            await build_agent_graph(agent_def)
+            await build_agent_graph(agent_def, {})
 
             mock_llm.assert_called_once_with(
                 model="test-model",
@@ -98,8 +99,8 @@ class TestBuildAgentGraph:
         """Test building graph with dict input data."""
         agent_def = create_test_agent_definition(
             messages=[
-                AgentMessage(role="system", content="Process {{task}}"),
-                AgentMessage(role="user", content="Start"),
+                AgentMessage(role=AgentMessageRole.SYSTEM, content="Process {{task}}"),
+                AgentMessage(role=AgentMessageRole.USER, content="Start"),
             ],
             input_schema={
                 "type": "object",
@@ -130,8 +131,8 @@ class TestBuildAgentGraph:
         """Test building graph with dict input data (JSON parsing happens in runtime.py)."""
         agent_def = create_test_agent_definition(
             messages=[
-                AgentMessage(role="system", content="Count: {{count}}"),
-                AgentMessage(role="user", content="Start"),
+                AgentMessage(role=AgentMessageRole.SYSTEM, content="Count: {{count}}"),
+                AgentMessage(role=AgentMessageRole.USER, content="Start"),
             ],
             input_schema={
                 "type": "object",
@@ -185,7 +186,7 @@ class TestBuildAgentGraph:
         ):
             mock_create_agent.return_value = MagicMock()
 
-            await build_agent_graph(agent_def)
+            await build_agent_graph(agent_def, {})
 
             mock_create_tools.assert_called_once()
             mock_create_agent.assert_called_once()

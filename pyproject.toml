@@ -1,22 +1,22 @@
 [project]
-name = "uipath-lowcode-python"
+name = "uipath-lowcode"
 version = "0.0.1"
 description = "UiPath LowCode"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 dependencies = [
-    "uipath>=2.1.110, <2.2.0",
-    "uipath-langchain>=0.0.146",
-    "langgraph>=0.6.6, <0.7.0",
-    "azure-monitor-opentelemetry>=1.7.0",
-    "opentelemetry-instrumentation-asyncio>=0.49.0",
-    "opentelemetry-instrumentation-httpx>=0.49.0",
-    "opentelemetry-instrumentation-aiohttp-client>=0.49.0",
-    "opentelemetry-instrumentation-sqlite3>=0.49.0",
+  "azure-monitor-opentelemetry>=1.7.0",
+  "langgraph>=0.6.6, <0.7.0",
+  "opentelemetry-instrumentation-aiohttp-client>=0.49.0",
+  "opentelemetry-instrumentation-asyncio>=0.49.0",
+  "opentelemetry-instrumentation-httpx>=0.49.0",
+  "opentelemetry-instrumentation-sqlite3>=0.49.0",
+  "uipath-langchain>=0.0.146",
+  "uipath>=2.1.110, <2.2.0",
 ]
 maintainers = [
-    { name = "Silviu Georgescu", email = "silviu.georgescu@uipath.com" },
-    { name = "Cristian Cotovanu", email = "cristian.cotovanu@uipath.com" },
+  { name = "Silviu Georgescu", email = "silviu.georgescu@uipath.com" },
+  { name = "Cristian Cotovanu", email = "cristian.cotovanu@uipath.com" },
 ]
 
 [project.entry-points."uipath.middlewares"]
@@ -33,17 +33,17 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.14.1",
-    "ruff>=0.9.4",
-    "pytest>=7.4.0",
-    "pytest-cov>=4.1.0",
-    "pytest-mock>=3.11.1",
-    "pytest-asyncio>=1.0.0",
-    "pytest_httpx>=0.35.0",
-    "pre-commit>=4.1.0",
-    "datamodel-code-generator>=0.33.0",
-    "requests>=2.32.5",
-    "debugpy>=1.8.17",
+  "datamodel-code-generator>=0.33.0",
+  "debugpy>=1.8.17",
+  "mypy>=1.14.1",
+  "pre-commit>=4.1.0",
+  "pytest_httpx>=0.35.0",
+  "pytest-asyncio>=1.0.0",
+  "pytest-cov>=4.1.0",
+  "pytest-mock>=3.11.1",
+  "pytest>=7.4.0",
+  "requests>=2.32.5",
+  "ruff>=0.9.4",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -67,14 +67,8 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-plugins = [
-  "pydantic.mypy"
-]
-
-exclude = [
-    "samples/.*",
-    "testcases/.*"
-]
+plugins = ["pydantic.mypy"]
+exclude = ["samples/.*", "testcases/.*"]
 
 follow_imports = "silent"
 warn_redundant_casts = true
@@ -84,6 +78,15 @@ check_untyped_defs = true
 no_implicit_reexport = true
 
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["jsonschema_pydantic.*"]
+follow_untyped_imports = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

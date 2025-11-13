@@ -7,6 +7,8 @@ from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["trace"]
+
 
 def get_azure_exporter() -> Optional[AzureMonitorTraceExporter]:
     """Get Azure Monitor trace exporter if connection string is configured."""
