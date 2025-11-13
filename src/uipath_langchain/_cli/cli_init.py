@@ -10,13 +10,15 @@ from typing import Any, Callable, overload
 
 import click
 from langgraph.graph.state import CompiledStateGraph
+from pydantic import TypeAdapter
 from uipath._cli._utils._console import ConsoleLogger
 from uipath._cli._utils._parse_ast import (  # type: ignore
     generate_bindings,
     write_bindings_file,
+    write_entry_points_file,
 )
 from uipath._cli.middlewares import MiddlewareResult
-from uipath._cli.models.runtime_schema import Bindings
+from uipath._cli.models.runtime_schema import Bindings, Entrypoint, Entrypoints
 
 from uipath_langchain._cli._utils._schema import generate_schema_from_graph
 
@@ -228,7 +230,8 @@ async def langgraph_init_middleware_async(
                 should_continue=False,
             )
 
-        uipath_config = {"entryPoints": entrypoints}
+        # add here default settings like {'isConversational': false}
+        uipath_config: dict[str, Any] = {}
 
         if write_config:
             config_path = write_config(uipath_config)
@@ -238,6 +241,16 @@ async def langgraph_init_middleware_async(
             with open(config_path, "w") as f:
                 json.dump(uipath_config, f, indent=4)
         console.success(f"Created {click.style(config_path, fg='cyan')} file.")
+
+        entry_points_path = write_entry_points_file(
+            Entrypoints(
+                entry_points=[
+                    TypeAdapter(Entrypoint).validate_python(entry_point)
+                    for entry_point in entrypoints
+                ]
+            )  # type: ignore
+        )
+        console.success(f"Created {click.style(entry_points_path, fg='cyan')} file.")
 
         for graph_name, mermaid_content in mermaids.items():
             mermaid_file_path = f"{graph_name}.mermaid"
