@@ -276,12 +276,18 @@ def main() -> None:
         default=0,
         help="Size of the small eval set to export"
     )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="evaluations",
+        help="Directory to write the eval_set file to"
+    )
     args, _ = parser.parse_known_args()
 
     load_dotenv(find_dotenv())
 
     # Export to the standard location that uipath eval discovers
-    base_dir = Path(__file__).parent.parent.parent / "evals"
+    base_dir = Path(__file__).parent.parent.parent / args.output_dir
 
     print("🚀 Starting export of evaluators and eval sets...")
     if args.include_not_supported:
