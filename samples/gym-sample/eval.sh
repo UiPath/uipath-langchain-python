@@ -21,7 +21,7 @@ rm -f __uipath/state.db
 
 # Run UiPath evaluation
 # - Uses the agent specified by $AGENT_NAME
-# - Loads eval set from evals/eval-sets/evaluation-set-$EVAL_SET_NAME.json
+# - Loads eval set from evaluations/eval-sets/evaluation-set-$EVAL_SET_NAME.json
 # - Skips sending report to UiPath platform
 # - Outputs results to results/eval-results-$EVAL_SET_NAME.json
-uipath eval $AGENT_NAME evals/eval-sets/evaluation-set-$EVAL_SET_NAME.json --no-report --output-file results/eval-results-$EVAL_SET_NAME.json --workers $NUM_WORKERS
+uipath eval $AGENT_NAME evaluations/eval-sets/evaluation-set-$EVAL_SET_NAME.json --no-report --output-file results/eval-results-$EVAL_SET_NAME.json --workers $NUM_WORKERS

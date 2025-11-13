@@ -180,5 +180,5 @@ cython_debug/
 **/__uipath/
 **/.langgraph_api
 
-samples/*/evals/
 samples/*/results/
+samples/*/evaluations/
