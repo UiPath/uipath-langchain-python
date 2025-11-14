@@ -225,8 +225,11 @@ def export_eval_set(
 
     print(small_set_size)
     if small_set_size > 0:
+        small_eval_set_id = str(uuid.uuid4())
+        eval_set["id"] = small_eval_set_id
+        eval_set["name"] = f"{eval_set['name']} - Small"
         eval_set["evaluations"] = [
-            datapoint_to_evaluation(dp, eval_set_id, evaluator_refs, agent_name)
+            datapoint_to_evaluation(dp, small_eval_set_id, evaluator_refs, agent_name)
             for dp in agent.datapoints[:small_set_size]
         ]
         output_path = output_dir / f"evaluation-set-{agent_name}-small.json"
