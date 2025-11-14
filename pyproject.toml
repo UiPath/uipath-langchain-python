@@ -18,6 +18,7 @@ dependencies = [
     "openai>=1.65.5",
     "openinference-instrumentation-langchain>=0.1.50",
     "jsonschema-pydantic>=0.6",
+    "azure-storage-blob>=12.27.1",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
