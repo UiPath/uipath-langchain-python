@@ -287,6 +287,9 @@ async def _retrieve_message_content(
     else:
         raise Exception("No inbox found")
 
-if __name__ == "__main__":
+def main():
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+if __name__ == "__main__":
+    main()

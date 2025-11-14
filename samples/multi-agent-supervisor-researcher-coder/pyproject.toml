@@ -3,7 +3,7 @@ name = "multi_agent_supervisor"
 version = "0.0.1"
 description = "Multi-agent system where a supervisor coordinates between a researcher and a coder"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.6.11",
     "langchain-anthropic>=0.3.22",
@@ -11,6 +11,7 @@ dependencies = [
     "tavily-python>=0.7.12",
     "uipath-langchain>=0.0.141, <0.1.0",
     "langchain-tavily>=0.2.12",
+    "uipath>=2.1.164, <2.2.0",
 ]
 
 [project.optional-dependencies]

@@ -1,5 +1,6 @@
 import os
-from contextlib import asynccontextmanager
+from typing import Any
+from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import create_react_agent
 from langchain_anthropic import ChatAnthropic
 from langchain_mcp_adapters.tools import load_mcp_tools
@@ -7,8 +8,8 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 
-@asynccontextmanager
-async def make_graph():
+async def mcp_client(state: MessagesState) -> dict[str, Any]:
+    """Agent node that connects to MCP server and processes messages."""
     async with streamablehttp_client(
         url=os.getenv("UIPATH_MCP_SERVER_URL"),
         headers={"Authorization": f"Bearer {os.getenv('UIPATH_ACCESS_TOKEN')}"},
@@ -17,7 +18,16 @@ async def make_graph():
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await load_mcp_tools(session)
-            print(tools)
+            print(f"Loaded {len(tools)} tools from MCP server")
             model = ChatAnthropic(model="claude-3-5-sonnet-latest")
             agent = create_react_agent(model, tools=tools)
-            yield agent
+            result = await agent.ainvoke(state)
+            return result
+
+
+builder = StateGraph(MessagesState)
+builder.add_node("mcp_client", mcp_client)
+builder.add_edge(START, "mcp_client")
+builder.add_edge("mcp_client", END)
+
+graph = builder.compile()

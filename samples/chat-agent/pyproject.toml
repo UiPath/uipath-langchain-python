@@ -3,14 +3,14 @@ name = "chat-agent"
 version = "0.0.1"
 description = "Chat agent with Tavily web search"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.6.5",
     "langchain-anthropic>=0.3.19",
     "tavily-python>=0.7.11",
     "langchain-tavily>=0.2.11",
     "uipath-langchain>=0.0.126, <0.1.0",
-    "uipath>=2.1.41, <2.2.0",
+    "uipath>=2.1.164, <2.2.0",
 ]
 
 [project.optional-dependencies]

@@ -13,6 +13,7 @@ dependencies = [
     "pydantic>=2.10.6",
     "aiohttp>=3.11.12",
     "typing-extensions>=4.12.2",
-    "ipython>=8.32.0"
+    "ipython>=8.32.0",
+    "uipath>=2.1.164, <2.2.0",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
