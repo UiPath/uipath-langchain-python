@@ -1329,7 +1329,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.1" },
     { name = "tavily-python", specifier = ">=0.7.12" },
-    { name = "uipath", specifier = ">=2.1.164,<2.2.0" },
+    { name = "uipath", specifier = ">=2.1.166,<2.2.0" },
     { name = "uipath-langchain", specifier = ">=0.0.141,<0.1.0" },
 ]
 provides-extras = ["dev"]
@@ -2864,7 +2864,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.1.164"
+version = "2.1.166"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-monitor-opentelemetry" },
@@ -2886,9 +2886,9 @@ dependencies = [
     { name = "tomli" },
     { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/93/b8/2050b916ffd100958ea6530b265d2f79bf94353bcccba17c4729fc2ab7e1/uipath-2.1.164.tar.gz", hash = "sha256:19180d341a860e7ef53eeb35c6b570ffbbf0d4cc2a1454d8aa1b07495dcbb6dd", size = 2669840, upload-time = "2025-11-14T00:22:12.728Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/98/a5/428b8d447d21c2e8261d296d03f91dc4eed5b18ca46c3e67e29c3e5b49c3/uipath-2.1.166.tar.gz", hash = "sha256:dd30963fd9150395d82c5cd82c0c2e2a2fca6423f4be8330d7b45ef282b232db", size = 3316238, upload-time = "2025-11-14T13:00:07.107Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/59/f5b4b5873a2ec9ec411df79dcae8af9c6317a7ea1f2861792a21f18e794a/uipath-2.1.164-py3-none-any.whl", hash = "sha256:b6b4065d9aa26404950107899c62012a0e18c09baadb2615c17e72b552cd6686", size = 403308, upload-time = "2025-11-14T00:22:10.424Z" },
+    { url = "https://files.pythonhosted.org/packages/61/f4/a61296a984040bb783b4f964936968a83f516e3afd19d16a097b72bda81a/uipath-2.1.166-py3-none-any.whl", hash = "sha256:01af3f96c2ddef28f0ecfebc36f9ef225fd42a0a49057b0b07a0f16f0a389b9c", size = 407195, upload-time = "2025-11-14T13:00:04.469Z" },
 ]
 
 [[package]]
