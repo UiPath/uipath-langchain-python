@@ -12,6 +12,9 @@ dependencies = [
     "anthropic>=0.57.1",
     "langchain-mcp-adapters>=0.1.9",
     "mypy>=1.17.1",
-    "uipath>=2.1.164, <2.2.0",
+    "uipath>=2.1.166, <2.2.0",
 ]
 requires-python = ">=3.11"
+
+[tool.setuptools]
+py-modules = []

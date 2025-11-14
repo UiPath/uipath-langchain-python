@@ -11,7 +11,7 @@ dependencies = [
     "tavily-python>=0.7.12",
     "uipath-langchain>=0.0.141, <0.1.0",
     "langchain-tavily>=0.2.12",
-    "uipath>=2.1.164, <2.2.0",
+    "uipath>=2.1.166, <2.2.0",
 ]
 
 [project.optional-dependencies]
@@ -20,6 +20,9 @@ dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
 [build-system]
 requires = ["setuptools>=73.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = []
 
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
