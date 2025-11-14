@@ -3681,31 +3681,7 @@ wheels = [
 ]
 
 [[package]]
-name = "uipath-langchain"
-version = "0.0.151"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "jsonschema-pydantic" },
-    { name = "langchain" },
-    { name = "langchain-community" },
-    { name = "langchain-core" },
-    { name = "langchain-openai" },
-    { name = "langgraph" },
-    { name = "langgraph-checkpoint-sqlite" },
-    { name = "openai" },
-    { name = "openinference-instrumentation-langchain" },
-    { name = "pydantic-settings" },
-    { name = "python-dotenv" },
-    { name = "uipath" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/16/50/6b3b246e55d363aa0db2c63ddab6a99c41b484aa090566df61263bb2b00b/uipath_langchain-0.0.151.tar.gz", hash = "sha256:d6cb488f587fa38cae7f005f8bc38da5eb759f8f2d2a1d414b6efb2e1988b996", size = 6754546, upload-time = "2025-11-07T13:59:49.741Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/85/26/86ad55eaf0052d00e598b6071e2a7167c712e476fada76c0fa7de9abc45f/uipath_langchain-0.0.151-py3-none-any.whl", hash = "sha256:3622b2ac0e199b5f640498ce13d6d9280680a103bbde4310eb708532f8d6c226", size = 61790, upload-time = "2025-11-07T13:59:47.905Z" },
-]
-
-[[package]]
-name = "uipath-lowcode"
+name = "uipath-agents"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
@@ -3759,6 +3735,30 @@ dev = [
     { name = "pytest-mock", specifier = ">=3.11.1" },
     { name = "requests", specifier = ">=2.32.5" },
     { name = "ruff", specifier = ">=0.9.4" },
+]
+
+[[package]]
+name = "uipath-langchain"
+version = "0.0.151"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "jsonschema-pydantic" },
+    { name = "langchain" },
+    { name = "langchain-community" },
+    { name = "langchain-core" },
+    { name = "langchain-openai" },
+    { name = "langgraph" },
+    { name = "langgraph-checkpoint-sqlite" },
+    { name = "openai" },
+    { name = "openinference-instrumentation-langchain" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "uipath" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/16/50/6b3b246e55d363aa0db2c63ddab6a99c41b484aa090566df61263bb2b00b/uipath_langchain-0.0.151.tar.gz", hash = "sha256:d6cb488f587fa38cae7f005f8bc38da5eb759f8f2d2a1d414b6efb2e1988b996", size = 6754546, upload-time = "2025-11-07T13:59:49.741Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/85/26/86ad55eaf0052d00e598b6071e2a7167c712e476fada76c0fa7de9abc45f/uipath_langchain-0.0.151-py3-none-any.whl", hash = "sha256:3622b2ac0e199b5f640498ce13d6d9280680a103bbde4310eb708532f8d6c226", size = 61790, upload-time = "2025-11-07T13:59:47.905Z" },
 ]
 
 [[package]]

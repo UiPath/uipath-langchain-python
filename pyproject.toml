@@ -1,7 +1,7 @@
 [project]
-name = "uipath-lowcode"
+name = "uipath-agents"
 version = "0.0.1"
-description = "UiPath LowCode"
+description = "UiPath Agents"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 dependencies = [
