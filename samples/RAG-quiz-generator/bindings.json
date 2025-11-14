@@ -1,0 +1,26 @@
+{
+    "version": "2.0",
+    "resources": [
+        {
+            "resource": "index",
+            "key": "state.index_name.state.index_folder_path",
+            "value": {
+                "name": {
+                    "defaultValue": "state.index_name",
+                    "isExpression": true,
+                    "displayName": "Name"
+                },
+                "folderPath": {
+                    "defaultValue": "state.index_folder_path",
+                    "isExpression": true,
+                    "displayName": "Folder Path"
+                }
+            },
+            "metadata": {
+                "ActivityName": "add_to_index_async",
+                "BindingsVersion": "2.2",
+                "DisplayLabel": "FullName"
+            }
+        }
+    ]
+}

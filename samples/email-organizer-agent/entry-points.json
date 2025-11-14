@@ -1,0 +1,52 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "4e411acb-5ba5-467e-8176-00b170a4500e",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "max_emails": {
+                        "title": "Max Emails",
+                        "type": "integer"
+                    },
+                    "max_rules": {
+                        "title": "Max Rules",
+                        "type": "integer"
+                    },
+                    "assignee": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "max_emails",
+                    "max_rules"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "success": {
+                        "default": null,
+                        "title": "Success",
+                        "type": "boolean"
+                    },
+                    "rules_created": {
+                        "default": null,
+                        "title": "Rules Created",
+                        "type": "integer"
+                    },
+                    "message": {
+                        "default": null,
+                        "title": "Message",
+                        "type": "string"
+                    }
+                },
+                "required": []
+            }
+        }
+    ]
+}

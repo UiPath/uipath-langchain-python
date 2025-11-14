@@ -1,0 +1,21 @@
+{
+    "version": "2.0",
+    "resources": [
+        {
+            "resource": "process",
+            "key": "open_deep_research",
+            "value": {
+                "name": {
+                    "defaultValue": "open_deep_research",
+                    "isExpression": false,
+                    "displayName": "Name"
+                }
+            },
+            "metadata": {
+                "ActivityName": "invoke_async",
+                "BindingsVersion": "2.2",
+                "DisplayLabel": "FullName"
+            }
+        }
+    ]
+}

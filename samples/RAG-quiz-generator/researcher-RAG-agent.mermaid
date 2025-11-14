@@ -11,10 +11,10 @@ graph TD;
 	create_file_name(create_file_name)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> prepare_input;
-	add_data_to_context_grounding_index --> __end__;
 	create_file_name --> research;
 	prepare_input --> create_file_name;
 	research --> add_data_to_context_grounding_index;
+	add_data_to_context_grounding_index --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc

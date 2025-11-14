@@ -4,13 +4,13 @@ version = "0.0.12"
 description = "Email Organizer Agent: Outlook rule creator"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.2.55",
     "langchain-anthropic>=0.3.8",
-    "uipath>=2.0.79, <2.2.0",
     "langchain-community>=0.3.21",
     "uipath-langchain>=0.0.124, <0.1.0",
+    "uipath>=2.1.164, <2.2.0",
 ]
 
 [project.optional-dependencies]
