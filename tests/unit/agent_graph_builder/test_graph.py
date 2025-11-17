@@ -11,7 +11,7 @@ from uipath.agent.models.agent import (
     LowCodeAgentDefinition,
 )
 
-from uipath_lowcode.agent_graph_builder import build_agent_graph
+from uipath_agents.agent_graph_builder import build_agent_graph
 
 
 def create_test_agent_definition(**overrides: Any) -> LowCodeAgentDefinition:
@@ -47,12 +47,12 @@ class TestBuildAgentGraph:
 
         with (
             patch(
-                "uipath_lowcode.agent_graph_builder.graph.create_tools_from_resources",
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
             patch(
-                "uipath_lowcode.agent_graph_builder.graph.create_agent"
+                "uipath_agents.agent_graph_builder.graph.create_agent"
             ) as mock_create,
         ):
             mock_create.return_value = MagicMock()
@@ -75,13 +75,13 @@ class TestBuildAgentGraph:
 
         with (
             patch(
-                "uipath_lowcode.agent_graph_builder.graph.create_tools_from_resources",
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("uipath_lowcode.agent_graph_builder.graph.create_llm") as mock_llm,
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
             patch(
-                "uipath_lowcode.agent_graph_builder.graph.create_agent"
+                "uipath_agents.agent_graph_builder.graph.create_agent"
             ) as mock_create,
         ):
             mock_llm.return_value = MagicMock()
@@ -111,12 +111,12 @@ class TestBuildAgentGraph:
 
         with (
             patch(
-                "uipath_lowcode.agent_graph_builder.graph.create_tools_from_resources",
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
             patch(
-                "uipath_lowcode.agent_graph_builder.graph.create_agent"
+                "uipath_agents.agent_graph_builder.graph.create_agent"
             ) as mock_create,
         ):
             mock_create.return_value = MagicMock()
@@ -143,12 +143,12 @@ class TestBuildAgentGraph:
 
         with (
             patch(
-                "uipath_lowcode.agent_graph_builder.graph.create_tools_from_resources",
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
                 new_callable=AsyncMock,
                 return_value=[],
             ),
             patch(
-                "uipath_lowcode.agent_graph_builder.graph.create_agent"
+                "uipath_agents.agent_graph_builder.graph.create_agent"
             ) as mock_create,
         ):
             mock_create.return_value = MagicMock()
@@ -176,12 +176,12 @@ class TestBuildAgentGraph:
         mock_tool = MagicMock()
         with (
             patch(
-                "uipath_lowcode.agent_graph_builder.graph.create_tools_from_resources",
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
                 new_callable=AsyncMock,
                 return_value=[mock_tool],
             ) as mock_create_tools,
             patch(
-                "uipath_lowcode.agent_graph_builder.graph.create_agent"
+                "uipath_agents.agent_graph_builder.graph.create_agent"
             ) as mock_create_agent,
         ):
             mock_create_agent.return_value = MagicMock()

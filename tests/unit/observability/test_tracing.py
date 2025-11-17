@@ -3,7 +3,7 @@
 import os
 from unittest.mock import MagicMock, patch
 
-from uipath_lowcode._observability import tracing
+from uipath_agents._observability import tracing
 
 
 class TestGetAzureExporter:
@@ -28,7 +28,7 @@ class TestGetAzureExporter:
                 clear=True,
             ),
             patch(
-                "uipath_lowcode._observability.tracing.AzureMonitorTraceExporter"
+                "uipath_agents._observability.tracing.AzureMonitorTraceExporter"
             ) as mock_exporter,
         ):
             mock_instance = MagicMock()
@@ -49,7 +49,7 @@ class TestGetAzureExporter:
                 {"APPLICATIONINSIGHTS_CONNECTION_STRING": conn_str},
                 clear=True,
             ),
-            patch("uipath_lowcode._observability.tracing.AzureMonitorTraceExporter"),
+            patch("uipath_agents._observability.tracing.AzureMonitorTraceExporter"),
         ):
             tracing.get_azure_exporter()
 
@@ -73,7 +73,7 @@ class TestShutdownTelemetry:
 
             tracing.shutdown_telemetry()
 
-            mock_provider.force_flush.assert_called_once_with(timeout_millis=10000)
+            mock_provider.force_flush.assert_called_once_with(timeout_millis=5000)
 
     def test_shutdown_handles_no_force_flush_method(self):
         """Test shutdown when provider doesn't have force_flush."""

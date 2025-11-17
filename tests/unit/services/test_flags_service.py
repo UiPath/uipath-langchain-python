@@ -1,6 +1,6 @@
 """Unit tests for FlagsService."""
 
-from uipath_lowcode._services.flags_service import (
+from uipath_agents._services.flags_service import (
     FeatureFlagsRequest,
     FeatureFlagsResponse,
     FlagsService,

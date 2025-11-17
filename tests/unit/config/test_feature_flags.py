@@ -4,11 +4,11 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from uipath_lowcode._config.feature_flags import (
+from uipath_agents._config.feature_flags import (
     FeatureFlagsConfig,
     get_feature_flags,
 )
-from uipath_lowcode._services.flags_service import FeatureFlagsResponse
+from uipath_agents._services.flags_service import FeatureFlagsResponse
 
 
 class TestFeatureFlagsConfig:
@@ -93,8 +93,8 @@ class TestFeatureFlagsConfig:
 class TestGetFeatureFlags:
     """Tests for get_feature_flags function."""
 
-    @patch("uipath_lowcode._config.feature_flags.FlagsService")
-    @patch("uipath_lowcode._config.feature_flags.UiPath")
+    @patch("uipath_agents._config.feature_flags.FlagsService")
+    @patch("uipath_agents._config.feature_flags.UiPath")
     def test_get_feature_flags_success(self, mock_uipath_class, mock_service_class):
         """Test successful feature flags retrieval."""
         mock_uipath = Mock()
@@ -124,8 +124,8 @@ class TestGetFeatureFlags:
             ["EnableUnifiedRuntime", "CommunityModelNameOverride"]
         )
 
-    @patch("uipath_lowcode._config.feature_flags.FlagsService")
-    @patch("uipath_lowcode._config.feature_flags.UiPath")
+    @patch("uipath_agents._config.feature_flags.FlagsService")
+    @patch("uipath_agents._config.feature_flags.UiPath")
     def test_get_feature_flags_empty_list(self, mock_uipath_class, mock_service_class):
         """Test retrieving feature flags with empty flags list."""
         mock_uipath = Mock()
@@ -143,8 +143,8 @@ class TestGetFeatureFlags:
         assert isinstance(result, FeatureFlagsConfig)
         assert result.to_dict() == {}
 
-    @patch("uipath_lowcode._config.feature_flags.FlagsService")
-    @patch("uipath_lowcode._config.feature_flags.UiPath")
+    @patch("uipath_agents._config.feature_flags.FlagsService")
+    @patch("uipath_agents._config.feature_flags.UiPath")
     def test_get_feature_flags_api_error(self, mock_uipath_class, mock_service_class):
         """Test that API errors are raised and logged."""
         mock_uipath = Mock()
@@ -159,7 +159,7 @@ class TestGetFeatureFlags:
         with pytest.raises(Exception, match="API Error"):
             get_feature_flags(["EnableUnifiedRuntime"])
 
-    @patch("uipath_lowcode._config.feature_flags.UiPath")
+    @patch("uipath_agents._config.feature_flags.UiPath")
     def test_get_feature_flags_uipath_initialization_error(self, mock_uipath_class):
         """Test that UiPath initialization errors are raised."""
         mock_uipath_class.side_effect = Exception("SDK not configured")
@@ -167,8 +167,8 @@ class TestGetFeatureFlags:
         with pytest.raises(Exception, match="SDK not configured"):
             get_feature_flags(["EnableUnifiedRuntime"])
 
-    @patch("uipath_lowcode._config.feature_flags.FlagsService")
-    @patch("uipath_lowcode._config.feature_flags.UiPath")
+    @patch("uipath_agents._config.feature_flags.FlagsService")
+    @patch("uipath_agents._config.feature_flags.UiPath")
     def test_get_feature_flags_passes_config_correctly(
         self, mock_uipath_class, mock_service_class
     ):

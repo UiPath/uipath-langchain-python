@@ -2,7 +2,7 @@
 
 from uipath.agent.models.agent import AgentMessageRole
 
-from uipath_lowcode.agent_graph_builder.message_utils import (
+from uipath_agents.agent_graph_builder.message_utils import (
     build_agent_messages,
     interpolate_message,
     safe_get_nested,

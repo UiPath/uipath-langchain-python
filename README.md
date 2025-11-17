@@ -37,7 +37,7 @@ uv sync --group dev
 
 ```
 uipath-lowcode-python/
-├── src/uipath_lowcode/
+├── src/uipath_agents/
 │   └── lowcode_agent_graph_builder/
 │       ├── graph.py              # Main entry point - builds agent graph
 │       ├── input_loader.py       # Loads agent.json and input data
@@ -62,7 +62,7 @@ uipath-lowcode-python/
 ### Basic Usage
 
 ```python
-from uipath_lowcode.lowcode_agent_graph_builder import build_lowcode_agent_graph
+from uipath_agents.lowcode_agent_graph_builder import build_lowcode_agent_graph
 
 # Build agent from agent.json in current directory with input data
 graph = await build_lowcode_agent_graph(
@@ -142,10 +142,10 @@ The project uses `mypy` for static type checking with strict configuration.
 
 ```bash
 # Check entire codebase
-uv run mypy src/uipath_lowcode
+uv run mypy src/uipath_agents
 
 # Check specific file
-uv run mypy src/uipath_lowcode/lowcode_agent_graph_builder/graph.py
+uv run mypy src/uipath_agents/lowcode_agent_graph_builder/graph.py
 ```
 
 ### Running Tests
@@ -157,7 +157,7 @@ The project uses `pytest` for testing. All test commands should be run via `uv r
 uv run pytest tests/unit/ -v
 
 # Run tests with coverage
-uv run pytest tests/unit/ -v --cov=src/uipath_lowcode/lowcode_agent_graph_builder --cov-report=html --cov-report=term-missing
+uv run pytest tests/unit/ -v --cov=src/uipath_agents/lowcode_agent_graph_builder --cov-report=html --cov-report=term-missing
 
 # Run specific test file
 uv run pytest tests/unit/lowcode_agent_graph_builder/test_input_loader.py -v

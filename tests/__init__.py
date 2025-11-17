@@ -1,1 +1,1 @@
-"""Test package for uipath_lowcode."""
+"""Test package for uipath_agents."""

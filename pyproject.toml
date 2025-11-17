@@ -20,7 +20,7 @@ maintainers = [
 ]
 
 [project.entry-points."uipath.middlewares"]
-register = "uipath_lowcode.middlewares:register_middleware"
+register = "uipath_agents.middlewares:register_middleware"
 
 [project.urls]
 Homepage = "https://uipath.com"
@@ -47,7 +47,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/uipath_lowcode"]
+packages = ["src/uipath_agents"]
 
 [tool.ruff]
 line-length = 88
