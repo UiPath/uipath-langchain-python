@@ -1,67 +1,7 @@
 {
-    "entryPoints": [
-        {
-            "filePath": "calculator",
-            "uniqueId": "b02d84f4-77a9-4e06-8406-9c2baf6eb92b",
-            "type": "agent",
-            "input": {
-                "type": "object",
-                "properties": {
-                    "expression": {
-                        "title": "Expression",
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "expression"
-                ]
-            },
-            "output": {
-                "type": "object",
-                "properties": {
-                    "answer": {
-                        "default": null,
-                        "title": "Answer",
-                        "type": "number"
-                    }
-                },
-                "required": []
-            }
-        },
-        {
-            "filePath": "loan",
-            "uniqueId": "7695a816-1c9e-40fc-a3fd-f62a36b032b1",
-            "type": "agent",
-            "input": {
-                "type": "object",
-                "properties": {
-                    "EmailBody": {
-                        "description": "The body of the request email",
-                        "title": "Emailbody",
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "EmailBody"
-                ]
-            },
-            "output": {
-                "type": "object",
-                "properties": {
-                    "ExecutionDetails": {
-                        "default": null,
-                        "title": "Executiondetails",
-                        "type": "string"
-                    },
-                    "ActionCenterTaskCreated": {
-                        "type": "boolean"
-                    },
-                    "ActionCenterTaskURL": {
-                        "type": "string"
-                    }
-                },
-                "required": []
-            }
-        }
+  "settings": {
+    "fileExtensionsIncluded": [
+      ".csv"
     ]
+  }
 }

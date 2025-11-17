@@ -1,4 +1,4 @@
-from typing import Annotated, Any, Dict, List, TypeAlias, override
+from typing import Annotated, Any, Dict, List, TypeAlias
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import add_messages
@@ -40,7 +40,6 @@ class EndExecutionTool(StructuredTool):
     description: str = "Use this tool when you have gathered all required information and want to end execution. The input should match the expected output schema."
     output_schema: type[BaseModel] | None = None  # The final output schema to return
 
-    @override
     def run(self, tool_input: StateBaseClass, *args: Any, **kwargs: Any):
         last_message = tool_input.messages[-1]
         # If the last message is a ToolMessage, this was the result of a validation step,
@@ -75,7 +74,6 @@ class RaiseErrorTool(StructuredTool):
         kwargs["args_schema"] = RaiseErrorInput
         super().__init__(*args, **kwargs)
 
-    @override
     def run(self, agent_state: StateBaseClass, *args: Any, **kwargs: Any):
         last_message = agent_state.messages[-1]
         # If the last message is a ToolMessage, this was the result of a validation step,
@@ -112,12 +110,10 @@ class EscalationTool(BaseTool):
             **kwargs,
         )
 
-    @override
     async def _arun(self, query: str) -> str:
         """Async run method required by BaseTool"""
         return self._run(query)
 
-    @override
     def _run(self, query: str) -> str:
         """Synchronous run method required by BaseTool"""
         if self.return_message:
