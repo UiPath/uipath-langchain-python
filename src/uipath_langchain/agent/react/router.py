@@ -67,7 +67,7 @@ def route_agent(
     Raises:
         AgentNodeRoutingException: When encountering unexpected state (empty messages, non-AIMessage, or excessive completions)
     """
-    messages = state.get("messages", [])
+    messages = state.messages
     last_message = __validate_last_message_is_AI(messages)
 
     tool_calls = list(last_message.tool_calls) if last_message.tool_calls else []

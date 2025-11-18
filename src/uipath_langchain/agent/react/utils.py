@@ -8,6 +8,16 @@ from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL
 
 
+def resolve_input_model(
+    input_schema: dict[str, Any] | None,
+) -> type[BaseModel]:
+    """Resolve the input model from the input schema."""
+    if input_schema:
+        return jsonschema_to_pydantic(input_schema)
+
+    return BaseModel
+
+
 def resolve_output_model(
     output_schema: dict[str, Any] | None,
 ) -> type[BaseModel]:

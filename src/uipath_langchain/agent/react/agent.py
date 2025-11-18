@@ -1,5 +1,5 @@
 import os
-from typing import Callable, Sequence
+from typing import Callable, Sequence, Type, TypeVar, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -24,16 +24,31 @@ from .terminate_node import (
 from .tools import create_flow_control_tools
 from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState
 
+InputT = TypeVar("InputT", bound=BaseModel)
+OutputT = TypeVar("OutputT", bound=BaseModel)
+
+
+def create_state_with_input(input_schema: Type[InputT]):
+    InnerAgentGraphState = type(
+        "InnerAgentGraphState",
+        (AgentGraphState, input_schema),
+        {},
+    )
+
+    cast(type[BaseModel], InnerAgentGraphState).model_rebuild()
+    return InnerAgentGraphState
+
 
 def create_agent(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     messages: Sequence[SystemMessage | HumanMessage]
-    | Callable[[AgentGraphState], Sequence[SystemMessage | HumanMessage]],
+    | Callable[[InputT], Sequence[SystemMessage | HumanMessage]],
     *,
-    response_format: type[BaseModel] | None = None,
+    input_schema: Type[InputT] | None = None,
+    output_schema: Type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
-) -> StateGraph[AgentGraphState]:
+) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
     """Build agent graph with INIT -> AGENT <-> TOOLS loop, terminated by control flow tools.
 
     Control flow tools (end_execution, raise_error) are auto-injected alongside regular tools.
@@ -44,15 +59,21 @@ def create_agent(
     os.environ["LANGCHAIN_RECURSION_LIMIT"] = str(config.recursion_limit)
 
     agent_tools = list(tools)
-    flow_control_tools: list[BaseTool] = create_flow_control_tools(response_format)
+    flow_control_tools: list[BaseTool] = create_flow_control_tools(output_schema)
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
     init_node = create_init_node(messages)
     agent_node = create_llm_node(model, llm_tools)
     tool_nodes = create_tool_node(agent_tools)
-    terminate_node = create_terminate_node(response_format)
+    terminate_node = create_terminate_node(output_schema)
 
-    builder: StateGraph[AgentGraphState] = StateGraph(AgentGraphState)
+    InnerAgentGraphState = create_state_with_input(
+        input_schema if input_schema is not None else BaseModel
+    )
+
+    builder: StateGraph[AgentGraphState, None, InputT, OutputT] = StateGraph(
+        InnerAgentGraphState, input_schema=input_schema, output_schema=output_schema
+    )
     builder.add_node(AgentGraphNode.INIT, init_node)
     builder.add_node(AgentGraphNode.AGENT, agent_node)
 
