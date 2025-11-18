@@ -154,7 +154,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
                         for node_name, agent_data in data.items():
                             if isinstance(agent_data, dict):
                                 state_event = UiPathAgentStateEvent(
-                                    payload=agent_data,
+                                    payload=serialize_output(agent_data),
                                     node_name=node_name,
                                     execution_id=self.context.execution_id,
                                 )
