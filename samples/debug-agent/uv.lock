@@ -316,7 +316,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.1" },
     { name = "uipath", specifier = ">=2.1.172,<2.2.0" },
-    { name = "uipath-langchain", specifier = ">=0.0.154,<0.1.0" },
+    { name = "uipath-langchain", specifier = ">=0.0.155,<0.1.0" },
 ]
 provides-extras = ["dev"]
 
@@ -2287,7 +2287,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.154"
+version = "0.0.155"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -2304,9 +2304,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "uipath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f3/3d/1494f362d1c2a0cc55b2d55548d63dd0ace2b4addbbc4fa2a122a79eca4b/uipath_langchain-0.0.154.tar.gz", hash = "sha256:419eb51b79a7e5929c0a0d4e1679fd9af1a5bb9d4e2398cc4152889381ca07d7", size = 7087704, upload-time = "2025-11-18T15:54:04.216Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/e7/1572cf4b5dbac0d2240a4b3d0ff30326a5caf9b07a713c7980aee6b24e52/uipath_langchain-0.0.155.tar.gz", hash = "sha256:71a4f0ce6326cb2fbe0088244fccd007b96ce12aaac71c5b9fb8cfb8ec2dfbda", size = 7271805, upload-time = "2025-11-18T16:23:04.374Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/6a/bc50a2d2961f51d26b9d74bda01d3fa9ff94805ff5c2895b67271ee8d044/uipath_langchain-0.0.154-py3-none-any.whl", hash = "sha256:f7b2c28f859de4fafa63d56ec838cc691f0fbc3fa32bbf51ed58ff7aac8926b7", size = 62490, upload-time = "2025-11-18T15:54:02.631Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/5c/ac2eb4c84450b34aa9f374795158222e2e43f396c5325b8ee4cad94bbc30/uipath_langchain-0.0.155-py3-none-any.whl", hash = "sha256:084203cdb10fb5a869309dc6432154a1ef97e1188e1d7e4d8cc496f89efb5aa9", size = 62513, upload-time = "2025-11-18T16:23:02.982Z" },
 ]
 
 [[package]]

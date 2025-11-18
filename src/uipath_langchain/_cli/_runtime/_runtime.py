@@ -396,7 +396,7 @@ class LangGraphRuntime(UiPathBaseRuntime):
         return UiPathBreakpointResult(
             breakpoint_node=breakpoint_node,
             breakpoint_type=breakpoint_type,
-            current_state=graph_state.values,
+            current_state=serialize_output(graph_state.values),
             next_nodes=next_nodes,
         )
 
