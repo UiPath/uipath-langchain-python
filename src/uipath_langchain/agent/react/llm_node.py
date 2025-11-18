@@ -24,7 +24,7 @@ def create_llm_node(
     base_llm = model.bind_tools(bindable_tools) if bindable_tools else model
 
     async def llm_node(state: AgentGraphState):
-        messages: list[AnyMessage] = state["messages"]
+        messages: list[AnyMessage] = state.messages
 
         successive_completions = count_successive_completions(messages)
         if successive_completions >= MAX_SUCCESSIVE_COMPLETIONS:
