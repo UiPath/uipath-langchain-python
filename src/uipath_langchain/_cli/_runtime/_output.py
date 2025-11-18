@@ -1,5 +1,6 @@
 import json
 import logging
+from enum import Enum
 from typing import Any
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -46,6 +47,10 @@ def serialize_output(output: Any) -> Any:
             return serialize_output(dict(output))
         except (TypeError, ValueError):
             return output
+
+    # Handle Enums
+    elif isinstance(output, Enum):
+        return output.value
 
     # Return primitive types as is
     return output
