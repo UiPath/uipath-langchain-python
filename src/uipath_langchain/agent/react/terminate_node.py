@@ -20,7 +20,6 @@ def create_terminate_node(
     """Validates and extracts end_execution args to state output field."""
 
     def terminate_node(state: AgentGraphState):
-        print(f"🔵 [TERMINATE NODE] State: {state}")
         last_message = state.messages[-1]
         if not isinstance(last_message, AIMessage):
             raise AgentNodeRoutingException(
