@@ -1,0 +1,84 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "a2029a82-e12d-4e3a-a5e8-9df149f2c49e",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "ticket_id": {
+                        "title": "Ticket Id",
+                        "type": "string"
+                    },
+                    "customer_message": {
+                        "title": "Customer Message",
+                        "type": "string"
+                    },
+                    "customer_tier": {
+                        "default": "standard",
+                        "title": "Customer Tier",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "ticket_id",
+                    "customer_message"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "ticket_id": {
+                        "default": null,
+                        "title": "Ticket Id",
+                        "type": "string"
+                    },
+                    "category": {
+                        "enum": [
+                            "technical",
+                            "billing",
+                            "general",
+                            "complaint"
+                        ],
+                        "title": "TicketCategory",
+                        "type": "string"
+                    },
+                    "priority": {
+                        "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "critical"
+                        ],
+                        "title": "TicketPriority",
+                        "type": "string"
+                    },
+                    "assigned_department": {
+                        "default": null,
+                        "title": "Assigned Department",
+                        "type": "string"
+                    },
+                    "requires_escalation": {
+                        "default": null,
+                        "title": "Requires Escalation",
+                        "type": "boolean"
+                    },
+                    "estimated_resolution_time": {
+                        "default": null,
+                        "title": "Estimated Resolution Time",
+                        "type": "integer"
+                    },
+                    "response_template": {
+                        "default": null,
+                        "title": "Response Template",
+                        "type": "string"
+                    }
+                },
+                "required": []
+            }
+        }
+    ]
+}
