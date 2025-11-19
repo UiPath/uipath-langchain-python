@@ -5,12 +5,14 @@ from __future__ import annotations
 from langchain_core.tools import BaseTool, StructuredTool
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
+    AgentIntegrationToolResourceConfig,
     AgentProcessToolResourceConfig,
     BaseAgentResourceConfig,
     LowCodeAgentDefinition,
 )
 
 from .context_tool import create_context_tool
+from .integration_tool import create_integration_tool
 from .process_tool import create_process_tool
 
 
@@ -35,5 +37,8 @@ async def _build_tool_for_resource(
 
     elif isinstance(resource, AgentContextResourceConfig):
         return create_context_tool(resource)
+
+    elif isinstance(resource, AgentIntegrationToolResourceConfig):
+        return create_integration_tool(resource)
 
     return None
