@@ -31,10 +31,10 @@ version = "0.0.1"
 description = "{project_name}"
 authors = [{{ name = "John Doe", email = "john.doe@myemail.com" }}]
 dependencies = [
-    "uipath-langchain>=0.0.106",
+    "uipath-langchain>=0.0.158",
     "langchain-anthropic>=0.3.8",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 """
 
     with open(project_toml_path, "w") as f:
