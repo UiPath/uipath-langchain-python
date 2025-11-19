@@ -145,6 +145,9 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# GitVersion
+.gitversion-cache
+
 # PyPI configuration file
 .pypirc
 

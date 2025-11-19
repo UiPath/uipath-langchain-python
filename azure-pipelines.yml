@@ -1,0 +1,129 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  autoCancel: true
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: Initialize
+    jobs:
+      - job: GitVersion
+        variables:
+          Agent.Source.Git.ShallowFetchDepth: 0
+        steps:
+          - task: gitversion/setup@3
+            displayName: Install GitVersion
+            inputs:
+              versionSpec: 6.x
+
+          - task: gitversion/execute@3
+            displayName: Execute GitVersion
+            inputs:
+              workingDirectory: $(System.DefaultWorkingDirectory)
+              useConfigFile: true
+              configFilePath: GitVersion.yml
+              updateAssemblyInfo: true
+
+          - powershell: |
+              # Convert SemVer to PEP 440 format
+              $majorMinorPatch = "$(GitVersion.MajorMinorPatch)"
+              $branchName = "$(GitVersion.BranchName)"
+              $buildId = "$(Build.BuildId)"
+
+              # Check if we're on main branch
+              if ($branchName -eq "main" -or $branchName -eq "master") {
+                  # Main branch: use SemVer directly (already clean like 1.2.5)
+                  $pythonVersion = $majorMinorPatch
+              } else {
+                  # Feature/other branches: use alpha with build ID
+                  $pythonVersion = "${majorMinorPatch}a${buildId}"
+              }
+
+              Write-Host "##vso[task.setvariable variable=PythonVersion;isOutput=true]$pythonVersion"
+              Write-Host "##vso[task.setvariable variable=SemVer;isOutput=true]$(GitVersion.SemVer)"
+              Write-Host "##vso[task.setvariable variable=Patch;isOutput=true]$(GitVersion.Patch)"
+              Write-Host "##vso[task.setvariable variable=MajorMinorPatch;isOutput=true]$majorMinorPatch"
+              Write-Host "##vso[task.setvariable variable=BranchName;isOutput=true]$branchName"
+
+              Write-Host "Set PythonVersion (PEP 440): $pythonVersion"
+              Write-Host "Branch: $branchName"
+              Write-Host "Build ID: $buildId"
+              Write-Host "Set SemVer: $(GitVersion.SemVer)"
+              Write-Host "Set MajorMinorPatch: $majorMinorPatch"
+            displayName: Set Custom Variables
+            name: SetVariables
+
+  - stage: Publish_Alpha
+    displayName: Publish - Alpha
+    dependsOn: [Initialize]
+    condition: and(succeeded(), eq(stageDependencies.Initialize.GitVersion.outputs['SetVariables.BranchName'], 'main'))
+    jobs:
+      - job: Publish
+        displayName: Build and Publish - Alpha
+        variables:
+          PythonVersion: $[ stageDependencies.Initialize.GitVersion.outputs['SetVariables.PythonVersion'] ]
+          SemVer: $[ stageDependencies.Initialize.GitVersion.outputs['SetVariables.SemVer'] ]
+          BranchName: $[ stageDependencies.Initialize.GitVersion.outputs['SetVariables.BranchName'] ]
+        steps:
+          - script: |
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+            displayName: Install UV
+
+          - script: |
+              echo "Setting version to: $(PythonVersion) (PEP 440 compliant)"
+              echo "Original SemVer: $(SemVer)"
+              sed -i 's/version = "0.0.0"/version = "$(PythonVersion)"/' pyproject.toml
+              cat pyproject.toml | grep version
+            displayName: Set Package Version
+
+          - script: |
+              uv build
+            displayName: Build Package
+
+          - script: |
+              uv publish --index alpha
+            displayName: Publish Package
+            env:
+              UV_PUBLISH_TOKEN: $(System.AccessToken)
+
+  - stage: Publish_Production
+    displayName: Publish - Production
+    dependsOn: [Publish_Alpha]
+    condition: and(succeeded(), eq(stageDependencies.Initialize.GitVersion.outputs['SetVariables.BranchName'], 'main'), eq(stageDependencies.Initialize.GitVersion.outputs['SetVariables.Patch'], '0'))
+    jobs:
+      - job: Publish
+        displayName: Build and Publish - Production
+        variables:
+          MajorMinorPatch: $[ stageDependencies.Initialize.GitVersion.outputs['SetVariables.MajorMinorPatch'] ]
+          SemVer: $[ stageDependencies.Initialize.GitVersion.outputs['SetVariables.SemVer'] ]
+          BranchName: $[ stageDependencies.Initialize.GitVersion.outputs['SetVariables.BranchName'] ]
+          Patch: $[ stageDependencies.Initialize.GitVersion.outputs['SetVariables.Patch'] ]
+        steps:
+          - script: |
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+            displayName: Install UV
+
+          - script: |
+              echo "Setting version to: $(MajorMinorPatch) (Production release)"
+              echo "Original SemVer: $(SemVer)"
+              sed -i 's/version = "0.0.0"/version = "$(MajorMinorPatch)"/' pyproject.toml
+              cat pyproject.toml | grep version
+            displayName: Set Package Version
+
+          - script: |
+              uv build
+            displayName: Build Package
+
+          - script: |
+              uv publish --index prod
+            displayName: Publish Package
+            env:
+              UV_PUBLISH_TOKEN: $(System.AccessToken)

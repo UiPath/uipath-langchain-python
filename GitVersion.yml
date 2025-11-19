@@ -1,0 +1,15 @@
+workflow: TrunkBased/preview1 # this gives the auto patch increment for `main` branch on each commit
+branches:
+  any: # by default only `feature(s)/{BranchName}` branches are targeted, so custom item is required to target all branches (feat, fix, chore etc)
+    mode: ContinuousDelivery
+    label: "{BranchName}"
+    increment: Minor
+    prevent-increment:
+      when-current-commit-tagged: false
+    track-merge-message: true
+    regex: ^.+[\/-](?<BranchName>.+)
+    source-branches:
+      - main
+    is-source-branch-for: []
+    is-main-branch: false
+    pre-release-weight: 30000
