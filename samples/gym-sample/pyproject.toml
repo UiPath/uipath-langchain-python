@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gym-sample"
+version = "0.0.1"
+description = "Agent gym sample"
+authors = [{ name = "Andrei Rusu", email = "andrei.rusu@uipath.com" }]
+dependencies = [
+    "langgraph>=0.2.70",
+    "langchain-core>=0.3.34",
+    "langgraph-checkpoint-sqlite>=2.0.3",
+    "python-dotenv>=1.0.1",
+    "uipath-langchain>=0.0.149",
+    "uipath>=2.1.169",
+    "pydantic>=2.10.6",
+    "aiohttp>=3.11.12",
+    "typing-extensions>=4.12.2",
+    "ipython>=8.32.0",
+    "jsonschema>=4.25.1"
+]
+requires-python = ">=3.11"
+
+[project.scripts]
+gym-eval = "gym_sample.run:main"
+gym-export = "gym_sample.export_evals:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
