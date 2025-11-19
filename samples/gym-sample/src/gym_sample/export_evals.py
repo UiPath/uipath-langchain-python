@@ -39,7 +39,6 @@ def evaluator_to_spec(evaluator: BaseEvaluator, agent_name: str) -> Dict[str, An
     # Use the evaluator_config (Pydantic model) and dump with aliases (camelCase)
     evaluator_config = evaluator.evaluator_config.model_dump(
         by_alias=True,
-        exclude_none=True,
         exclude_unset=False  # Include defaults like targetOutputKey
     )
 
@@ -89,7 +88,8 @@ def datapoint_to_evaluation(
     datapoint: Datapoint,
     eval_set_id: str,
     evaluator_refs: List[str],
-    agent_name: str
+    agent_name: str,
+    evaluators_map: Dict[str, BaseEvaluator]
 ) -> Dict[str, Any]:
     """Convert a Datapoint to an evaluation item in eval_set format (version 1.0).
 
@@ -98,6 +98,7 @@ def datapoint_to_evaluation(
         eval_set_id: The ID of the eval set this belongs to
         evaluator_refs: List of evaluator IDs referenced by this eval set
         agent_name: Name of the agent
+        evaluators_map: Map of evaluator names to evaluator instances
 
     Returns:
         Dict containing the evaluation in UiPath format
@@ -109,8 +110,12 @@ def datapoint_to_evaluation(
     for evaluator_name, criteria in datapoint.evaluation_criteria.items():
         # Add agent prefix to match the evaluator ID format
         agent_prefixed_id = f"{agent_name}_{evaluator_name}"
-        if agent_prefixed_id in evaluator_refs:
-            evaluation_criterias[agent_prefixed_id] = criteria
+        if agent_prefixed_id in evaluator_refs and evaluator_name in evaluators_map:
+            # Convert criteria keys to camelCase using the evaluator's Pydantic model
+            evaluator = evaluators_map[evaluator_name]
+            criteria_model = evaluator.evaluation_criteria_type.model_validate(criteria)
+            criteria_camelcase = criteria_model.model_dump(by_alias=True, exclude_unset=False)
+            evaluation_criterias[agent_prefixed_id] = criteria_camelcase
 
     return {
         "id": str(uuid.uuid4()),
@@ -189,6 +194,7 @@ def export_evaluators(agent_name: str, output_dir: Path, only_supported: bool = 
 def export_eval_set(
     agent_name: str,
     evaluator_refs: List[str],
+    evaluators: List[BaseEvaluator],
     output_dir: Path,
     small_set_size: int = 0
 ) -> None:
@@ -197,10 +203,14 @@ def export_eval_set(
     Args:
         agent_name: Name of the agent (e.g., "calculator", "loan")
         evaluator_refs: List of evaluator IDs to reference
+        evaluators: List of evaluator instances for this agent
         output_dir: Directory to write the eval_set file to
     """
     agents = get_agents()
     agent = agents[agent_name]
+
+    # Create a map of evaluator names to evaluator instances for criteria conversion
+    evaluators_map = {evaluator.id: evaluator for evaluator in evaluators}
 
     eval_set_id = str(uuid.uuid4())
     eval_set = {
@@ -209,7 +219,7 @@ def export_eval_set(
         "name": f"{agent_name.title()} Eval Set",
         "evaluatorRefs": evaluator_refs,
         "evaluations": [
-            datapoint_to_evaluation(dp, eval_set_id, evaluator_refs, agent_name)
+            datapoint_to_evaluation(dp, eval_set_id, evaluator_refs, agent_name, evaluators_map)
             for dp in agent.datapoints
         ],
         "modelSettings": [],
@@ -224,17 +234,24 @@ def export_eval_set(
         json.dump(eval_set, f)
 
     print(small_set_size)
-    if small_set_size > 0:
+    if small_set_size > 0 and small_set_size < len(agent.datapoints):
         small_eval_set_id = str(uuid.uuid4())
-        eval_set["id"] = small_eval_set_id
-        eval_set["name"] = f"{eval_set['name']} - Small"
-        eval_set["evaluations"] = [
-            datapoint_to_evaluation(dp, small_eval_set_id, evaluator_refs, agent_name)
-            for dp in agent.datapoints[:small_set_size]
-        ]
+        small_eval_set = {
+            "version": "1.0",
+            "id": small_eval_set_id,
+            "name": f"{agent_name.title()} Eval Set - Small",
+            "evaluatorRefs": evaluator_refs,
+            "evaluations": [
+                datapoint_to_evaluation(dp, small_eval_set_id, evaluator_refs, agent_name, evaluators_map)
+                for dp in agent.datapoints[:small_set_size]
+            ],
+            "modelSettings": [],
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "updatedAt": "2025-01-01T00:00:00.000Z",
+        }
         output_path = output_dir / f"evaluation-set-{agent_name}-small.json"
         with open(output_path, 'w') as f:
-            json.dump(eval_set, f)
+            json.dump(small_eval_set, f)
 
     print(f"  ✅ Exported eval set with {len(agent.datapoints)} evaluations")
 
@@ -249,13 +266,17 @@ def export_agent(agent_name: str, base_dir: Path, only_supported: bool = False, 
     """
     print(f"\n📦 Exporting {agent_name} agent:")
 
+    # Get evaluators for this agent
+    evaluators_getter = get_all_evaluators()[agent_name]
+    evaluators = evaluators_getter(include_llm_judge)
+
     # Export evaluators
     evaluators_dir = base_dir / "evaluators"
     evaluator_ids = export_evaluators(agent_name, evaluators_dir, only_supported, include_llm_judge)
 
-    # Export eval set
+    # Export eval set - pass evaluators for criteria conversion
     eval_sets_dir = base_dir / "eval-sets"
-    export_eval_set(agent_name, evaluator_ids, eval_sets_dir, small_set_size)
+    export_eval_set(agent_name, evaluator_ids, evaluators, eval_sets_dir, small_set_size)
 
     print(f"✨ Completed {agent_name} agent export\n")
 
