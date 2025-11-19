@@ -2,11 +2,9 @@
 
 from typing import Any
 
-from langgraph.graph import StateGraph
 from uipath.agent.models.agent import LowCodeAgentDefinition
 from uipath_langchain.agent.react import (
     AgentGraphConfig,
-    AgentGraphState,
     create_agent,
     resolve_output_model,
 )
@@ -23,7 +21,7 @@ AGENT_LOOP_RECURSION_LIMIT = 50
 async def build_agent_graph(
     agent_definition: LowCodeAgentDefinition,
     input_data: dict[str, Any],
-) -> StateGraph[AgentGraphState]:
+):
     """Build LangGraph agent from agent.json configuration and optional input data.
 
     Args:
@@ -42,7 +40,7 @@ async def build_agent_graph(
     )
 
     agent_messages = build_agent_messages(
-        agent_definition.messages, input_data, agent_definition.name
+        agent_definition.messages, input_data, agent_definition.name or ""
     )
     output_model = resolve_output_model(agent_definition.output_schema)
 
@@ -55,7 +53,7 @@ async def build_agent_graph(
         model=llm,
         tools=tools,
         messages=agent_messages,
-        state_schema=AgentGraphState,
-        response_format=output_model,
+        input_schema=None,
+        output_schema=output_model,
         config=agent_config,
     )
