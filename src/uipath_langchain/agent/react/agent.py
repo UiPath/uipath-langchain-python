@@ -1,5 +1,5 @@
 import os
-from typing import Callable, Sequence, Type, TypeVar, cast, Any
+from typing import Callable, Sequence, Type, TypeVar, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -15,6 +15,8 @@ from .init_node import (
 from .llm_node import (
     create_llm_node,
 )
+from .middleware_nodes import create_middleware_nodes
+from .middleware_types import AgentMiddleware
 from .router import (
     route_agent,
 )
@@ -48,7 +50,7 @@ def create_agent(
     input_schema: Type[InputT] | None = None,
     output_schema: Type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
-    middlewares: Sequence[Any] | None = None,
+    middlewares: Sequence[AgentMiddleware] | None = None,
 ) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
     """Build agent graph with INIT -> AGENT <-> TOOLS loop, terminated by control flow tools.
 
@@ -85,73 +87,42 @@ def create_agent(
 
     builder.add_edge(START, AgentGraphNode.INIT)
 
-    # Optional: before_agent middleware nodes
-    before_nodes: list[str] = []
-    after_middlewares: list[Any] = []
-    if middlewares:
-        for idx, mw in enumerate(middlewares):
-            before_hook = getattr(mw, "before_agent", None)
-            if not callable(before_hook):
-                continue
-            node_name = f"agent_before_{idx}"
+    # Build before_agent chain (INIT -> before... -> AGENT)
+    before_agent_middleware_nodes = create_middleware_nodes(
+        middlewares, "before_agent"
+    )
+    for node_name, node_callable in before_agent_middleware_nodes.items():
+        builder.add_node(node_name, node_callable)
 
-            async def before_node(state: AgentGraphState, _mw: Any = mw):
-                before = getattr(_mw, "before_agent", None)
-                if callable(before):
-                    result = before(state.messages, lambda msgs: msgs)
-                    if hasattr(result, "__await__"):
-                        result = await result
-                    if isinstance(result, list):
-                        return {"messages": result}
-                return {"messages": state.messages}
-
-            builder.add_node(node_name, before_node)
-            before_nodes.append(node_name)
-            after_middlewares.append(mw)
-
-    if before_nodes:
-        builder.add_edge(AgentGraphNode.INIT, before_nodes[0])
-        for cur, nxt in zip(before_nodes, before_nodes[1:], strict=False):
+    before_agent_middleware_node_names = list(before_agent_middleware_nodes.keys())
+    if before_agent_middleware_node_names:
+        builder.add_edge(AgentGraphNode.INIT, before_agent_middleware_node_names[0])
+        for cur, nxt in zip(before_agent_middleware_node_names, before_agent_middleware_node_names[1:], strict=False):
             builder.add_edge(cur, nxt)
-        builder.add_edge(before_nodes[-1], AgentGraphNode.AGENT)
+        builder.add_edge(before_agent_middleware_node_names[-1], AgentGraphNode.AGENT)
     else:
         builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
+    # Build after_agent chain to run BEFORE TERMINATE
+    after_agent_middleware_nodes = create_middleware_nodes(middlewares, "after_agent")
+    for node_name, node_callable in after_agent_middleware_nodes.items():
+        builder.add_node(node_name, node_callable)
+    after_agent_names = list(after_agent_middleware_nodes.keys())
+
     tool_node_names = list(tool_nodes.keys())
-    builder.add_conditional_edges(
-        AgentGraphNode.AGENT,
-        route_agent,
-        [AgentGraphNode.AGENT, *tool_node_names, AgentGraphNode.TERMINATE],
-    )
+    # Route AGENT to after chain (if present) instead of directly to TERMINATE
+    post_agent_destination = after_agent_names[0] if after_agent_names else AgentGraphNode.TERMINATE
+    destinations = [AgentGraphNode.AGENT, *tool_node_names, post_agent_destination]
+    builder.add_conditional_edges(AgentGraphNode.AGENT, route_agent, destinations)
 
     for tool_name in tool_node_names:
         builder.add_edge(tool_name, AgentGraphNode.AGENT)
 
-    # Optional: after_agent middleware nodes
-    after_nodes: list[str] = []
-    if after_middlewares:
-        for idx, mw in enumerate(after_middlewares):
-            node_name = f"agent_after_{idx}"
-
-            async def after_node(state: AgentGraphState, _mw: Any = mw):
-                after = getattr(_mw, "after_agent", None)
-                if callable(after):
-                    result = after(state.messages, lambda msgs: msgs)
-                    if hasattr(result, "__await__"):
-                        result = await result
-                    if isinstance(result, list):
-                        return {"messages": result}
-                return {"messages": state.messages}
-
-            builder.add_node(node_name, after_node)
-            after_nodes.append(node_name)
-
-    if after_nodes:
-        builder.add_edge(AgentGraphNode.TERMINATE, after_nodes[0])
-        for cur, nxt in zip(after_nodes, after_nodes[1:], strict=False):
+    # Chain after nodes to TERMINATE -> END
+    if after_agent_names:
+        for cur, nxt in zip(after_agent_names, after_agent_names[1:], strict=False):
             builder.add_edge(cur, nxt)
-        builder.add_edge(after_nodes[-1], END)
-    else:
-        builder.add_edge(AgentGraphNode.TERMINATE, END)
+        builder.add_edge(after_agent_names [-1], AgentGraphNode.TERMINATE)
+    builder.add_edge(AgentGraphNode.TERMINATE, END)
 
     return builder
