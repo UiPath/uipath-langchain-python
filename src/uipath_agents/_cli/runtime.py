@@ -59,7 +59,6 @@ def create_agent_langgraph_runtime(
 
         return await build_agent_graph(agent_definition, input_data=agent_input)
 
-    # LangGraphRuntime expects: (context, resolver, memory)
     runtime = AgentLangGraphRuntime(ctx, graph_builder, memory)
 
     return runtime
@@ -71,8 +70,7 @@ def setup_runtime_factory(
 ) -> UiPathRuntimeFactory[LangGraphRuntime, UiPathRuntimeContext]:
     """Set up runtime factory with instrumentation for low-code agents."""
 
-    os.environ.setdefault("OTEL_SERVICE_NAME", "uipath-lowcode-python")
-    os.environ.setdefault("OTEL_SERVICE_VERSION", "0.0.1")
+    os.environ.setdefault("OTEL_SERVICE_NAME", "uipath-agents")
 
     _instrument_traceable_attributes()
 
