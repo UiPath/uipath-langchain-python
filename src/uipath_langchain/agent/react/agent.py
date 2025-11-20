@@ -7,7 +7,10 @@ from langchain_core.tools import BaseTool
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
+from uipath.platform.guardrails import BaseGuardrail
 
+from ..guardrails import create_llm_guardrails_subgraph
+from ..guardrails.actions import GuardrailAction
 from ..tools import create_tool_node
 from .init_node import (
     create_init_node,
@@ -48,8 +51,14 @@ def create_agent(
     input_schema: Type[InputT] | None = None,
     output_schema: Type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None = None,
 ) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
-    """Build agent graph with INIT -> AGENT <-> TOOLS loop, terminated by control flow tools.
+    """Build agent graph with INIT -> AGENT(subgraph) <-> TOOLS loop, terminated by control flow tools.
+
+    The AGENT node is a subgraph that runs:
+    - before-agent guardrail middlewares
+    - the LLM tool-executing node
+    - after-agent guardrail middlewares
 
     Control flow tools (end_execution, raise_error) are auto-injected alongside regular tools.
     """
@@ -63,7 +72,6 @@ def create_agent(
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
     init_node = create_init_node(messages)
-    agent_node = create_llm_node(model, llm_tools)
     tool_nodes = create_tool_node(agent_tools)
     terminate_node = create_terminate_node(output_schema)
 
@@ -75,7 +83,6 @@ def create_agent(
         InnerAgentGraphState, input_schema=input_schema, output_schema=output_schema
     )
     builder.add_node(AgentGraphNode.INIT, init_node)
-    builder.add_node(AgentGraphNode.AGENT, agent_node)
 
     for tool_name, tool_node in tool_nodes.items():
         builder.add_node(tool_name, tool_node)
@@ -83,6 +90,12 @@ def create_agent(
     builder.add_node(AgentGraphNode.TERMINATE, terminate_node)
 
     builder.add_edge(START, AgentGraphNode.INIT)
+
+    llm_node = create_llm_node(model, llm_tools)
+    llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
+        (AgentGraphNode.LLM, llm_node), guardrails
+    )
+    builder.add_node(AgentGraphNode.AGENT, llm_with_guardrails_subgraph)
     builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
     tool_node_names = list(tool_nodes.keys())
