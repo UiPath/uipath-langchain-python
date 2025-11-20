@@ -44,7 +44,7 @@ jobs:
       fail-fast: false
       matrix:
         testcase: ${{ fromJson(needs.discover-testcases.outputs.testcases) }}
-        environment: [alpha, staging] # temporary disable [cloud]
+        environment: [alpha, cloud, staging]
         use_azure_chat: [true, false]
 
     name: "${{ matrix.testcase }} / ${{ matrix.environment }} / ${{ matrix.use_azure_chat && 'UiPathAzureChatOpenAI' || 'UiPathChat' }}"
