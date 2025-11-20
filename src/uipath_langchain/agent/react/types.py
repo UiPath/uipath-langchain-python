@@ -15,6 +15,7 @@ class AgentGraphState(BaseModel):
 class AgentGraphNode(StrEnum):
     INIT = "init"
     AGENT = "agent"
+    LLM = "llm"
     TOOLS = "tools"
     TERMINATE = "terminate"
 
