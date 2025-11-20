@@ -88,16 +88,18 @@ def create_agent(
     builder.add_edge(START, AgentGraphNode.INIT)
 
     # Build before_agent chain (INIT -> before... -> AGENT)
-    before_agent_middleware_nodes = create_middleware_nodes(
-        middlewares, "before_agent"
-    )
+    before_agent_middleware_nodes = create_middleware_nodes(middlewares, "before_agent")
     for node_name, node_callable in before_agent_middleware_nodes.items():
         builder.add_node(node_name, node_callable)
 
     before_agent_middleware_node_names = list(before_agent_middleware_nodes.keys())
     if before_agent_middleware_node_names:
         builder.add_edge(AgentGraphNode.INIT, before_agent_middleware_node_names[0])
-        for cur, nxt in zip(before_agent_middleware_node_names, before_agent_middleware_node_names[1:], strict=False):
+        for cur, nxt in zip(
+            before_agent_middleware_node_names,
+            before_agent_middleware_node_names[1:],
+            strict=False,
+        ):
             builder.add_edge(cur, nxt)
         builder.add_edge(before_agent_middleware_node_names[-1], AgentGraphNode.AGENT)
     else:
@@ -113,7 +115,27 @@ def create_agent(
     # Route AGENT to after chain (if present) instead of directly to TERMINATE
     post_agent_destination = after_agent_names[0] if after_agent_names else AgentGraphNode.TERMINATE
     destinations = [AgentGraphNode.AGENT, *tool_node_names, post_agent_destination]
-    builder.add_conditional_edges(AgentGraphNode.AGENT, route_agent, destinations)
+
+    def _route_agent_with_after_chain(state: AgentGraphState):
+        """Route from AGENT while honoring after-agent chain before TERMINATE.
+
+        Ensures that when the router requests TERMINATE and after-agent middleware
+        exists, we first enter the after-agent chain, which then leads to TERMINATE.
+        """
+        result = route_agent(state)
+        # If the router returns a list of tool names, pass through
+        if isinstance(result, list):
+            return result
+        # If router returned TERMINATE but we have after-agent middleware, route to first after-agent node
+        if (
+            result == AgentGraphNode.TERMINATE
+            or getattr(result, "value", None) == AgentGraphNode.TERMINATE.value
+        ) and after_agent_names:
+            return after_agent_names[0]
+        # Otherwise, return as-is (enum keys for core nodes, strings for tools)
+        return result
+
+    builder.add_conditional_edges(AgentGraphNode.AGENT, _route_agent_with_after_chain, destinations)
 
     for tool_name in tool_node_names:
         builder.add_edge(tool_name, AgentGraphNode.AGENT)
@@ -122,7 +144,7 @@ def create_agent(
     if after_agent_names:
         for cur, nxt in zip(after_agent_names, after_agent_names[1:], strict=False):
             builder.add_edge(cur, nxt)
-        builder.add_edge(after_agent_names [-1], AgentGraphNode.TERMINATE)
+        builder.add_edge(after_agent_names[-1], AgentGraphNode.TERMINATE)
     builder.add_edge(AgentGraphNode.TERMINATE, END)
 
     return builder
