@@ -11,6 +11,7 @@ from uipath import UiPath
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.models import ActivityMetadata, ActivityParameterLocationInfo
 
+from .static_args import apply_static_args, resolve_static_args
 from .utils import sanitize_tool_name
 
 
@@ -88,6 +89,7 @@ def convert_to_activity_metadata(
 
 def create_integration_tool(
     resource: AgentIntegrationToolResourceConfig,
+    agent_input: Dict[str, Any],
 ) -> StructuredTool:
     """Creates a StructuredTool for invoking an Integration Service connector activity."""
     tool_name: str = sanitize_tool_name(resource.name)
@@ -106,36 +108,15 @@ def create_integration_tool(
     )
 
     sdk = UiPath()
+    static_args = resolve_static_args(resource, agent_input)
 
-    def sanitize_for_serialization(args: Dict[str, Any]) -> Dict[str, Any]:
-        """Convert Pydantic models in args to dicts."""
-        converted_args: Dict[str, Any] = {}
-        for key, value in args.items():
-            # handle Pydantic model
-            if hasattr(value, "model_dump"):
-                converted_args[key] = value.model_dump()
-
-            elif isinstance(value, list):
-                # handle list of Pydantic models
-                converted_list = []
-                for item in value:
-                    if hasattr(item, "model_dump"):
-                        converted_list.append(item.model_dump())
-                    else:
-                        converted_list.append(item)
-                converted_args[key] = converted_list
-
-            # handle regular value or unexpected type
-            else:
-                converted_args[key] = value
-        return converted_args
-
+    @apply_static_args(static_args)
     async def integration_tool_fn(**kwargs: Any):
         try:
             result = await sdk.connections.invoke_activity_async(
                 activity_metadata=activity_metadata,
                 connection_id=connection_id,
-                activity_input=sanitize_for_serialization(kwargs),
+                activity_input=kwargs,
             )
         except Exception:
             raise

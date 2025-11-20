@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Dict
+
 from langchain_core.tools import BaseTool, StructuredTool
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
@@ -18,11 +20,12 @@ from .process_tool import create_process_tool
 
 async def create_tools_from_resources(
     agent: LowCodeAgentDefinition,
+    input: Dict[str, Any],
 ) -> list[BaseTool]:
     tools: list[BaseTool] = []
 
     for resource in agent.resources:
-        tool = await _build_tool_for_resource(resource)
+        tool = await _build_tool_for_resource(resource, input)
         if tool is not None:
             tools.append(tool)
 
@@ -31,6 +34,7 @@ async def create_tools_from_resources(
 
 async def _build_tool_for_resource(
     resource: BaseAgentResourceConfig,
+    input: Dict[str, Any],
 ) -> StructuredTool | None:
     if isinstance(resource, AgentProcessToolResourceConfig):
         return create_process_tool(resource)
@@ -39,6 +43,6 @@ async def _build_tool_for_resource(
         return create_context_tool(resource)
 
     elif isinstance(resource, AgentIntegrationToolResourceConfig):
-        return create_integration_tool(resource)
+        return create_integration_tool(resource, input)
 
     return None

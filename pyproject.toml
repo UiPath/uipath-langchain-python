@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.0.160"
+version = "0.0.161"
 description = "UiPath Langchain"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
@@ -18,6 +18,7 @@ dependencies = [
     "openai>=1.65.5",
     "openinference-instrumentation-langchain>=0.1.50",
     "jsonschema-pydantic>=0.6",
+    "jsonpath-ng>=1.7.0",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
