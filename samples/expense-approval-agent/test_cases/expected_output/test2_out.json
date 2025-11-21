@@ -1,0 +1,12 @@
+{
+  "expense_id": "EXP-20251001-56AD74DF",
+  "status": "rejected",
+  "approval_level": "manager",
+  "final_amount": 85,
+  "processing_notes": [
+    "Expense report EXP-20251001-56AD74DF created at 2025-10-01T10:00:00.000000",
+    "Missing receipt for expense over $25",
+    "Rejected on 2025-10-01 10:05"
+  ],
+  "reimbursement_eta": null
+}
