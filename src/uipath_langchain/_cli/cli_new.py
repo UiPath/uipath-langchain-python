@@ -32,7 +32,6 @@ description = "{project_name}"
 authors = [{{ name = "John Doe", email = "john.doe@myemail.com" }}]
 dependencies = [
     "uipath-langchain>=0.0.158",
-    "langchain-anthropic>=0.3.8",
 ]
 requires-python = ">=3.11"
 """
