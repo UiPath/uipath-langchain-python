@@ -11,9 +11,14 @@ Before proceeding, ensure you have the following installed:
 -   Python 3.10 or higher
 -   `pip` or `uv` package manager
 -   A UiPath Automation Cloud account with appropriate permissions
--   An Anthropic or OpenAI API key
 
-/// info
+
+By default, the quickstart agent uses UiPath LLM Gateway, which provides access to any LLM provider without requiring API keys. Alternatively, you can configure your agent to connect directly to the LLM provider of your choice (such as Anthropic or OpenAI) by providing the appropriate API key as an environment variable.
+
+For more details, see the [Chat Models documentation](https://uipath.github.io/uipath-python/langchain/chat_models/#chat-models).
+
+
+/// info | Optional: Using alternative LLM providers
 
 1. **Anthropic** - Generate an Anthropic API key [here](https://console.anthropic.com/settings/keys).
 
@@ -67,9 +72,6 @@ Activate with: source .venv/bin/activate
 # For Windows Bash: source .venv/Scripts/activate
 > source .venv/bin/activate
 
-# Install the langchain anthropic package
-> uv add langchain-anthropic
-
 # Install the uipath package
 > uv add uipath-langchain
 
@@ -95,9 +97,6 @@ uipath-langchain version 0.0.100
 
 # Upgrade pip to the latest version
 > python -m pip install --upgrade pip
-
-# Install the langchain anthropic package
-> pip install langchain-anthropic
 
 # Install the uipath package
 > pip install uipath-langchain
