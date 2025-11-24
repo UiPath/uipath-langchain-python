@@ -893,6 +893,18 @@ wheels = [
 ]
 
 [[package]]
+name = "jsonpath-ng"
+version = "1.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ply" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6d/86/08646239a313f895186ff0a4573452038eed8c86f54380b3ebac34d32fb2/jsonpath-ng-1.7.0.tar.gz", hash = "sha256:f6f5f7fd4e5ff79c785f1573b394043b39849fb2bb47bcead935d12b00beab3c", size = 37838, upload-time = "2024-10-11T15:41:42.404Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/35/5a/73ecb3d82f8615f32ccdadeb9356726d6cae3a4bbc840b437ceb95708063/jsonpath_ng-1.7.0-py3-none-any.whl", hash = "sha256:f3d7f9e848cba1b6da28c55b1c26ff915dc9e0b1ba7e752a53d6da8d5cbd00b6", size = 30105, upload-time = "2024-11-20T17:58:30.418Z" },
+]
+
+[[package]]
 name = "jsonpointer"
 version = "3.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1881,6 +1893,15 @@ wheels = [
 ]
 
 [[package]]
+name = "ply"
+version = "3.11"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e5/69/882ee5c9d017149285cab114ebeab373308ef0f874fcdac9beb90e0ac4da/ply-3.11.tar.gz", hash = "sha256:00c7c1aaa88358b9c765b6d3000c6eec0ba42abca5351b095321aef446081da3", size = 159130, upload-time = "2018-02-15T19:01:31.097Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/58/35da89ee790598a0700ea49b2a66594140f44dec458c07e8e3d4979137fc/ply-3.11-py2.py3-none-any.whl", hash = "sha256:096f9b8350b65ebd2fd1346b12452efe5b9607f7482813ffca50c22722a807ce", size = 49567, upload-time = "2018-02-15T19:01:27.172Z" },
+]
+
+[[package]]
 name = "pre-commit"
 version = "4.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2796,7 +2817,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.1.173"
+version = "2.1.177"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -2818,17 +2839,18 @@ dependencies = [
     { name = "tomli" },
     { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/87/20/0a80006a790d180672106d2df1a5dba431fb3dfb8eb95dfe86d496a620dd/uipath-2.1.173.tar.gz", hash = "sha256:0ff4964d8aa8b70fc99d8e4d45e8a07cfda739b7b597eea2f8cb131a90381dd3", size = 3157920, upload-time = "2025-11-19T06:54:12.643Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1b/a7/4bf0428a25688367d89fa916b7679919615590efc1eafec455959aaba372/uipath-2.1.177.tar.gz", hash = "sha256:4959e33f7fdacd68b76190b4167c3c4f6a277c3400986af0cdb49e0fbd26d5f4", size = 3146472, upload-time = "2025-11-19T20:49:02.424Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/98/48/256be247711b806b3ad5084f801a4148e6de28da6f172b8843bc9991118d/uipath-2.1.173-py3-none-any.whl", hash = "sha256:9483d14d148297d7ac6e28c156f5ee25823ebaef82f0fae49f07d4f40c2f4e24", size = 412752, upload-time = "2025-11-19T06:54:10.455Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/cf/de5f0d7e65f2aebbffecc406abfb1053a1b169b140eaba118f7a747746ce/uipath-2.1.177-py3-none-any.whl", hash = "sha256:fc58316ad724a4cf7d991cbbfae0802f055996b0a6d993aee6dacd877d5e05b7", size = 412970, upload-time = "2025-11-19T20:49:00.577Z" },
 ]
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.160"
+version = "0.0.161"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "jsonpath-ng" },
     { name = "jsonschema-pydantic" },
     { name = "langchain" },
     { name = "langchain-community" },
@@ -2860,6 +2882,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "jsonpath-ng", specifier = ">=1.7.0" },
     { name = "jsonschema-pydantic", specifier = ">=0.6" },
     { name = "langchain", specifier = ">=0.3.4" },
     { name = "langchain-community", specifier = ">=0.3.21" },
