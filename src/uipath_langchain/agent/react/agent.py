@@ -1,5 +1,5 @@
 import os
-from typing import Callable, Sequence, Type, TypeVar, cast
+from typing import Any, Callable, Literal, Sequence, Type, TypeVar, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -11,7 +11,11 @@ from uipath.agent.models.agent import AgentGuardrail
 from uipath.models.guardrails import GuardrailScope
 
 from ..tools import create_tool_node
-from .guardrail_nodes import create_llm_guardrail_node
+from .guardrail_nodes import (
+    create_agent_guardrail_node,
+    create_llm_guardrail_node,
+    create_tool_guardrail_node,
+)
 from .init_node import (
     create_init_node,
 )
@@ -29,6 +33,99 @@ from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState
 
 InputT = TypeVar("InputT", bound=BaseModel)
 OutputT = TypeVar("OutputT", bound=BaseModel)
+
+
+def create_guardrails_subgraph(
+    inner: tuple[str, Any],
+    guardrails: Sequence[AgentGuardrail] | None,
+    node_factory: Callable[
+        [AgentGuardrail, Literal["before", "after"]],
+        tuple[str, Callable] | None,
+    ] = create_llm_guardrail_node,  # default: LLM
+    guardrail_filter: Callable[[AgentGuardrail], bool] = lambda gr: GuardrailScope.LLM in gr.selector.scopes,
+) -> Any:
+    """Wrap a named inner runnable in a subgraph with before/after guardrail nodes.
+
+    Args:
+        inner: (inner_node_name, inner_node_callable/runnable)
+        guardrails: Collection of guardrails
+        node_factory: Function to create a guardrail node for a given hook
+        guardrail_filter: Predicate selecting applicable guardrails
+    """
+    inner_name, inner_node = inner
+    before_nodes: dict[str, Callable] = {}
+    after_nodes: dict[str, Callable] = {}
+    applicable_guardrails = [gr for gr in (guardrails or []) if guardrail_filter(gr)]
+    for gr in applicable_guardrails:
+        created = node_factory(gr, "before")
+        if created is not None:
+            name, fn = created
+            before_nodes[name] = fn
+    for gr in applicable_guardrails:
+        created = node_factory(gr, "after")
+        if created is not None:
+            name, fn = created
+            after_nodes[name] = fn
+
+    subgraph = StateGraph(AgentGraphState)
+    for node_name, node_callable in before_nodes.items():
+        subgraph.add_node(node_name, node_callable)
+    for node_name, node_callable in after_nodes.items():
+        subgraph.add_node(node_name, node_callable)
+    subgraph.add_node(inner_name, inner_node)
+
+    before_names = list(before_nodes.keys())
+    after_names = list(after_nodes.keys())
+    if before_names:
+        subgraph.add_edge(START, before_names[0])
+        for cur, nxt in zip(before_names, before_names[1:], strict=False):
+            subgraph.add_edge(cur, nxt)
+        subgraph.add_edge(before_names[-1], inner_name)
+    else:
+        subgraph.add_edge(START, inner_name)
+
+    if after_names:
+        subgraph.add_edge(inner_name, after_names[0])
+        for cur, nxt in zip(after_names, after_names[1:], strict=False):
+            subgraph.add_edge(cur, nxt)
+        subgraph.add_edge(after_names[-1], END)
+    else:
+        subgraph.add_edge(inner_name, END)
+
+    return subgraph.compile()
+
+
+def create_llm_guardrails_subgraph(
+    inner: tuple[str, Any], guardrails: Sequence[AgentGuardrail] | None
+) -> Any:
+    return create_guardrails_subgraph(
+        inner=inner,
+        guardrails=guardrails,
+        node_factory=create_llm_guardrail_node,
+        guardrail_filter=lambda gr: GuardrailScope.LLM in gr.selector.scopes,
+    )
+
+
+def create_agent_guardrails_subgraph(
+    inner: tuple[str, Any], guardrails: Sequence[AgentGuardrail] | None
+) -> Any:
+    return create_guardrails_subgraph(
+        inner=inner,
+        guardrails=guardrails,
+        node_factory=create_agent_guardrail_node,
+        guardrail_filter=lambda gr: GuardrailScope.AGENT in gr.selector.scopes,
+    )
+
+
+def create_tool_guardrails_subgraph(
+    inner: tuple[str, Any], guardrails: Sequence[AgentGuardrail] | None
+) -> Any:
+    return create_guardrails_subgraph(
+        inner=inner,
+        guardrails=guardrails,
+        node_factory=create_tool_guardrail_node,
+        guardrail_filter=lambda gr: GuardrailScope.TOOL in gr.selector.scopes,
+    )
 
 
 def create_state_with_input(input_schema: Type[InputT]):
@@ -72,7 +169,6 @@ def create_agent(
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
     init_node = create_init_node(messages)
-    agent_node = create_llm_node(model, llm_tools)
     tool_nodes = create_tool_node(agent_tools)
     terminate_node = create_terminate_node(output_schema)
 
@@ -92,50 +188,10 @@ def create_agent(
 
     builder.add_edge(START, AgentGraphNode.INIT)
 
-    # Build AGENT subgraph: before-agent guardrail nodes -> LLM -> after-agent guardrail nodes
-    agent_subgraph = StateGraph(AgentGraphState)
-    # Build guardrail nodes directly from guardrails (no middleware abstraction)
-    before_nodes: dict[str, Callable] = {}
-    after_nodes: dict[str, Callable] = {}
-    llm_guardrails = [
-        gr for gr in (guardrails or []) if GuardrailScope.LLM in gr.selector.scopes
-    ]
-    for gr in llm_guardrails:
-        name, fn = create_llm_guardrail_node(gr, "before")
-        before_nodes[name] = fn
-    for gr in llm_guardrails:
-        name, fn = create_llm_guardrail_node(gr, "after")
-        after_nodes[name] = fn
-
-    # Register middleware nodes inside subgraph
-    for node_name, node_callable in before_nodes.items():
-        agent_subgraph.add_node(node_name, node_callable)
-    for node_name, node_callable in after_nodes.items():
-        agent_subgraph.add_node(node_name, node_callable)
-    # Register LLM node inside subgraph
-    AGENT_LLM_NODE_NAME = "AGENT_LLM"
-    agent_subgraph.add_node(AGENT_LLM_NODE_NAME, agent_node)
-    # Wire subgraph: START -> before... -> LLM -> after... -> END
-    before_names = list(before_nodes.keys())
-    after_names = list(after_nodes.keys())
-    if before_names:
-        agent_subgraph.add_edge(START, before_names[0])
-        for cur, nxt in zip(before_names, before_names[1:], strict=False):
-            agent_subgraph.add_edge(cur, nxt)
-        agent_subgraph.add_edge(before_names[-1], AGENT_LLM_NODE_NAME)
-    else:
-        agent_subgraph.add_edge(START, AGENT_LLM_NODE_NAME)
-
-    if after_names:
-        agent_subgraph.add_edge(AGENT_LLM_NODE_NAME, after_names[0])
-        for cur, nxt in zip(after_names, after_names[1:], strict=False):
-            agent_subgraph.add_edge(cur, nxt)
-        agent_subgraph.add_edge(after_names[-1], END)
-    else:
-        agent_subgraph.add_edge(AGENT_LLM_NODE_NAME, END)
-
-    # Add compiled subgraph as the AGENT node in the outer graph
-    builder.add_node(AgentGraphNode.AGENT, agent_subgraph.compile())
+    # Compose layers explicitly: LLM -> Guardrails (-> Traces optional)
+    llm_node = create_llm_node(model, llm_tools)
+    guardrails_subgraph = create_llm_guardrails_subgraph((AgentGraphNode.LLM, llm_node), guardrails)
+    builder.add_node(AgentGraphNode.AGENT, guardrails_subgraph)
     builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
     tool_node_names = list(tool_nodes.keys())
