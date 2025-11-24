@@ -6,7 +6,7 @@ from typing import Any, Callable
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from uipath import UiPath
 from uipath._cli._runtime._contracts import UiPathErrorCode
-from uipath._services.guardrails_service import GuardrailsService
+from uipath._services.guardrails_service import GuardrailsService, BuiltInGuardrailValidationResult
 from uipath.agent.models.agent import (
     AgentBuiltInValidatorGuardrail,
     AgentGuardrailActionType,
@@ -54,17 +54,19 @@ class PiiDetectionMiddleware(AgentMiddleware):
         handler: Callable[[list[SystemMessage | HumanMessage]], Any],
     ) -> list[SystemMessage | HumanMessage]:
         """Validate messages before agent execution and proceed or block."""
-        self._evaluate_messages_with_service(messages, phase="before_agent")
+        self._evaluate_messages(messages, phase="before_agent")
+        print("before agent guardrail")
         return await self._maybe_await(handler(messages))
 
     async def after_agent(
         self, messages: list[AnyMessage], handler: Callable[[list[AnyMessage]], Any]
     ) -> list[AnyMessage]:
         """Validate messages after agent execution and proceed or block."""
-        self._evaluate_messages_with_service(messages, phase="after_agent")
+        self._evaluate_messages(messages, phase="after_agent")
+        print("after agent guardrail")
         return await self._maybe_await(handler(messages))
 
-    def _evaluate_messages_with_service(
+    def _evaluate_messages(
         self, messages: list[AnyMessage], phase: str
     ) -> None:
         """Call GuardrailsService and enforce the configured action."""
@@ -80,6 +82,9 @@ class PiiDetectionMiddleware(AgentMiddleware):
                 )
             )
             result = guardrails_service.evaluate_guardrail(text, self.guardrail)
+            # result: BuiltInGuardrailValidationResult = BuiltInGuardrailValidationResult(
+            #     validation_passed=False, reason="dummy"
+            # )
         except Exception as exc:
             logger.error("Failed to evaluate guardrail: %s", exc)
             raise

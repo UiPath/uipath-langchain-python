@@ -78,7 +78,6 @@ def create_agent(
         InnerAgentGraphState, input_schema=input_schema, output_schema=output_schema
     )
     builder.add_node(AgentGraphNode.INIT, init_node)
-    builder.add_node(AgentGraphNode.AGENT, agent_node)
 
     for tool_name, tool_node in tool_nodes.items():
         builder.add_node(tool_name, tool_node)
@@ -87,64 +86,61 @@ def create_agent(
 
     builder.add_edge(START, AgentGraphNode.INIT)
 
-    # Build before_agent chain (INIT -> before... -> AGENT)
-    before_agent_middleware_nodes = create_middleware_nodes(middlewares, "before_agent")
-    for node_name, node_callable in before_agent_middleware_nodes.items():
-        builder.add_node(node_name, node_callable)
+    # Build AGENT subgraph: before-agent middlewares -> LLM -> after-agent middlewares -> RETURN
+    agent_subgraph = StateGraph(AgentGraphState)
+    before_nodes = create_middleware_nodes(middlewares, "before_agent")
+    after_nodes = create_middleware_nodes(middlewares, "after_agent")
 
-    before_agent_middleware_node_names = list(before_agent_middleware_nodes.keys())
-    if before_agent_middleware_node_names:
-        builder.add_edge(AgentGraphNode.INIT, before_agent_middleware_node_names[0])
-        for cur, nxt in zip(
-            before_agent_middleware_node_names,
-            before_agent_middleware_node_names[1:],
-            strict=False,
-        ):
-            builder.add_edge(cur, nxt)
-        builder.add_edge(before_agent_middleware_node_names[-1], AgentGraphNode.AGENT)
+    # Register middleware nodes inside subgraph
+    for node_name, node_callable in before_nodes.items():
+        agent_subgraph.add_node(node_name, node_callable)
+    for node_name, node_callable in after_nodes.items():
+        agent_subgraph.add_node(node_name, node_callable)
+    # Register LLM node inside subgraph
+    AGENT_LLM_NODE_NAME = "AGENT_LLM"
+    agent_subgraph.add_node(AGENT_LLM_NODE_NAME, agent_node)
+    # Register final return node to ensure subgraph outputs the accumulated messages
+    AGENT_RETURN_NODE_NAME = "AGENT_RETURN"
+
+    async def _agent_return_node(state: AgentGraphState):
+        return {"messages": state.messages}
+
+    # agent_subgraph.add_node(AGENT_RETURN_NODE_NAME, _agent_return_node)
+
+    # Wire subgraph: START -> before... -> LLM -> after... -> RETURN -> END
+    before_names = list(before_nodes.keys())
+    after_names = list(after_nodes.keys())
+    if before_names:
+        agent_subgraph.add_edge(START, before_names[0])
+        for cur, nxt in zip(before_names, before_names[1:], strict=False):
+            agent_subgraph.add_edge(cur, nxt)
+        agent_subgraph.add_edge(before_names[-1], AGENT_LLM_NODE_NAME)
     else:
-        builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
+        agent_subgraph.add_edge(START, AGENT_LLM_NODE_NAME)
 
-    # Build after_agent chain to run BEFORE TERMINATE
-    after_agent_middleware_nodes = create_middleware_nodes(middlewares, "after_agent")
-    for node_name, node_callable in after_agent_middleware_nodes.items():
-        builder.add_node(node_name, node_callable)
-    after_agent_names = list(after_agent_middleware_nodes.keys())
+    if after_names:
+        agent_subgraph.add_edge(AGENT_LLM_NODE_NAME, after_names[0])
+        for cur, nxt in zip(after_names, after_names[1:], strict=False):
+            agent_subgraph.add_edge(cur, nxt)
+        agent_subgraph.add_edge(after_names[-1], END)
+    else:
+        agent_subgraph.add_edge(AGENT_LLM_NODE_NAME, END)
+    # agent_subgraph.add_edge(AGENT_RETURN_NODE_NAME, END)
+
+    # Add compiled subgraph as the AGENT node in the outer graph
+    builder.add_node(AgentGraphNode.AGENT, agent_subgraph.compile())
+    builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
     tool_node_names = list(tool_nodes.keys())
-    # Route AGENT to after chain (if present) instead of directly to TERMINATE
-    post_agent_destination = after_agent_names[0] if after_agent_names else AgentGraphNode.TERMINATE
-    destinations = [AgentGraphNode.AGENT, *tool_node_names, post_agent_destination]
-
-    def _route_agent_with_after_chain(state: AgentGraphState):
-        """Route from AGENT while honoring after-agent chain before TERMINATE.
-
-        Ensures that when the router requests TERMINATE and after-agent middleware
-        exists, we first enter the after-agent chain, which then leads to TERMINATE.
-        """
-        result = route_agent(state)
-        # If the router returns a list of tool names, pass through
-        if isinstance(result, list):
-            return result
-        # If router returned TERMINATE but we have after-agent middleware, route to first after-agent node
-        if (
-            result == AgentGraphNode.TERMINATE
-            or getattr(result, "value", None) == AgentGraphNode.TERMINATE.value
-        ) and after_agent_names:
-            return after_agent_names[0]
-        # Otherwise, return as-is (enum keys for core nodes, strings for tools)
-        return result
-
-    builder.add_conditional_edges(AgentGraphNode.AGENT, _route_agent_with_after_chain, destinations)
+    builder.add_conditional_edges(
+        AgentGraphNode.AGENT,
+        route_agent,
+        [AgentGraphNode.AGENT, *tool_node_names, AgentGraphNode.TERMINATE],
+    )
 
     for tool_name in tool_node_names:
         builder.add_edge(tool_name, AgentGraphNode.AGENT)
 
-    # Chain after nodes to TERMINATE -> END
-    if after_agent_names:
-        for cur, nxt in zip(after_agent_names, after_agent_names[1:], strict=False):
-            builder.add_edge(cur, nxt)
-        builder.add_edge(after_agent_names[-1], AgentGraphNode.TERMINATE)
     builder.add_edge(AgentGraphNode.TERMINATE, END)
 
     return builder
