@@ -1,0 +1,53 @@
+{
+  "id": "ca9e1b22-e201-4e7c-859d-2436075c833c",
+  "version": "1.0.0",
+  "name": "Agent",
+  "metadata": {
+    "storageVersion": "31.0.0",
+    "isConversational": false
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an agentic assistant.",
+      "contentTokens": [
+        {
+          "type": "simpleText",
+          "rawString": "You are an agentic assistant."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "What is the current date?",
+      "contentTokens": [
+        {
+          "type": "simpleText",
+          "rawString": "What is the current date?"
+        }
+      ]
+    }
+  ],
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "content": {
+        "type": "string",
+        "description": "Output content"
+      }
+    }
+  },
+  "settings": {
+    "model": "gpt-4.1-2025-04-14",
+    "maxTokens": 16384,
+    "temperature": 0,
+    "engine": "basic-v2",
+    "maxIterations": 25
+  },
+  "resources": [],
+  "features": []
+}
