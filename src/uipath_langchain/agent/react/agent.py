@@ -7,16 +7,17 @@ from langchain_core.tools import BaseTool
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
+from uipath.agent.models.agent import AgentGuardrail
+from uipath.models.guardrails import GuardrailScope
 
 from ..tools import create_tool_node
+from .guardrail_nodes import create_llm_guardrail_node
 from .init_node import (
     create_init_node,
 )
 from .llm_node import (
     create_llm_node,
 )
-from .middleware_nodes import create_middleware_nodes
-from .middleware_types import AgentMiddleware
 from .router import (
     route_agent,
 )
@@ -50,9 +51,14 @@ def create_agent(
     input_schema: Type[InputT] | None = None,
     output_schema: Type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
-    middlewares: Sequence[AgentMiddleware] | None = None,
+    guardrails: Sequence[AgentGuardrail] | None = None,
 ) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
-    """Build agent graph with INIT -> AGENT <-> TOOLS loop, terminated by control flow tools.
+    """Build agent graph with INIT -> AGENT(subgraph) <-> TOOLS loop, terminated by control flow tools.
+
+    The AGENT node is a subgraph that runs:
+    - before-agent guardrail middlewares
+    - the LLM tool-executing node
+    - after-agent guardrail middlewares
 
     Control flow tools (end_execution, raise_error) are auto-injected alongside regular tools.
     """
@@ -86,10 +92,20 @@ def create_agent(
 
     builder.add_edge(START, AgentGraphNode.INIT)
 
-    # Build AGENT subgraph: before-agent middlewares -> LLM -> after-agent middlewares -> RETURN
+    # Build AGENT subgraph: before-agent guardrail nodes -> LLM -> after-agent guardrail nodes
     agent_subgraph = StateGraph(AgentGraphState)
-    before_nodes = create_middleware_nodes(middlewares, "before_agent")
-    after_nodes = create_middleware_nodes(middlewares, "after_agent")
+    # Build guardrail nodes directly from guardrails (no middleware abstraction)
+    before_nodes: dict[str, Callable] = {}
+    after_nodes: dict[str, Callable] = {}
+    llm_guardrails = [
+        gr for gr in (guardrails or []) if GuardrailScope.LLM in gr.selector.scopes
+    ]
+    for gr in llm_guardrails:
+        name, fn = create_llm_guardrail_node(gr, "before")
+        before_nodes[name] = fn
+    for gr in llm_guardrails:
+        name, fn = create_llm_guardrail_node(gr, "after")
+        after_nodes[name] = fn
 
     # Register middleware nodes inside subgraph
     for node_name, node_callable in before_nodes.items():
@@ -99,15 +115,7 @@ def create_agent(
     # Register LLM node inside subgraph
     AGENT_LLM_NODE_NAME = "AGENT_LLM"
     agent_subgraph.add_node(AGENT_LLM_NODE_NAME, agent_node)
-    # Register final return node to ensure subgraph outputs the accumulated messages
-    AGENT_RETURN_NODE_NAME = "AGENT_RETURN"
-
-    async def _agent_return_node(state: AgentGraphState):
-        return {"messages": state.messages}
-
-    # agent_subgraph.add_node(AGENT_RETURN_NODE_NAME, _agent_return_node)
-
-    # Wire subgraph: START -> before... -> LLM -> after... -> RETURN -> END
+    # Wire subgraph: START -> before... -> LLM -> after... -> END
     before_names = list(before_nodes.keys())
     after_names = list(after_nodes.keys())
     if before_names:
@@ -125,7 +133,6 @@ def create_agent(
         agent_subgraph.add_edge(after_names[-1], END)
     else:
         agent_subgraph.add_edge(AGENT_LLM_NODE_NAME, END)
-    # agent_subgraph.add_edge(AGENT_RETURN_NODE_NAME, END)
 
     # Add compiled subgraph as the AGENT node in the outer graph
     builder.add_node(AgentGraphNode.AGENT, agent_subgraph.compile())
