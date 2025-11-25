@@ -9,8 +9,8 @@ from uipath.models.guardrails import GuardrailScope
 
 from .guardrail_nodes import (
     ActionEnforcementNode,
-    GuardrailAction,
     ActionInlineEnforcement,
+    GuardrailAction,
     create_agent_guardrail_node,
     create_llm_guardrail_node,
     create_tool_guardrail_node,
@@ -18,12 +18,54 @@ from .guardrail_nodes import (
 from .types import AgentGraphState
 
 
+def _build_guardrails_chain_by_execution_stage(
+    guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None,
+    *,
+    scope: GuardrailScope,
+    hook_type: Literal["PreExecution", "PostExecution"],
+    node_factory: Callable[
+        [
+            AgentGuardrail,
+            Literal["PreExecution", "PostExecution"],
+            Optional[ActionInlineEnforcement],
+        ],
+        tuple[str, Callable],
+    ],
+) -> list[tuple[str, Callable]]:
+    chain: list[tuple[str, Callable]] = []
+
+    for guardrail, action in guardrails or []:
+        action_enforcement_node = None
+        inline_action_to_enforce = None
+
+        action_enforcement = action.enforcement_outcome(
+            guardrail=guardrail,
+            scope=scope,
+            hook_type=hook_type,
+        )
+        if isinstance(action_enforcement, ActionEnforcementNode):
+            action_enforcement_node = action_enforcement
+        else:
+            inline_action_to_enforce = cast(ActionInlineEnforcement, action_enforcement)
+
+        eval_node = node_factory(guardrail, hook_type, inline_action_to_enforce)
+        if eval_node is not None:
+            chain.append(eval_node)
+        if action_enforcement_node is not None:
+            chain.append(action_enforcement)
+    return chain
+
+
 def create_guardrails_subgraph(
     main_inner_node: tuple[str, Any],
     guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None,
     scope: GuardrailScope,
     node_factory: Callable[
-        [AgentGuardrail, Literal["PreExecution", "PostExecution"], Optional[ActionInlineEnforcement]],
+        [
+            AgentGuardrail,
+            Literal["PreExecution", "PostExecution"],
+            Optional[ActionInlineEnforcement],
+        ],
         tuple[str, Callable],
     ] = create_llm_guardrail_node,
 ) -> Any:
@@ -34,46 +76,18 @@ def create_guardrails_subgraph(
     immediately after their corresponding guardrail nodes.
     """
     inner_name, inner_node = main_inner_node
-    before_chain: list[tuple[str, Callable]] = []
-    after_chain: list[tuple[str, Callable]] = []
-
-    for guardrail, action in guardrails or []:
-        action_enforcement_node: Optional[ActionEnforcementNode] = None
-        inline_action_to_enforce = None
-        action_enforcement_outcome = action.enforcement_outcome(
-            guardrail=guardrail,
-            scope=scope,
-            hook_type="PreExecution",
-        )
-        if isinstance(action_enforcement_outcome, ActionEnforcementNode):
-            action_enforcement_node = action_enforcement_outcome
-        else:
-            inline_action_to_enforce = cast(ActionInlineEnforcement, action_enforcement_outcome)
-
-        guardrail_evaluation_node = node_factory(guardrail, "PreExecution", inline_action_to_enforce)
-        if guardrail_evaluation_node is not None:
-            before_chain.append(guardrail_evaluation_node)
-        if action_enforcement_node is not None:
-            before_chain.append(action_enforcement_outcome)
-
-    for guardrail, action in guardrails or []:
-        inline_action_to_enforce = None
-        action_enforcement_node = None
-        action_enforcement_outcome = action.enforcement_outcome(
-            guardrail=guardrail,
-            scope=scope,
-            hook_type="PostExecution",
-        )
-        if isinstance(action_enforcement_outcome, ActionEnforcementNode):
-            action_enforcement_node = action_enforcement_outcome
-        else:
-            inline_action_to_enforce = cast(ActionInlineEnforcement, action_enforcement_outcome)
-
-        guardrail_evaluation_node = node_factory(guardrail, "PostExecution", inline_action_to_enforce)
-        if guardrail_evaluation_node is not None:
-            after_chain.append(guardrail_evaluation_node)
-        if action_enforcement_node is not None:
-            after_chain.append(action_enforcement_outcome)
+    before_chain = _build_guardrails_chain_by_execution_stage(
+        guardrails,
+        scope=scope,
+        hook_type="PreExecution",
+        node_factory=node_factory,
+    )
+    after_chain = _build_guardrails_chain_by_execution_stage(
+        guardrails,
+        scope=scope,
+        hook_type="PostExecution",
+        node_factory=node_factory,
+    )
 
     subgraph = StateGraph(AgentGraphState)
     for node_name, before_node in before_chain:
