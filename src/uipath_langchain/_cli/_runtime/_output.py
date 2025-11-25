@@ -87,6 +87,7 @@ async def create_and_save_resume_trigger(
                 CREATE TABLE IF NOT EXISTS {resume_triggers_table} (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     type TEXT NOT NULL,
+                    name TEXT NOT NULL,
                     key TEXT,
                     folder_key TEXT,
                     folder_path TEXT,
@@ -128,12 +129,12 @@ async def create_and_save_resume_trigger(
                 payload = json.dumps(resume_trigger.payload)
             else:
                 payload = str(resume_trigger.payload)
-
             await cur.execute(
-                f"INSERT INTO {resume_triggers_table} (type, key, payload, folder_path, folder_key) VALUES (?, ?, ?, ?, ?)",
+                f"INSERT INTO {resume_triggers_table} (type, key, name, payload, folder_path, folder_key) VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     resume_trigger.trigger_type.value,
                     trigger_key,
+                    resume_trigger.trigger_name.value,
                     payload,
                     resume_trigger.folder_path,
                     resume_trigger.folder_key,
