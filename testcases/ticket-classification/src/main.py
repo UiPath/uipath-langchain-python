@@ -12,7 +12,7 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 
 from uipath.platform import UiPath
-from uipath.platform.common import CreateAction
+from uipath.platform.common import CreateTask
 from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
 
 # Configuration

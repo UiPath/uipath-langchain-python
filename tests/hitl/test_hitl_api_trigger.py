@@ -87,11 +87,14 @@ class TestHitlApiTrigger:
                     assert len(tables) == 1
 
                     # Check the inserted trigger data from first execution
-                    cursor.execute("SELECT * FROM __uipath_resume_triggers")
+                    cursor.execute(
+                        "SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers"
+                    )
                     triggers = cursor.fetchall()
                     assert len(triggers) == 1
-                    _, type, key, folder_path, folder_key, payload, _ = triggers[0]
+                    type, key, name, folder_path, folder_key, payload = triggers[0]
                     assert type == "Api"
+                    assert name == "Api"
                     assert folder_path == folder_key is None
                     assert payload == "interrupt message"
                 finally:

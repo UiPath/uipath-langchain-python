@@ -98,11 +98,14 @@ class TestHitlJobTrigger:
                     assert len(tables) == 1
 
                     # Check the first job trigger data
-                    cursor.execute("SELECT * FROM __uipath_resume_triggers")
+                    cursor.execute(
+                        "SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers"
+                    )
                     triggers = cursor.fetchall()
                     assert len(triggers) == 1
-                    _, type, key, folder_key, folder_path, payload, _ = triggers[0]
+                    type, key, name, folder_path, folder_key, payload = triggers[0]
                     assert type == "Job"
+                    assert name == "Job"
                     assert folder_path == "process-folder-path"
                     assert folder_key is None
                     assert "input_arg_1" in payload
@@ -161,13 +164,14 @@ class TestHitlJobTrigger:
                     assert len(tables) == 1
 
                     # Check the second job trigger data (from wait job)
-                    cursor.execute("""SELECT * FROM __uipath_resume_triggers
+                    cursor.execute("""SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers
                                       ORDER BY timestamp DESC
                                       """)
                     triggers = cursor.fetchall()
                     assert len(triggers) == 2
-                    _, type, key, folder_key, folder_path, payload, _ = triggers[0]
+                    type, key, name, folder_key, folder_path, payload = triggers[0]
                     assert type == "Job"
+                    assert name == "Job"
                     assert folder_path is None
                     assert folder_key is None
                     assert "123" in payload
