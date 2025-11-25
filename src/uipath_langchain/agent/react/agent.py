@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from uipath.agent.models.agent import AgentGuardrail
 
 from ..tools import create_tool_node
+from .guardrail_nodes import GuardrailAction
 from .guardrails_subgraph import create_llm_guardrails_subgraph
 from .init_node import (
     create_init_node,
@@ -50,7 +51,7 @@ def create_agent(
     input_schema: Type[InputT] | None = None,
     output_schema: Type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
-    guardrails: Sequence[AgentGuardrail] | None = None,
+    guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None = None,
 ) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
     """Build agent graph with INIT -> AGENT(subgraph) <-> TOOLS loop, terminated by control flow tools.
 
