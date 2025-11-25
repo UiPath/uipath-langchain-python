@@ -23,7 +23,6 @@ class MainInput:
     index_name: str
     k: int
 
-
 def create_retrieval_chain(vectorstore: VectorStore, model: BaseChatModel, k: int = 3):
     """Create a retrieval chain using a vector store.
 
@@ -64,7 +63,6 @@ def create_retrieval_chain(vectorstore: VectorStore, model: BaseChatModel, k: in
         return {"result": answer, "source_documents": docs}
 
     return retrieval_chain
-
 
 async def main(input_data: MainInput):
 
@@ -121,7 +119,6 @@ async def main(input_data: MainInput):
         print(
             f"Source: {doc.metadata.get('source', 'N/A')}, Page Number: {doc.metadata.get('page_number', '0')}"
         )
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

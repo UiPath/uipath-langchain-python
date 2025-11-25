@@ -14,14 +14,12 @@ from ._utils._graph import LangGraphConfig
 
 console = ConsoleLogger()
 
-
 class FileOperationStatus(str, Enum):
     """Status of a file operation."""
 
     CREATED = "created"
     UPDATED = "updated"
     SKIPPED = "skipped"
-
 
 def generate_agent_md_file(
     target_directory: str,
@@ -66,7 +64,6 @@ def generate_agent_md_file(
         console.warning(f"Could not create {file_name}: {e}")
         return None
 
-
 def generate_specific_agents_md_files(
     target_directory: str, no_agents_md_override: bool
 ) -> Generator[tuple[str, FileOperationStatus], None, None]:
@@ -99,7 +96,6 @@ def generate_specific_agents_md_files(
         )
         if result:
             yield result
-
 
 def generate_agents_md_files(options: dict[str, Any]) -> None:
     """Generate agent MD files and log categorized summary.
@@ -136,7 +132,6 @@ def generate_agents_md_files(options: dict[str, Any]) -> None:
         files_str = ", ".join(click.style(f, fg="yellow") for f in skipped_files)
         console.info(f"Skipped (already exist): {files_str}")
 
-
 async def langgraph_init_middleware_async(
     options: dict[str, Any] | None = None,
 ) -> MiddlewareResult:
@@ -160,7 +155,6 @@ async def langgraph_init_middleware_async(
             should_continue=False,
             should_include_stacktrace=True,
         )
-
 
 def langgraph_init_middleware(
     options: dict[str, Any] | None = None,

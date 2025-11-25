@@ -7,7 +7,6 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-
 async def mcp_client(state: MessagesState) -> dict[str, Any]:
     """Agent node that connects to MCP server and processes messages."""
     async with streamablehttp_client(
@@ -23,7 +22,6 @@ async def mcp_client(state: MessagesState) -> dict[str, Any]:
             agent = create_react_agent(model, tools=tools)
             result = await agent.ainvoke(state)
             return result
-
 
 builder = StateGraph(MessagesState)
 builder.add_node("mcp_client", mcp_client)

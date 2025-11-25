@@ -6,7 +6,6 @@ from tenacity import (
     _utils,
 )
 
-
 def before_sleep_log(
     logger: "logging.Logger",
     log_level: int,

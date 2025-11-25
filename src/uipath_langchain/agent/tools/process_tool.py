@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Type
+from typing import Any
 
 from jsonschema_pydantic import jsonschema_to_pydantic  # type: ignore[import-untyped]
 from langchain_core.tools import StructuredTool
@@ -13,15 +13,14 @@ from uipath.platform.common import InvokeProcess
 
 from .utils import sanitize_tool_name
 
-
 def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredTool:
     """Uses interrupt() to suspend graph execution until process completes (handled by runtime)."""
     tool_name: str = sanitize_tool_name(resource.name)
     process_name = resource.properties.process_name
     folder_path = resource.properties.folder_path
 
-    input_model: Type[BaseModel] = jsonschema_to_pydantic(resource.input_schema)
-    output_model: Type[BaseModel] = jsonschema_to_pydantic(resource.output_schema)
+    input_model: type[BaseModel] = jsonschema_to_pydantic(resource.input_schema)
+    output_model: type[BaseModel] = jsonschema_to_pydantic(resource.output_schema)
 
     async def process_tool_fn(**kwargs: Any):
         try:

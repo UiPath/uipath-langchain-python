@@ -10,20 +10,17 @@ class TicketPriority(Enum):
     HIGH = "high"
     CRITICAL = "critical"
 
-
 class TicketCategory(Enum):
     TECHNICAL = "technical"
     BILLING = "billing"
     GENERAL = "general"
     COMPLAINT = "complaint"
 
-
 class TicketInput(BaseModel):
     """Input model for the ticket routing system."""
     ticket_id: str
     customer_message: str
     customer_tier: str = "standard"
-
 
 class TicketOutput(BaseModel):
     """Output model with routing decisions and metadata."""
@@ -34,7 +31,6 @@ class TicketOutput(BaseModel):
     requires_escalation: bool
     estimated_resolution_time: int
     response_template: str
-
 
 class State(BaseModel):
     """Internal state for processing."""
@@ -50,13 +46,11 @@ class State(BaseModel):
     estimated_resolution_time: int = 0
     response_template: str = ""
 
-
 async def analyze_sentiment(state: State) -> State:
     """Analyze customer sentiment from message."""
     negative_keywords = ["angry", "frustrated", "terrible", "worst", "unacceptable"]
     state.sentiment = "negative" if any(kw in state.customer_message.lower() for kw in negative_keywords) else "positive"
     return state
-
 
 async def classify_category(state: State) -> State:
     """Classify ticket into categories."""
@@ -71,13 +65,11 @@ async def classify_category(state: State) -> State:
         state.category = TicketCategory.GENERAL
     return state
 
-
 async def check_urgency(state: State) -> State:
     """Check for urgency keywords."""
     urgency_keywords = ["urgent", "asap", "immediately", "emergency", "critical"]
     state.has_urgency_keywords = any(kw in state.customer_message.lower() for kw in urgency_keywords)
     return state
-
 
 async def determine_priority(state: State) -> State:
     """Determine ticket priority based on multiple factors."""
@@ -94,7 +86,6 @@ async def determine_priority(state: State) -> State:
 
     return state
 
-
 async def check_escalation(state: State) -> State:
     """Determine if ticket needs escalation."""
     state.requires_escalation = (
@@ -102,7 +93,6 @@ async def check_escalation(state: State) -> State:
         and state.category == TicketCategory.COMPLAINT
     )
     return state
-
 
 async def route_to_department(state: State) -> State:
     """Route ticket to appropriate department."""
@@ -116,19 +106,16 @@ async def route_to_department(state: State) -> State:
         state.assigned_department = "General Support"
     return state
 
-
 async def escalate_to_manager(state: State) -> State:
     """Escalate to manager for high-priority issues."""
     state.assigned_department = f"{state.assigned_department} - Manager"
     state.estimated_resolution_time = 2  # hours
     return state
 
-
 async def assign_standard_queue(state: State) -> State:
     """Assign to standard support queue."""
     state.estimated_resolution_time = 24  # hours
     return state
-
 
 async def generate_response(state: State) -> State:
     """Generate automated response template."""
@@ -138,7 +125,6 @@ async def generate_response(state: State) -> State:
         f"Expected resolution time: {state.estimated_resolution_time} hours."
     )
     return state
-
 
 async def finalize_ticket(state: State) -> TicketOutput:
     """Final processing and return output model."""
@@ -152,11 +138,9 @@ async def finalize_ticket(state: State) -> TicketOutput:
         response_template=state.response_template
     )
 
-
 def should_escalate(state: State) -> Literal["escalate_to_manager", "assign_standard_queue"]:
     """Routing function to determine escalation path."""
     return "escalate_to_manager" if state.requires_escalation else "assign_standard_queue"
-
 
 builder = StateGraph(
     state_schema=State,

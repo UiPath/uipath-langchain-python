@@ -13,7 +13,6 @@ from .exceptions import (
 )
 from .types import AgentGraphState
 
-
 def create_terminate_node(
     response_schema: type[BaseModel] | None = None,
 ):

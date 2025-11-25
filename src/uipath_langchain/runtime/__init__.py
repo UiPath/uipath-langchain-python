@@ -6,7 +6,6 @@ from uipath.runtime import (
 
 from .._cli._runtime._factory import LangGraphRuntimeFactory
 
-
 def register_runtime_factory() -> None:
     """Register the LangGraph factory. Called automatically via entry point."""
 
@@ -18,7 +17,6 @@ def register_runtime_factory() -> None:
         )
 
     UiPathRuntimeFactoryRegistry.register("langgraph", create_factory, "langgraph.json")
-
 
 register_runtime_factory()
 

@@ -8,7 +8,6 @@ from uipath.utils import EndpointManager
 
 from uipath_langchain._utils._request_mixin import UiPathRequestMixin
 
-
 class UiPathAzureOpenAIEmbeddings(UiPathRequestMixin, AzureOpenAIEmbeddings):
     """Custom Embeddings connector for LangChain integration with UiPath.
 
@@ -53,7 +52,6 @@ class UiPathAzureOpenAIEmbeddings(UiPathRequestMixin, AzureOpenAIEmbeddings):
         return endpoint.format(
             model=self.model_name, api_version=self.openai_api_version
         )
-
 
 class UiPathOpenAIEmbeddings(UiPathRequestMixin, OpenAIEmbeddings):
     """Custom Embeddings connector for LangChain integration with UiPath.

@@ -1,11 +1,10 @@
 # mypy: disable-error-code="syntax"
 import os
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from pydantic import Field
 from pydantic_settings import BaseSettings
-
 
 class UiPathCachedPathsSettings(BaseSettings):
     cached_completion_db: str = Field(
@@ -19,16 +18,13 @@ class UiPathCachedPathsSettings(BaseSettings):
         alias="CACHED_EMBEDDINGS_DIR",
     )
 
-
 uipath_cached_paths_settings = UiPathCachedPathsSettings()
-uipath_token_header: Optional[str] = None
-
+uipath_token_header: str | None = None
 
 class UiPathClientFactorySettings(BaseSettings):
     base_url: str = Field(default="", alias="UIPATH_BASE_URL")
     client_id: str = Field(default="", alias="UIPATH_CLIENT_ID")
     client_secret: str = Field(default="", alias="UIPATH_CLIENT_SECRET")
-
 
 class UiPathClientSettings(BaseSettings):
     access_token: str = Field(default_factory=lambda: get_uipath_token_header())
@@ -44,7 +40,6 @@ class UiPathClientSettings(BaseSettings):
     timeout_seconds: str = Field(default="120", alias="UIPATH_TIMEOUT_SECONDS")
     action_name: str = Field(default="DefaultActionName", alias="UIPATH_ACTION_NAME")
     action_id: str = Field(default="DefaultActionId", alias="UIPATH_ACTION_ID")
-
 
 def get_uipath_token_header(
     settings: Any = None,
@@ -64,7 +59,6 @@ def get_uipath_token_header(
             uipath_token_header = res_json.get("access_token")
 
     return uipath_token_header or ""
-
 
 async def get_token_header_async(
     settings: Any = None,

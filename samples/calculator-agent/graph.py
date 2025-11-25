@@ -5,7 +5,6 @@ from langgraph.graph import StateGraph
 from pydantic.dataclasses import dataclass
 from uipath.tracing import traced
 
-
 class Operator(Enum):
     ADD = "+"
     SUBTRACT = "-"

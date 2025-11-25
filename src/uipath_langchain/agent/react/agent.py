@@ -1,5 +1,6 @@
 import os
-from typing import Callable, Sequence, Type, TypeVar, cast
+from collections.abc import Callable, Sequence
+from typing import TypeVar, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -27,8 +28,7 @@ from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState
 InputT = TypeVar("InputT", bound=BaseModel)
 OutputT = TypeVar("OutputT", bound=BaseModel)
 
-
-def create_state_with_input(input_schema: Type[InputT]):
+def create_state_with_input(input_schema: type[InputT]):
     InnerAgentGraphState = type(
         "InnerAgentGraphState",
         (AgentGraphState, input_schema),
@@ -38,15 +38,14 @@ def create_state_with_input(input_schema: Type[InputT]):
     cast(type[BaseModel], InnerAgentGraphState).model_rebuild()
     return InnerAgentGraphState
 
-
 def create_agent(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     messages: Sequence[SystemMessage | HumanMessage]
     | Callable[[InputT], Sequence[SystemMessage | HumanMessage]],
     *,
-    input_schema: Type[InputT] | None = None,
-    output_schema: Type[OutputT] | None = None,
+    input_schema: type[InputT] | None = None,
+    output_schema: type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
 ) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
     """Build agent graph with INIT -> AGENT <-> TOOLS loop, terminated by control flow tools.

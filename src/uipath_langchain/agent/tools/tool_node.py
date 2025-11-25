@@ -5,7 +5,6 @@ from collections.abc import Sequence
 from langchain_core.tools import BaseTool
 from langgraph.prebuilt import ToolNode
 
-
 def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, ToolNode]:
     """Create individual ToolNode for each tool.
 

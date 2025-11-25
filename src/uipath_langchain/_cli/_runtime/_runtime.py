@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any, AsyncGenerator, Optional, Sequence
+from typing import Any, AsyncGenerator, Sequence
 from uuid import uuid4
 
 from langchain_core.runnables.config import RunnableConfig
@@ -31,7 +31,6 @@ from ._input import get_graph_input
 from ._output import create_and_save_resume_trigger, serialize_output
 
 logger = logging.getLogger(__name__)
-
 
 class LangGraphRuntime:
     """
@@ -127,7 +126,7 @@ class LangGraphRuntime:
             graph_config = self._get_graph_config()
 
             # Track final chunk for result creation
-            final_chunk: Optional[dict[Any, Any]] = None
+            final_chunk: dict[Any, Any] | None = None
 
             # Stream events from graph
             async for stream_chunk in compiled_graph.astream(
@@ -227,7 +226,7 @@ class LangGraphRuntime:
         self,
         compiled_graph: CompiledStateGraph[Any, Any, Any],
         graph_config: RunnableConfig,
-    ) -> Optional[StateSnapshot]:
+    ) -> StateSnapshot | None:
         """Get final graph state."""
         try:
             return await compiled_graph.aget_state(graph_config)
@@ -301,7 +300,7 @@ class LangGraphRuntime:
 
         return False
 
-    def _get_dynamic_interrupt(self, state: StateSnapshot) -> Optional[Interrupt]:
+    def _get_dynamic_interrupt(self, state: StateSnapshot) -> Interrupt | None:
         """Get the first dynamic interrupt if any."""
         if not hasattr(state, "tasks"):
             return None
@@ -318,7 +317,7 @@ class LangGraphRuntime:
         compiled_graph: CompiledStateGraph[Any, Any, Any],
         graph_config: RunnableConfig,
         memory: AsyncSqliteSaver,
-        graph_output: Optional[Any],
+        graph_output: Any | None,
     ) -> UiPathRuntimeResult:
         """
         Get final graph state and create the execution result.
@@ -345,12 +344,12 @@ class LangGraphRuntime:
         self,
         graph_state: StateSnapshot,
         graph_memory: AsyncSqliteSaver,
-        graph_output: Optional[Any],
+        graph_output: Any | None,
     ) -> UiPathRuntimeResult:
         """Create result for suspended execution."""
         # Check if it's a dynamic interrupt
         dynamic_interrupt = self._get_dynamic_interrupt(graph_state)
-        resume_trigger: Optional[UiPathResumeTrigger] = None
+        resume_trigger: UiPathResumeTrigger | None = None
 
         if dynamic_interrupt:
             # Dynamic interrupt - create and save resume trigger
@@ -402,7 +401,7 @@ class LangGraphRuntime:
             next_nodes=next_nodes,
         )
 
-    def _create_success_result(self, output: Optional[Any]) -> UiPathRuntimeResult:
+    def _create_success_result(self, output: Any | None) -> UiPathRuntimeResult:
         """Create result for successful completion."""
         return UiPathRuntimeResult(
             output=serialize_output(output),
@@ -451,7 +450,6 @@ class LangGraphRuntime:
         """Cleanup runtime resources."""
         pass
 
-
 class LangGraphScriptRuntime(LangGraphRuntime):
     """
     Resolves the graph from langgraph.json config file and passes it to the base runtime.
@@ -461,7 +459,7 @@ class LangGraphScriptRuntime(LangGraphRuntime):
         self,
         runtime_id: str,
         memory: AsyncSqliteSaver,
-        entrypoint: Optional[str] = None,
+        entrypoint: str | None = None,
     ):
         self.resolver = LangGraphJsonResolver(entrypoint=entrypoint)
         self.entrypoint = entrypoint

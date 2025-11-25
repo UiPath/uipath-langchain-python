@@ -14,7 +14,6 @@ from typing_extensions import override
 from uipath.platform import UiPath
 from uipath.platform.context_grounding import ContextGroundingQueryResponse
 
-
 class ContextGroundingVectorStore(VectorStore):
     """Vector store that uses UiPath Context Grounding (ECS) as a backend.
 

@@ -1,4 +1,4 @@
-from typing import Optional, List, Literal
+from typing import Literal
 
 import httpx
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -17,7 +17,6 @@ from langchain_core.documents import Document
 class IndexNotFound(Exception):
     pass
 
-
 logger = logging.getLogger(__name__)
 
 llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
@@ -33,14 +32,14 @@ class QuizItem(BaseModel):
         description="The expected answer to the question",
     )
 class Quiz(BaseModel):
-   quiz_items: List[QuizItem] = Field(
+   quiz_items: list[QuizItem] = Field(
         description="A list of quiz items"
     )
 class QuizOrInsufficientInfo(BaseModel):
-    quiz: Optional[Quiz] = Field(
+    quiz: Quiz | None = Field(
         description="A quiz based on user input and available documents."
     )
-    additional_info: Optional[str] = Field(
+    additional_info: str | None = Field(
         description="String that controls whether additional information is required",
     )
 
@@ -65,7 +64,6 @@ Respond with the classification in the requested JSON format."""
 
 uipath = UiPath()
 
-
 class GraphOutput(BaseModel):
     quiz: Quiz
 
@@ -78,8 +76,8 @@ class GraphState(MessagesState):
     quiz_topic: str
     index_name: str
     index_folder_path: str
-    additional_info: Optional[str]
-    quiz: Optional[Quiz]
+    additional_info: str | None
+    quiz: Quiz | None
 
 def prepare_input(state: GraphInput) -> GraphState:
     return GraphState(

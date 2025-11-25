@@ -16,7 +16,6 @@ from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 
 logger = logging.getLogger(__name__)
 
-
 async def get_graph_input(
     input: dict[str, Any] | None,
     options: UiPathExecuteOptions | None,
@@ -83,7 +82,6 @@ async def get_graph_input(
 
     return Command(resume=await HitlReader.read(resume_trigger))
 
-
 async def _get_latest_trigger(
     memory: AsyncSqliteSaver,
     resume_triggers_table: str = "__uipath_resume_triggers",
@@ -107,7 +105,7 @@ async def _get_latest_trigger(
         resume_triggers_table: The name of the table containing resume triggers (default: "__uipath_resume_triggers").
 
     Returns:
-        Optional[tuple[str, str, str, str, str]]: A tuple containing (type, key, folder_path,
+        tuple[str, str, str, str, str] | None: A tuple containing (type, key, folder_path,
             folder_key, payload) for the most recent trigger, or None if no triggers are found
             or if the memory context is not available.
 

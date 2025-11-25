@@ -1,7 +1,7 @@
 import importlib
 import logging
 import sys
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable
 
 from uipath.tracing import traced
 
@@ -11,15 +11,14 @@ original_traceable: Any = None
 
 logger = logging.getLogger(__name__)
 
-
 # Apply the patch
 def _map_traceable_to_traced_args(
-    run_type: Optional[str] = None,
-    name: Optional[str] = None,
-    tags: Optional[List[str]] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    run_type: str | None = None,
+    name: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Map LangSmith @traceable arguments to UiPath @traced() arguments.
 
@@ -63,14 +62,13 @@ def _map_traceable_to_traced_args(
 
     return traced_args
 
-
 def otel_traceable_adapter(
-    func: Optional[Callable[..., Any]] = None,
+    func: Callable[..., Any] | None = None,
     *,
-    run_type: Optional[str] = None,
-    name: Optional[str] = None,
-    tags: Optional[List[str]] = None,
-    metadata: Optional[Dict[str, Any]] = None,
+    run_type: str | None = None,
+    name: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
     **kwargs: Any,
 ):
     """
@@ -107,7 +105,6 @@ def otel_traceable_adapter(
     else:
         # Called as @traceable - apply decorator directly
         return decorator(func)
-
 
 def _instrument_traceable_attributes():
     """Apply the patch to langsmith module at import time."""

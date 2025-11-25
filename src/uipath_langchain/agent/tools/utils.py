@@ -2,7 +2,6 @@
 
 import re
 
-
 def sanitize_tool_name(name: str) -> str:
     """Sanitize tool name for LLM compatibility (alphanumeric, underscore, hyphen only, max 64 chars)."""
     trim_whitespaces = "_".join(name.split())

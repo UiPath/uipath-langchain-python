@@ -1,6 +1,6 @@
 import httpx
 import logging
-from typing import List, Dict, Optional, Any
+from typing import Any
 from pydantic import BaseModel, PrivateAttr
 
 logger = logging.getLogger(__name__)
@@ -10,7 +10,7 @@ class OutlookClient(BaseModel):
     access_token: str
     base_url: str = "https://graph.microsoft.com/v1.0"
     user: str = "me"
-    _client: Optional[httpx.AsyncClient] = PrivateAttr(default=None)
+    _client: httpx.AsyncClient | None = PrivateAttr(default=None)
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create the httpx client"""
@@ -31,7 +31,7 @@ class OutlookClient(BaseModel):
             await self._client.aclose()
             self._client = None
     
-    async def _get(self, path: str, params: Optional[Dict] = None) -> Dict[str, Any]:
+    async def _get(self, path: str, params: dict | None = None) -> dict[str, Any]:
         """Make GET request to Microsoft Graph API"""
         client = await self._get_client()
         url = f"{self.base_url}/{self.user}/{path}"
@@ -40,7 +40,7 @@ class OutlookClient(BaseModel):
         response.raise_for_status()
         return response.json()
     
-    async def _post(self, path: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    async def _post(self, path: str, data: dict[str, Any]) -> dict[str, Any]:
         """Make POST request to Microsoft Graph API"""
         client = await self._get_client()
         url = f"{self.base_url}/{self.user}/{path}"
@@ -58,7 +58,7 @@ class OutlookClient(BaseModel):
         response = await client.delete(url)
         return response.status_code == 204  # No Content = Success
 
-    async def get_messages(self, max_emails: int, folder: str) -> List[Dict[str, Any]]:
+    async def get_messages(self, max_emails: int, folder: str) -> list[dict[str, Any]]:
         """Fetch emails from specified folder"""
         try:
             path = f"mailFolders/{folder}/messages?$top={max_emails}"
@@ -69,7 +69,7 @@ class OutlookClient(BaseModel):
             logger.error(f"Error fetching messages: {e}")
             return []
     
-    async def get_mail_folders(self, include_subfolders: bool = True) -> Dict[str, str]:
+    async def get_mail_folders(self, include_subfolders: bool = True) -> dict[str, str]:
         """Get all mail folders and return name -> ID mapping (excluding deleted items)"""
         try:
             all_folders = {}
@@ -117,7 +117,7 @@ class OutlookClient(BaseModel):
             logger.error(f"Error fetching mail folders: {e}")
             return {}
     
-    async def create_folder(self, folder_name: str, parent_folder_id: Optional[str] = None) -> Optional[str]:
+    async def create_folder(self, folder_name: str, parent_folder_id: str | None = None) -> str | None:
         """Create a new mail folder and return its ID"""
         try:
             folder_data = {"displayName": folder_name}
@@ -141,7 +141,7 @@ class OutlookClient(BaseModel):
             logger.error(f"Error creating folder {folder_name}: {e}")
             return None
     
-    async def get_message_rules(self) -> List[Dict[str, Any]]:
+    async def get_message_rules(self) -> list[dict[str, Any]]:
         """Get all existing message rules"""
         try:
             response = await self._get("mailFolders/inbox/messageRules")
@@ -152,7 +152,7 @@ class OutlookClient(BaseModel):
             logger.debug(f"Error fetching existing rules: {e}")
             return []
     
-    async def create_message_rule(self, rule_data: Dict[str, Any]) -> Optional[str]:
+    async def create_message_rule(self, rule_data: dict[str, Any]) -> str | None:
         """Create a new message rule and return its ID"""
         try:
             response = await self._post("mailFolders/inbox/messageRules", rule_data)

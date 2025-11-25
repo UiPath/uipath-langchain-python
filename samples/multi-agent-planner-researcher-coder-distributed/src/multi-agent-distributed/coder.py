@@ -11,10 +11,8 @@ llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 
 repl = PythonREPL()
 
-
 class GraphOutput(BaseModel):
     answer: str
-
 
 @tool
 def python_repl_tool(
@@ -32,14 +30,11 @@ def python_repl_tool(
     )
     return result_str
 
-
 code_agent = create_react_agent(llm, tools=[python_repl_tool])
-
 
 async def code_node(state: MessagesState) -> GraphOutput:
     result = await code_agent.ainvoke(state)
     return GraphOutput(answer=result["messages"][-1].content)
-
 
 # Build the state graph
 builder = StateGraph(MessagesState, output=GraphOutput)

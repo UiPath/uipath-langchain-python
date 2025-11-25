@@ -15,7 +15,6 @@ from .context_tool import create_context_tool
 from .integration_tool import create_integration_tool
 from .process_tool import create_process_tool
 
-
 async def create_tools_from_resources(
     agent: LowCodeAgentDefinition,
 ) -> list[BaseTool]:
@@ -27,7 +26,6 @@ async def create_tools_from_resources(
             tools.append(tool)
 
     return tools
-
 
 async def _build_tool_for_resource(
     resource: BaseAgentResourceConfig,

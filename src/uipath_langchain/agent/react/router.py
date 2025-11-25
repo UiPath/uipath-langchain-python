@@ -1,5 +1,6 @@
 """Routing functions for conditional edges in the agent graph."""
 
+from collections.abc import Sequence
 from typing import Literal
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall
@@ -12,9 +13,8 @@ from .utils import count_successive_completions
 
 FLOW_CONTROL_TOOLS = [END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name]
 
-
 def __filter_control_flow_tool_calls(
-    tool_calls: list[ToolCall],
+    tool_calls: Sequence[ToolCall],
 ) -> list[ToolCall]:
     """Remove control flow tools when multiple tool calls exist."""
     if len(tool_calls) <= 1:
@@ -22,13 +22,11 @@ def __filter_control_flow_tool_calls(
 
     return [tc for tc in tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS]
 
-
-def __has_control_flow_tool(tool_calls: list[ToolCall]) -> bool:
+def __has_control_flow_tool(tool_calls: Sequence[ToolCall]) -> bool:
     """Check if any tool call is of a control flow tool."""
     return any(tc.get("name") in FLOW_CONTROL_TOOLS for tc in tool_calls)
 
-
-def __validate_last_message_is_AI(messages: list[AnyMessage]) -> AIMessage:
+def __validate_last_message_is_AI(messages: Sequence[AnyMessage]) -> AIMessage:
     """Validate and return last message from state.
 
     Raises:
@@ -46,7 +44,6 @@ def __validate_last_message_is_AI(messages: list[AnyMessage]) -> AIMessage:
         )
 
     return last_message
-
 
 def route_agent(
     state: AgentGraphState,

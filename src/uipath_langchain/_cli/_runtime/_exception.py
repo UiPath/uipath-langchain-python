@@ -1,12 +1,10 @@
 from enum import Enum
-from typing import Optional, Union
 
 from uipath.runtime.errors import (
     UiPathBaseRuntimeError,
     UiPathErrorCategory,
     UiPathErrorCode,
 )
-
 
 class LangGraphErrorCode(Enum):
     CONFIG_MISSING = "CONFIG_MISSING"
@@ -26,17 +24,16 @@ class LangGraphErrorCode(Enum):
     DB_INSERT_FAILED = "DB_INSERT_FAILED"
     LICENSE_NOT_AVAILABLE = "LICENSE_NOT_AVAILABLE"
 
-
 class LangGraphRuntimeError(UiPathBaseRuntimeError):
     """Custom exception for LangGraph runtime errors with structured error information."""
 
     def __init__(
         self,
-        code: Union[LangGraphErrorCode, UiPathErrorCode],
+        code: LangGraphErrorCode | UiPathErrorCode,
         title: str,
         detail: str,
         category: UiPathErrorCategory = UiPathErrorCategory.UNKNOWN,
-        status: Optional[int] = None,
+        status: int | None = None,
     ):
         super().__init__(
             code.value, title, detail, category, status, prefix="LANGGRAPH"

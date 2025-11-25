@@ -1,6 +1,5 @@
 import logging
 
-
 class IgnoreSpecificUrl(logging.Filter):
     def __init__(self, url_to_ignore):
         super().__init__()
@@ -20,7 +19,6 @@ class IgnoreSpecificUrl(logging.Filter):
 
         except Exception:
             return False
-
 
 def _setup_tracer_httpx_logging(url: str):
     # Create a custom logger for httpx

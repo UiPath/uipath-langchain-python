@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from langchain_core.messages import (
     AIMessage,
@@ -26,15 +26,13 @@ from uipath.agent.conversation import (
     UiPathInlineValue,
 )
 
-
 def _new_id() -> str:
     return str(uuid.uuid4())
 
-
 def _wrap_in_conversation_event(
     msg_event: UiPathConversationMessageEvent,
-    exchange_id: Optional[str] = None,
-    conversation_id: Optional[str] = None,
+    exchange_id: str | None = None,
+    conversation_id: str | None = None,
 ) -> UiPathConversationEvent:
     """Helper to wrap a message event into a conversation-level event."""
     return UiPathConversationEvent(
@@ -44,7 +42,6 @@ def _wrap_in_conversation_event(
             message=msg_event,
         ),
     )
-
 
 def _extract_text(content) -> str:
     """Normalize LangGraph message.content to plain text."""
@@ -58,10 +55,9 @@ def _extract_text(content) -> str:
         )
     return str(content or "")
 
-
 def uipath_to_human_messages(
     uipath_msg: UiPathConversationMessage,
-) -> List[HumanMessage]:
+) -> list[HumanMessage]:
     """
     Converts a UiPathConversationMessage into a list of HumanMessages for LangGraph.
     Supports multimodal content parts (text, external content) and preserves metadata.
@@ -73,7 +69,7 @@ def uipath_to_human_messages(
         for part in uipath_msg.content_parts:
             data = part.data
             content = ""
-            metadata: Dict[str, Any] = {
+            metadata: dict[str, Any] = {
                 "message_id": uipath_msg.message_id,
                 "content_part_id": part.content_part_id,
                 "mime_type": part.mime_type,
@@ -99,12 +95,11 @@ def uipath_to_human_messages(
 
     return human_messages
 
-
 def map_message(
     message: BaseMessage,
-    exchange_id: Optional[str] = None,
-    conversation_id: Optional[str] = None,
-) -> Optional[UiPathConversationEvent]:
+    exchange_id: str | None = None,
+    conversation_id: str | None = None,
+) -> UiPathConversationEvent | None:
     """Convert LangGraph BaseMessage (chunk or full) into a UiPathConversationEvent."""
     message_id = getattr(message, "id", None) or _new_id()
     timestamp = datetime.now().isoformat()

@@ -11,12 +11,10 @@ from langgraph.types import Command
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
-
 tavily_tool = TavilySearch(max_results=5)
 
 # This executes code locally, which can be unsafe
 repl = PythonREPL()
-
 
 @tool
 def python_repl_tool(
@@ -45,12 +43,10 @@ system_prompt = (
     " respond with FINISH."
 )
 
-
 class Router(TypedDict):
     """Worker to route to next. If no workers needed, route to FINISH."""
 
     next: Literal[*options]
-
 
 llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 
@@ -94,7 +90,6 @@ research_agent = create_react_agent(
     llm, tools=[tavily_tool], prompt="You are a researcher. DO NOT do any math."
 )
 
-
 async def research_node(state: State) -> Command[Literal["supervisor"]]:
     result = await research_agent.ainvoke(state)
     return Command(
@@ -106,10 +101,8 @@ async def research_node(state: State) -> Command[Literal["supervisor"]]:
         goto="supervisor",
     )
 
-
 # NOTE: THIS PERFORMS ARBITRARY CODE EXECUTION, WHICH CAN BE UNSAFE WHEN NOT SANDBOXED
 code_agent = create_react_agent(llm, tools=[python_repl_tool])
-
 
 async def code_node(state: State) -> Command[Literal["supervisor"]]:
     result = await code_agent.ainvoke(state)
@@ -121,7 +114,6 @@ async def code_node(state: State) -> Command[Literal["supervisor"]]:
         },
         goto="supervisor",
     )
-
 
 builder = StateGraph(State, input=GraphInput, output=GraphOutput)
 builder.add_edge(START, "input")

@@ -12,7 +12,6 @@ from uipath_langchain.retrievers import ContextGroundingRetriever
 
 from .utils import sanitize_tool_name
 
-
 def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
     tool_name = sanitize_tool_name(resource.name)
     retriever = ContextGroundingRetriever(

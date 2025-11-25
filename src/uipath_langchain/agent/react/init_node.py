@@ -1,9 +1,9 @@
 """State initialization node for the ReAct Agent graph."""
 
-from typing import Any, Callable, Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-
 
 def create_init_node(
     messages: Sequence[SystemMessage | HumanMessage]

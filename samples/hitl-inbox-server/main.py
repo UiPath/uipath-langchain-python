@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Any
 import httpx
 import uuid
 from datetime import datetime
@@ -57,7 +57,6 @@ async def submit_job(job_request: schemas.JobRequest, background_tasks: Backgrou
     db.add(new_job)
     db.commit()
     db.refresh(new_job)
-
 
     # Submit the job to the external service in the background
     background_tasks.add_task(
@@ -151,9 +150,9 @@ async def job_complete_webhook(request: Request, db: Session = Depends(get_db)):
     return {"status": "success", "message": "Job completion processed successfully"}
 
 # API endpoint to get all inbox messages
-@app.get("/api/inbox", response_model=List[schemas.InboxMessageResponse])
+@app.get("/api/inbox", response_model=list[schemas.InboxMessageResponse])
 async def get_inbox_api(
-    status: Optional[str] = None,
+    status: str | None = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db)
@@ -245,9 +244,9 @@ async def get_job_status_api(job_id: str, db: Session = Depends(get_db)):
     }
 
 # API endpoint to get all jobs
-@app.get("/api/jobs", response_model=List[schemas.JobBasicResponse])
+@app.get("/api/jobs", response_model=list[schemas.JobBasicResponse])
 async def get_jobs_api(
-    status: Optional[str] = None,
+    status: str | None = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db)
@@ -262,8 +261,8 @@ async def get_jobs_api(
 
 async def _retrieve_message_content(
     job_id: str,
-    folder_key: Optional[str] = None,
-    folder_path: Optional[str] = None,
+    folder_key: str | None = None,
+    folder_path: str | None = None,
 ) -> str:
     spec = sdk.jobs._retrieve_inbox_id_spec(
         job_id=job_id,

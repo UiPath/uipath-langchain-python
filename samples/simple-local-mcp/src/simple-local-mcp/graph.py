@@ -7,7 +7,6 @@ from langgraph.prebuilt import create_react_agent
 
 model = ChatAnthropic(model="claude-3-5-sonnet-latest")
 
-
 @asynccontextmanager
 async def make_graph():
     client = MultiServerMCPClient({

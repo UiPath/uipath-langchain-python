@@ -7,7 +7,6 @@ from uipath._cli.middlewares import MiddlewareResult
 
 console = ConsoleLogger()
 
-
 def generate_script(target_directory):
     template_script_path = os.path.join(
         os.path.dirname(__file__), "_templates/main.py.template"
@@ -21,7 +20,6 @@ def generate_script(target_directory):
     )
     target_path = os.path.join(target_directory, "langgraph.json")
     shutil.copyfile(template_langgraph_json_path, target_path)
-
 
 def generate_pyproject(target_directory, project_name):
     project_toml_path = os.path.join(target_directory, "pyproject.toml")
@@ -38,7 +36,6 @@ requires-python = ">=3.11"
 
     with open(project_toml_path, "w") as f:
         f.write(toml_content)
-
 
 def langgraph_new_middleware(name: str) -> MiddlewareResult:
     """Middleware to create demo langchain agent"""

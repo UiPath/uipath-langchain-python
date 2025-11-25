@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable
 
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
@@ -7,13 +7,12 @@ from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
 from .._utils._graph import GraphConfig, LangGraphConfig
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 
-
 class LangGraphJsonResolver:
-    def __init__(self, entrypoint: Optional[str] = None) -> None:
+    def __init__(self, entrypoint: str | None = None) -> None:
         self.entrypoint = entrypoint
-        self.graph_config: Optional[GraphConfig] = None
+        self.graph_config: GraphConfig | None = None
         self._lock = asyncio.Lock()
-        self._graph_cache: Optional[StateGraph[Any, Any, Any]] = None
+        self._graph_cache: StateGraph[Any, Any, Any] | None = None
         self._resolving: bool = False
 
     async def __call__(self) -> StateGraph[Any, Any, Any]:
@@ -30,7 +29,7 @@ class LangGraphJsonResolver:
             self._graph_cache = await self._resolve(self.entrypoint)
             return self._graph_cache
 
-    async def _resolve(self, entrypoint: Optional[str]) -> StateGraph[Any, Any, Any]:
+    async def _resolve(self, entrypoint: str | None) -> StateGraph[Any, Any, Any]:
         config = LangGraphConfig()
         if not config.exists:
             raise LangGraphRuntimeError(
@@ -116,9 +115,7 @@ class LangGraphJsonResolver:
                 self.graph_config = None
             self._graph_cache = None
 
-
 AsyncResolver = Callable[[], Awaitable[StateGraph[Any, Any, Any]]]
-
 
 class LangGraphJsonResolverContext:
     """
@@ -127,7 +124,7 @@ class LangGraphJsonResolverContext:
     Thread-safe and reuses the same resolved graph across concurrent executions.
     """
 
-    def __init__(self, entrypoint: Optional[str] = None) -> None:
+    def __init__(self, entrypoint: str | None = None) -> None:
         self._resolver = LangGraphJsonResolver(entrypoint)
 
     async def __aenter__(self) -> AsyncResolver:

@@ -12,7 +12,6 @@ from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 
 logger = logging.getLogger(__name__)
 
-
 def serialize_output(output: Any) -> Any:
     """
     Recursively serialize an output object.
@@ -21,7 +20,7 @@ def serialize_output(output: Any) -> Any:
         output: The object to serialize
 
     Returns:
-        Dict[str, Any]: Serialized output as dictionary
+        dict[str, Any]: Serialized output as dictionary
     """
     if output is None:
         return {}
@@ -55,7 +54,6 @@ def serialize_output(output: Any) -> Any:
 
     # Return primitive types as is
     return output
-
 
 async def create_and_save_resume_trigger(
     interrupt_value: Any,

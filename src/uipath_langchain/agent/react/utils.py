@@ -1,12 +1,12 @@
 """ReAct Agent loop utilities."""
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from jsonschema_pydantic import jsonschema_to_pydantic  # type: ignore[import-untyped]
 from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL
-
 
 def resolve_input_model(
     input_schema: dict[str, Any] | None,
@@ -17,7 +17,6 @@ def resolve_input_model(
 
     return BaseModel
 
-
 def resolve_output_model(
     output_schema: dict[str, Any] | None,
 ) -> type[BaseModel]:
@@ -26,7 +25,6 @@ def resolve_output_model(
         return jsonschema_to_pydantic(output_schema)
 
     return END_EXECUTION_TOOL.args_schema
-
 
 def count_successive_completions(messages: Sequence[BaseMessage]) -> int:
     """Count consecutive AIMessages without tool calls at end of message history."""

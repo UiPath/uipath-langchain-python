@@ -6,13 +6,12 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, cast
 
 from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class GraphConfig:
@@ -20,7 +19,7 @@ class GraphConfig:
     path: str
     file_path: str
     graph_var: str
-    _graph: Optional[Union[StateGraph[Any, Any], CompiledStateGraph[Any, Any, Any]]] = (
+    _graph: StateGraph[Any, Any] | CompiledStateGraph[Any, Any, Any] | None = (
         None
     )
 
@@ -31,7 +30,7 @@ class GraphConfig:
 
     async def load_graph(
         self,
-    ) -> Union[StateGraph[Any, Any], CompiledStateGraph[Any, Any, Any]]:
+    ) -> StateGraph[Any, Any] | CompiledStateGraph[Any, Any, Any]:
         """Load graph from the specified path"""
         try:
             cwd = os.path.abspath(os.getcwd())
@@ -109,7 +108,7 @@ class GraphConfig:
             logger.error(f"Failed to load graph {self.name}: {str(e)}")
             raise
 
-    async def get_input_schema(self) -> Dict[str, Any]:
+    async def get_input_schema(self) -> dict[str, Any]:
         """Extract input schema from graph"""
         if not self._graph:
             self._graph = await self.load_graph()
@@ -132,19 +131,18 @@ class GraphConfig:
                 self._context_manager = None
                 self._graph = None
 
-
 class LangGraphConfig:
     def __init__(self, config_path: str = "langgraph.json"):
         self.config_path = config_path
-        self._config: Optional[Dict[str, Any]] = None
-        self._graphs: List[GraphConfig] = []
+        self._config: dict[str, Any] | None = None
+        self._graphs: list[GraphConfig] = []
 
     @property
     def exists(self) -> bool:
         """Check if langgraph.json exists"""
         return os.path.exists(self.config_path)
 
-    def load_config(self) -> Dict[str, Any]:
+    def load_config(self) -> dict[str, Any]:
         """Load and validate langgraph configuration"""
         if not self.exists:
             raise FileNotFoundError(f"Config file not found: {self.config_path}")
@@ -178,22 +176,22 @@ class LangGraphConfig:
         ]
 
     @property
-    def graphs(self) -> List[GraphConfig]:
+    def graphs(self) -> list[GraphConfig]:
         """Get all graph configurations"""
         if not self._graphs:
             self.load_config()
         return self._graphs
 
-    def get_graph(self, name: str) -> Optional[GraphConfig]:
+    def get_graph(self, name: str) -> GraphConfig | None:
         """Get a specific graph configuration by name"""
         return next((g for g in self.graphs if g.name == name), None)
 
     @property
-    def dependencies(self) -> List[str]:
+    def dependencies(self) -> list[str]:
         """Get project dependencies"""
         return self._config.get("dependencies", []) if self._config else []
 
     @property
-    def env_file(self) -> Optional[str]:
+    def env_file(self) -> str | None:
         """Get environment file path"""
         return self._config.get("env") if self._config else None

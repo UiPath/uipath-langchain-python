@@ -1,10 +1,9 @@
 from pydantic import BaseModel
-from typing import Optional, List
 from datetime import datetime
 
 class JobRequest(BaseModel):
     topic: str
-    callback_url: Optional[str] = None
+    callback_url: str | None = None
 
 class JobResponse(BaseModel):
     job_id: str
@@ -16,9 +15,9 @@ class InboxMessageResponse(BaseModel):
     job_id: str
     content: str
     status: str
-    human_feedback: Optional[str] = None
+    human_feedback: str | None = None
     received_at: datetime
-    approved_at: Optional[datetime] = None
+    approved_at: datetime | None = None
 
     class Config:
         orm_mode = True
@@ -35,7 +34,7 @@ class JobBasicResponse(BaseModel):
     topic: str
     status: str
     created_at: datetime
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
     class Config:
         orm_mode = True
@@ -44,14 +43,14 @@ class JobDetailResponse(BaseModel):
     id: str
     topic: str
     status: str
-    output: Optional[str] = None
-    agent_job_id: Optional[int] = None
-    agent_job_key: Optional[str] = None
-    human_feedback: Optional[str] = None
+    output: str | None = None
+    agent_job_id: int | None = None
+    agent_job_key: str | None = None
+    human_feedback: str | None = None
     created_at: datetime
-    completed_at: Optional[datetime] = None
-    error_message: Optional[str] = None
-    messages: List[InboxMessageResponse] = []
+    completed_at: datetime | None = None
+    error_message: str | None = None
+    messages: list[InboxMessageResponse] = []
 
     class Config:
         orm_mode = True

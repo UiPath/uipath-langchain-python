@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Type
+from typing import Any
 
 from jsonschema_pydantic import jsonschema_to_pydantic  # type: ignore[import-untyped]
 from langchain_core.tools import StructuredTool
@@ -12,7 +12,6 @@ from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
 
 from .utils import sanitize_tool_name
-
 
 def extract_top_level_field(param_name: str) -> str:
     """Extract the top-level field name from a jsonpath parameter name.
@@ -31,7 +30,6 @@ def extract_top_level_field(param_name: str) -> str:
         first_part = first_part.split("[")[0]
 
     return first_part
-
 
 def convert_to_activity_metadata(
     resource: AgentIntegrationToolResourceConfig,
@@ -85,7 +83,6 @@ def convert_to_activity_metadata(
         parameter_location_info=param_location_info,
     )
 
-
 def create_integration_tool(
     resource: AgentIntegrationToolResourceConfig,
 ) -> StructuredTool:
@@ -97,9 +94,9 @@ def create_integration_tool(
 
     activity_metadata = convert_to_activity_metadata(resource)
 
-    input_model: Type[BaseModel] = jsonschema_to_pydantic(resource.input_schema)
+    input_model: type[BaseModel] = jsonschema_to_pydantic(resource.input_schema)
     # note: IS tools output schemas were recently added and are most likely not present in all resources
-    output_model: Type[BaseModel] | None = (
+    output_model: type[BaseModel] | None = (
         jsonschema_to_pydantic(resource.output_schema)
         if resource.output_schema
         else None
@@ -107,9 +104,9 @@ def create_integration_tool(
 
     sdk = UiPath()
 
-    def sanitize_for_serialization(args: Dict[str, Any]) -> Dict[str, Any]:
+    def sanitize_for_serialization(args: dict[str, Any]) -> dict[str, Any]:
         """Convert Pydantic models in args to dicts."""
-        converted_args: Dict[str, Any] = {}
+        converted_args: dict[str, Any] = {}
         for key, value in args.items():
             # handle Pydantic model
             if hasattr(value, "model_dump"):

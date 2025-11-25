@@ -1,4 +1,3 @@
-from typing import Optional
 import time
 from langchain_anthropic import ChatAnthropic
 from langchain_tavily import TavilySearch
@@ -14,9 +13,7 @@ uipath = UiPath()
 tavily_tool = TavilySearch(max_results=5)
 anthropic_model = "claude-3-5-sonnet-latest"
 
-
 llm = ChatAnthropic(model=anthropic_model)
-
 
 class GraphInput(BaseModel):
     search_instructions: str
@@ -28,8 +25,8 @@ class GraphState(BaseModel):
     web_results: str
     index_name: str
     index_folder_path: str
-    file_name: Optional[str]
-    index: Optional[ContextGroundingIndex]
+    file_name: str | None
+    index: ContextGroundingIndex | None
 
 def prepare_input(state: GraphInput) -> GraphState:
     return GraphState(
@@ -74,7 +71,6 @@ async def create_file_name(state: GraphState) -> Command:
             "file_name": file_name.content,
         })
 
-
 async def add_data_to_context_grounding_index(state: GraphState) -> MessagesState:
     current_timestamp = int(time.time())
     file_name = state.file_name
@@ -86,8 +82,6 @@ async def add_data_to_context_grounding_index(state: GraphState) -> MessagesStat
         folder_path=state.index_folder_path,
     )
     return MessagesState(messages=[AIMessage("Relevant information uploaded to bucket.")])
-
-
 
 # Build the state graph
 builder = StateGraph(GraphState ,input=GraphInput, output=MessagesState)

@@ -2,7 +2,7 @@ import os
 import dotenv
 import httpx
 from contextlib import asynccontextmanager
-from typing import Optional, Literal
+from typing import Literal
 
 from pydantic import BaseModel
 from langgraph.graph import StateGraph, START, END
@@ -32,8 +32,8 @@ class GraphOutput(BaseModel):
 
 class State(BaseModel):
     task: str
-    access_token: Optional[str] = os.getenv("UIPATH_ACCESS_TOKEN")
-    result: Optional[str] = None
+    access_token: str | None = os.getenv("UIPATH_ACCESS_TOKEN")
+    result: str | None = None
 
 async def fetch_new_access_token(state: State) -> Command:
     try:

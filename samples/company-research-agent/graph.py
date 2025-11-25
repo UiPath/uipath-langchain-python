@@ -48,10 +48,8 @@ def get_message_text(msg: BaseMessage) -> str:
 class GraphState(BaseModel):
     company_name: str
 
-
 class GraphOutput(BaseModel):
     response: str
-
 
 async def research_node(state: GraphState) -> GraphOutput:
     # Format the user message with the company name
@@ -76,7 +74,6 @@ Ensure that each section is clearly labeled and contains relevant, concise infor
         msg = result
 
     return GraphOutput(response=get_message_text(msg))
-
 
 # Build the state graph
 builder = StateGraph(GraphState, output=GraphOutput)

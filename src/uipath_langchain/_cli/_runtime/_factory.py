@@ -1,5 +1,5 @@
 import os
-from typing import AsyncContextManager
+from collections.abc import AsyncContextManager
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from openinference.instrumentation.langchain import (
@@ -14,7 +14,6 @@ from uipath_langchain._tracing import _instrument_traceable_attributes
 
 from .._utils._graph import LangGraphConfig
 from ._runtime import LangGraphScriptRuntime
-
 
 class LangGraphRuntimeFactory:
     """Factory for creating LangGraph runtimes from langgraph.json configuration."""

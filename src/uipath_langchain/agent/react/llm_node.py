@@ -1,6 +1,6 @@
 """LLM node implementation for LangGraph."""
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage
@@ -9,7 +9,6 @@ from langchain_core.tools import BaseTool
 from .constants import MAX_SUCCESSIVE_COMPLETIONS
 from .types import AgentGraphState
 from .utils import count_successive_completions
-
 
 def create_llm_node(
     model: BaseChatModel,

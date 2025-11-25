@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Literal, Optional
+from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -19,7 +19,7 @@ uipath = UiPath()
 class GraphInput(BaseModel):
     message: str
     ticket_id: str
-    assignee: Optional[str] = None
+    assignee: str | None = None
 
 class GraphOutput(BaseModel):
     label: str
@@ -28,11 +28,11 @@ class GraphOutput(BaseModel):
 class GraphState(MessagesState):
     message: str
     ticket_id: str
-    assignee: Optional[str]
-    label: Optional[str] = None
-    confidence: Optional[float] = None
-    last_predicted_category: Optional[str]
-    human_approval: Optional[bool] = None
+    assignee: str | None
+    label: str | None = None
+    confidence: float | None = None
+    last_predicted_category: str | None
+    human_approval: bool | None = None
 
 class TicketClassification(BaseModel):
     label: Literal["security", "error", "system", "billing", "performance"] = Field(
@@ -41,7 +41,6 @@ class TicketClassification(BaseModel):
     confidence: float = Field(
         description="Confidence score for the classification", ge=0.0, le=1.0
     )
-
 
 output_parser = PydanticOutputParser(pydantic_object=TicketClassification)
 system_message = """You are a support ticket classifier. Classify tickets into exactly one category and provide a confidence score.
@@ -152,7 +151,6 @@ builder.add_edge("prepare_input", "classify")
 builder.add_edge("classify", "human_approval_node")
 builder.add_conditional_edges("human_approval_node", decide_next_node)
 builder.add_edge("notify_team", END)
-
 
 from langgraph.checkpoint.memory import MemorySaver
 

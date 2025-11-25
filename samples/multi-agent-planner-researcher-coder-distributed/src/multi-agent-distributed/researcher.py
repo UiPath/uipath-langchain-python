@@ -8,20 +8,16 @@ tavily_tool = TavilySearch(max_results=5)
 
 llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
 
-
 research_agent = create_react_agent(
     llm, tools=[tavily_tool], prompt="You are a researcher. DO NOT do any math."
 )
 
-
 class GraphOutput(BaseModel):
     answer: str
-
 
 async def research_node(state: MessagesState) -> GraphOutput:
     result = await research_agent.ainvoke(state)
     return GraphOutput(answer=result["messages"][-1].content)
-
 
 # Build the state graph
 builder = StateGraph(MessagesState, output=GraphOutput)

@@ -1,15 +1,13 @@
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any
 
 from langgraph.graph.state import CompiledStateGraph
-
 
 @dataclass
 class SchemaDetails:
     schema: dict[str, Any]
     has_input_circular_dependency: bool
     has_output_circular_dependency: bool
-
 
 def resolve_refs(schema, root=None, visited=None):
     """Recursively resolves $ref references in a JSON schema, handling circular references.
@@ -69,10 +67,9 @@ def resolve_refs(schema, root=None, visited=None):
 
     return schema, False
 
-
 def process_nullable_types(
-    schema: Dict[str, Any] | list[Any] | Any,
-) -> Dict[str, Any] | list[Any]:
+    schema: dict[str, Any] | list[Any] | Any,
+) -> dict[str, Any] | list[Any]:
     """Process the schema to handle nullable types by removing anyOf with null and keeping the base type."""
     if isinstance(schema, dict):
         if "anyOf" in schema and len(schema["anyOf"]) == 2:
@@ -87,7 +84,6 @@ def process_nullable_types(
     elif isinstance(schema, list):
         return [process_nullable_types(item) for item in schema]
     return schema
-
 
 def generate_schema_from_graph(
     graph: CompiledStateGraph[Any, Any, Any],

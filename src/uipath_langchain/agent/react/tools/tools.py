@@ -1,5 +1,6 @@
 """Control flow tools for agent execution."""
 
+from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -8,7 +9,6 @@ from uipath.agent.react import (
     END_EXECUTION_TOOL,
     RAISE_ERROR_TOOL,
 )
-
 
 def create_end_execution_tool(
     agent_output_schema: type[BaseModel] | None = None,
@@ -26,7 +26,6 @@ def create_end_execution_tool(
         coroutine=end_execution_fn,
     )
 
-
 def create_raise_error_tool() -> StructuredTool:
     """Never executed - routing intercepts and raises AgentTerminationException."""
 
@@ -40,10 +39,9 @@ def create_raise_error_tool() -> StructuredTool:
         coroutine=raise_error_fn,
     )
 
-
 def create_flow_control_tools(
     agent_output_schema: type[BaseModel] | None = None,
-) -> list[BaseTool]:
+) -> Sequence[BaseTool]:
     return [
         create_end_execution_tool(agent_output_schema),
         create_raise_error_tool(),

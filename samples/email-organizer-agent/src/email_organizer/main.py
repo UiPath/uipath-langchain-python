@@ -2,7 +2,7 @@ import logging
 import os
 import re
 from pydantic import BaseModel, Field
-from typing import List, Dict, Optional
+from typing import Any
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
 from uipath.platform import UiPath
@@ -31,9 +31,9 @@ class Email(BaseModel):
 class Rule(BaseModel):
     id: str = ""
     rule_name: str
-    conditions: Dict
+    conditions: dict
 
-    actions: Dict = {}
+    actions: dict = {}
     target_folder: str
     sequence: int = 1
     isEnabled: bool = True
@@ -41,19 +41,19 @@ class Rule(BaseModel):
 
 class llmRule(BaseModel):
     rule_name: str = Field(description="The unique identifier for the rule")
-    conditions: Dict = Field(default={}, description="Conditions must have this form {'predicate': ['value1', 'value2']}")
+    conditions: dict = Field(default={}, description="Conditions must have this form {'predicate': ['value1', 'value2']}")
     target_folder: str = Field(description="FolderName")
     reasoning: str = Field(description="Why this rule is useful")
     rule_type: str = Field(description="NEW or IMPROVED")
 
 class RuleSuggestions(BaseModel):
     """Container for multiple rule suggestions from LLM"""
-    rules: List[llmRule] = Field(description="List of email rule suggestions")
+    rules: list[llmRule] = Field(description="List of email rule suggestions")
 
 class GraphInput(BaseModel):
     max_emails: int
     max_rules: int
-    assignee: Optional[str] = None
+    assignee: str | None = None
 
 class GraphOutput(BaseModel):
     success: bool
@@ -62,17 +62,17 @@ class GraphOutput(BaseModel):
 
 class GraphState(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
-    emails: List[Email] = []
-    rules: List[Rule] = []
-    suggestions: List[Rule] = []
-    folders: Dict[str, str] = {} # folder name to ID mapping
+    emails: list[Email] = []
+    rules: list[Rule] = []
+    suggestions: list[Rule] = []
+    folders: dict[str, str] = {} # folder name to ID mapping
     access_token: str = ""
     human_approved: bool = False
-    outlook_client: Optional[OutlookClient] = None
+    outlook_client: OutlookClient | None = None
 
     max_emails: int = MAX_EMAILS_TO_ANALYZE  # From GraphInput
     max_rules: int = MAX_RULES_TO_CREATE     # From GraphInput
-    assignee: Optional[str] = None           # From GraphInput
+    assignee: str | None = None           # From GraphInput
 
 async def get_access_token(input_config: GraphInput) -> Command:
     """Get access token for Microsoft Graph API and initialize OutlookClient"""
@@ -243,7 +243,7 @@ async def fetch_rules(state: GraphState) -> Command:
             }
         )
 
-def _infer_conditions_from_rule(llm_rule: llmRule, emails: List[Email]) -> Dict:
+def _infer_conditions_from_rule(llm_rule: llmRule, emails: list[Email]) -> dict:
     """Infer rule conditions from rule name, reasoning, and email patterns"""
     conditions = {}
 
