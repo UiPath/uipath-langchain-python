@@ -64,9 +64,10 @@ async def get_graph_input(
     if not trigger:
         return Command(resume=input)
 
-    trigger_type, key, folder_path, folder_key, payload = trigger
+    trigger_type, key, name, folder_path, folder_key, payload = trigger
     resume_trigger = UiPathResumeTrigger(
         trigger_type=trigger_type,
+        trigger_name=name,
         item_key=key,
         folder_path=folder_path,
         folder_key=folder_key,
@@ -86,7 +87,7 @@ async def get_graph_input(
 async def _get_latest_trigger(
     memory: AsyncSqliteSaver,
     resume_triggers_table: str = "__uipath_resume_triggers",
-) -> Optional[tuple[str, str, str, str, str]]:
+) -> Optional[tuple[str, str, str, str, str, str]]:
     """
     Fetch the most recent resume trigger from the database.
 
@@ -125,7 +126,7 @@ async def _get_latest_trigger(
             memory.conn.cursor() as cur,
         ):
             await cur.execute(f"""
-                SELECT type, key, folder_path, folder_key, payload
+                SELECT type, key, name, folder_path, folder_key, payload
                 FROM {resume_triggers_table}
                 ORDER BY timestamp DESC
                 LIMIT 1
