@@ -19,7 +19,7 @@ The actual agent implementation (nodes, loops, execution logic) lives in the [`u
 
 ### Prerequisites
 
--   **uv** - Package and Python Manager ([install instructions](https://github.com/astral-sh/uv))
+-   **uv** - Package and Python Manager ([install instructions](https://docs.astral.sh/uv/getting-started/installation/))
     -   Python is automatically managed by `uv`
 
 ### Installation
@@ -99,7 +99,7 @@ For normal local development, only the `run` command is relevant, as the `debug`
 
 **Run**
 
-The basic command used to start or resume an agent execution in production mode (source code [cli_run.py](uipath-agents-python/src/uipath_agents/_cli/cli_run.py))
+The basic command used to start or resume an agent execution in production mode (source code [cli_run.py](src/uipath_agents/_cli/cli_run.py))
 
 ```bash
 # Start the agent.json from the current directory with inline args
@@ -128,10 +128,14 @@ The command used for runs started from Studio Web. It loads the `agent.json` and
 uv run uipath debug agent.json    '{}'
 ```
 
+**Dev**
+
+Currently work in progress. It's available for standard coded agents but not yet adapted for agents.
+
 ### Hints
 
 -   Take a look at the configurations in `./examples`\_
--   You can run any agent from any sub directory of `uipath-agents-uipath` as long as you have the three required files present.
+-   You can run any agent from any sub directory of `uipath-agents-python` as long as you have the three required files present.
 -   Remember to run `uv run uipath auth (--alpha)` if you get a 401 while executing the agent.
 -   You can also download the solution package from Studio Web and get the files from the `.agent-builder` directory or from an already published package.
 -   Do not confuse the `uipath debug` command with the `--debug` flag. The former is used for StudioWeb two-way communication for breakpoints, logs and so on and the latter waits for a debugger to be attached to the running process.
@@ -139,92 +143,3 @@ uv run uipath debug agent.json    '{}'
 ## Development Quickstart
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
-
-## Local Development with Editable Dependencies
-
-Most of the times when working on this repo, you'll also need to do some changes in `uipath-langchain-python` and/or `uipath-python`. In order to work with all 3 repositories, you'll need to configure them as `editable` dependencies.
-
-### Setup
-
-1. **Clone the dependency repositories** alongside this one ([related links](#related-projects)):
-
-    ```bash
-    cd ..
-    git clone <uipath-langchain-python-url>
-    git clone <uipath-python-url>
-
-    # Your directory structure should look like:
-    # .
-    # ├── uipath-python/
-    # ├── uipath-langchain-python/
-    # └── uipath-agents-python/
-    ```
-
-2. **Update `pyproject.toml`** in `uipath-agents.python` and add the following section:
-
-    ```toml
-    [tool.uv.sources]
-    uipath = { path = "../uipath-python", editable = true }
-    uipath-langchain = { path = "../uipath-langchain-python", editable = true }
-    ```
-
-3. **Sync dependencies** for `uipath-agents-python`:
-
-    ```bash
-    uv sync
-    ```
-
-4. **Update `pyproject.toml`** in `uipath-langchain-python` and add the following section:
-
-    ```toml
-    [tool.uv.sources]
-    uipath = { path = "../uipath-python", editable = true }
-    ```
-
-5. **Sync dependencies** for `uipath-langchain-python`:
-
-    ```bash
-    uv sync
-    ```
-
-6. **Go back to the agents repo**:
-
-    ```bash
-    cd ../uipath-agents-python
-    ```
-
-**IMPORTANT**: Do NOT commit the `editable` related changes to version control. This is for local development only. Using editable dependencies also updates the `uv.lock` files. If you need to update other dependencies in `pyproject.toml` files that also have `editable` dependencies, make sure to first revert the changes and do a clean `uv sync` to update the lockfile without the editable information and commit the changes before making them editable again.
-
-### Code Quality Tools
-
-#### Formatting & Linting (Ruff)
-
-```bash
-# Format code
-uv run ruff format .
-
-# Lint
-uv run ruff check .
-
-# Link and auto-fix issues
-uv run ruff check . --fix
-```
-
-#### Type Checking (mypy)
-
-```bash
-# Check entire codebase
-uv run mypy .
-
-# Check specific file
-uv run mypy src/uipath_agents/agent_graph_builder/graph.py
-```
-
-### Running Tests
-
-TBA
-
-## Related Projects
-
--   [uipath-python](https://github.com/UiPath/uipath-python) - Core UiPath Python SDK
--   [uipath-langchain-python](https://github.com/UiPath/uipath-langchain-python) - UiPath LangChain Integration SDK

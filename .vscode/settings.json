@@ -18,6 +18,7 @@
       "source.organizeImports": "explicit"
     }
   },
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
   "python.testing.pytestArgs": [
     "tests"
   ],

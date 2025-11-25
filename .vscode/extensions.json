@@ -1,0 +1,8 @@
+{
+  "recommendations": [
+    "ms-python.python", // intellisense
+    "charliermarsh.ruff", //  linting & formatting
+    "ms-python.debugpy", // debugging
+    "ms-python.mypy-type-checker" // type checking
+  ]
+}

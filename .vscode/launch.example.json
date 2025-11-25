@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Run UiPath Basic Agent",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/.venv/bin/uipath",
+      "args": [
+        "run",
+        "agent.json",
+        "'{}'"
+      ],
+      "cwd": "${workspaceFolder}/examples/basic",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Python: Run UiPath Basic Agent w/ Resume",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/.venv/bin/uipath",
+      "args": [
+        "run",
+        "agent.json",
+        "--resume"
+      ],
+      "cwd": "${workspaceFolder}/examples/basic",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}
