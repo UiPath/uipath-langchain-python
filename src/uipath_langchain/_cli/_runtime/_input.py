@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
@@ -87,7 +87,7 @@ async def get_graph_input(
 async def _get_latest_trigger(
     memory: AsyncSqliteSaver,
     resume_triggers_table: str = "__uipath_resume_triggers",
-) -> Optional[tuple[str, str, str, str, str, str]]:
+) -> tuple[str, str, str, str, str, str] | None:
     """
     Fetch the most recent resume trigger from the database.
 
@@ -134,7 +134,7 @@ async def _get_latest_trigger(
             result = await cur.fetchone()
             if result is None:
                 return None
-            return cast(tuple[str, str, str, str, str], tuple(result))
+            return cast(tuple[str, str, str, str, str, str], tuple(result))
     except Exception as e:
         raise LangGraphRuntimeError(
             LangGraphErrorCode.DB_QUERY_FAILED,

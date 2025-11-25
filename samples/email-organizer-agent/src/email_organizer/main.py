@@ -7,7 +7,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
 from uipath.platform import UiPath
 from uipath_langchain.chat import UiPathChat
-from uipath.platform.common import CreateAction
+from uipath.platform.common import CreateTask
 from email_organizer.outlook_client import OutlookClient
 from difflib import SequenceMatcher
 
@@ -492,7 +492,7 @@ async def wait_for_human_approval(state: GraphState) -> Command:
     logger.info("Displaying suggestions to user for approval...")
     logger.info(suggestions_text)
 
-    action_data = interrupt(CreateAction(
+    action_data = interrupt(CreateTask(
         app_name="escalation_agent_app",
         title="Email Rule Suggestions - Approval Required",
         data={

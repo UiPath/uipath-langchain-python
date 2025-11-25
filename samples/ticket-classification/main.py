@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from uipath.platform import UiPath
 
-from uipath.platform.common import CreateAction
+from uipath.platform.common import CreateTask
 logger = logging.getLogger(__name__)
 
 uipath = UiPath()
@@ -113,7 +113,7 @@ async def wait_for_human(state: GraphState) -> Command:
     ticket_message = state["messages"][1].content
     label = state["label"]
     confidence = state["confidence"]
-    action_data = interrupt(CreateAction(app_name="escalation_agent_app",
+    action_data = interrupt(CreateTask(app_name="escalation_agent_app",
                                          title="Action Required: Review classification",
                                          data={
                                              "AgentOutput": (

@@ -8,7 +8,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel
 from uipath.platform.actions import Action
-from uipath.platform.common import CreateAction, WaitAction
+from uipath.platform.common import CreateTask, WaitTask
 
 
 @dataclasses.dataclass
@@ -27,7 +27,7 @@ class Output:
 
 def create_action_node(input: Input) -> Command:
     response = interrupt(
-        CreateAction(
+        CreateTask(
             app_name="HITL APP",
             title="Action Required: Review classification",
             data={
@@ -49,7 +49,7 @@ def wait_action_node(state: GraphState) -> Output:
     print("Response from HITL action: {}".format(state.message))
 
     response = interrupt(
-        WaitAction(
+        WaitTask(
             action=Action(
                 key="1662478a-65b4-4a09-8e22-d707e5bd64f3",
                 data={"Question": "agent question from wait action"},
