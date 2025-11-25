@@ -1,14 +1,13 @@
 import logging
 import os
-import json
 import re
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
-from uipath import UiPath
+from uipath.platform import UiPath
 from uipath_langchain.chat import UiPathChat
-from uipath.models import CreateAction
+from uipath.platform.common import CreateAction
 from email_organizer.outlook_client import OutlookClient
 from difflib import SequenceMatcher
 
@@ -30,10 +29,10 @@ class Email(BaseModel):
     preview: str = ""
 
 class Rule(BaseModel):
-    id: str = "" 
+    id: str = ""
     rule_name: str
     conditions: Dict
-   
+
     actions: Dict = {}
     target_folder: str
     sequence: int = 1
@@ -70,7 +69,7 @@ class GraphState(BaseModel):
     access_token: str = ""
     human_approved: bool = False
     outlook_client: Optional[OutlookClient] = None
-    
+
     max_emails: int = MAX_EMAILS_TO_ANALYZE  # From GraphInput
     max_rules: int = MAX_RULES_TO_CREATE     # From GraphInput
     assignee: Optional[str] = None           # From GraphInput
@@ -81,7 +80,7 @@ async def get_access_token(input_config: GraphInput) -> Command:
         connection_key = os.getenv("OUTLOOK_CONNECTION_KEY")
         logger.info(f"Using Outlook connection key: {connection_key}")
 
-        connection_service = uipath.connections 
+        connection_service = uipath.connections
         token = await connection_service.retrieve_token_async(connection_key)
         access_token = token.access_token
 
@@ -90,8 +89,8 @@ async def get_access_token(input_config: GraphInput) -> Command:
             return Command(
                 update={
                     "output": GraphOutput(
-                        success=False, 
-                        rules_created=0, 
+                        success=False,
+                        rules_created=0,
                         message="Failed to obtain access token"
                     )
                 }
@@ -104,7 +103,7 @@ async def get_access_token(input_config: GraphInput) -> Command:
                     "access_token": access_token,
                     "outlook_client": outlook_client,
                     "max_emails": input_config.max_emails,    # Pass from input
-                    "max_rules": input_config.max_rules,      # Pass from input  
+                    "max_rules": input_config.max_rules,      # Pass from input
                     "assignee": input_config.assignee         # Pass from input
                 }
             )
@@ -113,24 +112,24 @@ async def get_access_token(input_config: GraphInput) -> Command:
         return Command(
             update={
                 "output": GraphOutput(
-                    success=False, 
-                    rules_created=0, 
+                    success=False,
+                    rules_created=0,
                     message=f"Error retrieving access token: {e}"
                 )
             }
         )
-    
+
 async def fetch_emails(state: GraphState) -> Command:
     """Fetch emails from inbox using OutlookClient"""
     try:
         if not state.outlook_client:
             raise Exception("OutlookClient not initialized")
-        
+
         max_emails = state.max_emails
         logger.info(f"Fetching {max_emails} emails from inbox...")
-        
+
         message_data = await state.outlook_client.get_messages(max_emails, "inbox")
-        
+
         emails = []
         for item in message_data:
             try:
@@ -146,13 +145,13 @@ async def fetch_emails(state: GraphState) -> Command:
                 continue
 
         logger.info(f"Fetched {len(emails)} emails from inbox")
-        
+
         return Command(
             update={
                 "emails": emails
             }
         )
-        
+
     except Exception as e:
         logger.error(f"Error fetching emails: {e}")
         return Command(
@@ -166,19 +165,19 @@ async def fetch_folders(state: GraphState) -> Command:
     try:
         if not state.outlook_client:
             raise Exception("OutlookClient not initialized")
-        
+
         logger.info("Fetching all available folders...")
         folders = await state.outlook_client.get_mail_folders(include_subfolders=True)
-        
+
         logger.info(f"Fetched {len(folders)} folders")
         logger.info(f"All available folders: {list(folders.keys())}")
-        
+
         return Command(
             update={
                 "folders": folders
             }
         )
-        
+
     except Exception as e:
         logger.error(f"Error fetching folders: {e}")
         return Command(
@@ -192,11 +191,11 @@ async def fetch_rules(state: GraphState) -> Command:
     try:
         if not state.outlook_client:
             raise Exception("OutlookClient not initialized")
-        
+
         logger.info("Fetching existing rules from Outlook...")
-        
+
         rules_data = await state.outlook_client.get_message_rules()
-        
+
         rules = []
         for item in rules_data:
             try:
@@ -212,7 +211,7 @@ async def fetch_rules(state: GraphState) -> Command:
                             break
                     if target_folder == "Unknown":
                         target_folder = f"Folder_ID_{folder_id[:8]}..."  # Show partial ID if name not found
-                
+
                 rule = Rule(
                     id=item.get("id", ""),
                     rule_name=item.get("displayName", "Unnamed Rule"),
@@ -229,13 +228,13 @@ async def fetch_rules(state: GraphState) -> Command:
                 continue
 
         logger.info(f"Fetched {len(rules)} existing rules from Outlook")
-        
+
         return Command(
             update={
                 "rules": rules
             }
         )
-        
+
     except Exception as e:
         logger.error(f"Error fetching rules: {e}")
         return Command(
@@ -249,10 +248,10 @@ def _infer_conditions_from_rule(llm_rule: llmRule, emails: List[Email]) -> Dict:
     conditions = {}
 
     rule_text = f"{llm_rule.rule_name} {llm_rule.reasoning}".lower()
-    
+
     email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
     emails_mentioned = re.findall(email_pattern, llm_rule.reasoning, re.IGNORECASE)
-    
+
     if emails_mentioned:
         conditions['senderContains'] = emails_mentioned
     else:
@@ -271,22 +270,22 @@ def _infer_conditions_from_rule(llm_rule: llmRule, emails: List[Email]) -> Dict:
             # Fallback: analyze actual emails to find patterns
             target_folder = llm_rule.target_folder.lower()
             sender_patterns = []
-            
+
             for email in emails:
                 if any(keyword in email.sender.lower() for keyword in target_folder.split()):
                     sender_patterns.append(email.sender.split('@')[-1] if '@' in email.sender else email.sender)
-            
+
             if sender_patterns:
                 # Take most common domain
                 from collections import Counter
                 most_common = Counter(sender_patterns).most_common(1)
                 if most_common:
                     conditions['senderContains'] = [most_common[0][0]]
-    
+
     # If no conditions found, provide a generic fallback
     if not conditions:
         conditions = {'senderContains': [llm_rule.target_folder.lower()]}
-    
+
     return conditions
 
 async def llm_node(state: GraphState) -> Command:
@@ -299,7 +298,7 @@ async def llm_node(state: GraphState) -> Command:
             content += f"{idx}. Subject: {email.subject}\n"
             content += f"   From: {email.sender}\n"
             content += f"   Preview: {email.preview}...\n\n"
-        
+
         existing_rules_content = ""
         if state.rules:
             existing_rules_content = "EXISTING RULES:\n"
@@ -310,7 +309,7 @@ async def llm_node(state: GraphState) -> Command:
                 existing_rules_content += f"   Target Folder: {rule.target_folder}\n\n"
         else:
             existing_rules_content = "EXISTING RULES: None found\n"
-            
+
         max_rules = state.max_rules
         prompt = f"""
 You are an email organization expert. Analyze the provided emails and create practical Outlook rules for automatic email organization.
@@ -371,10 +370,10 @@ Analyze the email patterns and create the most valuable organizational rules.
 
         structured_llm = llm.with_structured_output(RuleSuggestions)
         response = await structured_llm.ainvoke(prompt)
-        print(f"LLM raw response: {response}")  
+        print(f"LLM raw response: {response}")
 
         suggestions = []
-        
+
         if hasattr(response, 'rules'):
             rules_list = response.rules
         elif isinstance(response, dict) and 'rules' in response:
@@ -398,11 +397,11 @@ Analyze the email patterns and create the most valuable organizational rules.
                 except Exception as e:
                     logger.warning(f"Failed to create llmRule from dict {rule_dict}: {e}")
                     continue
-            
+
             conditions = llm_rule.conditions
             if not conditions:
                 conditions = _infer_conditions_from_rule(llm_rule, state.emails)
-            
+
             rule_suggestion = Rule(
                 rule_name=llm_rule.rule_name,
                 conditions=conditions,
@@ -428,8 +427,8 @@ Analyze the email patterns and create the most valuable organizational rules.
             update={
                 "output": GraphOutput(success=False, rules_created=0, message=f"Error generating suggestions: {e}")
             }
-        )   
- 
+        )
+
 async def wait_for_human_approval(state: GraphState) -> Command:
     """Wait for human approval before proceeding with rule creation"""
 
@@ -437,12 +436,12 @@ async def wait_for_human_approval(state: GraphState) -> Command:
     suggestions_text = "\n" + "="*60 + "\n"
     suggestions_text += "EMAIL RULE SUGGESTIONS\n"
     suggestions_text += "="*60 + "\n"
-    
+
     for idx, suggestion in enumerate(state.suggestions, 1):
         suggestions_text += f"\n{idx}.{suggestion.rule_type} Rule: {suggestion.rule_name}\n"
         suggestions_text += f"  Target Folder: {suggestion.target_folder}\n"
         suggestions_text += "  Conditions:\n"
-        
+
         for condition, values in suggestion.conditions.items():
             if isinstance(values, list):
                 suggestions_text += f"   - {condition}: {', '.join(values)}\n"
@@ -458,7 +457,7 @@ async def wait_for_human_approval(state: GraphState) -> Command:
     # Add summary
     new_rules = len([r for r in state.suggestions if r.rule_type == "NEW"])
     improved_rules = len([r for r in state.suggestions if r.rule_type == "IMPROVED"])
-    
+
     # Get unique target folders that don't exist yet
     suggested_folders = set(r.target_folder for r in state.suggestions if r.rule_type == "NEW")
     existing_folders = set(state.folders.keys())
@@ -477,12 +476,12 @@ async def wait_for_human_approval(state: GraphState) -> Command:
         suggestions_text += f"\nFOLDERS TO BE CREATED ({len(new_folders_needed)}):\n"
         for folder in sorted(new_folders_needed):
             suggestions_text += f"   • {folder}\n"
-    
+
     if existing_folders_used:
         suggestions_text += f"\nEXISTING FOLDERS TO BE USED ({len(existing_folders_used)}):\n"
         for folder in sorted(existing_folders_used):
             suggestions_text += f"   • {folder}\n"
-    
+
 
     suggestions_text += "="*60 + "\n"
     suggestions_text += "\n Do you want to proceed with creating these rules?\n"
@@ -494,7 +493,7 @@ async def wait_for_human_approval(state: GraphState) -> Command:
     logger.info(suggestions_text)
 
     action_data = interrupt(CreateAction(
-        app_name="escalation_agent_app", 
+        app_name="escalation_agent_app",
         title="Email Rule Suggestions - Approval Required",
         data={
             "AgentOutput": suggestions_text,
@@ -534,26 +533,26 @@ async def create_rules(state: GraphState) -> Command:
     try:
         if not state.outlook_client:
             raise Exception("OutlookClient not initialized")
-        
+
         created_folders = {}
         rules_created = 0
         rules_updated = 0
         errors = []
-        
+
         logger.info(f"Starting to process {len(state.suggestions)} rule suggestions")
-        
+
         # Refresh folder list to get current state
         logger.info("Refreshing folder list...")
         current_folders = await state.outlook_client.get_mail_folders()
         state.folders.update(current_folders)
-        
+
         # Create a lookup for existing rules by name
         existing_rules = [rule for rule in state.rules if rule.rule_type == "EXISTING"]
 
         # Process each rule suggestion
         for idx, suggestion in enumerate(state.suggestions, 1):
             logger.info(f"Processing rule {idx}/{len(state.suggestions)}: {suggestion.rule_name} ({suggestion.rule_type})")
-            
+
             try:
                 if suggestion.rule_type == "IMPROVED":
                     # Try to match by name first
@@ -601,7 +600,7 @@ async def create_rules(state: GraphState) -> Command:
                     # Handle NEW rule - create folder if needed, then create rule
                     folder_name = suggestion.target_folder
                     folder_id = None
-                    
+
                     # Check if folder exists
                     if folder_name in state.folders:
                         folder_id = state.folders[folder_name]
@@ -613,7 +612,7 @@ async def create_rules(state: GraphState) -> Command:
                         # Create new folder
                         logger.info(f"Creating new folder: {folder_name}")
                         folder_id = await state.outlook_client.create_folder(folder_name)
-                        
+
                         if folder_id:
                             created_folders[folder_name] = folder_id
                             state.folders[folder_name] = folder_id
@@ -621,11 +620,11 @@ async def create_rules(state: GraphState) -> Command:
                         else:
                             errors.append(f"Failed to create folder {folder_name}")
                             continue
-                    
+
                     if not folder_id:
                         errors.append(f"No folder ID found for {folder_name}")
                         continue
-                    
+
                     # Create the new rule
                     rule_data = {
                         "displayName": suggestion.rule_name,
@@ -637,29 +636,29 @@ async def create_rules(state: GraphState) -> Command:
                             "stopProcessingRules": False
                         }
                     }
-                    
+
                     logger.info(f"Creating new rule: {suggestion.rule_name} -> {folder_name}")
                     rule_id = await state.outlook_client.create_message_rule(rule_data)
-                    
+
                     if rule_id:
                         rules_created += 1
                         logger.info(f"Created rule: {suggestion.rule_name}")
                     else:
                         errors.append(f"Failed to create rule {suggestion.rule_name}")
-                
+
                 else:
                     logger.warning(f"Unknown rule type '{suggestion.rule_type}' for rule {suggestion.rule_name}")
                     errors.append(f"Unknown rule type '{suggestion.rule_type}' for rule {suggestion.rule_name}")
-                
+
                 # Rate limiting to avoid API throttling
                 import asyncio
                 await asyncio.sleep(0.5)
-                
+
             except Exception as e:
                 logger.error(f"Error processing rule {suggestion.rule_name}: {e}")
                 errors.append(f"Error processing rule {suggestion.rule_name}: {str(e)}")
                 continue
-        
+
         # Log final summary
         logger.info(f"FINAL SUMMARY:")
         logger.info(f"   • Created {len(created_folders)} new folders")
@@ -670,10 +669,10 @@ async def create_rules(state: GraphState) -> Command:
             logger.error(f"   • Errors encountered: {len(errors)}")
             for error in errors:
                 logger.error(f"     - {error}")
-        
+
         success = (rules_created + rules_updated) > 0
         total_rules = rules_created + rules_updated
-        
+
         return Command(
             update={
                 "output": GraphOutput(
@@ -683,14 +682,14 @@ async def create_rules(state: GraphState) -> Command:
                 )
             }
         )
-        
+
     except Exception as e:
         logger.error(f"Error in create_folders_and_rules: {e}")
         return Command(
             update={
                 "output": GraphOutput(
-                    success=False, 
-                    rules_created=0, 
+                    success=False,
+                    rules_created=0,
                     message=f"Error creating/updating rules: {e}"
                 )
             }
@@ -699,35 +698,35 @@ async def create_rules(state: GraphState) -> Command:
 def build_graph() -> StateGraph:
     """Build and compile the email organization graph."""
     builder = StateGraph(GraphState, input=GraphInput, output=GraphOutput)
-    
+
     # Add nodes
     builder.add_node("get_token", get_access_token)
-    builder.add_node("fetch_emails", fetch_emails)      
+    builder.add_node("fetch_emails", fetch_emails)
     builder.add_node("fetch_folders", fetch_folders)
-    builder.add_node("fetch_rules", fetch_rules)        
-    builder.add_node("llm_analysis", llm_node)          
+    builder.add_node("fetch_rules", fetch_rules)
+    builder.add_node("llm_analysis", llm_node)
     builder.add_node("wait_for_approval", wait_for_human_approval)
     builder.add_node("create_rules", create_rules)
-    
+
     # Add edges
     builder.add_edge(START, "get_token")
     builder.add_edge("get_token", "fetch_emails")
-    builder.add_edge("fetch_emails", "fetch_folders") 
-    builder.add_edge("fetch_folders", "fetch_rules")    
-    builder.add_edge("fetch_rules", "llm_analysis")     
-    builder.add_edge("llm_analysis", "wait_for_approval")    
+    builder.add_edge("fetch_emails", "fetch_folders")
+    builder.add_edge("fetch_folders", "fetch_rules")
+    builder.add_edge("fetch_rules", "llm_analysis")
+    builder.add_edge("llm_analysis", "wait_for_approval")
     def should_create_rules(state: GraphState) -> str:
         return "create_rules" if state.human_approved else "END"
     builder.add_conditional_edges(
-        "wait_for_approval", 
+        "wait_for_approval",
         should_create_rules,
         {"create_rules": "create_rules", "END": END}
     )
     builder.add_edge("create_rules", END)
-    
+
     from langgraph.checkpoint.memory import MemorySaver
     checkpointer = MemorySaver()
-    
+
     return builder.compile(checkpointer=checkpointer, interrupt_before=["wait_for_approval"])
 
 graph = build_graph()

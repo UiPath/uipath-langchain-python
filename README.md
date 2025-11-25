@@ -13,7 +13,7 @@ Check out these [sample projects](https://github.com/UiPath/uipath-langchain-pyt
 
 ## Requirements
 
--   Python 3.10 or higher
+-   Python 3.11 or higher
 -   UiPath Automation Cloud account
 
 ## Installation

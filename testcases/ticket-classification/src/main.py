@@ -11,8 +11,8 @@ from langgraph.graph import END, START, StateGraph, MessagesState
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 
-from uipath import UiPath
-from uipath.models import CreateAction
+from uipath.platform import UiPath
+from uipath.platform.common import CreateAction
 from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
 
 # Configuration
@@ -173,9 +173,9 @@ async def wait_for_human(state: GraphState) -> Command:
     label = state["label"]
     confidence = state["confidence"]
     is_resume = state.get("human_approval") is not None
-    
-    
-    
+
+
+
     if not is_resume:
         logger.info("Waiting for human approval via regular interrupt")
     interrupt_message = (
@@ -184,7 +184,7 @@ async def wait_for_human(state: GraphState) -> Command:
     )
     action_data = interrupt(interrupt_message)
     human_approved = bool(action_data)
-   
+
     return Command(
         update={
             "human_approval": human_approved,
@@ -200,20 +200,20 @@ async def notify_team(state: GraphState) -> GraphOutput:
 def build_graph() -> StateGraph:
     """Build and compile the ticket classification graph."""
     builder = StateGraph(GraphState, input=GraphInput, output=GraphOutput)
-    
+
     # Add nodes
     builder.add_node("prepare_input", prepare_input)
     builder.add_node("classify", classify)
     builder.add_node("human_approval_node", wait_for_human)
     builder.add_node("notify_team", notify_team)
-    
+
     # Add edges
     builder.add_edge(START, "prepare_input")
     builder.add_edge("prepare_input", "classify")
     builder.add_edge("classify", "human_approval_node")
     builder.add_conditional_edges("human_approval_node", decide_next_node)
     builder.add_edge("notify_team", END)
-    
+
     # Compile with memory checkpointer
     memory = MemorySaver()
     return builder.compile(checkpointer=memory)

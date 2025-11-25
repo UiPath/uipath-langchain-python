@@ -316,7 +316,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.1" },
     { name = "uipath", specifier = ">=2.1.172,<2.2.0" },
-    { name = "uipath-langchain", specifier = ">=0.0.155,<0.1.0" },
+    { name = "uipath-langchain", specifier = "==0.0.156.dev1002741025", index = "https://test.pypi.org/simple/" },
 ]
 provides-extras = ["dev"]
 
@@ -2287,8 +2287,8 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.0.155"
-source = { registry = "https://pypi.org/simple" }
+version = "0.0.156.dev1002741025"
+source = { registry = "https://test.pypi.org/simple/" }
 dependencies = [
     { name = "httpx" },
     { name = "jsonschema-pydantic" },
@@ -2304,9 +2304,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "uipath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a4/e7/1572cf4b5dbac0d2240a4b3d0ff30326a5caf9b07a713c7980aee6b24e52/uipath_langchain-0.0.155.tar.gz", hash = "sha256:71a4f0ce6326cb2fbe0088244fccd007b96ce12aaac71c5b9fb8cfb8ec2dfbda", size = 7271805, upload-time = "2025-11-18T16:23:04.374Z" }
+sdist = { url = "https://test-files.pythonhosted.org/packages/7c/ac/613d44df794876874c319de597502353992f4e1199380c847ef22f1eeead/uipath_langchain-0.0.156.dev1002741025.tar.gz", hash = "sha256:9620c997679254730c445a27a5e8c093887e90b1dbe0f39c3e0ba4bb5880d2e9", size = 7273971, upload-time = "2025-11-18T16:38:09.802Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/5c/ac2eb4c84450b34aa9f374795158222e2e43f396c5325b8ee4cad94bbc30/uipath_langchain-0.0.155-py3-none-any.whl", hash = "sha256:084203cdb10fb5a869309dc6432154a1ef97e1188e1d7e4d8cc496f89efb5aa9", size = 62513, upload-time = "2025-11-18T16:23:02.982Z" },
+    { url = "https://test-files.pythonhosted.org/packages/cd/b4/01323211ee67342cbcda106f8bd7ae94d11d79112f0768a985bad598de96/uipath_langchain-0.0.156.dev1002741025-py3-none-any.whl", hash = "sha256:717b2f2c3861c76e7a81358b5ed61ea33e96522504e489301254176f6011a1a6", size = 62681, upload-time = "2025-11-18T16:38:08.544Z" },
 ]
 
 [[package]]

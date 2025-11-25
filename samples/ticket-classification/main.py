@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Literal, Optional, List
+from typing import Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
@@ -9,9 +9,9 @@ from langgraph.graph import START, END, StateGraph, MessagesState
 from langgraph.types import interrupt, Command
 from pydantic import BaseModel, Field
 
-from uipath import UiPath
+from uipath.platform import UiPath
 
-from uipath.models import CreateAction
+from uipath.platform.common import CreateAction
 logger = logging.getLogger(__name__)
 
 uipath = UiPath()

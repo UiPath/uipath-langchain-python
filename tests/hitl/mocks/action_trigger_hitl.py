@@ -7,7 +7,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel
-from uipath.models import Action, CreateAction, WaitAction
+from uipath.platform.actions import Action
+from uipath.platform.common import CreateAction, WaitAction
 
 
 @dataclasses.dataclass
@@ -58,7 +59,7 @@ def wait_action_node(state: GraphState) -> Output:
     return Output(message=response["Answer"])
 
 
-builder = StateGraph(GraphState, input=Input, output=Output)
+builder = StateGraph(GraphState, input_schema=Input, output_schema=Output)
 
 builder.add_node("create_action_node", create_action_node)
 builder.add_node("wait_action_node", wait_action_node)

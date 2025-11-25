@@ -2,9 +2,9 @@ import os
 from typing import Union
 
 from langchain_community.tools import DuckDuckGoSearchResults
-from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_tavily import TavilySearch
 from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from pydantic import BaseModel
 
 from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
@@ -15,10 +15,10 @@ DEFAULT_MODEL = "gpt-4o-2024-08-06"
 ALTERNATIVE_MODEL = "claude-3-5-sonnet-latest"
 
 
-def get_search_tool() -> Union[TavilySearchResults, DuckDuckGoSearchResults]:
+def get_search_tool() -> Union[TavilySearch, DuckDuckGoSearchResults]:
     """Get the appropriate search tool based on available API keys."""
     if os.getenv("TAVILY_API_KEY"):
-        return TavilySearchResults(max_results=MAX_SEARCH_RESULTS)
+        return TavilySearch(max_results=MAX_SEARCH_RESULTS)
     return DuckDuckGoSearchResults()
 
 
@@ -58,7 +58,7 @@ def create_research_agent():
     """Create the research agent with configured LLM and tools."""
     llm = create_llm()
     search_tool = get_search_tool()
-    return create_react_agent(llm, tools=[search_tool], prompt=SYSTEM_PROMPT)
+    return create_agent(llm, tools=[search_tool], prompt=SYSTEM_PROMPT)
 
 
 class GraphState(BaseModel):

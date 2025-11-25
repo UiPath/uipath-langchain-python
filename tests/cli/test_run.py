@@ -3,8 +3,9 @@ import os
 import tempfile
 
 import pytest
+from uipath.runtime import UiPathRuntimeContext
 
-from uipath_langchain._cli.cli_run import langgraph_run_middleware
+from uipath_langchain.runtime import register_runtime_factory
 
 
 @pytest.fixture
@@ -41,7 +42,8 @@ def langgraph_json() -> str:
 
 
 class TestRun:
-    def test_successful_execution(
+    @pytest.mark.asyncio
+    async def test_successful_execution(
         self,
         langgraph_json: str,
         uipath_json: str,
@@ -54,42 +56,75 @@ class TestRun:
         output_file_name = "output.json"
         agent_file_name = "main.py"
         input_json_content = {"topic": "UiPath"}
+
+        register_runtime_factory()
+
         with tempfile.TemporaryDirectory() as temp_dir:
             current_dir = os.getcwd()
             os.chdir(temp_dir)
-            # Create input and output files
-            input_file_path = os.path.join(temp_dir, input_file_name)
-            output_file_path = os.path.join(temp_dir, output_file_name)
 
-            with open(input_file_path, "w") as f:
-                f.write(json.dumps(input_json_content))
+            try:
+                # Create input and output files
+                input_file_path = os.path.join(temp_dir, input_file_name)
+                output_file_path = os.path.join(temp_dir, output_file_name)
 
-            # Create test script
-            script_file_path = os.path.join(temp_dir, agent_file_name)
-            with open(script_file_path, "w") as f:
-                f.write(simple_agent)
+                with open(input_file_path, "w") as f:
+                    f.write(json.dumps(input_json_content))
 
-            # create uipath.json
-            uipath_json_file_path = os.path.join(temp_dir, "uipath.json")
-            with open(uipath_json_file_path, "w") as f:
-                f.write(uipath_json)
+                # Create test script
+                script_file_path = os.path.join(temp_dir, agent_file_name)
+                with open(script_file_path, "w") as f:
+                    f.write(simple_agent)
 
-            # Create langgraph.json
-            langgraph_json_file_path = os.path.join(temp_dir, "langgraph.json")
-            with open(langgraph_json_file_path, "w") as f:
-                f.write(langgraph_json)
+                # create uipath.json
+                uipath_json_file_path = os.path.join(temp_dir, "uipath.json")
+                with open(uipath_json_file_path, "w") as f:
+                    f.write(uipath_json)
 
-            result = langgraph_run_middleware(
-                entrypoint="agent",
-                input=None,
-                resume=False,
-                input_file=input_file_path,
-                execution_output_file=output_file_path,
-            )
-            assert result.should_continue is False
-            assert os.path.exists(output_file_path)
-            with open(output_file_path, "r") as f:
-                output = f.read()
-                assert "This is mock report for" in output
+                # Create langgraph.json
+                langgraph_json_file_path = os.path.join(temp_dir, "langgraph.json")
+                with open(langgraph_json_file_path, "w") as f:
+                    f.write(langgraph_json)
 
-            os.chdir(current_dir)
+                # Create runtime context
+                context = UiPathRuntimeContext.with_defaults(
+                    entrypoint="agent",
+                    input=None,
+                    input_file=input_file_path,
+                    output_file=output_file_path,
+                )
+
+                # Get factory from registry (will auto-detect langgraph.json)
+                from uipath.runtime import UiPathRuntimeFactoryRegistry
+
+                factory = UiPathRuntimeFactoryRegistry.get(
+                    search_path=temp_dir, context=context
+                )
+
+                # Create runtime
+                runtime = await factory.new_runtime(
+                    entrypoint="agent", runtime_id="test-runtime"
+                )
+
+                # Execute
+                from uipath.runtime import UiPathExecuteOptions
+
+                with context:
+                    context.result = await runtime.execute(
+                        input=input_json_content,
+                        options=UiPathExecuteOptions(resume=False),
+                    )
+
+                # Verify results
+                assert context.result is not None
+                assert os.path.exists(output_file_path)
+                with open(output_file_path, "r") as f:
+                    output = f.read()
+                    assert "This is mock report for" in output
+
+                # Cleanup
+                await runtime.dispose()
+                await factory.dispose()
+
+            finally:
+                os.chdir(current_dir)

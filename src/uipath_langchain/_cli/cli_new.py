@@ -31,7 +31,7 @@ version = "0.0.1"
 description = "{project_name}"
 authors = [{{ name = "John Doe", email = "john.doe@myemail.com" }}]
 dependencies = [
-    "uipath-langchain>=0.0.158",
+    "uipath-langchain>=0.1.0",
 ]
 requires-python = ">=3.11"
 """

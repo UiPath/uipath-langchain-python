@@ -3,14 +3,14 @@ from typing import Any, Optional, cast
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
-from uipath._cli._runtime._contracts import (
+from uipath._cli._runtime._hitl import HitlReader
+from uipath.runtime import (
     UiPathApiTrigger,
-    UiPathErrorCategory,
+    UiPathExecuteOptions,
     UiPathResumeTrigger,
     UiPathResumeTriggerType,
-    UiPathRuntimeContext,
 )
-from uipath._cli._runtime._hitl import HitlReader
+from uipath.runtime.errors import UiPathErrorCategory
 
 from ._conversation import uipath_to_human_messages
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 async def get_graph_input(
-    context: UiPathRuntimeContext,
+    input: dict[str, Any] | None,
+    options: UiPathExecuteOptions | None,
     memory: AsyncSqliteSaver,
     resume_triggers_table: str = "__uipath_resume_triggers",
 ) -> Any:
@@ -49,24 +50,22 @@ async def get_graph_input(
         LangGraphRuntimeError: If there's an error fetching trigger data from the database
             during resume processing.
     """
-    logger.debug(f"Resumed: {context.resume} Input: {context.input_json}")
-
     # Fresh execution - return input directly
-    if not context.resume:
-        if context.input_message:
-            return {"messages": uipath_to_human_messages(context.input_message)}
-        return context.input_json
+    if not options or not options.resume:
+        if input and "messages" in input:
+            return {"messages": uipath_to_human_messages(input["messages"])}
+        return input
 
     # Resume with explicit input provided
-    if context.input_json:
-        return Command(resume=context.input_json)
+    if input:
+        return Command(resume=input)
 
     # Resume from database trigger
     trigger = await _get_latest_trigger(
         memory, resume_triggers_table=resume_triggers_table
     )
     if not trigger:
-        return Command(resume=context.input_json)
+        return Command(resume=input)
 
     trigger_type, key, folder_path, folder_key, payload = trigger
     resume_trigger = UiPathResumeTrigger(

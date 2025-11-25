@@ -4,8 +4,9 @@ from enum import Enum
 from typing import Any
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathResumeTrigger
 from uipath._cli._runtime._hitl import HitlProcessor
+from uipath.runtime import UiPathResumeTrigger
+from uipath.runtime.errors import UiPathErrorCategory
 
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 

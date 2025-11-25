@@ -6,7 +6,7 @@ from uipath.agent.models.agent import (
     AgentIntegrationToolProperties,
     AgentIntegrationToolResourceConfig,
 )
-from uipath.models import ActivityParameterLocationInfo, Connection
+from uipath.platform.connections import ActivityParameterLocationInfo, Connection
 
 from uipath_langchain.agent.tools.integration_tool import (
     convert_to_activity_metadata,

@@ -9,7 +9,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.types import interrupt
 from pydantic import BaseModel
 from uipath.agent.models.agent import AgentProcessToolResourceConfig
-from uipath.models import InvokeProcess
+from uipath.platform.common import InvokeProcess
 
 from .utils import sanitize_tool_name
 

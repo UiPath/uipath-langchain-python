@@ -7,9 +7,9 @@ from typing import Any, Dict, Type
 from jsonschema_pydantic import jsonschema_to_pydantic  # type: ignore[import-untyped]
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
-from uipath import UiPath
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
-from uipath.models import ActivityMetadata, ActivityParameterLocationInfo
+from uipath.platform import UiPath
+from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
 
 from .utils import sanitize_tool_name
 

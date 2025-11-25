@@ -6,7 +6,7 @@ from langchain_core.callbacks import (
 )
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
-from uipath import UiPath
+from uipath.platform import UiPath
 
 
 class ContextGroundingRetriever(BaseRetriever):

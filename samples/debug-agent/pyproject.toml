@@ -5,7 +5,7 @@ description = "Debug Agent"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "uipath-langchain>=0.0.155, <0.1.0",
+    "uipath-langchain==0.0.156.dev1002741025",
     "uipath>=2.1.172, <2.2.0",
 ]
 
@@ -42,3 +42,12 @@ lint.ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "UP"]
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+
+[tool.uv.sources]
+uipath-langchain = { index = "testpypi" }
