@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, Sequence, cast
+from typing import Any, Callable, Literal, Optional, Sequence, cast
 
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
@@ -8,7 +8,9 @@ from uipath.agent.models.agent import AgentGuardrail
 from uipath.models.guardrails import GuardrailScope
 
 from .guardrail_nodes import (
+    ActionEnforcementNode,
     GuardrailAction,
+    ActionInlineEnforcement,
     create_agent_guardrail_node,
     create_llm_guardrail_node,
     create_tool_guardrail_node,
@@ -17,14 +19,13 @@ from .types import AgentGraphState
 
 
 def create_guardrails_subgraph(
-    inner: tuple[str, Any],
+    main_inner_node: tuple[str, Any],
     guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None,
+    scope: GuardrailScope,
     node_factory: Callable[
-        [AgentGuardrail, Literal["before", "after"], GuardrailAction],
-        tuple[str, Callable] | None,
+        [AgentGuardrail, Literal["PreExecution", "PostExecution"], Optional[ActionInlineEnforcement]],
+        tuple[str, Callable],
     ] = create_llm_guardrail_node,
-    guardrail_filter: Callable[[AgentGuardrail], bool]
-    | None = lambda gr: GuardrailScope.LLM in gr.selector.scopes,
 ) -> Any:
     """Wrap a named inner runnable in a subgraph with before/after guardrail nodes.
 
@@ -32,45 +33,53 @@ def create_guardrails_subgraph(
     tuples. Inline actions execute within the guardrail nodes; node-producing actions are linked
     immediately after their corresponding guardrail nodes.
     """
-    inner_name, inner_node = inner
+    inner_name, inner_node = main_inner_node
     before_chain: list[tuple[str, Callable]] = []
     after_chain: list[tuple[str, Callable]] = []
-    predicate = guardrail_filter or (lambda gr: True)
-    pairs: list[tuple[AgentGuardrail, GuardrailAction]] = (
-        [(gr, act) for gr, act in guardrails if predicate(gr)] if guardrails else []
-    )
 
-    for gr, resolved_action in pairs:
-        created = node_factory(gr, "before", resolved_action)
-        if created is not None:
-            before_chain.append(created)
-        # If action returns a node, link it right after the guardrail node
-        act = resolved_action.apply(
-            guardrail=gr,
-            scope=gr.selector.scopes[0] if gr.selector.scopes else GuardrailScope.LLM,
-            hook_type="before",
-            payload_generator=lambda state: "",  # not used for linking decision
+    for guardrail, action in guardrails or []:
+        action_enforcement_node: Optional[ActionEnforcementNode] = None
+        inline_action_to_enforce = None
+        action_enforcement_outcome = action.enforcement_outcome(
+            guardrail=guardrail,
+            scope=scope,
+            hook_type="PreExecution",
         )
-        if isinstance(act, tuple):
-            before_chain.append(cast(tuple[str, Callable], act))
-    for gr, resolved_action in pairs:
-        created = node_factory(gr, "after", resolved_action)
-        if created is not None:
-            after_chain.append(created)
-        act = resolved_action.apply(
-            guardrail=gr,
-            scope=gr.selector.scopes[0] if gr.selector.scopes else GuardrailScope.LLM,
-            hook_type="after",
-            payload_generator=lambda state: "",
+        if isinstance(action_enforcement_outcome, ActionEnforcementNode):
+            action_enforcement_node = action_enforcement_outcome
+        else:
+            inline_action_to_enforce = cast(ActionInlineEnforcement, action_enforcement_outcome)
+
+        guardrail_evaluation_node = node_factory(guardrail, "PreExecution", inline_action_to_enforce)
+        if guardrail_evaluation_node is not None:
+            before_chain.append(guardrail_evaluation_node)
+        if action_enforcement_node is not None:
+            before_chain.append(action_enforcement_outcome)
+
+    for guardrail, action in guardrails or []:
+        inline_action_to_enforce = None
+        action_enforcement_node = None
+        action_enforcement_outcome = action.enforcement_outcome(
+            guardrail=guardrail,
+            scope=scope,
+            hook_type="PostExecution",
         )
-        if isinstance(act, tuple):
-            after_chain.append(cast(tuple[str, Callable], act))
+        if isinstance(action_enforcement_outcome, ActionEnforcementNode):
+            action_enforcement_node = action_enforcement_outcome
+        else:
+            inline_action_to_enforce = cast(ActionInlineEnforcement, action_enforcement_outcome)
+
+        guardrail_evaluation_node = node_factory(guardrail, "PostExecution", inline_action_to_enforce)
+        if guardrail_evaluation_node is not None:
+            after_chain.append(guardrail_evaluation_node)
+        if action_enforcement_node is not None:
+            after_chain.append(action_enforcement_outcome)
 
     subgraph = StateGraph(AgentGraphState)
-    for node_name, node_callable in before_chain:
-        subgraph.add_node(node_name, node_callable)
-    for node_name, node_callable in after_chain:
-        subgraph.add_node(node_name, node_callable)
+    for node_name, before_node in before_chain:
+        subgraph.add_node(node_name, before_node)
+    for node_name, after_node in after_chain:
+        subgraph.add_node(node_name, after_node)
     subgraph.add_node(inner_name, inner_node)
 
     before_names = [name for name, _ in before_chain]
@@ -95,36 +104,53 @@ def create_guardrails_subgraph(
 
 
 def create_llm_guardrails_subgraph(
-    inner: tuple[str, Any],
+    llm_node: tuple[str, Any],
     guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None,
 ) -> Any:
+    applicable_guardrails = [
+        (guardrail, _)
+        for (guardrail, _) in (guardrails or [])
+        if GuardrailScope.LLM in guardrail.selector.scopes
+    ]
     return create_guardrails_subgraph(
-        inner=inner,
-        guardrails=guardrails,
-        node_factory=create_llm_guardrail_node,  # type: ignore[arg-type]
-        guardrail_filter=lambda gr: GuardrailScope.LLM in gr.selector.scopes,
+        main_inner_node=llm_node,
+        guardrails=applicable_guardrails,
+        scope=GuardrailScope.LLM,
+        node_factory=create_llm_guardrail_node,
     )
 
 
 def create_agent_guardrails_subgraph(
-    inner: tuple[str, Any],
+    agent_node: tuple[str, Any],
     guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None,
 ) -> Any:
+    applicable_guardrails = [
+        (guardrail, _)
+        for (guardrail, _) in (guardrails or [])
+        if GuardrailScope.AGENT in guardrail.selector.scopes
+    ]
     return create_guardrails_subgraph(
-        inner=inner,
-        guardrails=guardrails,
-        node_factory=create_agent_guardrail_node,  # type: ignore[arg-type]
-        guardrail_filter=lambda gr: GuardrailScope.AGENT in gr.selector.scopes,
+        main_inner_node=agent_node,
+        guardrails=applicable_guardrails,
+        scope=GuardrailScope.AGENT,
+        node_factory=create_agent_guardrail_node,
     )
 
 
 def create_tool_guardrails_subgraph(
-    inner: tuple[str, Any],
+    tool_node: tuple[str, Any],
     guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None,
 ) -> Any:
+    tool_name, _ = tool_node
+    applicable_guardrails = [
+        (guardrail, _action)
+        for (guardrail, _action) in (guardrails or [])
+        if GuardrailScope.TOOL in guardrail.selector.scopes
+        and tool_name in guardrail.selector.match_names
+    ]
     return create_guardrails_subgraph(
-        inner=inner,
-        guardrails=guardrails,
-        node_factory=create_tool_guardrail_node,  # type: ignore[arg-type]
-        guardrail_filter=lambda gr: GuardrailScope.TOOL in gr.selector.scopes,
+        main_inner_node=tool_node,
+        guardrails=applicable_guardrails,
+        scope=GuardrailScope.TOOL,
+        node_factory=create_tool_guardrail_node,
     )
