@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
-
+from langchain_core.documents import Document
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 from uipath.agent.models.agent import AgentContextResourceConfig
+from uipath.eval.mocks import mockable
 
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
@@ -21,22 +21,34 @@ def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
         number_of_results=resource.settings.result_count,
     )
 
-    async def context_tool_fn(query: str) -> str:
-        docs = await retriever.ainvoke(query)
-
-        if not docs:
-            return ""
-
-        return json.dumps([doc.model_dump() for doc in docs], indent=2)
-
     class ContextInputSchemaModel(BaseModel):
         query: str = Field(
             ..., description="The query to search for in the knowledge base"
         )
 
+    class ContextOutputSchemaModel(BaseModel):
+        documents: list[Document] = Field(
+            ..., description="List of retrieved documents."
+        )
+
+    input_model = ContextInputSchemaModel
+    output_model = ContextOutputSchemaModel
+
+    @mockable(
+        name=resource.name,
+        description=resource.description,
+        input_schema=input_model.model_json_schema(),
+        output_schema=output_model.model_json_schema(),
+    )
+    async def context_tool_fn(query: str) -> ContextOutputSchemaModel:
+        documents = await retriever.ainvoke(query)
+        return ContextOutputSchemaModel(
+            documents=documents,
+        )
+
     return StructuredTool(
         name=tool_name,
         description=resource.description,
-        args_schema=ContextInputSchemaModel,
+        args_schema=input_model,
         coroutine=context_tool_fn,
     )
