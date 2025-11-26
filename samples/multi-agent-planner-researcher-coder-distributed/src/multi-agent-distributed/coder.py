@@ -4,10 +4,10 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.tools import tool
 from langchain_experimental.utilities import PythonREPL
 from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from pydantic import BaseModel
 
-llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
+llm = ChatAnthropic(model="claude-3-7-sonnet-latest")
 
 repl = PythonREPL()
 
@@ -33,7 +33,7 @@ def python_repl_tool(
     return result_str
 
 
-code_agent = create_react_agent(llm, tools=[python_repl_tool])
+code_agent = create_agent(llm, tools=[python_repl_tool])
 
 
 async def code_node(state: MessagesState) -> GraphOutput:

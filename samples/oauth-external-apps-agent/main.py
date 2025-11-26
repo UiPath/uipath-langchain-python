@@ -7,7 +7,7 @@ from typing import Optional, Literal
 from pydantic import BaseModel
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command
-from langgraph import create_agent
+from langchain.agents import create_agent
 from langchain.messages import SystemMessage, HumanMessage
 
 from uipath_langchain.chat.models import UiPathChat

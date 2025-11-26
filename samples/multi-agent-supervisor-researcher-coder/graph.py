@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
 from langchain_core.tools import tool
 from langchain_experimental.utilities import PythonREPL
 from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langgraph.types import Command
 from pydantic import BaseModel
 from typing_extensions import TypedDict
@@ -52,7 +52,7 @@ class Router(TypedDict):
     next: Literal[*options]
 
 
-llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
+llm = ChatAnthropic(model="claude-3-7-sonnet-latest")
 
 class GraphInput(BaseModel):
     question: str
@@ -90,8 +90,8 @@ async def supervisor_node(state: State) -> Command[Literal[*members]] | GraphOut
     else:
         return Command(goto=goto, update={"next": goto})
 
-research_agent = create_react_agent(
-    llm, tools=[tavily_tool], prompt="You are a researcher. DO NOT do any math."
+research_agent = create_agent(
+    llm, tools=[tavily_tool], system_prompt="You are a researcher. DO NOT do any math."
 )
 
 
@@ -108,7 +108,7 @@ async def research_node(state: State) -> Command[Literal["supervisor"]]:
 
 
 # NOTE: THIS PERFORMS ARBITRARY CODE EXECUTION, WHICH CAN BE UNSAFE WHEN NOT SANDBOXED
-code_agent = create_react_agent(llm, tools=[python_repl_tool])
+code_agent = create_agent(llm, tools=[python_repl_tool])
 
 
 async def code_node(state: State) -> Command[Literal["supervisor"]]:

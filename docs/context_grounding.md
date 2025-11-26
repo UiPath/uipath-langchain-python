@@ -30,7 +30,7 @@ print(retriever.invoke("What is the company policy on remote work?"))
 You can easily integrate the retriever with LangChain's tool system:
 
 ```python
-from langchain.agents import create_react_agent
+from langchain.agents import create_agent
 from langchain.tools.retriever import create_retriever_tool
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
@@ -47,7 +47,7 @@ retriever_tool = create_retriever_tool(
 # You can use the tool in your agents
 model = OpenAI()
 tools = [retriever_tool]
-agent = create_react_agent(model, tools, prompt="Answer user questions as best as you can using the search tool.")
+agent = create_agent(model, tools, system_prompt="Answer user questions as best as you can using the search tool.")
 ```
 
 

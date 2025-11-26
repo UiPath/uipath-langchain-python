@@ -6,11 +6,11 @@ authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 
 requires-python = ">=3.11"
 dependencies = [
-    "langgraph>=0.2.55",
-    "langchain-anthropic>=0.3.8",
-    "langchain-community>=0.3.21",
-    "uipath-langchain>=0.0.124, <0.1.0",
-    "uipath>=2.1.166, <2.2.0",
+    "langgraph>=1.0.4",
+    "langchain-anthropic>=1.2.0",
+    "langchain-community>=0.4.1",
+    "uipath-langchain>=0.1.0, <0.2.0",
+    "uipath>=2.2.0, <2.3.0",
 ]
 
 [project.optional-dependencies]
@@ -58,3 +58,8 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+[dependency-groups]
+dev = [
+    "uipath-dev>=0.0.5",
+]

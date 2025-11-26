@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "e1222145-1791-4bf4-bdcf-ed81aeb93ed7",
+            "uniqueId": "cb508fac-2d57-4430-90f1-1c6f689ce197",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -26,6 +26,56 @@
                     }
                 },
                 "required": []
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "fetch_new_access_token",
+                        "name": "fetch_new_access_token",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "connect_to_mcp",
+                        "name": "connect_to_mcp",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "Node",
+                        "subgraph": null
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "connect_to_mcp",
+                        "label": null
+                    },
+                    {
+                        "source": "__start__",
+                        "target": "fetch_new_access_token",
+                        "label": null
+                    },
+                    {
+                        "source": "fetch_new_access_token",
+                        "target": "connect_to_mcp",
+                        "label": null
+                    },
+                    {
+                        "source": "connect_to_mcp",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
             }
         }
     ]

@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "25359821-b310-46fb-b4b2-59064f37613b",
+            "uniqueId": "cc314325-6593-4072-9d08-1db0de3f8a1a",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -2129,10 +2129,6 @@
                         },
                         "title": "Messages",
                         "type": "array"
-                    },
-                    "structured_response": {
-                        "default": null,
-                        "title": "Structured Response"
                     }
                 },
                 "required": []
@@ -2146,19 +2142,37 @@
                         "subgraph": null
                     },
                     {
-                        "id": "model",
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "agent:model",
                         "name": "model",
                         "type": "Node",
                         "subgraph": null
                     },
                     {
-                        "id": "tools",
+                        "id": "agent:tools",
                         "name": "tools",
                         "type": "Node",
                         "subgraph": null
                     },
                     {
-                        "id": "__end__",
+                        "id": "agent:SummarizationMiddleware.before_model",
+                        "name": "SummarizationMiddleware.before_model",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "agent:PatchToolCallsMiddleware.before_agent",
+                        "name": "PatchToolCallsMiddleware.before_agent",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "agent:__end__",
                         "name": "__end__",
                         "type": "Node",
                         "subgraph": null
@@ -2167,22 +2181,37 @@
                 "edges": [
                     {
                         "source": "__start__",
-                        "target": "model",
+                        "target": "agent:PatchToolCallsMiddleware.before_agent",
                         "label": null
                     },
                     {
-                        "source": "model",
+                        "source": "agent:__end__",
                         "target": "__end__",
                         "label": null
                     },
                     {
-                        "source": "model",
-                        "target": "tools",
+                        "source": "agent:PatchToolCallsMiddleware.before_agent",
+                        "target": "agent:SummarizationMiddleware.before_model",
                         "label": null
                     },
                     {
-                        "source": "tools",
-                        "target": "model",
+                        "source": "agent:SummarizationMiddleware.before_model",
+                        "target": "agent:model",
+                        "label": null
+                    },
+                    {
+                        "source": "agent:model",
+                        "target": "agent:__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "agent:model",
+                        "target": "agent:tools",
+                        "label": null
+                    },
+                    {
+                        "source": "agent:tools",
+                        "target": "agent:SummarizationMiddleware.before_model",
                         "label": null
                     }
                 ]

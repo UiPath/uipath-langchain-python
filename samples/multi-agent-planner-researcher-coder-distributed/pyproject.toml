@@ -5,12 +5,12 @@ description = "Supervisor agent that coordinates between a researcher and a code
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "langgraph>=0.2.55",
-    "langchain-anthropic>=0.3.8",
-    "langchain-experimental>=0.3.4",
-    "langchain-tavily>=0.2.11",
-    "uipath-langchain>=0.0.124, <0.1.0",
-    "uipath>=2.1.166, <2.2.0",
+    "langgraph>=1.0.4",
+    "langchain-anthropic>=1.2.0",
+    "langchain-experimental>=0.4.0",
+    "langchain-tavily>=0.2.13",
+    "uipath-langchain>=0.1.0, <0.2.0",
+    "uipath>=2.2.0, <2.3.0",
 ]
 
 [project.optional-dependencies]
@@ -46,3 +46,8 @@ lint.ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "UP"]
+
+[dependency-groups]
+dev = [
+    "uipath-dev>=0.0.5",
+]

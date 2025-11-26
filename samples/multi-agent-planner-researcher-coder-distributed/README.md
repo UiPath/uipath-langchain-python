@@ -124,7 +124,7 @@ You can debug individual agents by invoking them directly:
 Run the researcher agent with:
 
 ```bash
-uipath run researcher '{"messages":[{"content":"State the Pythagorean theorem formula using variables a, b, and c","type":"human"}]}'
+uipath run researcher '{\"messages":[{\"content\":\"State the Pythagorean theorem formula using variables a, b, and c\",\"type\":\"human\"}]}'
 ```
 
 #### Coder Agent
