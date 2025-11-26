@@ -1,23 +1,13 @@
----
-config:
-  flowchart:
-    curve: linear
----
-graph TD;
-	__start__([<p>__start__</p>]):::first
-	__end__([<p>__end__</p>]):::last
-	__start__ --> coder\3a__start__;
-	coder\3a__end__ --> __end__;
-	subgraph coder
-	coder\3a__start__(<p>__start__</p>)
-	coder\3aagent(agent)
-	coder\3atools(tools)
-	coder\3a__end__(<p>__end__</p>)
-	coder\3a__start__ --> coder\3aagent;
-	coder\3aagent -.-> coder\3a__end__;
-	coder\3aagent -.-> coder\3atools;
-	coder\3atools --> coder\3aagent;
-	end
-	classDef default fill:#f2f0ff,line-height:1.2
-	classDef first fill-opacity:0
-	classDef last fill:#bfb6fc
+flowchart TB
+  __start__(__start__)
+  __end__(__end__)
+  coder:__start__(__start__)
+  coder:model(model)
+  coder:tools(tools)
+  coder:__end__(__end__)
+  __start__ --> coder:__start__
+  coder:__end__ --> __end__
+  coder:__start__ --> coder:model
+  coder:model --> coder:__end__
+  coder:model --> coder:tools
+  coder:tools --> coder:model

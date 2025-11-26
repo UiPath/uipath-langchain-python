@@ -6,13 +6,13 @@ authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.11"
 dependencies = [
     "deepagents>=0.2.5",
-    "langchain-anthropic>=1.0.1",
+    "langchain-anthropic>=1.2.0",
     "langchain-tavily>=0.2.13",
-    "langgraph>=1.0.2",
-    "tavily-python>=0.7.12",
-    "uipath>=2.1.140",
-    "uipath-langchain>=0.0.120",
-    "openinference-instrumentation-langchain>=0.1.50",
+    "langgraph>=1.0.4",
+    "tavily-python>=0.7.13",
+    "uipath>=2.2.0, <2.3.0",
+    "uipath-langchain>=0.1.0, <0.2.0",
+    "openinference-instrumentation-langchain>=0.1.55",
 ]
 
 [project.optional-dependencies]
@@ -45,3 +45,8 @@ lint.ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "UP"]
+
+[dependency-groups]
+dev = [
+    "uipath-dev>=0.0.5",
+]

@@ -20,7 +20,7 @@ class IndexNotFound(Exception):
 
 logger = logging.getLogger(__name__)
 
-llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
+llm = ChatAnthropic(model="claude-3-7-sonnet-latest")
 
 class QuizItem(BaseModel):
     question: str = Field(

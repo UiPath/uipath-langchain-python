@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "83969bee-79ff-4d11-b06c-3394a6bef9de",
+            "uniqueId": "1cf1f8fb-2ced-4742-ad45-980291809509",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -28,6 +28,159 @@
                     }
                 },
                 "required": []
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "input",
+                        "name": "input",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "supervisor",
+                        "name": "supervisor",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "researcher:__start__",
+                        "name": "__start__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "researcher:agent",
+                        "name": "agent",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "researcher:tools",
+                        "name": "tools",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "researcher:__end__",
+                        "name": "__end__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "coder:__start__",
+                        "name": "__start__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "coder:agent",
+                        "name": "agent",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "coder:tools",
+                        "name": "tools",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "coder:__end__",
+                        "name": "__end__",
+                        "type": "Node",
+                        "subgraph": null
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "input",
+                        "label": null
+                    },
+                    {
+                        "source": "coder:__end__",
+                        "target": "supervisor",
+                        "label": null
+                    },
+                    {
+                        "source": "input",
+                        "target": "supervisor",
+                        "label": null
+                    },
+                    {
+                        "source": "researcher:__end__",
+                        "target": "supervisor",
+                        "label": null
+                    },
+                    {
+                        "source": "supervisor",
+                        "target": "coder:__start__",
+                        "label": null
+                    },
+                    {
+                        "source": "supervisor",
+                        "target": "researcher:__start__",
+                        "label": null
+                    },
+                    {
+                        "source": "supervisor",
+                        "target": "__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "researcher:__start__",
+                        "target": "researcher:agent",
+                        "label": null
+                    },
+                    {
+                        "source": "researcher:agent",
+                        "target": "researcher:__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "researcher:agent",
+                        "target": "researcher:tools",
+                        "label": null
+                    },
+                    {
+                        "source": "researcher:tools",
+                        "target": "researcher:agent",
+                        "label": null
+                    },
+                    {
+                        "source": "coder:__start__",
+                        "target": "coder:agent",
+                        "label": null
+                    },
+                    {
+                        "source": "coder:agent",
+                        "target": "coder:__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "coder:agent",
+                        "target": "coder:tools",
+                        "label": null
+                    },
+                    {
+                        "source": "coder:tools",
+                        "target": "coder:agent",
+                        "label": null
+                    }
+                ]
             }
         }
     ]

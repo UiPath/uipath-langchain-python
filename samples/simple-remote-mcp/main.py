@@ -1,7 +1,7 @@
 import os
 from typing import Any
 from langgraph.graph import StateGraph, MessagesState, START, END
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langchain_anthropic import ChatAnthropic
 from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession
@@ -19,8 +19,8 @@ async def mcp_client(state: MessagesState) -> dict[str, Any]:
             await session.initialize()
             tools = await load_mcp_tools(session)
             print(f"Loaded {len(tools)} tools from MCP server")
-            model = ChatAnthropic(model="claude-3-5-sonnet-latest")
-            agent = create_react_agent(model, tools=tools)
+            model = ChatAnthropic(model="claude-3-7-sonnet-latest")
+            agent = create_agent(model, tools=tools)
             result = await agent.ainvoke(state)
             return result
 

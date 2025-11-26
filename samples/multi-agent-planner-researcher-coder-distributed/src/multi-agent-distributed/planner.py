@@ -8,7 +8,7 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
-from uipath.models import InvokeProcess
+from uipath.platform.common import InvokeProcess
 
 worker_agents = {"researcher": "researcher-agent", "coder": "coder-agent"}
 agent_names = list(worker_agents.values())
@@ -67,7 +67,7 @@ def input(state: GraphInput):
     }
 
 
-llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
+llm = ChatAnthropic(model="claude-3-7-sonnet-latest")
 
 
 async def create_plan(state: State) -> Command:

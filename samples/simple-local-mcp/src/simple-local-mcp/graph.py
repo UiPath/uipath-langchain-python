@@ -3,9 +3,9 @@ from contextlib import asynccontextmanager
 
 from langchain_anthropic import ChatAnthropic
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
-model = ChatAnthropic(model="claude-3-5-sonnet-latest")
+model = ChatAnthropic(model="claude-3-7-sonnet-latest")
 
 
 @asynccontextmanager
@@ -22,5 +22,5 @@ async def make_graph():
                 "transport": "stdio",
             },
         })
-    agent = create_react_agent(model, await client.get_tools())
+    agent = create_agent(model, await client.get_tools())
     yield agent

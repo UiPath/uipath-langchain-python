@@ -1,40 +1,28 @@
----
-config:
-  flowchart:
-    curve: linear
----
-graph TD;
-	__start__([<p>__start__</p>]):::first
-	input(input)
-	supervisor(supervisor)
-	__end__([<p>__end__</p>]):::last
-	__start__ --> input;
-	coder\3a__end__ -.-> supervisor;
-	input --> supervisor;
-	researcher\3a__end__ -.-> supervisor;
-	supervisor -.-> coder\3a__start__;
-	supervisor -.-> researcher\3a__start__;
-	supervisor -.-> __end__;
-	subgraph researcher
-	researcher\3a__start__(<p>__start__</p>)
-	researcher\3aagent(agent)
-	researcher\3atools(tools)
-	researcher\3a__end__(<p>__end__</p>)
-	researcher\3a__start__ --> researcher\3aagent;
-	researcher\3aagent -.-> researcher\3a__end__;
-	researcher\3aagent -.-> researcher\3atools;
-	researcher\3atools --> researcher\3aagent;
-	end
-	subgraph coder
-	coder\3a__start__(<p>__start__</p>)
-	coder\3aagent(agent)
-	coder\3atools(tools)
-	coder\3a__end__(<p>__end__</p>)
-	coder\3a__start__ --> coder\3aagent;
-	coder\3aagent -.-> coder\3a__end__;
-	coder\3aagent -.-> coder\3atools;
-	coder\3atools --> coder\3aagent;
-	end
-	classDef default fill:#f2f0ff,line-height:1.2
-	classDef first fill-opacity:0
-	classDef last fill:#bfb6fc
+flowchart TB
+  __start__(__start__)
+  input(input)
+  supervisor(supervisor)
+  __end__(__end__)
+  researcher:__start__(__start__)
+  researcher:agent(agent)
+  researcher:tools(tools)
+  researcher:__end__(__end__)
+  coder:__start__(__start__)
+  coder:agent(agent)
+  coder:tools(tools)
+  coder:__end__(__end__)
+  __start__ --> input
+  coder:__end__ --> supervisor
+  input --> supervisor
+  researcher:__end__ --> supervisor
+  supervisor --> coder:__start__
+  supervisor --> researcher:__start__
+  supervisor --> __end__
+  researcher:__start__ --> researcher:agent
+  researcher:agent --> researcher:__end__
+  researcher:agent --> researcher:tools
+  researcher:tools --> researcher:agent
+  coder:__start__ --> coder:agent
+  coder:agent --> coder:__end__
+  coder:agent --> coder:tools
+  coder:tools --> coder:agent

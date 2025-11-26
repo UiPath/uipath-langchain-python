@@ -1,23 +1,13 @@
----
-config:
-  flowchart:
-    curve: linear
----
-graph TD;
-	__start__([<p>__start__</p>]):::first
-	__end__([<p>__end__</p>]):::last
-	__start__ --> researcher\3a__start__;
-	researcher\3a__end__ --> __end__;
-	subgraph researcher
-	researcher\3a__start__(<p>__start__</p>)
-	researcher\3aagent(agent)
-	researcher\3atools(tools)
-	researcher\3a__end__(<p>__end__</p>)
-	researcher\3a__start__ --> researcher\3aagent;
-	researcher\3aagent -.-> researcher\3a__end__;
-	researcher\3aagent -.-> researcher\3atools;
-	researcher\3atools --> researcher\3aagent;
-	end
-	classDef default fill:#f2f0ff,line-height:1.2
-	classDef first fill-opacity:0
-	classDef last fill:#bfb6fc
+flowchart TB
+  __start__(__start__)
+  __end__(__end__)
+  researcher:__start__(__start__)
+  researcher:model(model)
+  researcher:tools(tools)
+  researcher:__end__(__end__)
+  __start__ --> researcher:__start__
+  researcher:__end__ --> __end__
+  researcher:__start__ --> researcher:model
+  researcher:model --> researcher:__end__
+  researcher:model --> researcher:tools
+  researcher:tools --> researcher:model

@@ -3,7 +3,7 @@ import time
 from langchain_anthropic import ChatAnthropic
 from langchain_tavily import TavilySearch
 from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph import create_agent
+from langchain.agents import create_agent
 from langgraph.types import Command
 from pydantic import BaseModel
 from uipath.platform import UiPath
@@ -12,7 +12,7 @@ from uipath.platform.context_grounding import ContextGroundingIndex
 
 uipath = UiPath()
 tavily_tool = TavilySearch(max_results=5)
-anthropic_model = "claude-3-5-sonnet-latest"
+anthropic_model = "claude-3-7-sonnet-latest"
 
 
 llm = ChatAnthropic(model=anthropic_model)
@@ -44,7 +44,7 @@ def prepare_input(state: GraphInput) -> GraphState:
 async def research_node(state: GraphState) -> Command:
     research_agent = create_agent(
         llm, tools=[tavily_tool],
-        prompt=("As an AI research specialist, your task is to scour the internet for pertinent information based on the user's specified search_instructions."
+        system_prompt=("As an AI research specialist, your task is to scour the internet for pertinent information based on the user's specified search_instructions."
                 " Avoid summarizing or organizing the content; simply gather raw, unprocessed information. Do not engage in follow-up questions or discussions, "
                 "focus solely on compiling data as you find it online.")
     )

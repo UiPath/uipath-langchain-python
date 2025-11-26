@@ -1,16 +1,16 @@
 from langchain_anthropic import ChatAnthropic
 from langchain_tavily import TavilySearch
 from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from pydantic import BaseModel
 
 tavily_tool = TavilySearch(max_results=5)
 
-llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
+llm = ChatAnthropic(model="claude-3-7-sonnet-latest")
 
 
-research_agent = create_react_agent(
-    llm, tools=[tavily_tool], prompt="You are a researcher. DO NOT do any math."
+research_agent = create_agent(
+    llm, tools=[tavily_tool], system_prompt="You are a researcher. DO NOT do any math."
 )
 
 
