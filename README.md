@@ -57,6 +57,8 @@ Creates a `uipath.json` configuration file for your project. If `[GRAPH]` is omi
 uipath auth
 ```
 
+test
+
 This command opens a browser for authentication and creates/updates your `.env` file with the proper credentials.
 
 ### Debug a Project
