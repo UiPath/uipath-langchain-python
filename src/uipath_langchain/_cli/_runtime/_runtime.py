@@ -24,11 +24,11 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
-from .._utils._schema import generate_schema_from_graph
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 from ._graph_resolver import AsyncResolver, LangGraphJsonResolver
 from ._input import get_graph_input
 from ._output import create_and_save_resume_trigger, serialize_output
+from ._schema import generate_schema_from_graph, langgraph_to_uipath_graph
 
 logger = logging.getLogger(__name__)
 
@@ -479,6 +479,7 @@ class LangGraphScriptRuntime(LangGraphRuntime):
             type="agent",
             input=schema_details.schema["input"],
             output=schema_details.schema["output"],
+            graph=langgraph_to_uipath_graph(compiled_graph, xray=1),
         )
 
     async def dispose(self) -> None:

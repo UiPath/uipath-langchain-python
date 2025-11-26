@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 from pydantic import BaseModel, Field
 
-from uipath_langchain._cli._utils._schema import (
+from uipath_langchain._cli._runtime._schema import (
+    _resolve_refs,
     generate_schema_from_graph,
-    resolve_refs,
 )
 
 
@@ -20,7 +20,7 @@ class TestResolveRefs:
             "properties": {"name": {"type": "string"}, "age": {"type": "integer"}},
         }
 
-        result, has_circular = resolve_refs(schema)
+        result, has_circular = _resolve_refs(schema)
 
         assert result == schema
         assert has_circular is False
@@ -37,7 +37,7 @@ class TestResolveRefs:
             },
         }
 
-        result, has_circular = resolve_refs(schema)
+        result, has_circular = _resolve_refs(schema)
 
         assert result["properties"]["user"]["type"] == "object"
         assert result["properties"]["user"]["properties"]["name"]["type"] == "string"
@@ -58,7 +58,7 @@ class TestResolveRefs:
             },
         }
 
-        result, has_circular = resolve_refs(schema)
+        result, has_circular = _resolve_refs(schema)
 
         assert has_circular is True
         # Check that circular ref was replaced with simplified schema
@@ -87,7 +87,7 @@ class TestResolveRefs:
             },
         }
 
-        result, has_circular = resolve_refs(schema)
+        result, has_circular = _resolve_refs(schema)
 
         assert result["properties"]["person"]["type"] == "object"
         assert result["properties"]["person"]["properties"]["name"]["type"] == "string"
@@ -114,7 +114,7 @@ class TestResolveRefs:
             },
         }
 
-        result, has_circular = resolve_refs(schema)
+        result, has_circular = _resolve_refs(schema)
 
         assert result["properties"]["users"]["items"]["type"] == "object"
         assert (
@@ -140,7 +140,7 @@ class TestResolveRefs:
             },
         }
 
-        result, has_circular = resolve_refs(schema)
+        result, has_circular = _resolve_refs(schema)
 
         assert has_circular is True
 
