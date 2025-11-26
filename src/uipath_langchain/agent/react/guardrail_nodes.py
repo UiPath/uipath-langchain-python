@@ -276,7 +276,7 @@ def _create_guardrail_node(
     scope: GuardrailScope,
     hook_type: Literal["PreExecution", "PostExecution"],
     payload_generator: Callable[[AgentGraphState], str],
-    inline_action_to_enforce: ActionInlineEnforcement | None,
+    action_enforcement_outcome: ActionEnforcementOutcome | None,
 ) -> Tuple[str, Callable[[AgentGraphState], Any]]:
     """Private factory for guardrail nodes used by public creators.
 
@@ -287,7 +287,7 @@ def _create_guardrail_node(
     sanitized_name = re.sub(r"\W+", "_", guardrail.name).strip("_").lower()
     node_name = f"{sanitized_name}_{hook_type}_{scope.lower()}"
 
-    async def node(state: AgentGraphState) -> Dict[str, Any]:
+    async def node(state: AgentGraphState) -> Dict[str, Any] | Command:
         text = payload_generator(state)
         try:
             uipath = UiPath()
@@ -300,9 +300,10 @@ def _create_guardrail_node(
             raise
 
         if not result.validation_passed:
-            # Prefer inline handler if provided by action
-            if inline_action_to_enforce is not None:
-                maybe = inline_action_to_enforce(state, guardrail, result)
+            if isinstance(action_enforcement_outcome, ActionEnforcementNode):
+                return Command(goto=action_enforcement_outcome.name)
+            if action_enforcement_outcome is not None:
+                maybe = action_enforcement_outcome(state, guardrail, result)
                 if inspect.isawaitable(maybe):
                     await maybe  # type: ignore[func-returns-value]
                 # Inline handlers can optionally return a partial state update
@@ -317,7 +318,7 @@ def _create_guardrail_node(
 def create_llm_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     hook_type: Literal["PreExecution", "PostExecution"],
-    inline_action_to_enforce: ActionInlineEnforcement | None,
+    action_enforcement_outcome: ActionEnforcementOutcome | None,
 ) -> Tuple[str, Callable[[AgentGraphState], Any]]:
     def _payload_generator(state: AgentGraphState) -> str:
         if not state.messages:
@@ -329,14 +330,14 @@ def create_llm_guardrail_node(
         GuardrailScope.LLM,
         hook_type,
         _payload_generator,
-        inline_action_to_enforce,
+        action_enforcement_outcome,
     )
 
 
 def create_agent_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     hook_type: Literal["PreExecution", "PostExecution"],
-    inline_action_to_enforce: ActionInlineEnforcement | None,
+    action_enforcement_outcome: ActionEnforcementOutcome | None,
 ) -> Tuple[str, Callable[[AgentGraphState], Any]]:
     def _payload_generator(state: AgentGraphState) -> str:
         if not state.messages:
@@ -348,14 +349,14 @@ def create_agent_guardrail_node(
         GuardrailScope.AGENT,
         hook_type,
         _payload_generator,
-        inline_action_to_enforce,
+        action_enforcement_outcome,
     )
 
 
 def create_tool_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     hook_type: Literal["PreExecution", "PostExecution"],
-    inline_action_to_enforce: ActionInlineEnforcement | None,
+    action_enforcement_outcome: ActionEnforcementOutcome | None,
 ) -> Tuple[str, Callable[[AgentGraphState], Any]]:
     def _payload_generator(state: AgentGraphState) -> str:
         if not state.messages:
@@ -367,5 +368,5 @@ def create_tool_guardrail_node(
         GuardrailScope.TOOL,
         hook_type,
         _payload_generator,
-        inline_action_to_enforce,
+        action_enforcement_outcome,
     )
