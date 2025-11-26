@@ -42,6 +42,10 @@ class LangGraphRuntimeFactory:
         """Get the database connection string with same logic as get_memory."""
         if self.context.runtime_dir and self.context.state_file:
             path = os.path.join(self.context.runtime_dir, self.context.state_file)
+            if not self.context.resume and self.context.job_id is None:
+                # If not resuming and no job id, delete the previous state file
+                if os.path.exists(path):
+                    os.remove(path)
             os.makedirs(self.context.runtime_dir, exist_ok=True)
             return path
 
