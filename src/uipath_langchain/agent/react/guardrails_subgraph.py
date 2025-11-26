@@ -15,7 +15,7 @@ from .guardrail_nodes import (
     create_llm_guardrail_node,
     create_tool_guardrail_node,
 )
-from .types import AgentGraphState
+from .types import AgentGuardrailsGraphState
 
 
 def _build_guardrails_chain_by_execution_stage(
@@ -87,7 +87,7 @@ def create_guardrails_subgraph(
         node_factory=node_factory,
     )
 
-    subgraph = StateGraph(AgentGraphState)
+    subgraph = StateGraph(AgentGuardrailsGraphState)
     for node_name, before_node in before_chain:
         subgraph.add_node(node_name, before_node)
     for node_name, after_node in after_chain:
