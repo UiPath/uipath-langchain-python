@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from uipath._cli._runtime._hitl import HitlProcessor
+from uipath.platform.resume_triggers import UiPathResumeTriggerCreator
 from uipath.runtime import UiPathResumeTrigger
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -76,9 +76,6 @@ async def create_and_save_resume_trigger(
     Raises:
         LangGraphRuntimeError: If database operations fail
     """
-    # Create HITL processor
-    hitl_processor = HitlProcessor(interrupt_value)
-
     # Setup database and create table if needed
     await memory.setup()
     async with memory.lock, memory.conn.cursor() as cur:
@@ -105,7 +102,8 @@ async def create_and_save_resume_trigger(
 
         # Create resume trigger
         try:
-            resume_trigger = await hitl_processor.create_resume_trigger()
+            creator = UiPathResumeTriggerCreator()
+            resume_trigger = await creator.create_trigger(interrupt_value)
         except Exception as e:
             raise LangGraphRuntimeError(
                 LangGraphErrorCode.HITL_EVENT_CREATION_FAILED,

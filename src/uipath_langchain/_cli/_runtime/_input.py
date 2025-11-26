@@ -3,7 +3,7 @@ from typing import Any, cast
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
-from uipath._cli._runtime._hitl import HitlReader
+from uipath.platform.resume_triggers import UiPathResumeTriggerReader
 from uipath.runtime import (
     UiPathApiTrigger,
     UiPathExecuteOptions,
@@ -81,7 +81,8 @@ async def get_graph_input(
             inbox_id=resume_trigger.item_key, request=resume_trigger.payload
         )
 
-    return Command(resume=await HitlReader.read(resume_trigger))
+    reader = UiPathResumeTriggerReader()
+    return Command(resume=await reader.read_trigger(resume_trigger))
 
 
 async def _get_latest_trigger(

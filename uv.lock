@@ -2305,7 +2305,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.2.0.dev1008333055"
+version = "2.2.0.dev1008333056"
 source = { registry = "https://test.pypi.org/simple/" }
 dependencies = [
     { name = "click" },
@@ -2326,9 +2326,9 @@ dependencies = [
     { name = "uipath-dev" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://test-files.pythonhosted.org/packages/d7/c5/3081b250c2f59a89377e6b434610486e5f2a1792c7f4f8c419607aa23a14/uipath-2.2.0.dev1008333055.tar.gz", hash = "sha256:1691b13d2c0d5294d6c082136765260c8cb031a39fcd4907e34b5252d5422a70", size = 3249793, upload-time = "2025-11-26T07:30:45.371Z" }
+sdist = { url = "https://test-files.pythonhosted.org/packages/ad/ca/2b1d2493741b9552f907756b95febd33b57a9c5b69080fc28da32fb4f53f/uipath-2.2.0.dev1008333056.tar.gz", hash = "sha256:3e82924f534c26f83e2c7cb67254db3fcaae027175148b665136703b4bfc7485", size = 3249942, upload-time = "2025-11-26T08:08:23.283Z" }
 wheels = [
-    { url = "https://test-files.pythonhosted.org/packages/be/5b/2f5b1276b52928fda1ac266c89d05c1c557c80b947db6f12df1d0fd3e88a/uipath-2.2.0.dev1008333055-py3-none-any.whl", hash = "sha256:e7f8c8cf6b21b118be3fe281ffec91ac9ea43583c261b3850667e4d35bf0c5b0", size = 385912, upload-time = "2025-11-26T07:30:47.951Z" },
+    { url = "https://test-files.pythonhosted.org/packages/cf/67/dbdbef28140c4a92fb0c57be84685551ddba6a3c229270f61fe603897a29/uipath-2.2.0.dev1008333056-py3-none-any.whl", hash = "sha256:053a9438b3d6c1713a5a10f9b884d2a66a7d02ad22773c00f61e1b102529bade", size = 386469, upload-time = "2025-11-26T08:08:26.761Z" },
 ]
 
 [[package]]
@@ -2402,7 +2402,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.54" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = "==2.2.0.dev1008333055", index = "https://test.pypi.org/simple/" },
+    { name = "uipath", specifier = "==2.2.0.dev1008333056", index = "https://test.pypi.org/simple/" },
 ]
 
 [package.metadata.requires-dev]
