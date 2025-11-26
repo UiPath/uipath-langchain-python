@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Literal, Optional, Tuple, Union
 
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langgraph.types import Command, interrupt
 from uipath import UiPath
 from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathErrorCode
@@ -44,31 +44,56 @@ def _hook_type_to_tool_field(hook_type: Literal["PreExecution", "PostExecution"]
     return "ToolInputs" if hook_type == "PreExecution" else "ToolOutputs"
 
 
-def _extract_escalation_content(state: AgentGraphState, scope: GuardrailScope) -> str:
-    """Extract escalation content from state based on guardrail scope.
+def _extract_escalation_content(
+    state: AgentGraphState, scope: GuardrailScope, hook_type: Literal["PreExecution", "PostExecution"]
+) -> str:
+    """Extract escalation content from state based on guardrail scope and hook type.
 
     Args:
         state: The current agent graph state.
         scope: The guardrail scope (LLM/AGENT/TOOL).
+        hook_type: The hook type ("PreExecution" or "PostExecution").
 
     Returns:
-        JSON string in format {"content": "..."} for all scopes.
-        For TOOL scope: {"content": ""}.
-        For AGENT/LLM scope: {"content": "<message content>"}.
+        For non-LLM scope: Empty string.
+        For LLM PreExecution: JSON string with message content.
+        For LLM PostExecution: JSON array with tool call content and message content.
     """
-    if scope == GuardrailScope.TOOL:
+    if scope != GuardrailScope.LLM:
         return ""
-    # For AGENT and LLM scopes, return the content of the last message in JSON format
+
     if not state.messages:
-        return json.dumps({"content": ""})
-    content = _message_text(state.messages[-1])
-    return json.dumps({"content": content})
+        raise AgentTerminationException(
+            code=UiPathErrorCode.EXECUTION_ERROR,
+            title="Invalid state message",
+        )
+
+    last_message = state.messages[-1]
+    if hook_type == "PreExecution":
+        content = _message_text(last_message)
+        return json.dumps(content) if content else ""
+
+    ai_message: AIMessage = last_message  # type: ignore[assignment]
+    content_list: list[str] = []
+
+    if ai_message.tool_calls:
+        for tool_call in ai_message.tool_calls:
+            args = tool_call["args"] if isinstance(tool_call, dict) else tool_call.args
+            if isinstance(args, dict) and "content" in args and args["content"] is not None:
+                content_list.append(json.dumps(args["content"]))
+
+    message_content = _message_text(last_message)
+    if message_content:
+        content_list.append(message_content)
+
+    return json.dumps(content_list)
 
 
 def _process_escalation_response(
     state: AgentGraphState,
     escalation_result: Dict[str, Any],
     scope: GuardrailScope,
+    hook_type: Literal["PreExecution", "PostExecution"],
 ) -> Dict[str, Any] | Command:
     """Process escalation response and update state based on guardrail scope.
 
@@ -76,26 +101,61 @@ def _process_escalation_response(
         state: The current agent graph state.
         escalation_result: The result from the escalation interrupt.
         scope: The guardrail scope (LLM/AGENT/TOOL).
+        hook_type: The hook type ("PreExecution" or "PostExecution").
 
     Returns:
-        For AGENT/LLM scope: Command to update messages with reviewed inputs.
-        For TOOL scope: Empty dict (no message alteration).
+        For LLM scope: Command to update messages with reviewed inputs/outputs.
+        For non-LLM scope: Empty dict (no message alteration).
 
     Raises:
         AgentTerminationException: If escalation response processing fails.
     """
-    if scope == GuardrailScope.TOOL:
-        # For TOOL scope, don't alter messages
+    if scope != GuardrailScope.LLM:
         return {}
 
-    # For AGENT and LLM scopes, process the escalation response
     try:
-        reviewed_inputs_json = json.loads(escalation_result["ReviewedInputs"])
-        # Extract content from JSON format {"content": "..."}
-        content = reviewed_inputs_json.get("content", "")
+        reviewed_field = "ReviewedInputs" if hook_type == "PreExecution" else "ReviewedOutputs"
+
         msgs = state.messages.copy()
-        if len(msgs) > 1:
-            msgs[1].content = content
+        if not msgs or reviewed_field not in escalation_result:
+            return {}
+
+        last_message = msgs[-1]
+
+        if hook_type == "PreExecution":
+            reviewed_content = escalation_result[reviewed_field]
+            if reviewed_content:
+                last_message.content = json.loads(reviewed_content)
+        else:
+            reviewed_outputs_json = escalation_result[reviewed_field]
+            if not reviewed_outputs_json:
+                return {}
+
+            content_list = json.loads(reviewed_outputs_json)
+            if not content_list:
+                return {}
+
+            ai_message: AIMessage = last_message  # type: ignore[assignment]
+            content_index = 0
+
+            if ai_message.tool_calls:
+                tool_calls = list(ai_message.tool_calls)
+                for tool_call in tool_calls:
+                    args = tool_call["args"] if isinstance(tool_call, dict) else tool_call.args
+                    if isinstance(args, dict) and "content" in args and args["content"] is not None:
+                        if content_index < len(content_list):
+                            updated_content = json.loads(content_list[content_index])
+                            args["content"] = updated_content
+                            if isinstance(tool_call, dict):
+                                tool_call["args"] = args
+                            else:
+                                tool_call.args = args
+                            content_index += 1
+                ai_message.tool_calls = tool_calls
+
+            if len(content_list) > content_index:
+                ai_message.content = content_list[-1]
+
         return Command(update={"messages": msgs})
     except Exception as e:
         raise AgentTerminationException(
@@ -243,7 +303,7 @@ class HitlAction(GuardrailAction):
         node_name = f"{sanitized}_hitl_{hook_type}_{scope.lower()}"
 
         async def _node(state: AgentGraphState) -> Dict[str, Any]:
-            input = _extract_escalation_content(state, scope)
+            input = _extract_escalation_content(state, scope, hook_type)
             tool_field = _hook_type_to_tool_field(hook_type)
             data = {
                 "GuardrailName": guardrail.name,
@@ -252,9 +312,9 @@ class HitlAction(GuardrailAction):
                 "AgentTrace": "https://alpha.uipath.com/f88fa028-ccdd-4b5f-bee4-01ef94d134d8/studio_/designer/48fff406-52e9-4a37-ba66-76c0212d9c6b",
                 "Tool": "Create_Issue",
                 "ExecutionStage": hook_type,
-                "GuardrailResult": "Input data matched the guardrail conditions: [fields.project.key] Contains [AL]",
+                "GuardrailResult": "guardreilResult",
+                tool_field: input,
             }
-            data[tool_field] = input
             escalation_result = interrupt(
                 CreateAction(
                     app_name="Guardrail.Escalation.Action.App",
@@ -266,7 +326,7 @@ class HitlAction(GuardrailAction):
                 )
             )
 
-            return _process_escalation_response(state, escalation_result, scope)
+            return _process_escalation_response(state, escalation_result, scope, hook_type)
 
         return ActionEnforcementNode(node_name, _node)
 
