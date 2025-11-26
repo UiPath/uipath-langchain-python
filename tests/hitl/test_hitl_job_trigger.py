@@ -5,23 +5,31 @@ import shutil
 import sqlite3
 import uuid
 
+import pytest
 from click.testing import CliRunner
 from pytest_httpx import HTTPXMock
+from uipath.runtime import (
+    UiPathExecuteOptions,
+    UiPathRuntimeContext,
+    UiPathRuntimeFactoryRegistry,
+)
 
 from tests.hitl.conftest import get_file_path
-from uipath_langchain._cli.cli_run import langgraph_run_middleware
+from uipath_langchain.runtime import register_runtime_factory
 
 
 class TestHitlJobTrigger:
     """Test class for Job trigger functionality."""
 
-    def test_agent_job_trigger(
+    @pytest.mark.asyncio
+    async def test_agent_job_trigger(
         self,
         runner: CliRunner,
         temp_dir: str,
         httpx_mock: HTTPXMock,
         setup_test_env: None,
     ) -> None:
+        register_runtime_factory()
         script_name = "job_trigger_hitl.py"
         script_file_path = get_file_path(script_name)
 
@@ -32,128 +40,201 @@ class TestHitlJobTrigger:
         langgraph_config_file_path = get_file_path(langgraph_config_file_name)
 
         with runner.isolated_filesystem(temp_dir=temp_dir):
-            # Copy the API trigger test file to our temp directory
+            current_dir = os.getcwd()
 
-            shutil.copy(script_file_path, "hitl.py")
-            shutil.copy(config_file_path, config_file_name)
-            shutil.copy(langgraph_config_file_path, "langgraph.json")
-
-            # mock app creation
-            base_url = os.getenv("UIPATH_URL")
-            job_key = uuid.uuid4()
-
-            # Mock UiPath API response for job creation
-            httpx_mock.add_response(
-                url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.StartJobs",
-                json={"value": [{"key": f"{job_key}", "Id": "123"}]},
-            )
-
-            # First execution: creates job trigger and stores it in database
-            result = langgraph_run_middleware("agent", "{}", False)
-
-            assert result.error_message is None
-
-            # Verify that __uipath directory and state.db were created
-            assert os.path.exists("__uipath")
-            assert os.path.exists("__uipath/state.db")
-
-            # Verify the state database contains trigger information
-            conn = None
             try:
-                conn = sqlite3.connect("__uipath/state.db")
-                cursor = conn.cursor()
+                # Copy the API trigger test file to our temp directory
+                shutil.copy(script_file_path, "hitl.py")
+                shutil.copy(config_file_path, config_file_name)
+                shutil.copy(langgraph_config_file_path, "langgraph.json")
 
-                cursor.execute("""
-                                        SELECT name FROM sqlite_master
-                                        WHERE type='table' AND name='__uipath_resume_triggers'
-                                    """)
-                tables = cursor.fetchall()
-                assert len(tables) == 1
+                # mock app creation
+                base_url = os.getenv("UIPATH_URL")
+                job_key = uuid.uuid4()
 
-                # Check the first job trigger data
-                cursor.execute("SELECT * FROM __uipath_resume_triggers")
-                triggers = cursor.fetchall()
-                assert len(triggers) == 1
-                _, type, key, folder_key, folder_path, payload, _ = triggers[0]
-                assert type == "Job"
-                assert folder_path == "process-folder-path"
-                assert folder_key is None
-                assert "input_arg_1" in payload
-                assert "value_1" in payload
+                # Mock UiPath API response for job creation
+                httpx_mock.add_response(
+                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.StartJobs",
+                    json={"value": [{"key": f"{job_key}", "Id": "123"}]},
+                )
+
+                # First execution: creates job trigger and stores it in database
+                context = UiPathRuntimeContext.with_defaults(
+                    entrypoint="agent",
+                    input="{}",
+                    output_file="__uipath/output.json",
+                )
+
+                factory = UiPathRuntimeFactoryRegistry.get(
+                    search_path=os.getcwd(), context=context
+                )
+
+                runtime = await factory.new_runtime(
+                    entrypoint="agent", runtime_id="test-job-runtime"
+                )
+
+                with context:
+                    context.result = await runtime.execute(
+                        input={}, options=UiPathExecuteOptions(resume=False)
+                    )
+
+                assert context.result is not None
+
+                # Verify that __uipath directory and state.db were created
+                assert os.path.exists("__uipath")
+                assert os.path.exists("__uipath/state.db")
+
+                # Verify the state database contains trigger information
+                conn = None
+                try:
+                    conn = sqlite3.connect("__uipath/state.db")
+                    cursor = conn.cursor()
+
+                    cursor.execute("""
+                        SELECT name FROM sqlite_master
+                        WHERE type='table' AND name='__uipath_resume_triggers'
+                    """)
+                    tables = cursor.fetchall()
+                    assert len(tables) == 1
+
+                    # Check the first job trigger data
+                    cursor.execute(
+                        "SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers"
+                    )
+                    triggers = cursor.fetchall()
+                    assert len(triggers) == 1
+                    type, key, name, folder_path, folder_key, payload = triggers[0]
+                    assert type == "Job"
+                    assert name == "Job"
+                    assert folder_path == "process-folder-path"
+                    assert folder_key is None
+                    assert "input_arg_1" in payload
+                    assert "value_1" in payload
+                finally:
+                    if conn:
+                        conn.close()
+
+                # Cleanup first runtime
+                await runtime.dispose()
+
+                # Mock response for first resume: job output arguments
+                output_args_dict = {"output_arg_1": "response from invoke process"}
+                httpx_mock.add_response(
+                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={key})",
+                    json={
+                        "key": f"{job_key}",
+                        "id": 123,
+                        "output_arguments": json.dumps(output_args_dict),
+                    },
+                )
+
+                # Second execution: resume from first trigger
+                resume_context_1 = UiPathRuntimeContext.with_defaults(
+                    entrypoint="agent",
+                    input="{}",
+                    output_file="__uipath/output.json",
+                )
+
+                resume_factory_1 = UiPathRuntimeFactoryRegistry.get(
+                    search_path=os.getcwd(), context=resume_context_1
+                )
+
+                resume_runtime_1 = await resume_factory_1.new_runtime(
+                    entrypoint="agent", runtime_id="test-job-runtime"
+                )
+
+                with resume_context_1:
+                    resume_context_1.result = await resume_runtime_1.execute(
+                        input={}, options=UiPathExecuteOptions(resume=True)
+                    )
+
+                assert resume_context_1.result is not None
+
+                # Verify second trigger information
+                conn = None
+                try:
+                    conn = sqlite3.connect("__uipath/state.db")
+                    cursor = conn.cursor()
+
+                    cursor.execute("""
+                        SELECT name FROM sqlite_master
+                        WHERE type='table' AND name='__uipath_resume_triggers'
+                    """)
+                    tables = cursor.fetchall()
+                    assert len(tables) == 1
+
+                    # Check the second job trigger data (from wait job)
+                    cursor.execute("""SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers
+                                      ORDER BY timestamp DESC
+                                      """)
+                    triggers = cursor.fetchall()
+                    assert len(triggers) == 2
+                    type, key, name, folder_key, folder_path, payload = triggers[0]
+                    assert type == "Job"
+                    assert name == "Job"
+                    assert folder_path is None
+                    assert folder_key is None
+                    assert "123" in payload
+                    assert key == "487d9dc7-30fe-4926-b5f0-35a956914042"
+                finally:
+                    if conn:
+                        conn.close()
+
+                # Cleanup second runtime
+                await resume_runtime_1.dispose()
+
+                # Mock response for second resume: wait job output arguments
+                output_args_dict = {"output_arg_2": "response from wait job"}
+
+                httpx_mock.add_response(
+                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={key})",
+                    json={
+                        "key": f"{job_key}",
+                        "id": 123,
+                        "output_arguments": json.dumps(output_args_dict),
+                    },
+                )
+
+                # Third execution: resume from second trigger and complete
+                resume_context_2 = UiPathRuntimeContext.with_defaults(
+                    entrypoint="agent",
+                    input="{}",
+                    output_file="__uipath/output.json",
+                )
+
+                resume_factory_2 = UiPathRuntimeFactoryRegistry.get(
+                    search_path=os.getcwd(), context=resume_context_2
+                )
+
+                resume_runtime_2 = await resume_factory_2.new_runtime(
+                    entrypoint="agent", runtime_id="test-job-runtime"
+                )
+
+                with resume_context_2:
+                    resume_context_2.result = await resume_runtime_2.execute(
+                        input={}, options=UiPathExecuteOptions(resume=True)
+                    )
+
+                assert resume_context_2.result is not None
+
+                # Verify final output contains the last job response
+                with open("__uipath/output.json", "r") as f:
+                    output = f.read()
+                json_output = json.loads(output)
+                assert json_output == {"message": "response from wait job"}
+
+                # Verify execution log contains both job responses
+                with open("__uipath/execution.log", "r") as f:
+                    output = f.read()
+
+                assert "Process output" in output
+                assert "response from invoke process" in output
+
+                # Cleanup
+                await resume_runtime_2.dispose()
+                await resume_factory_2.dispose()
+                await resume_factory_1.dispose()
+                await factory.dispose()
+
             finally:
-                if conn:
-                    conn.close()
-
-            # Mock response for first resume: job output arguments
-            output_args_dict = {"output_arg_1": "response from invoke process"}
-            httpx_mock.add_response(
-                url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={key})",
-                json={
-                    "key": f"{job_key}",
-                    "id": 123,
-                    "output_arguments": json.dumps(output_args_dict),
-                },
-            )
-            # Second execution: resume from first trigger
-            result = langgraph_run_middleware("agent", "{}", True)
-            assert result.error_message is None
-            assert result.should_continue is False
-
-            # Verify second trigger information
-            conn = None
-            try:
-                conn = sqlite3.connect("__uipath/state.db")
-                cursor = conn.cursor()
-
-                cursor.execute("""
-                                                    SELECT name FROM sqlite_master
-                                                    WHERE type='table' AND name='__uipath_resume_triggers'
-                                                """)
-                tables = cursor.fetchall()
-                assert len(tables) == 1
-
-                # Check the second job trigger data (from wait job)
-                cursor.execute("""SELECT * FROM __uipath_resume_triggers
-                                  ORDER BY timestamp DESC
-                                  """)
-                triggers = cursor.fetchall()
-                assert len(triggers) == 2
-                _, type, key, folder_key, folder_path, payload, _ = triggers[0]
-                assert type == "Job"
-                assert folder_path is None
-                assert folder_key is None
-                assert "123" in payload
-                assert key == "487d9dc7-30fe-4926-b5f0-35a956914042"
-            finally:
-                if conn:
-                    conn.close()
-
-            # Mock response for second resume: wait job output arguments
-            output_args_dict = {"output_arg_2": "response from wait job"}
-
-            httpx_mock.add_response(
-                url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={key})",
-                json={
-                    "key": f"{job_key}",
-                    "id": 123,
-                    "output_arguments": json.dumps(output_args_dict),
-                },
-            )
-
-            # Third execution: resume from second trigger and complete
-            result = langgraph_run_middleware("agent", "{}", True)
-            assert result.error_message is None
-            assert result.should_continue is False
-
-            # Verify final output contains the last job response
-            with open("__uipath/output.json", "r") as f:
-                output = f.read()
-            json_output = json.loads(output)
-            assert json_output["output"] == {"message": "response from wait job"}
-
-            # Verify execution log contains both job responses
-            with open("__uipath/execution.log", "r") as f:
-                output = f.read()
-
-            assert "Process output" in output
-            assert "response from invoke process" in output
+                os.chdir(current_dir)

@@ -7,7 +7,7 @@ from typing import List, Optional
 import httpx
 import uuid
 from datetime import datetime
-from uipath import UiPath
+from uipath.platform import UiPath
 
 # Database models and setup
 from database import SessionLocal, engine

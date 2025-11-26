@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel
-from uipath._cli._runtime._contracts import UiPathErrorCode
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
+from uipath.runtime.errors import UiPathErrorCode
 
 from .exceptions import (
     AgentNodeRoutingException,

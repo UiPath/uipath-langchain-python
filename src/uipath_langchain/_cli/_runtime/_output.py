@@ -4,8 +4,9 @@ from enum import Enum
 from typing import Any
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathResumeTrigger
-from uipath._cli._runtime._hitl import HitlProcessor
+from uipath.platform.resume_triggers import UiPathResumeTriggerCreator
+from uipath.runtime import UiPathResumeTrigger
+from uipath.runtime.errors import UiPathErrorCategory
 
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError
 
@@ -75,9 +76,6 @@ async def create_and_save_resume_trigger(
     Raises:
         LangGraphRuntimeError: If database operations fail
     """
-    # Create HITL processor
-    hitl_processor = HitlProcessor(interrupt_value)
-
     # Setup database and create table if needed
     await memory.setup()
     async with memory.lock, memory.conn.cursor() as cur:
@@ -86,6 +84,7 @@ async def create_and_save_resume_trigger(
                 CREATE TABLE IF NOT EXISTS {resume_triggers_table} (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     type TEXT NOT NULL,
+                    name TEXT NOT NULL,
                     key TEXT,
                     folder_key TEXT,
                     folder_path TEXT,
@@ -103,7 +102,8 @@ async def create_and_save_resume_trigger(
 
         # Create resume trigger
         try:
-            resume_trigger = await hitl_processor.create_resume_trigger()
+            creator = UiPathResumeTriggerCreator()
+            resume_trigger = await creator.create_trigger(interrupt_value)
         except Exception as e:
             raise LangGraphRuntimeError(
                 LangGraphErrorCode.HITL_EVENT_CREATION_FAILED,
@@ -127,12 +127,12 @@ async def create_and_save_resume_trigger(
                 payload = json.dumps(resume_trigger.payload)
             else:
                 payload = str(resume_trigger.payload)
-
             await cur.execute(
-                f"INSERT INTO {resume_triggers_table} (type, key, payload, folder_path, folder_key) VALUES (?, ?, ?, ?, ?)",
+                f"INSERT INTO {resume_triggers_table} (type, key, name, payload, folder_path, folder_key) VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     resume_trigger.trigger_type.value,
                     trigger_key,
+                    resume_trigger.trigger_name.value,
                     payload,
                     resume_trigger.folder_path,
                     resume_trigger.folder_key,

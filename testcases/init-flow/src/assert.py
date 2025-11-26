@@ -44,6 +44,10 @@ with open("local_run_output.log", 'r', encoding='utf-8') as f:
 # Check if response contains 'Successful execution.'
 assert "Successful execution." in local_run_output, f"Response does not contain 'Successful execution.'. Actual response: {local_run_output}"
 
+with open(".uipath/traces.jsonl", 'r', encoding='utf-8') as f:
+    local_run_traces = f.read()
+    print(f"traces: {local_run_traces}")
+
 # Simple trace assertions - just check that expected spans exist
 assert_traces(".uipath/traces.jsonl", "expected_traces.json")
 

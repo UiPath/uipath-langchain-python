@@ -1,6 +1,6 @@
 """Exceptions for the basic agent loop."""
 
-from uipath._cli._runtime._contracts import UiPathRuntimeError
+from uipath.runtime.errors import UiPathRuntimeError
 
 
 class AgentNodeRoutingException(Exception):

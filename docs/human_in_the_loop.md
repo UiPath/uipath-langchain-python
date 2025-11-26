@@ -6,9 +6,9 @@ wait state within the LangGraph framework.
 
 ## Models Overview
 
-### 1. CreateAction
+### 1. CreateTask
 
-The `CreateAction` model is utilized to create an escalation action within the UiPath Action Center as part of an interrupt context. The action will rely on a previously created UiPath app.
+The `CreateTask` model is utilized to create an escalation action within the UiPath Action Center as part of an interrupt context. The action will rely on a previously created UiPath app.
 After addressing the escalation, the current agent will resume execution.
 For more information on UiPath apps, refer to the [UiPath Apps User Guide](https://docs.uipath.com/apps/automation-cloud/latest/user-guide/introduction).
 
@@ -19,34 +19,33 @@ For more information on UiPath apps, refer to the [UiPath Apps User Guide](https
 -   **app_key** (Optional[str]): The key of the app.
 -   **title** (str): The title of the action to create.
 -   **data** (Optional[Dict[str, Any]]): Values that the action will be populated with.
--   **app_version** (Optional[int]): The version of the app (defaults to 1).
 -   **assignee** (Optional[str]): The username or email of the person assigned to handle the escalation.
 
 #### Example:
 
 ```python
-from uipath.models import CreateAction
-action_output = interrupt(CreateAction(app_name="AppName", app_folder_path="MyFolderPath", title="Escalate Issue", data={"key": "value"}, app_version=1, assignee="user@example.com"))
+from uipath.platform.common import CreateTask
+task_output = interrupt(CreateTask(app_name="AppName", app_folder_path="MyFolderPath", title="Escalate Issue", data={"key": "value"}, assignee="user@example.com"))
 ```
 
-For a practical implementation of the `CreateAction` model, refer to the [ticket-classification sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/ticket-classification). This sample demonstrates how to create an action with dynamic input.
+For a practical implementation of the `CreateTask` model, refer to the [ticket-classification sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/ticket-classification). This sample demonstrates how to create an action with dynamic input.
 
 ---
 
-### 2. WaitAction
+### 2. WaitTask
 
-The `WaitAction` model is used to wait for an action to be handled. This model is intended for scenarios where the action has already been created.
+The `WaitTask` model is used to wait for a task to be handled. This model is intended for scenarios where the task has already been created.
 
 #### Attributes:
 
--   **action** (Action): The instance of the action to wait for.
+-   **task** (Task): The instance of the task to wait for.
 -   **app_folder_path** (Optional[str]): The folder path of the app.
 
 #### Example:
 
 ```python
-from uipath.models import WaitAction
-action_output = interrupt(WaitAction(action=my_action_instance, app_folder_path="MyFolderPath"))
+from uipath.platform.common import WaitTask
+task_output = interrupt(WaitTask(task=my_task_instance, app_folder_path="MyFolderPath"))
 ```
 
 ---

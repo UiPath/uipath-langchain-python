@@ -3,23 +3,32 @@ import os
 import shutil
 import sqlite3
 
+import pytest
 from click.testing import CliRunner
 from pytest_httpx import HTTPXMock
+from uipath.runtime import (
+    UiPathExecuteOptions,
+    UiPathRuntimeContext,
+    UiPathRuntimeFactoryRegistry,
+)
 
 from tests.hitl.conftest import get_file_path
-from uipath_langchain._cli.cli_run import langgraph_run_middleware
+from uipath_langchain.runtime import register_runtime_factory
 
 
 class TestHitlApiTrigger:
     """Test class for HITL API trigger functionality."""
 
-    def test_agent(
+    @pytest.mark.asyncio
+    async def test_agent(
         self,
         runner: CliRunner,
         temp_dir: str,
         httpx_mock: HTTPXMock,
         setup_test_env: None,
     ) -> None:
+        register_runtime_factory()
+
         script_name = "api_trigger_hitl.py"
         script_file_path = get_file_path(script_name)
 
@@ -30,60 +39,111 @@ class TestHitlApiTrigger:
         langgraph_config_file_path = get_file_path(langgraph_config_file_name)
 
         with runner.isolated_filesystem(temp_dir=temp_dir):
-            # Copy the API trigger test file to our temp directory
+            current_dir = os.getcwd()
 
-            shutil.copy(script_file_path, "hitl.py")
-            shutil.copy(config_file_path, config_file_name)
-            shutil.copy(langgraph_config_file_path, langgraph_config_file_name)
-
-            # First execution: creates interrupt and stores trigger in database
-            result = langgraph_run_middleware("agent", "{}", False)
-
-            assert result.error_message is None
-
-            # Verify that __uipath directory and state.db were created
-            assert os.path.exists("__uipath")
-            assert os.path.exists("__uipath/state.db")
-
-            # Verify the state database contains trigger information
-            conn = None
             try:
-                conn = sqlite3.connect("__uipath/state.db")
-                cursor = conn.cursor()
+                # Copy the API trigger test file to our temp directory
+                shutil.copy(script_file_path, "hitl.py")
+                shutil.copy(config_file_path, config_file_name)
+                shutil.copy(langgraph_config_file_path, langgraph_config_file_name)
 
-                cursor.execute("""
-                    SELECT name FROM sqlite_master
-                    WHERE type='table' AND name='__uipath_resume_triggers'
-                """)
-                tables = cursor.fetchall()
-                assert len(tables) == 1
+                # First execution: creates interrupt and stores trigger in database
+                context = UiPathRuntimeContext.with_defaults(
+                    entrypoint="agent",
+                    input="{}",
+                    output_file="__uipath/output.json",
+                )
 
-                # Check the inserted trigger data from first execution
-                cursor.execute("SELECT * FROM __uipath_resume_triggers")
-                triggers = cursor.fetchall()
-                assert len(triggers) == 1
-                _, type, key, folder_path, folder_key, payload, _ = triggers[0]
-                assert type == "Api"
-                assert folder_path == folder_key is None
-                assert payload == "interrupt message"
+                factory = UiPathRuntimeFactoryRegistry.get(
+                    search_path=os.getcwd(), context=context
+                )
+
+                runtime = await factory.new_runtime(
+                    entrypoint="agent", runtime_id="test-hitl-runtime"
+                )
+
+                with context:
+                    context.result = await runtime.execute(
+                        input={}, options=UiPathExecuteOptions(resume=False)
+                    )
+
+                assert context.result is not None
+
+                # Verify that __uipath directory and state.db were created
+                assert os.path.exists("__uipath")
+                assert os.path.exists("__uipath/state.db")
+
+                # Verify the state database contains trigger information
+                conn = None
+                try:
+                    conn = sqlite3.connect("__uipath/state.db")
+                    cursor = conn.cursor()
+
+                    cursor.execute("""
+                        SELECT name FROM sqlite_master
+                        WHERE type='table' AND name='__uipath_resume_triggers'
+                    """)
+                    tables = cursor.fetchall()
+                    assert len(tables) == 1
+
+                    # Check the inserted trigger data from first execution
+                    cursor.execute(
+                        "SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers"
+                    )
+                    triggers = cursor.fetchall()
+                    assert len(triggers) == 1
+                    type, key, name, folder_path, folder_key, payload = triggers[0]
+                    assert type == "Api"
+                    assert name == "Api"
+                    assert folder_path == folder_key is None
+                    assert payload == "interrupt message"
+                finally:
+                    if conn:
+                        conn.close()
+
+                # Cleanup first runtime
+                await runtime.dispose()
+
+                # Mock API response for resume scenario
+                base_url = os.getenv("UIPATH_URL")
+                httpx_mock.add_response(
+                    url=f"{base_url}/orchestrator_/api/JobTriggers/GetPayload/{key}",
+                    status_code=200,
+                    text=json.dumps({"payload": "human response"}),
+                )
+
+                # Second execution: resume from stored trigger and fetch human response
+                resume_context = UiPathRuntimeContext.with_defaults(
+                    entrypoint="agent",
+                    input="{}",
+                    output_file="__uipath/output.json",
+                )
+
+                resume_factory = UiPathRuntimeFactoryRegistry.get(
+                    search_path=os.getcwd(), context=resume_context
+                )
+
+                resume_runtime = await resume_factory.new_runtime(
+                    entrypoint="agent", runtime_id="test-hitl-runtime"
+                )
+
+                with resume_context:
+                    resume_context.result = await resume_runtime.execute(
+                        input={}, options=UiPathExecuteOptions(resume=True)
+                    )
+
+                assert resume_context.result is not None
+
+                # Verify the final output contains the resumed data
+                with open("__uipath/output.json", "r") as f:
+                    output = f.read()
+                json_output = json.loads(output)
+                assert json_output == {"message": "human response"}
+
+                # Cleanup
+                await resume_runtime.dispose()
+                await resume_factory.dispose()
+                await factory.dispose()
+
             finally:
-                if conn:
-                    conn.close()
-
-            # Mock API response for resume scenario
-            base_url = os.getenv("UIPATH_URL")
-            httpx_mock.add_response(
-                url=f"{base_url}/orchestrator_/api/JobTriggers/GetPayload/{key}",
-                status_code=200,
-                text=json.dumps({"payload": "human response"}),
-            )
-            # Second execution: resume from stored trigger and fetch human response
-            result = langgraph_run_middleware("agent", "{}", True)
-            assert result.error_message is None
-            assert result.should_continue is False
-
-            # Verify the final output contains the resumed data
-            with open("__uipath/output.json", "r") as f:
-                output = f.read()
-            json_output = json.loads(output)
-            assert json_output["output"] == {"message": "human response"}
+                os.chdir(current_dir)

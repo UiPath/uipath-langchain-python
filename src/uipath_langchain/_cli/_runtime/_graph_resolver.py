@@ -2,7 +2,7 @@ import asyncio
 from typing import Any, Awaitable, Callable, Optional
 
 from langgraph.graph.state import CompiledStateGraph, StateGraph
-from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
 
 from .._utils._graph import GraphConfig, LangGraphConfig
 from ._exception import LangGraphErrorCode, LangGraphRuntimeError

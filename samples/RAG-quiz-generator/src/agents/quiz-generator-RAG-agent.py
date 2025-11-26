@@ -4,11 +4,12 @@ import httpx
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field, field_validator, ValidationInfo
-from uipath import UiPath
+from uipath.platform import UiPath
 from langchain_core.output_parsers import PydanticOutputParser
 import logging
 import time
-from uipath.models import InvokeProcess, IngestionInProgressException
+from uipath.platform.common import InvokeProcess
+from uipath.platform.errors import IngestionInProgressException
 from uipath_langchain.retrievers import ContextGroundingRetriever
 from langchain_anthropic import ChatAnthropic
 from langchain_core.documents import Document

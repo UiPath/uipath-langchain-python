@@ -1,26 +1,14 @@
 import asyncio
 import importlib.resources
-import json
 import os
 import shutil
-import uuid
 from collections.abc import Generator
 from enum import Enum
-from typing import Any, Callable, overload
+from typing import Any
 
 import click
-from langgraph.graph.state import CompiledStateGraph
-from pydantic import TypeAdapter
 from uipath._cli._utils._console import ConsoleLogger
-from uipath._cli._utils._parse_ast import (  # type: ignore
-    generate_bindings,
-    write_bindings_file,
-    write_entry_points_file,
-)
 from uipath._cli.middlewares import MiddlewareResult
-from uipath._cli.models.runtime_schema import Bindings, Entrypoint, Entrypoints
-
-from uipath_langchain._cli._utils._schema import generate_schema_from_graph
 
 from ._utils._graph import LangGraphConfig
 
@@ -150,9 +138,7 @@ def generate_agents_md_files(options: dict[str, Any]) -> None:
 
 
 async def langgraph_init_middleware_async(
-    entrypoint: str,
     options: dict[str, Any] | None = None,
-    write_config: Callable[[Any], str] | None = None,
 ) -> MiddlewareResult:
     """Middleware to check for langgraph.json and create uipath.json with schemas"""
     options = options or {}
@@ -164,114 +150,6 @@ async def langgraph_init_middleware_async(
         )  # Continue with normal flow if no langgraph.json
 
     try:
-        config.load_config()
-        entrypoints = []
-        mermaids = {}
-        bindings = Bindings(
-            version="2.0",
-            resources=[],
-        )
-        for graph in config.graphs:
-            if entrypoint and graph.name != entrypoint:
-                continue
-
-            try:
-                loaded_graph = await graph.load_graph()
-                state_graph = (
-                    loaded_graph.builder
-                    if isinstance(loaded_graph, CompiledStateGraph)
-                    else loaded_graph
-                )
-                compiled_graph = state_graph.compile()
-                schema_details = generate_schema_from_graph(compiled_graph)
-
-                mermaids[graph.name] = compiled_graph.get_graph(xray=1).draw_mermaid()
-
-                try:
-                    should_infer_bindings = options.get("infer_bindings", True)
-                    # Make sure the file path exists
-                    if os.path.exists(graph.file_path) and should_infer_bindings:
-                        bindings.resources.extend(
-                            generate_bindings(graph.file_path).resources
-                        )
-
-                except Exception as e:
-                    console.warning(
-                        f"Warning: Could not generate bindings for {graph.file_path}: {str(e)}"
-                    )
-
-                new_entrypoint: dict[str, Any] = {
-                    "filePath": graph.name,
-                    "uniqueId": str(uuid.uuid4()),
-                    "type": "agent",
-                    "input": schema_details.schema["input"],
-                    "output": schema_details.schema["output"],
-                }
-                entrypoints.append(new_entrypoint)
-
-                warning_circular_deps = f" schema of graph '{graph.name}' contains circular dependencies. Some types might not be correctly inferred."
-                if schema_details.has_input_circular_dependency:
-                    console.warning("Input" + warning_circular_deps)
-                if schema_details.has_output_circular_dependency:
-                    console.warning("Output" + warning_circular_deps)
-
-            except Exception as e:
-                console.error(f"Error during graph load: {e}")
-                return MiddlewareResult(
-                    should_continue=False,
-                    should_include_stacktrace=True,
-                )
-            finally:
-                await graph.cleanup()
-
-        if entrypoint and not entrypoints:
-            console.error(f"Error: No graph found with name '{entrypoint}'")
-            return MiddlewareResult(
-                should_continue=False,
-            )
-
-        # add here default settings like {'isConversational': false}
-        uipath_config: dict[str, Any] = {}
-
-        if write_config:
-            config_path = write_config(uipath_config)
-        else:
-            # Save the uipath.json file
-            config_path = "uipath.json"
-            with open(config_path, "w") as f:
-                json.dump(uipath_config, f, indent=4)
-        console.success(f"Created {click.style(config_path, fg='cyan')} file.")
-
-        entry_points_path = write_entry_points_file(
-            Entrypoints(
-                entry_points=[
-                    TypeAdapter(Entrypoint).validate_python(entry_point)
-                    for entry_point in entrypoints
-                ]
-            )  # type: ignore
-        )
-        console.success(f"Created {click.style(entry_points_path, fg='cyan')} file.")
-
-        for graph_name, mermaid_content in mermaids.items():
-            mermaid_file_path = f"{graph_name}.mermaid"
-            try:
-                with open(mermaid_file_path, "w") as f:
-                    f.write(mermaid_content)
-                console.success(
-                    f"Created {click.style(mermaid_file_path, fg='cyan')} file."
-                )
-            except Exception as write_error:
-                console.error(
-                    f"Error writing mermaid file for '{graph_name}': {str(write_error)}"
-                )
-                return MiddlewareResult(
-                    should_continue=False,
-                    should_include_stacktrace=True,
-                )
-
-        bindings_path = write_bindings_file(bindings)
-        console.success(f"Created {click.style(bindings_path, fg='cyan')} file.")
-
         generate_agents_md_files(options)
 
         return MiddlewareResult(should_continue=False)
@@ -284,26 +162,8 @@ async def langgraph_init_middleware_async(
         )
 
 
-@overload
 def langgraph_init_middleware(
-    entrypoint: str,
-) -> MiddlewareResult: ...
-
-
-@overload
-def langgraph_init_middleware(
-    entrypoint: str,
-    options: dict[str, Any],
-    write_config: Callable[[Any], str],
-) -> MiddlewareResult: ...
-
-
-def langgraph_init_middleware(
-    entrypoint: str,
     options: dict[str, Any] | None = None,
-    write_config: Callable[[Any], str] | None = None,
 ) -> MiddlewareResult:
     """Middleware to check for langgraph.json and create uipath.json with schemas"""
-    return asyncio.run(
-        langgraph_init_middleware_async(entrypoint, options, write_config)
-    )
+    return asyncio.run(langgraph_init_middleware_async(options))

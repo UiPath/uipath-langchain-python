@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional, Union
 
-from uipath._cli._runtime._contracts import (
+from uipath.runtime.errors import (
     UiPathBaseRuntimeError,
     UiPathErrorCategory,
     UiPathErrorCode,

@@ -7,14 +7,14 @@ from typing import Optional, Literal
 from pydantic import BaseModel
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command
-from langgraph.prebuilt import create_react_agent
-from langchain.schema import SystemMessage, HumanMessage
+from langgraph import create_agent
+from langchain.messages import SystemMessage, HumanMessage
 
 from uipath_langchain.chat.models import UiPathChat
 from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-from uipath import UiPath
+from uipath.platform import UiPath
 
 dotenv.load_dotenv()
 
@@ -59,7 +59,7 @@ async def agent_mcp(access_token: str):
             await session.initialize()
             tools = await load_mcp_tools(session)
             model = UiPathChat(model="anthropic.claude-3-5-sonnet-20240620-v1:0")
-            agent = create_react_agent(model, tools=tools)
+            agent = create_agent(model, tools=tools)
             yield agent
 
 async def connect_to_mcp(state: State) -> Command:

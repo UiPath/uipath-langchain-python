@@ -1,31 +1,28 @@
 [project]
 name = "uipath-langchain"
-version = "0.0.160"
+version = "0.1.0"
 description = "UiPath Langchain"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "uipath>=2.1.173,<2.2.0",
-    "langgraph>=0.5.0, <0.7.0",
-    "langchain-core>=0.3.34",
-    "langgraph-checkpoint-sqlite>=2.0.3",
-    "langchain-community>=0.3.21",
-    "langchain-openai>=0.3.3",
-    "langchain>=0.3.4",
+    "uipath>=2.2.0, <2.3.0",
+    "langgraph>=1.0.0, <2.0.0",
+    "langchain-core>=1.0.0, <2.0.0",
+    "langgraph-checkpoint-sqlite>=3.0.0, <4.0.0",
+    "langchain-openai>=1.0.0, <2.0.0",
+    "langchain>=1.0.0, <2.0.0",
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.0.1",
     "httpx>=0.27.0",
-    "openai>=1.65.5",
-    "openinference-instrumentation-langchain>=0.1.50",
+    "openinference-instrumentation-langchain>=0.1.54",
     "jsonschema-pydantic>=0.6",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Build Tools",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 maintainers = [
     { name = "Marius Cosareanu", email = "marius.cosareanu@uipath.com" },
@@ -34,6 +31,9 @@ maintainers = [
 
 [project.entry-points."uipath.middlewares"]
 register = "uipath_langchain.middlewares:register_middleware"
+
+[project.entry-points."uipath.runtime.factories"]
+langgraph = "uipath_langchain.runtime:register_runtime_factory"
 
 [project.urls]
 Homepage = "https://uipath.com"

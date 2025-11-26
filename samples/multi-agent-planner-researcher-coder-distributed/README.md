@@ -244,7 +244,7 @@ The system is implemented using:
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
 - LangGraph
 - LangChain
 - Anthropic API key
