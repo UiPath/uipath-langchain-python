@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "90c7e825-aabf-4362-acdd-70c2a1b5ff88",
+            "uniqueId": "bf66f611-5167-47e3-a33f-c057a2d0dece",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -44,6 +44,40 @@
                     }
                 },
                 "required": []
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "calculate",
+                        "name": "calculate",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "Node",
+                        "subgraph": null
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "calculate",
+                        "label": null
+                    },
+                    {
+                        "source": "calculate",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
             }
         }
     ]

@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "1f356643-d957-43f0-b7b0-40feee88f129",
+            "uniqueId": "078cbdb9-d7a3-4323-b0f6-48b5056f62ba",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -28,6 +28,78 @@
                     }
                 },
                 "required": []
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "researcher:__start__",
+                        "name": "__start__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "researcher:model",
+                        "name": "model",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "researcher:tools",
+                        "name": "tools",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "researcher:__end__",
+                        "name": "__end__",
+                        "type": "Node",
+                        "subgraph": null
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "researcher:__start__",
+                        "label": null
+                    },
+                    {
+                        "source": "researcher:__end__",
+                        "target": "__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "researcher:__start__",
+                        "target": "researcher:model",
+                        "label": null
+                    },
+                    {
+                        "source": "researcher:model",
+                        "target": "researcher:__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "researcher:model",
+                        "target": "researcher:tools",
+                        "label": null
+                    },
+                    {
+                        "source": "researcher:tools",
+                        "target": "researcher:model",
+                        "label": null
+                    }
+                ]
             }
         }
     ]
