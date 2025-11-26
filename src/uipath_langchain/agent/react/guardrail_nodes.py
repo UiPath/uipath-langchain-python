@@ -21,7 +21,7 @@ from uipath.models.guardrails import (
 )
 
 from .exceptions import AgentTerminationException
-from .types import AgentGraphState
+from .types import AgentGuardrailsGraphState
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ def _hook_type_to_tool_field(hook_type: Literal["PreExecution", "PostExecution"]
 
 
 def _extract_escalation_content(
-    state: AgentGraphState, scope: GuardrailScope, hook_type: Literal["PreExecution", "PostExecution"]
+    state: AgentGuardrailsGraphState, scope: GuardrailScope, hook_type: Literal["PreExecution", "PostExecution"]
 ) -> str:
     """Extract escalation content from state based on guardrail scope and hook type.
 
@@ -90,7 +90,7 @@ def _extract_escalation_content(
 
 
 def _process_escalation_response(
-    state: AgentGraphState,
+    state: AgentGuardrailsGraphState,
     escalation_result: Dict[str, Any],
     scope: GuardrailScope,
     hook_type: Literal["PreExecution", "PostExecution"],
@@ -167,7 +167,7 @@ def _process_escalation_response(
 
 # ----- Extensible guardrail actions API -----
 ActionInlineEnforcement = Callable[
-    [AgentGraphState, CustomGuardrail | BuiltInValidatorGuardrail, Any],
+    [AgentGuardrailsGraphState, CustomGuardrail | BuiltInValidatorGuardrail, Any],
     Dict[str, Any] | None,
 ]
 
@@ -182,7 +182,7 @@ class ActionEnforcementNode:
     """
 
     name: str
-    node: Callable[[AgentGraphState], Any]
+    node: Callable[[AgentGuardrailsGraphState], Any]
 
 
 ActionEnforcementOutcome = Union[ActionEnforcementNode, ActionInlineEnforcement]
@@ -239,7 +239,7 @@ class BlockAction(GuardrailAction):
         hook_type: Literal["PreExecution", "PostExecution"],
     ) -> ActionEnforcementOutcome:
         def _handler(
-            state: AgentGraphState,
+            state: AgentGuardrailsGraphState,
             gr: CustomGuardrail | BuiltInValidatorGuardrail,
             result: Any,
         ) -> Dict[str, Any] | None:
@@ -267,7 +267,7 @@ class LogAction(GuardrailAction):
         hook_type: Literal["PreExecution", "PostExecution"],
     ) -> ActionEnforcementOutcome:
         def _handler(
-            state: AgentGraphState,
+            state: AgentGuardrailsGraphState,
             gr: CustomGuardrail | BuiltInValidatorGuardrail,
             result: Any,
         ) -> Dict[str, Any] | None:
@@ -302,7 +302,7 @@ class HitlAction(GuardrailAction):
         sanitized = re.sub(r"\W+", "_", guardrail.name).strip("_").lower()
         node_name = f"{sanitized}_hitl_{hook_type}_{scope.lower()}"
 
-        async def _node(state: AgentGraphState) -> Dict[str, Any]:
+        async def _node(state: AgentGuardrailsGraphState) -> Dict[str, Any]:
             input = _extract_escalation_content(state, scope, hook_type)
             tool_field = _hook_type_to_tool_field(hook_type)
             data = {
@@ -312,7 +312,7 @@ class HitlAction(GuardrailAction):
                 "AgentTrace": "https://alpha.uipath.com/f88fa028-ccdd-4b5f-bee4-01ef94d134d8/studio_/designer/48fff406-52e9-4a37-ba66-76c0212d9c6b",
                 "Tool": "Create_Issue",
                 "ExecutionStage": hook_type,
-                "GuardrailResult": "guardreilResult",
+                "GuardrailResult": state.guardrailResultReason,
                 tool_field: input,
             }
             escalation_result = interrupt(
@@ -335,9 +335,9 @@ def _create_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     scope: GuardrailScope,
     hook_type: Literal["PreExecution", "PostExecution"],
-    payload_generator: Callable[[AgentGraphState], str],
+    payload_generator: Callable[[AgentGuardrailsGraphState], str],
     action_enforcement_outcome: ActionEnforcementOutcome | None,
-) -> Tuple[str, Callable[[AgentGraphState], Any]]:
+) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail nodes used by public creators.
 
     For inline actions, the returned node will invoke the inline handler when
@@ -347,7 +347,7 @@ def _create_guardrail_node(
     sanitized_name = re.sub(r"\W+", "_", guardrail.name).strip("_").lower()
     node_name = f"{sanitized_name}_{hook_type}_{scope.lower()}"
 
-    async def node(state: AgentGraphState) -> Dict[str, Any] | Command:
+    async def node(state: AgentGuardrailsGraphState) -> Dict[str, Any] | Command:
         text = payload_generator(state)
         try:
             uipath = UiPath()
@@ -361,7 +361,7 @@ def _create_guardrail_node(
 
         if not result.validation_passed:
             if isinstance(action_enforcement_outcome, ActionEnforcementNode):
-                return Command(goto=action_enforcement_outcome.name)
+                return Command(update={"guardrailResultReason": result.reason}, goto=action_enforcement_outcome.name)
             if action_enforcement_outcome is not None:
                 maybe = action_enforcement_outcome(state, guardrail, result)
                 if inspect.isawaitable(maybe):
@@ -370,7 +370,7 @@ def _create_guardrail_node(
                 if isinstance(maybe, dict):
                     return maybe
         # No message change by default; keep last message type intact
-        return {}
+        return Command(update={"guardrailResultReason": None})
 
     return node_name, node
 
@@ -379,8 +379,8 @@ def create_llm_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     hook_type: Literal["PreExecution", "PostExecution"],
     action_enforcement_outcome: ActionEnforcementOutcome | None,
-) -> Tuple[str, Callable[[AgentGraphState], Any]]:
-    def _payload_generator(state: AgentGraphState) -> str:
+) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
+    def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
         return _message_text(state.messages[-1])
@@ -398,8 +398,8 @@ def create_agent_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     hook_type: Literal["PreExecution", "PostExecution"],
     action_enforcement_outcome: ActionEnforcementOutcome | None,
-) -> Tuple[str, Callable[[AgentGraphState], Any]]:
-    def _payload_generator(state: AgentGraphState) -> str:
+) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
+    def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
         return _message_text(state.messages[-1])
@@ -417,8 +417,8 @@ def create_tool_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     hook_type: Literal["PreExecution", "PostExecution"],
     action_enforcement_outcome: ActionEnforcementOutcome | None,
-) -> Tuple[str, Callable[[AgentGraphState], Any]]:
-    def _payload_generator(state: AgentGraphState) -> str:
+) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
+    def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
         return _message_text(state.messages[-1])
