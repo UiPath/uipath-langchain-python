@@ -1,0 +1,4 @@
+{
+  "test_type": "invoke",
+  "prompt": "Count from 1 to 5."
+}
