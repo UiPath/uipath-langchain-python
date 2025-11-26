@@ -27,7 +27,7 @@ def _build_guardrails_chain_by_execution_stage(
         [
             AgentGuardrail,
             Literal["PreExecution", "PostExecution"],
-            Optional[ActionInlineEnforcement],
+            Optional[ActionInlineEnforcement | ActionEnforcementNode],
         ],
         tuple[str, Callable],
     ],
@@ -36,7 +36,6 @@ def _build_guardrails_chain_by_execution_stage(
 
     for guardrail, action in guardrails or []:
         action_enforcement_node = None
-        inline_action_to_enforce = None
 
         action_enforcement = action.enforcement_outcome(
             guardrail=guardrail,
@@ -45,14 +44,13 @@ def _build_guardrails_chain_by_execution_stage(
         )
         if isinstance(action_enforcement, ActionEnforcementNode):
             action_enforcement_node = action_enforcement
-        else:
-            inline_action_to_enforce = cast(ActionInlineEnforcement, action_enforcement)
 
-        eval_node = node_factory(guardrail, hook_type, inline_action_to_enforce)
+        enforcement_to_pass: Optional[ActionInlineEnforcement | ActionEnforcementNode]
+        eval_node = node_factory(guardrail, hook_type, action_enforcement)
         if eval_node is not None:
             chain.append(eval_node)
         if action_enforcement_node is not None:
-            chain.append(action_enforcement)
+            chain.append((action_enforcement_node.name, action_enforcement_node.node))
     return chain
 
 
@@ -64,7 +62,7 @@ def create_guardrails_subgraph(
         [
             AgentGuardrail,
             Literal["PreExecution", "PostExecution"],
-            Optional[ActionInlineEnforcement],
+            Optional[ActionInlineEnforcement | ActionEnforcementNode],
         ],
         tuple[str, Callable],
     ] = create_llm_guardrail_node,
