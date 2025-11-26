@@ -2241,8 +2241,8 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.2.0.dev1008333069"
-source = { registry = "https://test.pypi.org/simple/" }
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "coverage" },
@@ -2261,9 +2261,9 @@ dependencies = [
     { name = "uipath-core" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://test-files.pythonhosted.org/packages/be/f1/c4012da4465eb28d4698991ab87b88febf240f3c2b07139cb417a9957c52/uipath-2.2.0.dev1008333069.tar.gz", hash = "sha256:a4fcc3f9dd4e7203a8beb09d2d7e34cecbdfbcb5ead818e85eb3a2a05e250d72", size = 3249192, upload-time = "2025-11-26T09:19:12.296Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/01/d3b7d6bc75c84dc1d701a9ea2007b7834502f34215eda2e7dffe5823070c/uipath-2.2.0.tar.gz", hash = "sha256:ca03d8d9ab8d9befcef4f874355e9618c3e50d129280b1d254af835caafe4c51", size = 3249301, upload-time = "2025-11-26T09:50:56.57Z" }
 wheels = [
-    { url = "https://test-files.pythonhosted.org/packages/30/85/7d52f7cc74156f6fc886cea73637a97225af7f5cb64d97318f87fc3efd6a/uipath-2.2.0.dev1008333069-py3-none-any.whl", hash = "sha256:106d417943fefe7dc9e233a6a12269479077c61d9878dcbb9522bae75abc8552", size = 386904, upload-time = "2025-11-26T09:19:10.338Z" },
+    { url = "https://files.pythonhosted.org/packages/01/21/914d74df60cbd8ddac2aa7cb6783a72e7e65c6517bc1702c7d8ded4eb2d8/uipath-2.2.0-py3-none-any.whl", hash = "sha256:852b15a6824f1d94a46ab5d792256597fbc76c47160210407c1afe4130814781", size = 387461, upload-time = "2025-11-26T09:50:54.4Z" },
 ]
 
 [[package]]
@@ -2315,15 +2315,15 @@ dev = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jsonschema-pydantic", specifier = ">=0.6" },
-    { name = "langchain", specifier = ">=1.1.0,<2.0.0" },
-    { name = "langchain-core", specifier = ">=1.1.0,<2.0.0" },
-    { name = "langchain-openai", specifier = ">=1.1.0,<2.0.0" },
-    { name = "langgraph", specifier = ">=1.0.3,<2.0.0" },
+    { name = "langchain", specifier = ">=1.0.0,<2.0.0" },
+    { name = "langchain-core", specifier = ">=1.0.0,<2.0.0" },
+    { name = "langchain-openai", specifier = ">=1.0.0,<2.0.0" },
+    { name = "langgraph", specifier = ">=1.0.0,<2.0.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.0.0,<4.0.0" },
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.54" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = "==2.2.0.dev1008333069", index = "https://test.pypi.org/simple/" },
+    { name = "uipath", specifier = ">=2.2.0,<2.3.0" },
 ]
 
 [package.metadata.requires-dev]
