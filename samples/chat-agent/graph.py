@@ -1,6 +1,6 @@
 from langchain_anthropic import ChatAnthropic
 from langchain_tavily import TavilySearch
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
 tavily_tool = TavilySearch(max_results=5)
 
@@ -27,5 +27,5 @@ Always maintain an enthusiastic and knowledgeable tone about cinema. Provide acc
 DO NOT do any math calculations unless specifically related to movie statistics or box office figures.
 """
 
-llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
-graph = create_react_agent(llm, tools=[tavily_tool], prompt=movie_system_prompt)
+llm = ChatAnthropic(model="claude-3-7-sonnet-latest")
+graph = create_agent(llm, tools=[tavily_tool], system_prompt=movie_system_prompt)

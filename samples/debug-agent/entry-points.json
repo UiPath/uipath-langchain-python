@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "a2029a82-e12d-4e3a-a5e8-9df149f2c49e",
+            "uniqueId": "3b0b7076-f0d1-4c8c-bcc3-fb79fcee515d",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -78,6 +78,144 @@
                     }
                 },
                 "required": []
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "analyze_sentiment",
+                        "name": "analyze_sentiment",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "classify_category",
+                        "name": "classify_category",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "check_urgency",
+                        "name": "check_urgency",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "determine_priority",
+                        "name": "determine_priority",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "check_escalation",
+                        "name": "check_escalation",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "route_to_department",
+                        "name": "route_to_department",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "escalate_to_manager",
+                        "name": "escalate_to_manager",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "assign_standard_queue",
+                        "name": "assign_standard_queue",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "generate_response",
+                        "name": "generate_response",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "finalize_ticket",
+                        "name": "finalize_ticket",
+                        "type": "Node",
+                        "subgraph": null
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "Node",
+                        "subgraph": null
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "analyze_sentiment",
+                        "label": null
+                    },
+                    {
+                        "source": "analyze_sentiment",
+                        "target": "classify_category",
+                        "label": null
+                    },
+                    {
+                        "source": "assign_standard_queue",
+                        "target": "generate_response",
+                        "label": null
+                    },
+                    {
+                        "source": "check_escalation",
+                        "target": "route_to_department",
+                        "label": null
+                    },
+                    {
+                        "source": "check_urgency",
+                        "target": "determine_priority",
+                        "label": null
+                    },
+                    {
+                        "source": "classify_category",
+                        "target": "check_urgency",
+                        "label": null
+                    },
+                    {
+                        "source": "determine_priority",
+                        "target": "check_escalation",
+                        "label": null
+                    },
+                    {
+                        "source": "escalate_to_manager",
+                        "target": "generate_response",
+                        "label": null
+                    },
+                    {
+                        "source": "generate_response",
+                        "target": "finalize_ticket",
+                        "label": null
+                    },
+                    {
+                        "source": "route_to_department",
+                        "target": "assign_standard_queue",
+                        "label": null
+                    },
+                    {
+                        "source": "route_to_department",
+                        "target": "escalate_to_manager",
+                        "label": null
+                    },
+                    {
+                        "source": "finalize_ticket",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
             }
         }
     ]
