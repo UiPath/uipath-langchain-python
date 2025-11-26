@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import AsyncContextManager
 
@@ -33,6 +34,7 @@ class LangGraphRuntimeFactory:
         self._config: LangGraphConfig | None = None
         self._memory: AsyncSqliteSaver | None = None
         self._memory_cm: AsyncContextManager[AsyncSqliteSaver] | None = None
+        self._memory_lock = asyncio.Lock()
         _instrument_traceable_attributes()
         LangChainInstrumentor().instrument()
         UiPathSpanUtils.register_current_span_provider(get_current_span)
@@ -56,11 +58,12 @@ class LangGraphRuntimeFactory:
 
     async def _get_memory(self) -> AsyncSqliteSaver:
         """Get or create the shared memory instance."""
-        if self._memory is None:
-            connection_string = self._get_connection_string()
-            self._memory_cm = AsyncSqliteSaver.from_conn_string(connection_string)
-            self._memory = await self._memory_cm.__aenter__()
-            await self._memory.setup()
+        async with self._memory_lock:
+            if self._memory is None:
+                connection_string = self._get_connection_string()
+                self._memory_cm = AsyncSqliteSaver.from_conn_string(connection_string)
+                self._memory = await self._memory_cm.__aenter__()
+                await self._memory.setup()
         return self._memory
 
     def _load_config(self) -> LangGraphConfig:
