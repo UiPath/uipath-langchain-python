@@ -2,7 +2,7 @@
 
 from typing import Any, Sequence
 
-from jsonschema_pydantic import jsonschema_to_pydantic  # type: ignore[import-untyped]
+from jsonschema_pydantic_converter import transform as create_model
 from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL
@@ -13,7 +13,7 @@ def resolve_input_model(
 ) -> type[BaseModel]:
     """Resolve the input model from the input schema."""
     if input_schema:
-        return jsonschema_to_pydantic(input_schema)
+        return create_model(input_schema)
 
     return BaseModel
 
@@ -23,7 +23,7 @@ def resolve_output_model(
 ) -> type[BaseModel]:
     """Fallback to default end_execution tool schema when no agent output schema is provided."""
     if output_schema:
-        return jsonschema_to_pydantic(output_schema)
+        return create_model(output_schema)
 
     return END_EXECUTION_TOOL.args_schema
 

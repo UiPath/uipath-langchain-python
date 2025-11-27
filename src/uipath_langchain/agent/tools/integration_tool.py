@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Type
+from typing import Any, Dict
 
-from jsonschema_pydantic import jsonschema_to_pydantic  # type: ignore[import-untyped]
+from jsonschema_pydantic_converter import transform as create_model
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel
+from pydantic import TypeAdapter
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
+from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
 
@@ -97,12 +98,12 @@ def create_integration_tool(
 
     activity_metadata = convert_to_activity_metadata(resource)
 
-    input_model: Type[BaseModel] = jsonschema_to_pydantic(resource.input_schema)
+    input_model: Any = create_model(resource.input_schema)
     # note: IS tools output schemas were recently added and are most likely not present in all resources
-    output_model: Type[BaseModel] | None = (
-        jsonschema_to_pydantic(resource.output_schema)
+    output_model: Any = (
+        create_model(resource.output_schema)
         if resource.output_schema
-        else None
+        else create_model({"type": "object", "properties": {}})
     )
 
     sdk = UiPath()
@@ -130,7 +131,13 @@ def create_integration_tool(
                 converted_args[key] = value
         return converted_args
 
-    async def integration_tool_fn(**kwargs: Any):
+    @mockable(
+        name=resource.name,
+        description=resource.description,
+        input_schema=input_model.model_json_schema(),
+        output_schema=output_model.model_json_schema(),
+    )
+    async def integration_tool_fn(**kwargs: Any) -> output_model:
         try:
             result = await sdk.connections.invoke_activity_async(
                 activity_metadata=activity_metadata,
@@ -140,7 +147,7 @@ def create_integration_tool(
         except Exception:
             raise
 
-        return result
+        return TypeAdapter(output_model).validate_python(result)
 
     tool = StructuredTool(
         name=tool_name,

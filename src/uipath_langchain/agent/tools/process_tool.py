@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Type
+from typing import Any
 
-from jsonschema_pydantic import jsonschema_to_pydantic  # type: ignore[import-untyped]
+from jsonschema_pydantic_converter import transform as create_model
 from langchain_core.tools import StructuredTool
 from langgraph.types import interrupt
-from pydantic import BaseModel
+from pydantic import TypeAdapter
 from uipath.agent.models.agent import AgentProcessToolResourceConfig
+from uipath.eval.mocks import mockable
 from uipath.platform.common import InvokeProcess
 
 from .utils import sanitize_tool_name
@@ -20,23 +21,26 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
     process_name = resource.properties.process_name
     folder_path = resource.properties.folder_path
 
-    input_model: Type[BaseModel] = jsonschema_to_pydantic(resource.input_schema)
-    output_model: Type[BaseModel] = jsonschema_to_pydantic(resource.output_schema)
+    input_model: Any = create_model(resource.input_schema)
+    output_model: Any = create_model(resource.output_schema)
 
-    async def process_tool_fn(**kwargs: Any):
-        try:
-            result = interrupt(
-                InvokeProcess(
-                    name=process_name,
-                    input_arguments=kwargs,
-                    process_folder_path=folder_path,
-                    process_folder_key=None,
-                )
+    @mockable(
+        name=resource.name,
+        description=resource.description,
+        input_schema=input_model.model_json_schema(),
+        output_schema=output_model.model_json_schema(),
+    )
+    async def process_tool_fn(**kwargs: Any) -> output_model:
+        result = interrupt(
+            InvokeProcess(
+                name=process_name,
+                input_arguments=kwargs,
+                process_folder_path=folder_path,
+                process_folder_key=None,
             )
-        except Exception:
-            raise
+        )
 
-        return result
+        return TypeAdapter(output_model).validate_python(result)
 
     tool = StructuredTool(
         name=tool_name,
