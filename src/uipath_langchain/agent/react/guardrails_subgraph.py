@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, Optional, Sequence, cast
+from typing import Any, Callable, Literal, Sequence
 
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
@@ -8,8 +8,7 @@ from uipath.agent.models.agent import AgentGuardrail
 from uipath.models.guardrails import GuardrailScope
 
 from .guardrail_nodes import (
-    ActionEnforcementNode,
-    ActionInlineEnforcement,
+    GraphNode,
     GuardrailAction,
     create_agent_guardrail_node,
     create_llm_guardrail_node,
@@ -22,36 +21,16 @@ def _build_guardrails_chain_by_execution_stage(
     guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None,
     *,
     scope: GuardrailScope,
-    hook_type: Literal["PreExecution", "PostExecution"],
-    node_factory: Callable[
-        [
-            AgentGuardrail,
-            Literal["PreExecution", "PostExecution"],
-            Optional[ActionInlineEnforcement | ActionEnforcementNode],
-        ],
-        tuple[str, Callable],
-    ],
-) -> list[tuple[str, Callable]]:
-    chain: list[tuple[str, Callable]] = []
-
+    execution_stage: Literal["PreExecution", "PostExecution"],
+) -> list[tuple[AgentGuardrail, GraphNode]]:
+    """Produce (guardrail, mandatory failure action node as GraphNode) for a stage."""
+    items: list[tuple[AgentGuardrail, GraphNode]] = []
     for guardrail, action in guardrails or []:
-        action_enforcement_node = None
-
-        action_enforcement = action.enforcement_outcome(
-            guardrail=guardrail,
-            scope=scope,
-            hook_type=hook_type,
+        failure_node = action.enforcement_outcome(
+            guardrail=guardrail, scope=scope, execution_stage=execution_stage
         )
-        if isinstance(action_enforcement, ActionEnforcementNode):
-            action_enforcement_node = action_enforcement
-
-        enforcement_to_pass: Optional[ActionInlineEnforcement | ActionEnforcementNode]
-        eval_node = node_factory(guardrail, hook_type, action_enforcement)
-        if eval_node is not None:
-            chain.append(eval_node)
-        if action_enforcement_node is not None:
-            chain.append((action_enforcement_node.name, action_enforcement_node.node))
-    return chain
+        items.append((guardrail, failure_node))
+    return items
 
 
 def create_guardrails_subgraph(
@@ -62,53 +41,70 @@ def create_guardrails_subgraph(
         [
             AgentGuardrail,
             Literal["PreExecution", "PostExecution"],
-            Optional[ActionInlineEnforcement | ActionEnforcementNode],
+            GraphNode,  # success node (name, callable)
+            GraphNode,  # failure node (name, callable)
         ],
-        tuple[str, Callable],
+        GraphNode,
     ] = create_llm_guardrail_node,
 ) -> Any:
-    """Wrap a named inner runnable in a subgraph with before/after guardrail nodes.
+    """Build a subgraph that enforces guardrails around an inner node.
 
-    Accepts per-guardrail actions by passing a sequence of (AgentGuardrail, GuardrailAction)
-    tuples. Inline actions execute within the guardrail nodes; node-producing actions are linked
-    immediately after their corresponding guardrail nodes.
+    START -> pre-eval nodes (dynamic goto) -> inner -> post-eval nodes (dynamic goto) -> END
+
+    No static edges are added between guardrail nodes; each eval decides via Command.
+    Failure nodes are added but not chained; they are expected to route via Command.
     """
     inner_name, inner_node = main_inner_node
-    before_chain = _build_guardrails_chain_by_execution_stage(
-        guardrails,
-        scope=scope,
-        hook_type="PreExecution",
-        node_factory=node_factory,
+
+    # Build stage descriptors (guardrail + failure action node) for both phases
+    before_items = _build_guardrails_chain_by_execution_stage(
+        guardrails, scope=scope, execution_stage="PreExecution"
     )
-    after_chain = _build_guardrails_chain_by_execution_stage(
-        guardrails,
-        scope=scope,
-        hook_type="PostExecution",
-        node_factory=node_factory,
+    after_items = _build_guardrails_chain_by_execution_stage(
+        guardrails, scope=scope, execution_stage="PostExecution"
     )
 
     subgraph = StateGraph(AgentGuardrailsGraphState)
-    for node_name, before_node in before_chain:
-        subgraph.add_node(node_name, before_node)
-    for node_name, after_node in after_chain:
-        subgraph.add_node(node_name, after_node)
-    subgraph.add_node(inner_name, inner_node)
 
-    before_names = [name for name, _ in before_chain]
-    after_names = [name for name, _ in after_chain]
-    if before_names:
-        subgraph.add_edge(START, before_names[0])
-        for cur, nxt in zip(before_names, before_names[1:], strict=False):
-            subgraph.add_edge(cur, nxt)
-        subgraph.add_edge(before_names[-1], inner_name)
+    # Construct pre-execution eval nodes from tail to head, so we can pass the success target
+    before_eval_nodes_rev: list[GraphNode] = []
+    next_success: GraphNode = (inner_name, inner_node)
+    for guardrail, failure_node in reversed(before_items):
+        eval_node = node_factory(guardrail, "PreExecution", next_success, failure_node)
+        before_eval_nodes_rev.append(eval_node)
+        next_success = eval_node
+    before_eval_nodes = list(reversed(before_eval_nodes_rev))
+
+    # Construct post-execution eval nodes from tail to head. Success target for last is END
+    after_eval_nodes_rev: list[GraphNode] = []
+    end_node: GraphNode = (str(END), lambda _s: {})
+    next_success_post: GraphNode = end_node
+    for guardrail, failure_node in reversed(after_items):
+        eval_node = node_factory(guardrail, "PostExecution", next_success_post, failure_node)
+        after_eval_nodes_rev.append(eval_node)
+        next_success_post = eval_node
+    after_eval_nodes = list(reversed(after_eval_nodes_rev))
+
+    # Add nodes: all eval nodes, inner node, and all failure action nodes
+    for name, node in before_eval_nodes:
+        subgraph.add_node(name, node)
+    subgraph.add_node(inner_name, inner_node)
+    for name, node in after_eval_nodes:
+        subgraph.add_node(name, node)
+
+    for _, fail_node in before_items:
+        subgraph.add_node(fail_node[0], fail_node[1])
+    for _, fail_node in after_items:
+        subgraph.add_node(fail_node[0], fail_node[1])
+
+    # Only minimal static edges: entry to first pre, inner to first post (or END)
+    if before_eval_nodes:
+        subgraph.add_edge(START, before_eval_nodes[0][0])
     else:
         subgraph.add_edge(START, inner_name)
 
-    if after_names:
-        subgraph.add_edge(inner_name, after_names[0])
-        for cur, nxt in zip(after_names, after_names[1:], strict=False):
-            subgraph.add_edge(cur, nxt)
-        subgraph.add_edge(after_names[-1], END)
+    if after_eval_nodes:
+        subgraph.add_edge(inner_name, after_eval_nodes[0][0])
     else:
         subgraph.add_edge(inner_name, END)
 
@@ -155,8 +151,8 @@ def create_tool_guardrails_subgraph(
 ) -> Any:
     tool_name, _ = tool_node
     applicable_guardrails = [
-        (guardrail, _action)
-        for (guardrail, _action) in (guardrails or [])
+        (guardrail, action)
+        for (guardrail, action) in (guardrails or [])
         if GuardrailScope.TOOL in guardrail.selector.scopes
         and tool_name in guardrail.selector.match_names
     ]

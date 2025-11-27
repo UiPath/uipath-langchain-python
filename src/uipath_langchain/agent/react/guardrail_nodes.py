@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import inspect
 import json
 import logging
 import re
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Literal, Tuple
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.types import Command, interrupt
 from uipath import UiPath
 from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathErrorCode
@@ -32,7 +30,9 @@ def _message_text(msg: AnyMessage) -> str:
     return str(getattr(msg, "content", "")) if hasattr(msg, "content") else ""
 
 
-def _hook_type_to_tool_field(hook_type: Literal["PreExecution", "PostExecution"]) -> str:
+def _hook_type_to_tool_field(
+    hook_type: Literal["PreExecution", "PostExecution"],
+) -> str:
     """Convert hook type to tool field name.
 
     Args:
@@ -45,7 +45,9 @@ def _hook_type_to_tool_field(hook_type: Literal["PreExecution", "PostExecution"]
 
 
 def _extract_escalation_content(
-    state: AgentGuardrailsGraphState, scope: GuardrailScope, hook_type: Literal["PreExecution", "PostExecution"]
+    state: AgentGuardrailsGraphState,
+    scope: GuardrailScope,
+    hook_type: Literal["PreExecution", "PostExecution"],
 ) -> str:
     """Extract escalation content from state based on guardrail scope and hook type.
 
@@ -79,7 +81,11 @@ def _extract_escalation_content(
     if ai_message.tool_calls:
         for tool_call in ai_message.tool_calls:
             args = tool_call["args"] if isinstance(tool_call, dict) else tool_call.args
-            if isinstance(args, dict) and "content" in args and args["content"] is not None:
+            if (
+                isinstance(args, dict)
+                and "content" in args
+                and args["content"] is not None
+            ):
                 content_list.append(json.dumps(args["content"]))
 
     message_content = _message_text(last_message)
@@ -114,7 +120,9 @@ def _process_escalation_response(
         return {}
 
     try:
-        reviewed_field = "ReviewedInputs" if hook_type == "PreExecution" else "ReviewedOutputs"
+        reviewed_field = (
+            "ReviewedInputs" if hook_type == "PreExecution" else "ReviewedOutputs"
+        )
 
         msgs = state.messages.copy()
         if not msgs or reviewed_field not in escalation_result:
@@ -141,8 +149,16 @@ def _process_escalation_response(
             if ai_message.tool_calls:
                 tool_calls = list(ai_message.tool_calls)
                 for tool_call in tool_calls:
-                    args = tool_call["args"] if isinstance(tool_call, dict) else tool_call.args
-                    if isinstance(args, dict) and "content" in args and args["content"] is not None:
+                    args = (
+                        tool_call["args"]
+                        if isinstance(tool_call, dict)
+                        else tool_call.args
+                    )
+                    if (
+                        isinstance(args, dict)
+                        and "content" in args
+                        and args["content"] is not None
+                    ):
                         if content_index < len(content_list):
                             updated_content = json.loads(content_list[content_index])
                             args["content"] = updated_content
@@ -165,38 +181,12 @@ def _process_escalation_response(
         ) from e
 
 
-# ----- Extensible guardrail actions API -----
-ActionInlineEnforcement = Callable[
-    [AgentGuardrailsGraphState, CustomGuardrail | BuiltInValidatorGuardrail, Any],
-    Dict[str, Any] | None,
-]
-
-
-@dataclass(frozen=True)
-class ActionEnforcementNode:
-    """Node-producing action result.
-
-    Attributes:
-        name: Unique node name to register in the graph.
-        node: The async callable implementing the node.
-    """
-
-    name: str
-    node: Callable[[AgentGuardrailsGraphState], Any]
-
-
-ActionEnforcementOutcome = Union[ActionEnforcementNode, ActionInlineEnforcement]
+# Graph node tuple (name, callable)
+GraphNode = Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]
 
 
 class GuardrailAction(ABC):
-    """Extensible action interface executed when a guardrail fails validation.
-
-    Implementations can either:
-    - return an inline handler (BlockAction/LogAction) that runs inside the guardrail node, or
-    - return a new node (HitlAction) to be linked into the guardrail subgraph.
-
-    See https://docs.uipath.com for guardrail concepts and best practices.
-    """
+    """Extensible action interface producing a node for validation failure."""
 
     @abstractmethod
     def enforcement_outcome(
@@ -204,20 +194,9 @@ class GuardrailAction(ABC):
         *,
         guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
         scope: GuardrailScope,
-        hook_type: Literal["PreExecution", "PostExecution"],
-    ) -> ActionEnforcementOutcome:
-        """Create either an inline violation handler or a node-producing action.
-
-        Args:
-            guardrail: The guardrail definition to enforce.
-            scope: The scope where this guardrail applies (LLM/AGENT/TOOL).
-            hook_type: Whether this is a 'before' or 'after' hook.
-
-        Returns:
-            Either:
-            - (name, node) tuple to be added to the graph, or
-            - a callable handler that will run inline if the guardrail fails.
-        """
+        execution_stage: Literal["PreExecution", "PostExecution"],
+    ) -> GraphNode:
+        """Create and return the GraphNode to execute on validation failure."""
         ...
 
 
@@ -228,7 +207,7 @@ class BlockAction(GuardrailAction):
         reason: Optional reason string to include in the raised exception title.
     """
 
-    def __init__(self, reason: Optional[str] = None):
+    def __init__(self, reason: str) -> None:
         self.reason = reason
 
     def enforcement_outcome(
@@ -236,13 +215,14 @@ class BlockAction(GuardrailAction):
         *,
         guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
         scope: GuardrailScope,
-        hook_type: Literal["PreExecution", "PostExecution"],
-    ) -> ActionEnforcementOutcome:
-        def _handler(
-            state: AgentGuardrailsGraphState,
-            gr: CustomGuardrail | BuiltInValidatorGuardrail,
-            result: Any,
-        ) -> Dict[str, Any] | None:
+        execution_stage: Literal["PreExecution", "PostExecution"],
+    ) -> GraphNode:
+        sanitized = re.sub(r"\W+", "_", getattr(guardrail, "name", "guardrail")).strip(
+            "_"
+        )
+        node_name = f"{sanitized}_{execution_stage.lower()}_{scope.lower()}_block"
+
+        async def _node(_state: AgentGuardrailsGraphState) -> Dict[str, Any]:
             raise AgentTerminationException(
                 code=UiPathErrorCode.EXECUTION_ERROR,
                 title="Guardrail violation",
@@ -250,13 +230,13 @@ class BlockAction(GuardrailAction):
                 category=UiPathErrorCategory.USER,
             )
 
-        return _handler
+        return node_name, _node
 
 
 class LogAction(GuardrailAction):
     """Inline action that logs guardrail violations and continues."""
 
-    def __init__(self, level: int = logging.WARNING):
+    def __init__(self, level: int = logging.WARNING) -> None:
         self.level = level
 
     def enforcement_outcome(
@@ -264,88 +244,84 @@ class LogAction(GuardrailAction):
         *,
         guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
         scope: GuardrailScope,
-        hook_type: Literal["PreExecution", "PostExecution"],
-    ) -> ActionEnforcementOutcome:
-        def _handler(
-            state: AgentGuardrailsGraphState,
-            gr: CustomGuardrail | BuiltInValidatorGuardrail,
-            result: Any,
-        ) -> Dict[str, Any] | None:
+        execution_stage: Literal["PreExecution", "PostExecution"],
+    ) -> GraphNode:
+        sanitized = re.sub(r"\W+", "_", getattr(guardrail, "name", "guardrail")).strip(
+            "_"
+        )
+        node_name = f"{sanitized}_{execution_stage.lower()}_{scope.lower()}_log"
+
+        async def _node(_state: AgentGuardrailsGraphState) -> Dict[str, Any]:
             logger.log(
                 self.level,
                 "Guardrail '%s' failed at %s %s: %s",
-                gr.name,
-                hook_type,
+                guardrail.name,
+                execution_stage,
                 scope.value if hasattr(scope, "value") else str(scope),
-                result.reason,
+                _state.guardrailResultReason,
             )
-            # No state mutation by default
             return {}
 
-        return _handler
+        return node_name, _node
 
 
 class HitlAction(GuardrailAction):
-    """Node-producing action that inserts a HITL interruption node into the graph.
-
-    The returned node triggers a dynamic interrupt for HITL without re-evaluating.
-    The runtime will persist a resume trigger and suspend execution.
-    """
-
     def enforcement_outcome(
         self,
         *,
         guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
         scope: GuardrailScope,
-        hook_type: Literal["PreExecution", "PostExecution"],
-    ) -> ActionEnforcementOutcome:
+        execution_stage: Literal["PreExecution", "PostExecution"],
+    ) -> GraphNode:
         sanitized = re.sub(r"\W+", "_", guardrail.name).strip("_").lower()
-        node_name = f"{sanitized}_hitl_{hook_type}_{scope.lower()}"
+        node_name = f"{sanitized}_hitl_{execution_stage}_{scope.lower()}"
 
         async def _node(state: AgentGuardrailsGraphState) -> Dict[str, Any]:
-            input = _extract_escalation_content(state, scope, hook_type)
-            tool_field = _hook_type_to_tool_field(hook_type)
+            input = _extract_escalation_content(state, scope, execution_stage)
+            tool_field = _hook_type_to_tool_field(execution_stage)
             data = {
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
-                "TenantName": "DefaultTenant",
+                "TenantName": "AgentsRuntime",
                 "AgentTrace": "https://alpha.uipath.com/f88fa028-ccdd-4b5f-bee4-01ef94d134d8/studio_/designer/48fff406-52e9-4a37-ba66-76c0212d9c6b",
                 "Tool": "Create_Issue",
-                "ExecutionStage": hook_type,
+                "ExecutionStage": execution_stage,
                 "GuardrailResult": state.guardrailResultReason,
                 tool_field: input,
             }
             escalation_result = interrupt(
                 CreateAction(
                     app_name="Guardrail.Escalation.Action.App",
-                    app_folder_path="TestEscalation",
-                    title="Agents Guardrail Task CTI",
+                    app_folder_path="Shared",
+                    title="Agents Guardrail Task VB",
                     data=data,
                     app_version=1,
-                    assignee="cristian.iliescu@uipath.com",
+                    assignee="valentina.bojan@uipath.com",
                 )
             )
+            return _process_escalation_response(
+                state, escalation_result, scope, execution_stage
+            )
 
-            return _process_escalation_response(state, escalation_result, scope, hook_type)
-
-        return ActionEnforcementNode(node_name, _node)
+        return node_name, _node
 
 
 def _create_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     scope: GuardrailScope,
-    hook_type: Literal["PreExecution", "PostExecution"],
+    execution_stage: Literal["PreExecution", "PostExecution"],
     payload_generator: Callable[[AgentGuardrailsGraphState], str],
-    action_enforcement_outcome: ActionEnforcementOutcome | None,
+    success_node: GraphNode,
+    failure_node: GraphNode,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
-    """Private factory for guardrail nodes used by public creators.
+    """Private factory for guardrail evaluation nodes.
 
-    For inline actions, the returned node will invoke the inline handler when
-    a validation fails. For node-producing actions, the inline handler is a no-op
-    and the actual action node is expected to be linked by the subgraph builder.
+    Returns a node that evaluates the guardrail and routes via Command:
+    - goto success_node on validation pass
+    - goto failure_node on validation fail
     """
     sanitized_name = re.sub(r"\W+", "_", guardrail.name).strip("_").lower()
-    node_name = f"{sanitized_name}_{hook_type}_{scope.lower()}"
+    node_name = f"{sanitized_name}_{execution_stage}_{scope.lower()}"
 
     async def node(state: AgentGuardrailsGraphState) -> Dict[str, Any] | Command:
         text = payload_generator(state)
@@ -360,25 +336,17 @@ def _create_guardrail_node(
             raise
 
         if not result.validation_passed:
-            if isinstance(action_enforcement_outcome, ActionEnforcementNode):
-                return Command(update={"guardrailResultReason": result.reason}, goto=action_enforcement_outcome.name)
-            if action_enforcement_outcome is not None:
-                maybe = action_enforcement_outcome(state, guardrail, result)
-                if inspect.isawaitable(maybe):
-                    await maybe  # type: ignore[func-returns-value]
-                # Inline handlers can optionally return a partial state update
-                if isinstance(maybe, dict):
-                    return maybe
-        # No message change by default; keep last message type intact
-        return Command(update={"guardrailResultReason": None})
+            return Command(goto=failure_node[0])
+        return Command(goto=success_node[0])
 
     return node_name, node
 
 
 def create_llm_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
-    hook_type: Literal["PreExecution", "PostExecution"],
-    action_enforcement_outcome: ActionEnforcementOutcome | None,
+    execution_stage: Literal["PreExecution", "PostExecution"],
+    success_node: GraphNode,
+    failure_node: GraphNode,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
@@ -388,16 +356,18 @@ def create_llm_guardrail_node(
     return _create_guardrail_node(
         guardrail,
         GuardrailScope.LLM,
-        hook_type,
+        execution_stage,
         _payload_generator,
-        action_enforcement_outcome,
+        success_node,
+        failure_node,
     )
 
 
 def create_agent_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
-    hook_type: Literal["PreExecution", "PostExecution"],
-    action_enforcement_outcome: ActionEnforcementOutcome | None,
+    execution_stage: Literal["PreExecution", "PostExecution"],
+    success_node: GraphNode,
+    failure_node: GraphNode,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
@@ -407,16 +377,18 @@ def create_agent_guardrail_node(
     return _create_guardrail_node(
         guardrail,
         GuardrailScope.AGENT,
-        hook_type,
+        execution_stage,
         _payload_generator,
-        action_enforcement_outcome,
+        success_node,
+        failure_node,
     )
 
 
 def create_tool_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
-    hook_type: Literal["PreExecution", "PostExecution"],
-    action_enforcement_outcome: ActionEnforcementOutcome | None,
+    execution_stage: Literal["PreExecution", "PostExecution"],
+    success_node: GraphNode,
+    failure_node: GraphNode,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
@@ -426,7 +398,8 @@ def create_tool_guardrail_node(
     return _create_guardrail_node(
         guardrail,
         GuardrailScope.TOOL,
-        hook_type,
+        execution_stage,
         _payload_generator,
-        action_enforcement_outcome,
+        success_node,
+        failure_node,
     )
