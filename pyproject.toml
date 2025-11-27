@@ -5,7 +5,8 @@ description = "UiPath Langchain"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
-    "uipath>=2.2.0, <2.3.0",
+    # "uipath>=2.2.0, <2.3.0",
+    "uipath>=2.2.4.dev1009590000,<2.2.4.dev1009600000",
     "langgraph>=1.0.0, <2.0.0",
     "langchain-core>=1.0.0, <2.0.0",
     "langgraph-checkpoint-sqlite>=3.0.0, <4.0.0",
@@ -16,6 +17,10 @@ dependencies = [
     "httpx>=0.27.0",
     "openinference-instrumentation-langchain>=0.1.54",
     "jsonschema-pydantic-converter>=0.1.5",
+    "langchain-aws>=0.2.35",
+    "langchain-google-vertexai>=2.1.2",
+    "boto3-stubs>=1.41.4",
+    "langchain-community>=0.4.1",
 ]
 classifiers = [
     "Intended Audience :: Developers",
@@ -107,3 +112,6 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+[tool.uv.sources]
+uipath = { index = "testpypi" }
