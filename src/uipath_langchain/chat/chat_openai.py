@@ -43,7 +43,7 @@ class UiPathSyncURLRewriteTransport(httpx.HTTPTransport):
                 request.url = httpx.URL(new_url_str, params=query_string)
             else:
                 request.url = httpx.URL(new_url_str)
-
+        
         return super().handle_request(request)
 
 
@@ -51,6 +51,8 @@ class ChatOpenAIUiPath(AzureChatOpenAI):
     """
     LangChain chat model for UiPath LLM Gateway with OpenAI models.
     """
+
+    _vendor: str = "openai"
 
     def __init__(
         self,
@@ -64,9 +66,6 @@ class ChatOpenAIUiPath(AzureChatOpenAI):
         vendor: str = "openai",
         **kwargs,
     ):
-        self.model_name = model_name
-        self.openai_api_version = api_version
-
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
         tenant_id = tenant_id or os.getenv("UIPATH_TENANT_ID")
         token = token or os.getenv("UIPATH_ACCESS_TOKEN")
@@ -89,13 +88,16 @@ class ChatOpenAIUiPath(AzureChatOpenAI):
         )
 
         endpoint = EndpointManager.get_vendor_endpoint().format(
-            model=model_name, api_version=api_version
+            vendor=vendor, model=model_name
         )
-        base_url = f"{gateway_url}/{org_id}/{tenant_id}/{endpoint}/openai/deployments/placeholder"
+        endpoint_without_completions = endpoint.replace("/completions", "")
+        base_url = f"{gateway_url}/{org_id}/{tenant_id}/{endpoint_without_completions}"
 
         logger.debug(
             f"Initializing ChatOpenAIUiPath with base_url={base_url}, model={model_name}"
         )
+        print(f"DEBUG: base_url={base_url}")
+        print(f"DEBUG: endpoint={endpoint}")
 
         headers = {
             "X-UiPath-Streaming-Enabled": "false",
@@ -130,10 +132,13 @@ class ChatOpenAIUiPath(AzureChatOpenAI):
             **kwargs,
         )
 
+        self.openai_api_version = api_version
+        self._vendor = vendor
+
     @property
     def endpoint(self) -> str:
         endpoint = EndpointManager.get_vendor_endpoint()
         logger.debug("Using endpoint: %s", endpoint)
         return endpoint.format(
-            model=self.model_name, api_version=self.openai_api_version
+            vendor=self._vendor, model=self.model_name, api_version=self.openai_api_version
         )

@@ -129,7 +129,7 @@ async def test_streaming(state: GraphState) -> Command:
                 streaming=True,
             ),
             ChatBedrockConverseUiPath(
-                model=BedrockModels.anthropic_claude_3_haiku,
+                model_name=BedrockModels.anthropic_claude_3_haiku,
                 temperature=0.7,
                 max_tokens=200,
             ),
@@ -208,7 +208,7 @@ async def test_invoke(state: GraphState) -> Command:
                 streaming=False,
             ),
             ChatBedrockConverseUiPath(
-                model=BedrockModels.anthropic_claude_3_haiku,
+                model_name=BedrockModels.anthropic_claude_3_haiku,
                 temperature=0.7,
                 max_tokens=200,
             ),
@@ -279,7 +279,7 @@ async def test_streaming_with_tools(state: GraphState) -> Command:
                 streaming=True,
             ),
             ChatBedrockConverseUiPath(
-                model=BedrockModels.anthropic_claude_3_haiku,
+                model_name=BedrockModels.anthropic_claude_3_haiku,
                 temperature=0.7,
                 max_tokens=200,
             ),
@@ -380,7 +380,7 @@ async def test_all_apis(state: GraphState) -> Command:
                 streaming=True,
             )),
             ("ChatBedrockConverseUiPath", ChatBedrockConverseUiPath(
-                model=BedrockModels.anthropic_claude_3_haiku,
+                model_name=BedrockModels.anthropic_claude_3_haiku,
                 temperature=0.7,
                 max_tokens=100,
             )),
