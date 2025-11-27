@@ -1,7 +1,7 @@
 from typing import Any, Optional, Union
 
-from jsonschema_pydantic import jsonschema_to_pydantic
 from pydantic import ValidationError
+from uipath.utils.dynamic_schema import jsonschema_to_pydantic
 
 from .exceptions import InputValidationError
 

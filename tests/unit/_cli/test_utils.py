@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from uipath_agents._cli.agent_loader import load_agent_configuration
 from uipath_agents._cli.exceptions import ConfigurationError, InputValidationError
+from uipath_agents._cli.utils import load_agent_configuration
 
 
 @pytest.fixture

@@ -1,75 +1,133 @@
 import asyncio
 import logging
-from pathlib import Path
 from typing import Optional
 
-from uipath._cli._debug._bridge import ConsoleDebugBridge, UiPathDebugBridge
-from uipath._cli._runtime._contracts import UiPathRuntimeContext, UiPathRuntimeResult
+from dotenv import load_dotenv
+from uipath._cli._debug._bridge import ConsoleDebugBridge
 from uipath._cli._utils._common import read_resource_overwrites_from_file
+from uipath._cli._utils._debug import setup_debugging
 from uipath._cli.middlewares import MiddlewareResult
-from uipath._events._events import UiPathAgentStateEvent
 from uipath._utils._bindings import ResourceOverwritesContext
+from uipath.core import UiPathTraceManager
+from uipath.runtime import (
+    UiPathDebugBridgeProtocol,
+    UiPathExecuteOptions,
+    UiPathRuntimeContext,
+    UiPathRuntimeFactoryProtocol,
+    UiPathRuntimeFactoryRegistry,
+    UiPathRuntimeProtocol,
+    UiPathRuntimeResult,
+    UiPathStreamOptions,
+)
+from uipath.runtime.events import UiPathRuntimeStateEvent
 from uipath.tracing import JsonLinesFileExporter, LlmOpsHttpExporter
 from uipath_langchain._cli._runtime._exception import LangGraphRuntimeError
-from uipath_langchain._cli._runtime._memory import get_memory
 
 from .._observability import get_azure_exporter, shutdown_telemetry
-from .runtime import create_agent_langgraph_runtime, setup_runtime_factory
+from .utils import _prepare_agent_run_files
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 
-def lowcode_run_middleware(
+async def execute_runtime(ctx: UiPathRuntimeContext) -> UiPathRuntimeResult:
+    with ctx:
+        runtime: UiPathRuntimeProtocol | None = None
+        factory: UiPathRuntimeFactoryProtocol | None = None
+        try:
+            factory = UiPathRuntimeFactoryRegistry.get(context=ctx)
+            runtime = await factory.new_runtime(ctx.entrypoint, ctx.job_id or "default")
+            options = UiPathExecuteOptions(resume=ctx.resume)
+            ctx.result = await runtime.execute(input=ctx.get_input(), options=options)
+            return ctx.result
+        finally:
+            if runtime:
+                await runtime.dispose()
+            if factory:
+                await factory.dispose()
+
+
+async def debug_runtime(
+    ctx: UiPathRuntimeContext,
+) -> UiPathRuntimeResult | None:
+    with ctx:
+        runtime: UiPathRuntimeProtocol | None = None
+        factory: UiPathRuntimeFactoryProtocol | None = None
+        try:
+            factory = UiPathRuntimeFactoryRegistry.get(context=ctx)
+            runtime = await factory.new_runtime(ctx.entrypoint, "default")
+            debug_bridge: UiPathDebugBridgeProtocol = ConsoleDebugBridge()
+            await debug_bridge.emit_execution_started()
+            options = UiPathStreamOptions(resume=ctx.resume)
+            async for event in runtime.stream(ctx.get_input(), options=options):
+                if isinstance(event, UiPathRuntimeResult):
+                    await debug_bridge.emit_execution_completed(event)
+                    ctx.result = event
+                elif isinstance(event, UiPathRuntimeStateEvent):
+                    await debug_bridge.emit_state_update(event)
+            return ctx.result
+        finally:
+            if runtime:
+                await runtime.dispose()
+            if factory:
+                await factory.dispose()
+
+
+def agents_run_middleware(
     entrypoint: Optional[str],
     input: Optional[str],
     resume: bool,
-    trace_file: Optional[str] = None,
+    input_file: Optional[str],
+    output_file: Optional[str],
+    trace_file: Optional[str],
+    debug: bool,
+    debug_port: int,
     **kwargs,
 ) -> MiddlewareResult:
     """Middleware to handle LangGraph execution"""
+
+    if not setup_debugging(debug, debug_port):
+        logger.error(f"Failed to start debug server on port {debug_port}")
+
+    _prepare_agent_run_files()
+
     try:
-        context = UiPathRuntimeContext.with_defaults(**kwargs)
-        context.entrypoint = entrypoint
-        context.input = input
-        context.resume = resume
-        context.execution_id = context.job_id or "default"
 
-        async def execute():
-            async with get_memory(context) as memory:
-                runtime_factory = setup_runtime_factory(
-                    runtime_generator=lambda ctx: create_agent_langgraph_runtime(
-                        ctx, memory
+        async def execute() -> None:
+            trace_manager = UiPathTraceManager()
+
+            ctx = UiPathRuntimeContext.with_defaults(
+                entrypoint=entrypoint,
+                input=input,
+                input_file=input_file,
+                output_file=output_file,
+                trace_file=trace_file,
+                resume=resume,
+                command="run",
+                trace_manager=trace_manager,
+            )
+
+            azure_exporter = get_azure_exporter()
+            if azure_exporter:
+                trace_manager.add_span_exporter(azure_exporter)
+
+            if ctx.trace_file:
+                trace_manager.add_span_exporter(JsonLinesFileExporter(ctx.trace_file))
+
+            if ctx.job_id:
+                trace_manager.add_span_exporter(LlmOpsHttpExporter())
+
+                async with ResourceOverwritesContext(
+                    lambda: read_resource_overwrites_from_file(ctx.runtime_dir)
+                ) as rcs_ctx:
+                    logger.info(
+                        f"Applied {rcs_ctx.overwrites_count} resource overwrite(s)"
                     )
-                )
+                    await execute_runtime(ctx)
 
-                if trace_file:
-                    runtime_factory.add_span_exporter(JsonLinesFileExporter(trace_file))
-
-                if context.job_id:
-                    async with ResourceOverwritesContext(
-                        lambda: read_resource_overwrites_from_file(
-                            Path(context.runtime_dir) if context.runtime_dir else None
-                        )
-                    ):
-                        runtime_factory.add_span_exporter(
-                            LlmOpsHttpExporter(extra_process_spans=True)
-                        )
-
-                        azure_exporter = get_azure_exporter()
-                        if azure_exporter:
-                            runtime_factory.add_span_exporter(azure_exporter)
-
-                        await runtime_factory.execute(context)
-                else:
-                    debug_bridge: UiPathDebugBridge = ConsoleDebugBridge()
-                    await debug_bridge.emit_execution_started(
-                        context.execution_id or "default"
-                    )
-                    async for event in runtime_factory.stream(context):
-                        if isinstance(event, UiPathRuntimeResult):
-                            await debug_bridge.emit_execution_completed(event)
-                        elif isinstance(event, UiPathAgentStateEvent):
-                            await debug_bridge.emit_state_update(event)
+            else:
+                await debug_runtime(ctx)
 
         asyncio.run(execute())
 
