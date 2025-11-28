@@ -23,7 +23,7 @@ maintainers = [
 register = "uipath_agents.middlewares:register_middleware"
 
 [project.entry-points."uipath.runtime.factories"]
-langgraph = "uipath_agents.runtime:register_runtime_factory"
+agents = "uipath_agents.runtime:register_runtime_factory"
 
 [project.urls]
 Homepage = "https://uipath.com"

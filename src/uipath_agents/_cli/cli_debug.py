@@ -3,8 +3,7 @@ import logging
 from typing import Optional
 
 from dotenv import load_dotenv
-from uipath._cli._debug._bridge import ConsoleDebugBridge, get_debug_bridge
-from uipath._cli._utils._debug import setup_debugging
+from uipath._cli._debug._bridge import get_debug_bridge
 from uipath._cli._utils._studio_project import StudioClient
 from uipath._cli.middlewares import MiddlewareResult
 from uipath._config import UiPathConfig
@@ -18,10 +17,7 @@ from uipath.runtime import (
     UiPathRuntimeFactoryProtocol,
     UiPathRuntimeFactoryRegistry,
     UiPathRuntimeProtocol,
-    UiPathRuntimeResult,
-    UiPathStreamOptions,
 )
-from uipath.runtime.events import UiPathRuntimeStateEvent
 from uipath.tracing import LlmOpsHttpExporter
 from uipath_langchain._cli._runtime._exception import LangGraphRuntimeError
 
@@ -33,64 +29,15 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 
-async def execute_runtime(ctx: UiPathRuntimeContext) -> UiPathRuntimeResult:
-    with ctx:
-        runtime: UiPathRuntimeProtocol | None = None
-        factory: UiPathRuntimeFactoryProtocol | None = None
-        try:
-            factory = UiPathRuntimeFactoryRegistry.get(context=ctx)
-            runtime = await factory.new_runtime(ctx.entrypoint, ctx.job_id or "default")
-            options = UiPathExecuteOptions(resume=ctx.resume)
-            ctx.result = await runtime.execute(input=ctx.get_input(), options=options)
-            return ctx.result
-        finally:
-            if runtime:
-                await runtime.dispose()
-            if factory:
-                await factory.dispose()
-
-
-async def debug_runtime(
-    ctx: UiPathRuntimeContext,
-) -> UiPathRuntimeResult | None:
-    with ctx:
-        runtime: UiPathRuntimeProtocol | None = None
-        factory: UiPathRuntimeFactoryProtocol | None = None
-        try:
-            factory = UiPathRuntimeFactoryRegistry.get(context=ctx)
-            runtime = await factory.new_runtime(ctx.entrypoint, "default")
-            debug_bridge: UiPathDebugBridgeProtocol = ConsoleDebugBridge()
-            await debug_bridge.emit_execution_started()
-            options = UiPathStreamOptions(resume=ctx.resume)
-            async for event in runtime.stream(ctx.get_input(), options=options):
-                if isinstance(event, UiPathRuntimeResult):
-                    await debug_bridge.emit_execution_completed(event)
-                    ctx.result = event
-                elif isinstance(event, UiPathRuntimeStateEvent):
-                    await debug_bridge.emit_state_update(event)
-            return ctx.result
-        finally:
-            if runtime:
-                await runtime.dispose()
-            if factory:
-                await factory.dispose()
-
-
 def agents_debug_middleware(
     entrypoint: Optional[str],
     input: Optional[str],
     resume: bool,
     input_file: Optional[str],
     output_file: Optional[str],
-    debug: bool,
-    debug_port: int,
     **kwargs,
 ) -> MiddlewareResult:
-    """Middleware to handle LangGraph execution"""
-
-    if not setup_debugging(debug, debug_port):
-        logger.error(f"Failed to start debug server on port {debug_port}")
-
+    """Middleware to handle Agents LangGraph execution"""
     _prepare_agent_run_files()
 
     try:
@@ -99,6 +46,7 @@ def agents_debug_middleware(
             trace_manager = UiPathTraceManager()
 
             with UiPathRuntimeContext.with_defaults(
+                entrypoint=entrypoint,
                 input=input,
                 input_file=input_file,
                 output_file=output_file,
@@ -117,7 +65,7 @@ def agents_debug_middleware(
                     factory = UiPathRuntimeFactoryRegistry.get(context=ctx)
 
                     runtime = await factory.new_runtime(
-                        entrypoint, ctx.job_id or "default"
+                        ctx.entrypoint, ctx.job_id or "agents"
                     )
 
                     debug_bridge: UiPathDebugBridgeProtocol = get_debug_bridge(ctx)

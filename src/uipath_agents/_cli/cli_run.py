@@ -5,7 +5,6 @@ from typing import Optional
 from dotenv import load_dotenv
 from uipath._cli._debug._bridge import ConsoleDebugBridge
 from uipath._cli._utils._common import read_resource_overwrites_from_file
-from uipath._cli._utils._debug import setup_debugging
 from uipath._cli.middlewares import MiddlewareResult
 from uipath._utils._bindings import ResourceOverwritesContext
 from uipath.core import UiPathTraceManager
@@ -36,6 +35,9 @@ async def execute_runtime(ctx: UiPathRuntimeContext) -> UiPathRuntimeResult:
         runtime: UiPathRuntimeProtocol | None = None
         factory: UiPathRuntimeFactoryProtocol | None = None
         try:
+            if ctx.entrypoint is None:
+                raise ValueError("Entrypoint is required for runtime execution")
+
             factory = UiPathRuntimeFactoryRegistry.get(context=ctx)
             runtime = await factory.new_runtime(ctx.entrypoint, ctx.job_id or "default")
             options = UiPathExecuteOptions(resume=ctx.resume)
@@ -55,8 +57,10 @@ async def debug_runtime(
         runtime: UiPathRuntimeProtocol | None = None
         factory: UiPathRuntimeFactoryProtocol | None = None
         try:
+            if ctx.entrypoint is None:
+                raise ValueError("Entrypoint is required for runtime debugging")
             factory = UiPathRuntimeFactoryRegistry.get(context=ctx)
-            runtime = await factory.new_runtime(ctx.entrypoint, "default")
+            runtime = await factory.new_runtime(ctx.entrypoint, "agents")
             debug_bridge: UiPathDebugBridgeProtocol = ConsoleDebugBridge()
             await debug_bridge.emit_execution_started()
             options = UiPathStreamOptions(resume=ctx.resume)
@@ -81,15 +85,9 @@ def agents_run_middleware(
     input_file: Optional[str],
     output_file: Optional[str],
     trace_file: Optional[str],
-    debug: bool,
-    debug_port: int,
     **kwargs,
 ) -> MiddlewareResult:
-    """Middleware to handle LangGraph execution"""
-
-    if not setup_debugging(debug, debug_port):
-        logger.error(f"Failed to start debug server on port {debug_port}")
-
+    """Middleware to handle Agents LangGraph execution"""
     _prepare_agent_run_files()
 
     try:

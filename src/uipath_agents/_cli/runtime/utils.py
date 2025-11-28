@@ -3,7 +3,7 @@ from typing import Any, Optional, Union
 from pydantic import ValidationError
 from uipath.utils.dynamic_schema import jsonschema_to_pydantic
 
-from .exceptions import InputValidationError
+from ..exceptions import InputValidationError
 
 
 def validate_json_against_json_schema(

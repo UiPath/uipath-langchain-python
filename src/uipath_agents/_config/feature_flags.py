@@ -3,7 +3,7 @@
 import logging
 from typing import Any, Dict, List
 
-from uipath import UiPath
+from uipath.platform import UiPath
 
 from .._services.flags_service import FlagsService
 

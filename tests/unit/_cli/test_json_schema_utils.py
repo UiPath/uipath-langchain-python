@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from uipath_agents._cli.exceptions import InputValidationError
-from uipath_agents._cli.json_schema_utils import validate_json_against_json_schema
+from uipath_agents._cli.runtime.utils import validate_json_against_json_schema
 
 
 class TestValidateJsonAgainstJsonSchema:
