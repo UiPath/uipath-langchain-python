@@ -6,7 +6,7 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Literal, Tuple
 
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langgraph.types import Command, interrupt
 from uipath import UiPath
 from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathErrorCode
@@ -266,6 +266,26 @@ class LogAction(GuardrailAction):
 
 
 class HitlAction(GuardrailAction):
+    """Node-producing action that inserts a HITL interruption node into the graph.
+
+    The returned node triggers a dynamic interrupt for HITL without re-evaluating.
+    The runtime will persist a resume trigger and suspend execution.
+    """
+
+    def __init__(
+        self,
+        app_name: str,
+        app_folder_path: str,
+        title: str,
+        version: int,
+        assignee: str,
+    ):
+        self.app_name = app_name
+        self.app_folder_path = app_folder_path
+        self.title = title
+        self.version = version
+        self.assignee = assignee
+
     def enforcement_outcome(
         self,
         *,
@@ -291,12 +311,12 @@ class HitlAction(GuardrailAction):
             }
             escalation_result = interrupt(
                 CreateAction(
-                    app_name="Guardrail.Escalation.Action.App",
-                    app_folder_path="Shared",
-                    title="Agents Guardrail Task VB",
+                    app_name=self.app_name,
+                    app_folder_path=self.app_folder_path,
+                    title="Test",
                     data=data,
-                    app_version=1,
-                    assignee="valentina.bojan@uipath.com",
+                    app_version=self.version,
+                    assignee=self.assignee,
                 )
             )
             return _process_escalation_response(
@@ -311,8 +331,8 @@ def _create_guardrail_node(
     scope: GuardrailScope,
     execution_stage: Literal["PreExecution", "PostExecution"],
     payload_generator: Callable[[AgentGuardrailsGraphState], str],
-    success_node: GraphNode,
-    failure_node: GraphNode,
+    success_node: str,
+    failure_node: str,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail evaluation nodes.
 
@@ -336,8 +356,10 @@ def _create_guardrail_node(
             raise
 
         if not result.validation_passed:
-            return Command(goto=failure_node[0])
-        return Command(goto=success_node[0])
+            return Command(
+                goto=failure_node, update={"guardrailResultReason": result.reason}
+            )
+        return Command(goto=success_node, update={"guardrailResultReason": None})
 
     return node_name, node
 
@@ -345,8 +367,8 @@ def _create_guardrail_node(
 def create_llm_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     execution_stage: Literal["PreExecution", "PostExecution"],
-    success_node: GraphNode,
-    failure_node: GraphNode,
+    success_node: str,
+    failure_node: str,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
@@ -366,8 +388,8 @@ def create_llm_guardrail_node(
 def create_agent_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     execution_stage: Literal["PreExecution", "PostExecution"],
-    success_node: GraphNode,
-    failure_node: GraphNode,
+    success_node: str,
+    failure_node: str,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
@@ -387,8 +409,8 @@ def create_agent_guardrail_node(
 def create_tool_guardrail_node(
     guardrail: CustomGuardrail | BuiltInValidatorGuardrail,
     execution_stage: Literal["PreExecution", "PostExecution"],
-    success_node: GraphNode,
-    failure_node: GraphNode,
+    success_node: str,
+    failure_node: str,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:

@@ -17,22 +17,6 @@ from .guardrail_nodes import (
 from .types import AgentGuardrailsGraphState
 
 
-def _build_guardrails_chain_by_execution_stage(
-    guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None,
-    *,
-    scope: GuardrailScope,
-    execution_stage: Literal["PreExecution", "PostExecution"],
-) -> list[tuple[AgentGuardrail, GraphNode]]:
-    """Produce (guardrail, mandatory failure action node as GraphNode) for a stage."""
-    items: list[tuple[AgentGuardrail, GraphNode]] = []
-    for guardrail, action in guardrails or []:
-        failure_node = action.enforcement_outcome(
-            guardrail=guardrail, scope=scope, execution_stage=execution_stage
-        )
-        items.append((guardrail, failure_node))
-    return items
-
-
 def create_guardrails_subgraph(
     main_inner_node: tuple[str, Any],
     guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None,
@@ -41,8 +25,8 @@ def create_guardrails_subgraph(
         [
             AgentGuardrail,
             Literal["PreExecution", "PostExecution"],
-            GraphNode,  # success node (name, callable)
-            GraphNode,  # failure node (name, callable)
+            str,  # success node name
+            str,  # fail node name
         ],
         GraphNode,
     ] = create_llm_guardrail_node,
@@ -56,59 +40,87 @@ def create_guardrails_subgraph(
     """
     inner_name, inner_node = main_inner_node
 
-    # Build stage descriptors (guardrail + failure action node) for both phases
-    before_items = _build_guardrails_chain_by_execution_stage(
-        guardrails, scope=scope, execution_stage="PreExecution"
-    )
-    after_items = _build_guardrails_chain_by_execution_stage(
-        guardrails, scope=scope, execution_stage="PostExecution"
-    )
-
     subgraph = StateGraph(AgentGuardrailsGraphState)
-
-    # Construct pre-execution eval nodes from tail to head, so we can pass the success target
-    before_eval_nodes_rev: list[GraphNode] = []
-    next_success: GraphNode = (inner_name, inner_node)
-    for guardrail, failure_node in reversed(before_items):
-        eval_node = node_factory(guardrail, "PreExecution", next_success, failure_node)
-        before_eval_nodes_rev.append(eval_node)
-        next_success = eval_node
-    before_eval_nodes = list(reversed(before_eval_nodes_rev))
-
-    # Construct post-execution eval nodes from tail to head. Success target for last is END
-    after_eval_nodes_rev: list[GraphNode] = []
-    end_node: GraphNode = (str(END), lambda _s: {})
-    next_success_post: GraphNode = end_node
-    for guardrail, failure_node in reversed(after_items):
-        eval_node = node_factory(guardrail, "PostExecution", next_success_post, failure_node)
-        after_eval_nodes_rev.append(eval_node)
-        next_success_post = eval_node
-    after_eval_nodes = list(reversed(after_eval_nodes_rev))
-
-    # Add nodes: all eval nodes, inner node, and all failure action nodes
-    for name, node in before_eval_nodes:
-        subgraph.add_node(name, node)
+    first_post_exec_guardrail_node = _build_guardrail_node_chain(
+        subgraph, guardrails, scope, "PostExecution", node_factory, END
+    )
     subgraph.add_node(inner_name, inner_node)
-    for name, node in after_eval_nodes:
-        subgraph.add_node(name, node)
-
-    for _, fail_node in before_items:
-        subgraph.add_node(fail_node[0], fail_node[1])
-    for _, fail_node in after_items:
-        subgraph.add_node(fail_node[0], fail_node[1])
-
-    # Only minimal static edges: entry to first pre, inner to first post (or END)
-    if before_eval_nodes:
-        subgraph.add_edge(START, before_eval_nodes[0][0])
-    else:
-        subgraph.add_edge(START, inner_name)
-
-    if after_eval_nodes:
-        subgraph.add_edge(inner_name, after_eval_nodes[0][0])
-    else:
-        subgraph.add_edge(inner_name, END)
+    subgraph.add_edge(inner_name, first_post_exec_guardrail_node)
+    first_pre_exec_guardrail_node = _build_guardrail_node_chain(
+        subgraph, guardrails, scope, "PreExecution", node_factory, inner_name
+    )
+    subgraph.add_edge(START, first_pre_exec_guardrail_node)
 
     return subgraph.compile()
+
+
+def _build_guardrail_node_chain(
+    subgraph: StateGraph,
+    guardrails: Sequence[tuple[AgentGuardrail, GuardrailAction]] | None,
+    scope: GuardrailScope,
+    execution_stage: Literal["PreExecution", "PostExecution"],
+    node_factory: Callable[
+        [
+            AgentGuardrail,
+            Literal["PreExecution", "PostExecution"],
+            str,  # success node name
+            str,  # fail node name
+        ],
+        GraphNode,
+    ],
+    next_node: str,
+) -> str:
+    """Recursively build a chain of guardrail nodes in reverse order.
+
+    This function processes guardrails from last to first, creating a chain where:
+    - Each guardrail node evaluates the guardrail condition
+    - On success, it routes to the next guardrail node (or the final next_node)
+    - On failure, it routes to a failure node that either throws an error or continues to next_node
+
+    Args:
+        subgraph: The StateGraph to add nodes and edges to.
+        guardrails: Sequence of (guardrail, action) tuples to process. Processed in reverse.
+        scope: The scope of the guardrails (LLM, AGENT, or TOOL).
+        execution_stage: Whether this is "PreExecution" or "PostExecution" guardrails.
+        node_factory: Factory function to create guardrail evaluation nodes.
+        next_node: The node name to route to after all guardrails pass.
+
+    Returns:
+        The name of the first guardrail node in the chain (or next_node if no guardrails).
+    """
+    # Base case: no guardrails to process, return the next node directly
+    if not guardrails:
+        return next_node
+
+    guardrail, action = guardrails[-1]
+    remaining_guardrails = guardrails[:-1]
+
+    fail_node_name, fail_node = action.enforcement_outcome(
+        guardrail=guardrail, scope=scope, execution_stage=execution_stage
+    )
+
+    # Create the guardrail evaluation node.
+    guardrail_node_name, guardrail_node = node_factory(
+        guardrail, execution_stage, next_node, fail_node_name
+    )
+
+    # Add both nodes to the subgraph
+    subgraph.add_node(guardrail_node_name, guardrail_node)
+    subgraph.add_node(fail_node_name, fail_node)
+
+    # Both success and failure paths route to the next node
+    subgraph.add_edge(fail_node_name, next_node)
+
+    previous_node_name = _build_guardrail_node_chain(
+        subgraph,
+        remaining_guardrails,
+        scope,
+        execution_stage,
+        node_factory,
+        guardrail_node_name,
+    )
+
+    return previous_node_name
 
 
 def create_llm_guardrails_subgraph(
