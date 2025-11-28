@@ -21,7 +21,6 @@ from uipath.runtime import (
 from uipath.tracing import LlmOpsHttpExporter
 from uipath_langchain._cli._runtime._exception import LangGraphRuntimeError
 
-from .._observability import shutdown_telemetry
 from .utils import _prepare_agent_run_files
 
 load_dotenv()
@@ -120,8 +119,3 @@ def agents_debug_middleware(
             error_message=f"Error: {str(e)}",
             should_include_stacktrace=True,
         )
-    finally:
-        try:
-            shutdown_telemetry()
-        except Exception as e:
-            logger.error(f"Error during telemetry shutdown: {e}")

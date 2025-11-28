@@ -22,7 +22,6 @@ from uipath.runtime.events import UiPathRuntimeStateEvent
 from uipath.tracing import JsonLinesFileExporter, LlmOpsHttpExporter
 from uipath_langchain._cli._runtime._exception import LangGraphRuntimeError
 
-from .._observability import get_azure_exporter, shutdown_telemetry
 from .utils import _prepare_agent_run_files
 
 load_dotenv()
@@ -106,10 +105,6 @@ def agents_run_middleware(
                 trace_manager=trace_manager,
             )
 
-            azure_exporter = get_azure_exporter()
-            if azure_exporter:
-                trace_manager.add_span_exporter(azure_exporter)
-
             if ctx.trace_file:
                 trace_manager.add_span_exporter(JsonLinesFileExporter(ctx.trace_file))
 
@@ -146,8 +141,3 @@ def agents_run_middleware(
             error_message=f"Error: {str(e)}",
             should_include_stacktrace=True,
         )
-    finally:
-        try:
-            shutdown_telemetry()
-        except Exception as e:
-            logger.error(f"Error during telemetry shutdown: {e}")

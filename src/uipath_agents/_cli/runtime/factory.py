@@ -1,30 +1,12 @@
-import os
-
-from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
-from opentelemetry.instrumentation.asyncio import AsyncioInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
+from dotenv import load_dotenv
 from uipath.runtime import UiPathRuntimeContext, UiPathRuntimeProtocol
 from uipath_langchain._cli._runtime._factory import LangGraphRuntimeFactory
 
+from ..._observability import configure_telemetry, shutdown_telemetry
 from ..constants import AGENT_ENTRYPOINT
 from .runtime import create_agent_langgraph_runtime
 
-_telemetry_initialized = False
-
-
-def _configure_agents_telemetry() -> None:
-    """Configure telemetry for agents. Idempotent - only runs once."""
-    global _telemetry_initialized
-    if _telemetry_initialized:
-        return
-
-    os.environ.setdefault("OTEL_SERVICE_NAME", "uipath-agents")
-    AsyncioInstrumentor().instrument()
-    HTTPXClientInstrumentor().instrument()
-    AioHttpClientInstrumentor().instrument()
-    SQLite3Instrumentor().instrument()
-    _telemetry_initialized = True
+load_dotenv()
 
 
 class AgentRuntimeFactory(LangGraphRuntimeFactory):
@@ -37,18 +19,14 @@ class AgentRuntimeFactory(LangGraphRuntimeFactory):
             context: UiPathRuntimeContext to use for runtime creation
         """
         super().__init__(context)
-        _configure_agents_telemetry()
+        configure_telemetry(context.trace_manager)
 
     def discover_entrypoints(self) -> list[str]:
         """Discover the Agent entrypoint agent.json"""
         return [AGENT_ENTRYPOINT]
 
     async def discover_runtimes(self) -> list[UiPathRuntimeProtocol]:
-        """Discover runtime instances for all entrypoints.
-
-        Returns:
-            List of AgentLangGraphRuntime instances
-        """
+        """Discover runtime instances for all entrypoints."""
         entrypoints = self.discover_entrypoints()
         memory = await self._get_memory()
 
@@ -77,3 +55,10 @@ class AgentRuntimeFactory(LangGraphRuntimeFactory):
         return create_agent_langgraph_runtime(
             runtime_id, entrypoint, self.context, memory
         )
+
+    async def dispose(self) -> None:
+        """Cleanup factory resources."""
+        if self.context.trace_manager:
+            self.context.trace_manager.flush_spans()
+        shutdown_telemetry()
+        await super().dispose()
