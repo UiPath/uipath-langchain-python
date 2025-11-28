@@ -67,6 +67,7 @@ class TestHitlApiTrigger:
                         input={}, options=UiPathExecuteOptions(resume=False)
                     )
 
+                print(context.result)
                 assert context.result is not None
 
                 # Verify that __uipath directory and state.db were created
@@ -103,6 +104,7 @@ class TestHitlApiTrigger:
 
                 # Cleanup first runtime
                 await runtime.dispose()
+                await factory.dispose()
 
                 # Mock API response for resume scenario
                 base_url = os.getenv("UIPATH_URL")
@@ -117,6 +119,7 @@ class TestHitlApiTrigger:
                     entrypoint="agent",
                     input="{}",
                     output_file="__uipath/output.json",
+                    resume=True,
                 )
 
                 resume_factory = UiPathRuntimeFactoryRegistry.get(
@@ -143,7 +146,6 @@ class TestHitlApiTrigger:
                 # Cleanup
                 await resume_runtime.dispose()
                 await resume_factory.dispose()
-                await factory.dispose()
 
             finally:
                 os.chdir(current_dir)

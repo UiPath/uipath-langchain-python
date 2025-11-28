@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any
 
 from langchain_core.runnables.graph import Graph
 from langgraph.graph.state import CompiledStateGraph
@@ -50,7 +50,7 @@ def _convert_graph_to_uipath(graph: Graph) -> UiPathRuntimeGraph:
     return UiPathRuntimeGraph(nodes=nodes, edges=edges)
 
 
-def langgraph_to_uipath_graph(
+def get_graph_schema(
     compiled_graph: CompiledStateGraph[Any, Any, Any, Any], xray: int = 1
 ) -> UiPathRuntimeGraph:
     """Convert a compiled LangGraph to UiPathRuntimeGraph structure.
@@ -101,7 +101,7 @@ def langgraph_to_uipath_graph(
     return UiPathRuntimeGraph(nodes=nodes, edges=edges)
 
 
-def generate_schema_from_graph(
+def get_entrypoints_schema(
     graph: CompiledStateGraph[Any, Any, Any],
 ) -> SchemaDetails:
     """Extract input/output schema from a LangGraph graph"""
@@ -120,7 +120,7 @@ def generate_schema_from_graph(
             )
 
             # Process the schema to handle nullable types
-            processed_properties = process_nullable_types(
+            processed_properties = _process_nullable_types(
                 unpacked_ref_def_properties.get("properties", {})
             )
 
@@ -137,7 +137,7 @@ def generate_schema_from_graph(
             )
 
             # Process the schema to handle nullable types
-            processed_properties = process_nullable_types(
+            processed_properties = _process_nullable_types(
                 unpacked_ref_def_properties.get("properties", {})
             )
 
@@ -208,9 +208,9 @@ def _resolve_refs(schema, root=None, visited=None):
     return schema, False
 
 
-def process_nullable_types(
-    schema: Dict[str, Any] | list[Any] | Any,
-) -> Dict[str, Any] | list[Any]:
+def _process_nullable_types(
+    schema: dict[str, Any] | list[Any] | Any,
+) -> dict[str, Any] | list[Any]:
     """Process the schema to handle nullable types by removing anyOf with null and keeping the base type."""
     if isinstance(schema, dict):
         if "anyOf" in schema and len(schema["anyOf"]) == 2:
@@ -221,7 +221,13 @@ def process_nullable_types(
                 )
                 return non_null_type
 
-        return {k: process_nullable_types(v) for k, v in schema.items()}
+        return {k: _process_nullable_types(v) for k, v in schema.items()}
     elif isinstance(schema, list):
-        return [process_nullable_types(item) for item in schema]
+        return [_process_nullable_types(item) for item in schema]
     return schema
+
+
+__all__ = [
+    "get_graph_schema",
+    "get_entrypoints_schema",
+]

@@ -147,6 +147,7 @@ class TestHitlActionTrigger:
 
                 # Cleanup first runtime
                 await runtime.dispose()
+                await factory.dispose()
 
                 # Mock response for first resume: human response from create action
                 httpx_mock.add_response(
@@ -163,6 +164,7 @@ class TestHitlActionTrigger:
                     entrypoint="agent",
                     input="{}",
                     output_file="__uipath/output.json",
+                    resume=True,
                 )
 
                 resume_factory_1 = UiPathRuntimeFactoryRegistry.get(
@@ -212,6 +214,7 @@ class TestHitlActionTrigger:
 
                 # Cleanup second runtime
                 await resume_runtime_1.dispose()
+                await resume_factory_1.dispose()
 
                 # Mock response for second resume: human response from wait action
                 httpx_mock.add_response(
@@ -228,6 +231,7 @@ class TestHitlActionTrigger:
                     entrypoint="agent",
                     input="{}",
                     output_file="__uipath/output.json",
+                    resume=True,
                 )
 
                 resume_factory_2 = UiPathRuntimeFactoryRegistry.get(
@@ -261,8 +265,6 @@ class TestHitlActionTrigger:
                 # Cleanup
                 await resume_runtime_2.dispose()
                 await resume_factory_2.dispose()
-                await resume_factory_1.dispose()
-                await factory.dispose()
 
             finally:
                 os.chdir(current_dir)

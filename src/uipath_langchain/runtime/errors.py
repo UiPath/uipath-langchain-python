@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, Union
+from typing import Union
 
 from uipath.runtime.errors import (
     UiPathBaseRuntimeError,
@@ -36,7 +36,7 @@ class LangGraphRuntimeError(UiPathBaseRuntimeError):
         title: str,
         detail: str,
         category: UiPathErrorCategory = UiPathErrorCategory.UNKNOWN,
-        status: Optional[int] = None,
+        status: int | None = None,
     ):
         super().__init__(
             code.value, title, detail, category, status, prefix="LANGGRAPH"

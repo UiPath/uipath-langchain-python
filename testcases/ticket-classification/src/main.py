@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Literal, Optional
+from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
@@ -33,7 +33,7 @@ class GraphInput(BaseModel):
     """Input model for the ticket classification graph."""
     message: str
     ticket_id: str
-    assignee: Optional[str] = None
+    assignee: str | None = None
 
 
 class GraphOutput(BaseModel):
@@ -46,11 +46,11 @@ class GraphState(MessagesState):
     """State model for the ticket classification workflow."""
     message: str
     ticket_id: str
-    assignee: Optional[str]
-    label: Optional[str] = None
-    confidence: Optional[float] = None
-    last_predicted_category: Optional[str] = None
-    human_approval: Optional[bool] = None
+    assignee: str | None
+    label: str | None = None
+    confidence: float | None = None
+    last_predicted_category: str | None = None
+    human_approval: bool | None = None
 
 
 class TicketClassification(BaseModel):

@@ -1,17 +1,14 @@
-import logging
 import os
-from typing import Any, AsyncGenerator, Optional, Sequence
+from typing import Any, AsyncGenerator
 from uuid import uuid4
 
 from langchain_core.runnables.config import RunnableConfig
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
-from langgraph.graph.state import CompiledStateGraph, StateGraph
-from langgraph.types import Interrupt, StateSnapshot
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command, Interrupt, StateSnapshot
 from uipath.runtime import (
     UiPathBreakpointResult,
     UiPathExecuteOptions,
-    UiPathResumeTrigger,
     UiPathRuntimeResult,
     UiPathRuntimeStatus,
     UiPathStreamOptions,
@@ -24,31 +21,34 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
-from ._exception import LangGraphErrorCode, LangGraphRuntimeError
-from ._graph_resolver import AsyncResolver, LangGraphJsonResolver
-from ._input import get_graph_input
-from ._output import create_and_save_resume_trigger, serialize_output
-from ._schema import generate_schema_from_graph, langgraph_to_uipath_graph
+from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
+from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
 
-logger = logging.getLogger(__name__)
+from ._serialize import serialize_output
 
 
-class LangGraphRuntime:
+class UiPathLangGraphRuntime:
     """
-    A runtime class implementing the async context manager protocol.
-    This allows using the class with 'async with' statements.
+    A runtime class for executing LangGraph graphs within the UiPath framework.
     """
 
     def __init__(
         self,
-        runtime_id: str,
-        graph_resolver: AsyncResolver,
-        memory: AsyncSqliteSaver,
+        graph: CompiledStateGraph[Any, Any, Any, Any],
+        runtime_id: str | None = None,
+        entrypoint: str | None = None,
     ):
-        self.runtime_id: str = runtime_id
-        self.graph_resolver: AsyncResolver = graph_resolver
-        self.memory: AsyncSqliteSaver = memory
-        self.resume_triggers_table: str = "__uipath_resume_triggers"
+        """
+        Initialize the runtime.
+
+        Args:
+            graph: The CompiledStateGraph to execute
+            runtime_id: Unique identifier for this runtime instance
+            entrypoint: Optional entrypoint name (for schema generation)
+        """
+        self.graph: CompiledStateGraph[Any, Any, Any, Any] = graph
+        self.runtime_id: str = runtime_id or "default"
+        self.entrypoint: str | None = entrypoint
 
     async def execute(
         self,
@@ -56,28 +56,19 @@ class LangGraphRuntime:
         options: UiPathExecuteOptions | None = None,
     ) -> UiPathRuntimeResult:
         """Execute the graph with the provided input and configuration."""
-        graph = await self.graph_resolver()
-        if not graph:
-            return UiPathRuntimeResult(
-                status=UiPathRuntimeStatus.FAULTED,
-            )
-
         try:
-            compiled_graph = await self._setup_graph(self.memory, graph)
-            graph_input = await self._get_graph_input(input, options, self.memory)
+            graph_input = await self._get_graph_input(input, options)
             graph_config = self._get_graph_config()
 
             # Execute without streaming
-            graph_output = await compiled_graph.ainvoke(
+            graph_output = await self.graph.ainvoke(
                 graph_input,
                 graph_config,
                 interrupt_before=options.breakpoints if options else None,
             )
 
             # Get final state and create result
-            result = await self._create_runtime_result(
-                compiled_graph, graph_config, self.memory, graph_output
-            )
+            result = await self._create_runtime_result(graph_config, graph_output)
 
             return result
 
@@ -105,11 +96,11 @@ class LangGraphRuntime:
                 if isinstance(event, UiPathRuntimeResult):
                     # Last event is the result
                     print(f"Final result: {event}")
-                elif isinstance(event, UiPathAgentMessageEvent):
+                elif isinstance(event, UiPathRuntimeMessageEvent):
                     # Access framework-specific message
                     message = event.payload  # BaseMessage or AIMessageChunk
                     print(f"Message: {message.content}")
-                elif isinstance(event, UiPathAgentStateEvent):
+                elif isinstance(event, UiPathRuntimeStateEvent):
                     # Access framework-specific state
                     state = event.payload
                     print(f"Node {event.node_name} updated: {state}")
@@ -117,20 +108,15 @@ class LangGraphRuntime:
         Raises:
             LangGraphRuntimeError: If execution fails
         """
-        graph = await self.graph_resolver()
-        if not graph:
-            return
-
         try:
-            compiled_graph = await self._setup_graph(self.memory, graph)
-            graph_input = await self._get_graph_input(input, options, self.memory)
+            graph_input = await self._get_graph_input(input, options)
             graph_config = self._get_graph_config()
 
             # Track final chunk for result creation
-            final_chunk: Optional[dict[Any, Any]] = None
+            final_chunk: dict[Any, Any] | None = None
 
             # Stream events from graph
-            async for stream_chunk in compiled_graph.astream(
+            async for stream_chunk in self.graph.astream(
                 graph_input,
                 graph_config,
                 interrupt_before=options.breakpoints if options else None,
@@ -163,14 +149,10 @@ class LangGraphRuntime:
                                 yield state_event
 
             # Extract output from final chunk
-            graph_output = self._extract_graph_result(
-                final_chunk, compiled_graph.output_channels
-            )
+            graph_output = self._extract_graph_result(final_chunk)
 
             # Get final state and create result
-            result = await self._create_runtime_result(
-                compiled_graph, graph_config, self.memory, graph_output
-            )
+            result = await self._create_runtime_result(graph_config, graph_output)
 
             # Yield the final result as last event
             yield result
@@ -178,17 +160,17 @@ class LangGraphRuntime:
         except Exception as e:
             raise self._create_runtime_error(e) from e
 
-    async def _setup_graph(
-        self, memory: AsyncSqliteSaver, graph: StateGraph[Any, Any, Any]
-    ) -> CompiledStateGraph[Any, Any, Any]:
-        """Setup and compile the graph with memory and interrupts."""
-        interrupt_before: list[str] = []
-        interrupt_after: list[str] = []
+    async def get_schema(self) -> UiPathRuntimeSchema:
+        """Get schema for this LangGraph runtime."""
+        schema_details = get_entrypoints_schema(self.graph)
 
-        return graph.compile(
-            checkpointer=memory,
-            interrupt_before=interrupt_before,
-            interrupt_after=interrupt_after,
+        return UiPathRuntimeSchema(
+            filePath=self.entrypoint,
+            uniqueId=str(uuid4()),
+            type="agent",
+            input=schema_details.schema["input"],
+            output=schema_details.schema["output"],
+            graph=get_graph_schema(self.graph, xray=1),
         )
 
     def _get_graph_config(self) -> RunnableConfig:
@@ -213,30 +195,23 @@ class LangGraphRuntime:
         self,
         input: dict[str, Any] | None,
         options: UiPathExecuteOptions | None,
-        memory: AsyncSqliteSaver,
     ) -> Any:
         """Process and return graph input."""
-        return await get_graph_input(
-            input=input,
-            options=options,
-            memory=memory,
-            resume_triggers_table=self.resume_triggers_table,
-        )
+        if options and options.resume:
+            return Command(resume=input)
+        return input
 
     async def _get_graph_state(
         self,
-        compiled_graph: CompiledStateGraph[Any, Any, Any],
         graph_config: RunnableConfig,
-    ) -> Optional[StateSnapshot]:
+    ) -> StateSnapshot | None:
         """Get final graph state."""
         try:
-            return await compiled_graph.aget_state(graph_config)
+            return await self.graph.aget_state(graph_config)
         except Exception:
             return None
 
-    def _extract_graph_result(
-        self, final_chunk: Any, output_channels: str | Sequence[str]
-    ) -> Any:
+    def _extract_graph_result(self, final_chunk: Any) -> Any:
         """
         Extract the result from a LangGraph output chunk according to the graph's output channels.
 
@@ -254,6 +229,8 @@ class LangGraphRuntime:
         # If the result isn't a dict or graph doesn't define output channels, return as is
         if not isinstance(final_chunk, dict):
             return final_chunk
+
+        output_channels = self.graph.output_channels
 
         # Case 1: Single output channel as string
         if isinstance(output_channels, str):
@@ -301,7 +278,7 @@ class LangGraphRuntime:
 
         return False
 
-    def _get_dynamic_interrupt(self, state: StateSnapshot) -> Optional[Interrupt]:
+    def _get_dynamic_interrupt(self, state: StateSnapshot) -> Interrupt | None:
         """Get the first dynamic interrupt if any."""
         if not hasattr(state, "tasks"):
             return None
@@ -315,10 +292,8 @@ class LangGraphRuntime:
 
     async def _create_runtime_result(
         self,
-        compiled_graph: CompiledStateGraph[Any, Any, Any],
         graph_config: RunnableConfig,
-        memory: AsyncSqliteSaver,
-        graph_output: Optional[Any],
+        graph_output: Any,
     ) -> UiPathRuntimeResult:
         """
         Get final graph state and create the execution result.
@@ -330,13 +305,11 @@ class LangGraphRuntime:
             graph_output: The graph execution output
         """
         # Get the final state
-        graph_state = await self._get_graph_state(compiled_graph, graph_config)
+        graph_state = await self._get_graph_state(graph_config)
 
         # Check if execution was interrupted (static or dynamic)
         if graph_state and self._is_interrupted(graph_state):
-            return await self._create_suspended_result(
-                graph_state, memory, graph_output
-            )
+            return await self._create_suspended_result(graph_state)
         else:
             # Normal completion
             return self._create_success_result(graph_output)
@@ -344,26 +317,16 @@ class LangGraphRuntime:
     async def _create_suspended_result(
         self,
         graph_state: StateSnapshot,
-        graph_memory: AsyncSqliteSaver,
-        graph_output: Optional[Any],
     ) -> UiPathRuntimeResult:
         """Create result for suspended execution."""
         # Check if it's a dynamic interrupt
         dynamic_interrupt = self._get_dynamic_interrupt(graph_state)
-        resume_trigger: Optional[UiPathResumeTrigger] = None
 
         if dynamic_interrupt:
-            # Dynamic interrupt - create and save resume trigger
-            resume_trigger = await create_and_save_resume_trigger(
-                interrupt_value=dynamic_interrupt.value,
-                memory=graph_memory,
-                resume_triggers_table=self.resume_triggers_table,
-            )
-            output = serialize_output(graph_output)
+            # Dynamic interrupt - should create and save resume trigger
             return UiPathRuntimeResult(
-                output=output,
+                output=dynamic_interrupt.value,
                 status=UiPathRuntimeStatus.SUSPENDED,
-                resume=resume_trigger,
             )
         else:
             # Static interrupt (breakpoint)
@@ -402,7 +365,7 @@ class LangGraphRuntime:
             next_nodes=next_nodes,
         )
 
-    def _create_success_result(self, output: Optional[Any]) -> UiPathRuntimeResult:
+    def _create_success_result(self, output: Any) -> UiPathRuntimeResult:
         """Create result for successful completion."""
         return UiPathRuntimeResult(
             output=serialize_output(output),
@@ -450,39 +413,3 @@ class LangGraphRuntime:
     async def dispose(self) -> None:
         """Cleanup runtime resources."""
         pass
-
-
-class LangGraphScriptRuntime(LangGraphRuntime):
-    """
-    Resolves the graph from langgraph.json config file and passes it to the base runtime.
-    """
-
-    def __init__(
-        self,
-        runtime_id: str,
-        memory: AsyncSqliteSaver,
-        entrypoint: Optional[str] = None,
-    ):
-        self.resolver = LangGraphJsonResolver(entrypoint=entrypoint)
-        self.entrypoint = entrypoint
-        super().__init__(runtime_id, self.resolver, memory=memory)
-
-    async def get_schema(self) -> UiPathRuntimeSchema:
-        """Get entrypoint for this LangGraph runtime."""
-        graph = await self.resolver()
-        compiled_graph = graph.compile()
-        schema_details = generate_schema_from_graph(compiled_graph)
-
-        return UiPathRuntimeSchema(
-            filePath=self.entrypoint,
-            uniqueId=str(uuid4()),
-            type="agent",
-            input=schema_details.schema["input"],
-            output=schema_details.schema["output"],
-            graph=langgraph_to_uipath_graph(compiled_graph, xray=1),
-        )
-
-    async def dispose(self) -> None:
-        """Cleanup runtime resources including resolver."""
-        await super().dispose()
-        await self.resolver.cleanup()

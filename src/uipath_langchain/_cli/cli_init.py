@@ -10,7 +10,7 @@ import click
 from uipath._cli._utils._console import ConsoleLogger
 from uipath._cli.middlewares import MiddlewareResult
 
-from ._utils._graph import LangGraphConfig
+from uipath_langchain.runtime.config import LangGraphConfig
 
 console = ConsoleLogger()
 

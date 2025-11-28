@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from jsonschema_pydantic_converter import transform as create_model
 from langchain_core.tools import StructuredTool
@@ -108,9 +108,9 @@ def create_integration_tool(
 
     sdk = UiPath()
 
-    def sanitize_for_serialization(args: Dict[str, Any]) -> Dict[str, Any]:
+    def sanitize_for_serialization(args: dict[str, Any]) -> dict[str, Any]:
         """Convert Pydantic models in args to dicts."""
-        converted_args: Dict[str, Any] = {}
+        converted_args: dict[str, Any] = {}
         for key, value in args.items():
             # handle Pydantic model
             if hasattr(value, "model_dump"):
