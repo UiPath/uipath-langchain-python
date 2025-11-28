@@ -166,7 +166,7 @@ def create_tool_guardrails_subgraph(
         (guardrail, action)
         for (guardrail, action) in (guardrails or [])
         if GuardrailScope.TOOL in guardrail.selector.scopes
-        and tool_name in guardrail.selector.match_names
+        # and tool_name in guardrail.selector.match_names
     ]
     return create_guardrails_subgraph(
         main_inner_node=tool_node,

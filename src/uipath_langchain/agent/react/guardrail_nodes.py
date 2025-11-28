@@ -6,7 +6,7 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Literal, Tuple
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage, ToolCall
 from langgraph.types import Command, interrupt
 from uipath import UiPath
 from uipath._cli._runtime._contracts import UiPathErrorCategory, UiPathErrorCode
@@ -44,32 +44,20 @@ def _hook_type_to_tool_field(
     return "ToolInputs" if hook_type == "PreExecution" else "ToolOutputs"
 
 
-def _extract_escalation_content(
+def _extract_llm_escalation_content(
     state: AgentGuardrailsGraphState,
-    scope: GuardrailScope,
     hook_type: Literal["PreExecution", "PostExecution"],
 ) -> str:
-    """Extract escalation content from state based on guardrail scope and hook type.
+    """Extract escalation content for LLM scope guardrails.
 
     Args:
         state: The current agent graph state.
-        scope: The guardrail scope (LLM/AGENT/TOOL).
         hook_type: The hook type ("PreExecution" or "PostExecution").
 
     Returns:
-        For non-LLM scope: Empty string.
-        For LLM PreExecution: JSON string with message content.
-        For LLM PostExecution: JSON array with tool call content and message content.
+        For PreExecution: JSON string with message content.
+        For PostExecution: JSON array with tool call content and message content.
     """
-    if scope != GuardrailScope.LLM:
-        return ""
-
-    if not state.messages:
-        raise AgentTerminationException(
-            code=UiPathErrorCode.EXECUTION_ERROR,
-            title="Invalid state message",
-        )
-
     last_message = state.messages[-1]
     if hook_type == "PreExecution":
         content = _message_text(last_message)
@@ -93,6 +81,78 @@ def _extract_escalation_content(
         content_list.append(message_content)
 
     return json.dumps(content_list)
+
+
+def _extract_agent_escalation_content(
+    state: AgentGuardrailsGraphState,
+    hook_type: Literal["PreExecution", "PostExecution"],
+) -> str:
+    """Extract escalation content for AGENT scope guardrails.
+
+    Args:
+        state: The current agent graph state.
+        hook_type: The hook type ("PreExecution" or "PostExecution").
+
+    Returns:
+        Empty string (AGENT scope guardrails do not extract escalation content).
+    """
+    return ""
+
+
+def _extract_tool_escalation_content(
+    state: AgentGuardrailsGraphState,
+    hook_type: Literal["PreExecution", "PostExecution"],
+) -> str:
+    """Extract escalation content for TOOL scope guardrails.
+
+    Args:
+        state: The current agent graph state.
+        hook_type: The hook type ("PreExecution" or "PostExecution").
+
+    Returns:
+        Empty string (TOOL scope guardrails do not extract escalation content).
+    """
+    tool_message: ToolMessage = state.messages[-1]
+
+    if hook_type == "PreExecution":
+        return json.dumps(tool_message.additional_kwargs)
+
+    return json.dumps(tool_message.content)
+
+
+def _extract_escalation_content(
+    state: AgentGuardrailsGraphState,
+    scope: GuardrailScope,
+    hook_type: Literal["PreExecution", "PostExecution"],
+) -> str:
+    """Extract escalation content from state based on guardrail scope and hook type.
+
+    Args:
+        state: The current agent graph state.
+        scope: The guardrail scope (LLM/AGENT/TOOL).
+        hook_type: The hook type ("PreExecution" or "PostExecution").
+
+    Returns:
+        For LLM scope: JSON string or array with message/tool call content.
+        For AGENT/TOOL scope: Empty string.
+    """
+    if not state.messages:
+        raise AgentTerminationException(
+            code=UiPathErrorCode.EXECUTION_ERROR,
+            title="Invalid state message",
+            detail="No message found into agent state"
+        )
+
+    match scope:
+        case GuardrailScope.LLM:
+            return _extract_llm_escalation_content(state, hook_type)
+        case GuardrailScope.AGENT:
+            return _extract_agent_escalation_content(state, hook_type)
+        case GuardrailScope.TOOL:
+            return _extract_tool_escalation_content(state, hook_type)
+        case _:
+            # Fallback for unknown scopes
+            return ""
 
 
 def _process_escalation_response(
@@ -415,7 +475,16 @@ def create_tool_guardrail_node(
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
-        return _message_text(state.messages[-1])
+
+
+        if execution_stage == "PreExecution":
+            tool_message: AIMessage = state.messages[-1]
+            tool_call: ToolCall = tool_message.tool_calls[0]
+            args = tool_call["args"] if isinstance(tool_call, dict) else tool_call.args
+            return json.dumps(args)
+
+        # TO BE IMPLEMENTED
+        return ""
 
     return _create_guardrail_node(
         guardrail,

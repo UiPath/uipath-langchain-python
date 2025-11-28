@@ -72,7 +72,7 @@ def create_agent(
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
     init_node = create_init_node(messages)
-    tool_nodes = create_tool_node(agent_tools)
+    tool_nodes = create_tool_node(agent_tools, guardrails)
     terminate_node = create_terminate_node(output_schema)
 
     InnerAgentGraphState = create_state_with_input(
