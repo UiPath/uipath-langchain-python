@@ -1,14 +1,14 @@
 from uipath.runtime import UiPathRuntimeContext, UiPathRuntimeFactoryRegistry
 
 from ._cli.constants import AGENT_ENTRYPOINT
-from ._cli.runtime.factory import AgentRuntimeFactory
+from ._cli.runtime.factory import AgentsRuntimeFactory
 
 
-def _create_agent_factory(context: UiPathRuntimeContext | None) -> AgentRuntimeFactory:
+def _create_agent_factory(context: UiPathRuntimeContext | None) -> AgentsRuntimeFactory:
     """Create an AgentRuntimeFactory with the given context."""
     if context is None:
         raise ValueError("UiPathRuntimeContext is required for AgentRuntimeFactory")
-    return AgentRuntimeFactory(context=context)
+    return AgentsRuntimeFactory(context=context)
 
 
 def register_runtime_factory() -> None:
