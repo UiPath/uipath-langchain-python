@@ -77,7 +77,7 @@ Activate with: source .venv/bin/activate
 
 # Verify the uipath installation
 > uipath -lv
-uipath-langchain version 0.0.100
+uipath-langchain version 0.1.0
 ```
 
 ////
@@ -103,7 +103,7 @@ uipath-langchain version 0.0.100
 
 # Verify the uipath installation
 > uipath -lv
-uipath-langchain version 0.0.100
+uipath-langchain version 0.1.0
 ```
 
 ////
@@ -158,16 +158,18 @@ Selected tenant: Tenant1
 ⠋ Initializing UiPath project ...
 ✓   Created '.env' file.
 ✓   Created 'agent.mermaid' file.
-✓   Created 'uipath.json' file.
+✓   Created 'entry-points.json' file.
+✓   Created 'bindings.json' file.
 ```
 
 This command creates the following files:
 
 | File Name        | Description                                                                                                                       |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `.env`           | Environment variables and secrets (this file will not be packed & published).                                                     |
-| `uipath.json`    | Input/output JSON schemas and bindings.                                                                                           |
-| `agent.mermaid`  | Graph visual representation.                                                                                                      |
+| `.env`              | Environment variables and secrets (this file will not be packed & published) |
+| `entry-points.json` | Contains the input/output and graph schemas of your graphs                   |
+| `bindings.json`     | Allows you to configure overridable resource bindings                        |
+| `agent.mermaid`     | Graph visual representation                                                  |
 
 ## Set Up Environment Variables
 
