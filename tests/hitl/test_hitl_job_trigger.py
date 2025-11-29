@@ -125,6 +125,7 @@ class TestHitlJobTrigger:
                     json={
                         "key": f"{job_key}",
                         "id": 123,
+                        "state": "Successful",
                         "output_arguments": json.dumps(output_args_dict),
                     },
                 )
@@ -194,6 +195,7 @@ class TestHitlJobTrigger:
                     json={
                         "key": f"{job_key}",
                         "id": 123,
+                        "state": "Successful",
                         "output_arguments": json.dumps(output_args_dict),
                     },
                 )
