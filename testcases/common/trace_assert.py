@@ -3,9 +3,9 @@ Simple trace assertion - just check that expected spans exist with required attr
 Much simpler than the tree-based approach.
 """
 import json
-from typing import List, Dict, Any
+from typing import Any
 
-def load_traces(traces_file: str) -> List[Dict[str, Any]]:
+def load_traces(traces_file: str) -> list[dict[str, Any]]:
     """Load traces from a JSONL file."""
     traces = []
     with open(traces_file, 'r', encoding='utf-8') as f:
@@ -14,13 +14,13 @@ def load_traces(traces_file: str) -> List[Dict[str, Any]]:
                 traces.append(json.loads(line))
     return traces
 
-def load_expected_traces(expected_file: str) -> List[Dict[str, Any]]:
+def load_expected_traces(expected_file: str) -> list[dict[str, Any]]:
     """Load expected trace definitions from a JSON file."""
     with open(expected_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
     return data.get('required_spans', [])
 
-def get_attributes(span: Dict[str, Any]) -> Dict[str, Any]:
+def get_attributes(span: dict[str, Any]) -> dict[str, Any]:
     """
     Parse attributes from a span.
     Supports both formats:
@@ -54,7 +54,7 @@ def matches_value(expected_value: Any, actual_value: Any) -> bool:
     # Exact match
     return expected_value == actual_value
 
-def matches_expected(span: Dict[str, Any], expected: Dict[str, Any]) -> bool:
+def matches_expected(span: dict[str, Any], expected: dict[str, Any]) -> bool:
     """
     Check if a span matches the expected definition.
     Supports both formats:

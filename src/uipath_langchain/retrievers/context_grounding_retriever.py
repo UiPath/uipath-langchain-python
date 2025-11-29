@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from langchain_core.callbacks import (
     AsyncCallbackManagerForRetrieverRun,
     CallbackManagerForRetrieverRun,
@@ -11,14 +9,14 @@ from uipath.platform import UiPath
 
 class ContextGroundingRetriever(BaseRetriever):
     index_name: str
-    folder_path: Optional[str] = None
-    folder_key: Optional[str] = None
-    uipath_sdk: Optional[UiPath] = None
-    number_of_results: Optional[int] = 10
+    folder_path: str | None = None
+    folder_key: str | None = None
+    uipath_sdk: UiPath | None = None
+    number_of_results: int | None = 10
 
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
-    ) -> List[Document]:
+    ) -> list[Document]:
         """Sync implementations for retriever calls context_grounding API to search the requested index."""
 
         sdk = self.uipath_sdk if self.uipath_sdk is not None else UiPath()
@@ -43,7 +41,7 @@ class ContextGroundingRetriever(BaseRetriever):
 
     async def _aget_relevant_documents(
         self, query: str, *, run_manager: AsyncCallbackManagerForRetrieverRun
-    ) -> List[Document]:
+    ) -> list[Document]:
         """Async implementations for retriever calls context_grounding API to search the requested index."""
 
         sdk = self.uipath_sdk if self.uipath_sdk is not None else UiPath()

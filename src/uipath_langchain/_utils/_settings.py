@@ -1,6 +1,6 @@
 # mypy: disable-error-code="syntax"
 import os
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from pydantic import Field
@@ -21,7 +21,7 @@ class UiPathCachedPathsSettings(BaseSettings):
 
 
 uipath_cached_paths_settings = UiPathCachedPathsSettings()
-uipath_token_header: Optional[str] = None
+uipath_token_header: str | None = None
 
 
 class UiPathClientFactorySettings(BaseSettings):

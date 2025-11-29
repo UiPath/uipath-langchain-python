@@ -116,6 +116,7 @@ class TestHitlJobTrigger:
 
                 # Cleanup first runtime
                 await runtime.dispose()
+                await factory.dispose()
 
                 # Mock response for first resume: job output arguments
                 output_args_dict = {"output_arg_1": "response from invoke process"}
@@ -133,6 +134,7 @@ class TestHitlJobTrigger:
                     entrypoint="agent",
                     input="{}",
                     output_file="__uipath/output.json",
+                    resume=True,
                 )
 
                 resume_factory_1 = UiPathRuntimeFactoryRegistry.get(
@@ -182,6 +184,7 @@ class TestHitlJobTrigger:
 
                 # Cleanup second runtime
                 await resume_runtime_1.dispose()
+                await resume_factory_1.dispose()
 
                 # Mock response for second resume: wait job output arguments
                 output_args_dict = {"output_arg_2": "response from wait job"}
@@ -200,6 +203,7 @@ class TestHitlJobTrigger:
                     entrypoint="agent",
                     input="{}",
                     output_file="__uipath/output.json",
+                    resume=True,
                 )
 
                 resume_factory_2 = UiPathRuntimeFactoryRegistry.get(
@@ -233,8 +237,6 @@ class TestHitlJobTrigger:
                 # Cleanup
                 await resume_runtime_2.dispose()
                 await resume_factory_2.dispose()
-                await resume_factory_1.dispose()
-                await factory.dispose()
 
             finally:
                 os.chdir(current_dir)

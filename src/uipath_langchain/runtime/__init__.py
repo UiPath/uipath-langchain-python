@@ -4,7 +4,12 @@ from uipath.runtime import (
     UiPathRuntimeFactoryRegistry,
 )
 
-from .._cli._runtime._factory import LangGraphRuntimeFactory
+from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
+from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
+from uipath_langchain.runtime.schema import (
+    get_entrypoints_schema,
+    get_graph_schema,
+)
 
 
 def register_runtime_factory() -> None:
@@ -13,7 +18,7 @@ def register_runtime_factory() -> None:
     def create_factory(
         context: UiPathRuntimeContext | None = None,
     ) -> UiPathRuntimeFactoryProtocol:
-        return LangGraphRuntimeFactory(
+        return UiPathLangGraphRuntimeFactory(
             context=context if context else UiPathRuntimeContext(),
         )
 
@@ -22,4 +27,10 @@ def register_runtime_factory() -> None:
 
 register_runtime_factory()
 
-__all__ = ["LangGraphRuntimeFactory", "register_runtime_factory"]
+__all__ = [
+    "register_runtime_factory",
+    "get_entrypoints_schema",
+    "get_graph_schema",
+    "UiPathLangGraphRuntimeFactory",
+    "UiPathLangGraphRuntime",
+]

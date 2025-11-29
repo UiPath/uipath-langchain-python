@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Mapping
 
 import httpx
 import openai
@@ -24,16 +24,16 @@ from uipath.runtime.errors import (
     UiPathRuntimeError,
 )
 
-from uipath_langchain._cli._runtime._exception import (
-    LangGraphErrorCode,
-    LangGraphRuntimeError,
-)
 from uipath_langchain._utils._settings import (
     UiPathClientFactorySettings,
     UiPathClientSettings,
     get_uipath_token_header,
 )
 from uipath_langchain._utils._sleep_policy import before_sleep_log
+from uipath_langchain.runtime.errors import (
+    LangGraphErrorCode,
+    LangGraphRuntimeError,
+)
 
 
 def get_from_uipath_url():
@@ -73,29 +73,27 @@ def _get_access_token(data):
 class UiPathRequestMixin(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    default_headers: Optional[Mapping[str, str]] = {
+    default_headers: Mapping[str, str] | None = {
         "X-UiPath-Streaming-Enabled": "false",
         "X-UiPath-JobKey": os.getenv("UIPATH_JOB_KEY", ""),
         "X-UiPath-ProcessKey": os.getenv("UIPATH_PROCESS_KEY", ""),
     }
-    model_name: Optional[str] = Field(
+    model_name: str | None = Field(
         default_factory=lambda: os.getenv("UIPATH_MODEL_NAME", "gpt-4o-2024-08-06"),
         alias="model",
     )
-    settings: Optional[UiPathClientSettings] = None
-    client_id: Optional[str] = Field(
-        default_factory=lambda: os.getenv("UIPATH_CLIENT_ID")
-    )
-    client_secret: Optional[str] = Field(
+    settings: UiPathClientSettings | None = None
+    client_id: str | None = Field(default_factory=lambda: os.getenv("UIPATH_CLIENT_ID"))
+    client_secret: str | None = Field(
         default_factory=lambda: os.getenv("UIPATH_CLIENT_SECRET")
     )
-    base_url: Optional[str] = Field(
+    base_url: str | None = Field(
         default_factory=lambda data: getattr(data["settings"], "base_url", None)
         or os.getenv("UIPATH_BASE_URL")
         or get_from_uipath_url(),
         alias="azure_endpoint",
     )
-    access_token: Optional[str] = Field(
+    access_token: str | None = Field(
         default_factory=lambda data: _get_access_token(data)
     )
 
@@ -127,39 +125,39 @@ class UiPathRequestMixin(BaseModel):
         alias="timeout",
     )
 
-    openai_api_version: Optional[str] = Field(
+    openai_api_version: str | None = Field(
         default_factory=lambda: os.getenv("OPENAI_API_VERSION", "2024-08-01-preview"),
         alias="api_version",
     )
     include_account_id: bool = False
-    temperature: Optional[float] = 0.0
-    max_tokens: Optional[int] = 1000
-    frequency_penalty: Optional[float] = None
-    presence_penalty: Optional[float] = None
+    temperature: float | None = 0.0
+    max_tokens: int | None = 1000
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
 
-    logger: Optional[logging.Logger] = None
-    max_retries: Optional[int] = 5
+    logger: logging.Logger | None = None
+    max_retries: int | None = 5
     base_delay: float = 5.0
     max_delay: float = 60.0
 
-    _url: Optional[str] = None
-    _auth_headers: Optional[Dict[str, str]] = None
+    _url: str | None = None
+    _auth_headers: dict[str, str] | None = None
 
     # required to instantiate AzureChatOpenAI subclasses
-    azure_endpoint: Optional[str] = Field(
+    azure_endpoint: str | None = Field(
         default="placeholder", description="Bypassed Azure endpoint"
     )
-    openai_api_key: Optional[SecretStr] = Field(
+    openai_api_key: SecretStr | None = Field(
         default=SecretStr("placeholder"), description="Bypassed API key"
     )
     # required to instatiate ChatAnthropic subclasses (will be needed when passthrough is implemented for Anthropic models)
-    stop_sequences: Optional[List[str]] = Field(
+    stop_sequences: list[str] | None = Field(
         default=None, description="Bypassed stop sequence"
     )
 
     def _request(
-        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
-    ) -> Dict[str, Any]:
+        self, url: str, request_body: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         """Run an asynchronous call to the LLM."""
         # if self.logger:
         #     self.logger.info(f"Completion request: {request_body['messages'][:2]}")
@@ -199,8 +197,8 @@ class UiPathRequestMixin(BaseModel):
             return response.json()
 
     def _call(
-        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
-    ) -> Dict[str, Any]:
+        self, url: str, request_body: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         """Run a synchronous call with retries to LLM"""
         if self.max_retries is None:
             return self._request(url, request_body, headers)
@@ -238,8 +236,8 @@ class UiPathRequestMixin(BaseModel):
             raise err
 
     async def _arequest(
-        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
-    ) -> Dict[str, Any]:
+        self, url: str, request_body: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         # if self.logger:
         #     self.logger.info(f"Completion request: {request_body['messages'][:2]}")
         client_kwargs = get_httpx_client_kwargs()
@@ -277,8 +275,8 @@ class UiPathRequestMixin(BaseModel):
             return response.json()
 
     async def _acall(
-        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
-    ) -> Dict[str, Any]:
+        self, url: str, request_body: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         """Run an asynchronous call with retries to the LLM."""
         if self.max_retries is None:
             return await self._arequest(url, request_body, headers)
@@ -451,7 +449,7 @@ class UiPathRequestMixin(BaseModel):
         return "uipath"
 
     @property
-    def _identifying_params(self) -> Dict[str, Any]:
+    def _identifying_params(self) -> dict[str, Any]:
         return {
             "url": self.url,
             "model": self.model_name,
@@ -487,7 +485,7 @@ class UiPathRequestMixin(BaseModel):
         )
 
     @property
-    def auth_headers(self) -> Dict[str, str]:
+    def auth_headers(self) -> dict[str, str]:
         if not self._auth_headers:
             self._auth_headers = {
                 **self.default_headers,  # type: ignore
@@ -505,7 +503,7 @@ class UiPathRequestMixin(BaseModel):
                 self._auth_headers["x-uipath-internal-tenantid"] = self.tenant_id
         return self._auth_headers
 
-    def _get_llm_string(self, stop: Optional[list[str]] = None, **kwargs: Any) -> str:
+    def _get_llm_string(self, stop: list[str] | None = None, **kwargs: Any) -> str:
         serialized_repr = getattr(self, "_serialized", self.model_dump())
         _cleanup_llm_representation(serialized_repr, 1)
         kwargs = serialized_repr.get("kwargs", serialized_repr)

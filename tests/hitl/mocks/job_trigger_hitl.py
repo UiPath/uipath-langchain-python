@@ -1,7 +1,6 @@
 # type: ignore
 import dataclasses
 import time
-from typing import Optional
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
@@ -17,7 +16,7 @@ class Input:
 
 
 class GraphState(BaseModel):
-    process_output: Optional[str] = None
+    process_output: str | None = None
 
 
 @dataclasses.dataclass

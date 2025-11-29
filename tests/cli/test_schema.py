@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 from pydantic import BaseModel, Field
 
-from uipath_langchain._cli._runtime._schema import (
+from uipath_langchain.runtime.schema import (
     _resolve_refs,
-    generate_schema_from_graph,
+    get_entrypoints_schema,
 )
 
 
@@ -154,7 +154,7 @@ class TestGenerateSchemaFromGraph:
         del mock_graph.input_schema
         del mock_graph.output_schema
 
-        result = generate_schema_from_graph(mock_graph)
+        result = get_entrypoints_schema(mock_graph)
 
         assert result.schema["input"] == {
             "type": "object",
@@ -183,7 +183,7 @@ class TestGenerateSchemaFromGraph:
         mock_graph.input_schema = InputModel
         mock_graph.output_schema = OutputModel
 
-        result = generate_schema_from_graph(mock_graph)
+        result = get_entrypoints_schema(mock_graph)
 
         assert "query" in result.schema["input"]["properties"]
         assert "max_results" in result.schema["input"]["properties"]
@@ -204,7 +204,7 @@ class TestGenerateSchemaFromGraph:
         mock_graph.input_schema = NodeInput
         del mock_graph.output_schema
 
-        result = generate_schema_from_graph(mock_graph)
+        result = get_entrypoints_schema(mock_graph)
 
         assert result.has_input_circular_dependency is True
         assert result.has_output_circular_dependency is False
@@ -221,7 +221,7 @@ class TestGenerateSchemaFromGraph:
         del mock_graph.input_schema
         mock_graph.output_schema = TreeOutput
 
-        result = generate_schema_from_graph(mock_graph)
+        result = get_entrypoints_schema(mock_graph)
 
         assert result.has_input_circular_dependency is False
         assert result.has_output_circular_dependency is True
@@ -242,7 +242,7 @@ class TestGenerateSchemaFromGraph:
         mock_graph.input_schema = CircularInput
         mock_graph.output_schema = CircularOutput
 
-        result = generate_schema_from_graph(mock_graph)
+        result = get_entrypoints_schema(mock_graph)
 
         assert result.has_input_circular_dependency is True
         assert result.has_output_circular_dependency is True
@@ -260,7 +260,7 @@ class TestGenerateSchemaFromGraph:
         mock_graph.input_schema = StrictModel
         del mock_graph.output_schema
 
-        result = generate_schema_from_graph(mock_graph)
+        result = get_entrypoints_schema(mock_graph)
 
         assert "required_field" in result.schema["input"]["required"]
         assert "optional_field" not in result.schema["input"]["required"]

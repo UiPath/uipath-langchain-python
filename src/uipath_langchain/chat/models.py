@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, AsyncIterator, Dict, Iterator, List, Literal, Optional, Union
+from typing import Any, AsyncIterator, Iterator, Literal, Union
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -25,9 +25,9 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
 
     def _generate(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
         if "tools" in kwargs and not kwargs["tools"]:
@@ -38,9 +38,9 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
 
     async def _agenerate(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
         if "tools" in kwargs and not kwargs["tools"]:
@@ -51,9 +51,9 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
 
     def _stream(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         if "tools" in kwargs and not kwargs["tools"]:
@@ -75,9 +75,9 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
 
     async def _astream(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         if "tools" in kwargs and not kwargs["tools"]:
@@ -99,11 +99,11 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
 
     def with_structured_output(
         self,
-        schema: Optional[Any] = None,
+        schema: Any = None,
         *,
         method: Literal["function_calling", "json_mode", "json_schema"] = "json_schema",
         include_raw: bool = False,
-        strict: Optional[bool] = None,
+        strict: bool | None = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, Any]:
         """Model wrapper that returns outputs formatted to match the given schema."""
@@ -134,8 +134,8 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
 
     def _create_chat_result(
         self,
-        response: Union[Dict[str, Any], BaseModel],
-        generation_info: Optional[Dict[Any, Any]] = None,
+        response: Union[dict[str, Any], BaseModel],
+        generation_info: dict[Any, Any] | None = None,
     ) -> ChatResult:
         if not isinstance(response, dict):
             response = response.model_dump()
@@ -176,9 +176,9 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         self,
         input_: LanguageModelInput,
         *,
-        stop: Optional[List[str]] = None,
+        stop: list[str] | None = None,
         **kwargs: Any,
-    ) -> Dict[Any, Any]:
+    ) -> dict[Any, Any]:
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
         # hacks to make the request work with uipath normalized
         for message in payload["messages"]:
@@ -197,7 +197,7 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
                 }
         return payload
 
-    def _normalize_tool_choice(self, kwargs: Dict[str, Any]) -> None:
+    def _normalize_tool_choice(self, kwargs: dict[str, Any]) -> None:
         """Normalize tool_choice for UiPath Gateway compatibility.
 
         Converts LangChain tool_choice formats to UiPath Gateway format:
@@ -228,9 +228,9 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
 
     def _generate(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
         """Override the _generate method to implement the chat model logic.
@@ -258,9 +258,9 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
 
     async def _agenerate(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> ChatResult:
         """Override the _generate method to implement the chat model logic.
@@ -288,9 +288,9 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
 
     def _stream(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         """Stream the LLM on a given prompt.
@@ -327,9 +327,9 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
 
     async def _astream(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Async stream the LLM on a given prompt.
@@ -366,13 +366,13 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
 
     def with_structured_output(
         self,
-        schema: Optional[Any] = None,
+        schema: Any = None,
         *,
         method: Literal[
             "function_calling", "json_mode", "json_schema"
         ] = "function_calling",
         include_raw: bool = False,
-        strict: Optional[bool] = None,
+        strict: bool | None = None,
         **kwargs: Any,
     ) -> Runnable[LanguageModelInput, Any]:
         """Model wrapper that returns outputs formatted to match the given schema."""
