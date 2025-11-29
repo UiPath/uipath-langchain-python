@@ -1,13 +1,24 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable, TypeVar
 
-from langchain_core.runnables.graph import Graph
+from langchain_core.language_models.base import BaseLanguageModel
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.runnables.base import Runnable
+from langchain_core.runnables.graph import Graph, Node
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.prebuilt import ToolNode
 from uipath.runtime.schema import (
     UiPathRuntimeEdge,
     UiPathRuntimeGraph,
     UiPathRuntimeNode,
 )
+
+try:
+    from langgraph._internal._runnable import RunnableCallable
+except ImportError:
+    RunnableCallable = None  # type: ignore
+
+T = TypeVar("T")
 
 
 @dataclass
@@ -15,6 +26,113 @@ class SchemaDetails:
     schema: dict[str, Any]
     has_input_circular_dependency: bool
     has_output_circular_dependency: bool
+
+
+def _unwrap_runnable_callable(
+    runnable: Runnable[Any, Any], target_type: type[T]
+) -> T | None:
+    """Unwrap a RunnableCallable to find an instance of the target type.
+
+    Args:
+        runnable: The runnable to unwrap
+        target_type: The type to search for (e.g., BaseChatModel)
+
+    Returns:
+        Instance of target_type if found in the closure, None otherwise
+    """
+    if isinstance(runnable, target_type):
+        return runnable
+
+    if RunnableCallable is not None and isinstance(runnable, RunnableCallable):
+        func: Callable[..., Any] | None = getattr(runnable, "func", None)
+        if func is not None and hasattr(func, "__closure__") and func.__closure__:
+            for cell in func.__closure__:
+                if hasattr(cell, "cell_contents"):
+                    content = cell.cell_contents
+                    if isinstance(content, target_type):
+                        return content
+
+    return None
+
+
+def _get_node_type(node: Node) -> str:
+    """Determine the type of a LangGraph node using strongly-typed isinstance checks.
+
+    Args:
+        node: A Node object from the graph
+
+    Returns:
+        String representing the node type
+    """
+    if node.id in ("__start__", "__end__"):
+        return node.id
+
+    if node.data is None:
+        return "node"
+
+    if not isinstance(node.data, Runnable):
+        return "node"
+
+    tool_node = _unwrap_runnable_callable(node.data, ToolNode)
+    if tool_node is not None:
+        return "tool"
+
+    chat_model = _unwrap_runnable_callable(node.data, BaseChatModel)  # type: ignore[type-abstract]
+    if chat_model is not None:
+        return "model"
+
+    language_model = _unwrap_runnable_callable(node.data, BaseLanguageModel)  # type: ignore[type-abstract]
+    if language_model is not None:
+        return "model"
+
+    return "node"
+
+
+def _get_node_metadata(node: Node) -> dict[str, Any]:
+    """Extract metadata from a node in a type-safe manner.
+
+    Args:
+        node: A Node object from the graph
+
+    Returns:
+        Dictionary containing node metadata
+    """
+    if node.data is None:
+        return {}
+
+    # Early return if data is not a Runnable
+    if not isinstance(node.data, Runnable):
+        return {}
+
+    metadata: dict[str, Any] = {}
+
+    tool_node = _unwrap_runnable_callable(node.data, ToolNode)
+    if tool_node is not None:
+        if hasattr(tool_node, "_tools_by_name"):
+            tools_by_name = tool_node._tools_by_name
+            metadata["tool_names"] = list(tools_by_name.keys())
+            metadata["tool_count"] = len(tools_by_name)
+        return metadata
+
+    chat_model = _unwrap_runnable_callable(node.data, BaseChatModel)  # type: ignore[type-abstract]
+    if chat_model is not None:
+        if hasattr(chat_model, "model") and isinstance(chat_model.model, str):
+            metadata["model_name"] = chat_model.model
+        elif hasattr(chat_model, "model_name") and chat_model.model_name:
+            metadata["model_name"] = chat_model.model_name
+
+        if hasattr(chat_model, "temperature") and chat_model.temperature is not None:
+            metadata["temperature"] = chat_model.temperature
+
+        if hasattr(chat_model, "max_tokens") and chat_model.max_tokens is not None:
+            metadata["max_tokens"] = chat_model.max_tokens
+        elif (
+            hasattr(chat_model, "max_completion_tokens")
+            and chat_model.max_completion_tokens is not None
+        ):
+            metadata["max_tokens"] = chat_model.max_completion_tokens
+
+    return metadata
 
 
 def _convert_graph_to_uipath(graph: Graph) -> UiPathRuntimeGraph:
@@ -32,7 +150,8 @@ def _convert_graph_to_uipath(graph: Graph) -> UiPathRuntimeGraph:
             UiPathRuntimeNode(
                 id=node.id,
                 name=node.name or node.id,
-                type=node.__class__.__name__,
+                type=_get_node_type(node),
+                metadata=_get_node_metadata(node),
                 subgraph=None,
             )
         )
@@ -62,28 +181,25 @@ def get_graph_schema(
     Returns:
         UiPathRuntimeGraph with hierarchical subgraph structure
     """
-    graph: Graph = compiled_graph.get_graph(xray=xray)
+    graph: Graph = compiled_graph.get_graph(xray=0)  # Keep parent at xray=0
 
-    subgraphs_dict: dict[str, Graph] = {}
+    subgraphs_dict: dict[str, UiPathRuntimeGraph] = {}
     if xray:
         for name, subgraph_pregel in compiled_graph.get_subgraphs():
-            next_xray: int | bool = (
-                xray - 1 if isinstance(xray, int) and xray > 1 else False
-            )
+            next_xray: int = xray - 1 if isinstance(xray, int) and xray > 0 else 0
             subgraph_graph: Graph = subgraph_pregel.get_graph(xray=next_xray)
-            subgraphs_dict[name] = subgraph_graph
+            subgraphs_dict[name] = _convert_graph_to_uipath(subgraph_graph)
 
     nodes: list[UiPathRuntimeNode] = []
     for node_id, node in graph.nodes.items():
-        subgraph: UiPathRuntimeGraph | None = None
-        if node_id in subgraphs_dict:
-            subgraph = _convert_graph_to_uipath(subgraphs_dict[node_id])
+        subgraph: UiPathRuntimeGraph | None = subgraphs_dict.get(node_id)
 
         nodes.append(
             UiPathRuntimeNode(
                 id=node.id,
                 name=node.name or node.id,
-                type=node.__class__.__name__,
+                type=_get_node_type(node),
+                metadata=_get_node_metadata(node),
                 subgraph=subgraph,
             )
         )
