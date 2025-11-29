@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import uuid
 from typing import Any
 
 from jsonschema_pydantic_converter import transform as create_model
@@ -44,6 +46,11 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         output_schema=output_model.model_json_schema(),
     )
     async def escalation_tool_fn(**kwargs: Any) -> Any:
+        # Get execution context from environment variables
+        instance_id = os.getenv("UIPATH_TRACE_ID") or str(uuid.uuid4())
+        job_key = os.getenv("UIPATH_JOB_KEY")
+        process_key = os.getenv("UIPATH_PROCESS_KEY")
+
         result = interrupt(
             CreateEscalation(
                 title=channel.task_title or resource.name,
@@ -53,6 +60,12 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
                 app_folder_path=channel.properties.folder_name,
                 app_key=channel.properties.app_name,
                 app_version=channel.properties.app_version,
+                priority=channel.priority,
+                labels=channel.labels,
+                is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
+                actionable_message_metadata=channel.properties.actionable_message_meta_data,
+                agent_id=resource.id,
+                resource_key=channel.properties.resource_key,
             )
         )
 
