@@ -30,7 +30,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def process_tool_fn(**kwargs: Any) -> output_model:
+    async def process_tool_fn(**kwargs: Any) -> Any:
         result = interrupt(
             InvokeProcess(
                 name=process_name,
@@ -41,6 +41,8 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
         )
 
         return TypeAdapter(output_model).validate_python(result)
+
+    process_tool_fn.__annotations__["return"] = output_model
 
     tool = StructuredTool(
         name=tool_name,

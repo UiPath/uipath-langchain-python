@@ -43,10 +43,10 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def escalation_tool_fn(**kwargs: Any) -> output_model:
+    async def escalation_tool_fn(**kwargs: Any) -> Any:
         result = interrupt(
             CreateEscalation(
-                title=channel.task_title,
+                title=channel.task_title or resource.name,
                 data=kwargs,
                 assignee=assignee,
                 app_name=channel.properties.app_name,
@@ -57,6 +57,8 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         )
 
         return TypeAdapter(output_model).validate_python(result)
+
+    escalation_tool_fn.__annotations__["return"] = output_model
 
     tool = StructuredTool(
         name=tool_name,

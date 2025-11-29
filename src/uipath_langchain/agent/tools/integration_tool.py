@@ -137,7 +137,7 @@ def create_integration_tool(
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def integration_tool_fn(**kwargs: Any) -> output_model:
+    async def integration_tool_fn(**kwargs: Any) -> Any:
         try:
             result = await sdk.connections.invoke_activity_async(
                 activity_metadata=activity_metadata,
@@ -148,6 +148,8 @@ def create_integration_tool(
             raise
 
         return TypeAdapter(output_model).validate_python(result)
+
+    integration_tool_fn.__annotations__["return"] = output_model
 
     tool = StructuredTool(
         name=tool_name,
