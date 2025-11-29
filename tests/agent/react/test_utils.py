@@ -1,8 +1,13 @@
 """Tests for ReAct agent utilities."""
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from pydantic import BaseModel
 
-from uipath_langchain.agent.react.utils import count_successive_completions
+from uipath_langchain.agent.react.utils import (
+    count_successive_completions,
+    resolve_input_model,
+    resolve_output_model,
+)
 
 
 class TestCountSuccessiveCompletions:
@@ -133,3 +138,67 @@ class TestCountSuccessiveCompletions:
             AIMessage(content="thought 3"),
         ]
         assert count_successive_completions(messages) == 3
+
+
+class TestResolveInputModel:
+    """Test input model resolution from JSON schema."""
+
+    def test_returns_base_model_when_schema_is_none(self):
+        """Should return BaseModel when no schema provided."""
+        result = resolve_input_model(None)
+        assert result is BaseModel
+
+    def test_creates_model_from_simple_schema(self):
+        """Should create Pydantic model from simple JSON schema."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
+            },
+            "required": ["name"],
+        }
+        result = resolve_input_model(schema)
+        assert issubclass(result, BaseModel)
+        assert "name" in result.model_fields
+
+    def test_creates_model_from_nested_schema(self):
+        """Should create Pydantic model from nested JSON schema."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "user": {
+                    "type": "object",
+                    "properties": {
+                        "email": {"type": "string"},
+                    },
+                },
+            },
+        }
+        result = resolve_input_model(schema)
+        assert issubclass(result, BaseModel)
+
+
+class TestResolveOutputModel:
+    """Test output model resolution from JSON schema."""
+
+    def test_returns_end_execution_schema_when_none(self):
+        """Should return END_EXECUTION_TOOL args_schema when no schema provided."""
+        from uipath.agent.react import END_EXECUTION_TOOL
+
+        result = resolve_output_model(None)
+        assert result is END_EXECUTION_TOOL.args_schema
+
+    def test_creates_model_from_output_schema(self):
+        """Should create Pydantic model from output JSON schema."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "result": {"type": "string"},
+                "success": {"type": "boolean"},
+            },
+            "required": ["result"],
+        }
+        result = resolve_output_model(schema)
+        assert issubclass(result, BaseModel)
+        assert "result" in result.model_fields
