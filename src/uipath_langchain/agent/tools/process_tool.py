@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Type
 
-from jsonschema_pydantic_converter import transform as create_model
 from langchain_core.tools import StructuredTool
 from langgraph.types import interrupt
-from pydantic import TypeAdapter
+from pydantic import BaseModel
 from uipath.agent.models.agent import AgentProcessToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform.common import InvokeProcess
+from uipath.utils.dynamic_schema import jsonschema_to_pydantic
 
 from .utils import sanitize_tool_name
 
@@ -21,8 +21,8 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
     process_name = resource.properties.process_name
     folder_path = resource.properties.folder_path
 
-    input_model: Any = create_model(resource.input_schema)
-    output_model: Any = create_model(resource.output_schema)
+    input_model: Type[BaseModel] = jsonschema_to_pydantic(resource.input_schema)
+    output_model: Type[BaseModel] = jsonschema_to_pydantic(resource.output_schema)
 
     @mockable(
         name=resource.name,
@@ -40,7 +40,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             )
         )
 
-        return TypeAdapter(output_model).validate_python(result)
+        return output_model.model_validate(result)
 
     process_tool_fn.__annotations__["return"] = output_model
 
