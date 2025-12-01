@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Type
 
-from jsonschema_pydantic_converter import transform as create_model
 from langchain_core.tools import StructuredTool
-from pydantic import TypeAdapter
+from pydantic import BaseModel
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
+from uipath.utils.dynamic_schema import jsonschema_to_pydantic
 
 from .utils import sanitize_tool_name
 
@@ -98,12 +98,12 @@ def create_integration_tool(
 
     activity_metadata = convert_to_activity_metadata(resource)
 
-    input_model: Any = create_model(resource.input_schema)
+    input_model: Type[BaseModel] = jsonschema_to_pydantic(resource.input_schema)
     # note: IS tools output schemas were recently added and are most likely not present in all resources
-    output_model: Any = (
-        create_model(resource.output_schema)
+    output_model: Type[BaseModel] = (
+        jsonschema_to_pydantic(resource.output_schema)
         if resource.output_schema
-        else create_model({"type": "object", "properties": {}})
+        else jsonschema_to_pydantic({"type": "object", "properties": {}})
     )
 
     sdk = UiPath()
@@ -147,7 +147,7 @@ def create_integration_tool(
         except Exception:
             raise
 
-        return TypeAdapter(output_model).validate_python(result)
+        return output_model.model_validate(result)
 
     integration_tool_fn.__annotations__["return"] = output_model
 

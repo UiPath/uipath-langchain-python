@@ -708,18 +708,6 @@ wheels = [
 ]
 
 [[package]]
-name = "jsonschema-pydantic-converter"
-version = "0.1.5"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/83/a1/b6a670843a889fd5442d75bcca3e8351b7d47351dfadd95bd453e3e36554/jsonschema_pydantic_converter-0.1.5.tar.gz", hash = "sha256:5b0802e872958f3fa57ed1dc6c95bebb43eff3f2e3bf997b7a7a47652f9e69ee", size = 57905, upload-time = "2025-11-25T06:56:39.022Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/7a/660cbe4876fa5f3ed52acf0978659d3b2b6c4e766080177f69889cc5a4ee/jsonschema_pydantic_converter-0.1.5-py3-none-any.whl", hash = "sha256:dd35a42f968251f1e5d215e2272317a99b27719d6fc348fac3560257ef9f7b3f", size = 17450, upload-time = "2025-11-25T06:56:37.9Z" },
-]
-
-[[package]]
 name = "langchain"
 version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2349,7 +2337,6 @@ version = "0.1.6"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
-    { name = "jsonschema-pydantic-converter" },
     { name = "langchain" },
     { name = "langchain-core" },
     { name = "langchain-openai" },
@@ -2378,7 +2365,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "jsonschema-pydantic-converter", specifier = ">=0.1.5" },
     { name = "langchain", specifier = ">=1.0.0,<2.0.0" },
     { name = "langchain-core", specifier = ">=1.0.0,<2.0.0" },
     { name = "langchain-openai", specifier = ">=1.0.0,<2.0.0" },
