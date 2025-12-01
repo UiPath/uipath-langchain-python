@@ -198,8 +198,8 @@ class UiPathLangGraphRuntime:
     ) -> Any:
         """Process and return graph input."""
         if options and options.resume:
-            return Command(resume=input)
-        return input
+            return Command(resume=input or {})
+        return input or {}
 
     async def _get_graph_state(
         self,
