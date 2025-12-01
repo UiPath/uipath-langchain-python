@@ -64,11 +64,15 @@ uv run uipath run
 
 The library expects multiple files in order to run:
 
--   `agent.json`: agent definition file
+-   `agent.json`: agent definition file (also used for Agents runtime detection)
 -   `bindings.json`: agent's bindings definiton file
 -   `uipath.json`: binding overwrite information
 
-These files are generated automatically by Studio Web / Serverless Executor and can be obtained for local development by following these steps:
+These files must be present at the **top level** of your working directory. The UiPath CLI automatically detects which runtime to use based on the presence of `agent.json` - if found, it loads the `AgentsRuntimeFactory` from this package to handle agent execution.
+
+#### Getting the Configuration Files
+
+These files are generated automatically by Studio Web / Serverless Executor. For local development, you can obtain them by following these steps:
 
 1. Open an agent project in Studio Web.
 2. Start a Debug run (you can wait for the agent to finish or stop after a few seconds).
@@ -80,7 +84,7 @@ These files are generated automatically by Studio Web / Serverless Executor and 
 
     - if a warning with `.agent-builder folder not found` is displayed, run the agent in Debug one more time
 
-4. Copy the `agent.json` and `bindings.json` from the output.
+4. Copy the `agent.json` and `bindings.json` from the output to your local project directory.
 5. Create a `uipath.json` file using the following contents:
 
     ```json
@@ -93,13 +97,15 @@ These files are generated automatically by Studio Web / Serverless Executor and 
     }
     ```
 
+**Note on `.agent-builder` directory**: When running agents locally, the runtime automatically checks for a `.agent-builder/` directory. If it exists, any files inside will be copied to the top level, overriding existing files. This is used by Studio Web, but you can also leverage it for local testing by placing updated configurations in `.agent-builder/` without modifying your main files.
+
 ### Commands
 
 For normal local development, only the `run` command is relevant, as the `debug` command is not meant for local debug, it's intended for Studio Web debug. The `run` command can be used for debugging the python code IDE.
 
 **Run**
 
-The basic command used to start or resume an agent execution in production mode (source code [cli_run.py](src/uipath_agents/_cli/cli_run.py))
+The basic command used to start or resume an agent execution in production mode (source code [cli_run.py](src/uipath_agents/_cli/cli_run.py)). This command will automatically prepare agent files from `.agent-builder/` if that directory exists before executing.
 
 ```bash
 # Start the agent.json from the current directory with inline args
@@ -118,15 +124,19 @@ uv run uipath run --resume
 ```
 
 -   **Entrypoint** is currently unused for Agents, it can be be any string or removed entirely.
+-   Files from `.agent-builder/` are automatically copied to the top level if that directory exists
 
 **Debug (StudioWeb)**
 
-The command used for runs started from Studio Web. It loads the `agent.json` and `bindings.json` from the `.agent-builder` directory and copies them to the root directory and wires-up the debug hooks / channels. Should not be used for local development unless you're working on debug specific features.
+The command used for runs started from Studio Web. Like the `run` command, it automatically prepares files from `.agent-builder/` if that directory exists, then wires-up the debug hooks and communication channels with Studio Web. Should not be used for local development unless you're working on debug specific features.
 
 ```bash
 #                   <entrypoint>  <args>
 uv run uipath debug agent.json    '{}'
 ```
+
+-   Files are loaded from `.agent-builder/` and copied to the top level before execution
+-   Establishes bidirectional communication with Studio Web for breakpoints, logs, and state inspection
 
 **Dev**
 
@@ -134,8 +144,8 @@ Currently work in progress. It's available for standard coded agents but not yet
 
 ### Hints
 
--   Take a look at the configurations in `./examples`\_
--   You can run any agent from any sub directory of `uipath-agents-python` as long as you have the three required files present.
+-   Take a look at the configurations in `./examples`
+-   You can run any agent from any sub directory of `uipath-agents-python` as long as you have the three required files present at the top level of that directory.
 -   Remember to run `uv run uipath auth (--alpha)` if you get a 401 while executing the agent.
 -   You can also download the solution package from Studio Web and get the files from the `.agent-builder` directory or from an already published package.
 -   Do not confuse the `uipath debug` command with the `--debug` flag. The former is used for StudioWeb two-way communication for breakpoints, logs and so on and the latter waits for a debugger to be attached to the running process.

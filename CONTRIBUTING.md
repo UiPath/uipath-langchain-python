@@ -4,7 +4,7 @@ Most of the times when working on this repo, you'll also need to do some changes
 
 ## Development Strategies
 
-A simple way to make development easier and not combine code changes with agent defintitions, is to create a separate Python project that references the `uipath-agents-python` package as an editable dependency. For a better experience, start by creating a new root-level directory (e.g. `python-workspace`) that will hold all the related projects and repositories.
+A simple way to make development easier and not combine code changes with agent definitions, is to create a separate Python project that references the `uipath-agents-python` package as an editable dependency. For a better experience, start by creating a new root-level directory (e.g. `python-workspace`) that will hold all the related projects and repositories.
 
 ```bash
 # . python-workspace/
@@ -43,12 +43,20 @@ You can open this directory in your IDE to make your life easier instead of open
     cp -R ../uipath-agents-python/examples/basic basic
     cd basic
 
-    # repeat the instructions to run an agent from [README.md](README.md)
+    # Ensure agent.json is at the top level (required for runtime detection)
+    ls agent.json
+
+    # Authenticate and run
     uv run uipath auth --alpha
-    uv run uipath agent.json '{}'
+    uv run uipath run agent.json '{}'
     ```
 
 3. You now have a fully functioning setup to start working on `uipath-agents-python`. Any change will be picked up by the `playground` project for testing.
+
+**Key behavior to remember:**
+- The runtime automatically detects agents by the presence of `agent.json` at the top level - this MUST be present at all times even if `.agent-builder/` with `agent.json` in already exists.
+- If you create a `.agent-builder/` directory, it would override the top-level `agent.json` and `bindings.json` during execution.
+- Copying contents of .agent-builder runs during both `run` and `debug` commands and files are copied only if the directory exists, without being a critical dependency.
 
 ### Multiple Repositories
 
