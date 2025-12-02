@@ -1,7 +1,5 @@
 """Termination node for the Agent graph."""
 
-from __future__ import annotations
-
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
