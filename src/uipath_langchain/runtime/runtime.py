@@ -21,6 +21,7 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
+from uipath_langchain.chat import UiPathChatMessagesMapper
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
 
@@ -49,6 +50,7 @@ class UiPathLangGraphRuntime:
         self.graph: CompiledStateGraph[Any, Any, Any, Any] = graph
         self.runtime_id: str = runtime_id or "default"
         self.entrypoint: str | None = entrypoint
+        self.chat = UiPathChatMessagesMapper()
 
     async def execute(
         self,
@@ -130,7 +132,7 @@ class UiPathLangGraphRuntime:
                     if isinstance(data, tuple):
                         message, _ = data
                         event = UiPathRuntimeMessageEvent(
-                            payload=message,
+                            payload=self.chat.map_event(message),
                         )
                         yield event
 
@@ -197,9 +199,14 @@ class UiPathLangGraphRuntime:
         options: UiPathExecuteOptions | None,
     ) -> Any:
         """Process and return graph input."""
+        graph_input = input or {}
+        if isinstance(graph_input, dict):
+            messages = graph_input.get("messages", None)
+            if messages and isinstance(messages, list):
+                graph_input["messages"] = self.chat.map_messages(messages)
         if options and options.resume:
-            return Command(resume=input or {})
-        return input or {}
+            return Command(resume=graph_input)
+        return graph_input
 
     async def _get_graph_state(
         self,
@@ -299,9 +306,7 @@ class UiPathLangGraphRuntime:
         Get final graph state and create the execution result.
 
         Args:
-            compiled_graph: The compiled graph instance
             graph_config: The graph execution configuration
-            memory: The SQLite memory instance
             graph_output: The graph execution output
         """
         # Get the final state
