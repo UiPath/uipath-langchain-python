@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from langchain_core.documents import Document
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
@@ -40,11 +42,8 @@ def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def context_tool_fn(query: str) -> ContextOutputSchemaModel:
-        documents = await retriever.ainvoke(query)
-        return ContextOutputSchemaModel(
-            documents=documents,
-        )
+    async def context_tool_fn(query: str) -> dict[str, Any]:
+        return {"documents": await retriever.ainvoke(query)}
 
     return StructuredTool(
         name=tool_name,
