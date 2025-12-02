@@ -10,8 +10,8 @@ from pydantic import BaseModel
 from uipath.agent.models.agent import AgentGuardrail
 
 from ..tools import create_tool_node
-from ..guardrails import GuardrailAction
-from ..guardrails import create_llm_guardrails_subgraph
+from .guardrail_nodes import GuardrailAction
+from .guardrails_subgraph import create_llm_guardrails_subgraph
 from .init_node import (
     create_init_node,
 )
@@ -91,11 +91,12 @@ def create_agent(
 
     builder.add_edge(START, AgentGraphNode.INIT)
 
+    # Compose layers explicitly: LLM -> Guardrails (-> Traces optional)
     llm_node = create_llm_node(model, llm_tools)
-    llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
-        (AgentGraphNode.LLM, llm_node), guardrails
+    guardrails_subgraph = create_llm_guardrails_subgraph(
+        ("AGENT_LLM", llm_node), guardrails
     )
-    builder.add_node(AgentGraphNode.AGENT, llm_with_guardrails_subgraph)
+    builder.add_node(AgentGraphNode.AGENT, guardrails_subgraph)
     builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
     tool_node_names = list(tool_nodes.keys())
