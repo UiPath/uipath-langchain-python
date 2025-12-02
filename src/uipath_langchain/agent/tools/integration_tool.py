@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Type
 
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath

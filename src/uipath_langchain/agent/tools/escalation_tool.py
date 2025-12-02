@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Any
+from typing import Annotated, Any
 
-from langchain_core.tools import StructuredTool
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import InjectedToolCallId, StructuredTool
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel
+from pydantic import BaseModel, create_model
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipientType,
@@ -36,8 +37,12 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
 
     tool_name: str = f"escalate_{sanitize_tool_name(resource.name)}"
     channel: AgentEscalationChannel = resource.channels[0]
-
-    input_model: type[BaseModel] = jsonschema_to_pydantic(channel.input_schema)
+    base_input_model: type[BaseModel] = jsonschema_to_pydantic(channel.input_schema)
+    input_model = create_model(
+        base_input_model.__name__,
+        __base__=base_input_model,
+        tool_call_id=(Annotated[str, InjectedToolCallId]),
+    )
     output_model: type[BaseModel] = jsonschema_to_pydantic(channel.output_schema)
 
     # only works for UserEmail type as value is GUID for UserId or GroupId for other types
@@ -56,9 +61,10 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def escalation_tool_fn(**kwargs: Any) -> Command[Any] | Any:
+    async def escalation_tool_fn(
+        tool_call_id: Annotated[str, InjectedToolCallId], **kwargs: Any
+    ) -> Command[Any] | Any:
         task_title = channel.task_title or "Escalation Task"
-
         result = interrupt(
             CreateEscalation(
                 title=task_title,
@@ -86,11 +92,17 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         if outcome and outcome == EscalationAction.END:
             return Command(
                 update={
+                    "messages": [
+                        ToolMessage(
+                            content="Terminating the agent execution as configured in the escalation outcome",
+                            tool_call_id=tool_call_id,
+                        )
+                    ],
                     "termination": {
                         "source": AgentTerminationSource.ESCALATION,
                         "title": f"Agent run ended based on escalation outcome {outcome} with directive {escalation_action}",
                         "detail": f"Escalation output: {validated_result.model_dump()}",
-                    }
+                    },
                 },
                 goto=AgentGraphNode.TERMINATE,
             )
