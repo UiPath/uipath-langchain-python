@@ -4,6 +4,7 @@ import json
 from typing import cast
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from pydantic import BaseModel
 from uipath.runtime import (
     UiPathApiTrigger,
     UiPathResumeTrigger,
@@ -51,13 +52,17 @@ class SqliteResumableStorage:
         trigger_key = (
             trigger.api_resume.inbox_id if trigger.api_resume else trigger.item_key
         )
-        payload = (
-            json.dumps(trigger.payload)
-            if isinstance(trigger.payload, dict)
-            else str(trigger.payload)
-            if trigger.payload
-            else None
-        )
+        payload = trigger.payload
+        if payload:
+            payload = (
+                (
+                    payload.model_dump()
+                    if isinstance(payload, BaseModel)
+                    else json.dumps(payload)
+                )
+                if isinstance(payload, dict)
+                else str(payload)
+            )
 
         async with self.memory.lock, self.memory.conn.cursor() as cur:
             await cur.execute(
