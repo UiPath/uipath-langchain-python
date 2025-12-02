@@ -3,12 +3,15 @@ import json
 import logging
 import os
 import time
-from typing import Any, Mapping
+from typing import Any, AsyncIterator, Dict, Iterator, Mapping
 
 import httpx
 import openai
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import _cleanup_llm_representation
+from langchain_core.messages import AIMessageChunk
+from langchain_core.messages.ai import UsageMetadata
+from langchain_core.outputs import ChatGenerationChunk
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 from tenacity import (
     AsyncRetrying,
@@ -178,6 +181,8 @@ class UiPathRequestMixin(BaseModel):
 
             # Handle HTTP errors and map them to OpenAI exceptions
             try:
+                content = response.content  # Read content to avoid closed stream issues
+                print(f"Response content: {content.decode('utf-8')}")
                 response.raise_for_status()
             except httpx.HTTPStatusError as err:
                 if self.logger:
@@ -221,6 +226,7 @@ class UiPathRequestMixin(BaseModel):
 
         try:
             return retryer(self._request, url, request_body, headers)
+            # return self._request(url, request_body, headers)
         except openai.APIStatusError as err:
             if self.logger:
                 self.logger.error(
@@ -331,6 +337,256 @@ class UiPathRequestMixin(BaseModel):
                     },
                 )
             raise err
+
+    def _convert_chunk(
+        self,
+        chunk: Dict[str, Any],
+        default_chunk_class: type,
+        include_tool_calls: bool = False,
+    ) -> ChatGenerationChunk | None:
+        """Convert a streaming chunk to a ChatGenerationChunk.
+
+        Args:
+            chunk: The raw SSE chunk dictionary
+            default_chunk_class: The default message chunk class to use
+            include_tool_calls: Whether to parse and include tool call chunks
+
+        Returns:
+            A ChatGenerationChunk or None if the chunk should be skipped
+        """
+
+        token_usage = chunk.get("usage")
+        choices = chunk.get("choices", [])
+
+        usage_metadata: UsageMetadata | None = None
+        if token_usage:
+            usage_metadata = UsageMetadata(
+                input_tokens=token_usage.get("prompt_tokens", 0),
+                output_tokens=token_usage.get("completion_tokens", 0),
+                total_tokens=token_usage.get("total_tokens", 0),
+            )
+
+        if len(choices) == 0:
+            return ChatGenerationChunk(
+                message=default_chunk_class(content="", usage_metadata=usage_metadata),
+                generation_info={},
+            )
+
+        choice = choices[0]
+        delta = choice.get("delta")
+        if delta is None:
+            return None
+
+        # Extract content from delta
+        content = delta.get("content", "")
+
+        # Build the message chunk
+        message_kwargs = {
+            "content": content or "",
+            "usage_metadata": usage_metadata,
+        }
+
+        # Handle tool calls if requested (for normalized API)
+        if include_tool_calls:
+            tool_calls = delta.get("tool_calls", [])
+            tool_call_chunks = []
+            if tool_calls:
+                for tc in tool_calls:
+                    # Tool call structure: {'function': {'name': '...', 'arguments': '...'}, 'id': '...', 'index': 0}
+                    function = tc.get("function", {})
+                    tool_call_chunks.append(
+                        {
+                            "id": tc.get("id"),
+                            "name": function.get("name"),
+                            "args": function.get("arguments", ""),
+                            "index": tc.get("index", 0),
+                        }
+                    )
+            if tool_call_chunks:
+                message_kwargs["tool_call_chunks"] = tool_call_chunks
+
+        message_chunk = AIMessageChunk(**message_kwargs)
+
+        generation_info = {}
+        if finish_reason := choice.get("finish_reason"):
+            generation_info["finish_reason"] = finish_reason
+            if model_name := chunk.get("model"):
+                generation_info["model_name"] = model_name
+
+        return ChatGenerationChunk(
+            message=message_chunk,
+            generation_info=generation_info or None,
+        )
+
+    def _stream_request(
+        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
+    ) -> Iterator[Dict[str, Any]]:
+        """Stream SSE responses from the LLM."""
+        client_kwargs = get_httpx_client_kwargs()
+        with httpx.Client(
+            **client_kwargs,
+            event_hooks={
+                "request": [self._log_request_duration],
+                "response": [self._log_response_duration],
+            },
+        ) as client:
+            with client.stream(
+                "POST",
+                url,
+                headers=headers,
+                json=request_body,
+                timeout=self.default_request_timeout,
+            ) as response:
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as err:
+                    if self.logger:
+                        self.logger.error(
+                            "Error querying UiPath: %s (%s)",
+                            err.response.reason_phrase,
+                            err.response.status_code,
+                            extra={
+                                "ActionName": self.settings.action_name,
+                                "ActionId": self.settings.action_id,
+                            }
+                            if self.settings
+                            else None,
+                        )
+                    # Read the response body for streaming responses
+                    err.response.read()
+                    raise self._make_status_error_from_response(err.response) from err
+
+                for line in response.iter_lines():
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    if self.logger:
+                        self.logger.debug(f"[SSE] Raw line: {line}")
+
+                    if line.startswith("data:"):
+                        data = line[
+                            5:
+                        ].strip()  # Remove "data:" prefix and strip whitespace
+                        if data == "[DONE]":
+                            break
+                        if not data:  # Skip empty data lines
+                            continue
+                        try:
+                            parsed = json.loads(data)
+                            # Skip empty chunks (some APIs send them as keepalive)
+                            # Check for truly empty: empty id AND (no choices or empty choices list)
+                            if (not parsed.get("id") or parsed.get("id") == "") and (
+                                not parsed.get("choices")
+                                or len(parsed.get("choices", [])) == 0
+                            ):
+                                if self.logger:
+                                    self.logger.debug(
+                                        "[SSE] Skipping empty keepalive chunk"
+                                    )
+                                continue
+                            yield parsed
+                        except json.JSONDecodeError as e:
+                            if self.logger:
+                                self.logger.warning(
+                                    f"Failed to parse SSE chunk: {data}, error: {e}"
+                                )
+                            continue
+                    else:
+                        # Handle lines without "data: " prefix (some APIs send raw JSON)
+                        try:
+                            parsed = json.loads(line)
+                            if self.logger:
+                                self.logger.debug(f"[SSE] Parsed raw JSON: {parsed}")
+                            yield parsed
+                        except json.JSONDecodeError:
+                            # Not JSON, skip
+                            pass
+
+    async def _astream_request(
+        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Async stream SSE responses from the LLM."""
+        client_kwargs = get_httpx_client_kwargs()
+        async with httpx.AsyncClient(
+            **client_kwargs,
+            event_hooks={
+                "request": [self._alog_request_duration],
+                "response": [self._alog_response_duration],
+            },
+        ) as client:
+            async with client.stream(
+                "POST",
+                url,
+                headers=headers,
+                json=request_body,
+                timeout=self.default_request_timeout,
+            ) as response:
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as err:
+                    if self.logger:
+                        self.logger.error(
+                            "Error querying LLM: %s (%s)",
+                            err.response.reason_phrase,
+                            err.response.status_code,
+                            extra={
+                                "ActionName": self.settings.action_name,
+                                "ActionId": self.settings.action_id,
+                            }
+                            if self.settings
+                            else None,
+                        )
+                    # Read the response body for streaming responses
+                    await err.response.aread()
+                    raise self._make_status_error_from_response(err.response) from err
+
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    if self.logger:
+                        self.logger.debug(f"[SSE] Raw line: {line}")
+
+                    if line.startswith("data:"):
+                        data = line[
+                            5:
+                        ].strip()  # Remove "data:" prefix and strip whitespace
+                        if data == "[DONE]":
+                            break
+                        if not data:  # Skip empty data lines
+                            continue
+                        try:
+                            parsed = json.loads(data)
+                            # Skip empty chunks (some APIs send them as keepalive)
+                            # Check for truly empty: empty id AND (no choices or empty choices list)
+                            if (not parsed.get("id") or parsed.get("id") == "") and (
+                                not parsed.get("choices")
+                                or len(parsed.get("choices", [])) == 0
+                            ):
+                                if self.logger:
+                                    self.logger.debug(
+                                        "[SSE] Skipping empty keepalive chunk"
+                                    )
+                                continue
+                            yield parsed
+                        except json.JSONDecodeError as e:
+                            if self.logger:
+                                self.logger.warning(
+                                    f"Failed to parse SSE chunk: {data}, error: {e}"
+                                )
+                            continue
+                    else:
+                        # Handle lines without "data: " prefix (some APIs send raw JSON)
+                        try:
+                            parsed = json.loads(line)
+                            if self.logger:
+                                self.logger.debug(f"[SSE] Parsed raw JSON: {parsed}")
+                            yield parsed
+                        except json.JSONDecodeError:
+                            # Not JSON, skip
+                            pass
 
     def _make_status_error_from_response(
         self,
@@ -490,8 +746,6 @@ class UiPathRequestMixin(BaseModel):
             self._auth_headers = {
                 **self.default_headers,  # type: ignore
                 "Authorization": f"Bearer {self.access_token}",
-                "X-UiPath-LlmGateway-RequestingProduct": self.requesting_product,
-                "X-UiPath-LlmGateway-RequestingFeature": self.requesting_feature,
                 "X-UiPath-LlmGateway-TimeoutSeconds": str(self.default_request_timeout),
             }
             if self.is_normalized and self.model_name:

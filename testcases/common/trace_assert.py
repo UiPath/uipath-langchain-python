@@ -125,6 +125,10 @@ def assert_traces(traces_file: str, expected_file: str) -> None:
     with open(traces_file, 'r', encoding='utf-8') as f:
         print(f.read())
     if missing_spans:
+        print(f"\n=== Dumping raw traces from {traces_file} ===")
+        with open(traces_file, 'r', encoding='utf-8') as f:
+            print(f.read())
+        print(f"\n=== End of traces dump ===\n")
         raise AssertionError(
             f"Missing expected spans: {', '.join(missing_spans)}\n"
             f"Expected {len(expected_spans)} spans, found {len(expected_spans) - len(missing_spans)}"
