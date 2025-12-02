@@ -14,13 +14,6 @@ class AgentGraphState(BaseModel):
     messages: Annotated[list[AnyMessage], add_messages] = []
 
 
-class AgentGuardrailsGraphState(BaseModel):
-    """Agent Guardrails Graph state for guardrail subgraph."""
-
-    messages: Annotated[list[AnyMessage], add_messages] = []
-    guardrailResultReason: Optional[str] = None
-
-
 class AgentGraphNode(StrEnum):
     INIT = "init"
     AGENT = "agent"

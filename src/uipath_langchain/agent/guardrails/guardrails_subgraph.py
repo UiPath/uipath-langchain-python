@@ -8,12 +8,11 @@ from uipath.agent.models.agent import AgentGuardrail
 from uipath.models.guardrails import GuardrailScope
 
 from .guardrail_nodes import (
-    GraphNode,
-    GuardrailAction,
     create_agent_guardrail_node,
     create_llm_guardrail_node,
     create_tool_guardrail_node,
 )
+from .actions.base_action import GuardrailAction, GuardrailActionNode
 from .types import AgentGuardrailsGraphState
 
 
@@ -28,7 +27,7 @@ def create_guardrails_subgraph(
             str,  # success node name
             str,  # fail node name
         ],
-        GraphNode,
+        GuardrailActionNode,
     ] = create_llm_guardrail_node,
 ) -> Any:
     """Build a subgraph that enforces guardrails around an inner node.
@@ -41,15 +40,19 @@ def create_guardrails_subgraph(
     inner_name, inner_node = main_inner_node
 
     subgraph = StateGraph(AgentGuardrailsGraphState)
+
+    # Add pre execution guardrail nodes
+    first_pre_exec_guardrail_node = _build_guardrail_node_chain(
+        subgraph, guardrails, scope, "PreExecution", node_factory, inner_name
+    )
+    subgraph.add_edge(START, first_pre_exec_guardrail_node)
+
+    # Add post execution guardrail nodes
     first_post_exec_guardrail_node = _build_guardrail_node_chain(
         subgraph, guardrails, scope, "PostExecution", node_factory, END
     )
     subgraph.add_node(inner_name, inner_node)
     subgraph.add_edge(inner_name, first_post_exec_guardrail_node)
-    first_pre_exec_guardrail_node = _build_guardrail_node_chain(
-        subgraph, guardrails, scope, "PreExecution", node_factory, inner_name
-    )
-    subgraph.add_edge(START, first_pre_exec_guardrail_node)
 
     return subgraph.compile()
 
@@ -66,7 +69,7 @@ def _build_guardrail_node_chain(
             str,  # success node name
             str,  # fail node name
         ],
-        GraphNode,
+        GuardrailActionNode,
     ],
     next_node: str,
 ) -> str:
@@ -95,7 +98,7 @@ def _build_guardrail_node_chain(
     guardrail, action = guardrails[-1]
     remaining_guardrails = guardrails[:-1]
 
-    fail_node_name, fail_node = action.enforcement_outcome(
+    fail_node_name, fail_node = action.action_node(
         guardrail=guardrail, scope=scope, execution_stage=execution_stage
     )
 
@@ -108,7 +111,7 @@ def _build_guardrail_node_chain(
     subgraph.add_node(guardrail_node_name, guardrail_node)
     subgraph.add_node(fail_node_name, fail_node)
 
-    # Both success and failure paths route to the next node
+    # Failure path route to the next node
     subgraph.add_edge(fail_node_name, next_node)
 
     previous_node_name = _build_guardrail_node_chain(
