@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Literal, Dict, Any
+from typing import Any, Dict, Literal
 
 from langchain_core.messages import AIMessage
-from langgraph.types import interrupt, Command
+from langgraph.types import Command, interrupt
 from uipath.platform.common import CreateEscalation
-from uipath.platform.guardrails import CustomGuardrail, BuiltInValidatorGuardrail, GuardrailScope
+from uipath.platform.guardrails import (
+    BuiltInValidatorGuardrail,
+    CustomGuardrail,
+    GuardrailScope,
+)
 from uipath.runtime.errors import UiPathErrorCode
 
-from .base_action import GuardrailAction, GuardrailActionNode
+from ...exceptions import AgentTerminationException
 from ..guardrail_nodes import _message_text
 from ..types import AgentGuardrailsGraphState
-from ...exceptions import AgentTerminationException
+from .base_action import GuardrailAction, GuardrailActionNode
 
 
 class EscalateAction(GuardrailAction):
@@ -70,8 +74,16 @@ class EscalateAction(GuardrailAction):
                     assignee=self.assignee,
                 )
             )
-            return _process_escalation_response(
-                state, escalation_result, scope, execution_stage
+
+            if escalation_result.action == "Approve":
+                return _process_escalation_response(
+                    state, escalation_result.data, scope, execution_stage
+                )
+
+            raise AgentTerminationException(
+                code=UiPathErrorCode.CREATE_RESUME_TRIGGER_ERROR,
+                title="Escalation rejected",
+                detail="Escalation rejected",
             )
 
         return node_name, _node
@@ -159,7 +171,7 @@ def _process_escalation_response(
         raise AgentTerminationException(
             code=UiPathErrorCode.EXECUTION_ERROR,
             title="Escalation rejected",
-            detail="TODO",
+            detail=str(e)
         ) from e
 
 
