@@ -12,6 +12,7 @@ from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
 
 from .static_args import handle_static_args
+from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_tool_name
 
 
@@ -169,11 +170,12 @@ def create_integration_tool(
 
         return result
 
-    tool = StructuredTool(
+    tool = StructuredToolWithOutputType(
         name=tool_name,
         description=resource.description,
         args_schema=resource.input_schema,
         coroutine=integration_tool_fn,
+        output_type=output_model,
     )
 
     return tool
