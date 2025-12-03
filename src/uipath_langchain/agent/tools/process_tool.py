@@ -6,6 +6,7 @@ from typing import Any
 
 from jsonschema_pydantic_converter import transform as create_model
 from langchain_core.tools import StructuredTool
+from langgraph.types import interrupt
 from uipath.agent.models.agent import AgentProcessToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform.common import InvokeProcess
@@ -29,11 +30,13 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
         output_schema=output_model.model_json_schema(),
     )
     async def process_tool_fn(**kwargs: Any):
-        return InvokeProcess(
-            name=process_name,
-            input_arguments=kwargs,
-            process_folder_path=folder_path,
-            process_folder_key=None,
+        return interrupt(
+            InvokeProcess(
+                name=process_name,
+                input_arguments=kwargs,
+                process_folder_path=folder_path,
+                process_folder_key=None,
+            )
         )
 
     tool = StructuredTool(
