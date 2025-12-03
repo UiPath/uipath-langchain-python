@@ -1,6 +1,5 @@
 import json
 import logging
-import uuid
 from datetime import datetime, timezone
 from typing import Any, cast
 
@@ -17,8 +16,6 @@ from uipath.core.chat import (
     UiPathConversationContentPartEndEvent,
     UiPathConversationContentPartEvent,
     UiPathConversationContentPartStartEvent,
-    UiPathConversationEvent,
-    UiPathConversationExchangeEvent,
     UiPathConversationMessage,
     UiPathConversationMessageEndEvent,
     UiPathConversationMessageEvent,
@@ -33,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class UiPathChatMessagesMapper:
-    """Stateful mapper that converts LangChain messages to UiPath conversation events.
+    """Stateful mapper that converts LangChain messages to UiPath message events.
 
     Maintains state across multiple message conversions to properly track:
     - The AI message ID associated with each tool call for proper correlation with ToolMessage
@@ -43,21 +40,6 @@ class UiPathChatMessagesMapper:
         """Initialize the mapper with empty state."""
         self.tool_call_to_ai_message: dict[str, str] = {}
         self.seen_message_ids: set[str] = set()
-
-    def _wrap_in_conversation_event(
-        self,
-        msg_event: UiPathConversationMessageEvent,
-        exchange_id: str | None = None,
-        conversation_id: str | None = None,
-    ) -> UiPathConversationEvent:
-        """Helper to wrap a message event into a conversation-level event."""
-        return UiPathConversationEvent(
-            conversation_id=conversation_id or str(uuid.uuid4()),
-            exchange=UiPathConversationExchangeEvent(
-                exchange_id=exchange_id or str(uuid.uuid4()),
-                message=msg_event,
-            ),
-        )
 
     def _extract_text(self, content: Any) -> str:
         """Normalize LangGraph message.content to plain text."""
@@ -146,18 +128,14 @@ class UiPathChatMessagesMapper:
     def map_event(
         self,
         message: BaseMessage,
-        exchange_id: str | None = None,
-        conversation_id: str | None = None,
-    ) -> UiPathConversationEvent | None:
-        """Convert LangGraph BaseMessage (chunk or full) into a UiPathConversationEvent.
+    ) -> UiPathConversationMessageEvent | None:
+        """Convert LangGraph BaseMessage (chunk or full) into a UiPathConversationMessageEvent.
 
         Args:
             message: The LangChain message to convert
-            exchange_id: Optional exchange ID for the conversation
-            conversation_id: Optional conversation ID
 
         Returns:
-            A UiPathConversationEvent if the message should be emitted, None otherwise
+            A UiPathConversationMessageEvent if the message should be emitted, None otherwise.
         """
         # Format timestamp as ISO 8601 UTC with milliseconds: 2025-01-04T10:30:00.123Z
         timestamp = (
@@ -182,9 +160,7 @@ class UiPathChatMessagesMapper:
                     content_part_id=f"chunk-{message.id}-0",
                     end=UiPathConversationContentPartEndEvent(),
                 )
-                return self._wrap_in_conversation_event(
-                    msg_event, exchange_id, conversation_id
-                )
+                return msg_event
 
             # For every new message_id, start a new message
             if message.id not in self.seen_message_ids:
@@ -252,9 +228,7 @@ class UiPathChatMessagesMapper:
                 or msg_event.tool_call
                 or msg_event.end
             ):
-                return self._wrap_in_conversation_event(
-                    msg_event, exchange_id, conversation_id
-                )
+                return msg_event
 
             return None
 
@@ -286,42 +260,34 @@ class UiPathChatMessagesMapper:
                     # Keep as string if not valid JSON
                     pass
 
-            return self._wrap_in_conversation_event(
-                UiPathConversationMessageEvent(
-                    message_id=result_message_id,
-                    tool_call=UiPathConversationToolCallEvent(
-                        tool_call_id=message.tool_call_id,
-                        start=UiPathConversationToolCallStartEvent(
-                            tool_name=message.name,
-                            arguments=None,
-                            timestamp=timestamp,
-                        ),
-                        end=UiPathConversationToolCallEndEvent(
-                            timestamp=timestamp,
-                            result=UiPathInlineValue(inline=content_value),
-                        ),
+            return UiPathConversationMessageEvent(
+                message_id=result_message_id,
+                tool_call=UiPathConversationToolCallEvent(
+                    tool_call_id=message.tool_call_id,
+                    start=UiPathConversationToolCallStartEvent(
+                        tool_name=message.name,
+                        arguments=None,
+                        timestamp=timestamp,
+                    ),
+                    end=UiPathConversationToolCallEndEvent(
+                        timestamp=timestamp,
+                        result=UiPathInlineValue(inline=content_value),
                     ),
                 ),
-                exchange_id,
-                conversation_id,
             )
 
         # --- Fallback for other BaseMessage types ---
         text_content = self._extract_text(message.content)
-        return self._wrap_in_conversation_event(
-            UiPathConversationMessageEvent(
-                message_id=message.id,
-                start=UiPathConversationMessageStartEvent(
-                    role="assistant", timestamp=timestamp
-                ),
-                content_part=UiPathConversationContentPartEvent(
-                    content_part_id=f"cp-{message.id}",
-                    chunk=UiPathConversationContentPartChunkEvent(data=text_content),
-                ),
-                end=UiPathConversationMessageEndEvent(),
+        return UiPathConversationMessageEvent(
+            message_id=message.id,
+            start=UiPathConversationMessageStartEvent(
+                role="assistant", timestamp=timestamp
             ),
-            exchange_id,
-            conversation_id,
+            content_part=UiPathConversationContentPartEvent(
+                content_part_id=f"cp-{message.id}",
+                chunk=UiPathConversationContentPartChunkEvent(data=text_content),
+            ),
+            end=UiPathConversationMessageEndEvent(),
         )
 
 
