@@ -5,8 +5,8 @@ from typing import Any, Dict, List
 from pydantic import BaseModel, ConfigDict, Field
 from uipath._config import Config
 from uipath._execution_context import ExecutionContext
-from uipath._services._base_service import BaseService
 from uipath._utils import Endpoint, RequestSpec
+from uipath.platform.common._base_service import BaseService
 
 
 class FeatureFlagsRequest(BaseModel):

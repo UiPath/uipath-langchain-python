@@ -6,6 +6,7 @@ from uipath.agent.models.agent import LowCodeAgentDefinition
 from uipath_langchain.agent.react import (
     AgentGraphConfig,
     create_agent,
+    resolve_input_model,
     resolve_output_model,
 )
 from uipath_langchain.agent.tools import create_tools_from_resources
@@ -42,6 +43,7 @@ async def build_agent_graph(
     agent_messages = build_agent_messages(
         agent_definition.messages, input_data, agent_definition.name or ""
     )
+    input_model = resolve_input_model(agent_definition.input_schema)
     output_model = resolve_output_model(agent_definition.output_schema)
 
     # Create agent config with feature flags
@@ -53,7 +55,7 @@ async def build_agent_graph(
         model=llm,
         tools=tools,
         messages=agent_messages,
-        input_schema=None,
+        input_schema=input_model,
         output_schema=output_model,
         config=agent_config,
     )
