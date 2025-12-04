@@ -64,7 +64,7 @@ class TestHitlApiTrigger:
 
                 with context:
                     context.result = await runtime.execute(
-                        input={}, options=UiPathExecuteOptions(resume=False)
+                        input=None, options=UiPathExecuteOptions(resume=False)
                     )
 
                 print(context.result)
@@ -132,7 +132,7 @@ class TestHitlApiTrigger:
 
                 with resume_context:
                     resume_context.result = await resume_runtime.execute(
-                        input={}, options=UiPathExecuteOptions(resume=True)
+                        input=None, options=UiPathExecuteOptions(resume=True)
                     )
 
                 assert resume_context.result is not None

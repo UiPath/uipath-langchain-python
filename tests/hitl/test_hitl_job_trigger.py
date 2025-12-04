@@ -75,7 +75,7 @@ class TestHitlJobTrigger:
 
                 with context:
                     context.result = await runtime.execute(
-                        input={}, options=UiPathExecuteOptions(resume=False)
+                        input=None, options=UiPathExecuteOptions(resume=False)
                     )
 
                 assert context.result is not None
@@ -125,7 +125,7 @@ class TestHitlJobTrigger:
                     json={
                         "key": f"{job_key}",
                         "id": 123,
-                        "state": "Successful",
+                        "state": "successful",
                         "output_arguments": json.dumps(output_args_dict),
                     },
                 )
@@ -148,7 +148,7 @@ class TestHitlJobTrigger:
 
                 with resume_context_1:
                     resume_context_1.result = await resume_runtime_1.execute(
-                        input={}, options=UiPathExecuteOptions(resume=True)
+                        input=None, options=UiPathExecuteOptions(resume=True)
                     )
 
                 assert resume_context_1.result is not None
@@ -195,7 +195,7 @@ class TestHitlJobTrigger:
                     json={
                         "key": f"{job_key}",
                         "id": 123,
-                        "state": "Successful",
+                        "state": "successful",
                         "output_arguments": json.dumps(output_args_dict),
                     },
                 )
@@ -218,7 +218,7 @@ class TestHitlJobTrigger:
 
                 with resume_context_2:
                     resume_context_2.result = await resume_runtime_2.execute(
-                        input={}, options=UiPathExecuteOptions(resume=True)
+                        input=None, options=UiPathExecuteOptions(resume=True)
                     )
 
                 assert resume_context_2.result is not None

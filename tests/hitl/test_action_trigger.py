@@ -177,7 +177,7 @@ class TestHitlActionTrigger:
 
                 with resume_context_1:
                     resume_context_1.result = await resume_runtime_1.execute(
-                        input={}, options=UiPathExecuteOptions(resume=True)
+                        input=None, options=UiPathExecuteOptions(resume=True)
                     )
 
                 assert resume_context_1.result is not None
@@ -244,7 +244,7 @@ class TestHitlActionTrigger:
 
                 with resume_context_2:
                     resume_context_2.result = await resume_runtime_2.execute(
-                        input={}, options=UiPathExecuteOptions(resume=True)
+                        input=None, options=UiPathExecuteOptions(resume=True)
                     )
 
                 assert resume_context_2.result is not None

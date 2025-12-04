@@ -1,0 +1,12 @@
+flowchart TB
+  __start__(__start__)
+  model(model)
+  tools(tools)
+  HumanInTheLoopMiddleware.after_model(HumanInTheLoopMiddleware.after_model)
+  __end__(__end__)
+  HumanInTheLoopMiddleware.after_model --> __end__
+  HumanInTheLoopMiddleware.after_model --> model
+  HumanInTheLoopMiddleware.after_model --> tools
+  __start__ --> model
+  model --> HumanInTheLoopMiddleware.after_model
+  tools --> model
