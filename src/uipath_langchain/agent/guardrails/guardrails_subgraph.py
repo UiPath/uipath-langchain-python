@@ -28,7 +28,7 @@ def _create_guardrails_subgraph(
         ],
         GuardrailActionNode,
     ] = create_llm_guardrail_node,
-) -> Any:
+):
     """Build a subgraph that enforces guardrails around an inner node.
 
     START -> pre-eval nodes (dynamic goto) -> inner -> post-eval nodes (dynamic goto) -> END
@@ -133,7 +133,7 @@ def _build_guardrail_node_chain(
 def create_llm_guardrails_subgraph(
     llm_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
-) -> Any:
+):
     applicable_guardrails = [
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
@@ -150,7 +150,7 @@ def create_llm_guardrails_subgraph(
 def create_agent_guardrails_subgraph(
     agent_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
-) -> Any:
+):
     applicable_guardrails = [
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
@@ -167,7 +167,7 @@ def create_agent_guardrails_subgraph(
 def create_tool_guardrails_subgraph(
     tool_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
-) -> Any:
+):
     tool_name, _ = tool_node
     applicable_guardrails = [
         (guardrail, action)

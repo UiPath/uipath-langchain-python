@@ -3265,7 +3265,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.1.18"
+version = "0.1.19"
 source = { editable = "." }
 dependencies = [
     { name = "boto3-stubs" },
