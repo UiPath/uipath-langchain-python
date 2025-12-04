@@ -10,6 +10,7 @@ from uipath.eval.mocks import mockable
 
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
+from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_tool_name
 
 
@@ -43,9 +44,10 @@ def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
     async def context_tool_fn(query: str) -> dict[str, Any]:
         return {"documents": await retriever.ainvoke(query)}
 
-    return StructuredTool(
+    return StructuredToolWithOutputType(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
         coroutine=context_tool_fn,
+        output_type=output_model,
     )
