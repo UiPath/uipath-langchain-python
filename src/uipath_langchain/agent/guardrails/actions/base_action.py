@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from typing import Any, Literal, Tuple
 
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
+
+GuardrailActionNode = Tuple[str, Any]
 
 
 class GuardrailAction(ABC):
@@ -19,6 +19,3 @@ class GuardrailAction(ABC):
     ) -> GuardrailActionNode:
         """Create and return the Action node to execute on validation failure."""
         ...
-
-
-GuardrailActionNode = Tuple[str, Any]
