@@ -1,7 +1,6 @@
 """Tests for guardrail node creation and routing."""
 
 import types
-from typing import Literal
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,7 +9,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from uipath_langchain.agent.guardrails.guardrail_nodes import (
     create_llm_guardrail_node,
 )
-from uipath_langchain.agent.guardrails.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.guardrails.types import (
+    AgentGuardrailsGraphState,
+    ExecutionStage,
+)
 
 
 class FakeGuardrails:
@@ -45,15 +47,15 @@ class TestLlmGuardrailNodes:
     @pytest.mark.parametrize(
         "execution_stage,expected_name",
         [
-            ("PreExecution", "llm_preexecution_example"),
-            ("PostExecution", "llm_postexecution_example"),
+            (ExecutionStage.PRE_EXECUTION, "llm_pre_execution_example"),
+            (ExecutionStage.POST_EXECUTION, "llm_post_execution_example"),
         ],
         ids=["pre-success", "post-success"],
     )
     async def test_llm_success_pre_and_post(
         self,
         monkeypatch,
-        execution_stage: Literal["PreExecution", "PostExecution"],
+        execution_stage: ExecutionStage,
         expected_name,
     ):
         guardrail = MagicMock()
@@ -75,15 +77,15 @@ class TestLlmGuardrailNodes:
     @pytest.mark.parametrize(
         "execution_stage,expected_name",
         [
-            ("PreExecution", "llm_preexecution_example"),
-            ("PostExecution", "llm_postexecution_example"),
+            (ExecutionStage.PRE_EXECUTION, "llm_pre_execution_example"),
+            (ExecutionStage.POST_EXECUTION, "llm_post_execution_example"),
         ],
         ids=["pre-fail", "post-fail"],
     )
     async def test_llm_failure_pre_and_post(
         self,
         monkeypatch,
-        execution_stage: Literal["PreExecution", "PostExecution"],
+        execution_stage: ExecutionStage,
         expected_name,
     ):
         guardrail = MagicMock()

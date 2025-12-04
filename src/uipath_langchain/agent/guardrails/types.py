@@ -1,3 +1,4 @@
+from enum import Enum
 from typing import Annotated, Optional
 
 from langchain_core.messages import AnyMessage
@@ -10,3 +11,10 @@ class AgentGuardrailsGraphState(BaseModel):
 
     messages: Annotated[list[AnyMessage], add_messages] = []
     guardrail_validation_result: Optional[str] = None
+
+
+class ExecutionStage(str, Enum):
+    """Execution stage enumeration."""
+
+    PRE_EXECUTION = "preExecution"
+    POST_EXECUTION = "postExecution"

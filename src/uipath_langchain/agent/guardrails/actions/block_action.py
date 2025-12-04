@@ -1,8 +1,9 @@
 import re
-from typing import Any, Dict, Literal
 
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
+
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ...exceptions import AgentTerminationException
 from ..types import AgentGuardrailsGraphState
@@ -24,12 +25,12 @@ class BlockAction(GuardrailAction):
         *,
         guardrail: BaseGuardrail,
         scope: GuardrailScope,
-        execution_stage: Literal["PreExecution", "PostExecution"],
+        execution_stage: ExecutionStage,
     ) -> GuardrailActionNode:
-        raw_node_name = f"{scope.name}_{execution_stage}_{guardrail.name}_block"
+        raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}_block"
         node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
 
-        async def _node(_state: AgentGuardrailsGraphState) -> Dict[str, Any]:
+        async def _node(_state: AgentGuardrailsGraphState):
             raise AgentTerminationException(
                 code=UiPathErrorCode.EXECUTION_ERROR,
                 title="Guardrail violation",

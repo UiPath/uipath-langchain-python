@@ -7,7 +7,10 @@ from uipath.platform.guardrails import GuardrailScope
 
 from uipath_langchain.agent.exceptions import AgentTerminationException
 from uipath_langchain.agent.guardrails.actions.block_action import BlockAction
-from uipath_langchain.agent.guardrails.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.guardrails.types import (
+    AgentGuardrailsGraphState,
+    ExecutionStage,
+)
 
 
 class TestBlockAction:
@@ -21,10 +24,10 @@ class TestBlockAction:
         node_name, node = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
-            execution_stage="PreExecution",
+            execution_stage=ExecutionStage.PRE_EXECUTION,
         )
 
-        assert node_name == "llm_preexecution_my_guardrail_v1_block"
+        assert node_name == "llm_pre_execution_my_guardrail_v1_block"
 
         with pytest.raises(AgentTerminationException) as excinfo:
             await node(AgentGuardrailsGraphState(messages=[]))

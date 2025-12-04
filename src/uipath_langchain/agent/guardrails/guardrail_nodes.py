@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Any, Callable, Dict, Literal, Tuple
+from typing import Any, Callable, Tuple
 
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.types import Command
@@ -9,6 +9,8 @@ from uipath.platform.guardrails import (
     BaseGuardrail,
     GuardrailScope,
 )
+
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from .types import AgentGuardrailsGraphState
 
@@ -24,7 +26,7 @@ def _message_text(msg: AnyMessage) -> str:
 def _create_guardrail_node(
     guardrail: BaseGuardrail,
     scope: GuardrailScope,
-    execution_stage: Literal["PreExecution", "PostExecution"],
+    execution_stage: ExecutionStage,
     payload_generator: Callable[[AgentGuardrailsGraphState], str],
     success_node: str,
     failure_node: str,
@@ -35,12 +37,12 @@ def _create_guardrail_node(
     - goto success_node on validation pass
     - goto failure_node on validation fail
     """
-    raw_node_name = f"{scope.name}_{execution_stage}_{guardrail.name}"
+    raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}"
     node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
 
     async def node(
         state: AgentGuardrailsGraphState,
-    ) -> Dict[str, Any] | Command[str]:
+    ):
         text = payload_generator(state)
         try:
             uipath = UiPath()
@@ -60,7 +62,7 @@ def _create_guardrail_node(
 
 def create_llm_guardrail_node(
     guardrail: BaseGuardrail,
-    execution_stage: Literal["PreExecution", "PostExecution"],
+    execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
@@ -81,7 +83,7 @@ def create_llm_guardrail_node(
 
 def create_agent_guardrail_node(
     guardrail: BaseGuardrail,
-    execution_stage: Literal["PreExecution", "PostExecution"],
+    execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
@@ -103,7 +105,7 @@ def create_agent_guardrail_node(
 
 def create_tool_guardrail_node(
     guardrail: BaseGuardrail,
-    execution_stage: Literal["PreExecution", "PostExecution"],
+    execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
 ) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:

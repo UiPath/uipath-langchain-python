@@ -40,7 +40,7 @@ def _fake_action(fail_prefix: str) -> GuardrailAction:
             scope,
             execution_stage,
         ) -> GuardrailActionNode:
-            name = f"{fail_prefix}_{execution_stage}_{guardrail.name}"
+            name = f"{fail_prefix}_{execution_stage.name.lower()}_{guardrail.name}"
             return name, lambda s: s
 
     return _Action()
@@ -48,7 +48,7 @@ def _fake_action(fail_prefix: str) -> GuardrailAction:
 
 def _fake_factory(eval_prefix):
     def _factory(guardrail, execution_stage, success_node, failure_node):
-        name = f"{eval_prefix}_{execution_stage}_{guardrail.name}"
+        name = f"{eval_prefix}_{execution_stage.name.lower()}_{guardrail.name}"
         return name, (lambda s: s)  # node function not invoked in this test
 
     return _factory
@@ -96,14 +96,14 @@ class TestLlmGuardrailsSubgraph:
         )
 
         # Expected node names
-        pre_g1 = "eval_PreExecution_guardrail1"
-        log_pre_g1 = "log_PreExecution_guardrail1"
-        pre_g2 = "eval_PreExecution_guardrail2"
-        block_pre_g2 = "block_PreExecution_guardrail2"
-        post_g1 = "eval_PostExecution_guardrail1"
-        log_post_g1 = "log_PostExecution_guardrail1"
-        post_g2 = "eval_PostExecution_guardrail2"
-        block_post_g2 = "block_PostExecution_guardrail2"
+        pre_g1 = "eval_pre_execution_guardrail1"
+        log_pre_g1 = "log_pre_execution_guardrail1"
+        pre_g2 = "eval_pre_execution_guardrail2"
+        block_pre_g2 = "block_pre_execution_guardrail2"
+        post_g1 = "eval_post_execution_guardrail1"
+        log_post_g1 = "log_post_execution_guardrail1"
+        post_g2 = "eval_post_execution_guardrail2"
+        block_post_g2 = "block_post_execution_guardrail2"
 
         # Edges (order not guaranteed; compare as a set)
         expected_edges = {
