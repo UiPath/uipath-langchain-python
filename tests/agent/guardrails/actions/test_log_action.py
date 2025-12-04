@@ -1,6 +1,7 @@
 """Tests for LogAction guardrail failure behavior."""
 
 import logging
+from itertools import product
 from unittest.mock import MagicMock
 
 import pytest
@@ -8,9 +9,9 @@ from uipath.platform.guardrails import GuardrailScope
 
 from uipath_langchain.agent.guardrails.actions.log_action import LogAction
 from uipath_langchain.agent.guardrails.types import (
-    AgentGuardrailsGraphState,
     ExecutionStage,
 )
+from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
 
 
 class TestLogAction:
@@ -47,23 +48,39 @@ class TestLogAction:
         )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("scope", "stage", "level"),
+        list(
+            product(
+                (GuardrailScope.LLM, GuardrailScope.AGENT, GuardrailScope.TOOL),
+                (ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION),
+                (logging.INFO, logging.WARNING, logging.ERROR),
+            )
+        ),
+    )
     async def test_default_message_includes_context(
-        self, caplog: pytest.LogCaptureFixture
+        self,
+        caplog: pytest.LogCaptureFixture,
+        scope: GuardrailScope,
+        stage: ExecutionStage,
+        level: int,
     ) -> None:
-        """PostExecution + TOOL: default message includes guardrail name, scope, stage, and reason."""
-        action = LogAction(message=None, level=logging.WARNING)
+        """Default message includes guardrail name, scope, stage, and reason."""
+        action = LogAction(message=None, level=level)
         guardrail = MagicMock()
         guardrail.name = "My Guardrail"
 
         node_name, node = action.action_node(
             guardrail=guardrail,
-            scope=GuardrailScope.TOOL,
-            execution_stage=ExecutionStage.POST_EXECUTION,
+            scope=scope,
+            execution_stage=stage,
             guarded_component_name="guarded_node_name",
         )
-        assert node_name == "tool_post_execution_my_guardrail_log"
+        assert (
+            node_name == f"{scope.name.lower()}_{stage.name.lower()}_my_guardrail_log"
+        )
 
-        with caplog.at_level(logging.WARNING):
+        with caplog.at_level(level):
             result = await node(
                 AgentGuardrailsGraphState(
                     messages=[], guardrail_validation_result="bad input"
@@ -72,9 +89,10 @@ class TestLogAction:
 
         assert result == {}
         # Confirm default formatted message content
+        expected = (
+            "Guardrail [My Guardrail] validation failed for "
+            f"[{scope.name}] [{stage.name}] with the following reason: bad input"
+        )
         assert any(
-            rec.levelno == logging.WARNING
-            and rec.message
-            == "Guardrail [My Guardrail] validation failed for [TOOL] [POST_EXECUTION] with the following reason: bad input"
-            for rec in caplog.records
+            rec.levelno == level and rec.message == expected for rec in caplog.records
         )

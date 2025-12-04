@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from uipath.platform.guardrails import BuiltInValidatorGuardrail, DeterministicGuardrail
 
-import uipath_langchain.agent.guardrails.guardrails_subgraph
+import uipath_langchain.agent.react.guardrails.guardrails_subgraph
 from uipath_langchain.agent.guardrails.actions.base_action import GuardrailAction
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
@@ -39,7 +39,7 @@ class TestGuardrailStageFiltering:
 
         # --- PRE_EXECUTION ---
         # Should get ALL guardrails
-        pre_filtered = uipath_langchain.agent.guardrails.guardrails_subgraph._filter_guardrails_by_stage(
+        pre_filtered = uipath_langchain.agent.react.guardrails.guardrails_subgraph._filter_guardrails_by_stage(
             guardrails, ExecutionStage.PRE_EXECUTION
         )
         assert len(pre_filtered) == 3
@@ -49,7 +49,7 @@ class TestGuardrailStageFiltering:
 
         # --- POST_EXECUTION ---
         # Should SKIP Prompt Injection
-        post_filtered = uipath_langchain.agent.guardrails.guardrails_subgraph._filter_guardrails_by_stage(
+        post_filtered = uipath_langchain.agent.react.guardrails.guardrails_subgraph._filter_guardrails_by_stage(
             guardrails, ExecutionStage.POST_EXECUTION
         )
         assert len(post_filtered) == 2
