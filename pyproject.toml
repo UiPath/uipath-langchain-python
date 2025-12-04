@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.1.15"
+version = "0.1.17"
 description = "UiPath Langchain"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -17,6 +17,11 @@ dependencies = [
     "openinference-instrumentation-langchain>=0.1.56",
     "jsonschema-pydantic-converter>=0.1.5",
     "jsonpath-ng>=1.7.0",
+    "langchain-aws>=0.2.35",
+    "langchain-google-vertexai>=2.1.2",
+    "boto3-stubs>=1.41.4",
+    "langchain-community>=0.4.1",
+    "types-protobuf>=6.32.1.20251105",
 ]
 classifiers = [
     "Intended Audience :: Developers",

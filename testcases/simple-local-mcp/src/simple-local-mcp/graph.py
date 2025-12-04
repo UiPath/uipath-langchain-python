@@ -6,10 +6,7 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
 from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
 
-if os.getenv("USE_AZURE_CHAT", "false").lower() == "true":
-    model = UiPathAzureChatOpenAI(model="gpt-4o-2024-08-06", streaming=False)
-else:
-    model = UiPathChat(model="gpt-4o-2024-08-06", streaming=False)
+model = UiPathChat(model="gpt-4o-2024-08-06", streaming=False)
 
 @asynccontextmanager
 async def make_graph():

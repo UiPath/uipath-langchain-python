@@ -45,9 +45,8 @@ jobs:
       matrix:
         testcase: ${{ fromJson(needs.discover-testcases.outputs.testcases) }}
         environment: [alpha, cloud, staging]
-        use_azure_chat: [true, false]
 
-    name: "${{ matrix.testcase }} / ${{ matrix.environment }} / ${{ matrix.use_azure_chat && 'UiPathAzureChatOpenAI' || 'UiPathChat' }}"
+    name: "${{ matrix.testcase }} / ${{ matrix.environment }}"
 
     steps:
     - name: Checkout code
@@ -58,16 +57,14 @@ jobs:
 
     - name: Run testcase
       env:
-        CLIENT_ID:      ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_ID || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_ID || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_ID }}
-        CLIENT_SECRET:  ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_SECRET || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_SECRET || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_SECRET }}
-        BASE_URL:       ${{ matrix.environment == 'alpha' && secrets.ALPHA_BASE_URL || matrix.environment == 'staging' && secrets.STAGING_BASE_URL || matrix.environment == 'cloud' && secrets.CLOUD_BASE_URL }}
-        USE_AZURE_CHAT: ${{ matrix.use_azure_chat }}
+        ENVIRONMENT: ${{ matrix.environment }}
+        CLIENT_ID: ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_ID || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_ID || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_ID }}
+        CLIENT_SECRET: ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_SECRET || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_SECRET || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_SECRET }}
+        BASE_URL: ${{ matrix.environment == 'alpha' && secrets.ALPHA_BASE_URL || matrix.environment == 'staging' && secrets.STAGING_BASE_URL || matrix.environment == 'cloud' && secrets.CLOUD_BASE_URL }}
       working-directory: testcases/${{ matrix.testcase }}
       run: |
         echo "Running testcase: ${{ matrix.testcase }}"
         echo "Environment: ${{ matrix.environment }}"
-        echo "LLM: ${{ matrix.use_azure_chat && 'UiPathAzureChatOpenAI' || 'UiPathChat' }}"
-        echo "USE_AZURE_CHAT: ${{ matrix.use_azure_chat }}"
 
         # Execute the testcase run script directly
         bash run.sh

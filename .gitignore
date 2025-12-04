@@ -179,3 +179,4 @@ cython_debug/
 **/**.nupkg
 **/__uipath/
 **/.langgraph_api
+**/testcases/**/uipath.json

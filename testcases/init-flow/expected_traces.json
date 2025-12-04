@@ -14,10 +14,7 @@
       }
     },
     {
-      "name": [
-        "UiPathChat",
-        "UiPathAzureChatOpenAI"
-      ],
+      "name": "UiPathChat",
       "attributes": {
         "openinference.span.kind": "LLM",
         "llm.provider": "azure",
