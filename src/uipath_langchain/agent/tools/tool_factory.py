@@ -1,7 +1,5 @@
 """Factory functions for creating tools from agent resources."""
 
-from __future__ import annotations
-
 from langchain_core.tools import BaseTool, StructuredTool
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
@@ -16,9 +14,7 @@ from .integration_tool import create_integration_tool
 from .process_tool import create_process_tool
 
 
-async def create_tools_from_resources(
-    agent: LowCodeAgentDefinition,
-) -> list[BaseTool]:
+async def create_tools_from_resources(agent: LowCodeAgentDefinition) -> list[BaseTool]:
     tools: list[BaseTool] = []
 
     for resource in agent.resources:

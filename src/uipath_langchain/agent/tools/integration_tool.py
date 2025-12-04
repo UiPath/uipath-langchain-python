@@ -1,17 +1,53 @@
 """Process tool creation for UiPath process execution."""
 
-from __future__ import annotations
-
+import copy
 from typing import Any
 
 from jsonschema_pydantic_converter import transform as create_model
+from langchain.tools import ToolRuntime
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
 
+from .static_args import handle_static_args
 from .utils import sanitize_tool_name
+
+
+def remove_asterisk_from_properties(fields: dict[str, Any]) -> dict[str, Any]:
+    """
+    Fix bug in integration service.
+    """
+    fields = copy.deepcopy(fields)
+
+    def fix_types(props: dict[str, Any]) -> None:
+        type_ = props.get("type", None)
+        if "$ref" in props:
+            props["$ref"] = props["$ref"].replace("[*]", "")
+        if type_ == "object":
+            properties = {}
+            for k, v in props.get("properties", {}).items():
+                # Remove asterisks!
+                k = k.replace("[*]", "")
+                properties[k] = v
+                if isinstance(v, dict):
+                    fix_types(v)
+            if "properties" in props:
+                props["properties"] = properties
+        if type_ == "array":
+            fix_types(props.get("items", {}))
+
+    definitions = {}
+    for k, value in fields.get("$defs", fields.get("definitions", {})).items():
+        k = k.replace("[*]", "")
+        definitions[k] = value
+        fix_types(value)
+    if "definitions" in fields:
+        fields["definitions"] = definitions
+
+    fix_types(fields)
+    return fields
 
 
 def extract_top_level_field(param_name: str) -> str:
@@ -97,38 +133,15 @@ def create_integration_tool(
 
     activity_metadata = convert_to_activity_metadata(resource)
 
-    input_model: Any = create_model(resource.input_schema)
+    input_model = create_model(resource.input_schema)
     # note: IS tools output schemas were recently added and are most likely not present in all resources
     output_model: Any = (
-        create_model(resource.output_schema)
+        create_model(remove_asterisk_from_properties(resource.output_schema))
         if resource.output_schema
         else create_model({"type": "object", "properties": {}})
     )
 
     sdk = UiPath()
-
-    def sanitize_for_serialization(args: dict[str, Any]) -> dict[str, Any]:
-        """Convert Pydantic models in args to dicts."""
-        converted_args: dict[str, Any] = {}
-        for key, value in args.items():
-            # handle Pydantic model
-            if hasattr(value, "model_dump"):
-                converted_args[key] = value.model_dump()
-
-            elif isinstance(value, list):
-                # handle list of Pydantic models
-                converted_list = []
-                for item in value:
-                    if hasattr(item, "model_dump"):
-                        converted_list.append(item.model_dump())
-                    else:
-                        converted_list.append(item)
-                converted_args[key] = converted_list
-
-            # handle regular value or unexpected type
-            else:
-                converted_args[key] = value
-        return converted_args
 
     @mockable(
         name=resource.name,
@@ -136,17 +149,30 @@ def create_integration_tool(
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def integration_tool_fn(**kwargs: Any):
-        return await sdk.connections.invoke_activity_async(
-            activity_metadata=activity_metadata,
-            connection_id=connection_id,
-            activity_input=sanitize_for_serialization(kwargs),
-        )
+    async def integration_tool_fn(runtime: ToolRuntime, **kwargs: Any):
+        try:
+            # we manually validating here and not passing input_model to StructuredTool
+            # because langchain itself will block their own injected arguments (like runtime) if the model is strict
+            val_args = input_model.model_validate(kwargs)
+            args = handle_static_args(
+                resource=resource,
+                runtime=runtime,
+                input_args=val_args.model_dump(),
+            )
+            result = await sdk.connections.invoke_activity_async(
+                activity_metadata=activity_metadata,
+                connection_id=connection_id,
+                activity_input=args,
+            )
+        except Exception:
+            raise
+
+        return result
 
     tool = StructuredTool(
         name=tool_name,
         description=resource.description,
-        args_schema=input_model,
+        args_schema=resource.input_schema,
         coroutine=integration_tool_fn,
     )
 
