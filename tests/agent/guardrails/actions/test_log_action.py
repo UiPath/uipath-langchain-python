@@ -7,7 +7,10 @@ import pytest
 from uipath.platform.guardrails import GuardrailScope
 
 from uipath_langchain.agent.guardrails.actions.log_action import LogAction
-from uipath_langchain.agent.guardrails.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.guardrails.types import (
+    AgentGuardrailsGraphState,
+    ExecutionStage,
+)
 
 
 class TestLogAction:
@@ -23,7 +26,7 @@ class TestLogAction:
         node_name, node = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
-            execution_stage="PreExecution",
+            execution_stage=ExecutionStage.PRE_EXECUTION,
         )
 
         assert node_name == "llm_preexecution_my_guardrail_v1_log"
@@ -54,7 +57,7 @@ class TestLogAction:
         node_name, node = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
-            execution_stage="PostExecution",
+            execution_stage=ExecutionStage.POST_EXECUTION,
         )
         assert node_name == "tool_postexecution_my_guardrail_log"
 
