@@ -31,7 +31,7 @@ You can easily integrate the retriever with LangChain's tool system:
 
 ```python
 from langchain.agents import create_agent
-from langchain.tools.retriever import create_retriever_tool
+from langchain_core.tools.retriever import create_retriever_tool
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
 retriever = ContextGroundingRetriever(index_name = "Company Policy Context")
