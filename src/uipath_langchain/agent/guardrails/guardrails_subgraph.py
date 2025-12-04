@@ -1,8 +1,10 @@
-from typing import Any, Callable, Literal, Sequence
+from typing import Any, Callable, Sequence
 
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
+
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from .actions.base_action import GuardrailAction, GuardrailActionNode
 from .guardrail_nodes import (
@@ -20,7 +22,7 @@ def _create_guardrails_subgraph(
     node_factory: Callable[
         [
             BaseGuardrail,
-            Literal["PreExecution", "PostExecution"],
+            ExecutionStage,
             str,  # success node name
             str,  # fail node name
         ],
@@ -40,13 +42,18 @@ def _create_guardrails_subgraph(
 
     # Add pre execution guardrail nodes
     first_pre_exec_guardrail_node = _build_guardrail_node_chain(
-        subgraph, guardrails, scope, "PreExecution", node_factory, inner_name
+        subgraph,
+        guardrails,
+        scope,
+        ExecutionStage.PRE_EXECUTION,
+        node_factory,
+        inner_name,
     )
     subgraph.add_edge(START, first_pre_exec_guardrail_node)
 
     # Add post execution guardrail nodes
     first_post_exec_guardrail_node = _build_guardrail_node_chain(
-        subgraph, guardrails, scope, "PostExecution", node_factory, END
+        subgraph, guardrails, scope, ExecutionStage.POST_EXECUTION, node_factory, END
     )
     subgraph.add_node(inner_name, inner_node)
     subgraph.add_edge(inner_name, first_post_exec_guardrail_node)
@@ -58,11 +65,11 @@ def _build_guardrail_node_chain(
     subgraph: StateGraph[AgentGuardrailsGraphState],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
     scope: GuardrailScope,
-    execution_stage: Literal["PreExecution", "PostExecution"],
+    execution_stage: ExecutionStage,
     node_factory: Callable[
         [
             BaseGuardrail,
-            Literal["PreExecution", "PostExecution"],
+            ExecutionStage,
             str,  # success node name
             str,  # fail node name
         ],

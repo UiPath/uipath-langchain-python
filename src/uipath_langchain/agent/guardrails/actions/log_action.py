@@ -1,8 +1,9 @@
 import logging
 import re
-from typing import Any, Dict, Literal
 
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
+
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ..types import AgentGuardrailsGraphState
 from .base_action import GuardrailAction, GuardrailActionNode
@@ -19,13 +20,13 @@ class LogAction(GuardrailAction):
         *,
         guardrail: BaseGuardrail,
         scope: GuardrailScope,
-        execution_stage: Literal["PreExecution", "PostExecution"],
+        execution_stage: ExecutionStage,
     ) -> GuardrailActionNode:
-        raw_node_name = f"{scope.name}_{execution_stage}_{guardrail.name}_log"
+        raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}_log"
         node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
 
         # TODO: add complete implementation for Log action
-        async def _node(_state: AgentGuardrailsGraphState) -> Dict[str, Any]:
+        async def _node(_state: AgentGuardrailsGraphState):
             print(
                 self.level,
                 "Guardrail '%s' failed at %s %s: %s",

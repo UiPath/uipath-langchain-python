@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import Any, Literal, Tuple
+from typing import Any, Tuple
 
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
+
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 GuardrailActionNode = Tuple[str, Any]
 
@@ -15,7 +17,7 @@ class GuardrailAction(ABC):
         *,
         guardrail: BaseGuardrail,
         scope: GuardrailScope,
-        execution_stage: Literal["PreExecution", "PostExecution"],
+        execution_stage: ExecutionStage,
     ) -> GuardrailActionNode:
         """Create and return the Action node to execute on validation failure."""
         ...
