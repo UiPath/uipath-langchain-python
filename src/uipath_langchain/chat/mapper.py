@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, cast
+from uuid import uuid4
 
 from langchain_core.messages import (
     AIMessageChunk,
@@ -246,10 +247,12 @@ class UiPathChatMessagesMapper:
                 logger.warning(
                     f"Tool message {message.tool_call_id} has no associated AI message ID. Skipping."
                 )
-                return None
 
             # Clean up the mapping after use
-            if message.tool_call_id:
+            if (
+                message.tool_call_id
+                and message.tool_call_id in self.tool_call_to_ai_message
+            ):
                 del self.tool_call_to_ai_message[message.tool_call_id]
 
             content_value: Any = message.content
@@ -261,7 +264,7 @@ class UiPathChatMessagesMapper:
                     pass
 
             return UiPathConversationMessageEvent(
-                message_id=result_message_id,
+                message_id=result_message_id or str(uuid4()),
                 tool_call=UiPathConversationToolCallEvent(
                     tool_call_id=message.tool_call_id,
                     start=UiPathConversationToolCallStartEvent(

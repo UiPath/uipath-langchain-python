@@ -1,13 +1,11 @@
 [project]
 name = "uipath-langchain"
-version = "0.1.13"
+version = "0.1.14"
 description = "UiPath Langchain"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
-    "uipath-core>=0.0.6, <0.1.0",
-    "uipath-runtime>=0.1.2, <0.2.0",
-    "uipath>=2.2.11, <2.3.0",
+    "uipath>=2.2.16, <2.3.0",
     "langgraph>=1.0.0, <2.0.0",
     "langchain-core>=1.0.0, <2.0.0",
     "langgraph-checkpoint-sqlite>=3.0.0, <4.0.0",
@@ -110,3 +108,4 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+

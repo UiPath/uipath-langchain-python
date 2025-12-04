@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any, AsyncGenerator
 from uuid import uuid4
@@ -27,6 +28,8 @@ from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_sc
 
 from ._serialize import serialize_output
 
+logger = logging.getLogger(__name__)
+
 
 class UiPathLangGraphRuntime:
     """
@@ -51,6 +54,7 @@ class UiPathLangGraphRuntime:
         self.runtime_id: str = runtime_id or "default"
         self.entrypoint: str | None = entrypoint
         self.chat = UiPathChatMessagesMapper()
+        self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
     async def execute(
         self,
@@ -139,7 +143,13 @@ class UiPathLangGraphRuntime:
                 # Emit UiPathRuntimeStateEvent for state updates
                 elif chunk_type == "updates":
                     if isinstance(data, dict):
-                        final_chunk = data
+                        filtered_data = {
+                            node_name: agent_data
+                            for node_name, agent_data in data.items()
+                            if not self._is_middleware_node(node_name)
+                        }
+                        if filtered_data:
+                            final_chunk = filtered_data
 
                         # Emit state update event for each node
                         for node_name, agent_data in data.items():
@@ -414,6 +424,29 @@ class UiPathLangGraphRuntime:
             detail,
             UiPathErrorCategory.USER,
         )
+
+    def _detect_middleware_nodes(self) -> set[str]:
+        """
+        Detect middleware nodes by their naming pattern.
+
+        Middleware nodes always contain both:
+        1. "Middleware" in the name (by convention)
+        2. A dot "." separator (MiddlewareName.hook_name)
+
+        Returns:
+            Set of middleware node names
+        """
+        middleware_nodes: set[str] = set()
+
+        for node_name in self.graph.nodes.keys():
+            if "." in node_name and "Middleware" in node_name:
+                middleware_nodes.add(node_name)
+
+        return middleware_nodes
+
+    def _is_middleware_node(self, node_name: str) -> bool:
+        """Check if a node name represents a middleware node."""
+        return node_name in self._middleware_node_names
 
     async def dispose(self) -> None:
         """Cleanup runtime resources."""

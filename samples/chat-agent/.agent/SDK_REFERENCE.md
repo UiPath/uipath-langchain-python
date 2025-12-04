@@ -259,37 +259,37 @@ Documents service
 # Classify a document using a DU Modern project.
 sdk.documents.classify(project_type: <enum 'ProjectType, tag: Optional[str]=None, project_name: Optional[str]=None, file: Union[IO[bytes], bytes, str, NoneType]=None, file_path: Optional[str]=None) -> typing.List[uipath.platform.documents.documents.ClassificationResult]
 
-# Asynchronously version of the [`classify`][uipath._services.documents_service.DocumentsService.classify] method.
+# Asynchronously version of the [`classify`][uipath.platform.documents._documents_service.DocumentsService.classify] method.
 sdk.documents.classify_async(project_type: <enum 'ProjectType, tag: Optional[str]=None, project_name: Optional[str]=None, file: Union[IO[bytes], bytes, str, NoneType]=None, file_path: Optional[str]=None) -> typing.List[uipath.platform.documents.documents.ClassificationResult]
 
 # Create a validate classification action for a document based on the classification results. More details about validation actions can be found in the [official documentation](https://docs.uipath.com/ixp/automation-cloud/latest/user-guide/validating-classifications).
 sdk.documents.create_validate_classification_action(action_title: str, action_priority: <enum 'ActionPriority, action_catalog: str, action_folder: str, storage_bucket_name: str, storage_bucket_directory_path: str, classification_results: List[uipath.platform.documents.documents.ClassificationResult]) -> uipath.platform.documents.documents.ValidateClassificationAction
 
-# Asynchronous version of the [`create_validation_action`][uipath._services.documents_service.DocumentsService.create_validate_classification_action] method.
+# Asynchronous version of the [`create_validation_action`][uipath.platform.documents._documents_service.DocumentsService.create_validate_classification_action] method.
 sdk.documents.create_validate_classification_action_async(action_title: str, action_priority: <enum 'ActionPriority, action_catalog: str, action_folder: str, storage_bucket_name: str, storage_bucket_directory_path: str, classification_results: List[uipath.platform.documents.documents.ClassificationResult]) -> uipath.platform.documents.documents.ValidateClassificationAction
 
 # Create a validate extraction action for a document based on the extraction response. More details about validation actions can be found in the [official documentation](https://docs.uipath.com/ixp/automation-cloud/latest/user-guide/validating-extractions).
 sdk.documents.create_validate_extraction_action(action_title: str, action_priority: <enum 'ActionPriority, action_catalog: str, action_folder: str, storage_bucket_name: str, storage_bucket_directory_path: str, extraction_response: uipath.platform.documents.documents.ExtractionResponse) -> uipath.platform.documents.documents.ValidateExtractionAction
 
-# Asynchronous version of the [`create_validation_action`][uipath._services.documents_service.DocumentsService.create_validate_extraction_action] method.
+# Asynchronous version of the [`create_validation_action`][uipath.platform.documents._documents_service.DocumentsService.create_validate_extraction_action] method.
 sdk.documents.create_validate_extraction_action_async(action_title: str, action_priority: <enum 'ActionPriority, action_catalog: str, action_folder: str, storage_bucket_name: str, storage_bucket_directory_path: str, extraction_response: uipath.platform.documents.documents.ExtractionResponse) -> uipath.platform.documents.documents.ValidateExtractionAction
 
 # Extract predicted data from a document using an DU Modern/IXP project.
 sdk.documents.extract(tag: Optional[str]=None, project_name: Optional[str]=None, file: Union[IO[bytes], bytes, str, NoneType]=None, file_path: Optional[str]=None, classification_result: Optional[uipath.platform.documents.documents.ClassificationResult]=None, project_type: Optional[uipath.platform.documents.documents.ProjectType]=None, document_type_name: Optional[str]=None) -> typing.Union[uipath.platform.documents.documents.ExtractionResponse, uipath.platform.documents.documents.ExtractionResponseIXP]
 
-# Asynchronously version of the [`extract`][uipath._services.documents_service.DocumentsService.extract] method.
+# Asynchronously version of the [`extract`][uipath.platform.documents._documents_service.DocumentsService.extract] method.
 sdk.documents.extract_async(tag: Optional[str]=None, project_name: Optional[str]=None, file: Union[IO[bytes], bytes, str, NoneType]=None, file_path: Optional[str]=None, classification_result: Optional[uipath.platform.documents.documents.ClassificationResult]=None, project_type: Optional[uipath.platform.documents.documents.ProjectType]=None, document_type_name: Optional[str]=None) -> typing.Union[uipath.platform.documents.documents.ExtractionResponse, uipath.platform.documents.documents.ExtractionResponseIXP]
 
 # Get the result of a validate classification action.
 sdk.documents.get_validate_classification_result(validation_action: uipath.platform.documents.documents.ValidateClassificationAction) -> typing.List[uipath.platform.documents.documents.ClassificationResult]
 
-# Asynchronous version of the [`get_validation_result`][uipath._services.documents_service.DocumentsService.get_validate_classification_result] method.
+# Asynchronous version of the [`get_validation_result`][uipath.platform.documents._documents_service.DocumentsService.get_validate_classification_result] method.
 sdk.documents.get_validate_classification_result_async(validation_action: uipath.platform.documents.documents.ValidateClassificationAction) -> typing.List[uipath.platform.documents.documents.ClassificationResult]
 
 # Get the result of a validate extraction action.
 sdk.documents.get_validate_extraction_result(validation_action: uipath.platform.documents.documents.ValidateExtractionAction) -> typing.Union[uipath.platform.documents.documents.ExtractionResponse, uipath.platform.documents.documents.ExtractionResponseIXP]
 
-# Asynchronous version of the [`get_validation_result`][uipath._services.documents_service.DocumentsService.get_validate_extraction_result] method.
+# Asynchronous version of the [`get_validation_result`][uipath.platform.documents._documents_service.DocumentsService.get_validate_extraction_result] method.
 sdk.documents.get_validate_extraction_result_async(validation_action: uipath.platform.documents.documents.ValidateExtractionAction) -> typing.Union[uipath.platform.documents.documents.ExtractionResponse, uipath.platform.documents.documents.ExtractionResponseIXP]
 
 ```
@@ -411,7 +411,7 @@ Llm service
 
 ```python
 # Generate chat completions using UiPath's normalized LLM Gateway API.
-sdk.llm.chat_completions(messages: Union[List[Dict[str, str]], List[tuple[str, str]]], model: str="gpt-4o-mini-2024-07-18", max_tokens: int=4096, temperature: float=0, n: int=1, frequency_penalty: float=0, presence_penalty: float=0, top_p: Optional[float]=1, top_k: Optional[int]=None, tools: Optional[List[uipath.platform.llm_gateway.llm_gateway.ToolDefinition]]=None, tool_choice: Union[uipath.platform.llm_gateway.llm_gateway.AutoToolChoice, uipath.platform.llm_gateway.llm_gateway.RequiredToolChoice, uipath.platform.llm_gateway.llm_gateway.SpecificToolChoice, Literal['auto', 'none'], NoneType]=None, response_format: Union[Dict[str, Any], type[pydantic.main.BaseModel], NoneType]=None, api_version: str="2024-08-01-preview")
+sdk.llm.chat_completions(messages: list[dict[str, str]] | list[tuple[str, str]], model: str="gpt-4o-mini-2024-07-18", max_tokens: int=4096, temperature: float=0, n: int=1, frequency_penalty: float=0, presence_penalty: float=0, top_p: float | None=1, top_k: int | None=None, tools: list[uipath.platform.llm_gateway.llm_gateway.ToolDefinition] | None=None, tool_choice: Union[uipath.platform.llm_gateway.llm_gateway.AutoToolChoice, uipath.platform.llm_gateway.llm_gateway.RequiredToolChoice, uipath.platform.llm_gateway.llm_gateway.SpecificToolChoice, Literal['auto', 'none'], NoneType]=None, response_format: dict[str, Any] | type[pydantic.main.BaseModel] | None=None, api_version: str="2024-08-01-preview")
 
 ```
 
@@ -421,7 +421,7 @@ Llm Openai service
 
 ```python
 # Generate chat completions using UiPath's LLM Gateway service.
-sdk.llm_openai.chat_completions(messages: List[Dict[str, str]], model: str="gpt-4o-mini-2024-07-18", max_tokens: int=4096, temperature: float=0, response_format: Union[Dict[str, Any], type[pydantic.main.BaseModel], NoneType]=None, api_version: str="2024-10-21")
+sdk.llm_openai.chat_completions(messages: list[dict[str, str]], model: str="gpt-4o-mini-2024-07-18", max_tokens: int=4096, temperature: float=0, response_format: dict[str, Any] | type[pydantic.main.BaseModel] | None=None, api_version: str="2024-10-21")
 
 # Generate text embeddings using UiPath's LLM Gateway service.
 sdk.llm_openai.embeddings(input: str, embedding_model: str="text-embedding-ada-002", openai_api_version: str="2024-10-21")
@@ -434,16 +434,16 @@ Mcp service
 
 ```python
 # List all MCP servers.
-sdk.mcp.list(folder_path: Optional[str]=None) -> typing.List[uipath.platform.orchestrator.mcp.McpServer]
+sdk.mcp.list(folder_path: str | None=None) -> typing.List[uipath.platform.orchestrator.mcp.McpServer]
 
 # Asynchronously list all MCP servers.
-sdk.mcp.list_async(folder_path: Optional[str]=None) -> typing.List[uipath.platform.orchestrator.mcp.McpServer]
+sdk.mcp.list_async(folder_path: str | None=None) -> typing.List[uipath.platform.orchestrator.mcp.McpServer]
 
 # Retrieve a specific MCP server by its slug.
-sdk.mcp.retrieve(slug: str, folder_path: Optional[str]=None) -> uipath.platform.orchestrator.mcp.McpServer
+sdk.mcp.retrieve(slug: str, folder_path: str | None=None) -> uipath.platform.orchestrator.mcp.McpServer
 
 # Asynchronously retrieve a specific MCP server by its slug.
-sdk.mcp.retrieve_async(slug: str, folder_path: Optional[str]=None) -> uipath.platform.orchestrator.mcp.McpServer
+sdk.mcp.retrieve_async(slug: str, folder_path: str | None=None) -> uipath.platform.orchestrator.mcp.McpServer
 
 ```
 
