@@ -4,6 +4,7 @@ from typing import Sequence
 from uipath.agent.models.agent import (
     AgentGuardrail,
     AgentGuardrailBlockAction,
+    AgentGuardrailEscalateAction,
     AgentGuardrailLogAction,
     AgentGuardrailSeverityLevel,
     AgentUnknownGuardrail,
@@ -12,6 +13,7 @@ from uipath.platform.guardrails import BaseGuardrail
 
 from uipath_langchain.agent.guardrails.actions import (
     BlockAction,
+    EscalateAction,
     GuardrailAction,
     LogAction,
 )
@@ -51,6 +53,19 @@ def build_guardrails_with_actions(
                 (
                     guardrail,
                     LogAction(message=action.message, level=level),
+                )
+            )
+        elif isinstance(action, AgentGuardrailEscalateAction):
+            result.append(
+                (
+                    guardrail,
+                    EscalateAction(
+                        app_name="app_name",
+                        app_title=guardrail.action.app.title,
+                        app_folder_path=guardrail.action.app.folder_name,
+                        version=guardrail.action.app.version,
+                        assignee=guardrail.action.recipient.value,
+                    ),
                 )
             )
     return result
