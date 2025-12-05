@@ -49,7 +49,7 @@ class UiPathSyncURLRewriteTransport(httpx.HTTPTransport):
         return super().handle_request(request)
 
 
-class ChatOpenAIUiPath(AzureChatOpenAI):
+class UiPathChatOpenAI(AzureChatOpenAI):
     def __init__(
         self,
         token: Optional[str] = None,

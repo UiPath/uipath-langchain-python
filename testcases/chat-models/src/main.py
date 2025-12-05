@@ -8,7 +8,7 @@ from langgraph.graph import END, START, StateGraph, MessagesState
 from pydantic import BaseModel, Field
 from langchain_core.language_models import BaseChatModel
 
-from uipath_langchain.chat import ChatBedrockConverseUiPath, ChatBedrockUiPath, ChatVertexUiPath, ChatOpenAIUiPath, UiPathChat, UiPathAzureChatOpenAI
+from uipath_langchain.chat import UiPathChatBedrockConverse, UiPathChatBedrock, UiPathChatVertex, UiPathChatOpenAI, UiPathChat, UiPathAzureChatOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -16,19 +16,19 @@ logger = logging.getLogger(__name__)
 def create_test_models(max_tokens: int = 100) -> list[tuple[str, Any]]:
     """Create all test chat models with the specified max_tokens."""
     return [
-        ("ChatOpenAIUiPath", ChatOpenAIUiPath(
+        ("UiPathChatOpenAI", UiPathChatOpenAI(
             temperature=0.7,
             max_tokens=max_tokens,
         )),
-        ("ChatVertexUiPath", ChatVertexUiPath(
+        ("UiPathChatVertex", UiPathChatVertex(
             temperature=0.7,
             max_tokens=max_tokens,
         )),
-        ("ChatBedrockConverseUiPath", ChatBedrockConverseUiPath(
+        ("UiPathChatBedrockConverse", UiPathChatBedrockConverse(
             temperature=0.7,
             max_tokens=max_tokens,
         )),
-        ("ChatBedrockUiPath", ChatBedrockUiPath(
+        ("UiPathChatBedrock", UiPathChatBedrock(
             temperature=0.7,
             max_tokens=max_tokens,
         )),
@@ -293,7 +293,7 @@ async def run_all_tests(state: GraphState) -> dict:
     # Build summary
     logger.info("="*80)
     summary_lines = []
-    for model_name in ["ChatOpenAIUiPath", "ChatVertexUiPath", "ChatBedrockConverseUiPath", "ChatBedrockUiPath", "UiPathChat", "UiPathAzureChatOpenAI"]:
+    for model_name in ["UiPathChatOpenAI", "UiPathChatVertex", "UiPathChatBedrockConverse", "UiPathChatBedrock", "UiPathChat", "UiPathAzureChatOpenAI"]:
         if model_name in all_model_results:
             summary_lines.append(f"{model_name}:")
             results = all_model_results[model_name]

@@ -81,7 +81,7 @@ class AwsBedrockCompletionsPassthroughClient:
         request.headers.update(headers)
 
 
-class ChatBedrockConverseUiPath(ChatBedrockConverse):
+class UiPathChatBedrockConverse(ChatBedrockConverse):
     def __init__(
         self,
         org_id: Optional[str] = None,
@@ -119,7 +119,7 @@ class ChatBedrockConverseUiPath(ChatBedrockConverse):
         super().__init__(**kwargs)
 
 
-class ChatBedrockUiPath(ChatBedrock):
+class UiPathChatBedrock(ChatBedrock):
     def __init__(
         self,
         org_id: Optional[str] = None,

@@ -1,15 +1,15 @@
-from .chat_bedrock import ChatBedrockConverseUiPath, ChatBedrockUiPath
-from .chat_gemini import ChatVertexUiPath
-from .chat_openai import ChatOpenAIUiPath
+from .chat_bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
+from .chat_gemini import UiPathChatVertex
+from .chat_openai import UiPathChatOpenAI
 from .mapper import UiPathChatMessagesMapper
 from .models import UiPathAzureChatOpenAI, UiPathChat
 
 __all__ = [
     "UiPathChat",
     "UiPathAzureChatOpenAI",
-    "ChatOpenAIUiPath",
-    "ChatVertexUiPath",
-    "ChatBedrockConverseUiPath",
-    "ChatBedrockUiPath",
+    "UiPathChatOpenAI",
+    "UiPathChatVertex",
+    "UiPathChatBedrockConverse",
+    "UiPathChatBedrock",
     "UiPathChatMessagesMapper",
 ]
