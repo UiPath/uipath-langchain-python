@@ -4,6 +4,11 @@ set -e
 echo "Syncing dependencies..."
 uv sync
 
+echo "Adding UiPath Langchain Chat Models Extras..."
+uv add uipath-langchain[bedrock]
+
+uv add uipath-langchain[vertex]
+
 echo "Authenticating with UiPath..."
 uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --base-url="$BASE_URL"
 

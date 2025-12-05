@@ -3,6 +3,40 @@ import os
 from typing import Optional, Union
 
 import aiohttp
+from pydantic import Field
+from uipath.utils import EndpointManager
+
+from .supported_models import GeminiModels
+
+logger = logging.getLogger(__name__)
+
+
+def _check_vertex_dependencies() -> None:
+    """Check if required dependencies for UiPathChatVertex are installed."""
+    import importlib.util
+
+    missing_packages = []
+
+    if importlib.util.find_spec("langchain_google_vertexai") is None:
+        missing_packages.append("langchain-google-vertexai")
+
+    if importlib.util.find_spec("langchain_community") is None:
+        missing_packages.append("langchain-community")
+
+    if missing_packages:
+        packages_str = ", ".join(missing_packages)
+        raise ImportError(
+            f"The following packages are required to use UiPathChatVertex: {packages_str}\n"
+            "Please install them using one of the following methods:\n\n"
+            "  # Using pip:\n"
+            f"  pip install uipath-langchain[vertex]\n\n"
+            "  # Using uv:\n"
+            f"  uv add 'uipath-langchain[vertex]'\n\n"
+        )
+
+
+_check_vertex_dependencies()
+
 from google.auth.credentials import AnonymousCredentials
 from google.cloud.aiplatform_v1.services.prediction_service import (
     PredictionServiceAsyncClient as v1PredictionServiceAsyncClient,
@@ -22,14 +56,10 @@ from google.cloud.aiplatform_v1beta1.services.prediction_service.transports.base
 from google.cloud.aiplatform_v1beta1.services.prediction_service.transports.rest import (
     PredictionServiceRestTransport,
 )
-from langchain_community.utilities.vertexai import get_client_info
+from langchain_community.utilities.vertexai import (
+    get_client_info,
+)
 from langchain_google_vertexai import ChatVertexAI
-from pydantic import Field
-from uipath.utils import EndpointManager
-
-from .chat_models import GeminiModels
-
-logger = logging.getLogger(__name__)
 
 
 class CustomPredictionServiceRestTransport(PredictionServiceRestTransport):
@@ -56,7 +86,7 @@ class CustomPredictionServiceRestTransport(PredictionServiceRestTransport):
                 method, self.llmgw_url, headers=headers, **kwargs_inner
             )
 
-        self._session.request = redirected_request  # type: ignore
+        self._session.request = redirected_request  # type: ignore[method-assign, assignment]
 
 
 class CustomPredictionServiceRestAsyncTransport:
@@ -75,7 +105,9 @@ class CustomPredictionServiceRestAsyncTransport:
         """Convert proto-plus request to JSON string."""
         import json
 
-        from proto import Message as ProtoMessage  # type: ignore[import-untyped]
+        from proto import (  # type: ignore[import-untyped]
+            Message as ProtoMessage,
+        )
 
         if isinstance(request, ProtoMessage):
             request_dict = type(request).to_dict(

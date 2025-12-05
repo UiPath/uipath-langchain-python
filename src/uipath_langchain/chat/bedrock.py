@@ -2,13 +2,44 @@ import logging
 import os
 from typing import Optional
 
-import boto3
-from langchain_aws import ChatBedrock, ChatBedrockConverse
 from uipath.utils import EndpointManager
 
-from .chat_models import BedrockModels
+from .supported_models import BedrockModels
 
 logger = logging.getLogger(__name__)
+
+
+def _check_bedrock_dependencies() -> None:
+    """Check if required dependencies for UiPathChatBedrock are installed."""
+    import importlib.util
+
+    missing_packages = []
+
+    if importlib.util.find_spec("langchain_aws") is None:
+        missing_packages.append("langchain-aws")
+
+    if importlib.util.find_spec("boto3") is None:
+        missing_packages.append("boto3")
+
+    if missing_packages:
+        packages_str = ", ".join(missing_packages)
+        raise ImportError(
+            f"The following packages are required to use UiPathChatBedrock: {packages_str}\n"
+            "Please install them using one of the following methods:\n\n"
+            "  # Using pip:\n"
+            f"  pip install uipath-langchain[bedrock]\n\n"
+            "  # Using uv:\n"
+            f"  uv add 'uipath-langchain[bedrock]'\n\n"
+        )
+
+
+_check_bedrock_dependencies()
+
+import boto3
+from langchain_aws import (
+    ChatBedrock,
+    ChatBedrockConverse,
+)
 
 
 class AwsBedrockCompletionsPassthroughClient:
