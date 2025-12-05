@@ -57,22 +57,28 @@ Attachments service
 
 ```python
 # Delete an attachment.
-sdk.attachments.delete(key: uuid.UUID, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> None
+sdk.attachments.delete(key: uuid.UUID, folder_key: str | None=None, folder_path: str | None=None) -> None
 
 # Delete an attachment asynchronously.
-sdk.attachments.delete_async(key: uuid.UUID, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> None
+sdk.attachments.delete_async(key: uuid.UUID, folder_key: str | None=None, folder_path: str | None=None) -> None
 
 # Download an attachment.
-sdk.attachments.download(key: uuid.UUID, destination_path: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> str
+sdk.attachments.download(key: uuid.UUID, destination_path: str, folder_key: str | None=None, folder_path: str | None=None) -> str
 
 # Download an attachment asynchronously.
-sdk.attachments.download_async(key: uuid.UUID, destination_path: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> str
+sdk.attachments.download_async(key: uuid.UUID, destination_path: str, folder_key: str | None=None, folder_path: str | None=None) -> str
+
+# Open an attachment.
+sdk.attachments.open(attachment: uipath.platform.attachments.attachments.Attachment, mode: <enum 'AttachmentMode="AttachmentMode.READ", content: Union[str, bytes, Iterable[bytes], AsyncIterable[bytes], NoneType]=None, folder_key: str | None=None, folder_path: str | None=None) -> typing.Iterator[typing.Tuple[uipath.platform.attachments.attachments.Attachment, httpx.Response]]
+
+# Open an attachment asynchronously.
+sdk.attachments.open_async(attachment: uipath.platform.attachments.attachments.Attachment, mode: <enum 'AttachmentMode="AttachmentMode.READ", content: Union[str, bytes, Iterable[bytes], AsyncIterable[bytes], NoneType]=None, folder_key: str | None=None, folder_path: str | None=None) -> typing.AsyncIterator[typing.Tuple[uipath.platform.attachments.attachments.Attachment, httpx.Response]]
 
 # Upload a file or content to UiPath as an attachment.
-sdk.attachments.upload(name: str, content: Union[str, bytes, NoneType]=None, source_path: Optional[str]=None, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> uuid.UUID
+sdk.attachments.upload(name: str, content: str | bytes | None=None, source_path: str | None=None, folder_key: str | None=None, folder_path: str | None=None) -> uuid.UUID
 
 # Upload a file or content to UiPath as an attachment asynchronously.
-sdk.attachments.upload_async(name: str, content: Union[str, bytes, NoneType]=None, source_path: Optional[str]=None, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> uuid.UUID
+sdk.attachments.upload_async(name: str, content: str | bytes | None=None, source_path: str | None=None, folder_key: str | None=None, folder_path: str | None=None) -> uuid.UUID
 
 ```
 
@@ -356,6 +362,16 @@ sdk.folders.retrieve_key_async(folder_path: str) -> typing.Optional[str]
 
 ```
 
+### Guardrails
+
+Guardrails service
+
+```python
+# Validate input text using the provided guardrail.
+sdk.guardrails.evaluate_guardrail(input_data: str | dict[str, Any], guardrail: Annotated[Union[uipath.platform.guardrails.guardrails.CustomGuardrail, uipath.platform.guardrails.guardrails.BuiltInValidatorGuardrail], FieldInfo(annotation=NoneType, required=True, discriminator='guardrail_type')]) -> uipath.platform.guardrails.guardrails.GuardrailValidationResult
+
+```
+
 ### Jobs
 
 Jobs service
@@ -392,7 +408,7 @@ sdk.jobs.resume(inbox_id: Optional[str]=None, job_id: Optional[str]=None, folder
 sdk.jobs.resume_async(inbox_id: Optional[str]=None, job_id: Optional[str]=None, folder_key: Optional[str]=None, folder_path: Optional[str]=None, payload: Any) -> None
 
 # Retrieve a job identified by its key.
-sdk.jobs.retrieve(job_key: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> uipath.platform.orchestrator.job.Job
+sdk.jobs.retrieve(job_key: str, folder_key: str | None=None, folder_path: str | None=None, process_name: str | None=None) -> uipath.platform.orchestrator.job.Job
 
 # Fetch payload data for API triggers.
 sdk.jobs.retrieve_api_payload(inbox_id: str) -> typing.Any
@@ -401,7 +417,7 @@ sdk.jobs.retrieve_api_payload(inbox_id: str) -> typing.Any
 sdk.jobs.retrieve_api_payload_async(inbox_id: str) -> typing.Any
 
 # Asynchronously retrieve a job identified by its key.
-sdk.jobs.retrieve_async(job_key: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> uipath.platform.orchestrator.job.Job
+sdk.jobs.retrieve_async(job_key: str, folder_key: str | None=None, folder_path: str | None=None, process_name: str | None=None) -> uipath.platform.orchestrator.job.Job
 
 ```
 
@@ -540,10 +556,10 @@ sdk.tasks.create(title: str, data: Optional[Dict[str, Any]]=None, app_name: Opti
 sdk.tasks.create_async(title: str, data: Optional[Dict[str, Any]]=None, app_name: Optional[str]=None, app_key: Optional[str]=None, app_folder_path: Optional[str]=None, app_folder_key: Optional[str]=None, assignee: Optional[str]=None) -> uipath.platform.action_center.tasks.Task
 
 # Retrieves a task by its key synchronously.
-sdk.tasks.retrieve(action_key: str, app_folder_path: str="", app_folder_key: str="") -> uipath.platform.action_center.tasks.Task
+sdk.tasks.retrieve(action_key: str, app_folder_path: str="", app_folder_key: str="", app_name: str | None=None) -> uipath.platform.action_center.tasks.Task
 
 # Retrieves a task by its key asynchronously.
-sdk.tasks.retrieve_async(action_key: str, app_folder_path: str="", app_folder_key: str="") -> uipath.platform.action_center.tasks.Task
+sdk.tasks.retrieve_async(action_key: str, app_folder_path: str="", app_folder_key: str="", app_name: str | None=None) -> uipath.platform.action_center.tasks.Task
 
 ```
 
