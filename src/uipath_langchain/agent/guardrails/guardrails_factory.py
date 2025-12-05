@@ -60,11 +60,10 @@ def build_guardrails_with_actions(
                 (
                     guardrail,
                     EscalateAction(
-                        app_name="app_name",
-                        app_title=guardrail.action.app.title,
-                        app_folder_path=guardrail.action.app.folder_name,
-                        version=guardrail.action.app.version,
-                        assignee=guardrail.action.recipient.value,
+                        app_name=action.app.name,
+                        app_folder_path=action.app.folder_name,
+                        version=action.app.version,
+                        assignee=action.recipient.value,
                     ),
                 )
             )
