@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any, Dict, Literal
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.types import Command, interrupt
 from uipath.platform.common import CreateEscalation
 from uipath.platform.guardrails import (
@@ -13,10 +13,10 @@ from uipath.platform.guardrails import (
 )
 from uipath.runtime.errors import UiPathErrorCode
 
-from ...exceptions import AgentTerminationException
+from .base_action import GuardrailAction, GuardrailActionNode
 from ..guardrail_nodes import _message_text
 from ..types import AgentGuardrailsGraphState, ExecutionStage
-from .base_action import GuardrailAction, GuardrailActionNode
+from ...exceptions import AgentTerminationException
 
 
 class EscalateAction(GuardrailAction):
@@ -57,7 +57,8 @@ class EscalateAction(GuardrailAction):
             data = {
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
-                #"TenantName": "TBD",
+                # TODO populate this 2 arguments
+                # "TenantName": "TBD",
                 # "AgentTrace": "https://alpha.uipath.com/f88fa028-ccdd-4b5f-bee4-01ef94d134d8/studio_/designer/48fff406-52e9-4a37-ba66-76c0212d9c6b",
                 "Tool": scope.name.lower(),
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
@@ -198,7 +199,7 @@ def _extract_escalation_content(
     state: AgentGuardrailsGraphState,
     scope: GuardrailScope,
     execution_stage: ExecutionStage,
-) -> str:
+) -> str | list[str | Dict[str, Any]]:
     """Extract escalation content from state based on guardrail scope and execution stage.
 
     Args:
@@ -223,6 +224,10 @@ def _extract_escalation_content(
 
     last_message = state.messages[-1]
     if execution_stage == ExecutionStage.PRE_EXECUTION:
+        if isinstance(last_message, ToolMessage):
+            print(last_message.content)
+            return last_message.content
+
         content = _message_text(last_message)
         return json.dumps(content) if content else ""
 
