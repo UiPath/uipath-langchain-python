@@ -14,10 +14,15 @@ from .guardrail_nodes import (
 )
 from .types import AgentGuardrailsGraphState
 
+GuardrailItem = (
+    tuple[BaseGuardrail, GuardrailAction]
+    | tuple[BaseGuardrail, GuardrailAction, Sequence[ExecutionStage]]
+)
+
 
 def _create_guardrails_subgraph(
     main_inner_node: tuple[str, Any],
-    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    guardrails: Sequence[GuardrailItem] | None,
     scope: GuardrailScope,
     execution_stages: Sequence[ExecutionStage],
     node_factory: Callable[
@@ -53,9 +58,17 @@ def _create_guardrails_subgraph(
 
     # Pre-execution stage handling
     if ExecutionStage.PRE_EXECUTION in execution_stages:
+        # Filter guardrails that apply to PRE_EXECUTION
+        # Default (tuple length 2) applies to all stages
+        pre_guardrails = [
+            item[:2]
+            for item in (guardrails or [])
+            if len(item) == 2
+            or ExecutionStage.PRE_EXECUTION in item[2]  # type: ignore
+        ]
         first_pre_exec_guardrail_node = _build_guardrail_node_chain(
             subgraph,
-            guardrails,
+            pre_guardrails,  # type: ignore
             scope,
             ExecutionStage.PRE_EXECUTION,
             node_factory,
@@ -67,9 +80,16 @@ def _create_guardrails_subgraph(
 
     # Post-execution stage handling
     if ExecutionStage.POST_EXECUTION in execution_stages:
+        # Filter guardrails that apply to POST_EXECUTION
+        post_guardrails = [
+            item[:2]
+            for item in (guardrails or [])
+            if len(item) == 2
+            or ExecutionStage.POST_EXECUTION in item[2]  # type: ignore
+        ]
         first_post_exec_guardrail_node = _build_guardrail_node_chain(
             subgraph,
-            guardrails,
+            post_guardrails,  # type: ignore
             scope,
             ExecutionStage.POST_EXECUTION,
             node_factory,
@@ -153,12 +173,12 @@ def _build_guardrail_node_chain(
 
 def create_llm_guardrails_subgraph(
     llm_node: tuple[str, Any],
-    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    guardrails: Sequence[GuardrailItem] | None,
 ) -> Any:
     applicable_guardrails = [
-        (guardrail, _)
-        for (guardrail, _) in (guardrails or [])
-        if GuardrailScope.LLM in guardrail.selector.scopes
+        item
+        for item in (guardrails or [])
+        if GuardrailScope.LLM in item[0].selector.scopes
     ]
     return _create_guardrails_subgraph(
         main_inner_node=llm_node,
@@ -171,7 +191,7 @@ def create_llm_guardrails_subgraph(
 
 def create_agent_guardrails_subgraph(
     agent_node: tuple[str, Any],
-    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    guardrails: Sequence[GuardrailItem] | None,
     execution_stage: ExecutionStage,
 ) -> Any:
     """Create a subgraph for AGENT-scoped guardrails that only applies pre-execution checks.
@@ -180,9 +200,9 @@ def create_agent_guardrails_subgraph(
     guardrails should run and no post-execution guardrails should be evaluated.
     """
     applicable_guardrails = [
-        (guardrail, _)
-        for (guardrail, _) in (guardrails or [])
-        if GuardrailScope.AGENT in guardrail.selector.scopes
+        item
+        for item in (guardrails or [])
+        if GuardrailScope.AGENT in item[0].selector.scopes
     ]
     return _create_guardrails_subgraph(
         main_inner_node=agent_node,
@@ -195,15 +215,15 @@ def create_agent_guardrails_subgraph(
 
 def create_tool_guardrails_subgraph(
     tool_node: tuple[str, Any],
-    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    guardrails: Sequence[GuardrailItem] | None,
 ) -> Any:
     tool_name, _ = tool_node
     applicable_guardrails = [
-        (guardrail, action)
-        for (guardrail, action) in (guardrails or [])
-        if GuardrailScope.TOOL in guardrail.selector.scopes
-        and guardrail.selector.match_names is not None
-        and tool_name in guardrail.selector.match_names
+        item
+        for item in (guardrails or [])
+        if GuardrailScope.TOOL in item[0].selector.scopes
+        and item[0].selector.match_names is not None
+        and tool_name in item[0].selector.match_names
     ]
     return _create_guardrails_subgraph(
         main_inner_node=tool_node,

@@ -5,6 +5,7 @@ from .guardrail_nodes import (
 )
 from .guardrails_factory import build_guardrails_with_actions
 from .guardrails_subgraph import (
+    GuardrailItem,
     create_agent_guardrails_subgraph,
     create_llm_guardrails_subgraph,
     create_tool_guardrails_subgraph,
@@ -18,4 +19,5 @@ __all__ = [
     "create_agent_guardrail_node",
     "create_tool_guardrail_node",
     "build_guardrails_with_actions",
+    "GuardrailItem",
 ]
