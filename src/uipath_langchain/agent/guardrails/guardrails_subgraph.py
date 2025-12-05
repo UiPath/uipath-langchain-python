@@ -2,7 +2,11 @@ from typing import Any, Callable, Sequence
 
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
-from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
+from uipath.platform.guardrails import (
+    BaseGuardrail,
+    BuiltInValidatorGuardrail,
+    GuardrailScope,
+)
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
@@ -13,6 +17,24 @@ from .guardrail_nodes import (
     create_tool_guardrail_node,
 )
 from .types import AgentGuardrailsGraphState
+
+
+def _filter_guardrails_by_stage(
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    stage: ExecutionStage,
+) -> list[tuple[BaseGuardrail, GuardrailAction]]:
+    """Filter guardrails that apply to a specific execution stage."""
+    filtered_guardrails = []
+    for guardrail, action in guardrails or []:
+        # Internal knowledge: Prompt injection should only run pre-execution
+        if (
+            isinstance(guardrail, BuiltInValidatorGuardrail)
+            and guardrail.validator_type == "prompt_injection"
+            and stage == ExecutionStage.POST_EXECUTION
+        ):
+            continue
+        filtered_guardrails.append((guardrail, action))
+    return filtered_guardrails
 
 
 def _create_guardrails_subgraph(
@@ -53,9 +75,12 @@ def _create_guardrails_subgraph(
 
     # Add pre execution guardrail nodes
     if ExecutionStage.PRE_EXECUTION in execution_stages:
+        pre_guardrails = _filter_guardrails_by_stage(
+            guardrails, ExecutionStage.PRE_EXECUTION
+        )
         first_pre_exec_guardrail_node = _build_guardrail_node_chain(
             subgraph,
-            guardrails,
+            pre_guardrails,
             scope,
             ExecutionStage.PRE_EXECUTION,
             node_factory,
@@ -67,9 +92,12 @@ def _create_guardrails_subgraph(
 
     # Add post execution guardrail nodes
     if ExecutionStage.POST_EXECUTION in execution_stages:
+        post_guardrails = _filter_guardrails_by_stage(
+            guardrails, ExecutionStage.POST_EXECUTION
+        )
         first_post_exec_guardrail_node = _build_guardrail_node_chain(
             subgraph,
-            guardrails,
+            post_guardrails,
             scope,
             ExecutionStage.POST_EXECUTION,
             node_factory,

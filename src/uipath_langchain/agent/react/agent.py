@@ -9,11 +9,11 @@ from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from uipath.platform.guardrails import BaseGuardrail
 
-from ..guardrails import (
+from ..guardrails.actions import GuardrailAction
+from ..guardrails.guardrails_subgraph import (
     create_agent_guardrails_subgraph,
     create_llm_guardrails_subgraph,
 )
-from ..guardrails.actions import GuardrailAction
 from ..guardrails.types import ExecutionStage
 from ..tools import create_tool_node
 from .init_node import (
