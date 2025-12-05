@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Any, Tuple
+from typing import Any
 
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
-GuardrailActionNode = Tuple[str, Any]
+GuardrailActionNode = tuple[str, Any]
 
 
 class GuardrailAction(ABC):

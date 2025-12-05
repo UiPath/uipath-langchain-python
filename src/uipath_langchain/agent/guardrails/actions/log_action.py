@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 
@@ -45,7 +45,7 @@ class LogAction(GuardrailAction):
         raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}_log"
         node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
 
-        async def _node(_state: AgentGuardrailsGraphState) -> Dict[str, Any]:
+        async def _node(_state: AgentGuardrailsGraphState) -> dict[str, Any]:
             message = (
                 self.message
                 or f"Guardrail [{guardrail.name}] validation failed for [{scope.name}] [{execution_stage.name}] with the following reason: {_state.guardrail_validation_result}"

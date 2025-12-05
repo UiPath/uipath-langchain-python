@@ -17,7 +17,7 @@ from uipath.agent.models.agent import (
 
 from uipath_langchain.agent.guardrails.actions.block_action import BlockAction
 from uipath_langchain.agent.guardrails.actions.log_action import LogAction
-from uipath_langchain.agent.react.guardrails.guardrails_factory import (
+from uipath_langchain.agent.guardrails.guardrails_factory import (
     build_guardrails_with_actions,
 )
 
@@ -96,6 +96,6 @@ class TestGuardrailsFactory:
         )
         result = build_guardrails_with_actions([log_guardrail, block_guardrail])
         assert len(result) == 1
-        gr, action = result[0]
+        gr, action, _ = result[0]
         assert gr is block_guardrail
         assert isinstance(action, BlockAction)

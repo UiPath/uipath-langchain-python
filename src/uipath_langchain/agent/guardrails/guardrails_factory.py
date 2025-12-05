@@ -1,5 +1,5 @@
 import logging
-from typing import List, Sequence, Tuple
+from typing import Sequence
 
 from uipath.agent.models.agent import (
     AgentGuardrail,
@@ -18,7 +18,7 @@ from uipath_langchain.agent.guardrails.actions import (
 
 def build_guardrails_with_actions(
     guardrails: Sequence[AgentGuardrail] | None,
-) -> List[Tuple[AgentGuardrail, GuardrailAction]]:
+) -> list[tuple[AgentGuardrail, GuardrailAction]]:
     """Build a list of (guardrail, action) tuples from model definitions.
 
     Args:
@@ -30,7 +30,7 @@ def build_guardrails_with_actions(
     if not guardrails:
         return []
 
-    result: List[Tuple[AgentGuardrail, GuardrailAction]] = []
+    result: list[tuple[AgentGuardrail, GuardrailAction]] = []
     for guardrail in guardrails:
         if isinstance(guardrail, AgentUnknownGuardrail):
             continue

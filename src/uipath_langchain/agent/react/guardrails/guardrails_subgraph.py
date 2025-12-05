@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
+
 from ...guardrails import (
     AgentGuardrailsGraphState,
     create_agent_guardrail_node,
@@ -13,35 +14,29 @@ from ...guardrails import (
 )
 from ...guardrails.actions import GuardrailAction, GuardrailActionNode
 
-GuardrailItem = (
-    tuple[BaseGuardrail, GuardrailAction]
-    | tuple[BaseGuardrail, GuardrailAction, Sequence[ExecutionStage]]
-)
+GuardrailItem = tuple[BaseGuardrail, GuardrailAction]
 
 
 def _filter_guardrails_by_stage(
-    guardrails: Sequence[GuardrailItem] | None, stage: ExecutionStage
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]],
+    stage: ExecutionStage,
 ) -> list[tuple[BaseGuardrail, GuardrailAction]]:
-    """Filter guardrails that apply to a specific execution stage.
-
-    Guardrails without explicit stages (length 2) are considered to apply to all stages.
-    """
+    """Filter guardrails that apply to a specific execution stage."""
     filtered_guardrails = []
-    for item in guardrails or []:
-        if len(item) == 3:
-            guardrail, action, stages = item
-        else:
-            guardrail, action = item  # type: ignore
-            stages = None
-
-        if stages is None or stage in stages:
-            filtered_guardrails.append((guardrail, action))
+    for guardrail, action in guardrails or []:
+        # Internal knowledge: Prompt injection should only run pre-execution
+        if (
+            "prompt-injection" == guardrail.name.lower()
+            and stage == ExecutionStage.POST_EXECUTION
+        ):
+            continue
+        filtered_guardrails.append((guardrail, action))
     return filtered_guardrails
 
 
 def _create_guardrails_subgraph(
     main_inner_node: tuple[str, Any],
-    guardrails: Sequence[GuardrailItem] | None,
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
     scope: GuardrailScope,
     execution_stages: Sequence[ExecutionStage],
     node_factory: Callable[
@@ -82,7 +77,7 @@ def _create_guardrails_subgraph(
         )
         first_pre_exec_guardrail_node = _build_guardrail_node_chain(
             subgraph,
-            pre_guardrails,  # type: ignore
+            pre_guardrails,
             scope,
             ExecutionStage.PRE_EXECUTION,
             node_factory,
@@ -99,7 +94,7 @@ def _create_guardrails_subgraph(
         )
         first_post_exec_guardrail_node = _build_guardrail_node_chain(
             subgraph,
-            post_guardrails,  # type: ignore
+            post_guardrails,
             scope,
             ExecutionStage.POST_EXECUTION,
             node_factory,
@@ -183,12 +178,12 @@ def _build_guardrail_node_chain(
 
 def create_llm_guardrails_subgraph(
     llm_node: tuple[str, Any],
-    guardrails: Sequence[GuardrailItem] | None,
-) -> Any:
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+):
     applicable_guardrails = [
-        item
-        for item in (guardrails or [])
-        if GuardrailScope.LLM in item[0].selector.scopes
+        (guardrail, _)
+        for (guardrail, _) in (guardrails or [])
+        if GuardrailScope.LLM in guardrail.selector.scopes
     ]
     return _create_guardrails_subgraph(
         main_inner_node=llm_node,
@@ -201,18 +196,18 @@ def create_llm_guardrails_subgraph(
 
 def create_agent_guardrails_subgraph(
     agent_node: tuple[str, Any],
-    guardrails: Sequence[GuardrailItem] | None,
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
     execution_stage: ExecutionStage,
-) -> Any:
+):
     """Create a subgraph for AGENT-scoped guardrails that only applies pre-execution checks.
 
     This is intended for wrapping nodes like INIT, where only pre-execution
     guardrails should run and no post-execution guardrails should be evaluated.
     """
     applicable_guardrails = [
-        item
-        for item in (guardrails or [])
-        if GuardrailScope.AGENT in item[0].selector.scopes
+        (guardrail, _)
+        for (guardrail, _) in (guardrails or [])
+        if GuardrailScope.AGENT in guardrail.selector.scopes
     ]
     return _create_guardrails_subgraph(
         main_inner_node=agent_node,
@@ -225,15 +220,15 @@ def create_agent_guardrails_subgraph(
 
 def create_tool_guardrails_subgraph(
     tool_node: tuple[str, Any],
-    guardrails: Sequence[GuardrailItem] | None,
-) -> Any:
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+):
     tool_name, _ = tool_node
     applicable_guardrails = [
-        item
-        for item in (guardrails or [])
-        if GuardrailScope.TOOL in item[0].selector.scopes
-           and item[0].selector.match_names is not None
-           and tool_name in item[0].selector.match_names
+        (guardrail, action)
+        for (guardrail, action) in (guardrails or [])
+        if GuardrailScope.TOOL in guardrail.selector.scopes
+        and guardrail.selector.match_names is not None
+        and tool_name in guardrail.selector.match_names
     ]
     return _create_guardrails_subgraph(
         main_inner_node=tool_node,

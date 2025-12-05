@@ -4,12 +4,12 @@ import types
 from unittest.mock import MagicMock
 
 import pytest
+import uipath_langchain.agent.guardrails.guardrails_subgraph as mod
 from uipath.platform.guardrails import (
     BaseGuardrail,
     GuardrailScope,
 )
 
-import uipath_langchain.agent.guardrails.guardrails_subgraph as mod
 from uipath_langchain.agent.guardrails.actions.base_action import (
     GuardrailAction,
     GuardrailActionNode,
