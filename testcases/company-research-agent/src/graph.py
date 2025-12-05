@@ -1,18 +1,15 @@
-import os
-from typing import Union
-
 from langchain.agents import create_agent
 from langchain_community.tools import DuckDuckGoSearchResults
 from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import BaseModel
 
-from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
+from uipath_langchain.chat import UiPathChat
 
 # Configuration constants
 DEFAULT_MODEL = "gpt-4o-2024-08-06"
 
 
-def get_search_tool() -> Union[DuckDuckGoSearchResults]:
+def get_search_tool() -> DuckDuckGoSearchResults:
     """Get the appropriate search tool based on available API keys."""
     return DuckDuckGoSearchResults()
 
@@ -42,10 +39,8 @@ DO NOT do any math as specified in your instructions.
 """
 
 
-def create_llm() -> Union[UiPathAzureChatOpenAI, UiPathChat]:
-    """Create and configure the language model based on an environment variable."""
-    if os.getenv("USE_AZURE_CHAT", "false").lower() == "true":
-        return UiPathAzureChatOpenAI(model=DEFAULT_MODEL, streaming=False)
+def create_llm() -> UiPathChat:
+    """Create and configure the language model."""
     return UiPathChat(model=DEFAULT_MODEL, streaming=False)
 
 
