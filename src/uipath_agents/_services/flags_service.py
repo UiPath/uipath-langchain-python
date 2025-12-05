@@ -3,10 +3,8 @@
 from typing import Any, Dict, List
 
 from pydantic import BaseModel, ConfigDict, Field
-from uipath._config import Config
-from uipath._execution_context import ExecutionContext
 from uipath._utils import Endpoint, RequestSpec
-from uipath.platform.common._base_service import BaseService
+from uipath.platform.common import BaseService, UiPathApiConfig, UiPathExecutionContext
 
 
 class FeatureFlagsRequest(BaseModel):
@@ -28,7 +26,9 @@ class FeatureFlagsResponse(BaseModel):
 class FlagsService(BaseService):
     """Service for retrieving feature flags from the Agents Runtime API."""
 
-    def __init__(self, config: Config, execution_context: ExecutionContext) -> None:
+    def __init__(
+        self, config: UiPathApiConfig, execution_context: UiPathExecutionContext
+    ) -> None:
         """Initialize the flags service."""
         super().__init__(config=config, execution_context=execution_context)
 
