@@ -1,5 +1,6 @@
 """Tests for EscalateAction guardrail failure behavior."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,7 +11,10 @@ from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.exceptions import AgentTerminationException
 from uipath_langchain.agent.guardrails.actions.escalate_action import EscalateAction
-from uipath_langchain.agent.guardrails.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.guardrails.types import (
+    AgentGuardrailsGraphState,
+    ExecutionStage,
+)
 
 
 class TestEscalateAction:
@@ -19,7 +23,6 @@ class TestEscalateAction:
         """PreExecution + LLM: name is sanitized correctly."""
         action = EscalateAction(
             app_name="TestApp",
-            app_title="Test Title",
             app_folder_path="TestFolder",
             version=1,
             assignee="test@example.com",
@@ -31,17 +34,16 @@ class TestEscalateAction:
         node_name, _ = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
-            execution_stage="PreExecution",
+            execution_stage=ExecutionStage.PRE_EXECUTION,
         )
 
-        assert node_name == "my_guardrail_v1_hitl_PreExecution_llm"
+        assert node_name == "my_guardrail_v1_hitl_pre_execution_llm"
 
     @pytest.mark.asyncio
     async def test_node_name_post_agent(self):
         """PostExecution + AGENT: name is sanitized correctly."""
         action = EscalateAction(
             app_name="TestApp",
-            app_title="Test Title",
             app_folder_path="TestFolder",
             version=1,
             assignee="test@example.com",
@@ -53,10 +55,10 @@ class TestEscalateAction:
         node_name, _ = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.AGENT,
-            execution_stage="PostExecution",
+            execution_stage=ExecutionStage.POST_EXECUTION,
         )
 
-        assert node_name == "special_guardrail_2024_hitl_PostExecution_agent"
+        assert node_name == "special_guardrail_2024_hitl_post_execution_agent"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -64,7 +66,6 @@ class TestEscalateAction:
         """PreExecution + LLM: interrupt is called with correct escalation data."""
         action = EscalateAction(
             app_name="TestApp",
-            app_title="Test Title",
             app_folder_path="TestFolder",
             version=1,
             assignee="test@example.com",
@@ -82,7 +83,7 @@ class TestEscalateAction:
         node_name, node = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
-            execution_stage="PreExecution",
+            execution_stage=ExecutionStage.PRE_EXECUTION,
         )
 
         state = AgentGuardrailsGraphState(
@@ -99,7 +100,7 @@ class TestEscalateAction:
         # Verify escalation data structure
         assert call_args.app_name == "TestApp"
         assert call_args.app_folder_path == "TestFolder"
-        assert call_args.title == "Test Title"
+        assert call_args.title == "TestApp"
         assert call_args.assignee == "test@example.com"
         assert call_args.data["GuardrailName"] == "Test Guardrail"
         assert call_args.data["GuardrailDescription"] == "Test description"
@@ -113,7 +114,6 @@ class TestEscalateAction:
         """When escalation is approved, returns Command from _process_escalation_response."""
         action = EscalateAction(
             app_name="TestApp",
-            app_title="Test Title",
             app_folder_path="TestFolder",
             version=1,
             assignee="test@example.com",
@@ -131,7 +131,7 @@ class TestEscalateAction:
         _, node = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
-            execution_stage="PreExecution",
+            execution_stage=ExecutionStage.PRE_EXECUTION,
         )
 
         state = AgentGuardrailsGraphState(
@@ -149,7 +149,6 @@ class TestEscalateAction:
         """When escalation is rejected, raises AgentTerminationException."""
         action = EscalateAction(
             app_name="TestApp",
-            app_title="Test Title",
             app_folder_path="TestFolder",
             version=1,
             assignee="test@example.com",
@@ -166,7 +165,7 @@ class TestEscalateAction:
         _, node = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
-            execution_stage="PreExecution",
+            execution_stage=ExecutionStage.PRE_EXECUTION,
         )
 
         state = AgentGuardrailsGraphState(
@@ -189,7 +188,6 @@ class TestEscalateAction:
         """PostExecution: uses ToolOutputs field instead of ToolInputs."""
         action = EscalateAction(
             app_name="TestApp",
-            app_title="Test Title",
             app_folder_path="TestFolder",
             version=1,
             assignee="test@example.com",
@@ -207,7 +205,7 @@ class TestEscalateAction:
         _, node = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
-            execution_stage="PostExecution",
+            execution_stage=ExecutionStage.POST_EXECUTION,
         )
 
         state = AgentGuardrailsGraphState(
@@ -220,3 +218,306 @@ class TestEscalateAction:
         call_args = mock_interrupt.call_args[0][0]
         assert "ToolOutputs" in call_args.data
         assert "ToolInputs" not in call_args.data
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_post_execution_ai_message_with_tool_calls_extraction(
+        self, mock_interrupt
+    ):
+        """PostExecution with AIMessage and tool calls: extracts tool calls and content."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            assignee="test@example.com",
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+        )
+
+        ai_message = AIMessage(
+            content="AI response",
+            tool_calls=[
+                {
+                    "name": "test_tool",
+                    "args": {"content": {"input": "test"}},
+                    "id": "call_1",
+                }
+            ],
+        )
+        state = AgentGuardrailsGraphState(messages=[ai_message])
+
+        await node(state)
+
+        # Verify interrupt was called with tool calls and content in ToolOutputs
+        call_args = mock_interrupt.call_args[0][0]
+        tool_outputs = call_args.data["ToolOutputs"]
+        parsed = json.loads(tool_outputs)
+        assert len(parsed) == 2  # Tool call content + message content
+        assert parsed[1] == "AI response"
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_pre_execution_with_reviewed_inputs(self, mock_interrupt):
+        """PreExecution: updates message content with ReviewedInputs."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            assignee="test@example.com",
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        reviewed_content = {"updated": "content"}
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {"ReviewedInputs": json.dumps(reviewed_content)}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Original content")],
+        )
+
+        result = await node(state)
+
+        # Verify message content was updated
+        assert isinstance(result, Command)
+        assert result.update is not None
+        assert result.update["messages"][0].content == reviewed_content
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_post_execution_human_message_with_reviewed_outputs(
+        self, mock_interrupt
+    ):
+        """PostExecution with HumanMessage: updates content with ReviewedOutputs."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            assignee="test@example.com",
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        reviewed_content = ["Updated content"]
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {"ReviewedOutputs": json.dumps(reviewed_content)}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Original content")],
+        )
+
+        result = await node(state)
+
+        # Verify HumanMessage content was updated (ignores tool calls)
+        assert isinstance(result, Command)
+        assert result.update is not None
+        assert result.update["messages"][0].content == "Updated content"
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_post_execution_ai_message_with_reviewed_outputs_and_tool_calls(
+        self, mock_interrupt
+    ):
+        """PostExecution with AIMessage: updates tool calls and content with ReviewedOutputs."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            assignee="test@example.com",
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        reviewed_tool_content = {"updated": "tool_content"}
+        reviewed_message_content = "Updated message"
+        reviewed_outputs = [
+            json.dumps(reviewed_tool_content),
+            reviewed_message_content,
+        ]
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {"ReviewedOutputs": json.dumps(reviewed_outputs)}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+        )
+
+        ai_message = AIMessage(
+            content="Original content",
+            tool_calls=[
+                {
+                    "name": "test_tool",
+                    "args": {"content": {"original": "tool_input"}},
+                    "id": "call_1",
+                }
+            ],
+        )
+        state = AgentGuardrailsGraphState(messages=[ai_message])
+
+        result = await node(state)
+
+        # Verify tool calls and message content were updated
+        assert isinstance(result, Command)
+        assert result.update is not None
+        updated_message = result.update["messages"][0]
+        assert updated_message.tool_calls[0]["args"]["content"] == reviewed_tool_content
+        assert updated_message.content == reviewed_message_content
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_non_llm_scope_returns_empty_dict(self, mock_interrupt):
+        """Non-LLM scope: returns empty dict without processing messages."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            assignee="test@example.com",
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {"ReviewedInputs": "test"}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.AGENT,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+        )
+
+        result = await node(state)
+
+        # Non-LLM scope should return empty dict
+        assert result == {}
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_missing_reviewed_field_returns_empty_dict(self, mock_interrupt):
+        """Missing reviewed field: returns empty dict when reviewed field not in result."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            assignee="test@example.com",
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {}  # No ReviewedInputs field
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+        )
+
+        result = await node(state)
+
+        # Missing reviewed field should return empty dict
+        assert result == {}
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_json_parsing_error_raises_exception(self, mock_interrupt):
+        """JSON parsing error: raises AgentTerminationException with execution error."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            assignee="test@example.com",
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {
+            "ReviewedInputs": "invalid json {"
+        }  # Invalid JSON
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+        )
+
+        with pytest.raises(AgentTerminationException) as excinfo:
+            await node(state)
+
+        assert (
+            excinfo.value.error_info.code
+            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        )
+        assert excinfo.value.error_info.title == "Escalation rejected"
+
+    @pytest.mark.asyncio
+    async def test_extract_content_non_llm_scope_returns_empty(self):
+        """Non-LLM scope in extraction: returns empty string."""
+        from uipath_langchain.agent.guardrails.actions.escalate_action import (
+            _extract_escalation_content,
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+        )
+
+        result = _extract_escalation_content(
+            state, GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION
+        )
+
+        assert result == ""

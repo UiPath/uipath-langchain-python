@@ -31,17 +31,14 @@ def build_guardrails_with_actions(
             result.append((guardrail, BlockAction(action.reason)))
 
         if isinstance(action, AgentGuardrailEscalateAction):
-            # TODO get app_name from name + folder_name
-
             result.append(
                 (
                     guardrail,
                     EscalateAction(
-                        app_name="app_name",
-                        app_title=guardrail.action.app.title,
-                        app_folder_path=guardrail.action.app.folder_name,
-                        version=guardrail.action.app.version,
-                        assignee=guardrail.action.recipient.value,
+                        app_name=action.app.name,
+                        app_folder_path=action.app.folder_name,
+                        version=action.app.version,
+                        assignee=action.recipient.value,
                     ),
                 )
             )
