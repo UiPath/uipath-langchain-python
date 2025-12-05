@@ -3,9 +3,9 @@
 [![PyPI downloads](https://img.shields.io/pypi/dm/uipath-langchain.svg)](https://pypi.org/project/uipath-langchain/)
 [![Python versions](https://img.shields.io/pypi/pyversions/uipath-langchain.svg)](https://pypi.org/project/uipath-langchain/)
 
-A Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform. This package provides programmatic interaction with UiPath Cloud Platform services and human-in-the-loop (HITL) semantics through Action Center integration.
+A Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform. It provides programmatic interaction with UiPath Cloud Platform services and human-in-the-loop (HITL) semantics through Action Center integration.
 
-This package is an extension to the [UiPath Python SDK](https://github.com/UiPath/uipath-python).
+This package is an extension to the [UiPath Python SDK](https://github.com/UiPath/uipath-python) and implements the [UiPath Runtime Protocol](https://github.com/UiPath/uipath-runtime-python).
 
 This [quickstart guide](https://uipath.github.io/uipath-python/) walks you through deploying your first agent to UiPath Cloud Platform.
 
@@ -109,6 +109,19 @@ To properly use the CLI for packaging and publishing, your project should includ
 
 ## Development
 
+### Developer Tools
+
+Check out [uipath-dev](https://github.com/uipath/uipath-dev-python) - an interactive terminal application for building, testing, and debugging UiPath Python runtimes, agents, and automation scripts.
+
 ### Setting Up a Development Environment
 
 Please read our [contribution guidelines](https://github.com/UiPath/uipath-langchain-python/blob/main/CONTRIBUTING.md) before submitting a pull request.
+
+### Special Thanks
+
+A huge thank-you to the open-source community and the maintainers of the libraries that make this project possible:
+
+- [LangChain](https://github.com/langchain-ai/langchain) for providing a powerful framework for building stateful LLM applications.
+- [Pydantic](https://github.com/pydantic/pydantic) for reliable, typed configuration and validation.
+- [OpenInference](https://github.com/Arize-ai/openinference) for observability and instrumentation support.
+
