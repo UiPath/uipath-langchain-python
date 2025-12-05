@@ -1,57 +1,16 @@
 """Tests for guardrails subgraph construction."""
 
-import types
 from unittest.mock import MagicMock
 
-from uipath.platform.guardrails import (
-    BaseGuardrail,
-    GuardrailScope,
-)
+import uipath.platform.guardrails as guardrails_mod
+from uipath.platform.guardrails import GuardrailScope
 
 import uipath_langchain.agent.guardrails.guardrails_subgraph as mod
-from uipath_langchain.agent.guardrails.actions.base_action import (
-    GuardrailAction,
-    GuardrailActionNode,
+from tests.agent.guardrails.test_guardrail_utils import (
+    FakeStateGraph,
+    fake_action,
+    fake_factory,
 )
-
-
-class FakeStateGraph:
-    def __init__(self, _state_type):
-        self.added_nodes = []
-        self.added_edges = []
-
-    def add_node(self, name, node):
-        self.added_nodes.append((name, node))
-
-    def add_edge(self, src, dst):
-        self.added_edges.append((src, dst))
-
-    def compile(self):
-        # Return a simple object we can inspect if needed
-        return types.SimpleNamespace(nodes=self.added_nodes, edges=self.added_edges)
-
-
-def _fake_action(fail_prefix: str) -> GuardrailAction:
-    class _Action(GuardrailAction):
-        def action_node(
-            self,
-            *,
-            guardrail: BaseGuardrail,
-            scope,
-            execution_stage,
-        ) -> GuardrailActionNode:
-            name = f"{fail_prefix}_{execution_stage.name.lower()}_{guardrail.name}"
-            return name, lambda s: s
-
-    return _Action()
-
-
-def _fake_factory(eval_prefix):
-    def _factory(guardrail, execution_stage, success_node, failure_node):
-        name = f"{eval_prefix}_{execution_stage.name.lower()}_{guardrail.name}"
-        return name, (lambda s: s)  # node function not invoked in this test
-
-    return _factory
 
 
 class TestLlmGuardrailsSubgraph:
@@ -74,19 +33,23 @@ class TestLlmGuardrailsSubgraph:
         monkeypatch.setattr(mod, "START", "START")
         monkeypatch.setattr(mod, "END", "END")
         # Use fake factory to control eval node names
-        monkeypatch.setattr(mod, "create_llm_guardrail_node", _fake_factory("eval"))
+        monkeypatch.setattr(mod, "create_llm_guardrail_node", fake_factory("eval"))
 
         # Guardrails g1 (first), g2 (second); builder processes last first
         guardrail1 = MagicMock()
         guardrail1.name = "guardrail1"
-        guardrail1.selector = types.SimpleNamespace(scopes=[GuardrailScope.LLM])
+        guardrail1.selector = guardrails_mod.GuardrailSelector(
+            scopes=[GuardrailScope.LLM]
+        )
 
         guardrail2 = MagicMock()
         guardrail2.name = "guardrail2"
-        guardrail2.selector = types.SimpleNamespace(scopes=[GuardrailScope.LLM])
+        guardrail2.selector = guardrails_mod.GuardrailSelector(
+            scopes=[GuardrailScope.LLM]
+        )
 
-        a1 = _fake_action("log")
-        a2 = _fake_action("block")
+        a1 = fake_action("log")
+        a2 = fake_action("block")
         guardrails = [(guardrail1, a1), (guardrail2, a2)]
 
         inner = ("inner", lambda s: s)
