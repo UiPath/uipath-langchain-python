@@ -68,9 +68,13 @@ Upon completion of the invoked process, the current agent will automatically res
 #### Example:
 
 ```python
-from uipath.models import InvokeProcess
+from uipath.platform.common import InvokeProcess
 process_output = interrupt(InvokeProcess(name="MyProcess", process_folder_path="MyFolderPath", input_arguments={"arg1": "value1"}))
 ```
+
+/// info
+The return value of the interrupt is the job output. If the job did not produce any output, the return value will be the job state, e.g., `{"state": "successful"}`.
+///
 
 /// warning
 An agent can invoke itself if needed, but this must be done with caution. Be mindful that using the same name for invocation may lead to unintentional loops. To prevent recursion issues, implement safeguards like exit conditions.
@@ -93,6 +97,10 @@ the job has already been created.
 #### Example:
 
 ```python
-from uipath.models import WaitJob
+from uipath.platform.common import WaitJob
 job_output = interrupt(WaitJob(job=my_job_instance, process_folder_path="MyFolderPath"))
 ```
+
+/// info
+The return value of the interrupt is the job output. If the job did not produce any output, the return value will be the job state, e.g., `{"state": "successful"}`.
+///
