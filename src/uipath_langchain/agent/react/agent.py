@@ -9,11 +9,7 @@ from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from uipath.platform.guardrails import BaseGuardrail
 
-from ..guardrails import (
-    GuardrailItem,
-    create_agent_guardrails_subgraph,
-    create_llm_guardrails_subgraph,
-)
+from .guardrails.guardrails_subgraph import create_agent_guardrails_subgraph, create_llm_guardrails_subgraph
 from ..guardrails.actions import GuardrailAction
 from ..guardrails.types import ExecutionStage
 from ..tools import create_tool_node
@@ -56,7 +52,7 @@ def create_agent(
     input_schema: Type[InputT] | None = None,
     output_schema: Type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
-    guardrails: Sequence[GuardrailItem] | None = None,
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None = None,
 ) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
     """Build agent graph with INIT -> AGENT(subgraph) <-> TOOLS loop, terminated by control flow tools.
 

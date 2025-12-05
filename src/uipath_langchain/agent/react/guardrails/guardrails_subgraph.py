@@ -5,19 +5,38 @@ from langgraph.graph import StateGraph
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
-
-from .actions.base_action import GuardrailAction, GuardrailActionNode
-from .guardrail_nodes import (
+from ...guardrails import (
+    AgentGuardrailsGraphState,
     create_agent_guardrail_node,
     create_llm_guardrail_node,
     create_tool_guardrail_node,
 )
-from .types import AgentGuardrailsGraphState
+from ...guardrails.actions import GuardrailAction, GuardrailActionNode
 
 GuardrailItem = (
     tuple[BaseGuardrail, GuardrailAction]
     | tuple[BaseGuardrail, GuardrailAction, Sequence[ExecutionStage]]
 )
+
+
+def _filter_guardrails_by_stage(
+    guardrails: Sequence[GuardrailItem] | None, stage: ExecutionStage
+) -> list[tuple[BaseGuardrail, GuardrailAction]]:
+    """Filter guardrails that apply to a specific execution stage.
+
+    Guardrails without explicit stages (length 2) are considered to apply to all stages.
+    """
+    filtered_guardrails = []
+    for item in guardrails or []:
+        if len(item) == 3:
+            guardrail, action, stages = item
+        else:
+            guardrail, action = item  # type: ignore
+            stages = None
+
+        if stages is None or stage in stages:
+            filtered_guardrails.append((guardrail, action))
+    return filtered_guardrails
 
 
 def _create_guardrails_subgraph(
@@ -58,14 +77,9 @@ def _create_guardrails_subgraph(
 
     # Pre-execution stage handling
     if ExecutionStage.PRE_EXECUTION in execution_stages:
-        # Filter guardrails that apply to PRE_EXECUTION
-        # Default (tuple length 2) applies to all stages
-        pre_guardrails = [
-            item[:2]
-            for item in (guardrails or [])
-            if len(item) == 2
-            or ExecutionStage.PRE_EXECUTION in item[2]  # type: ignore
-        ]
+        pre_guardrails = _filter_guardrails_by_stage(
+            guardrails, ExecutionStage.PRE_EXECUTION
+        )
         first_pre_exec_guardrail_node = _build_guardrail_node_chain(
             subgraph,
             pre_guardrails,  # type: ignore
@@ -80,13 +94,9 @@ def _create_guardrails_subgraph(
 
     # Post-execution stage handling
     if ExecutionStage.POST_EXECUTION in execution_stages:
-        # Filter guardrails that apply to POST_EXECUTION
-        post_guardrails = [
-            item[:2]
-            for item in (guardrails or [])
-            if len(item) == 2
-            or ExecutionStage.POST_EXECUTION in item[2]  # type: ignore
-        ]
+        post_guardrails = _filter_guardrails_by_stage(
+            guardrails, ExecutionStage.POST_EXECUTION
+        )
         first_post_exec_guardrail_node = _build_guardrail_node_chain(
             subgraph,
             post_guardrails,  # type: ignore
@@ -222,8 +232,8 @@ def create_tool_guardrails_subgraph(
         item
         for item in (guardrails or [])
         if GuardrailScope.TOOL in item[0].selector.scopes
-        and item[0].selector.match_names is not None
-        and tool_name in item[0].selector.match_names
+           and item[0].selector.match_names is not None
+           and tool_name in item[0].selector.match_names
     ]
     return _create_guardrails_subgraph(
         main_inner_node=tool_node,
