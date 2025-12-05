@@ -27,6 +27,9 @@ For more information on UiPath apps, refer to the [UiPath Apps User Guide](https
 from uipath.platform.common import CreateTask
 task_output = interrupt(CreateTask(app_name="AppName", app_folder_path="MyFolderPath", title="Escalate Issue", data={"key": "value"}, assignee="user@example.com"))
 ```
+/// info
+The return value of the interrupt is the task output. If the task did not produce any output, the return value will be the task status, e.g., `{"status": "completed"}`.
+///
 
 For a practical implementation of the `CreateTask` model, refer to the [ticket-classification sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/ticket-classification). This sample demonstrates how to create an action with dynamic input.
 
@@ -47,6 +50,9 @@ The `WaitTask` model is used to wait for a task to be handled. This model is int
 from uipath.platform.common import WaitTask
 task_output = interrupt(WaitTask(task=my_task_instance, app_folder_path="MyFolderPath"))
 ```
+/// info
+The return value of the interrupt is the task output. If the task did not produce any output, the return value will be the task status, e.g., `{"status": "completed"}`.
+///
 
 ---
 
