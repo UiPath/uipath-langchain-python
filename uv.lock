@@ -1324,7 +1324,7 @@ wheels = [
 
 [[package]]
 name = "openinference-instrumentation-langchain"
-version = "0.1.55"
+version = "0.1.56"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openinference-instrumentation" },
@@ -1334,9 +1334,9 @@ dependencies = [
     { name = "opentelemetry-semantic-conventions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2c/18/0242af5d7ea1170287b4d1e89aa9a3bcd545788cf748b5494a19b9499b18/openinference_instrumentation_langchain-0.1.55.tar.gz", hash = "sha256:57a2875ca845950f944700d9352efb080c8b20049253408e7739d960c43f34e8", size = 68602, upload-time = "2025-11-10T21:45:29.899Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/4d/f63ccd6f2e272de5015388cf633cdbb5163ed119c2ac8df4cd19c3f38ba6/openinference_instrumentation_langchain-0.1.56.tar.gz", hash = "sha256:19fcf552096c53e1b289d0225a372890ca909ef79fba471a395220912fc5e0e7", size = 72264, upload-time = "2025-12-04T19:58:39.814Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/5a/55a99fd64cc1c8c21b1c47211c7389af5a9cd98f75d83a21c8b97e6c1d33/openinference_instrumentation_langchain-0.1.55-py3-none-any.whl", hash = "sha256:3f755950254fdf7741e0327a585cb0609c6c5553109a2b52929c29ce2a02c2d3", size = 22195, upload-time = "2025-11-10T21:45:28.147Z" },
+    { url = "https://files.pythonhosted.org/packages/13/93/4f2d40640ec567cf96831c5303f43a84177a8781d4e125b68485407bc364/openinference_instrumentation_langchain-0.1.56-py3-none-any.whl", hash = "sha256:1de2bbe9780dae5e45308bd3dd97a38ac218b618a9cce4c96fc9e8c762c3491d", size = 23261, upload-time = "2025-12-04T19:58:35.98Z" },
 ]
 
 [[package]]
@@ -2365,7 +2365,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.1.14"
+version = "0.1.15"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -2405,7 +2405,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.0.0,<2.0.0" },
     { name = "langgraph", specifier = ">=1.0.0,<2.0.0" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.0.0,<4.0.0" },
-    { name = "openinference-instrumentation-langchain", specifier = ">=0.1.54" },
+    { name = "openinference-instrumentation-langchain", specifier = ">=0.1.56" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "uipath", specifier = ">=2.2.16,<2.3.0" },
