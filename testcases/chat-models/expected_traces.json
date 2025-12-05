@@ -9,10 +9,10 @@
     },
     {
       "name": [
-        "ChatVertexUiPath",
-        "ChatOpenAIUiPath",
-        "ChatBedrockConverseUiPath",
-        "ChatBedrockUiPath",
+        "UiPathChatVertex",
+        "UiPathChatOpenAI",
+        "UiPathChatBedrockConverse",
+        "UiPathChatBedrock",
         "UiPathChat",
         "UiPathAzureChatOpenAI"
       ],

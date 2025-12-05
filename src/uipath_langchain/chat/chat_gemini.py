@@ -184,7 +184,7 @@ class CustomPredictionServiceRestAsyncTransport:
             logger.error(f"Failed to parse streaming response: {e}")
 
 
-class ChatVertexUiPath(ChatVertexAI):
+class UiPathChatVertex(ChatVertexAI):
     transport: Optional[PredictionServiceTransport] = Field(default=None)
     async_transport: Optional[CustomPredictionServiceRestAsyncTransport] = Field(
         default=None
