@@ -8,6 +8,7 @@ from uipath.agent.models.agent import (
     AgentGuardrailSeverityLevel,
     AgentUnknownGuardrail,
 )
+from uipath.platform.guardrails import BaseGuardrail
 
 from uipath_langchain.agent.guardrails.actions import (
     BlockAction,
@@ -18,7 +19,7 @@ from uipath_langchain.agent.guardrails.actions import (
 
 def build_guardrails_with_actions(
     guardrails: Sequence[AgentGuardrail] | None,
-) -> list[tuple[AgentGuardrail, GuardrailAction]]:
+) -> list[tuple[BaseGuardrail, GuardrailAction]]:
     """Build a list of (guardrail, action) tuples from model definitions.
 
     Args:
@@ -30,7 +31,7 @@ def build_guardrails_with_actions(
     if not guardrails:
         return []
 
-    result: list[tuple[AgentGuardrail, GuardrailAction]] = []
+    result: list[tuple[BaseGuardrail, GuardrailAction]] = []
     for guardrail in guardrails:
         if isinstance(guardrail, AgentUnknownGuardrail):
             continue
