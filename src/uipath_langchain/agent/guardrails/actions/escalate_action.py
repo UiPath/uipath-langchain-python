@@ -13,10 +13,10 @@ from uipath.platform.guardrails import (
 )
 from uipath.runtime.errors import UiPathErrorCode
 
-from .base_action import GuardrailAction, GuardrailActionNode
+from ...exceptions import AgentTerminationException
 from ..guardrail_nodes import _message_text
 from ..types import AgentGuardrailsGraphState, ExecutionStage
-from ...exceptions import AgentTerminationException
+from .base_action import GuardrailAction, GuardrailActionNode
 
 
 class EscalateAction(GuardrailAction):
@@ -225,7 +225,6 @@ def _extract_escalation_content(
     last_message = state.messages[-1]
     if execution_stage == ExecutionStage.PRE_EXECUTION:
         if isinstance(last_message, ToolMessage):
-            print(last_message.content)
             return last_message.content
 
         content = _message_text(last_message)
