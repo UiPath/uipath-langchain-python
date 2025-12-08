@@ -9,6 +9,7 @@ from uipath.agent.models.agent import AgentProcessToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform.common import InvokeProcess
 
+from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_tool_name
 
 
@@ -37,11 +38,12 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             )
         )
 
-    tool = StructuredTool(
+    tool = StructuredToolWithOutputType(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
         coroutine=process_tool_fn,
+        output_type=output_model,
     )
 
     return tool
