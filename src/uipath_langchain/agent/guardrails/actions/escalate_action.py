@@ -105,6 +105,7 @@ class EscalateAction(GuardrailAction):
 
         return node_name, _node
 
+
 def _get_node_name(
     execution_stage: ExecutionStage, guardrail: BaseGuardrail, scope: GuardrailScope
 ) -> str:
@@ -401,18 +402,6 @@ def _extract_agent_escalation_content(
     """
     return ""
 
-def _execution_stage_to_escalation_field(
-    execution_stage: ExecutionStage,
-) -> str:
-    """Convert execution stage to escalation data field name.
-
-    Args:
-        execution_stage: The execution stage enum.
-
-    Returns:
-        "Inputs" for PRE_EXECUTION, "Outputs" for POST_EXECUTION.
-    """
-    return "Inputs" if execution_stage == ExecutionStage.PRE_EXECUTION else "Outputs"
 
 def _extract_tool_escalation_content(
     state: AgentGuardrailsGraphState, execution_stage: ExecutionStage
@@ -446,6 +435,7 @@ def _extract_tool_escalation_content(
         if not isinstance(last_message, ToolMessage):
             return ""
         return last_message.content
+
 
 def _execution_stage_to_escalation_field(
     execution_stage: ExecutionStage,
