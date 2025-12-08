@@ -1,9 +1,9 @@
 """Handles static arguments for tool calls."""
 
-from typing import Any, Dict, List
+from typing import Any
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
-from langchain.tools import ToolRuntime
+from langchain_core.runnables.config import RunnableConfig
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
     AgentIntegrationToolResourceConfig,
@@ -13,8 +13,8 @@ from uipath.agent.models.agent import (
 
 def resolve_static_args(
     resource: BaseAgentResourceConfig,
-    agent_input: Dict[str, Any],
-) -> Dict[str, Any]:
+    agent_input: dict[str, Any],
+) -> dict[str, Any]:
     """Resolves static arguments for a given resource with a given input.
 
     Args:
@@ -23,7 +23,7 @@ def resolve_static_args(
 
     Returns:
         A dictionary of expanded arguments to be used in the tool call.
-    static_args: Dict[str, Any] = {}
+    static_args: dict[str, Any] = {}
     """
 
     if isinstance(resource, AgentIntegrationToolResourceConfig):
@@ -35,9 +35,9 @@ def resolve_static_args(
 
 
 def resolve_integration_static_args(
-    parameters: List[AgentIntegrationToolParameter],
-    agent_input: Dict[str, Any],
-) -> Dict[str, Any]:
+    parameters: list[AgentIntegrationToolParameter],
+    agent_input: dict[str, Any],
+) -> dict[str, Any]:
     """Resolves static arguments for an integration tool resource.
 
     Args:
@@ -48,7 +48,7 @@ def resolve_integration_static_args(
         A dictionary of expanded static arguments for the integration tool.
     """
 
-    static_args: Dict[str, Any] = {}
+    static_args: dict[str, Any] = {}
     for param in parameters:
         value = None
 
@@ -75,9 +75,9 @@ def resolve_integration_static_args(
     return static_args
 
 
-def sanitize_for_serialization(args: Dict[str, Any]) -> Dict[str, Any]:
+def sanitize_for_serialization(args: dict[str, Any]) -> dict[str, Any]:
     """Convert Pydantic models in args to dicts."""
-    converted_args: Dict[str, Any] = {}
+    converted_args: dict[str, Any] = {}
     for key, value in args.items():
         # handle Pydantic model
         if hasattr(value, "model_dump"):
@@ -100,13 +100,13 @@ def sanitize_for_serialization(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def apply_static_args(
-    static_args: Dict[str, Any],
-    kwargs: Dict[str, Any],
-) -> Dict[str, Any]:
+    static_args: dict[str, Any],
+    kwargs: dict[str, Any],
+) -> dict[str, Any]:
     """Applies static arguments to the given input arguments.
 
     Args:
-        static_args: Dictionary of static arguments {json_path: value} to apply.
+        static_args: dictionary of static arguments {json_path: value} to apply.
         kwargs: Original input arguments to the tool.
 
     Returns:
@@ -122,17 +122,19 @@ def apply_static_args(
 
 
 def handle_static_args(
-    resource: BaseAgentResourceConfig, runtime: ToolRuntime, input_args: Dict[str, Any]
-) -> Dict[str, Any]:
+    resource: BaseAgentResourceConfig,
+    config: RunnableConfig,
+    input_args: dict[str, Any],
+) -> dict[str, Any]:
     """Resolves and applies static arguments for a tool call.
     Args:
         resource: The agent resource configuration.
-        runtime: The tool runtime providing the current state.
+        config: The RunnableConfig containing agent input.
         input_args: The original input arguments to the tool.
     Returns:
         A dictionary of input arguments with static arguments applied.
     """
-
-    static_args = resolve_static_args(resource, dict(runtime.state))
+    agent_input = config.get("metadata", {}).get("input", {})
+    static_args = resolve_static_args(resource, agent_input)
     merged_args = apply_static_args(static_args, input_args)
     return merged_args

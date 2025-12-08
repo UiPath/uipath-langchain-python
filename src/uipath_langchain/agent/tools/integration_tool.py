@@ -4,7 +4,7 @@ import copy
 from typing import Any
 
 from jsonschema_pydantic_converter import transform as create_model
-from langchain.tools import ToolRuntime
+from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
@@ -149,14 +149,15 @@ def create_integration_tool(
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def integration_tool_fn(runtime: ToolRuntime, **kwargs: Any):
+    async def integration_tool_fn(config: RunnableConfig, **kwargs: Any):
         try:
-            # we manually validating here and not passing input_model to StructuredTool
-            # because langchain itself will block their own injected arguments (like runtime) if the model is strict
+            # we manually validate here and don't pass input_model to StructuredTool
+            # because langchain itself will block their own injected arguments (like runtime/config) if the model is strict
+            # https://github.com/langchain-ai/langchain/issues/34246
             val_args = input_model.model_validate(kwargs)
             args = handle_static_args(
                 resource=resource,
-                runtime=runtime,
+                config=config,
                 input_args=val_args.model_dump(),
             )
             result = await sdk.connections.invoke_activity_async(

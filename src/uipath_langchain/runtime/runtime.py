@@ -64,7 +64,7 @@ class UiPathLangGraphRuntime:
         """Execute the graph with the provided input and configuration."""
         try:
             graph_input = await self._get_graph_input(input, options)
-            graph_config = self._get_graph_config()
+            graph_config = self._get_graph_config(input)
 
             # Execute without streaming
             graph_output = await self.graph.ainvoke(
@@ -116,7 +116,7 @@ class UiPathLangGraphRuntime:
         """
         try:
             graph_input = await self._get_graph_input(input, options)
-            graph_config = self._get_graph_config()
+            graph_config = self._get_graph_config(input)
 
             # Track final chunk for result creation
             final_chunk: dict[Any, Any] | None = None
@@ -185,11 +185,14 @@ class UiPathLangGraphRuntime:
             graph=get_graph_schema(self.graph, xray=1),
         )
 
-    def _get_graph_config(self) -> RunnableConfig:
+    def _get_graph_config(self, input: dict[str, Any] | None = None) -> RunnableConfig:
         """Build graph execution configuration."""
         graph_config: RunnableConfig = {
             "configurable": {"thread_id": self.runtime_id},
             "callbacks": [],
+            "metadata": {
+                "input": input or {},
+            },
         }
 
         # Add optional config from environment
