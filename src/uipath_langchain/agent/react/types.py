@@ -6,10 +6,23 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 
+class AgentTerminationSource(StrEnum):
+    ESCALATION = "escalation"
+
+
+class AgentTermination(BaseModel):
+    """Agent Graph Termination model."""
+
+    source: AgentTerminationSource
+    title: str
+    detail: str = ""
+
+
 class AgentGraphState(BaseModel):
     """Agent Graph state for standard loop execution."""
 
     messages: Annotated[list[AnyMessage], add_messages] = []
+    termination: AgentTermination | None = None
 
 
 class AgentGraphNode(StrEnum):
