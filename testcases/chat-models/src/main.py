@@ -8,7 +8,9 @@ from langgraph.graph import END, START, StateGraph, MessagesState
 from pydantic import BaseModel, Field
 from langchain_core.language_models import BaseChatModel
 
-from uipath_langchain.chat import UiPathChatBedrockConverse, UiPathChatBedrock, UiPathChatVertex, UiPathChatOpenAI, UiPathChat, UiPathAzureChatOpenAI
+from uipath_langchain.chat.bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
+from uipath_langchain.chat.gemini import UiPathChatVertex
+from uipath_langchain.chat import UiPathChatOpenAI, UiPathChat, UiPathAzureChatOpenAI
 
 logger = logging.getLogger(__name__)
 

@@ -17,12 +17,8 @@ dependencies = [
     "openinference-instrumentation-langchain>=0.1.56",
     "jsonschema-pydantic-converter>=0.1.5",
     "jsonpath-ng>=1.7.0",
-    "langchain-aws>=0.2.35",
-    "langchain-google-vertexai>=2.1.2",
-    "boto3-stubs>=1.41.4",
-    "langchain-community>=0.4.1",
-    "types-protobuf>=6.32.1.20251105",
 ]
+
 classifiers = [
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Build Tools",
@@ -33,6 +29,17 @@ classifiers = [
 maintainers = [
     { name = "Marius Cosareanu", email = "marius.cosareanu@uipath.com" },
     { name = "Cristian Pufu", email = "cristian.pufu@uipath.com" }
+]
+
+[project.optional-dependencies]
+vertex = [
+    "langchain-google-vertexai>=2.1.2",
+    "langchain-community>=0.4.1",
+    "types-protobuf>=6.32.1.20251105",
+]
+bedrock = [
+    "langchain-aws>=0.2.35",
+    "boto3-stubs>=1.41.4",
 ]
 
 [project.entry-points."uipath.middlewares"]
@@ -76,6 +83,8 @@ select = ["E", "F", "B", "I"]
 
 [tool.ruff.lint.per-file-ignores]
 "*" = ["E501"]
+"src/uipath_langchain/chat/bedrock.py" = ["E402"]
+"src/uipath_langchain/chat/gemini.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"

@@ -6,7 +6,7 @@ import httpx
 from langchain_openai import AzureChatOpenAI
 from uipath.utils import EndpointManager
 
-from .chat_models import OpenAIModels
+from .supported_models import OpenAIModels
 
 logger = logging.getLogger(__name__)
 
