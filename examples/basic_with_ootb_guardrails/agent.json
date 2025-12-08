@@ -1,0 +1,157 @@
+{
+  "id": "ca9e1b22-e201-4e7c-859d-2436075c833c",
+  "version": "1.0.0",
+  "name": "Agent",
+  "metadata": {
+    "storageVersion": "31.0.0",
+    "isConversational": false
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are an agentic assistant.",
+      "contentTokens": [
+        {
+          "type": "simpleText",
+          "rawString": "You are an agentic assistant."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "What is the current date, Agent?",
+      "contentTokens": [
+        {
+          "type": "simpleText",
+          "rawString": "What is the current date, Agent?"
+        }
+      ]
+    }
+  ],
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "content": {
+        "type": "string",
+        "description": "Output content"
+      }
+    }
+  },
+  "settings": {
+    "model": "gpt-4.1-2025-04-14",
+    "maxTokens": 16384,
+    "temperature": 0,
+    "engine": "basic-v2",
+    "maxIterations": 25
+  },
+  "resources": [],
+  "features": [],
+  "guardrails": [
+    {
+      "name": "PII log guardrail",
+      "description": "This validator is designed to detect personally identifiable information using Azure Cognitive Services",
+      "action": {
+          "$actionType": "log",
+          "severityLevel": "Warning"
+      },
+      "enabledForEvals": true,
+      "id": "5b994b25-3714-48fa-804f-4173b2645603",
+      "selector": {
+        "scopes": [
+          "Agent",
+          "Llm"
+        ]
+      },
+      "$guardrailType": "builtInValidator",
+      "validatorType": "pii_detection",
+      "validatorParameters": [
+        {
+          "$parameterType": "enum-list",
+          "id": "entities",
+          "value": [
+            "Email",
+            "Address",
+            "PhoneNumber",
+            "Person"
+          ]
+        },
+        {
+          "$parameterType": "map-enum",
+          "id": "entityThresholds",
+          "value": {
+            "Email": 0.5,
+            "Address": 0.7,
+            "PhoneNumber": 0.5,
+            "Person": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "name": "Prompt injection log guardrail",
+      "description": "This validator is designed to detect personally identifiable information using Azure Cognitive Services",
+      "action": {
+          "$actionType": "log",
+          "severityLevel": "Warning"
+      },
+      "enabledForEvals": true,
+      "id": "5b994b25-3714-48fa-804f-4173b2645603",
+      "selector": {
+        "scopes": [
+          "Llm"
+        ]
+      },
+      "$guardrailType": "builtInValidator",
+      "validatorType": "prompt_injection",
+      "validatorParameters": [
+        {
+          "$parameterType": "number",
+          "id": "threshold",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "name": "PII block guardrail",
+      "description": "This validator is designed to detect personally identifiable information using Azure Cognitive Services",
+      "action": {
+          "$actionType": "block",
+          "reason": "test"
+      },
+      "enabledForEvals": true,
+      "id": "5b994b25-3714-48fa-804f-4173b2645603",
+      "selector": {
+        "scopes": [
+          "Agent",
+          "Llm"
+        ]
+      },
+      "$guardrailType": "builtInValidator",
+      "validatorType": "pii_detection",
+      "validatorParameters": [
+        {
+          "$parameterType": "enum-list",
+          "id": "entities",
+          "value": [
+            "Email",
+            "Address",
+            "PhoneNumber"
+          ]
+        },
+        {
+          "$parameterType": "map-enum",
+          "id": "entityThresholds",
+          "value": {
+            "Email": 0.5,
+            "Address": 0.7,
+            "PhoneNumber": 0.5
+          }
+        }
+      ]
+    }
+  ]
+}

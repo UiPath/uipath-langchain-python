@@ -2,7 +2,10 @@
 
 from typing import Any
 
-from uipath.agent.models.agent import LowCodeAgentDefinition
+from uipath.agent.models.agent import (
+    LowCodeAgentDefinition,
+)
+from uipath_langchain.agent.guardrails import build_guardrails_with_actions
 from uipath_langchain.agent.react import (
     AgentGraphConfig,
     create_agent,
@@ -46,6 +49,8 @@ async def build_agent_graph(
     input_model = resolve_input_model(agent_definition.input_schema)
     output_model = resolve_output_model(agent_definition.output_schema)
 
+    guardrails = build_guardrails_with_actions(agent_definition.guardrails)
+
     # Create agent config with feature flags
     agent_config = AgentGraphConfig(
         recursion_limit=AGENT_LOOP_RECURSION_LIMIT,
@@ -58,4 +63,5 @@ async def build_agent_graph(
         input_schema=input_model,
         output_schema=output_model,
         config=agent_config,
+        guardrails=guardrails,
     )
