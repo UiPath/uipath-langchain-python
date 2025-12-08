@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Any, Callable, Tuple
+from typing import Any, Callable
 
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
 from langgraph.types import Command
@@ -30,7 +30,7 @@ def _create_guardrail_node(
     payload_generator: Callable[[AgentGuardrailsGraphState], str],
     success_node: str,
     failure_node: str,
-) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
+) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail evaluation nodes.
 
     Returns a node that evaluates the guardrail and routes via Command:
@@ -65,7 +65,7 @@ def create_llm_guardrail_node(
     execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
-) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
+) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
@@ -86,7 +86,7 @@ def create_agent_guardrail_node(
     execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
-) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
+) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     # To be implemented in future PR
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
@@ -108,7 +108,7 @@ def create_tool_guardrail_node(
     execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
-) -> Tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
+) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     # To be implemented in future PR
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
