@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.1.18"
+version = "0.1.19"
 description = "UiPath Langchain"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -113,4 +113,3 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
-

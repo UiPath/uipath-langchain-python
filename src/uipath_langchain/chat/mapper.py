@@ -7,12 +7,17 @@ from uuid import uuid4
 from langchain_core.messages import (
     AIMessageChunk,
     BaseMessage,
+    Citation,
     HumanMessage,
     TextContentBlock,
     ToolCallChunk,
     ToolMessage,
 )
 from uipath.core.chat import (
+    UiPathConversationCitationEndEvent,
+    UiPathConversationCitationEvent,
+    UiPathConversationCitationSource,
+    UiPathConversationCitationStartEvent,
     UiPathConversationContentPartChunkEvent,
     UiPathConversationContentPartEndEvent,
     UiPathConversationContentPartEvent,
@@ -184,13 +189,50 @@ class UiPathChatMessagesMapper:
                         text_block = cast(TextContentBlock, block)
                         text = text_block["text"]
 
-                        msg_event.content_part = UiPathConversationContentPartEvent(
-                            content_part_id=f"chunk-{message.id}-0",
-                            chunk=UiPathConversationContentPartChunkEvent(
-                                data=text,
-                                content_part_sequence=0,
-                            ),
-                        )
+                        # Map citations if present
+                        annotations = text_block.get("annotations", [])
+                        citation_annotations = [
+                            cast(Citation, annotation)
+                            for annotation in annotations
+                            if annotation.get("type") == "citation"
+                        ]
+
+                        if citation_annotations:
+                            for citation_annotation in citation_annotations:
+                                # Build citation source, only include url if present
+                                block_index = text_block.get("index", 0)
+                                block_index = block_index // 2 + 1
+                                source_args = {
+                                    "title": citation_annotation.get("title"),
+                                    "number": block_index,
+                                }
+                                if citation_annotation.get("url") is not None:
+                                    source_args["url"] = citation_annotation.get("url")
+
+                                citation_source = UiPathConversationCitationSource(
+                                    **source_args
+                                )
+
+                                msg_event.content_part = UiPathConversationContentPartEvent(
+                                    content_part_id=f"chunk-{message.id}-0",
+                                    chunk=UiPathConversationContentPartChunkEvent(
+                                        data=citation_annotation["cited_text"],
+                                        citation=UiPathConversationCitationEvent(
+                                            citation_id=str(uuid4()),
+                                            start=UiPathConversationCitationStartEvent(),
+                                            end=UiPathConversationCitationEndEvent(
+                                                sources=[citation_source]
+                                            ),
+                                        ),
+                                    ),
+                                )
+                        else:
+                            msg_event.content_part = UiPathConversationContentPartEvent(
+                                content_part_id=f"chunk-{message.id}-0",
+                                chunk=UiPathConversationContentPartChunkEvent(
+                                    data=text
+                                ),
+                            )
 
                     elif block_type == "tool_call_chunk":
                         tool_chunk_block = cast(ToolCallChunk, block)
@@ -204,10 +246,7 @@ class UiPathChatMessagesMapper:
 
                         msg_event.content_part = UiPathConversationContentPartEvent(
                             content_part_id=f"chunk-{message.id}-0",
-                            chunk=UiPathConversationContentPartChunkEvent(
-                                data=args,
-                                content_part_sequence=0,
-                            ),
+                            chunk=UiPathConversationContentPartChunkEvent(data=args),
                         )
                         # Continue so that multiple tool_call_chunks in the same block list
                         # are handled correctly
@@ -217,10 +256,7 @@ class UiPathChatMessagesMapper:
             elif isinstance(message.content, str) and message.content:
                 msg_event.content_part = UiPathConversationContentPartEvent(
                     content_part_id=f"content-{message.id}",
-                    chunk=UiPathConversationContentPartChunkEvent(
-                        data=message.content,
-                        content_part_sequence=0,
-                    ),
+                    chunk=UiPathConversationContentPartChunkEvent(data=message.content),
                 )
 
             if (
@@ -269,12 +305,12 @@ class UiPathChatMessagesMapper:
                     tool_call_id=message.tool_call_id,
                     start=UiPathConversationToolCallStartEvent(
                         tool_name=message.name,
-                        arguments=None,
+                        input=None,
                         timestamp=timestamp,
                     ),
                     end=UiPathConversationToolCallEndEvent(
                         timestamp=timestamp,
-                        result=UiPathInlineValue(inline=content_value),
+                        output=UiPathInlineValue(inline=content_value),
                     ),
                 ),
             )

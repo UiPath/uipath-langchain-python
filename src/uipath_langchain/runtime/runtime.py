@@ -7,6 +7,7 @@ from langchain_core.runnables.config import RunnableConfig
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, Interrupt, StateSnapshot
+from pydantic import ValidationError
 from uipath.runtime import (
     UiPathBreakpointResult,
     UiPathExecuteOptions,
@@ -135,10 +136,17 @@ class UiPathLangGraphRuntime:
                 if chunk_type == "messages":
                     if isinstance(data, tuple):
                         message, _ = data
-                        event = UiPathRuntimeMessageEvent(
-                            payload=self.chat.map_event(message),
-                        )
-                        yield event
+
+                        try:
+                            mapped_event = self.chat.map_event(message)
+                            event = UiPathRuntimeMessageEvent(
+                                payload=mapped_event,
+                            )
+                            yield event
+                        except ValidationError as e:
+                            logger.warning(
+                                f"Failed to map event due to validation error, skipping: {e}"
+                            )
 
                 # Emit UiPathRuntimeStateEvent for state updates
                 elif chunk_type == "updates":
