@@ -227,10 +227,10 @@ def create_agent_guardrails_subgraph(
 
 
 def create_tool_guardrails_subgraph(
+    tool_name: str,
     tool_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
 ):
-    tool_name, _ = tool_node
     applicable_guardrails = [
         (guardrail, action)
         for (guardrail, action) in (guardrails or [])

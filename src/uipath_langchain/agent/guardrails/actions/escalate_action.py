@@ -34,6 +34,14 @@ class EscalateAction(GuardrailAction):
         version: int,
         assignee: str,
     ):
+        """Initialize EscalateAction with escalation app configuration.
+
+        Args:
+            app_name: Name of the escalation app.
+            app_folder_path: Folder path where the escalation app is located.
+            version: Version of the escalation app.
+            assignee: User or role assigned to handle the escalation.
+        """
         self.app_name = app_name
         self.app_folder_path = app_folder_path
         self.version = version
@@ -46,6 +54,17 @@ class EscalateAction(GuardrailAction):
         scope: GuardrailScope,
         execution_stage: ExecutionStage,
     ) -> GuardrailActionNode:
+        """Create a HITL escalation node for the guardrail.
+
+        Args:
+            guardrail: The guardrail that triggered this escalation action.
+            scope: The guardrail scope (LLM/AGENT/TOOL).
+            execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+        Returns:
+            A tuple of (node_name, node_function) where the node function triggers
+            a HITL interruption and processes the escalation response.
+        """
         node_name = _get_node_name(execution_stage, guardrail, scope)
 
         async def _node(
@@ -86,7 +105,6 @@ class EscalateAction(GuardrailAction):
 
         return node_name, _node
 
-
 def _get_node_name(
     execution_stage: ExecutionStage, guardrail: BaseGuardrail, scope: GuardrailScope
 ) -> str:
@@ -95,46 +113,57 @@ def _get_node_name(
     return node_name
 
 
-def _execution_stage_to_string(
-    execution_stage: ExecutionStage,
-) -> Literal["PreExecution", "PostExecution"]:
-    """Convert ExecutionStage enum to string literal.
-
-    Args:
-        execution_stage: The execution stage enum.
-
-    Returns:
-        "PreExecution" for PRE_EXECUTION, "PostExecution" for POST_EXECUTION.
-    """
-    if execution_stage == ExecutionStage.PRE_EXECUTION:
-        return "PreExecution"
-    return "PostExecution"
-
-
 def _process_escalation_response(
     state: AgentGuardrailsGraphState,
     escalation_result: Dict[str, Any],
     scope: GuardrailScope,
     execution_stage: ExecutionStage,
 ) -> Dict[str, Any] | Command[Any]:
-    """Process escalation response and update state based on guardrail scope.
+    """Process escalation response and route to appropriate handler based on scope.
 
     Args:
         state: The current agent graph state.
-        escalation_result: The result from the escalation interrupt.
+        escalation_result: The result from the escalation interrupt containing reviewed inputs/outputs.
         scope: The guardrail scope (LLM/AGENT/TOOL).
-        execution_stage: The hook type ("PreExecution" or "PostExecution").
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
 
     Returns:
-        For LLM scope: Command to update messages with reviewed inputs/outputs.
-        For non-LLM scope: Empty dict (no message alteration).
+        For LLM/TOOL scope: Command to update messages with reviewed inputs/outputs, or empty dict.
+        For AGENT scope: Empty dict (no message alteration).
+    """
+    match scope:
+        case GuardrailScope.LLM:
+            return _process_llm_escalation_response(
+                state, escalation_result, execution_stage
+            )
+        case GuardrailScope.TOOL:
+            return _process_tool_escalation_response(
+                state, escalation_result, execution_stage
+            )
+        case GuardrailScope.AGENT:
+            return {}
+
+
+def _process_llm_escalation_response(
+    state: AgentGuardrailsGraphState,
+    escalation_result: Dict[str, Any],
+    execution_stage: ExecutionStage,
+) -> Dict[str, Any] | Command[Any]:
+    """Process escalation response for LLM scope guardrails.
+
+    Updates message content or tool calls based on reviewed inputs/outputs from escalation.
+
+    Args:
+        state: The current agent graph state.
+        escalation_result: The result from the escalation interrupt containing reviewed inputs/outputs.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Returns:
+        Command to update messages with reviewed inputs/outputs, or empty dict if no updates needed.
 
     Raises:
         AgentTerminationException: If escalation response processing fails.
     """
-    if scope != GuardrailScope.LLM:
-        return {}
-
     try:
         reviewed_field = (
             "ReviewedInputs"
@@ -200,6 +229,82 @@ def _process_escalation_response(
         ) from e
 
 
+def _process_tool_escalation_response(
+    state: AgentGuardrailsGraphState,
+    escalation_result: Dict[str, Any],
+    execution_stage: ExecutionStage,
+) -> Dict[str, Any] | Command[Any]:
+    """Process escalation response for TOOL scope guardrails.
+
+    Updates tool call arguments (PreExecution) or tool message content (PostExecution)
+    based on reviewed inputs/outputs from escalation.
+
+    Args:
+        state: The current agent graph state.
+        escalation_result: The result from the escalation interrupt containing reviewed inputs/outputs.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Returns:
+        Command to update messages with reviewed tool call args or content, or empty dict if no updates needed.
+
+    Raises:
+        AgentTerminationException: If escalation response processing fails.
+    """
+    try:
+        reviewed_field = (
+            "ReviewedInputs"
+            if execution_stage == ExecutionStage.PRE_EXECUTION
+            else "ReviewedOutputs"
+        )
+
+        msgs = state.messages.copy()
+        if not msgs or reviewed_field not in escalation_result:
+            return {}
+
+        last_message = msgs[-1]
+        if execution_stage == ExecutionStage.PRE_EXECUTION:
+            if not isinstance(last_message, AIMessage):
+                return {}
+
+            # Get reviewed tool calls args from escalation result
+            reviewed_inputs_json = escalation_result[reviewed_field]
+            if not reviewed_inputs_json:
+                return {}
+
+            reviewed_tool_calls_args = json.loads(reviewed_inputs_json)
+            if not isinstance(reviewed_tool_calls_args, list):
+                return {}
+
+            # Update tool calls with reviewed args
+            if last_message.tool_calls and reviewed_tool_calls_args:
+                tool_calls = list(last_message.tool_calls)
+                for i, tool_call in enumerate(tool_calls):
+                    if i < len(reviewed_tool_calls_args):
+                        reviewed_args = reviewed_tool_calls_args[i]
+                        if isinstance(reviewed_args, dict):
+                            if isinstance(tool_call, dict):
+                                tool_call["args"] = reviewed_args
+                            else:
+                                tool_call.args = reviewed_args
+                last_message.tool_calls = tool_calls
+        else:
+            if not isinstance(last_message, ToolMessage):
+                return {}
+
+            # PostExecution: update tool message content
+            reviewed_outputs_json = escalation_result[reviewed_field]
+            if reviewed_outputs_json:
+                last_message.content = reviewed_outputs_json
+
+        return Command[Any](update={"messages": msgs})
+    except Exception as e:
+        raise AgentTerminationException(
+            code=UiPathErrorCode.EXECUTION_ERROR,
+            title="Escalation rejected",
+            detail=str(e),
+        ) from e
+
+
 def _extract_escalation_content(
     state: AgentGuardrailsGraphState,
     scope: GuardrailScope,
@@ -210,23 +315,45 @@ def _extract_escalation_content(
     Args:
         state: The current agent graph state.
         scope: The guardrail scope (LLM/AGENT/TOOL).
-        execution_stage: The execution stage enum.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
 
     Returns:
-        For non-LLM scope: Empty string.
-        For LLM PreExecution: JSON string with message content.
-        For LLM PostExecution: JSON array with tool call content and message content.
-    """
-    if scope != GuardrailScope.LLM:
-        return ""
+        str or list[str | Dict[str, Any]]: For LLM scope, returns JSON string or list with message/tool call content.
+        For AGENT scope, returns empty string. For TOOL scope, returns JSON string or list with tool-specific content.
 
+    Raises:
+        AgentTerminationException: If no messages are found in state.
+    """
     if not state.messages:
         raise AgentTerminationException(
             code=UiPathErrorCode.EXECUTION_ERROR,
             title="Invalid state message",
-            detail="No messages in state",
+            detail="No message found into agent state",
         )
 
+    match scope:
+        case GuardrailScope.LLM:
+            return _extract_llm_escalation_content(state, execution_stage)
+        case GuardrailScope.AGENT:
+            return _extract_agent_escalation_content(state, execution_stage)
+        case GuardrailScope.TOOL:
+            return _extract_tool_escalation_content(state, execution_stage)
+
+
+def _extract_llm_escalation_content(
+    state: AgentGuardrailsGraphState, execution_stage: ExecutionStage
+) -> str | list[str | Dict[str, Any]]:
+    """Extract escalation content for LLM scope guardrails.
+
+    Args:
+        state: The current agent graph state.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Returns:
+        str or list[str | Dict[str, Any]]: For PreExecution, returns JSON string with message content or empty string.
+        For PostExecution, returns JSON string (array) with tool call content and message content.
+        Returns empty string if no content found.
+    """
     last_message = state.messages[-1]
     if execution_stage == ExecutionStage.PRE_EXECUTION:
         if isinstance(last_message, ToolMessage):
@@ -260,6 +387,20 @@ def _extract_escalation_content(
     return _message_text(last_message)
 
 
+def _extract_agent_escalation_content(
+    state: AgentGuardrailsGraphState, execution_stage: ExecutionStage
+) -> str | list[str | Dict[str, Any]]:
+    """Extract escalation content for AGENT scope guardrails.
+
+    Args:
+        state: The current agent graph state.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Returns:
+        str: Empty string (AGENT scope guardrails do not extract escalation content).
+    """
+    return ""
+
 def _execution_stage_to_escalation_field(
     execution_stage: ExecutionStage,
 ) -> str:
@@ -272,3 +413,65 @@ def _execution_stage_to_escalation_field(
         "Inputs" for PRE_EXECUTION, "Outputs" for POST_EXECUTION.
     """
     return "Inputs" if execution_stage == ExecutionStage.PRE_EXECUTION else "Outputs"
+
+def _extract_tool_escalation_content(
+    state: AgentGuardrailsGraphState, execution_stage: ExecutionStage
+) -> str | list[str | Dict[str, Any]]:
+    """Extract escalation content for TOOL scope guardrails.
+
+    Args:
+        state: The current agent graph state.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Returns:
+        str or list[str | Dict[str, Any]]: For PreExecution, returns JSON string (array) with all tool call arguments,
+        or empty string if message type doesn't match. For PostExecution, returns string with tool message content,
+        or empty string if message type doesn't match.
+    """
+    last_message = state.messages[-1]
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        if not isinstance(last_message, AIMessage):
+            return ""
+        # Get all tool calls args and put in a list of dicts
+        tool_calls_args: list[dict[str, Any]] = []
+        if last_message.tool_calls:
+            for tool_call in last_message.tool_calls:
+                args = (
+                    tool_call["args"] if isinstance(tool_call, dict) else tool_call.args
+                )
+                if isinstance(args, dict):
+                    tool_calls_args.append(args)
+        return json.dumps(tool_calls_args)
+    else:
+        if not isinstance(last_message, ToolMessage):
+            return ""
+        return last_message.content
+
+def _execution_stage_to_escalation_field(
+    execution_stage: ExecutionStage,
+) -> str:
+    """Convert execution stage to escalation data field name.
+
+    Args:
+        execution_stage: The execution stage enum.
+
+    Returns:
+        "Inputs" for PRE_EXECUTION, "Outputs" for POST_EXECUTION.
+    """
+    return "Inputs" if execution_stage == ExecutionStage.PRE_EXECUTION else "Outputs"
+
+
+def _execution_stage_to_string(
+    execution_stage: ExecutionStage,
+) -> Literal["PreExecution", "PostExecution"]:
+    """Convert ExecutionStage enum to string literal.
+
+    Args:
+        execution_stage: The execution stage enum.
+
+    Returns:
+        "PreExecution" for PRE_EXECUTION, "PostExecution" for POST_EXECUTION.
+    """
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        return "PreExecution"
+    return "PostExecution"
