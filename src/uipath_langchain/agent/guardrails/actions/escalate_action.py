@@ -45,8 +45,7 @@ class EscalateAction(GuardrailAction):
         scope: GuardrailScope,
         execution_stage: ExecutionStage,
     ) -> GuardrailActionNode:
-        sanitized = re.sub(r"\W+", "_", guardrail.name).strip("_").lower()
-        node_name = f"{sanitized}_hitl_{execution_stage.name.lower()}_{scope.lower()}"
+        node_name = _get_node_name(execution_stage, guardrail, scope)
 
         async def _node(
             state: AgentGuardrailsGraphState,
@@ -57,9 +56,6 @@ class EscalateAction(GuardrailAction):
             data = {
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
-                # TODO populate this 2 arguments
-                # "TenantName": "TBD",
-                # "AgentTrace": "https://alpha.uipath.com/f88fa028-ccdd-4b5f-bee4-01ef94d134d8/studio_/designer/48fff406-52e9-4a37-ba66-76c0212d9c6b",
                 "Tool": scope.name.lower(),
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
                 "GuardrailResult": state.guardrail_validation_result,
@@ -88,6 +84,14 @@ class EscalateAction(GuardrailAction):
             )
 
         return node_name, _node
+
+
+def _get_node_name(
+    execution_stage: ExecutionStage, guardrail: BaseGuardrail, scope: GuardrailScope
+) -> str:
+    sanitized = re.sub(r"\W+", "_", guardrail.name).strip("_").lower()
+    node_name = f"{sanitized}_hitl_{execution_stage.name.lower()}_{scope.lower()}"
+    return node_name
 
 
 def _execution_stage_to_string(
