@@ -106,7 +106,7 @@ class TestEscalateAction:
         assert call_args.data["GuardrailDescription"] == "Test description"
         assert call_args.data["ExecutionStage"] == "PreExecution"
         assert call_args.data["GuardrailResult"] == "Validation failed"
-        assert "ToolInputs" in call_args.data
+        assert call_args.data["Inputs"] == '"Test message"'
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -219,7 +219,7 @@ class TestEscalateAction:
 
         # Verify ToolOutputs is used for PostExecution
         call_args = mock_interrupt.call_args[0][0]
-        assert "ToolOutputs" in call_args.data
+        assert call_args.data["Outputs"] == '["Test response"]'
         assert "ToolInputs" not in call_args.data
 
     @pytest.mark.asyncio
@@ -265,7 +265,7 @@ class TestEscalateAction:
 
         # Verify interrupt was called with tool calls and content in ToolOutputs
         call_args = mock_interrupt.call_args[0][0]
-        tool_outputs = call_args.data["ToolOutputs"]
+        tool_outputs = call_args.data["Outputs"]
         parsed = json.loads(tool_outputs)
         assert len(parsed) == 2  # Tool call content + message content
         assert parsed[1] == "AI response"

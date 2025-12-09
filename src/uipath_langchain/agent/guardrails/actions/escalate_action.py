@@ -22,8 +22,9 @@ from .base_action import GuardrailAction, GuardrailActionNode
 class EscalateAction(GuardrailAction):
     """Node-producing action that inserts a HITL interruption node into the graph.
 
-    The returned node triggers a dynamic interrupt for HITL without re-evaluating.
-    The runtime will persist a resume trigger and suspend execution.
+    The returned node creates a human-in-the-loop interruption that suspends execution
+    and waits for human review. When execution resumes, if the escalation was approved,
+    the flow continues with the reviewed content; otherwise, an error is raised.
     """
 
     def __init__(
@@ -51,15 +52,15 @@ class EscalateAction(GuardrailAction):
             state: AgentGuardrailsGraphState,
         ) -> Dict[str, Any] | Command[Any]:
             input = _extract_escalation_content(state, scope, execution_stage)
-            tool_field = _execution_stage_to_tool_field(execution_stage)
+            escalation_field = _execution_stage_to_escalation_field(execution_stage)
 
             data = {
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
-                "Tool": scope.name.lower(),
+                "Component": scope.name.lower(),
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
                 "GuardrailResult": state.guardrail_validation_result,
-                tool_field: input,
+                escalation_field: input,
             }
 
             escalation_result = interrupt(
@@ -259,19 +260,15 @@ def _extract_escalation_content(
     return _message_text(last_message)
 
 
-def _execution_stage_to_tool_field(
+def _execution_stage_to_escalation_field(
     execution_stage: ExecutionStage,
 ) -> str:
-    """Convert execution stage to tool field name.
+    """Convert execution stage to escalation data field name.
 
     Args:
         execution_stage: The execution stage enum.
 
     Returns:
-        "ToolInputs" for PRE_EXECUTION, "ToolOutputs" for POST_EXECUTION.
+        "Inputs" for PRE_EXECUTION, "Outputs" for POST_EXECUTION.
     """
-    return (
-        "ToolInputs"
-        if execution_stage == ExecutionStage.PRE_EXECUTION
-        else "ToolOutputs"
-    )
+    return "Inputs" if execution_stage == ExecutionStage.PRE_EXECUTION else "Outputs"
