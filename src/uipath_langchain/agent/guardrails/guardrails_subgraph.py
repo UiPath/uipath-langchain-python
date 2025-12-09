@@ -2,7 +2,11 @@ from typing import Any, Callable, Sequence
 
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
-from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
+from uipath.platform.guardrails import (
+    BaseGuardrail,
+    BuiltInValidatorGuardrail,
+    GuardrailScope,
+)
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
@@ -14,11 +18,35 @@ from .guardrail_nodes import (
 )
 from .types import AgentGuardrailsGraphState
 
+_VALIDATOR_ALLOWED_STAGES = {
+    "prompt_injection": {ExecutionStage.PRE_EXECUTION},
+    "pii_detection": {ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION},
+}
+
+
+def _filter_guardrails_by_stage(
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    stage: ExecutionStage,
+) -> list[tuple[BaseGuardrail, GuardrailAction]]:
+    """Filter guardrails that apply to a specific execution stage."""
+    filtered_guardrails = []
+    for guardrail, action in guardrails or []:
+        # Internal knowledge: Check against configured allowed stages
+        if (
+            isinstance(guardrail, BuiltInValidatorGuardrail)
+            and guardrail.validator_type in _VALIDATOR_ALLOWED_STAGES
+            and stage not in _VALIDATOR_ALLOWED_STAGES[guardrail.validator_type]
+        ):
+            continue
+        filtered_guardrails.append((guardrail, action))
+    return filtered_guardrails
+
 
 def _create_guardrails_subgraph(
     main_inner_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
     scope: GuardrailScope,
+    execution_stages: Sequence[ExecutionStage],
     node_factory: Callable[
         [
             BaseGuardrail,
@@ -31,32 +59,58 @@ def _create_guardrails_subgraph(
 ):
     """Build a subgraph that enforces guardrails around an inner node.
 
-    START -> pre-eval nodes (dynamic goto) -> inner -> post-eval nodes (dynamic goto) -> END
+    The constructed graph conditionally includes pre- and/or post-execution guardrail
+    chains based on ``execution_stages``:
+    - If ``ExecutionStage.PRE_EXECUTION`` is included, the graph links
+      START -> first pre-guardrail node -> ... -> inner.
+      Otherwise, it directly links START -> inner.
+    - If ``ExecutionStage.POST_EXECUTION`` is included, the graph links
+      inner -> first post-guardrail node -> ... -> END.
+      Otherwise, it directly links inner -> END.
 
-    No static edges are added between guardrail nodes; each eval decides via Command.
-    Failure nodes are added but not chained; they are expected to route via Command.
+    No static edges are added between guardrail nodes; each evaluation node routes
+    dynamically to its configured success/failure targets. Failure nodes are added
+    but not chained; they are expected to route via Command to the provided next node.
     """
     inner_name, inner_node = main_inner_node
 
     subgraph = StateGraph(AgentGuardrailsGraphState)
 
+    subgraph.add_node(inner_name, inner_node)
+
     # Add pre execution guardrail nodes
-    first_pre_exec_guardrail_node = _build_guardrail_node_chain(
-        subgraph,
-        guardrails,
-        scope,
-        ExecutionStage.PRE_EXECUTION,
-        node_factory,
-        inner_name,
-    )
-    subgraph.add_edge(START, first_pre_exec_guardrail_node)
+    if ExecutionStage.PRE_EXECUTION in execution_stages:
+        pre_guardrails = _filter_guardrails_by_stage(
+            guardrails, ExecutionStage.PRE_EXECUTION
+        )
+        first_pre_exec_guardrail_node = _build_guardrail_node_chain(
+            subgraph,
+            pre_guardrails,
+            scope,
+            ExecutionStage.PRE_EXECUTION,
+            node_factory,
+            inner_name,
+        )
+        subgraph.add_edge(START, first_pre_exec_guardrail_node)
+    else:
+        subgraph.add_edge(START, inner_name)
 
     # Add post execution guardrail nodes
-    first_post_exec_guardrail_node = _build_guardrail_node_chain(
-        subgraph, guardrails, scope, ExecutionStage.POST_EXECUTION, node_factory, END
-    )
-    subgraph.add_node(inner_name, inner_node)
-    subgraph.add_edge(inner_name, first_post_exec_guardrail_node)
+    if ExecutionStage.POST_EXECUTION in execution_stages:
+        post_guardrails = _filter_guardrails_by_stage(
+            guardrails, ExecutionStage.POST_EXECUTION
+        )
+        first_post_exec_guardrail_node = _build_guardrail_node_chain(
+            subgraph,
+            post_guardrails,
+            scope,
+            ExecutionStage.POST_EXECUTION,
+            node_factory,
+            END,
+        )
+        subgraph.add_edge(inner_name, first_post_exec_guardrail_node)
+    else:
+        subgraph.add_edge(inner_name, END)
 
     return subgraph.compile()
 
@@ -143,6 +197,7 @@ def create_llm_guardrails_subgraph(
         main_inner_node=llm_node,
         guardrails=applicable_guardrails,
         scope=GuardrailScope.LLM,
+        execution_stages=[ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION],
         node_factory=create_llm_guardrail_node,
     )
 
@@ -150,7 +205,13 @@ def create_llm_guardrails_subgraph(
 def create_agent_guardrails_subgraph(
     agent_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    execution_stage: ExecutionStage,
 ):
+    """Create a subgraph for AGENT-scoped guardrails that applies checks at the specified stage.
+
+    This is intended for wrapping nodes like INIT or TERMINATE, where guardrails should run
+    either before (pre-execution) or after (post-execution) the node logic.
+    """
     applicable_guardrails = [
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
@@ -160,6 +221,7 @@ def create_agent_guardrails_subgraph(
         main_inner_node=agent_node,
         guardrails=applicable_guardrails,
         scope=GuardrailScope.AGENT,
+        execution_stages=[execution_stage],
         node_factory=create_agent_guardrail_node,
     )
 
@@ -180,5 +242,6 @@ def create_tool_guardrails_subgraph(
         main_inner_node=tool_node,
         guardrails=applicable_guardrails,
         scope=GuardrailScope.TOOL,
+        execution_stages=[ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION],
         node_factory=create_tool_guardrail_node,
     )
