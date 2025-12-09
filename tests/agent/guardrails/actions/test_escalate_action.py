@@ -176,10 +176,13 @@ class TestEscalateAction:
             await node(state)
 
         assert excinfo.value.error_info.title == "Escalation rejected"
-        assert excinfo.value.error_info.detail == "Escalation rejected"
+        assert (
+            excinfo.value.error_info.detail
+            == "Action was rejected after reviewing the task created by guardrail [Test Guardrail]. Please contact your administrator."
+        )
         assert (
             excinfo.value.error_info.code
-            == f"Python.{UiPathErrorCode.CREATE_RESUME_TRIGGER_ERROR.value}"
+            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
         )
 
     @pytest.mark.asyncio

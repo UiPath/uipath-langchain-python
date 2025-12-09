@@ -78,9 +78,9 @@ class EscalateAction(GuardrailAction):
                 )
 
             raise AgentTerminationException(
-                code=UiPathErrorCode.CREATE_RESUME_TRIGGER_ERROR,
+                code=UiPathErrorCode.EXECUTION_ERROR,
                 title="Escalation rejected",
-                detail="Escalation rejected",
+                detail=f"Action was rejected after reviewing the task created by guardrail [{guardrail.name}]. Please contact your administrator.",
             )
 
         return node_name, _node
