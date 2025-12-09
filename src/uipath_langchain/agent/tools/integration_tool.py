@@ -142,33 +142,34 @@ def create_integration_tool(
         else create_model({"type": "object", "properties": {}})
     )
 
-    sdk = UiPath()
-
-    @mockable(
-        name=resource.name,
-        description=resource.description,
-        input_schema=input_model.model_json_schema(),
-        output_schema=output_model.model_json_schema(),
-    )
     async def integration_tool_fn(runtime: ToolRuntime, **kwargs: Any):
-        try:
-            # we manually validating here and not passing input_model to StructuredTool
-            # because langchain itself will block their own injected arguments (like runtime) if the model is strict
-            val_args = input_model.model_validate(kwargs)
-            args = handle_static_args(
-                resource=resource,
-                runtime=runtime,
-                input_args=val_args.model_dump(),
-            )
-            result = await sdk.connections.invoke_activity_async(
-                activity_metadata=activity_metadata,
-                connection_id=connection_id,
-                activity_input=args,
-            )
-        except Exception:
-            raise
+        @mockable(
+            name=resource.name,
+            description=resource.description,
+            input_schema=input_model.model_json_schema(),
+            output_schema=output_model.model_json_schema(),
+            example_calls=[],  # TODO: pass these in from runtime.
+        )
+        async def integration_tool_fn_impl(**inner_kwargs: Any):
+            try:
+                # we manually validating here and not passing input_model to StructuredTool
+                # because langchain itself will block their own injected arguments (like runtime) if the model is strict
+                sdk = UiPath()
+                val_args = input_model.model_validate(inner_kwargs)
+                args = handle_static_args(
+                    resource=resource,
+                    runtime=runtime,
+                    input_args=val_args.model_dump(),
+                )
+                return await sdk.connections.invoke_activity_async(
+                    activity_metadata=activity_metadata,
+                    connection_id=connection_id,
+                    activity_input=args,
+                )
+            except Exception:
+                raise
 
-        return result
+        return await integration_tool_fn_impl(**kwargs)
 
     tool = StructuredToolWithOutputType(
         name=tool_name,
