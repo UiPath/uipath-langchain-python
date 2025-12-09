@@ -7,7 +7,6 @@ from langchain_core.tools import tool
 from langchain_experimental.utilities import PythonREPL
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langchain.agents import create_agent
-from langgraph.types import Command
 from pydantic import BaseModel
 from typing_extensions import TypedDict
 
@@ -82,52 +81,65 @@ def input(state: GraphInput):
         "next": "",
     }
 
-async def supervisor_node(state: State) -> Command[Literal[*members]] | GraphOutput:
+async def supervisor_node(state: State) -> dict | GraphOutput:
     response = await llm.with_structured_output(Router).ainvoke(state["messages"])
     goto = response["next"]
     if goto == "FINISH":
         return GraphOutput(answer=get_message_text(state["messages"][-1]))
     else:
-        return Command(goto=goto, update={"next": goto})
+        return {"next": goto}
+
+def route_supervisor(state: State) -> Literal["researcher", "coder"] | Literal["__end__"]:
+    next_node = state.get("next", "")
+    if next_node == "researcher":
+        return "researcher"
+    elif next_node == "coder":
+        return "coder"
+    else:
+        return END
 
 research_agent = create_agent(
     llm, tools=[tavily_tool], system_prompt="You are a researcher. DO NOT do any math."
 )
 
 
-async def research_node(state: State) -> Command[Literal["supervisor"]]:
+async def research_node(state: State):
     result = await research_agent.ainvoke(state)
-    return Command(
-        update={
-            "messages": [
-                HumanMessage(content=result["messages"][-1].content, name="researcher")
-            ]
-        },
-        goto="supervisor",
-    )
+    return {
+        "messages": [
+            HumanMessage(content=result["messages"][-1].content, name="researcher")
+        ]
+    }
 
 
 # NOTE: THIS PERFORMS ARBITRARY CODE EXECUTION, WHICH CAN BE UNSAFE WHEN NOT SANDBOXED
 code_agent = create_agent(llm, tools=[python_repl_tool])
 
 
-async def code_node(state: State) -> Command[Literal["supervisor"]]:
+async def code_node(state: State):
     result = await code_agent.ainvoke(state)
-    return Command(
-        update={
-            "messages": [
-                HumanMessage(content=result["messages"][-1].content, name="coder")
-            ]
-        },
-        goto="supervisor",
-    )
+    return {
+        "messages": [
+            HumanMessage(content=result["messages"][-1].content, name="coder")
+        ]
+    }
 
 
 builder = StateGraph(State, input=GraphInput, output=GraphOutput)
-builder.add_edge(START, "input")
-builder.add_edge("input", "supervisor")
 builder.add_node("input", input)
 builder.add_node("supervisor", supervisor_node)
 builder.add_node("researcher", research_node)
 builder.add_node("coder", code_node)
+
+builder.add_edge(START, "input")
+builder.add_edge("input", "supervisor")
+builder.add_conditional_edges("supervisor", route_supervisor, {
+    "researcher": "researcher",
+    "coder": "coder",
+    END: END
+})
+builder.add_edge("researcher", "supervisor")
+builder.add_edge("coder", "supervisor")
+builder.add_edge("supervisor", END)
+
 graph = builder.compile()

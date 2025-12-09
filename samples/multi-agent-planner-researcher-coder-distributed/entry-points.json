@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "planner",
-            "uniqueId": "20d32728-256f-4087-b566-2aa1a3d44524",
+            "uniqueId": "7ab9bf62-e4a4-4261-8b47-0223be930f45",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -34,38 +34,44 @@
                     {
                         "id": "__start__",
                         "name": "__start__",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
                     },
                     {
                         "id": "input",
                         "name": "input",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
                     },
                     {
                         "id": "create_plan",
                         "name": "create_plan",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
                     },
                     {
                         "id": "supervisor",
                         "name": "supervisor",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
                     },
                     {
                         "id": "invoke_agent",
                         "name": "invoke_agent",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
                     },
                     {
                         "id": "__end__",
                         "name": "__end__",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
                     }
                 ],
                 "edges": [
@@ -83,13 +89,23 @@
                         "source": "supervisor",
                         "target": "__end__",
                         "label": null
+                    },
+                    {
+                        "source": "create_plan",
+                        "target": "supervisor",
+                        "label": null
+                    },
+                    {
+                        "source": "invoke_agent",
+                        "target": "supervisor",
+                        "label": null
                     }
                 ]
             }
         },
         {
             "filePath": "researcher",
-            "uniqueId": "66a715f2-da76-4c5a-a36e-1f6d119a9162",
+            "uniqueId": "834546c0-6741-4a84-9159-dcc40f5942e8",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -1171,69 +1187,95 @@
                     {
                         "id": "__start__",
                         "name": "__start__",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "researcher",
+                        "name": "researcher",
+                        "type": "node",
+                        "subgraph": {
+                            "nodes": [
+                                {
+                                    "id": "__start__",
+                                    "name": "__start__",
+                                    "type": "__start__",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                },
+                                {
+                                    "id": "model",
+                                    "name": "model",
+                                    "type": "model",
+                                    "subgraph": null,
+                                    "metadata": {
+                                        "model_name": "claude-3-7-sonnet-latest",
+                                        "max_tokens": 64000
+                                    }
+                                },
+                                {
+                                    "id": "tools",
+                                    "name": "tools",
+                                    "type": "tool",
+                                    "subgraph": null,
+                                    "metadata": {
+                                        "tool_names": [
+                                            "tavily_search"
+                                        ],
+                                        "tool_count": 1
+                                    }
+                                },
+                                {
+                                    "id": "__end__",
+                                    "name": "__end__",
+                                    "type": "__end__",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                }
+                            ],
+                            "edges": [
+                                {
+                                    "source": "__start__",
+                                    "target": "model",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "__end__",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "tools",
+                                    "label": null
+                                },
+                                {
+                                    "source": "tools",
+                                    "target": "model",
+                                    "label": null
+                                }
+                            ]
+                        },
+                        "metadata": {}
                     },
                     {
                         "id": "__end__",
                         "name": "__end__",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "researcher:__start__",
-                        "name": "__start__",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "researcher:model",
-                        "name": "model",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "researcher:tools",
-                        "name": "tools",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "researcher:__end__",
-                        "name": "__end__",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
                     }
                 ],
                 "edges": [
                     {
                         "source": "__start__",
-                        "target": "researcher:__start__",
+                        "target": "researcher",
                         "label": null
                     },
                     {
-                        "source": "researcher:__end__",
+                        "source": "researcher",
                         "target": "__end__",
-                        "label": null
-                    },
-                    {
-                        "source": "researcher:__start__",
-                        "target": "researcher:model",
-                        "label": null
-                    },
-                    {
-                        "source": "researcher:model",
-                        "target": "researcher:__end__",
-                        "label": null
-                    },
-                    {
-                        "source": "researcher:model",
-                        "target": "researcher:tools",
-                        "label": null
-                    },
-                    {
-                        "source": "researcher:tools",
-                        "target": "researcher:model",
                         "label": null
                     }
                 ]
@@ -1241,7 +1283,7 @@
         },
         {
             "filePath": "coder",
-            "uniqueId": "96301097-e149-4415-8ab1-ad07dba84aef",
+            "uniqueId": "49f05858-56b9-412e-affb-c63048d689bc",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -2323,69 +2365,95 @@
                     {
                         "id": "__start__",
                         "name": "__start__",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "coder",
+                        "name": "coder",
+                        "type": "node",
+                        "subgraph": {
+                            "nodes": [
+                                {
+                                    "id": "__start__",
+                                    "name": "__start__",
+                                    "type": "__start__",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                },
+                                {
+                                    "id": "model",
+                                    "name": "model",
+                                    "type": "model",
+                                    "subgraph": null,
+                                    "metadata": {
+                                        "model_name": "claude-3-7-sonnet-latest",
+                                        "max_tokens": 64000
+                                    }
+                                },
+                                {
+                                    "id": "tools",
+                                    "name": "tools",
+                                    "type": "tool",
+                                    "subgraph": null,
+                                    "metadata": {
+                                        "tool_names": [
+                                            "python_repl_tool"
+                                        ],
+                                        "tool_count": 1
+                                    }
+                                },
+                                {
+                                    "id": "__end__",
+                                    "name": "__end__",
+                                    "type": "__end__",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                }
+                            ],
+                            "edges": [
+                                {
+                                    "source": "__start__",
+                                    "target": "model",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "__end__",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "tools",
+                                    "label": null
+                                },
+                                {
+                                    "source": "tools",
+                                    "target": "model",
+                                    "label": null
+                                }
+                            ]
+                        },
+                        "metadata": {}
                     },
                     {
                         "id": "__end__",
                         "name": "__end__",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "coder:__start__",
-                        "name": "__start__",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "coder:model",
-                        "name": "model",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "coder:tools",
-                        "name": "tools",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "coder:__end__",
-                        "name": "__end__",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
                     }
                 ],
                 "edges": [
                     {
                         "source": "__start__",
-                        "target": "coder:__start__",
+                        "target": "coder",
                         "label": null
                     },
                     {
-                        "source": "coder:__end__",
+                        "source": "coder",
                         "target": "__end__",
-                        "label": null
-                    },
-                    {
-                        "source": "coder:__start__",
-                        "target": "coder:model",
-                        "label": null
-                    },
-                    {
-                        "source": "coder:model",
-                        "target": "coder:__end__",
-                        "label": null
-                    },
-                    {
-                        "source": "coder:model",
-                        "target": "coder:tools",
-                        "label": null
-                    },
-                    {
-                        "source": "coder:tools",
-                        "target": "coder:model",
                         "label": null
                     }
                 ]

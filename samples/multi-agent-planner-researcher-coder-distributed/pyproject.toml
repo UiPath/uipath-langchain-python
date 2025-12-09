@@ -9,8 +9,8 @@ dependencies = [
     "langchain-anthropic>=1.2.0",
     "langchain-experimental>=0.4.0",
     "langchain-tavily>=0.2.13",
-    "uipath-langchain>=0.1.0, <0.2.0",
-    "uipath>=2.2.0, <2.3.0",
+    "uipath-langchain>=0.1.22, <0.2.0",
+    "uipath>=2.2.26, <2.3.0",
 ]
 
 [project.optional-dependencies]

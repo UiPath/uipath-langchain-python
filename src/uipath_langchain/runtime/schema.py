@@ -7,6 +7,8 @@ from langchain_core.runnables.base import Runnable
 from langchain_core.runnables.graph import Graph, Node
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
+from langgraph.pregel._read import PregelNode
+from langgraph.pregel._write import ChannelWrite, ChannelWriteEntry
 from uipath.runtime.schema import (
     UiPathRuntimeEdge,
     UiPathRuntimeGraph,
@@ -193,7 +195,6 @@ def get_graph_schema(
     nodes: list[UiPathRuntimeNode] = []
     for node_id, node in graph.nodes.items():
         subgraph: UiPathRuntimeGraph | None = subgraphs_dict.get(node_id)
-
         nodes.append(
             UiPathRuntimeNode(
                 id=node.id,
@@ -204,15 +205,51 @@ def get_graph_schema(
             )
         )
 
+    # Use a set to track unique edges (source, target)
+    seen_edges: set[tuple[str, str]] = set()
     edges: list[UiPathRuntimeEdge] = []
+
+    # First, add edges from graph.edges (static edges)
     for edge in graph.edges:
-        edges.append(
-            UiPathRuntimeEdge(
-                source=edge.source,
-                target=edge.target,
-                label=getattr(edge, "data", None) or getattr(edge, "label", None),
+        edge_tuple = (edge.source, edge.target)
+        if edge_tuple not in seen_edges:
+            seen_edges.add(edge_tuple)
+            edges.append(
+                UiPathRuntimeEdge(
+                    source=edge.source,
+                    target=edge.target,
+                    label=getattr(edge, "data", None) or getattr(edge, "label", None),
+                )
             )
-        )
+
+    # Build a map of channel -> target node
+    channel_to_target: dict[str, str] = {}
+    node_spec: PregelNode
+    for node_name, node_spec in compiled_graph.nodes.items():
+        for trigger in node_spec.triggers:
+            if isinstance(trigger, str) and trigger.startswith("branch:to:"):
+                channel_to_target[trigger] = node_name
+
+    # Extract edges by looking at what each node writes to (dynamic edges from Command)
+    for source_name, node_spec in compiled_graph.nodes.items():
+        writer: Runnable[Any, Any]
+        for writer in node_spec.writers:
+            if isinstance(writer, ChannelWrite):
+                write_entry: Any
+                for write_entry in writer.writes:
+                    if isinstance(write_entry, ChannelWriteEntry) and isinstance(
+                        write_entry.channel, str
+                    ):
+                        target = channel_to_target.get(write_entry.channel)
+                        if target:
+                            edge_tuple = (source_name, target)
+                            if edge_tuple not in seen_edges:
+                                seen_edges.add(edge_tuple)
+                                edges.append(
+                                    UiPathRuntimeEdge(
+                                        source=source_name, target=target, label=None
+                                    )
+                                )
 
     return UiPathRuntimeGraph(nodes=nodes, edges=edges)
 

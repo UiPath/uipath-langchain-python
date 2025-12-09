@@ -4,7 +4,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langgraph.graph import START, MessagesState, StateGraph
+from langgraph.graph import START, END, MessagesState, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
@@ -142,26 +142,32 @@ async def create_plan(state: State) -> Command:
     )
 
 
-def supervisor_node(state: State) -> Command | GraphOutput:
+def supervisor_node(state: State) -> dict | GraphOutput:
     """Execute the next step in the plan or finish if complete."""
     plan = state["execution_plan"]
 
     # If no plan exists, create one
     if plan is None:
-        return Command(goto="create_plan")
+        return {}  # Will route to create_plan
 
     # If we've completed all steps, finish
     if state["current_step"] >= len(plan.steps):
         return GraphOutput(answer=state["messages"][-1].content)
 
-    # Get the next step from the plan
+    # Get the next step from the plan and UPDATE STATE
     next_step = plan.steps[state["current_step"]]
-    next_agent = next_step.agent
-    next_task = next_step.task
+    return {
+        "next": next_step.agent,
+        "next_task": next_step.task
+    }
 
-    # Return command to invoke the next agent
-    return Command(goto="invoke_agent", update={"next": next_agent, "next_task": next_task})
 
+def route_supervisor(state: State):
+    if state.get("execution_plan") is None:
+        return "create_plan"
+    if state["current_step"] >= len(state["execution_plan"].steps):
+        return END
+    return "invoke_agent"
 
 def invoke_agent(state: State) -> Command:
     """Invoke the agent specified in the current step of the execution plan."""
@@ -194,8 +200,6 @@ def invoke_agent(state: State) -> Command:
         goto="supervisor",
     )
 
-
-# Build the state graph
 builder = StateGraph(State, input=GraphInput, output=GraphOutput)
 builder.add_node("input", input)
 builder.add_node("create_plan", create_plan)
@@ -204,9 +208,8 @@ builder.add_node("invoke_agent", invoke_agent)
 
 builder.add_edge(START, "input")
 builder.add_edge("input", "supervisor")
+builder.add_conditional_edges("supervisor", route_supervisor)
 builder.add_edge("create_plan", "supervisor")
 builder.add_edge("invoke_agent", "supervisor")
 
-
-# Compile the graph
 graph = builder.compile()
