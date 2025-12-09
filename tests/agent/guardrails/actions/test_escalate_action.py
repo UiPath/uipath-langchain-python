@@ -1,7 +1,6 @@
 """Tests for EscalateAction guardrail failure behavior."""
 
 import json
-from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -221,7 +220,7 @@ class TestEscalateAction:
         # Verify ToolOutputs is used for PostExecution
         call_args = mock_interrupt.call_args[0][0]
         assert call_args.data["Outputs"] == '["Test response"]'
-        assert "ToolInputs" not in call_args.data
+        assert "Inputs" not in call_args.data
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -593,12 +592,9 @@ class TestEscalateAction:
         call_args = mock_interrupt.call_args[0][0]
 
         assert call_args.data["GuardrailName"] == "Test Guardrail"
-        assert call_args.data["Tool"] == "tool"
+        assert call_args.data["Component"] == "tool"
         assert call_args.data["ExecutionStage"] == "PreExecution"
-        assert "ToolInputs" in call_args.data
-        tool_inputs = json.loads(call_args.data["ToolInputs"])
-        assert len(tool_inputs) == 1
-        assert tool_inputs[0] == {"input": "test"}
+        assert call_args.data["Inputs"] == '[{"input": "test"}]'
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -718,7 +714,7 @@ class TestEscalateAction:
         await node(state)
 
         call_args = mock_interrupt.call_args[0][0]
-        assert call_args.data["ToolOutputs"] == "Tool execution result"
+        assert call_args.data["Outputs"] == "Tool execution result"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
