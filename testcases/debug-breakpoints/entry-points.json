@@ -1,0 +1,144 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "e5ac49b9-f9e0-4ac9-b10d-a7a593ad82e9",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "description": "The task to process",
+                        "title": "Task",
+                        "type": "string"
+                    },
+                    "value": {
+                        "description": "A numeric value to process",
+                        "title": "Value",
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "task",
+                    "value"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "default": null,
+                        "title": "Task",
+                        "type": "string"
+                    },
+                    "initial_value": {
+                        "default": null,
+                        "title": "Initial Value",
+                        "type": "integer"
+                    },
+                    "processed_value": {
+                        "default": null,
+                        "title": "Processed Value",
+                        "type": "integer"
+                    },
+                    "steps_completed": {
+                        "default": null,
+                        "items": {
+                            "type": "string"
+                        },
+                        "title": "Steps Completed",
+                        "type": "array"
+                    }
+                },
+                "required": []
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "prepare_input",
+                        "name": "prepare_input",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "process_step_1",
+                        "name": "process_step_1",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "process_step_2",
+                        "name": "process_step_2",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "process_step_3",
+                        "name": "process_step_3",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "finalize",
+                        "name": "finalize",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "prepare_input",
+                        "label": null
+                    },
+                    {
+                        "source": "prepare_input",
+                        "target": "process_step_1",
+                        "label": null
+                    },
+                    {
+                        "source": "process_step_1",
+                        "target": "process_step_2",
+                        "label": null
+                    },
+                    {
+                        "source": "process_step_2",
+                        "target": "process_step_3",
+                        "label": null
+                    },
+                    {
+                        "source": "process_step_3",
+                        "target": "finalize",
+                        "label": null
+                    },
+                    {
+                        "source": "finalize",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}
