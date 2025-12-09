@@ -8,12 +8,21 @@ Tests the interactive debugger functionality including:
 - Remove breakpoint (r command)
 - Quit debugger (q command)
 - Step mode (s command)
+
+Interactions are recorded and printed at the end of each test.
 """
 
-import re
-import pexpect
 import sys
+from pathlib import Path
+
+import pexpect
 import pytest
+
+# Add testcases to path for common imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+from testcases.common import PromptTest
+
 
 # The command to run for all tests
 COMMAND = "uv run uipath debug agent --file input.json"
@@ -27,182 +36,224 @@ TIMEOUT = 30
 EXPECTED_FINAL_VALUE = "320"
 
 
-def strip_ansi(text: str) -> str:
-    """Remove ANSI escape codes from text."""
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return ansi_escape.sub('', text)
-
-
-def read_log(filename: str) -> str:
-    """Read and strip ANSI from log file."""
-    with open(filename, 'r', encoding='utf-8') as f:
-        return strip_ansi(f.read())
-
-
-def run_test(interactions, log_file):
-    """
-    A generic test runner for a sequence of debugger interactions.
-
-    Args:
-        interactions (list): A list of (command, expected_response) tuples.
-        log_file (str): File to log the complete session output.
-    """
-    print(f"\n--- Running test, logging to {log_file} ---")
-
-    child = pexpect.spawn(COMMAND, encoding='utf-8', timeout=TIMEOUT)
+def test_single_breakpoint():
+    """Test setting and hitting a single breakpoint."""
+    test = PromptTest(
+        command=COMMAND,
+        test_name="debug_single_breakpoint",
+        prompt=PROMPT,
+        timeout=TIMEOUT,
+    )
     try:
-        # Log everything to the specified file
-        child.logfile_read = open(log_file, "w")
+        test.start()
 
-        for i, (command, expected_response) in enumerate(interactions):
-            # Wait for the prompt before sending a command
-            child.expect(PROMPT)
-            print(f"Interaction {i+1}: Sending command '{command}'")
-            child.sendline(command)
+        test.send_command("b process_step_2", expect=r"Breakpoint set at: process_step_2")
+        test.send_command("c", expect=r"BREAKPOINT.*process_step_2.*before")
+        test.send_command("c", expect=r"Debug session completed")
 
-            # Check for the expected response
-            if expected_response:
-                print(f"Interaction {i+1}: Expecting '{expected_response}'")
-                child.expect(expected_response)
+        test.expect_eof()
 
-        # After all interactions, wait for the process to end
-        print("Waiting for process to complete...")
-        child.expect(pexpect.EOF)
-        print("--- Test completed successfully ---")
+        # Additional assertions on log file
+        output = test.get_output()
+        assert "processed_value" in output and EXPECTED_FINAL_VALUE in output, \
+            f"Final processed_value of {EXPECTED_FINAL_VALUE} not found"
 
     except (pexpect.exceptions.TIMEOUT, pexpect.exceptions.EOF) as e:
         print("\nERROR: Pexpect failed.", file=sys.stderr)
-        print(f"Failure during: pexpect.{type(e).__name__}", file=sys.stderr)
-        print("\n--- Child Output (Before Failure) ---", file=sys.stderr)
-        print(child.before, file=sys.stderr)
-        pytest.fail(f"Test failed in {log_file}: {e}")
+        print(f"Failure: {type(e).__name__}", file=sys.stderr)
+        print(f"\n--- Output before failure ---\n{test.before}", file=sys.stderr)
+        pytest.fail(f"Test failed: {e}")
     finally:
-        child.close()
-
-
-# === Debug Command Tests ===
-
-def test_single_breakpoint():
-    """Test setting and hitting a single breakpoint."""
-    interactions = [
-        ("b process_step_2", r"Breakpoint set at: process_step_2"),
-        ("c", r"BREAKPOINT.*process_step_2.*before"),
-        ("c", r"Debug session completed")
-    ]
-    run_test(interactions, "debug_single_breakpoint.log")
-
-    # Additional assertions on log file
-    output = read_log("debug_single_breakpoint.log")
-    assert "processed_value" in output and EXPECTED_FINAL_VALUE in output, \
-        f"Final processed_value of {EXPECTED_FINAL_VALUE} not found"
+        test.close()
 
 
 def test_multiple_breakpoints():
     """Test setting and hitting multiple breakpoints."""
-    interactions = [
-        ("b process_step_2", r"Breakpoint set at: process_step_2"),
-        ("b process_step_4", r"Breakpoint set at: process_step_4"),
-        ("c", r"BREAKPOINT.*process_step_2.*before"),
-        ("c", r"BREAKPOINT.*process_step_4.*before"),
-        ("c", r"Debug session completed")
-    ]
-    run_test(interactions, "debug_multiple_breakpoints.log")
+    test = PromptTest(
+        command=COMMAND,
+        test_name="debug_multiple_breakpoints",
+        prompt=PROMPT,
+        timeout=TIMEOUT,
+    )
+    try:
+        test.start()
 
-    # Additional assertions on log file
-    output = read_log("debug_multiple_breakpoints.log")
-    breakpoint_count = output.count("BREAKPOINT")
-    assert breakpoint_count >= 2, \
-        f"Expected at least 2 breakpoints hit, got {breakpoint_count}"
-    assert "processed_value" in output and EXPECTED_FINAL_VALUE in output, \
-        f"Final processed_value of {EXPECTED_FINAL_VALUE} not found"
+        test.send_command("b process_step_2", expect=r"Breakpoint set at: process_step_2")
+        test.send_command("b process_step_4", expect=r"Breakpoint set at: process_step_4")
+        test.send_command("c", expect=r"BREAKPOINT.*process_step_2.*before")
+        test.send_command("c", expect=r"BREAKPOINT.*process_step_4.*before")
+        test.send_command("c", expect=r"Debug session completed")
+
+        test.expect_eof()
+
+        # Additional assertions on log file
+        output = test.get_output()
+        breakpoint_count = output.count("BREAKPOINT")
+        assert breakpoint_count >= 2, \
+            f"Expected at least 2 breakpoints hit, got {breakpoint_count}"
+        assert "processed_value" in output and EXPECTED_FINAL_VALUE in output, \
+            f"Final processed_value of {EXPECTED_FINAL_VALUE} not found"
+
+    except (pexpect.exceptions.TIMEOUT, pexpect.exceptions.EOF) as e:
+        print("\nERROR: Pexpect failed.", file=sys.stderr)
+        print(f"Failure: {type(e).__name__}", file=sys.stderr)
+        print(f"\n--- Output before failure ---\n{test.before}", file=sys.stderr)
+        pytest.fail(f"Test failed: {e}")
+    finally:
+        test.close()
 
 
 def test_list_breakpoints():
     """Test listing active breakpoints with 'l' command."""
-    interactions = [
-        ("b process_step_2", r"Breakpoint set at: process_step_2"),
-        ("b process_step_3", r"Breakpoint set at: process_step_3"),
-        ("l", r"Active breakpoints:"),  # Check that list shows breakpoints
-        ("c", r"BREAKPOINT.*process_step_2.*before"),
-        ("c", r"BREAKPOINT.*process_step_3.*before"),
-        ("c", r"Debug session completed")
-    ]
-    run_test(interactions, "debug_list_breakpoints.log")
+    test = PromptTest(
+        command=COMMAND,
+        test_name="debug_list_breakpoints",
+        prompt=PROMPT,
+        timeout=TIMEOUT,
+    )
+    try:
+        test.start()
 
-    # Additional assertions on log file
-    output = read_log("debug_list_breakpoints.log")
-    assert "process_step_2" in output and "process_step_3" in output, \
-        "Not all breakpoints shown in list"
+        test.send_command("b process_step_2", expect=r"Breakpoint set at: process_step_2")
+        test.send_command("b process_step_3", expect=r"Breakpoint set at: process_step_3")
+        test.send_command("l", expect=r"Active breakpoints:")
+        test.send_command("c", expect=r"BREAKPOINT.*process_step_2.*before")
+        test.send_command("c", expect=r"BREAKPOINT.*process_step_3.*before")
+        test.send_command("c", expect=r"Debug session completed")
+
+        test.expect_eof()
+
+        # Additional assertions on log file
+        output = test.get_output()
+        assert "process_step_2" in output and "process_step_3" in output, \
+            "Not all breakpoints shown in list"
+
+    except (pexpect.exceptions.TIMEOUT, pexpect.exceptions.EOF) as e:
+        print("\nERROR: Pexpect failed.", file=sys.stderr)
+        print(f"Failure: {type(e).__name__}", file=sys.stderr)
+        print(f"\n--- Output before failure ---\n{test.before}", file=sys.stderr)
+        pytest.fail(f"Test failed: {e}")
+    finally:
+        test.close()
 
 
 def test_remove_breakpoint():
     """Test removing a breakpoint with 'r' command."""
-    interactions = [
-        ("b process_step_2", r"Breakpoint set at: process_step_2"),
-        ("b process_step_4", r"Breakpoint set at: process_step_4"),
-        ("l", r"Active breakpoints:"),  # Verify both are set
-        ("r process_step_2", r"Breakpoint removed: process_step_2"),
-        ("l", r"process_step_4"),  # Verify only step_4 is left
+    test = PromptTest(
+        command=COMMAND,
+        test_name="debug_remove_breakpoint",
+        prompt=PROMPT,
+        timeout=TIMEOUT,
+    )
+    try:
+        test.start()
+
+        test.send_command("b process_step_2", expect=r"Breakpoint set at: process_step_2")
+        test.send_command("b process_step_4", expect=r"Breakpoint set at: process_step_4")
+        test.send_command("l", expect=r"Active breakpoints:")
+        test.send_command("r process_step_2", expect=r"Breakpoint removed: process_step_2")
+        test.send_command("l", expect=r"process_step_4")
         # Now, continue and ensure we ONLY stop at step_4 (not step_2)
-        ("c", r"BREAKPOINT.*process_step_4.*before"),
-        ("c", r"Debug session completed")
-    ]
-    run_test(interactions, "debug_remove_breakpoint.log")
+        test.send_command("c", expect=r"BREAKPOINT.*process_step_4.*before")
+        test.send_command("c", expect=r"Debug session completed")
+
+        test.expect_eof()
+
+    except (pexpect.exceptions.TIMEOUT, pexpect.exceptions.EOF) as e:
+        print("\nERROR: Pexpect failed.", file=sys.stderr)
+        print(f"Failure: {type(e).__name__}", file=sys.stderr)
+        print(f"\n--- Output before failure ---\n{test.before}", file=sys.stderr)
+        pytest.fail(f"Test failed: {e}")
+    finally:
+        test.close()
 
 
 def test_quit_debugger():
     """Test quitting the debugger early with 'q' command."""
-    interactions = [
-        ("b process_step_3", r"Breakpoint set at: process_step_3"),
-        ("c", r"BREAKPOINT.*process_step_3.*before"),
-        ("q", None)  # No specific output expected, just EOF
-    ]
-    run_test(interactions, "debug_quit.log")
+    test = PromptTest(
+        command=COMMAND,
+        test_name="debug_quit",
+        prompt=PROMPT,
+        timeout=TIMEOUT,
+    )
+    try:
+        test.start()
 
-    # Additional assertions on log file
-    output = read_log("debug_quit.log")
+        test.send_command("b process_step_3", expect=r"Breakpoint set at: process_step_3")
+        test.send_command("c", expect=r"BREAKPOINT.*process_step_3.*before")
+        # Quit - no specific output expected, just EOF
+        test.send_command("q")
 
-    # Steps 1 and 2 should have executed before the breakpoint
-    assert "step_1_double" in output, "step_1 did not execute before quit"
-    assert "step_2_add_100" in output, "step_2 did not execute before quit"
+        test.expect_eof()
 
-    # Step 3 should NOT have executed (we quit at the breakpoint BEFORE step_3)
-    assert "step_3_multiply_3" not in output, \
-        "step_3 should not have executed - quit was before step_3"
+        # Additional assertions on log file
+        output = test.get_output()
+
+        # Steps 1 and 2 should have executed before the breakpoint
+        assert "step_1_double" in output, "step_1 did not execute before quit"
+        assert "step_2_add_100" in output, "step_2 did not execute before quit"
+
+        # Step 3 should NOT have executed (we quit at the breakpoint BEFORE step_3)
+        assert "step_3_multiply_3" not in output, \
+            "step_3 should not have executed - quit was before step_3"
+
+    except (pexpect.exceptions.TIMEOUT, pexpect.exceptions.EOF) as e:
+        print("\nERROR: Pexpect failed.", file=sys.stderr)
+        print(f"Failure: {type(e).__name__}", file=sys.stderr)
+        print(f"\n--- Output before failure ---\n{test.before}", file=sys.stderr)
+        pytest.fail(f"Test failed: {e}")
+    finally:
+        test.close()
 
 
 def test_step_mode():
     """Test step mode - breaks on every node."""
-    interactions = [
-        ("s", r"BREAKPOINT.*prepare_input.*before"),
-        ("s", r"BREAKPOINT.*process_step_1.*before"),
-        ("s", r"BREAKPOINT.*process_step_2.*before"),
-        ("s", r"BREAKPOINT.*process_step_3.*before"),
-        ("s", r"BREAKPOINT.*process_step_4.*before"),
-        ("s", r"BREAKPOINT.*process_step_5.*before"),
-        ("s", r"BREAKPOINT.*finalize.*before"),
-        ("s", r"Debug session completed")
-    ]
-    run_test(interactions, "debug_step_mode.log")
+    test = PromptTest(
+        command=COMMAND,
+        test_name="debug_step_mode",
+        prompt=PROMPT,
+        timeout=TIMEOUT,
+    )
+    try:
+        test.start()
 
-    # Additional assertions on log file
-    output = read_log("debug_step_mode.log")
+        test.send_command("s", expect=r"BREAKPOINT.*prepare_input.*before")
+        test.send_command("s", expect=r"BREAKPOINT.*process_step_1.*before")
+        test.send_command("s", expect=r"BREAKPOINT.*process_step_2.*before")
+        test.send_command("s", expect=r"BREAKPOINT.*process_step_3.*before")
+        test.send_command("s", expect=r"BREAKPOINT.*process_step_4.*before")
+        test.send_command("s", expect=r"BREAKPOINT.*process_step_5.*before")
+        test.send_command("s", expect=r"BREAKPOINT.*finalize.*before")
+        test.send_command("s", expect=r"Debug session completed")
 
-    # Count breakpoints - should have 7 (one per node)
-    breakpoint_count = output.count("BREAKPOINT")
-    assert breakpoint_count >= 7, \
-        f"Expected at least 7 breakpoints in step mode, got {breakpoint_count}"
+        test.expect_eof()
 
-    # Check all steps executed
-    assert "step_1_double" in output, "step_1 not found in step mode output"
-    assert "step_2_add_100" in output, "step_2 not found in step mode output"
-    assert "step_3_multiply_3" in output, "step_3 not found in step mode output"
-    assert "step_4_subtract_50" in output, "step_4 not found in step mode output"
-    assert "step_5_add_10" in output, "step_5 not found in step mode output"
+        # Additional assertions on log file
+        output = test.get_output()
 
-    # Check final value
-    assert "processed_value" in output and EXPECTED_FINAL_VALUE in output, \
-        f"Final processed_value of {EXPECTED_FINAL_VALUE} not found"
+        # Count breakpoints - should have 7 (one per node)
+        breakpoint_count = output.count("BREAKPOINT")
+        assert breakpoint_count >= 7, \
+            f"Expected at least 7 breakpoints in step mode, got {breakpoint_count}"
+
+        # Check all steps executed
+        assert "step_1_double" in output, "step_1 not found in step mode output"
+        assert "step_2_add_100" in output, "step_2 not found in step mode output"
+        assert "step_3_multiply_3" in output, "step_3 not found in step mode output"
+        assert "step_4_subtract_50" in output, "step_4 not found in step mode output"
+        assert "step_5_add_10" in output, "step_5 not found in step mode output"
+
+        # Check final value
+        assert "processed_value" in output and EXPECTED_FINAL_VALUE in output, \
+            f"Final processed_value of {EXPECTED_FINAL_VALUE} not found"
+
+    except (pexpect.exceptions.TIMEOUT, pexpect.exceptions.EOF) as e:
+        print("\nERROR: Pexpect failed.", file=sys.stderr)
+        print(f"Failure: {type(e).__name__}", file=sys.stderr)
+        print(f"\n--- Output before failure ---\n{test.before}", file=sys.stderr)
+        pytest.fail(f"Test failed: {e}")
+    finally:
+        test.close()
 
 
 if __name__ == "__main__":
