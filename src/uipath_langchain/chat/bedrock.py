@@ -81,7 +81,6 @@ class AwsBedrockCompletionsPassthroughClient:
             region_name="none",
             aws_access_key_id="none",
             aws_secret_access_key="none",
-            verify=False,
         )
         client.meta.events.register(
             "before-send.bedrock-runtime.*", self._modify_request
