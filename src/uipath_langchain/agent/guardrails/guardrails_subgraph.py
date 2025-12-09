@@ -18,6 +18,11 @@ from .guardrail_nodes import (
 )
 from .types import AgentGuardrailsGraphState
 
+_VALIDATOR_ALLOWED_STAGES = {
+    "prompt_injection": {ExecutionStage.PRE_EXECUTION},
+    "pii_detection": {ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION},
+}
+
 
 def _filter_guardrails_by_stage(
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
@@ -26,11 +31,11 @@ def _filter_guardrails_by_stage(
     """Filter guardrails that apply to a specific execution stage."""
     filtered_guardrails = []
     for guardrail, action in guardrails or []:
-        # Internal knowledge: Prompt injection should only run pre-execution
+        # Internal knowledge: Check against configured allowed stages
         if (
             isinstance(guardrail, BuiltInValidatorGuardrail)
-            and guardrail.validator_type == "prompt_injection"
-            and stage == ExecutionStage.POST_EXECUTION
+            and guardrail.validator_type in _VALIDATOR_ALLOWED_STAGES
+            and stage not in _VALIDATOR_ALLOWED_STAGES[guardrail.validator_type]
         ):
             continue
         filtered_guardrails.append((guardrail, action))
