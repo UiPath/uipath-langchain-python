@@ -70,9 +70,6 @@ class CustomPredictionServiceRestTransport(PredictionServiceRestTransport):
         kwargs.setdefault("credentials", AnonymousCredentials())
         super().__init__(**kwargs)
 
-        # Disable SSL verification for testing
-        self._session.verify = False
-
         original_request = self._session.request
 
         def redirected_request(method, url, **kwargs_inner):
@@ -159,7 +156,7 @@ class CustomPredictionServiceRestAsyncTransport:
         if streaming:
             headers["X-UiPath-Streaming-Enabled"] = "true"
 
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector(ssl=True)
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.post(
                 self.llmgw_url, headers=headers, data=request_json
