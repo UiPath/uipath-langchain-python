@@ -12,6 +12,7 @@ from langchain_core.messages import (
     ToolCallChunk,
     ToolMessage,
 )
+from pydantic import ValidationError
 from uipath.core.chat import (
     UiPathConversationContentPartChunkEvent,
     UiPathConversationContentPartEndEvent,
@@ -79,6 +80,17 @@ class UiPathChatMessagesMapper:
             return self._map_messages_internal(
                 cast(list[UiPathConversationMessage], messages)
             )
+
+        # Case3: List[dict] -> parse to List[UiPathConversationMessage]
+        if isinstance(first, dict):
+            try:
+                parsed_messages = [
+                    UiPathConversationMessage.model_validate(message)
+                    for message in messages
+                ]
+                return self._map_messages_internal(parsed_messages)
+            except ValidationError:
+                pass
 
         # Fallback: unknown type – just pass through
         return messages
@@ -274,7 +286,7 @@ class UiPathChatMessagesMapper:
                     ),
                     end=UiPathConversationToolCallEndEvent(
                         timestamp=timestamp,
-                        result=UiPathInlineValue(inline=content_value),
+                        output=UiPathInlineValue(inline=content_value),
                     ),
                 ),
             )
