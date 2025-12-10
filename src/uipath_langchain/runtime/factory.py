@@ -21,6 +21,7 @@ from uipath.runtime import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._tracing import _instrument_traceable_attributes
+from uipath_langchain._tracing.tracer import is_custom_instrumentation_enabled
 from uipath_langchain.runtime.config import LangGraphConfig
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.graph import LangGraphLoader
@@ -56,7 +57,9 @@ class UiPathLangGraphRuntimeFactory:
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
         """Setup tracing and instrumentation."""
         _instrument_traceable_attributes()
-        LangChainInstrumentor().instrument()
+        # Skip OpenInference auto-instrumentation when custom instrumentation is enabled
+        if not is_custom_instrumentation_enabled():
+            LangChainInstrumentor().instrument()
         UiPathSpanUtils.register_current_span_provider(get_current_span)
         UiPathSpanUtils.register_current_span_ancestors_provider(get_ancestor_spans)
 

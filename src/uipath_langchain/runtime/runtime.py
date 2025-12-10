@@ -22,6 +22,10 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
+from uipath_langchain._tracing.tracer import (
+    get_tracer,
+    is_custom_instrumentation_enabled,
+)
 from uipath_langchain.chat import UiPathChatMessagesMapper
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
@@ -61,7 +65,44 @@ class UiPathLangGraphRuntime:
         input: dict[str, Any] | None = None,
         options: UiPathExecuteOptions | None = None,
     ) -> UiPathRuntimeResult:
-        """Execute the graph with the provided input and configuration."""
+        """Execute the graph with the provided input and configuration.
+
+        If UIPATH_CUSTOM_INSTRUMENTATION is enabled, wraps execution in
+        an "Agent run" span matching C# Agents schema.
+        """
+        if is_custom_instrumentation_enabled():
+            return await self._execute_traced(input, options)
+        return await self._execute_core(input, options)
+
+    async def _execute_traced(
+        self,
+        input: dict[str, Any] | None = None,
+        options: UiPathExecuteOptions | None = None,
+    ) -> UiPathRuntimeResult:
+        """Execute with custom instrumentation - wraps in Agent run span."""
+        tracer = get_tracer()
+
+        # Use entrypoint as agent name, fallback to runtime_id
+        agent_name = self.entrypoint or self.runtime_id
+
+        with tracer.start_agent_run(
+            agent_name=agent_name,
+            agent_id=self.runtime_id,
+        ):
+            result = await self._execute_core(input, options)
+
+            # Emit agent output span if successful
+            if result.status == UiPathRuntimeStatus.SUCCESSFUL:
+                tracer.emit_agent_output(result.output)
+
+            return result
+
+    async def _execute_core(
+        self,
+        input: dict[str, Any] | None = None,
+        options: UiPathExecuteOptions | None = None,
+    ) -> UiPathRuntimeResult:
+        """Core execution logic (shared by traced and non-traced paths)."""
         try:
             graph_input = await self._get_graph_input(input, options)
             graph_config = self._get_graph_config()
@@ -89,6 +130,9 @@ class UiPathLangGraphRuntime:
         """
         Stream graph execution events in real-time.
 
+        If UIPATH_CUSTOM_INSTRUMENTATION is enabled, wraps execution in
+        an "Agent run" span matching C# Agents schema.
+
         Yields UiPath UiPathRuntimeEvent instances (thin wrappers around framework data),
         then yields the final UiPathRuntimeResult as the last item.
 
@@ -114,6 +158,46 @@ class UiPathLangGraphRuntime:
         Raises:
             LangGraphRuntimeError: If execution fails
         """
+        if is_custom_instrumentation_enabled():
+            async for event in self._stream_traced(input, options):
+                yield event
+        else:
+            async for event in self._stream_core(input, options):
+                yield event
+
+    async def _stream_traced(
+        self,
+        input: dict[str, Any] | None = None,
+        options: UiPathStreamOptions | None = None,
+    ) -> AsyncGenerator[UiPathRuntimeEvent, None]:
+        """Stream with custom instrumentation - wraps in Agent run span."""
+        tracer = get_tracer()
+
+        # Use entrypoint as agent name, fallback to runtime_id
+        agent_name = self.entrypoint or self.runtime_id
+
+        with tracer.start_agent_run(
+            agent_name=agent_name,
+            agent_id=self.runtime_id,
+        ):
+            final_result: UiPathRuntimeResult | None = None
+
+            async for event in self._stream_core(input, options):
+                # Capture final result for agent output span
+                if isinstance(event, UiPathRuntimeResult):
+                    final_result = event
+                yield event
+
+            # Emit agent output span if successful
+            if final_result and final_result.status == UiPathRuntimeStatus.SUCCESSFUL:
+                tracer.emit_agent_output(final_result.output)
+
+    async def _stream_core(
+        self,
+        input: dict[str, Any] | None = None,
+        options: UiPathStreamOptions | None = None,
+    ) -> AsyncGenerator[UiPathRuntimeEvent, None]:
+        """Core stream logic (shared by traced and non-traced paths)."""
         try:
             graph_input = await self._get_graph_input(input, options)
             graph_config = self._get_graph_config()
