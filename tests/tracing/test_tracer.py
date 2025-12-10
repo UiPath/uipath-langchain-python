@@ -10,7 +10,6 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from uipath_langchain._tracing.schema import SpanType
 from uipath_langchain._tracing.tracer import UiPathTracer, get_tracer, reset_tracer
 
-
 _test_provider: TracerProvider | None = None
 _test_exporter: InMemorySpanExporter | None = None
 
