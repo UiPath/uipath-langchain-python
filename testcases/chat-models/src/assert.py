@@ -40,15 +40,6 @@ print(f"\nTest Results:")
 print(f"  Success: {success}")
 print(f"  Summary:\n{result_summary}")
 
-if not success:
-    print("\n" + "="*80)
-    print("TEST FAILURES")
-    print("="*80)
-    lines = result_summary.split('\n')
-    for line in lines:
-        if line.strip():
-            print(line)
-    print("="*80)
 
 assert success is True, f"Test did not succeed. See detailed results above."
 

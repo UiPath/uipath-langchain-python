@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from langchain_core.language_models import BaseChatModel
 
 from uipath_langchain.chat.bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
-from uipath_langchain.chat.gemini import UiPathChatVertex
+from uipath_langchain.chat.vertex import UiPathChatVertex
 from uipath_langchain.chat import UiPathChatOpenAI, UiPathChat, UiPathAzureChatOpenAI
 
 logger = logging.getLogger(__name__)
@@ -18,30 +18,12 @@ logger = logging.getLogger(__name__)
 def create_test_models(max_tokens: int = 100) -> list[tuple[str, Any]]:
     """Create all test chat models with the specified max_tokens."""
     return [
-        ("UiPathChatOpenAI", UiPathChatOpenAI(
-            temperature=0.7,
-            max_tokens=max_tokens,
-        )),
-        ("UiPathChatVertex", UiPathChatVertex(
-            temperature=0.7,
-            max_tokens=max_tokens,
-        )),
-        ("UiPathChatBedrockConverse", UiPathChatBedrockConverse(
-            temperature=0.7,
-            max_tokens=max_tokens,
-        )),
-        ("UiPathChatBedrock", UiPathChatBedrock(
-            temperature=0.7,
-            max_tokens=max_tokens,
-        )),
-        ("UiPathChat", UiPathChat(
-            temperature=0.7,
-            max_tokens=max_tokens,
-        )),
-        ("UiPathAzureChatOpenAI", UiPathAzureChatOpenAI(
-            temperature=0.7,
-            max_tokens=max_tokens,
-        ))
+        ("UiPathChatOpenAI", UiPathChatOpenAI()),
+        ("UiPathChatVertex", UiPathChatVertex()),
+        ("UiPathChatBedrockConverse", UiPathChatBedrockConverse()),
+        ("UiPathChatBedrock", UiPathChatBedrock()),
+        ("UiPathChat", UiPathChat()),
+        ("UiPathAzureChatOpenAI", UiPathAzureChatOpenAI())
     ]
 
 
@@ -340,7 +322,7 @@ async def return_results(state: GraphState) -> GraphOutput:
 
 def build_graph() -> StateGraph:
     """Build and compile the testing graph."""
-    builder = StateGraph(GraphState, input=GraphInput, output=GraphOutput)
+    builder = StateGraph(GraphState, input_schema=GraphInput, output_schema=GraphOutput)
 
     builder.add_node("prepare_input", prepare_input)
     builder.add_node("run_all_tests", run_all_tests)

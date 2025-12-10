@@ -4,6 +4,7 @@ from typing import Optional
 
 import httpx
 from langchain_openai import AzureChatOpenAI
+from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
 from .supported_models import OpenAIModels
@@ -87,11 +88,11 @@ class UiPathChatOpenAI(AzureChatOpenAI):
             default_headers=self._build_headers(token),
             http_async_client=httpx.AsyncClient(
                 transport=UiPathURLRewriteTransport(verify=True),
-                verify=True,
+                **get_httpx_client_kwargs(),
             ),
             http_client=httpx.Client(
                 transport=UiPathSyncURLRewriteTransport(verify=True),
-                verify=True,
+                **get_httpx_client_kwargs(),
             ),
             api_key=token,
             api_version=api_version,
