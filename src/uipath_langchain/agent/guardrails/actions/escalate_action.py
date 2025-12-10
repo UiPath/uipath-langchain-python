@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any, Dict, Literal
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolCall, ToolMessage
 from langgraph.types import Command, interrupt
 from uipath.platform.common import CreateEscalation
 from uipath.platform.guardrails import (
@@ -53,6 +53,7 @@ class EscalateAction(GuardrailAction):
         guardrail: BaseGuardrail,
         scope: GuardrailScope,
         execution_stage: ExecutionStage,
+        guarded_component_name: str,
     ) -> GuardrailActionNode:
         """Create a HITL escalation node for the guardrail.
 
@@ -70,7 +71,9 @@ class EscalateAction(GuardrailAction):
         async def _node(
             state: AgentGuardrailsGraphState,
         ) -> Dict[str, Any] | Command[Any]:
-            input = _extract_escalation_content(state, scope, execution_stage)
+            input = _extract_escalation_content(
+                state, scope, execution_stage, guarded_component_name
+            )
             escalation_field = _execution_stage_to_escalation_field(execution_stage)
 
             data = {
@@ -94,7 +97,11 @@ class EscalateAction(GuardrailAction):
 
             if escalation_result.action == "Approve":
                 return _process_escalation_response(
-                    state, escalation_result.data, scope, execution_stage
+                    state,
+                    escalation_result.data,
+                    scope,
+                    execution_stage,
+                    guarded_component_name,
                 )
 
             raise AgentTerminationException(
@@ -119,6 +126,7 @@ def _process_escalation_response(
     escalation_result: Dict[str, Any],
     scope: GuardrailScope,
     execution_stage: ExecutionStage,
+    guarded_node_name: str,
 ) -> Dict[str, Any] | Command[Any]:
     """Process escalation response and route to appropriate handler based on scope.
 
@@ -139,7 +147,7 @@ def _process_escalation_response(
             )
         case GuardrailScope.TOOL:
             return _process_tool_escalation_response(
-                state, escalation_result, execution_stage
+                state, escalation_result, execution_stage, guarded_node_name
             )
         case GuardrailScope.AGENT:
             return {}
@@ -234,16 +242,20 @@ def _process_tool_escalation_response(
     state: AgentGuardrailsGraphState,
     escalation_result: Dict[str, Any],
     execution_stage: ExecutionStage,
+    tool_name: str,
 ) -> Dict[str, Any] | Command[Any]:
     """Process escalation response for TOOL scope guardrails.
 
-    Updates tool call arguments (PreExecution) or tool message content (PostExecution)
-    based on reviewed inputs/outputs from escalation.
+    Updates the tool call arguments (PreExecution) or tool message content (PostExecution)
+    for the specific tool matching the tool_name. For PreExecution, finds the tool call
+    with the matching name and updates only that tool call's args with the reviewed dict.
+    For PostExecution, updates the tool message content.
 
     Args:
         state: The current agent graph state.
         escalation_result: The result from the escalation interrupt containing reviewed inputs/outputs.
         execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+        tool_name: Name of the tool to update. Only the tool call matching this name will be updated.
 
     Returns:
         Command to update messages with reviewed tool call args or content, or empty dict if no updates needed.
@@ -273,20 +285,22 @@ def _process_tool_escalation_response(
                 return {}
 
             reviewed_tool_calls_args = json.loads(reviewed_inputs_json)
-            if not isinstance(reviewed_tool_calls_args, list):
+            if not isinstance(reviewed_tool_calls_args, dict):
                 return {}
 
-            # Update tool calls with reviewed args
-            if last_message.tool_calls and reviewed_tool_calls_args:
+            # Find and update only the tool call with matching name
+            if last_message.tool_calls:
                 tool_calls = list(last_message.tool_calls)
-                for i, tool_call in enumerate(tool_calls):
-                    if i < len(reviewed_tool_calls_args):
-                        reviewed_args = reviewed_tool_calls_args[i]
-                        if isinstance(reviewed_args, dict):
+                for tool_call in tool_calls:
+                    call_name = extract_tool_name(tool_call)
+                    if call_name == tool_name:
+                        # Update args for the matching tool call
+                        if isinstance(reviewed_tool_calls_args, dict):
                             if isinstance(tool_call, dict):
-                                tool_call["args"] = reviewed_args
+                                tool_call["args"] = reviewed_tool_calls_args
                             else:
-                                tool_call.args = reviewed_args
+                                tool_call.args = reviewed_tool_calls_args
+                        break
                 last_message.tool_calls = tool_calls
         else:
             if not isinstance(last_message, ToolMessage):
@@ -310,6 +324,7 @@ def _extract_escalation_content(
     state: AgentGuardrailsGraphState,
     scope: GuardrailScope,
     execution_stage: ExecutionStage,
+    guarded_node_name: str,
 ) -> str | list[str | Dict[str, Any]]:
     """Extract escalation content from state based on guardrail scope and execution stage.
 
@@ -338,7 +353,9 @@ def _extract_escalation_content(
         case GuardrailScope.AGENT:
             return _extract_agent_escalation_content(state, execution_stage)
         case GuardrailScope.TOOL:
-            return _extract_tool_escalation_content(state, execution_stage)
+            return _extract_tool_escalation_content(
+                state, execution_stage, guarded_node_name
+            )
 
 
 def _extract_llm_escalation_content(
@@ -404,37 +421,52 @@ def _extract_agent_escalation_content(
 
 
 def _extract_tool_escalation_content(
-    state: AgentGuardrailsGraphState, execution_stage: ExecutionStage
+    state: AgentGuardrailsGraphState, execution_stage: ExecutionStage, tool_name: str
 ) -> str | list[str | Dict[str, Any]]:
     """Extract escalation content for TOOL scope guardrails.
 
     Args:
         state: The current agent graph state.
         execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+        tool_name: Optional tool name to filter tool calls. If provided, only extracts args for matching tool.
 
     Returns:
-        str or list[str | Dict[str, Any]]: For PreExecution, returns JSON string (array) with all tool call arguments,
-        or empty string if message type doesn't match. For PostExecution, returns string with tool message content,
-        or empty string if message type doesn't match.
+        str or list[str | Dict[str, Any]]: For PreExecution, returns JSON string with tool call arguments
+        for the specified tool name, or empty string if not found. For PostExecution, returns string with
+        tool message content, or empty string if message type doesn't match.
     """
     last_message = state.messages[-1]
     if execution_stage == ExecutionStage.PRE_EXECUTION:
         if not isinstance(last_message, AIMessage):
             return ""
-        # Get all tool calls args and put in a list of dicts
-        tool_calls_args: list[dict[str, Any]] = []
-        if last_message.tool_calls:
-            for tool_call in last_message.tool_calls:
+        if not last_message.tool_calls:
+            return ""
+
+        # Find the tool call with matching name
+        for tool_call in last_message.tool_calls:
+            call_name = extract_tool_name(tool_call)
+            if call_name == tool_name:
+                # Extract args from the matching tool call
                 args = (
-                    tool_call["args"] if isinstance(tool_call, dict) else tool_call.args
+                    tool_call.get("args")
+                    if isinstance(tool_call, dict)
+                    else getattr(tool_call, "args", None)
                 )
-                if isinstance(args, dict):
-                    tool_calls_args.append(args)
-        return json.dumps(tool_calls_args)
+                if args is not None:
+                    return json.dumps(args)
+        return ""
     else:
         if not isinstance(last_message, ToolMessage):
             return ""
         return last_message.content
+
+
+def extract_tool_name(tool_call: ToolCall) -> Any | None:
+    return (
+        tool_call.get("name")
+        if isinstance(tool_call, dict)
+        else getattr(tool_call, "name", None)
+    )
 
 
 def _execution_stage_to_escalation_field(

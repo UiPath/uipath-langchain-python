@@ -35,6 +35,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         assert node_name == "my_guardrail_v1_hitl_pre_execution_llm"
@@ -56,6 +57,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.AGENT,
             execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         assert node_name == "special_guardrail_2024_hitl_post_execution_agent"
@@ -84,6 +86,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         state = AgentGuardrailsGraphState(
@@ -132,6 +135,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         state = AgentGuardrailsGraphState(
@@ -166,6 +170,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         state = AgentGuardrailsGraphState(
@@ -209,6 +214,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         state = AgentGuardrailsGraphState(
@@ -247,6 +253,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         ai_message = AIMessage(
@@ -294,6 +301,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         state = AgentGuardrailsGraphState(
@@ -333,6 +341,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         state = AgentGuardrailsGraphState(
@@ -377,6 +386,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         ai_message = AIMessage(
@@ -423,6 +433,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.AGENT,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         state = AgentGuardrailsGraphState(
@@ -457,6 +468,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         state = AgentGuardrailsGraphState(
@@ -493,6 +505,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
         )
 
         state = AgentGuardrailsGraphState(
@@ -520,7 +533,7 @@ class TestEscalateAction:
         )
 
         result = _extract_escalation_content(
-            state, GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION
+            state, GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, "test_node"
         )
 
         assert result == ""
@@ -542,6 +555,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_tool",
         )
 
         assert node_name == "tool_guardrail_hitl_pre_execution_tool"
@@ -569,6 +583,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_tool",
         )
 
         ai_message = AIMessage(
@@ -594,7 +609,7 @@ class TestEscalateAction:
         assert call_args.data["GuardrailName"] == "Test Guardrail"
         assert call_args.data["Component"] == "tool"
         assert call_args.data["ExecutionStage"] == "PreExecution"
-        assert call_args.data["Inputs"] == '[{"input": "test"}]'
+        assert call_args.data["Inputs"] == '{"input": "test"}'
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -610,7 +625,7 @@ class TestEscalateAction:
         guardrail.name = "Test Guardrail"
         guardrail.description = "Test description"
 
-        reviewed_args = [{"input": "updated_value", "param": "new"}]
+        reviewed_args = {"input": "updated_value", "param": "new"}
         mock_escalation_result = MagicMock()
         mock_escalation_result.action = "Approve"
         mock_escalation_result.data = {"ReviewedInputs": json.dumps(reviewed_args)}
@@ -620,6 +635,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_tool",
         )
 
         ai_message = AIMessage(
@@ -639,7 +655,7 @@ class TestEscalateAction:
         assert isinstance(result, Command)
         assert result.update is not None
         updated_message = result.update["messages"][0]
-        assert updated_message.tool_calls[0]["args"] == reviewed_args[0]
+        assert updated_message.tool_calls[0]["args"] == reviewed_args
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -665,6 +681,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_tool",
         )
 
         tool_message = ToolMessage(
@@ -703,6 +720,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_tool",
         )
 
         tool_message = ToolMessage(
@@ -734,13 +752,14 @@ class TestEscalateAction:
 
         mock_escalation_result = MagicMock()
         mock_escalation_result.action = "Approve"
-        mock_escalation_result.data = {"ReviewedInputs": json.dumps([{}])}
+        mock_escalation_result.data = {"ReviewedInputs": json.dumps({})}
         mock_interrupt.return_value = mock_escalation_result
 
         _, node = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_tool",
         )
 
         state = AgentGuardrailsGraphState(
@@ -776,6 +795,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_tool",
         )
 
         state = AgentGuardrailsGraphState(
@@ -811,6 +831,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_tool",
         )
 
         ai_message = AIMessage(
@@ -831,10 +852,10 @@ class TestEscalateAction:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
-    async def test_tool_pre_execution_non_list_reviewed_inputs_returns_empty(
+    async def test_tool_pre_execution_non_dict_reviewed_inputs_raises_exception(
         self, mock_interrupt
     ):
-        """TOOL PreExecution with non-list ReviewedInputs: returns empty dict."""
+        """TOOL PreExecution with invalid JSON ReviewedInputs: raises exception."""
         action = EscalateAction(
             app_name="TestApp",
             app_folder_path="TestFolder",
@@ -847,13 +868,14 @@ class TestEscalateAction:
 
         mock_escalation_result = MagicMock()
         mock_escalation_result.action = "Approve"
-        mock_escalation_result.data = {"ReviewedInputs": json.dumps({"not": "a list"})}
+        mock_escalation_result.data = {"ReviewedInputs": "not a json dict"}
         mock_interrupt.return_value = mock_escalation_result
 
         _, node = action.action_node(
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_tool",
         )
 
         ai_message = AIMessage(
@@ -868,9 +890,14 @@ class TestEscalateAction:
         )
         state = AgentGuardrailsGraphState(messages=[ai_message])
 
-        result = await node(state)
+        with pytest.raises(AgentTerminationException) as excinfo:
+            await node(state)
 
-        assert result == {}
+        assert (
+            excinfo.value.error_info.code
+            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        )
+        assert excinfo.value.error_info.title == "Escalation rejected"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -895,6 +922,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_tool",
         )
 
         ai_message = AIMessage(
@@ -932,10 +960,7 @@ class TestEscalateAction:
         guardrail.name = "Test Guardrail"
         guardrail.description = "Test description"
 
-        reviewed_args = [
-            {"input": "updated_1"},
-            {"input": "updated_2"},
-        ]
+        reviewed_args = {"input": "updated_1"}
         mock_escalation_result = MagicMock()
         mock_escalation_result.action = "Approve"
         mock_escalation_result.data = {"ReviewedInputs": json.dumps(reviewed_args)}
@@ -945,6 +970,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="tool_1",
         )
 
         ai_message = AIMessage(
@@ -969,8 +995,10 @@ class TestEscalateAction:
         assert isinstance(result, Command)
         assert result.update is not None
         updated_message = result.update["messages"][0]
-        assert updated_message.tool_calls[0]["args"] == reviewed_args[0]
-        assert updated_message.tool_calls[1]["args"] == reviewed_args[1]
+        # Only tool_1 should be updated
+        assert updated_message.tool_calls[0]["args"] == reviewed_args
+        # tool_2 should remain unchanged
+        assert updated_message.tool_calls[1]["args"] == {"input": "original_2"}
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -988,7 +1016,7 @@ class TestEscalateAction:
         guardrail.name = "Test Guardrail"
         guardrail.description = "Test description"
 
-        reviewed_args = [{"input": "updated_1"}]  # Only one reviewed arg
+        reviewed_args = {"input": "updated_1"}
         mock_escalation_result = MagicMock()
         mock_escalation_result.action = "Approve"
         mock_escalation_result.data = {"ReviewedInputs": json.dumps(reviewed_args)}
@@ -998,6 +1026,7 @@ class TestEscalateAction:
             guardrail=guardrail,
             scope=GuardrailScope.TOOL,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="tool_1",
         )
 
         ai_message = AIMessage(
@@ -1022,7 +1051,7 @@ class TestEscalateAction:
         assert isinstance(result, Command)
         assert result.update is not None
         updated_message = result.update["messages"][0]
-        assert updated_message.tool_calls[0]["args"] == reviewed_args[0]
+        assert updated_message.tool_calls[0]["args"] == reviewed_args
         # Second tool call should remain unchanged
         assert updated_message.tool_calls[1]["args"] == {"input": "original_2"}
 
@@ -1050,13 +1079,13 @@ class TestEscalateAction:
         )
         state = AgentGuardrailsGraphState(messages=[ai_message])
 
-        result = _extract_tool_escalation_content(state, ExecutionStage.PRE_EXECUTION)
+        result = _extract_tool_escalation_content(
+            state, ExecutionStage.PRE_EXECUTION, "test_tool"
+        )
 
         assert isinstance(result, str)
         parsed = json.loads(result)
-        assert len(parsed) == 2
-        assert parsed[0] == {"input": "test", "param": 123}
-        assert parsed[1] == {"data": "value"}
+        assert parsed == {"input": "test", "param": 123}
 
     @pytest.mark.asyncio
     async def test_extract_tool_content_post_execution(self):
@@ -1071,7 +1100,9 @@ class TestEscalateAction:
         )
         state = AgentGuardrailsGraphState(messages=[tool_message])
 
-        result = _extract_tool_escalation_content(state, ExecutionStage.POST_EXECUTION)
+        result = _extract_tool_escalation_content(
+            state, ExecutionStage.POST_EXECUTION, "test_tool"
+        )
 
         assert result == "Tool execution result"
 
@@ -1086,7 +1117,9 @@ class TestEscalateAction:
             messages=[HumanMessage(content="Not an AI message")]
         )
 
-        result = _extract_tool_escalation_content(state, ExecutionStage.PRE_EXECUTION)
+        result = _extract_tool_escalation_content(
+            state, ExecutionStage.PRE_EXECUTION, "test_tool"
+        )
 
         assert result == ""
 
@@ -1101,7 +1134,9 @@ class TestEscalateAction:
             messages=[AIMessage(content="Not a tool message")]
         )
 
-        result = _extract_tool_escalation_content(state, ExecutionStage.POST_EXECUTION)
+        result = _extract_tool_escalation_content(
+            state, ExecutionStage.POST_EXECUTION, "test_tool"
+        )
 
         assert result == ""
 
@@ -1115,11 +1150,11 @@ class TestEscalateAction:
         ai_message = AIMessage(content="No tool calls")
         state = AgentGuardrailsGraphState(messages=[ai_message])
 
-        result = _extract_tool_escalation_content(state, ExecutionStage.PRE_EXECUTION)
+        result = _extract_tool_escalation_content(
+            state, ExecutionStage.PRE_EXECUTION, "test_tool"
+        )
 
-        assert isinstance(result, str)
-        parsed = json.loads(result)
-        assert parsed == []
+        assert result == ""
 
     @pytest.mark.asyncio
     async def test_extract_llm_content_pre_execution_tool_message(self):
@@ -1190,7 +1225,7 @@ class TestEscalateAction:
 
         with pytest.raises(AgentTerminationException) as excinfo:
             _extract_escalation_content(
-                state, GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION
+                state, GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION, "test_node"
             )
 
         assert (

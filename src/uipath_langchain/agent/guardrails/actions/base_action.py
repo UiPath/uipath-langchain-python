@@ -18,6 +18,7 @@ class GuardrailAction(ABC):
         guardrail: BaseGuardrail,
         scope: GuardrailScope,
         execution_stage: ExecutionStage,
+        guarded_component_name: str,
     ) -> GuardrailActionNode:
         """Create and return the Action node to execute on validation failure."""
         ...

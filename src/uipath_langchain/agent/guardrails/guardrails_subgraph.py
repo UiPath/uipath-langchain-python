@@ -1,7 +1,9 @@
+from functools import partial
 from typing import Any, Callable, Sequence
 
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
+from langgraph.prebuilt import ToolNode
 from uipath.platform.guardrails import (
     BaseGuardrail,
     BuiltInValidatorGuardrail,
@@ -90,6 +92,7 @@ def _create_guardrails_subgraph(
             ExecutionStage.PRE_EXECUTION,
             node_factory,
             inner_name,
+            inner_name,
         )
         subgraph.add_edge(START, first_pre_exec_guardrail_node)
     else:
@@ -107,6 +110,7 @@ def _create_guardrails_subgraph(
             ExecutionStage.POST_EXECUTION,
             node_factory,
             END,
+            inner_node,
         )
         subgraph.add_edge(inner_name, first_post_exec_guardrail_node)
     else:
@@ -130,6 +134,7 @@ def _build_guardrail_node_chain(
         GuardrailActionNode,
     ],
     next_node: str,
+    guarded_node_name: str,
 ) -> str:
     """Recursively build a chain of guardrail nodes in reverse order.
 
@@ -157,7 +162,10 @@ def _build_guardrail_node_chain(
     remaining_guardrails = guardrails[:-1]
 
     fail_node_name, fail_node = action.action_node(
-        guardrail=guardrail, scope=scope, execution_stage=execution_stage
+        guardrail=guardrail,
+        scope=scope,
+        execution_stage=execution_stage,
+        guarded_component_name=guarded_node_name,
     )
 
     # Create the guardrail evaluation node.
@@ -179,6 +187,7 @@ def _build_guardrail_node_chain(
         execution_stage,
         node_factory,
         guardrail_node_name,
+        guarded_node_name,
     )
 
     return previous_node_name
@@ -200,6 +209,24 @@ def create_llm_guardrails_subgraph(
         execution_stages=[ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION],
         node_factory=create_llm_guardrail_node,
     )
+
+
+def create_tools_guardrails_subgraph(
+    tool_nodes: dict[str, ToolNode],
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+) -> dict[str, ToolNode]:
+    """Create tool nodes with guardrails.
+    Args:
+    """
+    result: dict[str, ToolNode] = {}
+    for tool_name, tool_node in tool_nodes.items():
+        subgraph = create_tool_guardrails_subgraph(
+            (tool_name, tool_node),
+            guardrails,
+        )
+        result[tool_name] = subgraph
+
+    return result
 
 
 def create_agent_guardrails_subgraph(
@@ -227,10 +254,10 @@ def create_agent_guardrails_subgraph(
 
 
 def create_tool_guardrails_subgraph(
-    tool_name: str,
     tool_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
 ):
+    tool_name, _ = tool_node
     applicable_guardrails = [
         (guardrail, action)
         for (guardrail, action) in (guardrails or [])
@@ -243,5 +270,5 @@ def create_tool_guardrails_subgraph(
         guardrails=applicable_guardrails,
         scope=GuardrailScope.TOOL,
         execution_stages=[ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION],
-        node_factory=create_tool_guardrail_node,
+        node_factory=partial(create_tool_guardrail_node, tool_name=tool_name),
     )

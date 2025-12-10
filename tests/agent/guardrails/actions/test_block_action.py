@@ -25,6 +25,7 @@ class TestBlockAction:
             guardrail=guardrail,
             scope=GuardrailScope.LLM,
             execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="guarded_node_name",
         )
 
         assert node_name == "llm_pre_execution_my_guardrail_v1_block"
