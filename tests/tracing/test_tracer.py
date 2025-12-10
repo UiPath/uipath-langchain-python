@@ -30,6 +30,7 @@ def _setup_test_provider():
 def tracer_with_exporter():
     """Setup tracer with in-memory exporter for testing."""
     _setup_test_provider()
+    assert _test_exporter is not None
     _test_exporter.clear()
     reset_tracer()
     tracer = UiPathTracer()
