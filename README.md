@@ -1,5 +1,6 @@
 # UiPath LangChain Python SDK
 
+[![PyPI - Version](https://img.shields.io/pypi/v/uipath-langchain)](https://pypi.org/project/uipath-langchain/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/uipath-langchain.svg)](https://pypi.org/project/uipath-langchain/)
 [![Python versions](https://img.shields.io/pypi/pyversions/uipath-langchain.svg)](https://pypi.org/project/uipath-langchain/)
 

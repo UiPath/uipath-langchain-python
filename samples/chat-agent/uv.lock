@@ -308,7 +308,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.1" },
     { name = "tavily-python", specifier = ">=0.7.13" },
     { name = "uipath", specifier = ">=2.2.18,<2.3.0" },
-    { name = "uipath-langchain", specifier = ">=0.1.14,<0.2.0" },
+    { name = "uipath-langchain", specifier = ">=0.1.22,<0.2.0" },
 ]
 provides-extras = ["dev"]
 
@@ -1218,7 +1218,7 @@ wheels = [
 
 [[package]]
 name = "openinference-instrumentation-langchain"
-version = "0.1.55"
+version = "0.1.56"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "openinference-instrumentation" },
@@ -1228,9 +1228,9 @@ dependencies = [
     { name = "opentelemetry-semantic-conventions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2c/18/0242af5d7ea1170287b4d1e89aa9a3bcd545788cf748b5494a19b9499b18/openinference_instrumentation_langchain-0.1.55.tar.gz", hash = "sha256:57a2875ca845950f944700d9352efb080c8b20049253408e7739d960c43f34e8", size = 68602, upload-time = "2025-11-10T21:45:29.899Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a8/4d/f63ccd6f2e272de5015388cf633cdbb5163ed119c2ac8df4cd19c3f38ba6/openinference_instrumentation_langchain-0.1.56.tar.gz", hash = "sha256:19fcf552096c53e1b289d0225a372890ca909ef79fba471a395220912fc5e0e7", size = 72264, upload-time = "2025-12-04T19:58:39.814Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/22/5a/55a99fd64cc1c8c21b1c47211c7389af5a9cd98f75d83a21c8b97e6c1d33/openinference_instrumentation_langchain-0.1.55-py3-none-any.whl", hash = "sha256:3f755950254fdf7741e0327a585cb0609c6c5553109a2b52929c29ce2a02c2d3", size = 22195, upload-time = "2025-11-10T21:45:28.147Z" },
+    { url = "https://files.pythonhosted.org/packages/13/93/4f2d40640ec567cf96831c5303f43a84177a8781d4e125b68485407bc364/openinference_instrumentation_langchain-0.1.56-py3-none-any.whl", hash = "sha256:1de2bbe9780dae5e45308bd3dd97a38ac218b618a9cce4c96fc9e8c762c3491d", size = 23261, upload-time = "2025-12-04T19:58:35.98Z" },
 ]
 
 [[package]]
@@ -2179,7 +2179,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.1.14"
+version = "0.1.23"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -2195,9 +2195,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "uipath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/2b/879f0547c138007760e35edf3ff226752ec814b46b81190569e644cf76e1/uipath_langchain-0.1.14.tar.gz", hash = "sha256:79c750a00e47ef4c912ad6f949eda2fe21936eb18e7271fc67c0fd0c731f4ac0", size = 7233304, upload-time = "2025-12-04T13:22:07.028Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b2/d1/8a2f33facf51cb5e9dba37b9b69e2f369cefc6bce88e2d38b3d7928a93dc/uipath_langchain-0.1.23.tar.gz", hash = "sha256:7605209b68bd731c93c87a840235f0d3f8fd20ad8bab089423dccfdba3360616", size = 7292305, upload-time = "2025-12-09T11:11:12.015Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/00/12/d9a78b9fdc4feccff58793d5ca439d587c379b594a9cfc094c66c59b5886/uipath_langchain-0.1.14-py3-none-any.whl", hash = "sha256:f025f1c4206ab8b57ec407fbf8e4c20a005828080271ab2cd285c3e849d304db", size = 63498, upload-time = "2025-12-04T13:22:05.347Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/ec/34d72f71aba55f4e9d4d131767156644fa842950bb367cf2f4d17e56ddb3/uipath_langchain-0.1.23-py3-none-any.whl", hash = "sha256:3312d828fe04ddeb36f72b76054a5d7f42ece62cf51d71a3759e791fbc03036b", size = 81038, upload-time = "2025-12-09T11:11:10.396Z" },
 ]
 
 [[package]]

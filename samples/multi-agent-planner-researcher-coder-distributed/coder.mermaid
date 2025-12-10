@@ -1,13 +1,16 @@
 flowchart TB
   __start__(__start__)
   __end__(__end__)
-  coder:__start__(__start__)
-  coder:model(model)
-  coder:tools(tools)
-  coder:__end__(__end__)
-  __start__ --> coder:__start__
-  coder:__end__ --> __end__
-  coder:__start__ --> coder:model
-  coder:model --> coder:__end__
-  coder:model --> coder:tools
-  coder:tools --> coder:model
+  __start__ --> coder
+  coder --> __end__
+  subgraph coder [coder]
+    direction LR
+    __start__(__start__)
+    model(model)
+    tools(tools)
+    __end__(__end__)
+    __start__ --> model
+    model --> __end__
+    model --> tools
+    tools --> model
+  end

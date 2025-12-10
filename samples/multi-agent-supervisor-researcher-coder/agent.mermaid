@@ -3,26 +3,32 @@ flowchart TB
   input(input)
   supervisor(supervisor)
   __end__(__end__)
-  researcher:__start__(__start__)
-  researcher:agent(agent)
-  researcher:tools(tools)
-  researcher:__end__(__end__)
-  coder:__start__(__start__)
-  coder:agent(agent)
-  coder:tools(tools)
-  coder:__end__(__end__)
   __start__ --> input
-  coder:__end__ --> supervisor
+  coder --> supervisor
   input --> supervisor
-  researcher:__end__ --> supervisor
-  supervisor --> coder:__start__
-  supervisor --> researcher:__start__
+  researcher --> supervisor
   supervisor --> __end__
-  researcher:__start__ --> researcher:agent
-  researcher:agent --> researcher:__end__
-  researcher:agent --> researcher:tools
-  researcher:tools --> researcher:agent
-  coder:__start__ --> coder:agent
-  coder:agent --> coder:__end__
-  coder:agent --> coder:tools
-  coder:tools --> coder:agent
+  supervisor --> coder
+  supervisor --> researcher
+  subgraph researcher [researcher]
+    direction LR
+    __start__(__start__)
+    model(model)
+    tools(tools)
+    __end__(__end__)
+    __start__ --> model
+    model --> __end__
+    model --> tools
+    tools --> model
+  end
+  subgraph coder [coder]
+    direction LR
+    __start__(__start__)
+    model(model)
+    tools(tools)
+    __end__(__end__)
+    __start__ --> model
+    model --> __end__
+    model --> tools
+    tools --> model
+  end
