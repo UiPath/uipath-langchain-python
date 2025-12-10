@@ -3,6 +3,7 @@
 This module provides the UiPathTracer class that creates OpenTelemetry spans
 with the exact schema matching Temporal implementation backend.
 """
+
 import json
 import os
 from contextlib import contextmanager

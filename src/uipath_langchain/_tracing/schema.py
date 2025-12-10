@@ -3,6 +3,7 @@
 This module defines the span types and naming conventions that match
 the Temporal implementation backend.
 """
+
 from enum import Enum
 
 

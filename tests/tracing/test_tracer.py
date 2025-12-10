@@ -1,4 +1,5 @@
 """Test UiPathTracer produces correct span structure."""
+
 import json
 
 import pytest
