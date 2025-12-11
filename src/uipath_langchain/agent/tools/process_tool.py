@@ -4,6 +4,7 @@ from typing import Any
 
 from jsonschema_pydantic_converter import transform as create_model
 from langchain_core.tools import StructuredTool
+from langgraph.prebuilt import ToolRuntime
 from langgraph.types import interrupt
 from uipath.agent.models.agent import AgentProcessToolResourceConfig
 from uipath.eval.mocks import mockable
@@ -22,21 +23,25 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
     input_model: Any = create_model(resource.input_schema)
     output_model: Any = create_model(resource.output_schema)
 
-    @mockable(
-        name=resource.name,
-        description=resource.description,
-        input_schema=input_model.model_json_schema(),
-        output_schema=output_model.model_json_schema(),
-    )
-    async def process_tool_fn(**kwargs: Any):
-        return interrupt(
-            InvokeProcess(
-                name=process_name,
-                input_arguments=kwargs,
-                process_folder_path=folder_path,
-                process_folder_key=None,
-            )
+    async def process_tool_fn(runtime: ToolRuntime, **kwargs: Any):
+        @mockable(
+            name=resource.name,
+            description=resource.description,
+            input_schema=input_model.model_json_schema(),
+            output_schema=output_model.model_json_schema(),
+            example_calls=[],  # TODO: pass these in from runtime.
         )
+        async def process_tool_impl(**inner_kwargs: Any):
+            return interrupt(
+                InvokeProcess(
+                    name=process_name,
+                    input_arguments=inner_kwargs,
+                    process_folder_path=folder_path,
+                    process_folder_key=None,
+                )
+            )
+
+        return await process_tool_impl(**kwargs)
 
     tool = StructuredToolWithOutputType(
         name=tool_name,
