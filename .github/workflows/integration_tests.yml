@@ -36,6 +36,7 @@ jobs:
   integration-tests:
     needs: [discover-testcases]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     container:
       image: ghcr.io/astral-sh/uv:python3.12-bookworm
       env:

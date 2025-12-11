@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.1.25"
+version = "0.1.26"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -33,9 +33,8 @@ maintainers = [
 
 [project.optional-dependencies]
 vertex = [
-    "langchain-google-vertexai>=2.1.2",
-    "langchain-community>=0.4.1",
-    "types-protobuf>=6.32.1.20251105",
+    "langchain-google-genai>=2.0.0",
+    "google-generativeai>=0.8.0",
 ]
 bedrock = [
     "langchain-aws>=0.2.35",
@@ -84,7 +83,7 @@ select = ["E", "F", "B", "I"]
 [tool.ruff.lint.per-file-ignores]
 "*" = ["E501"]
 "src/uipath_langchain/chat/bedrock.py" = ["E402"]
-"src/uipath_langchain/chat/gemini.py" = ["E402"]
+"src/uipath_langchain/chat/vertex.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"
