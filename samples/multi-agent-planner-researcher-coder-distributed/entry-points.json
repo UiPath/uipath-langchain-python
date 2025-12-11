@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "planner",
-            "uniqueId": "7ab9bf62-e4a4-4261-8b47-0223be930f45",
+            "uniqueId": "de82073f-4022-4c2a-b194-c9d3244c83e8",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -46,15 +46,18 @@
                         "metadata": {}
                     },
                     {
-                        "id": "create_plan",
-                        "name": "create_plan",
-                        "type": "node",
+                        "id": "planner_agent",
+                        "name": "planner_agent",
+                        "type": "model",
                         "subgraph": null,
-                        "metadata": {}
+                        "metadata": {
+                            "model_name": "claude-3-7-sonnet-latest",
+                            "max_tokens": 64000
+                        }
                     },
                     {
-                        "id": "supervisor",
-                        "name": "supervisor",
+                        "id": "route_agent",
+                        "name": "route_agent",
                         "type": "node",
                         "subgraph": null,
                         "metadata": {}
@@ -82,22 +85,22 @@
                     },
                     {
                         "source": "input",
-                        "target": "supervisor",
+                        "target": "route_agent",
                         "label": null
                     },
                     {
-                        "source": "supervisor",
+                        "source": "route_agent",
                         "target": "__end__",
                         "label": null
                     },
                     {
-                        "source": "create_plan",
-                        "target": "supervisor",
+                        "source": "planner_agent",
+                        "target": "route_agent",
                         "label": null
                     },
                     {
                         "source": "invoke_agent",
-                        "target": "supervisor",
+                        "target": "route_agent",
                         "label": null
                     }
                 ]
@@ -105,7 +108,7 @@
         },
         {
             "filePath": "researcher",
-            "uniqueId": "834546c0-6741-4a84-9159-dcc40f5942e8",
+            "uniqueId": "e4488723-686f-4ec0-a235-ad809877c78a",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -1283,7 +1286,7 @@
         },
         {
             "filePath": "coder",
-            "uniqueId": "49f05858-56b9-412e-affb-c63048d689bc",
+            "uniqueId": "13f3fa13-a340-46be-b137-5d9a99b2eeee",
             "type": "agent",
             "input": {
                 "type": "object",

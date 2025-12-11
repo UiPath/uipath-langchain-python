@@ -32,16 +32,21 @@ def python_repl_tool(
     return result_str
 
 members = ["researcher", "coder"]
-# Our team supervisor is an LLM node. It just picks the next agent to process
-# and decides when the work is completed
 options = members + ["FINISH"]
 
 system_prompt = (
     "You are a supervisor tasked with managing a conversation between the"
     f" following workers: {members}. Given the following user request,"
     " respond with the worker to act next. Each worker will perform a"
-    " task and respond with their results and status. When finished,"
-    " respond with FINISH."
+    " task and respond with their results and status.\n\n"
+    "When to choose FINISH:\n"
+    "- If the user's question has been fully answered\n"
+    "- If a worker has provided a complete solution\n"
+    "- If no additional work is needed\n\n"
+    "When to choose a worker:\n"
+    "- researcher: For searching information, finding facts, or research tasks\n"
+    "- coder: For mathematical calculations, data analysis, or code execution\n\n"
+    "Avoid sending workers back and forth unnecessarily. Once a worker completes the task, choose FINISH."
 )
 
 
@@ -61,6 +66,7 @@ class GraphOutput(BaseModel):
 
 class State(MessagesState):
     next: str
+    answer: str
 
 def get_message_text(msg: BaseMessage) -> str:
     """LangChain-style safe message text extractor."""
@@ -79,27 +85,54 @@ def input(state: GraphInput):
             HumanMessage(content=state.question),
         ],
         "next": "",
+        "answer": "",
     }
 
-async def supervisor_node(state: State) -> dict | GraphOutput:
+async def supervisor_node(state: State) -> dict:
     response = await llm.with_structured_output(Router).ainvoke(state["messages"])
     goto = response["next"]
+
+    # When finishing, extract the answer and store it in state
     if goto == "FINISH":
-        return GraphOutput(answer=get_message_text(state["messages"][-1]))
+        # Get the last message from a worker (not system message)
+        last_worker_message = None
+        for msg in reversed(state["messages"]):
+            if msg.type == "human" and hasattr(msg, "name") and msg.name in members:
+                last_worker_message = msg
+                break
+
+        if last_worker_message:
+            answer = get_message_text(last_worker_message)
+        else:
+            # Fallback: get last non-system message
+            answer = get_message_text(state["messages"][-1])
+
+        return {"next": goto, "answer": answer}
     else:
         return {"next": goto}
 
-def route_supervisor(state: State) -> Literal["researcher", "coder"] | Literal["__end__"]:
+def route_supervisor(state: State) -> Literal["researcher", "coder", "__end__"]:
     next_node = state.get("next", "")
     if next_node == "researcher":
         return "researcher"
     elif next_node == "coder":
         return "coder"
+    elif next_node == "FINISH":
+        return "__end__"
     else:
-        return END
+        return "__end__"
+
+def output_node(state: State) -> GraphOutput:
+    return GraphOutput(answer=state.get("answer", ""))
 
 research_agent = create_agent(
-    llm, tools=[tavily_tool], system_prompt="You are a researcher. DO NOT do any math."
+    llm,
+    tools=[tavily_tool],
+    system_prompt=(
+        "You are a researcher. DO NOT do any math. "
+        "Search for information and provide findings. "
+        "When you've completed your research, clearly state your findings."
+    )
 )
 
 
@@ -113,7 +146,15 @@ async def research_node(state: State):
 
 
 # NOTE: THIS PERFORMS ARBITRARY CODE EXECUTION, WHICH CAN BE UNSAFE WHEN NOT SANDBOXED
-code_agent = create_agent(llm, tools=[python_repl_tool])
+code_agent = create_agent(
+    llm,
+    tools=[python_repl_tool],
+    system_prompt=(
+        "You are a coder. Execute Python code to solve problems. "
+        "When you've successfully completed the calculation or task, "
+        "provide the final answer clearly."
+    )
+)
 
 
 async def code_node(state: State):
@@ -130,16 +171,17 @@ builder.add_node("input", input)
 builder.add_node("supervisor", supervisor_node)
 builder.add_node("researcher", research_node)
 builder.add_node("coder", code_node)
+builder.add_node("output", output_node)
 
 builder.add_edge(START, "input")
 builder.add_edge("input", "supervisor")
 builder.add_conditional_edges("supervisor", route_supervisor, {
     "researcher": "researcher",
     "coder": "coder",
-    END: END
+    "__end__": "output"
 })
 builder.add_edge("researcher", "supervisor")
 builder.add_edge("coder", "supervisor")
-builder.add_edge("supervisor", END)
+builder.add_edge("output", END)
 
 graph = builder.compile()
