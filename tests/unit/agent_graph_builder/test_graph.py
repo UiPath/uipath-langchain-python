@@ -30,7 +30,7 @@ def create_test_agent_definition(**overrides: Any) -> LowCodeAgentDefinition:
             max_tokens=1024,
         ),
         "input_schema": {"type": "object", "properties": {}},
-        "output_schema": {"type": "object"},
+        "output_schema": {"type": "object", "properties": {}},
         "resources": [],
     }
     defaults.update(overrides)
