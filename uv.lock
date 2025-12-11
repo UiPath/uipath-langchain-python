@@ -3109,7 +3109,6 @@ dependencies = [
     { name = "opentelemetry-instrumentation-sqlite3" },
     { name = "uipath" },
     { name = "uipath-langchain" },
-    { name = "uipath-runtime" },
 ]
 
 [package.dev-dependencies]
@@ -3135,9 +3134,8 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-asyncio", specifier = ">=0.49.0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.49.0" },
     { name = "opentelemetry-instrumentation-sqlite3", specifier = ">=0.49.0" },
-    { name = "uipath", specifier = ">=2.2.26" },
-    { name = "uipath-langchain", specifier = ">=0.1.22" },
-    { name = "uipath-runtime", specifier = ">=0.2.2" },
+    { name = "uipath", specifier = "==2.2.26" },
+    { name = "uipath-langchain", specifier = "==0.1.22" },
 ]
 
 [package.metadata.requires-dev]
