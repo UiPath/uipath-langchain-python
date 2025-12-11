@@ -2,14 +2,16 @@ flowchart TB
   __start__(__start__)
   input(input)
   supervisor(supervisor)
+  output(output)
   __end__(__end__)
   __start__ --> input
   coder --> supervisor
   input --> supervisor
   researcher --> supervisor
-  supervisor --> __end__
   supervisor --> coder
+  supervisor --> |__end__|output
   supervisor --> researcher
+  output --> __end__
   subgraph researcher [researcher]
     direction LR
     __start__(__start__)
