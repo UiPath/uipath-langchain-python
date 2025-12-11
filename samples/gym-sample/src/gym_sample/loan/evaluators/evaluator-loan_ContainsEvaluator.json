@@ -1,0 +1,1 @@
+{"version": "1.0", "id": "loan_ContainsEvaluator", "description": "ContainsEvaluator for loan agent", "evaluatorTypeId": "uipath-contains", "evaluatorConfig": {"name": "ContainsEvaluator", "targetOutputKey": "ExecutionDetails", "caseSensitive": false, "negated": false}}

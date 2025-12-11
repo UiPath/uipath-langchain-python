@@ -1,0 +1,12 @@
+{
+    "description": "LLMJudgeTrajectoryEvaluator for calculator agent",
+    "evaluatorConfig": {
+        "model": "gpt-4o-2024-11-20",
+        "name": "LLMJudgeTrajectoryEvaluator",
+        "prompt": "As an expert evaluator, determine how well the agent performed on a scale of 0-100. Focus on whether the agent's actions and outputs matched the expected behavior, while allowing for alternative valid expressions and reasonable variations in language. Maintain high standards for accuracy and completeness. Provide your score with a brief and clear justification explaining your reasoning.\n----\nAgentInput:\n{{UserOrSyntheticInput}}\n----\nExpectedAgentBehavior:\n{{ExpectedAgentBehavior}}\n----\nAgentRunHistory:\n{{AgentRunHistory}}\n",
+        "temperature": 0.0
+    },
+    "evaluatorTypeId": "uipath-llm-judge-trajectory-similarity",
+    "id": "calculator_LLMJudgeTrajectoryEvaluator",
+    "version": "1.0"
+}

@@ -1,0 +1,11 @@
+{
+    "description": "ToolCallArgsEvaluator for calculator agent",
+    "evaluatorConfig": {
+        "name": "ToolCallArgsEvaluator",
+        "strict": false,
+        "subset": false
+    },
+    "evaluatorTypeId": "uipath-tool-call-args",
+    "id": "calculator_ToolCallArgsEvaluator",
+    "version": "1.0"
+}

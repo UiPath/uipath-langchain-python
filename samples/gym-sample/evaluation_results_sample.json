@@ -1,0 +1,55 @@
+[
+  {
+    "experiment_unique_identifier": "calculator_default_loop_calculator_ExactMatchEvaluator",
+    "agent": "calculator",
+    "agent_version": "1.0.0",
+    "loop_name": "default_loop",
+    "loop_version": "1.0.0",
+    "testcase": "addition_simple",
+    "score": 1.0,
+    "metric": "calculator_ExactMatchEvaluator",
+    "metric_tags": [],
+    "agent_metric_weights": {},
+    "split": "test"
+  },
+  {
+    "experiment_unique_identifier": "calculator_default_loop_calculator_ExactMatchEvaluator",
+    "agent": "calculator",
+    "agent_version": "1.0.0",
+    "loop_name": "default_loop",
+    "loop_version": "1.0.0",
+    "testcase": "multiplication_complex",
+    "score": 0.95,
+    "metric": "calculator_ExactMatchEvaluator",
+    "metric_tags": [],
+    "agent_metric_weights": {},
+    "split": "test"
+  },
+  {
+    "experiment_unique_identifier": "calculator_default_loop_calculator_ToolCallCountEvaluator",
+    "agent": "calculator",
+    "agent_version": "1.0.0",
+    "loop_name": "default_loop",
+    "loop_version": "1.0.0",
+    "testcase": "addition_simple",
+    "score": 1.0,
+    "metric": "calculator_ToolCallCountEvaluator",
+    "metric_tags": [],
+    "agent_metric_weights": {},
+    "split": "test"
+  },
+  {
+    "experiment_unique_identifier": "calculator_default_loop_calculator_LLMJudgeOutputEvaluator",
+    "agent": "calculator",
+    "agent_version": "1.0.0",
+    "loop_name": "default_loop",
+    "loop_version": "1.0.0",
+    "testcase": "addition_simple",
+    "score": 1.0,
+    "metric": "calculator_LLMJudgeOutputEvaluator",
+    "metric_tags": [],
+    "agent_metric_weights": {},
+    "split": "test"
+  }
+]
+

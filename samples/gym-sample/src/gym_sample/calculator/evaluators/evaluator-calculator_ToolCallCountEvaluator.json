@@ -1,0 +1,10 @@
+{
+    "description": "ToolCallCountEvaluator for calculator agent",
+    "evaluatorConfig": {
+        "name": "ToolCallCountEvaluator",
+        "strict": false
+    },
+    "evaluatorTypeId": "uipath-tool-call-count",
+    "id": "calculator_ToolCallCountEvaluator",
+    "version": "1.0"
+}

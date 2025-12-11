@@ -1,0 +1,90 @@
+[project]
+name = "gym-sample"
+version = "0.0.1"
+description = "Agent gym sample"
+authors = [
+  { name = "Akshaya Shanbhogue", email = "akshaya.shanbhogue@uipath.com" },
+  { name = "Andrei Rusu", email = "andrei.rusu@uipath.com" },
+]
+dependencies = [
+    "langgraph>=0.2.70",
+    "langchain-core>=0.3.34",
+    "langgraph-checkpoint-sqlite>=2.0.3",
+    "python-dotenv>=1.0.1",
+    "uipath-langchain>=0.1.26",
+    "uipath==2.2.29.dev1010093365",
+    "pydantic>=2.10.6",
+    "aiohttp>=3.11.12",
+    "typing-extensions>=4.12.2",
+    "ipython>=8.32.0",
+    "jsonschema>=4.25.1",
+    "aiostream>=0.7.1",
+]
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.14.1",
+    "ruff>=0.9.4",
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.11.1",
+    "pytest-asyncio>=1.0.0",
+    "pre-commit>=4.1.0",
+    "numpy>=1.24.0",
+    "pytest_httpx>=0.35.0"
+]
+
+[project.entry-points."uipath.runtime.factories"]
+langgraph = "gym_sample.runtime:register_runtime_factory"
+
+[project.entry-points."uipath.middlewares"]
+register = "gym_sample.middlewares:register_middleware"
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gym_sample"]
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"*" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+plugins = [
+  "pydantic.mypy"
+]
+
+follow_imports = "silent"
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_any_generics = true
+check_untyped_defs = true
+no_implicit_reexport = true
+
+disallow_untyped_defs = false
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+
+[tool.uv.sources]
+uipath-langchain = { path = "../..", editable = true }
+uipath = { index = "testpypi" }

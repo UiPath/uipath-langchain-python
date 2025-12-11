@@ -1,0 +1,12 @@
+{
+    "description": "ContainsEvaluator for calculator agent",
+    "evaluatorConfig": {
+        "caseSensitive": false,
+        "name": "ContainsEvaluator",
+        "negated": false,
+        "targetOutputKey": "answer"
+    },
+    "evaluatorTypeId": "uipath-contains",
+    "id": "calculator_ContainsEvaluator",
+    "version": "1.0"
+}

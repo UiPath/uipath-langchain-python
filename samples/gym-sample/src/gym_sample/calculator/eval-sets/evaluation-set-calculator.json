@@ -1,0 +1,2015 @@
+{
+    "createdAt": "2025-01-01T00:00:00.000Z",
+    "evaluations": [
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "7"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 7.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 7.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 7
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the add tool to add 2 and 5 to get 7."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 2,
+                                "b": 5
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            0
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "c8bc784d-21a5-4690-8974-f537a91287af",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 2 + 5"
+            },
+            "name": "TestSimpleAddition",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "10"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 10.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 10.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 10
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the multiply tool to multiply 2 and 5 to get 10."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 2,
+                                "b": 5
+                            },
+                            "name": "multiply"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            0
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "7fcde5fd-636f-462e-8655-9e85ed4997cd",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 2 * 5"
+            },
+            "name": "TestSimpleMultiplication",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "3"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 3.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 3.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 3
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the add tool to add 5 and -2 to get 3."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 5,
+                                "b": -2
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            0
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "1bc4a6e3-2fe8-475d-ad1e-8cb0be060e82",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 5 - 2"
+            },
+            "name": "TestSimpleSubtraction",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "12"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 12.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 12.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 12
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the multiply tool to multiply 2 and 5 to get 10, then use the add tool to add 2 and 10 to get 12."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 2,
+                                "b": 5
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 2,
+                                "b": 10
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "baa251ad-f031-4be6-9d51-d605a4409b6b",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 2 + 2 * 5"
+            },
+            "name": "TestCompoundOperation1",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "25"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 25.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 25.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 25
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the multiply tool to multiply 3 and 5 to get 15, then use the multiply tool to multiply 2 and 5 to get 10, then use the add tool to add 15 and 10 to get 25."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 3,
+                                "b": 5
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 2,
+                                "b": 5
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 15,
+                                "b": 10
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            2
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply",
+                        "multiply",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "b9adc701-c8c7-4dde-b663-2a6d1329bfb1",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 3 * 5 + 2 * 5"
+            },
+            "name": "TestCompoundOperation2",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "150"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 150.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 150.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 150
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the add tool to add 5 and 5 to get 10, then use the multiply tool to multiply 3 and 10 to get 30, then use the multiply tool to multiply 30 and 5 to get 150."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 5,
+                                "b": 5
+                            },
+                            "name": "add"
+                        },
+                        {
+                            "args": {
+                                "a": 3,
+                                "b": 10
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 30,
+                                "b": 5
+                            },
+                            "name": "multiply"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            2
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "add",
+                        "multiply",
+                        "multiply"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "3fff8144-2b5b-4ffc-8d75-8099c86106e0",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 3 * (5 + 5) * 5"
+            },
+            "name": "TestCompoundOperation3",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "14"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 14.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 14.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 14
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the multiply tool to multiply 3 and 4 to get 12, then use the add tool to add 2 and 12 to get 14."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 3,
+                                "b": 4
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 2,
+                                "b": 12
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "c9cd9b29-9b04-4f67-a993-8d279ce649d9",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 2 + 3 * 4"
+            },
+            "name": "TestCompoundOperation4",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "25"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 25.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 25.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 25
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the add tool to add 2 and 3 to get 5, then use the add tool to add 4 and 1 to get 5, then use the multiply tool to multiply 5 and 5 to get 25."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 2,
+                                "b": 3
+                            },
+                            "name": "add"
+                        },
+                        {
+                            "args": {
+                                "a": 4,
+                                "b": 1
+                            },
+                            "name": "add"
+                        },
+                        {
+                            "args": {
+                                "a": 5,
+                                "b": 5
+                            },
+                            "name": "multiply"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            2
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "add",
+                        "add",
+                        "multiply"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "092500f3-c7e3-4f39-87c0-af7f006c3c2c",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is (2 + 3) * (4 + 1)"
+            },
+            "name": "TestCompoundOperation5",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "8"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 8.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 8.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 8
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the multiply tool to multiply 10 and 0.5 to get 5, then use the add tool to add 5 and 3 to get 8."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 10,
+                                "b": 0.5
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 5,
+                                "b": 3
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "b0e367b3-d0bd-424b-903f-90f8381b2395",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 10 * 0.5 + 3"
+            },
+            "name": "TestCompoundOperation6",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "15"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 15.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 15.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 15
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the multiply tool to multiply 5 and 5 to get 25, then use the add tool to add 25 and -10 to get 15."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 5,
+                                "b": 5
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 25,
+                                "b": -10
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "ed2d1eff-67f0-4178-8e83-c7b6ec2d468d",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 5 * 5 + (-10)"
+            },
+            "name": "TestCompoundOperation7",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "20"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 20.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 20.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 20
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the add tool to add 8 and -3 to get 5, then use the add tool to add 2 and 2 to get 4, then use the multiply tool to multiply 5 and 4 to get 20."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 8,
+                                "b": -3
+                            },
+                            "name": "add"
+                        },
+                        {
+                            "args": {
+                                "a": 2,
+                                "b": 2
+                            },
+                            "name": "add"
+                        },
+                        {
+                            "args": {
+                                "a": 5,
+                                "b": 4
+                            },
+                            "name": "multiply"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            2
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "add",
+                        "add",
+                        "multiply"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "2da49be7-68a8-4c29-b45a-d781252bb266",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is (8 + (-3)) * (2 + 2)"
+            },
+            "name": "TestCompoundOperation8",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "28"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 28.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 28.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 28
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the add tool to add 3 and 4 to get 7, then use the multiply tool to multiply 2 and 7 to get 14, then use the add tool to add 1 and 1 to get 2, then use the multiply tool to multiply 14 and 2 to get 28."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 3,
+                                "b": 4
+                            },
+                            "name": "add"
+                        },
+                        {
+                            "args": {
+                                "a": 2,
+                                "b": 7
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 1,
+                                "b": 1
+                            },
+                            "name": "add"
+                        },
+                        {
+                            "args": {
+                                "a": 14,
+                                "b": 2
+                            },
+                            "name": "multiply"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            2
+                        ],
+                        "multiply": [
+                            "=",
+                            2
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "add",
+                        "multiply",
+                        "add",
+                        "multiply"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "7e21120e-66d6-47e6-baae-aa72ae6bf630",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is (2 * (3 + 4)) * (1 + 1)"
+            },
+            "name": "TestNestedParentheses",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "1"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 1.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 1.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 1
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the multiply tool to multiply -2 and -3 to get 6, then use the add tool to add 6 and -5 to get 1."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": -2,
+                                "b": -3
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 6,
+                                "b": -5
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "dd58a6ff-b62b-4e5c-87d4-4e0a5c23d878",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is (-2) * (-3) + (-5)"
+            },
+            "name": "TestMultipleNegatives",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "5"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 5.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 5.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 5
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the add tool to add 0.5 and 1.5 to get 2, then use the multiply tool to multiply 2 and 2.5 to get 5."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 0.5,
+                                "b": 1.5
+                            },
+                            "name": "add"
+                        },
+                        {
+                            "args": {
+                                "a": 2,
+                                "b": 2.5
+                            },
+                            "name": "multiply"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "add",
+                        "multiply"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "75c3c175-1c6d-495a-8503-2090a7e80377",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is (0.5 + 1.5) * 2.5"
+            },
+            "name": "TestDecimalParentheses",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "22"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 22.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 22.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 22
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the escalation tool to escalate 17 and 5 to get 22."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 17,
+                                "b": 5
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "escalation": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "escalation",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "43b7cf85-4d59-4c60-8260-61d03933414f",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is x + 5"
+            },
+            "name": "TestMissingNumberSimple",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "102"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 102.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 102.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 102
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the escalation tool to escalate 17 and 5 to get 22, then use the escalation tool to escalate 22 and 5 to get 27, then use the multiply tool to multiply 27 and 17 to get 459, then use the add tool to add 459 and 85 to get 544."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 17,
+                                "b": 5
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 17,
+                                "b": 85
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "escalation": [
+                            "=",
+                            2
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "escalation",
+                        "escalation",
+                        "multiply",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "19c18893-178e-4855-a8b2-a57d9154c886",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is x + y * 5"
+            },
+            "name": "TestMissingNumberMedium",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "311"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 311.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 311.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 311
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the escalation tool to escalate 17 and 17 to get 289, then use the escalation tool to escalate 289 and 17 to get 306, then use the escalation tool to escalate 306 and 5 to get 311."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 17,
+                                "b": 17
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 17,
+                                "b": 289
+                            },
+                            "name": "add"
+                        },
+                        {
+                            "args": {
+                                "a": 306,
+                                "b": 5
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            2
+                        ],
+                        "escalation": [
+                            "=",
+                            3
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "escalation",
+                        "escalation",
+                        "escalation",
+                        "multiply",
+                        "add",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "b675efed-4c03-4f2a-a7ee-7946fda12317",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is x + y * z + 5"
+            },
+            "name": "TestMissingNumberComplex",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "25"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 25.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 25.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 25
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the add tool to add 10 and 15 to get 25."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 10,
+                                "b": 15
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "add"
+                    ]
+                },
+                "calculator_ToolCallOutputEvaluator": {
+                    "tool_outputs": [
+                        {
+                            "name": "add",
+                            "output": "25"
+                        }
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "3f4aaf8c-e707-4479-a2f3-4f9b3bbc12a5",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 10 + 15"
+            },
+            "name": "TestToolCallOutput1",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "42"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 42.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 42.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 42
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the multiply tool to multiply 6 and 7 to get 42."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 6,
+                                "b": 7
+                            },
+                            "name": "multiply"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply"
+                    ]
+                },
+                "calculator_ToolCallOutputEvaluator": {
+                    "tool_outputs": [
+                        {
+                            "name": "multiply",
+                            "output": "42"
+                        }
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "75bc1317-b549-4d1f-9ea1-dc557dcea5be",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 6 * 7"
+            },
+            "name": "TestToolCallOutput2",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "200"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 200.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 200.0
+                    }
+                },
+                "calculator_LLMJudgeOutputEvaluator": {
+                    "expected_output": {
+                        "answer": 200
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the multiply tool to multiply 50 and 2 to get 100, then use the add tool to add 100 and 100 to get 200."
+                },
+                "calculator_ToolCallArgsEvaluator": {
+                    "tool_calls": [
+                        {
+                            "args": {
+                                "a": 50,
+                                "b": 2
+                            },
+                            "name": "multiply"
+                        },
+                        {
+                            "args": {
+                                "a": 100,
+                                "b": 100
+                            },
+                            "name": "add"
+                        }
+                    ]
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply",
+                        "add"
+                    ]
+                },
+                "calculator_ToolCallOutputEvaluator": {
+                    "tool_outputs": [
+                        {
+                            "name": "multiply",
+                            "output": "100"
+                        },
+                        {
+                            "name": "add",
+                            "output": "200"
+                        }
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "2e20e3ad-c0d7-4984-ac67-202dd34b7342",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 100 + 50 * 2"
+            },
+            "name": "TestToolCallOutput3",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "25"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 25.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 25.0
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the add tool to add 12 and 13 to get 25."
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "0680cfcd-3748-49fe-aab0-56c7e0c6b40e",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 12 + 13"
+            },
+            "name": "TestStrictJSONSimilarity1",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "81"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 81.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 81.0
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should use the multiply tool to multiply 9 and 9 to get 81."
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "38c1b1cb-7343-4c91-a400-6ab65814d2e5",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 9 * 9"
+            },
+            "name": "TestStrictJSONSimilarity2",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "19"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 19.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 19.0
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should follow the order of operations, first multiplying 5 and 3 to get 15, then adding 4 to get 19."
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "58831d3a-a38d-4f34-a3f2-70898632da66",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 4 + 5 * 3"
+            },
+            "name": "TestTrajectory1",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "21"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 21.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 21.0
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should evaluate parentheses first: add 1 and 2 to get 3, add 3 and 4 to get 7, then multiply 3 and 7 to get 21."
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            2
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "add",
+                        "add",
+                        "multiply"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "187f6614-4095-4de8-870a-ecbf72992b4d",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is (1 + 2) * (3 + 4)"
+            },
+            "name": "TestTrajectory2",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "26"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 26.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 26.0
+                    }
+                },
+                "calculator_LLMJudgeTrajectoryEvaluator": {
+                    "expected_agent_behavior": "The agent should perform multiplications first (2*3=6 and 4*5=20), then add the results (6+20=26)."
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "multiply": [
+                            "=",
+                            2
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "multiply",
+                        "multiply",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "69fa5188-da7c-4c9c-8d25-21bfd491c312",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is 2 * 3 + 4 * 5"
+            },
+            "name": "TestTrajectory3",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "27"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 27.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 27.0
+                    }
+                },
+                "calculator_LLMJudgeTrajectorySimulationEvaluator": {
+                    "expected_agent_behavior": "The agent should recognize that 'a' is an unknown variable, escalate to get its value (17), then add 10 to get 27."
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "escalation": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "escalation",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "8ff05e17-2923-4e02-85ec-7fc0acf30019",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is a + 10"
+            },
+            "name": "TestTrajectorySimulation1",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "When the agent asks for the value of 'a', respond with 17.",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "294"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 294.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 294.0
+                    }
+                },
+                "calculator_LLMJudgeTrajectorySimulationEvaluator": {
+                    "expected_agent_behavior": "The agent should identify two missing variables (m and n), escalate twice to get their values (both 17), multiply them to get 289, then add 5 to get 294."
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "escalation": [
+                            "=",
+                            2
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "escalation",
+                        "escalation",
+                        "multiply",
+                        "add"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "80714637-8f05-4767-b407-0cfb4f265184",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is m * n + 5"
+            },
+            "name": "TestTrajectorySimulation2",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "When the agent asks for missing values, respond with 17 for each variable.",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        },
+        {
+            "createdAt": "2025-01-01T00:00:00.000Z",
+            "evalSetId": "f1322e20-7551-49ab-ac69-3b316964397a",
+            "evaluationCriterias": {
+                "calculator_ContainsEvaluator": {
+                    "search_text": "578"
+                },
+                "calculator_ExactMatchEvaluator": {
+                    "expected_output": {
+                        "answer": 578.0
+                    }
+                },
+                "calculator_JsonSimilarityEvaluator": {
+                    "expected_output": {
+                        "answer": 578.0
+                    }
+                },
+                "calculator_LLMJudgeTrajectorySimulationEvaluator": {
+                    "expected_agent_behavior": "The agent should recognize three missing variables (p, q, r), escalate three times to get their values (all 17), add p and q (17+17=34), then multiply by r (34*17=578)."
+                },
+                "calculator_ToolCallCountEvaluator": {
+                    "tool_calls_count": {
+                        "add": [
+                            "=",
+                            1
+                        ],
+                        "escalation": [
+                            "=",
+                            3
+                        ],
+                        "multiply": [
+                            "=",
+                            1
+                        ]
+                    }
+                },
+                "calculator_ToolCallOrderEvaluator": {
+                    "tool_calls_order": [
+                        "escalation",
+                        "escalation",
+                        "escalation",
+                        "add",
+                        "multiply"
+                    ]
+                }
+            },
+            "expectedAgentBehavior": "",
+            "expectedOutput": {},
+            "id": "0e105d43-a70a-44fe-9cbe-287dab3a3a62",
+            "inputGenerationInstructions": "",
+            "inputs": {
+                "expression": "how much is (p + q) * r"
+            },
+            "name": "TestTrajectorySimulation3",
+            "simulateInput": false,
+            "simulateTools": false,
+            "simulationInstructions": "When the agent asks for missing values, respond with 17 for each variable (p, q, and r).",
+            "source": "manual",
+            "toolsToSimulate": [],
+            "updatedAt": "2025-01-01T00:00:00.000Z"
+        }
+    ],
+    "evaluatorRefs": [
+        "calculator_ExactMatchEvaluator",
+        "calculator_ContainsEvaluator",
+        "calculator_JsonSimilarityEvaluator",
+        "calculator_ToolCallOrderEvaluator",
+        "calculator_ToolCallCountEvaluator",
+        "calculator_ToolCallArgsEvaluator",
+        "calculator_ToolCallOutputEvaluator",
+        "calculator_LLMJudgeOutputEvaluator",
+        "calculator_LLMJudgeTrajectoryEvaluator",
+        "calculator_LLMJudgeTrajectorySimulationEvaluator"
+    ],
+    "id": "f1322e20-7551-49ab-ac69-3b316964397a",
+    "modelSettings": [],
+    "name": "Calculator Eval Set",
+    "updatedAt": "2025-01-01T00:00:00.000Z",
+    "version": "1.0"
+}

@@ -1,0 +1,1 @@
+{"version": "1.0", "id": "loan_ToolCallArgsEvaluator", "description": "ToolCallArgsEvaluator for loan agent", "evaluatorTypeId": "uipath-tool-call-args", "evaluatorConfig": {"name": "ToolCallArgsEvaluator", "strict": false, "subset": false}}

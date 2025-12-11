@@ -1,0 +1,1 @@
+{"version": "1.0", "id": "loan_ExactMatchEvaluator", "description": "ExactMatchEvaluator for loan agent", "evaluatorTypeId": "uipath-exact-match", "evaluatorConfig": {"name": "ExactMatchEvaluator", "targetOutputKey": "ActionCenterTaskCreated", "caseSensitive": false, "negated": false}}

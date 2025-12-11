@@ -1,0 +1,12 @@
+{
+    "description": "ExactMatchEvaluator for calculator agent",
+    "evaluatorConfig": {
+        "caseSensitive": false,
+        "name": "ExactMatchEvaluator",
+        "negated": false,
+        "targetOutputKey": "*"
+    },
+    "evaluatorTypeId": "uipath-exact-match",
+    "id": "calculator_ExactMatchEvaluator",
+    "version": "1.0"
+}

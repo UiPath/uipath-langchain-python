@@ -1,0 +1,10 @@
+{
+    "description": "JsonSimilarityEvaluator for calculator agent",
+    "evaluatorConfig": {
+        "name": "JsonSimilarityEvaluator",
+        "targetOutputKey": "*"
+    },
+    "evaluatorTypeId": "uipath-json-similarity",
+    "id": "calculator_JsonSimilarityEvaluator",
+    "version": "1.0"
+}

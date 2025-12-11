@@ -1,0 +1,10 @@
+{
+    "description": "ToolCallOutputEvaluator for calculator agent",
+    "evaluatorConfig": {
+        "name": "ToolCallOutputEvaluator",
+        "strict": false
+    },
+    "evaluatorTypeId": "uipath-tool-call-output",
+    "id": "calculator_ToolCallOutputEvaluator",
+    "version": "1.0"
+}
