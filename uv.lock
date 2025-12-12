@@ -1,11 +1,17 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version == '3.13.*'",
     "python_full_version == '3.12.*'",
     "python_full_version < '3.12'",
+]
+
+[manifest]
+members = [
+    "mcp-refactoring-assistant",
+    "uipath-langchain",
 ]
 
 [[package]]
@@ -1293,6 +1299,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/5b/f5/4ec618ed16cc4f8fb
 wheels = [
     { url = "https://files.pythonhosted.org/packages/94/54/e7d793b573f298e1c9013b8c4dade17d481164aa517d1d7148619c2cedbf/markdown_it_py-4.0.0-py3-none-any.whl", hash = "sha256:87327c59b172c5011896038353a81343b6754500a08cd7a4973bb48c6d578147", size = 87321, upload-time = "2025-08-11T12:57:51.923Z" },
 ]
+
+[[package]]
+name = "mcp-refactoring-assistant"
+version = "0.1.0"
+source = { virtual = "samples/mcp-refactoring-assistant" }
+dependencies = [
+    { name = "uipath-langchain" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "uipath-langchain", editable = "." }]
 
 [[package]]
 name = "mdurl"

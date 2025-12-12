@@ -122,3 +122,8 @@ url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
 
+[tool.uv.workspace]
+members = [
+    "samples/mcp-refactoring-assistant",
+]
+

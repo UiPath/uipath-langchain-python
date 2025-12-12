@@ -1,0 +1,19 @@
+[project]
+name = "code-refactoring-assistant"
+version = "0.0.2"
+description = "Code Refactoring Assistant with MCP Server and LangGraph Agent"
+authors = [{ name = "Giulia Imbrea", email = "giulia.imbrea@uipath.com" }]
+dependencies = [
+  "mcp>=1.15.0",
+  "langchain-core>=1.1.0",
+  "langchain>=1.1.0",
+  "langchain-anthropic>=1.2.0",
+  "langchain-openai>=1.1.0",
+  "langgraph>=1.0.0",
+  "uipath-langchain>=0.1.23",
+  "langchain-mcp-adapters>=0.2.0",
+  "uipath>=2.2.27",
+  "uipath-dev>=0.0.12",
+  "python-dotenv>=1.0.0",
+]
+requires-python = ">=3.11"
