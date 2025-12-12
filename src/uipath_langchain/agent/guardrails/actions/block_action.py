@@ -26,6 +26,7 @@ class BlockAction(GuardrailAction):
         guardrail: BaseGuardrail,
         scope: GuardrailScope,
         execution_stage: ExecutionStage,
+        guarded_component_name: str,
     ) -> GuardrailActionNode:
         raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}_block"
         node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")

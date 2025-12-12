@@ -11,6 +11,7 @@ from uipath.platform.guardrails import BaseGuardrail
 
 from ..guardrails import create_llm_guardrails_subgraph
 from ..guardrails.actions import GuardrailAction
+from ..guardrails.guardrails_subgraph import create_tools_guardrails_subgraph
 from ..tools import create_tool_node
 from .init_node import (
     create_init_node,
@@ -73,6 +74,9 @@ def create_agent(
 
     init_node = create_init_node(messages)
     tool_nodes = create_tool_node(agent_tools)
+    tool_nodes_with_guardrails = create_tools_guardrails_subgraph(
+        tool_nodes, guardrails
+    )
     terminate_node = create_terminate_node(output_schema)
 
     InnerAgentGraphState = create_state_with_input(
@@ -84,7 +88,7 @@ def create_agent(
     )
     builder.add_node(AgentGraphNode.INIT, init_node)
 
-    for tool_name, tool_node in tool_nodes.items():
+    for tool_name, tool_node in tool_nodes_with_guardrails.items():
         builder.add_node(tool_name, tool_node)
 
     builder.add_node(AgentGraphNode.TERMINATE, terminate_node)
@@ -98,7 +102,7 @@ def create_agent(
     builder.add_node(AgentGraphNode.AGENT, llm_with_guardrails_subgraph)
     builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
-    tool_node_names = list(tool_nodes.keys())
+    tool_node_names = list(tool_nodes_with_guardrails.keys())
     builder.add_conditional_edges(
         AgentGraphNode.AGENT,
         route_agent,

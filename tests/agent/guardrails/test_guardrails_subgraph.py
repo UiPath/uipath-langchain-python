@@ -39,6 +39,7 @@ def _fake_action(fail_prefix: str) -> GuardrailAction:
             guardrail: BaseGuardrail,
             scope,
             execution_stage,
+            guarded_component_name: str,
         ) -> GuardrailActionNode:
             name = f"{fail_prefix}_{execution_stage.name.lower()}_{guardrail.name}"
             return name, lambda s: s

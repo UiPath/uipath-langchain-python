@@ -1,8 +1,9 @@
+import json
 import logging
 import re
 from typing import Any, Callable
 
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
 from langgraph.types import Command
 from uipath.platform import UiPath
 from uipath.platform.guardrails import (
@@ -108,11 +109,58 @@ def create_tool_guardrail_node(
     execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
+    tool_name: str,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
-    # To be implemented in future PR
+    """Create a guardrail node for TOOL scope guardrails.
+
+    Args:
+        guardrail: The guardrail to evaluate.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+        success_node: Node to route to on validation pass.
+        failure_node: Node to route to on validation fail.
+        tool_name: Name of the tool to extract arguments from.
+
+    Returns:
+        A tuple of (node_name, node_function) for the guardrail evaluation node.
+    """
+
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
+        """Extract tool call arguments for the specified tool name.
+
+        Args:
+            state: The current agent graph state.
+
+        Returns:
+            JSON string of the tool call arguments, or empty string if not found.
+        """
         if not state.messages:
             return ""
+
+        if execution_stage == ExecutionStage.PRE_EXECUTION:
+            if not isinstance(state.messages[-1], AIMessage):
+                return ""
+            message = state.messages[-1]
+
+            if not message.tool_calls:
+                return ""
+
+            # Find the first tool call with matching name
+            for tool_call in message.tool_calls:
+                call_name = (
+                    tool_call.get("name")
+                    if isinstance(tool_call, dict)
+                    else getattr(tool_call, "name", None)
+                )
+                if call_name == tool_name:
+                    # Extract args from the tool call
+                    args = (
+                        tool_call.get("args")
+                        if isinstance(tool_call, dict)
+                        else getattr(tool_call, "args", None)
+                    )
+                    if args is not None:
+                        return json.dumps(args)
+
         return _message_text(state.messages[-1])
 
     return _create_guardrail_node(

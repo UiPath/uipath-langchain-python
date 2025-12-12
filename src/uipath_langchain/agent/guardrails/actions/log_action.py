@@ -31,6 +31,7 @@ class LogAction(GuardrailAction):
         guardrail: BaseGuardrail,
         scope: GuardrailScope,
         execution_stage: ExecutionStage,
+        guarded_component_name: str,
     ) -> GuardrailActionNode:
         """Create a guardrail action node that logs validation failures.
 
