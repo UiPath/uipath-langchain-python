@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from uipath.platform.guardrails import BuiltInValidatorGuardrail, CustomGuardrail
+from uipath.platform.guardrails import BuiltInValidatorGuardrail, DeterministicGuardrail
 
 import uipath_langchain.agent.guardrails.guardrails_subgraph
 from uipath_langchain.agent.guardrails.actions.base_action import GuardrailAction
@@ -20,7 +20,7 @@ class TestGuardrailStageFiltering:
         pi_guardrail.name = "Prompt-Injection"
 
         # 2. Generic Guardrail (BaseGuardrail)
-        generic_guardrail = MagicMock(spec=CustomGuardrail)
+        generic_guardrail = MagicMock(spec=DeterministicGuardrail)
         generic_guardrail.name = "Generic"
 
         # 3. Other BuiltIn Guardrail
