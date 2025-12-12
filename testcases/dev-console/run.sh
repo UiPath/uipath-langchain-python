@@ -16,5 +16,5 @@ uv run uipath pack
 # Clear any existing job key to use Console mode instead of SignalR mode
 export UIPATH_JOB_KEY=""
 
-echo "=== Running debug tests with pexpect ==="
-uv run pytest src/test_debug.py -v -s
+echo "=== Running dev console tests with pexpect ==="
+uv run pytest src/test_dev.py -v -s
