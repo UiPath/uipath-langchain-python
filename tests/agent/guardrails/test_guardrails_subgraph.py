@@ -133,3 +133,61 @@ class TestLlmGuardrailsSubgraph:
             "inner",
         ]:
             assert name in node_names
+
+
+class TestAgentGuardrailsSubgraph:
+    def test_no_guardrails_creates_simple_edges(self, monkeypatch):
+        """When no guardrails, edges should be: START -> inner -> END."""
+        from uipath_langchain.agent.guardrails.types import ExecutionStage
+
+        monkeypatch.setattr(mod, "StateGraph", FakeStateGraph)
+        monkeypatch.setattr(mod, "START", "START")
+        monkeypatch.setattr(mod, "END", "END")
+
+        inner = ("init", lambda s: s)
+        compiled = mod.create_agent_guardrails_subgraph(
+            agent_node=inner,
+            guardrails=None,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+        )
+
+        # Expect only inner node added and two edges
+        assert ("init", inner[1]) in compiled.nodes
+        assert set(compiled.edges) == {("START", "init"), ("init", "END")}
+
+    def test_guardrails_build_chain_for_execution_stage(self, monkeypatch):
+        """Agent guardrails should create chain at specified execution stage."""
+        from uipath_langchain.agent.guardrails.types import ExecutionStage
+
+        monkeypatch.setattr(mod, "StateGraph", FakeStateGraph)
+        monkeypatch.setattr(mod, "START", "START")
+        monkeypatch.setattr(mod, "END", "END")
+        monkeypatch.setattr(mod, "create_agent_guardrail_node", _fake_factory("eval"))
+
+        guardrail1 = MagicMock()
+        guardrail1.name = "guardrail1"
+        guardrail1.selector = types.SimpleNamespace(scopes=[GuardrailScope.AGENT])
+
+        a1 = _fake_action("log")
+        guardrails = [(guardrail1, a1)]
+
+        # Test PRE_EXECUTION (INIT node)
+        compiled_pre = mod.create_agent_guardrails_subgraph(
+            agent_node=("init", lambda s: s),
+            guardrails=guardrails,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+        )
+        assert {("START", "eval_pre_execution_guardrail1"), ("init", "END")}.issubset(
+            set(compiled_pre.edges)
+        )
+
+        # Test POST_EXECUTION (TERMINATE node)
+        compiled_post = mod.create_agent_guardrails_subgraph(
+            agent_node=("terminate", lambda s: s),
+            guardrails=guardrails,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+        )
+        assert {
+            ("START", "terminate"),
+            ("terminate", "eval_post_execution_guardrail1"),
+        }.issubset(set(compiled_post.edges))

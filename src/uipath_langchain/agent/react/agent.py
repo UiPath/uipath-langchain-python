@@ -9,8 +9,12 @@ from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from uipath.platform.guardrails import BaseGuardrail
 
-from ..guardrails import create_llm_guardrails_subgraph
+from ..guardrails import (
+    create_agent_guardrails_subgraph,
+    create_llm_guardrails_subgraph,
+)
 from ..guardrails.actions import GuardrailAction
+from ..guardrails.types import ExecutionStage
 from ..tools import create_tool_node
 from .init_node import (
     create_init_node,
@@ -82,12 +86,22 @@ def create_agent(
     builder: StateGraph[AgentGraphState, None, InputT, OutputT] = StateGraph(
         InnerAgentGraphState, input_schema=input_schema, output_schema=output_schema
     )
-    builder.add_node(AgentGraphNode.INIT, init_node)
+    init_with_guardrails = create_agent_guardrails_subgraph(
+        (AgentGraphNode.INIT, init_node),
+        guardrails,
+        ExecutionStage.PRE_EXECUTION,
+    )
+    builder.add_node(AgentGraphNode.INIT, init_with_guardrails)
 
     for tool_name, tool_node in tool_nodes.items():
         builder.add_node(tool_name, tool_node)
 
-    builder.add_node(AgentGraphNode.TERMINATE, terminate_node)
+    terminate_with_guardrails = create_agent_guardrails_subgraph(
+        (AgentGraphNode.TERMINATE, terminate_node),
+        guardrails,
+        ExecutionStage.POST_EXECUTION,
+    )
+    builder.add_node(AgentGraphNode.TERMINATE, terminate_with_guardrails)
 
     builder.add_edge(START, AgentGraphNode.INIT)
 
