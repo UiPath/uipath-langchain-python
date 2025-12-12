@@ -107,7 +107,7 @@ class TestLogAction:
 
         # Verify node returns empty dict
         with caplog.at_level(logging.INFO):
-            result = await node(
+            await node(
                 AgentGuardrailsGraphState(
                     messages=[], guardrail_validation_result="validation error"
                 )
@@ -118,9 +118,15 @@ class TestLogAction:
         assert log_record.levelno == logging.INFO
 
         # Verify default message includes all context
-        assert "Guardrail [Test Guardrail] validation failed for [LLM] [POST_EXECUTION]" in log_record.message
+        assert (
+            "Guardrail [Test Guardrail] validation failed for [LLM] [POST_EXECUTION]"
+            in log_record.message
+        )
         assert "validation error" in log_record.message
-        assert log_record.message == "Guardrail [Test Guardrail] validation failed for [LLM] [POST_EXECUTION] with the following reason: validation error"
+        assert (
+            log_record.message
+            == "Guardrail [Test Guardrail] validation failed for [LLM] [POST_EXECUTION] with the following reason: validation error"
+        )
 
     @pytest.mark.asyncio
     async def test_node_name_and_exception_pre_tool(
@@ -147,7 +153,7 @@ class TestLogAction:
 
         # Verify node returns empty dict
         with caplog.at_level(logging.WARNING):
-            result = await node(
+            await node(
                 AgentGuardrailsGraphState(
                     messages=[], guardrail_validation_result="invalid tool args"
                 )
@@ -158,9 +164,15 @@ class TestLogAction:
         assert log_record.levelno == logging.WARNING
 
         # Verify default message includes all context
-        assert "Guardrail [Tool Guardrail v2] validation failed for [TOOL] [PRE_EXECUTION]" in log_record.message
+        assert (
+            "Guardrail [Tool Guardrail v2] validation failed for [TOOL] [PRE_EXECUTION]"
+            in log_record.message
+        )
         assert "invalid tool args" in log_record.message
-        assert log_record.message == "Guardrail [Tool Guardrail v2] validation failed for [TOOL] [PRE_EXECUTION] with the following reason: invalid tool args"
+        assert (
+            log_record.message
+            == "Guardrail [Tool Guardrail v2] validation failed for [TOOL] [PRE_EXECUTION] with the following reason: invalid tool args"
+        )
 
     @pytest.mark.asyncio
     async def test_node_name_and_exception_post_tool(
@@ -187,7 +199,7 @@ class TestLogAction:
 
         # Verify node returns empty dict
         with caplog.at_level(logging.ERROR):
-            result = await node(
+            await node(
                 AgentGuardrailsGraphState(
                     messages=[], guardrail_validation_result="tool error"
                 )
@@ -199,8 +211,12 @@ class TestLogAction:
 
         # Verify custom message was logged (not default message)
         assert log_record.message == "Tool execution failed"
-        assert "Guardrail" not in log_record.message  # Custom message doesn't include guardrail context
-        assert "validation failed" not in log_record.message  # Custom message doesn't include default format
+        assert (
+            "Guardrail" not in log_record.message
+        )  # Custom message doesn't include guardrail context
+        assert (
+            "validation failed" not in log_record.message
+        )  # Custom message doesn't include default format
 
     @pytest.mark.asyncio
     async def test_node_name_and_exception_post_tool_warning(
@@ -227,7 +243,7 @@ class TestLogAction:
 
         # Verify node returns empty dict
         with caplog.at_level(logging.WARNING):
-            result = await node(
+            await node(
                 AgentGuardrailsGraphState(
                     messages=[], guardrail_validation_result="post execution error"
                 )
@@ -238,6 +254,12 @@ class TestLogAction:
         assert log_record.levelno == logging.WARNING
 
         # Verify default message includes all context
-        assert "Guardrail [Post Tool Guardrail] validation failed for [TOOL] [POST_EXECUTION]" in log_record.message
+        assert (
+            "Guardrail [Post Tool Guardrail] validation failed for [TOOL] [POST_EXECUTION]"
+            in log_record.message
+        )
         assert "post execution error" in log_record.message
-        assert log_record.message == "Guardrail [Post Tool Guardrail] validation failed for [TOOL] [POST_EXECUTION] with the following reason: post execution error"
+        assert (
+            log_record.message
+            == "Guardrail [Post Tool Guardrail] validation failed for [TOOL] [POST_EXECUTION] with the following reason: post execution error"
+        )
