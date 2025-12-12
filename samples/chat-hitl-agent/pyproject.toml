@@ -9,22 +9,12 @@ dependencies = [
     "langchain-anthropic>=1.2.0",
     "tavily-python>=0.7.13",
     "langchain-tavily>=0.2.13",
-    "uipath-langchain>=0.1.14, <0.2.0",
-    "uipath>=2.2.18, <2.3.0",
+    "uipath-langchain>=0.1.26, <0.2.0",
+    "uipath>=2.2.29, <2.3.0",
 ]
 
 [project.optional-dependencies]
 dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
-
-[build-system]
-requires = ["setuptools>=73.0.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-py-modules = []
-
-[tool.setuptools.package-data]
-"*" = ["py.typed"]
 
 [tool.ruff]
 lint.select = [
@@ -49,5 +39,5 @@ lint.ignore = [
 
 [dependency-groups]
 dev = [
-     "uipath-dev>=0.0.12",
+     "uipath-dev>=0.0.13",
 ]
