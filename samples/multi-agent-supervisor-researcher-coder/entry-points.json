@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "ee84ff72-76ce-40f4-adb0-f76bd220f634",
+            "uniqueId": "f9a09cfc-67bf-429a-883d-ebc178a4b6d6",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -48,9 +48,12 @@
                     {
                         "id": "supervisor",
                         "name": "supervisor",
-                        "type": "node",
+                        "type": "model",
                         "subgraph": null,
-                        "metadata": {}
+                        "metadata": {
+                            "model_name": "claude-3-7-sonnet-latest",
+                            "max_tokens": 64000
+                        }
                     },
                     {
                         "id": "researcher",
