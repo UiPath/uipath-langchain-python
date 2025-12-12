@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "cc314325-6593-4072-9d08-1db0de3f8a1a",
+            "uniqueId": "d770033b-53dc-4b15-9ebd-eaf8cdc03825",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -150,7 +150,7 @@
                                         },
                                         "usage_metadata": {
                                             "additionalProperties": true,
-                                            "description": "Usage metadata for a message, such as token counts.\n\nThis is a standard representation of token usage that is consistent across models.\n\nExample:\n    ```python\n    {\n        \"input_tokens\": 350,\n        \"output_tokens\": 240,\n        \"total_tokens\": 590,\n        \"input_token_details\": {\n            \"audio\": 10,\n            \"cache_creation\": 200,\n            \"cache_read\": 100,\n        },\n        \"output_token_details\": {\n            \"audio\": 10,\n            \"reasoning\": 200,\n        },\n    }\n    ```\n\n!!! warning \"Behavior changed in `langchain-core` 0.3.9\"\n    Added `input_token_details` and `output_token_details`.\n\n!!! note \"LangSmith SDK\"\n    The LangSmith SDK also has a `UsageMetadata` class. While the two share fields,\n    LangSmith's `UsageMetadata` has additional fields to capture cost information\n    used by the LangSmith platform.",
+                                            "description": "Usage metadata for a message, such as token counts.\n\nThis is a standard representation of token usage that is consistent across models.\n\nExample:\n    ```python\n    {\n        \"input_tokens\": 350,\n        \"output_tokens\": 240,\n        \"total_tokens\": 590,\n        \"input_token_details\": {\n            \"audio\": 10,\n            \"cache_creation\": 200,\n            \"cache_read\": 100,\n        },\n        \"output_token_details\": {\n            \"audio\": 10,\n            \"reasoning\": 200,\n        },\n    }\n    ```\n\n!!! warning \"Behavior changed in `langchain-core` 0.3.9\"\n\n    Added `input_token_details` and `output_token_details`.\n\n!!! note \"LangSmith SDK\"\n\n    The LangSmith SDK also has a `UsageMetadata` class. While the two share fields,\n    LangSmith's `UsageMetadata` has additional fields to capture cost information\n    used by the LangSmith platform.",
                                             "properties": {
                                                 "input_tokens": {
                                                     "title": "Input Tokens",
@@ -445,7 +445,7 @@
                                 },
                                 {
                                     "additionalProperties": true,
-                                    "description": "Message for passing the result of executing a tool back to a model.\n\n`ToolMessage` objects contain the result of a tool invocation. Typically, the result\nis encoded inside the `content` field.\n\nExample: A `ToolMessage` representing a result of `42` from a tool call with id\n\n```python\nfrom langchain_core.messages import ToolMessage\n\nToolMessage(content=\"42\", tool_call_id=\"call_Jja7J89XsjrOLA5r!MEOW!SL\")\n```\n\nExample: A `ToolMessage` where only part of the tool output is sent to the model\nand the full output is passed in to artifact.\n\n```python\nfrom langchain_core.messages import ToolMessage\n\ntool_output = {\n    \"stdout\": \"From the graph we can see that the correlation between \"\n    \"x and y is ...\",\n    \"stderr\": None,\n    \"artifacts\": {\"type\": \"image\", \"base64_data\": \"/9j/4gIcSU...\"},\n}\n\nToolMessage(\n    content=tool_output[\"stdout\"],\n    artifact=tool_output,\n    tool_call_id=\"call_Jja7J89XsjrOLA5r!MEOW!SL\",\n)\n```\n\nThe `tool_call_id` field is used to associate the tool call request with the\ntool call response. Useful in situations where a chat model is able\nto request multiple tool calls in parallel.",
+                                    "description": "Message for passing the result of executing a tool back to a model.\n\n`ToolMessage` objects contain the result of a tool invocation. Typically, the result\nis encoded inside the `content` field.\n\n`tool_call_id` is used to associate the tool call request with the tool call\nresponse. Useful in situations where a chat model is able to request multiple tool\ncalls in parallel.\n\nExample:\n    A `ToolMessage` representing a result of `42` from a tool call with id\n\n    ```python\n    from langchain_core.messages import ToolMessage\n\n    ToolMessage(content=\"42\", tool_call_id=\"call_Jja7J89XsjrOLA5r!MEOW!SL\")\n    ```\n\nExample:\n    A `ToolMessage` where only part of the tool output is sent to the model\n    and the full output is passed in to artifact.\n\n    ```python\n    from langchain_core.messages import ToolMessage\n\n    tool_output = {\n        \"stdout\": \"From the graph we can see that the correlation between \"\n        \"x and y is ...\",\n        \"stderr\": None,\n        \"artifacts\": {\"type\": \"image\", \"base64_data\": \"/9j/4gIcSU...\"},\n    }\n\n    ToolMessage(\n        content=tool_output[\"stdout\"],\n        artifact=tool_output,\n        tool_call_id=\"call_Jja7J89XsjrOLA5r!MEOW!SL\",\n    )\n    ```",
                                     "properties": {
                                         "content": {
                                             "anyOf": [
@@ -654,7 +654,7 @@
                                         },
                                         "usage_metadata": {
                                             "additionalProperties": true,
-                                            "description": "Usage metadata for a message, such as token counts.\n\nThis is a standard representation of token usage that is consistent across models.\n\nExample:\n    ```python\n    {\n        \"input_tokens\": 350,\n        \"output_tokens\": 240,\n        \"total_tokens\": 590,\n        \"input_token_details\": {\n            \"audio\": 10,\n            \"cache_creation\": 200,\n            \"cache_read\": 100,\n        },\n        \"output_token_details\": {\n            \"audio\": 10,\n            \"reasoning\": 200,\n        },\n    }\n    ```\n\n!!! warning \"Behavior changed in `langchain-core` 0.3.9\"\n    Added `input_token_details` and `output_token_details`.\n\n!!! note \"LangSmith SDK\"\n    The LangSmith SDK also has a `UsageMetadata` class. While the two share fields,\n    LangSmith's `UsageMetadata` has additional fields to capture cost information\n    used by the LangSmith platform.",
+                                            "description": "Usage metadata for a message, such as token counts.\n\nThis is a standard representation of token usage that is consistent across models.\n\nExample:\n    ```python\n    {\n        \"input_tokens\": 350,\n        \"output_tokens\": 240,\n        \"total_tokens\": 590,\n        \"input_token_details\": {\n            \"audio\": 10,\n            \"cache_creation\": 200,\n            \"cache_read\": 100,\n        },\n        \"output_token_details\": {\n            \"audio\": 10,\n            \"reasoning\": 200,\n        },\n    }\n    ```\n\n!!! warning \"Behavior changed in `langchain-core` 0.3.9\"\n\n    Added `input_token_details` and `output_token_details`.\n\n!!! note \"LangSmith SDK\"\n\n    The LangSmith SDK also has a `UsageMetadata` class. While the two share fields,\n    LangSmith's `UsageMetadata` has additional fields to capture cost information\n    used by the LangSmith platform.",
                                             "properties": {
                                                 "input_tokens": {
                                                     "title": "Input Tokens",
@@ -1215,7 +1215,7 @@
                                         },
                                         "usage_metadata": {
                                             "additionalProperties": true,
-                                            "description": "Usage metadata for a message, such as token counts.\n\nThis is a standard representation of token usage that is consistent across models.\n\nExample:\n    ```python\n    {\n        \"input_tokens\": 350,\n        \"output_tokens\": 240,\n        \"total_tokens\": 590,\n        \"input_token_details\": {\n            \"audio\": 10,\n            \"cache_creation\": 200,\n            \"cache_read\": 100,\n        },\n        \"output_token_details\": {\n            \"audio\": 10,\n            \"reasoning\": 200,\n        },\n    }\n    ```\n\n!!! warning \"Behavior changed in `langchain-core` 0.3.9\"\n    Added `input_token_details` and `output_token_details`.\n\n!!! note \"LangSmith SDK\"\n    The LangSmith SDK also has a `UsageMetadata` class. While the two share fields,\n    LangSmith's `UsageMetadata` has additional fields to capture cost information\n    used by the LangSmith platform.",
+                                            "description": "Usage metadata for a message, such as token counts.\n\nThis is a standard representation of token usage that is consistent across models.\n\nExample:\n    ```python\n    {\n        \"input_tokens\": 350,\n        \"output_tokens\": 240,\n        \"total_tokens\": 590,\n        \"input_token_details\": {\n            \"audio\": 10,\n            \"cache_creation\": 200,\n            \"cache_read\": 100,\n        },\n        \"output_token_details\": {\n            \"audio\": 10,\n            \"reasoning\": 200,\n        },\n    }\n    ```\n\n!!! warning \"Behavior changed in `langchain-core` 0.3.9\"\n\n    Added `input_token_details` and `output_token_details`.\n\n!!! note \"LangSmith SDK\"\n\n    The LangSmith SDK also has a `UsageMetadata` class. While the two share fields,\n    LangSmith's `UsageMetadata` has additional fields to capture cost information\n    used by the LangSmith platform.",
                                             "properties": {
                                                 "input_tokens": {
                                                     "title": "Input Tokens",
@@ -1510,7 +1510,7 @@
                                 },
                                 {
                                     "additionalProperties": true,
-                                    "description": "Message for passing the result of executing a tool back to a model.\n\n`ToolMessage` objects contain the result of a tool invocation. Typically, the result\nis encoded inside the `content` field.\n\nExample: A `ToolMessage` representing a result of `42` from a tool call with id\n\n```python\nfrom langchain_core.messages import ToolMessage\n\nToolMessage(content=\"42\", tool_call_id=\"call_Jja7J89XsjrOLA5r!MEOW!SL\")\n```\n\nExample: A `ToolMessage` where only part of the tool output is sent to the model\nand the full output is passed in to artifact.\n\n```python\nfrom langchain_core.messages import ToolMessage\n\ntool_output = {\n    \"stdout\": \"From the graph we can see that the correlation between \"\n    \"x and y is ...\",\n    \"stderr\": None,\n    \"artifacts\": {\"type\": \"image\", \"base64_data\": \"/9j/4gIcSU...\"},\n}\n\nToolMessage(\n    content=tool_output[\"stdout\"],\n    artifact=tool_output,\n    tool_call_id=\"call_Jja7J89XsjrOLA5r!MEOW!SL\",\n)\n```\n\nThe `tool_call_id` field is used to associate the tool call request with the\ntool call response. Useful in situations where a chat model is able\nto request multiple tool calls in parallel.",
+                                    "description": "Message for passing the result of executing a tool back to a model.\n\n`ToolMessage` objects contain the result of a tool invocation. Typically, the result\nis encoded inside the `content` field.\n\n`tool_call_id` is used to associate the tool call request with the tool call\nresponse. Useful in situations where a chat model is able to request multiple tool\ncalls in parallel.\n\nExample:\n    A `ToolMessage` representing a result of `42` from a tool call with id\n\n    ```python\n    from langchain_core.messages import ToolMessage\n\n    ToolMessage(content=\"42\", tool_call_id=\"call_Jja7J89XsjrOLA5r!MEOW!SL\")\n    ```\n\nExample:\n    A `ToolMessage` where only part of the tool output is sent to the model\n    and the full output is passed in to artifact.\n\n    ```python\n    from langchain_core.messages import ToolMessage\n\n    tool_output = {\n        \"stdout\": \"From the graph we can see that the correlation between \"\n        \"x and y is ...\",\n        \"stderr\": None,\n        \"artifacts\": {\"type\": \"image\", \"base64_data\": \"/9j/4gIcSU...\"},\n    }\n\n    ToolMessage(\n        content=tool_output[\"stdout\"],\n        artifact=tool_output,\n        tool_call_id=\"call_Jja7J89XsjrOLA5r!MEOW!SL\",\n    )\n    ```",
                                     "properties": {
                                         "content": {
                                             "anyOf": [
@@ -1719,7 +1719,7 @@
                                         },
                                         "usage_metadata": {
                                             "additionalProperties": true,
-                                            "description": "Usage metadata for a message, such as token counts.\n\nThis is a standard representation of token usage that is consistent across models.\n\nExample:\n    ```python\n    {\n        \"input_tokens\": 350,\n        \"output_tokens\": 240,\n        \"total_tokens\": 590,\n        \"input_token_details\": {\n            \"audio\": 10,\n            \"cache_creation\": 200,\n            \"cache_read\": 100,\n        },\n        \"output_token_details\": {\n            \"audio\": 10,\n            \"reasoning\": 200,\n        },\n    }\n    ```\n\n!!! warning \"Behavior changed in `langchain-core` 0.3.9\"\n    Added `input_token_details` and `output_token_details`.\n\n!!! note \"LangSmith SDK\"\n    The LangSmith SDK also has a `UsageMetadata` class. While the two share fields,\n    LangSmith's `UsageMetadata` has additional fields to capture cost information\n    used by the LangSmith platform.",
+                                            "description": "Usage metadata for a message, such as token counts.\n\nThis is a standard representation of token usage that is consistent across models.\n\nExample:\n    ```python\n    {\n        \"input_tokens\": 350,\n        \"output_tokens\": 240,\n        \"total_tokens\": 590,\n        \"input_token_details\": {\n            \"audio\": 10,\n            \"cache_creation\": 200,\n            \"cache_read\": 100,\n        },\n        \"output_token_details\": {\n            \"audio\": 10,\n            \"reasoning\": 200,\n        },\n    }\n    ```\n\n!!! warning \"Behavior changed in `langchain-core` 0.3.9\"\n\n    Added `input_token_details` and `output_token_details`.\n\n!!! note \"LangSmith SDK\"\n\n    The LangSmith SDK also has a `UsageMetadata` class. While the two share fields,\n    LangSmith's `UsageMetadata` has additional fields to capture cost information\n    used by the LangSmith platform.",
                                             "properties": {
                                                 "input_tokens": {
                                                     "title": "Input Tokens",
@@ -2138,80 +2138,128 @@
                     {
                         "id": "__start__",
                         "name": "__start__",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "agent",
+                        "name": "agent",
+                        "type": "node",
+                        "subgraph": {
+                            "nodes": [
+                                {
+                                    "id": "__start__",
+                                    "name": "__start__",
+                                    "type": "__start__",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                },
+                                {
+                                    "id": "model",
+                                    "name": "model",
+                                    "type": "model",
+                                    "subgraph": null,
+                                    "metadata": {
+                                        "model_name": "claude-haiku-4-5",
+                                        "max_tokens": 4096
+                                    }
+                                },
+                                {
+                                    "id": "tools",
+                                    "name": "tools",
+                                    "type": "tool",
+                                    "subgraph": null,
+                                    "metadata": {
+                                        "tool_names": [
+                                            "write_todos",
+                                            "ls",
+                                            "read_file",
+                                            "write_file",
+                                            "edit_file",
+                                            "glob",
+                                            "grep",
+                                            "execute",
+                                            "task",
+                                            "tavily_search"
+                                        ],
+                                        "tool_count": 10
+                                    }
+                                },
+                                {
+                                    "id": "SummarizationMiddleware.before_model",
+                                    "name": "SummarizationMiddleware.before_model",
+                                    "type": "node",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                },
+                                {
+                                    "id": "PatchToolCallsMiddleware.before_agent",
+                                    "name": "PatchToolCallsMiddleware.before_agent",
+                                    "type": "node",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                },
+                                {
+                                    "id": "__end__",
+                                    "name": "__end__",
+                                    "type": "__end__",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                }
+                            ],
+                            "edges": [
+                                {
+                                    "source": "PatchToolCallsMiddleware.before_agent",
+                                    "target": "SummarizationMiddleware.before_model",
+                                    "label": null
+                                },
+                                {
+                                    "source": "SummarizationMiddleware.before_model",
+                                    "target": "model",
+                                    "label": null
+                                },
+                                {
+                                    "source": "__start__",
+                                    "target": "PatchToolCallsMiddleware.before_agent",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "__end__",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "tools",
+                                    "label": null
+                                },
+                                {
+                                    "source": "tools",
+                                    "target": "SummarizationMiddleware.before_model",
+                                    "label": null
+                                }
+                            ]
+                        },
+                        "metadata": {}
                     },
                     {
                         "id": "__end__",
                         "name": "__end__",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "agent:model",
-                        "name": "model",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "agent:tools",
-                        "name": "tools",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "agent:SummarizationMiddleware.before_model",
-                        "name": "SummarizationMiddleware.before_model",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "agent:PatchToolCallsMiddleware.before_agent",
-                        "name": "PatchToolCallsMiddleware.before_agent",
-                        "type": "Node",
-                        "subgraph": null
-                    },
-                    {
-                        "id": "agent:__end__",
-                        "name": "__end__",
-                        "type": "Node",
-                        "subgraph": null
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
                     }
                 ],
                 "edges": [
                     {
                         "source": "__start__",
-                        "target": "agent:PatchToolCallsMiddleware.before_agent",
+                        "target": "agent",
                         "label": null
                     },
                     {
-                        "source": "agent:__end__",
+                        "source": "agent",
                         "target": "__end__",
-                        "label": null
-                    },
-                    {
-                        "source": "agent:PatchToolCallsMiddleware.before_agent",
-                        "target": "agent:SummarizationMiddleware.before_model",
-                        "label": null
-                    },
-                    {
-                        "source": "agent:SummarizationMiddleware.before_model",
-                        "target": "agent:model",
-                        "label": null
-                    },
-                    {
-                        "source": "agent:model",
-                        "target": "agent:__end__",
-                        "label": null
-                    },
-                    {
-                        "source": "agent:model",
-                        "target": "agent:tools",
-                        "label": null
-                    },
-                    {
-                        "source": "agent:tools",
-                        "target": "agent:SummarizationMiddleware.before_model",
                         "label": null
                     }
                 ]
