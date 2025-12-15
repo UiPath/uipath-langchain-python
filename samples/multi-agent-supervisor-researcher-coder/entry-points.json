@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "ee84ff72-76ce-40f4-adb0-f76bd220f634",
+            "uniqueId": "3252b086-675a-4d9d-a549-e99fa6f7cd2d",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -48,9 +48,12 @@
                     {
                         "id": "supervisor",
                         "name": "supervisor",
-                        "type": "node",
+                        "type": "model",
                         "subgraph": null,
-                        "metadata": {}
+                        "metadata": {
+                            "model_name": "claude-3-7-sonnet-latest",
+                            "max_tokens": 64000
+                        }
                     },
                     {
                         "id": "researcher",
@@ -189,6 +192,13 @@
                         "metadata": {}
                     },
                     {
+                        "id": "output",
+                        "name": "output",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
                         "id": "__end__",
                         "name": "__end__",
                         "type": "__end__",
@@ -219,17 +229,22 @@
                     },
                     {
                         "source": "supervisor",
-                        "target": "__end__",
-                        "label": null
-                    },
-                    {
-                        "source": "supervisor",
                         "target": "coder",
                         "label": null
                     },
                     {
                         "source": "supervisor",
+                        "target": "output",
+                        "label": "__end__"
+                    },
+                    {
+                        "source": "supervisor",
                         "target": "researcher",
+                        "label": null
+                    },
+                    {
+                        "source": "output",
+                        "target": "__end__",
                         "label": null
                     }
                 ]

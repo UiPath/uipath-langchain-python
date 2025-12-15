@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "planner",
-            "uniqueId": "7ab9bf62-e4a4-4261-8b47-0223be930f45",
+            "uniqueId": "612002c9-74ee-4b66-b262-0dd0a524f3c8",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -46,15 +46,18 @@
                         "metadata": {}
                     },
                     {
-                        "id": "create_plan",
-                        "name": "create_plan",
-                        "type": "node",
+                        "id": "planner_agent",
+                        "name": "planner_agent",
+                        "type": "model",
                         "subgraph": null,
-                        "metadata": {}
+                        "metadata": {
+                            "model_name": "claude-3-7-sonnet-latest",
+                            "max_tokens": 64000
+                        }
                     },
                     {
-                        "id": "supervisor",
-                        "name": "supervisor",
+                        "id": "router",
+                        "name": "router",
                         "type": "node",
                         "subgraph": null,
                         "metadata": {}
@@ -62,6 +65,13 @@
                     {
                         "id": "invoke_agent",
                         "name": "invoke_agent",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "output",
+                        "name": "output",
                         "type": "node",
                         "subgraph": null,
                         "metadata": {}
@@ -82,22 +92,37 @@
                     },
                     {
                         "source": "input",
-                        "target": "supervisor",
-                        "label": null
-                    },
-                    {
-                        "source": "supervisor",
-                        "target": "__end__",
-                        "label": null
-                    },
-                    {
-                        "source": "create_plan",
-                        "target": "supervisor",
+                        "target": "router",
                         "label": null
                     },
                     {
                         "source": "invoke_agent",
-                        "target": "supervisor",
+                        "target": "router",
+                        "label": null
+                    },
+                    {
+                        "source": "planner_agent",
+                        "target": "router",
+                        "label": null
+                    },
+                    {
+                        "source": "router",
+                        "target": "invoke_agent",
+                        "label": null
+                    },
+                    {
+                        "source": "router",
+                        "target": "output",
+                        "label": "__end__"
+                    },
+                    {
+                        "source": "router",
+                        "target": "planner_agent",
+                        "label": null
+                    },
+                    {
+                        "source": "output",
+                        "target": "__end__",
                         "label": null
                     }
                 ]
@@ -105,7 +130,7 @@
         },
         {
             "filePath": "researcher",
-            "uniqueId": "834546c0-6741-4a84-9159-dcc40f5942e8",
+            "uniqueId": "84adaea3-48d6-4e92-a095-2e4f9d4f60eb",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -1283,7 +1308,7 @@
         },
         {
             "filePath": "coder",
-            "uniqueId": "49f05858-56b9-412e-affb-c63048d689bc",
+            "uniqueId": "ecd1a7d1-3348-4d86-9cfe-69408e575d87",
             "type": "agent",
             "input": {
                 "type": "object",

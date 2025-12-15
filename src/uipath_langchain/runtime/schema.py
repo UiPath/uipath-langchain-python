@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
@@ -31,28 +32,83 @@ class SchemaDetails:
 
 
 def _unwrap_runnable_callable(
-    runnable: Runnable[Any, Any], target_type: type[T]
+    runnable: Runnable[Any, Any],
+    target_type: type[T],
+    _seen: set[int] | None = None,
 ) -> T | None:
-    """Unwrap a RunnableCallable to find an instance of the target type.
+    """Try to find an instance of target_type (e.g., BaseChatModel)
+    inside a Runnable.
 
-    Args:
-        runnable: The runnable to unwrap
-        target_type: The type to search for (e.g., BaseChatModel)
-
-    Returns:
-        Instance of target_type if found in the closure, None otherwise
+    Handles:
+    - Direct model runnables
+    - LangGraph RunnableCallable
+    - LangChain function runnables (RunnableLambda, etc.)
+    - RunnableBinding / RunnableSequence with nested steps
     """
     if isinstance(runnable, target_type):
         return runnable
 
+    if _seen is None:
+        _seen = set()
+    obj_id = id(runnable)
+    if obj_id in _seen:
+        return None
+    _seen.add(obj_id)
+
+    func: Callable[..., Any] | None = None
+
+    # 1) LangGraph internal RunnableCallable
     if RunnableCallable is not None and isinstance(runnable, RunnableCallable):
-        func: Callable[..., Any] | None = getattr(runnable, "func", None)
-        if func is not None and hasattr(func, "__closure__") and func.__closure__:
-            for cell in func.__closure__:
-                if hasattr(cell, "cell_contents"):
-                    content = cell.cell_contents
-                    if isinstance(content, target_type):
-                        return content
+        func = getattr(runnable, "func", None)
+
+    # 2) Generic LangChain function-wrapping runnables
+    if func is None:
+        for attr_name in ("func", "_func", "afunc", "_afunc"):
+            maybe = getattr(runnable, attr_name, None)
+            if callable(maybe):
+                func = maybe
+                break
+
+    # 3) Look into the function closure for a model
+    if func is not None:
+        closure = getattr(func, "__closure__", None) or ()
+        for cell in closure:
+            content = getattr(cell, "cell_contents", None)
+            if isinstance(content, target_type):
+                return content
+            if isinstance(content, Runnable):
+                found = _unwrap_runnable_callable(content, target_type, _seen)
+                if found is not None:
+                    return found
+
+    # 4) Deep-scan attributes, including nested runnables / containers
+    def _scan_value(value: Any) -> T | None:
+        if isinstance(value, target_type):
+            return value
+        if isinstance(value, Runnable):
+            return _unwrap_runnable_callable(value, target_type, _seen)
+        if isinstance(value, dict):
+            for v in value.values():
+                found = _scan_value(v)
+                if found is not None:
+                    return found
+        # Handle lists, tuples, sets, etc. but avoid strings/bytes
+        if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+            for item in value:
+                found = _scan_value(item)
+                if found is not None:
+                    return found
+        return None
+
+    try:
+        attrs = vars(runnable)
+    except TypeError:
+        attrs = {}
+
+    for value in attrs.values():
+        found = _scan_value(value)
+        if found is not None:
+            return found
 
     return None
 
