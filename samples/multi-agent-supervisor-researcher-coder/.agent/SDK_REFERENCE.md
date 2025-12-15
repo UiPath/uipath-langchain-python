@@ -221,6 +221,12 @@ sdk.context_grounding.delete_index(index: uipath.platform.context_grounding.cont
 # Asynchronously delete a context grounding index.
 sdk.context_grounding.delete_index_async(index: uipath.platform.context_grounding.context_grounding_index.ContextGroundingIndex, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> None
 
+# Downloads the Batch Transform result file to the specified path.
+sdk.context_grounding.download_batch_transform_result(id: str, destination_path: str, validate_status: bool=True, index_name: str | None=None) -> None
+
+# Asynchronously downloads the Batch Transform result file to the specified path.
+sdk.context_grounding.download_batch_transform_result_async(id: str, destination_path: str, validate_status: bool=True, index_name: str | None=None) -> None
+
 # Ingest data into the context grounding index.
 sdk.context_grounding.ingest_data(index: uipath.platform.context_grounding.context_grounding_index.ContextGroundingIndex, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> None
 
@@ -232,6 +238,12 @@ sdk.context_grounding.retrieve(name: str, folder_key: Optional[str]=None, folder
 
 # Asynchronously retrieve context grounding index information by its name.
 sdk.context_grounding.retrieve_async(name: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> uipath.platform.context_grounding.context_grounding_index.ContextGroundingIndex
+
+# Retrieves a Batch Transform task status.
+sdk.context_grounding.retrieve_batch_transform(id: str, index_name: str | None=None) -> uipath.platform.context_grounding.context_grounding.BatchTransformResponse
+
+# Asynchronously retrieves a Batch Transform task status.
+sdk.context_grounding.retrieve_batch_transform_async(id: str, index_name: str | None=None) -> uipath.platform.context_grounding.context_grounding.BatchTransformResponse
 
 # Retrieve context grounding index information by its ID.
 sdk.context_grounding.retrieve_by_id(id: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> typing.Any
@@ -251,11 +263,17 @@ sdk.context_grounding.search(name: str, query: str, number_of_results: int=10, f
 # Search asynchronously for contextual information within a specific index.
 sdk.context_grounding.search_async(name: str, query: str, number_of_results: int=10, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> typing.List[uipath.platform.context_grounding.context_grounding.ContextGroundingQueryResponse]
 
+# Starts a Batch Transform, task on the targeted index.
+sdk.context_grounding.start_batch_transform(name: str, index_name: str, prompt: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=250000)])], output_columns: list[uipath.platform.context_grounding.context_grounding.BatchTransformOutputColumn], storage_bucket_folder_path_prefix: Annotated[str | None, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=512)])]=None, enable_web_search_grounding: bool=False, folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.context_grounding.context_grounding.BatchTransformCreationResponse
+
+# Asynchronously starts a Batch Transform, task on the targeted index.
+sdk.context_grounding.start_batch_transform_async(name: str, index_name: str, prompt: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=250000)])], output_columns: list[uipath.platform.context_grounding.context_grounding.BatchTransformOutputColumn], storage_bucket_folder_path_prefix: Annotated[str | None, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=512)])]=None, enable_web_search_grounding: bool=False, folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.context_grounding.context_grounding.BatchTransformCreationResponse
+
 # Starts a Deep RAG task on the targeted index.
-sdk.context_grounding.start_deep_rag(name: str, index_name: str, prompt: str, glob_pattern: str="*", citation_mode: <enum 'CitationMode="CitationMode.SKIP", folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.context_grounding.context_grounding.DeepRagCreationResponse
+sdk.context_grounding.start_deep_rag(name: str, index_name: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=512)])], prompt: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=250000)])], glob_pattern: Annotated[str, FieldInfo(annotation=NoneType, required=False, default='*', metadata=[MaxLen(max_length=512)])]="**", citation_mode: <enum 'CitationMode="CitationMode.SKIP", folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.context_grounding.context_grounding.DeepRagCreationResponse
 
 # Asynchronously starts a Deep RAG task on the targeted index.
-sdk.context_grounding.start_deep_rag_async(name: str, index_name: str, prompt: str, glob_pattern: str="*", citation_mode: <enum 'CitationMode="CitationMode.SKIP", folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.context_grounding.context_grounding.DeepRagCreationResponse
+sdk.context_grounding.start_deep_rag_async(name: str, index_name: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=512)])], prompt: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=250000)])], glob_pattern: Annotated[str, FieldInfo(annotation=NoneType, required=False, default='*', metadata=[MaxLen(max_length=512)])]="**", citation_mode: <enum 'CitationMode="CitationMode.SKIP", folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.context_grounding.context_grounding.DeepRagCreationResponse
 
 ```
 
@@ -380,7 +398,7 @@ Guardrails service
 
 ```python
 # Validate input text using the provided guardrail.
-sdk.guardrails.evaluate_guardrail(input_data: str | dict[str, Any], guardrail: Annotated[Union[uipath.platform.guardrails.guardrails.DeterministicGuardrail, uipath.platform.guardrails.guardrails.BuiltInValidatorGuardrail], FieldInfo(annotation=NoneType, required=True, discriminator='guardrail_type')]) -> uipath.platform.guardrails.guardrails.GuardrailValidationResult
+sdk.guardrails.evaluate_guardrail(input_data: str | dict[str, Any], guardrail: uipath.platform.guardrails.guardrails.BuiltInValidatorGuardrail) -> uipath.core.guardrails.guardrails.GuardrailValidationResult
 
 ```
 

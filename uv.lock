@@ -2863,9 +2863,10 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.1.26"
+version = "0.1.28"
 source = { editable = "." }
 dependencies = [
+    { name = "aiosqlite" },
     { name = "httpx" },
     { name = "jsonpath-ng" },
     { name = "jsonschema-pydantic-converter" },
@@ -2905,6 +2906,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", specifier = "==0.21.0" },
     { name = "boto3-stubs", marker = "extra == 'bedrock'", specifier = ">=1.41.4" },
     { name = "google-generativeai", marker = "extra == 'vertex'", specifier = ">=0.8.0" },
     { name = "httpx", specifier = ">=0.27.0" },

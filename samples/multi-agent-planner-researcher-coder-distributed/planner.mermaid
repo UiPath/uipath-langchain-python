@@ -1,12 +1,16 @@
 flowchart TB
   __start__(__start__)
   input(input)
-  create_plan(create_plan)
-  supervisor(supervisor)
+  planner_agent(planner_agent)
+  router(router)
   invoke_agent(invoke_agent)
+  output(output)
   __end__(__end__)
   __start__ --> input
-  input --> supervisor
-  supervisor --> __end__
-  create_plan --> supervisor
-  invoke_agent --> supervisor
+  input --> router
+  invoke_agent --> router
+  planner_agent --> router
+  router --> invoke_agent
+  router --> |__end__|output
+  router --> planner_agent
+  output --> __end__
