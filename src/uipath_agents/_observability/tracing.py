@@ -3,10 +3,11 @@ import os
 from typing import Any, ClassVar
 
 from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
-from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
-from opentelemetry.instrumentation.asyncio import AsyncioInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
+
+# from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
+# from opentelemetry.instrumentation.asyncio import AsyncioInstrumentor
+# from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+# from opentelemetry.instrumentation.sqlite3 import SQLite3Instrumentor
 from uipath.core import UiPathTraceManager
 
 from uipath_agents._observability.utils import setup_otel_env
@@ -39,14 +40,14 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
         if azure_exporter:
             trace_manager.add_span_exporter(azure_exporter)
 
-    _TelemetryState.instrumentors = [
-        AsyncioInstrumentor(),
-        HTTPXClientInstrumentor(),
-        AioHttpClientInstrumentor(),
-        SQLite3Instrumentor(),
-    ]
-    for instrumentor in _TelemetryState.instrumentors:
-        instrumentor.instrument()
+    # _TelemetryState.instrumentors = [
+    #     AsyncioInstrumentor(),
+    #     HTTPXClientInstrumentor(),
+    #     AioHttpClientInstrumentor(),
+    #     SQLite3Instrumentor(),
+    # ]
+    # for instrumentor in _TelemetryState.instrumentors:
+    #     instrumentor.instrument()
 
     _TelemetryState.configured = True
     logger.debug("Telemetry configured successfully")
