@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any, Dict, Literal
 
-from langchain_core.messages import AIMessage, ToolCall, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.types import Command, interrupt
 from uipath.platform.common import CreateEscalation
 from uipath.platform.guardrails import (
@@ -16,7 +16,7 @@ from uipath.runtime.errors import UiPathErrorCode
 from ...exceptions import AgentTerminationException
 from ...react.types import AgentGuardrailsGraphState
 from ..types import ExecutionStage
-from ..utils import get_message_content
+from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNode
 
 
@@ -293,7 +293,11 @@ def _process_tool_escalation_response(
             if last_message.tool_calls:
                 tool_calls = list(last_message.tool_calls)
                 for tool_call in tool_calls:
-                    call_name = extract_tool_name(tool_call)
+                    call_name = (
+                        tool_call.get("name")
+                        if isinstance(tool_call, dict)
+                        else getattr(tool_call, "name", None)
+                    )
                     if call_name == tool_name:
                         # Update args for the matching tool call
                         if isinstance(reviewed_tool_calls_args, dict):
@@ -438,36 +442,14 @@ def _extract_tool_escalation_content(
     """
     last_message = state.messages[-1]
     if execution_stage == ExecutionStage.PRE_EXECUTION:
-        if not isinstance(last_message, AIMessage):
-            return ""
-        if not last_message.tool_calls:
-            return ""
-
-        # Find the tool call with matching name
-        for tool_call in last_message.tool_calls:
-            call_name = extract_tool_name(tool_call)
-            if call_name == tool_name:
-                # Extract args from the matching tool call
-                args = (
-                    tool_call.get("args")
-                    if isinstance(tool_call, dict)
-                    else getattr(tool_call, "args", None)
-                )
-                if args is not None:
-                    return json.dumps(args)
+        args = _extract_tool_args_from_message(last_message, tool_name)
+        if args:
+            return json.dumps(args)
         return ""
     else:
         if not isinstance(last_message, ToolMessage):
             return ""
         return last_message.content
-
-
-def extract_tool_name(tool_call: ToolCall) -> Any | None:
-    return (
-        tool_call.get("name")
-        if isinstance(tool_call, dict)
-        else getattr(tool_call, "name", None)
-    )
 
 
 def _execution_stage_to_escalation_field(
