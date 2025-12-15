@@ -1,6 +1,7 @@
 """Tests for guardrails subgraph construction."""
 
 import types
+from typing import Sequence
 from unittest.mock import MagicMock
 
 from uipath.platform.guardrails import (
@@ -13,6 +14,7 @@ from uipath_langchain.agent.guardrails.actions.base_action import (
     GuardrailAction,
     GuardrailActionNode,
 )
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 
 class FakeStateGraph:
@@ -56,18 +58,34 @@ def _fake_factory(eval_prefix):
 
 
 class TestLlmGuardrailsSubgraph:
-    def test_no_guardrails_creates_simple_edges(self, monkeypatch):
-        """When no guardrails, edges should be: START -> inner -> END."""
-        monkeypatch.setattr(mod, "StateGraph", FakeStateGraph)
-        monkeypatch.setattr(mod, "START", "START")
-        monkeypatch.setattr(mod, "END", "END")
-
+    def test_no_applicable_guardrails_returns_original_node(self):
+        """If no guardrails match the scope, the original node should be returned."""
         inner = ("inner", lambda s: s)
-        compiled = mod.create_llm_guardrails_subgraph(llm_node=inner, guardrails=None)
+        guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] = []
 
-        # Expect only inner node added and two edges
-        assert ("inner", inner[1]) in compiled.nodes
-        assert set(compiled.edges) == {("START", "inner"), ("inner", "END")}
+        # Should return the inner node function directly, not a compiled graph
+        result = mod.create_llm_guardrails_subgraph(
+            llm_node=inner, guardrails=guardrails
+        )
+        assert result == inner[1]
+
+        # Case with None guardrails
+        result_none = mod.create_llm_guardrails_subgraph(
+            llm_node=inner, guardrails=None
+        )
+        assert result_none == inner[1]
+
+        # Case with guardrails but none matching LLM scope
+        non_matching_guardrail = MagicMock()
+        non_matching_guardrail.selector = types.SimpleNamespace(
+            scopes=[GuardrailScope.TOOL]
+        )
+        guardrails_non_match = [(non_matching_guardrail, MagicMock())]
+
+        result_non_match = mod.create_llm_guardrails_subgraph(
+            llm_node=inner, guardrails=guardrails_non_match
+        )
+        assert result_non_match == inner[1]
 
     def test_two_guardrails_build_chains_pre_and_post(self, monkeypatch):
         """Two guardrails should create reverse-ordered pre/post chains with failure edges."""
@@ -134,3 +152,79 @@ class TestLlmGuardrailsSubgraph:
             "inner",
         ]:
             assert name in node_names
+
+
+class TestAgentGuardrailsSubgraph:
+    def test_no_applicable_guardrails_returns_original_node(self):
+        """If no guardrails match the AGENT scope, the original node should be returned."""
+        inner = ("inner", lambda s: s)
+        guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] = []
+        stage = ExecutionStage.PRE_EXECUTION
+
+        # Should return the inner node function directly
+        result = mod.create_agent_guardrails_subgraph(
+            agent_node=inner, guardrails=guardrails, execution_stage=stage
+        )
+        assert result == inner[1]
+
+        # Case with None guardrails
+        result_none = mod.create_agent_guardrails_subgraph(
+            agent_node=inner, guardrails=None, execution_stage=stage
+        )
+        assert result_none == inner[1]
+
+        # Case with guardrails but none matching AGENT scope
+        non_matching_guardrail = MagicMock()
+        non_matching_guardrail.selector = types.SimpleNamespace(
+            scopes=[GuardrailScope.LLM]
+        )
+        guardrails_non_match = [(non_matching_guardrail, MagicMock())]
+
+        result_non_match = mod.create_agent_guardrails_subgraph(
+            agent_node=inner, guardrails=guardrails_non_match, execution_stage=stage
+        )
+        assert result_non_match == inner[1]
+
+
+class TestToolGuardrailsSubgraph:
+    def test_no_applicable_guardrails_returns_original_node(self):
+        """If no guardrails match the TOOL scope/name, the original node should be returned."""
+        tool_name = "test_tool"
+        inner = (tool_name, lambda s: s)
+        guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] = []
+
+        # Should return the inner node function directly
+        result = mod.create_tool_guardrails_subgraph(
+            tool_node=inner, guardrails=guardrails
+        )
+        assert result == inner[1]
+
+        # Case with None guardrails
+        result_none = mod.create_tool_guardrails_subgraph(
+            tool_node=inner, guardrails=None
+        )
+        assert result_none == inner[1]
+
+        # Case with guardrails matching TOOL scope but NOT the tool name
+        wrong_name_guardrail = MagicMock()
+        wrong_name_guardrail.selector = types.SimpleNamespace(
+            scopes=[GuardrailScope.TOOL], match_names=["other_tool"]
+        )
+        guardrails_wrong_name = [(wrong_name_guardrail, MagicMock())]
+
+        result_wrong_name = mod.create_tool_guardrails_subgraph(
+            tool_node=inner, guardrails=guardrails_wrong_name
+        )
+        assert result_wrong_name == inner[1]
+
+        # Case with guardrails matching tool name but NOT TOOL scope (unlikely but good to test)
+        wrong_scope_guardrail = MagicMock()
+        wrong_scope_guardrail.selector = types.SimpleNamespace(
+            scopes=[GuardrailScope.LLM], match_names=[tool_name]
+        )
+        guardrails_wrong_scope = [(wrong_scope_guardrail, MagicMock())]
+
+        result_wrong_scope = mod.create_tool_guardrails_subgraph(
+            tool_node=inner, guardrails=guardrails_wrong_scope
+        )
+        assert result_wrong_scope == inner[1]
