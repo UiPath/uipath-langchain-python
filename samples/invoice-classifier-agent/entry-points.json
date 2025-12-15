@@ -1,0 +1,118 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "7160d2ac-8c27-438d-adaf-91db615b9445",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "attachment": {
+                        "description": "Model representing an attachment. Id 'None' is used for uploads.",
+                        "properties": {
+                            "ID": {
+                                "format": "uuid",
+                                "type": "string"
+                            },
+                            "FullName": {
+                                "title": "Fullname",
+                                "type": "string"
+                            },
+                            "MimeType": {
+                                "title": "Mimetype",
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "FullName",
+                            "MimeType"
+                        ],
+                        "title": "Attachment",
+                        "type": "object"
+                    },
+                    "attachment_bytes": {
+                        "format": "binary",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "attachment"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "approved": {
+                        "default": null,
+                        "title": "Approved",
+                        "type": "boolean"
+                    }
+                },
+                "required": []
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "download",
+                        "name": "download",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "mask_pii",
+                        "name": "mask_pii",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "auto_approval",
+                        "name": "auto_approval",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "download",
+                        "label": null
+                    },
+                    {
+                        "source": "download",
+                        "target": "mask_pii",
+                        "label": null
+                    },
+                    {
+                        "source": "mask_pii",
+                        "target": "auto_approval",
+                        "label": null
+                    },
+                    {
+                        "source": "auto_approval",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}

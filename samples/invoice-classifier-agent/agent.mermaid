@@ -1,0 +1,10 @@
+flowchart TB
+  __start__(__start__)
+  download(download)
+  mask_pii(mask_pii)
+  auto_approval(auto_approval)
+  __end__(__end__)
+  __start__ --> download
+  download --> mask_pii
+  mask_pii --> auto_approval
+  auto_approval --> __end__
