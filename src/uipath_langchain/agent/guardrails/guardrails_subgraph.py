@@ -202,6 +202,9 @@ def create_llm_guardrails_subgraph(
         for (guardrail, _) in (guardrails or [])
         if GuardrailScope.LLM in guardrail.selector.scopes
     ]
+    if applicable_guardrails is None or len(applicable_guardrails) == 0:
+        return llm_node[1]
+
     return _create_guardrails_subgraph(
         main_inner_node=llm_node,
         guardrails=applicable_guardrails,
@@ -244,6 +247,9 @@ def create_agent_guardrails_subgraph(
         for (guardrail, _) in (guardrails or [])
         if GuardrailScope.AGENT in guardrail.selector.scopes
     ]
+    if applicable_guardrails is None or len(applicable_guardrails) == 0:
+        return agent_node[1]
+
     return _create_guardrails_subgraph(
         main_inner_node=agent_node,
         guardrails=applicable_guardrails,
@@ -265,6 +271,9 @@ def create_tool_guardrails_subgraph(
         and guardrail.selector.match_names is not None
         and tool_name in guardrail.selector.match_names
     ]
+    if applicable_guardrails is None or len(applicable_guardrails) == 0:
+        return tool_node[1]
+
     return _create_guardrails_subgraph(
         main_inner_node=tool_node,
         guardrails=applicable_guardrails,
