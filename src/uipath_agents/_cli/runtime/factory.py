@@ -17,7 +17,7 @@ from uipath_langchain.runtime.storage import SqliteResumableStorage
 
 from uipath_agents.agent_graph_builder import build_agent_graph
 
-# from ..._observability import configure_telemetry, shutdown_telemetry
+from ..._observability import configure_telemetry, shutdown_telemetry
 from ..constants import AGENT_ENTRYPOINT
 from ..utils import _prepare_agent_run_files, load_agent_configuration
 from .runtime import AgentsLangGraphRuntime
@@ -40,7 +40,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
         """Setup tracing and instrumentation."""
         super()._setup_instrumentation(trace_manager)
-        # configure_telemetry(trace_manager)
+        configure_telemetry(trace_manager)
 
     def discover_entrypoints(self) -> list[str]:
         """Discover the Agent entrypoint agent.json"""
@@ -142,5 +142,5 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         """Cleanup factory resources."""
         if self.context.trace_manager:
             self.context.trace_manager.flush_spans()
-        # shutdown_telemetry()
+        shutdown_telemetry()
         await super().dispose()
