@@ -3135,7 +3135,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.49.0" },
     { name = "opentelemetry-instrumentation-sqlite3", specifier = ">=0.49.0" },
     { name = "uipath", specifier = "==2.2.30" },
-    { name = "uipath-langchain", specifier = "==0.1.27" },
+    { name = "uipath-langchain", specifier = "==0.1.28" },
 ]
 
 [package.metadata.requires-dev]
@@ -3169,7 +3169,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.1.27"
+version = "0.1.28"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
@@ -3186,9 +3186,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "uipath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/de/7a/995b669f32d8c6c38cd72af22d6a3cdc5fd8dc2bec36f8b137d1a51e95a6/uipath_langchain-0.1.27.tar.gz", hash = "sha256:eb0a6ffae893e3d96387522b287b2c26550a9005478aaa036fe7da6a715133ee", size = 7279756, upload-time = "2025-12-14T09:40:02.101Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/2b/6a75cee64a2013d53110ba12b511be0e73a336d4cde6724a27d9f1b6a483/uipath_langchain-0.1.28.tar.gz", hash = "sha256:78e4123cc7032252f42d5210633971486ebe6b2a01e1102cf04a4d2d734c1607", size = 7280233, upload-time = "2025-12-15T09:49:26.546Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/5d/ceebbeee08b2fe6dea24e01c6768cf319bbc6a45107cf71a30e67c57ef21/uipath_langchain-0.1.27-py3-none-any.whl", hash = "sha256:0633db9f864f0447390a01872ebb8c7551b4a30a955e3dc7cc09ac48701bc8aa", size = 86117, upload-time = "2025-12-14T09:40:00.673Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/6f/aac9522c1d00893a4f62ca842d3ce977ee550734e2fcbf660c0ab8dd2442/uipath_langchain-0.1.28-py3-none-any.whl", hash = "sha256:b3bfbc1b26b4b8fca7ab363a2ac7bbfa1b7b76804931e409e869de89f7989417", size = 86159, upload-time = "2025-12-15T09:49:25.136Z" },
 ]
 
 [[package]]
