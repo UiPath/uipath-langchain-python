@@ -12,7 +12,7 @@ from uipath.platform.guardrails import (
 )
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
-from uipath_langchain.agent.guardrails.utils import get_message_text
+from uipath_langchain.agent.guardrails.utils import get_message_content
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ def create_llm_guardrail_node(
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
-        return get_message_text(state.messages[-1])
+        return get_message_content(state.messages[-1])
 
     return _create_guardrail_node(
         guardrail,
@@ -85,7 +85,7 @@ def create_agent_init_guardrail_node(
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
-        return get_message_text(state.messages[-1])
+        return get_message_content(state.messages[-1])
 
     return _create_guardrail_node(
         guardrail,
@@ -173,7 +173,7 @@ def create_tool_guardrail_node(
                     if args is not None:
                         return json.dumps(args)
 
-        return get_message_text(state.messages[-1])
+        return get_message_content(state.messages[-1])
 
     return _create_guardrail_node(
         guardrail,

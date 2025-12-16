@@ -16,7 +16,7 @@ from uipath.runtime.errors import UiPathErrorCode
 from ...exceptions import AgentTerminationException
 from ...react.types import AgentGuardrailsGraphState
 from ..types import ExecutionStage
-from ..utils import get_message_text
+from ..utils import get_message_content
 from .base_action import GuardrailAction, GuardrailActionNode
 
 
@@ -378,7 +378,7 @@ def _extract_llm_escalation_content(
         if isinstance(last_message, ToolMessage):
             return last_message.content
 
-        content = get_message_text(last_message)
+        content = get_message_content(last_message)
         return json.dumps(content) if content else ""
 
     # For AI messages, process tool calls if present
@@ -396,14 +396,14 @@ def _extract_llm_escalation_content(
                 ):
                     content_list.append(json.dumps(args["content"]))
 
-        message_content = get_message_text(last_message)
+        message_content = get_message_content(last_message)
         if message_content:
             content_list.append(message_content)
 
         return json.dumps(content_list)
 
     # Fallback for other message types
-    return get_message_text(last_message)
+    return get_message_content(last_message)
 
 
 def _extract_agent_escalation_content(

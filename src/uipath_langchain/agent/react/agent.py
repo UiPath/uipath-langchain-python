@@ -14,7 +14,8 @@ from ..tools import create_tool_node
 from .guardrails.guardrails_subgraph import (
     create_agent_init_guardrails_subgraph,
     create_agent_terminate_guardrails_subgraph,
-    create_tools_guardrails_subgraph, create_llm_guardrails_subgraph,
+    create_llm_guardrails_subgraph,
+    create_tools_guardrails_subgraph,
 )
 from .init_node import (
     create_init_node,
@@ -99,7 +100,7 @@ def create_agent(
         builder.add_node(tool_name, tool_node)
 
     terminate_with_guardrails_subgraph = create_agent_terminate_guardrails_subgraph(
-        (AgentGraphNode.TERMINATE, terminate_node),
+        (AgentGraphNode.GUARDED_TERMINATE, terminate_node),
         guardrails,
     )
     builder.add_node(AgentGraphNode.TERMINATE, terminate_with_guardrails_subgraph)
