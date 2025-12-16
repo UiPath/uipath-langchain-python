@@ -14,8 +14,9 @@ from uipath.platform.guardrails import (
 from uipath.runtime.errors import UiPathErrorCode
 
 from ...exceptions import AgentTerminationException
-from ..guardrail_nodes import _message_text
-from ..types import AgentGuardrailsGraphState, ExecutionStage
+from ...react.types import AgentGuardrailsGraphState
+from ..types import ExecutionStage
+from ..utils import get_message_content
 from .base_action import GuardrailAction, GuardrailActionNode
 
 
@@ -229,7 +230,7 @@ def _process_llm_escalation_response(
                 if content_list:
                     last_message.content = content_list[-1]
 
-        return Command[Any](update={"messages": msgs})
+        return Command(update={"messages": msgs})
     except Exception as e:
         raise AgentTerminationException(
             code=UiPathErrorCode.EXECUTION_ERROR,
@@ -311,7 +312,7 @@ def _process_tool_escalation_response(
             if reviewed_outputs_json:
                 last_message.content = reviewed_outputs_json
 
-        return Command[Any](update={"messages": msgs})
+        return Command(update={"messages": msgs})
     except Exception as e:
         raise AgentTerminationException(
             code=UiPathErrorCode.EXECUTION_ERROR,
@@ -377,7 +378,7 @@ def _extract_llm_escalation_content(
         if isinstance(last_message, ToolMessage):
             return last_message.content
 
-        content = _message_text(last_message)
+        content = get_message_content(last_message)
         return json.dumps(content) if content else ""
 
     # For AI messages, process tool calls if present
@@ -395,14 +396,14 @@ def _extract_llm_escalation_content(
                 ):
                     content_list.append(json.dumps(args["content"]))
 
-        message_content = _message_text(last_message)
+        message_content = get_message_content(last_message)
         if message_content:
             content_list.append(message_content)
 
         return json.dumps(content_list)
 
     # Fallback for other message types
-    return _message_text(last_message)
+    return get_message_content(last_message)
 
 
 def _extract_agent_escalation_content(

@@ -3,7 +3,7 @@ import logging
 import re
 from typing import Any, Callable
 
-from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 from langgraph.types import Command
 from uipath.platform import UiPath
 from uipath.platform.guardrails import (
@@ -12,16 +12,10 @@ from uipath.platform.guardrails import (
 )
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
-
-from .types import AgentGuardrailsGraphState
+from uipath_langchain.agent.guardrails.utils import get_message_content
+from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
 
 logger = logging.getLogger(__name__)
-
-
-def _message_text(msg: AnyMessage) -> str:
-    if isinstance(msg, (HumanMessage, SystemMessage)):
-        return msg.content if isinstance(msg.content, str) else str(msg.content)
-    return str(getattr(msg, "content", "")) if hasattr(msg, "content") else ""
 
 
 def _create_guardrail_node(
@@ -70,7 +64,7 @@ def create_llm_guardrail_node(
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
-        return _message_text(state.messages[-1])
+        return get_message_content(state.messages[-1])
 
     return _create_guardrail_node(
         guardrail,
@@ -82,17 +76,35 @@ def create_llm_guardrail_node(
     )
 
 
-def create_agent_guardrail_node(
+def create_agent_init_guardrail_node(
     guardrail: BaseGuardrail,
     execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
-    # To be implemented in future PR
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
-        return _message_text(state.messages[-1])
+        return get_message_content(state.messages[-1])
+
+    return _create_guardrail_node(
+        guardrail,
+        GuardrailScope.AGENT,
+        execution_stage,
+        _payload_generator,
+        success_node,
+        failure_node,
+    )
+
+
+def create_agent_terminate_guardrail_node(
+    guardrail: BaseGuardrail,
+    execution_stage: ExecutionStage,
+    success_node: str,
+    failure_node: str,
+) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
+    def _payload_generator(state: AgentGuardrailsGraphState) -> str:
+        return str(state.agent_result)
 
     return _create_guardrail_node(
         guardrail,
@@ -161,7 +173,7 @@ def create_tool_guardrail_node(
                     if args is not None:
                         return json.dumps(args)
 
-        return _message_text(state.messages[-1])
+        return get_message_content(state.messages[-1])
 
     return _create_guardrail_node(
         guardrail,

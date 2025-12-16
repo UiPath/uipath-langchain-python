@@ -6,7 +6,7 @@ from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ...exceptions import AgentTerminationException
-from ..types import AgentGuardrailsGraphState
+from ...react.types import AgentGuardrailsGraphState
 from .base_action import GuardrailAction, GuardrailActionNode
 
 
