@@ -3,6 +3,7 @@ from .block_action import BlockAction
 from .escalate_action import EscalateAction
 from .filter_action import FilterAction
 from .log_action import LogAction
+from .filter_action import FilterAction
 
 __all__ = [
     "GuardrailAction",
