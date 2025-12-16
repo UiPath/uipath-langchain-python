@@ -40,60 +40,59 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import PrivateAttr
 
 
-def _rewrite_request_for_gateway(
-    request: httpx.Request, gateway_url: str
-) -> httpx.Request:
-    """Rewrite a request to redirect to the UiPath gateway."""
-    url_str = str(request.url)
-    if "generateContent" in url_str or "streamGenerateContent" in url_str:
-        is_streaming = "alt=sse" in url_str
+def _rewrite_vertex_url(original_url: str, gateway_url: str) -> httpx.URL | None:
+    """Rewrite Google GenAI URLs to UiPath gateway endpoint.
 
-        headers = dict(request.headers)
-
-        headers["X-UiPath-Streaming-Enabled"] = "true" if is_streaming else "false"
-
-        gateway_url_parsed = httpx.URL(gateway_url)
-        if gateway_url_parsed.host:
-            headers["host"] = gateway_url_parsed.host
-
-        return httpx.Request(
-            method=request.method,
-            url=gateway_url,
-            headers=headers,
-            content=request.content,
-            extensions=request.extensions,
-        )
-    return request
+    Handles URL patterns containing generateContent or streamGenerateContent.
+    Returns the gateway URL, or None if no rewrite needed.
+    """
+    if "generateContent" in original_url or "streamGenerateContent" in original_url:
+        return httpx.URL(gateway_url + "?api-version=v1")
+    return None
 
 
-class _UrlRewriteTransport(httpx.BaseTransport):
+class _UrlRewriteTransport(httpx.HTTPTransport):
     """Transport that rewrites URLs to redirect to UiPath gateway."""
 
-    def __init__(self, gateway_url: str):
+    def __init__(self, gateway_url: str, verify: bool = True):
+        super().__init__(verify=verify)
         self.gateway_url = gateway_url
-        self._transport = httpx.HTTPTransport()
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
-        request = _rewrite_request_for_gateway(request, self.gateway_url)
-        return self._transport.handle_request(request)
+        original_url = str(request.url)
+        new_url = _rewrite_vertex_url(original_url, self.gateway_url)
+        if new_url:
+            # Set streaming header based on original URL before modifying
+            is_streaming = "alt=sse" in original_url
+            request.headers["X-UiPath-Streaming-Enabled"] = (
+                "true" if is_streaming else "false"
+            )
+            # Update host header to match the new URL
+            request.headers["host"] = new_url.host
+            request.url = new_url
+        return super().handle_request(request)
 
-    def close(self) -> None:
-        self._transport.close()
 
-
-class _AsyncUrlRewriteTransport(httpx.AsyncBaseTransport):
+class _AsyncUrlRewriteTransport(httpx.AsyncHTTPTransport):
     """Async transport that rewrites URLs to redirect to UiPath gateway."""
 
-    def __init__(self, gateway_url: str):
+    def __init__(self, gateway_url: str, verify: bool = True):
+        super().__init__(verify=verify)
         self.gateway_url = gateway_url
-        self._transport = httpx.AsyncHTTPTransport()
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        request = _rewrite_request_for_gateway(request, self.gateway_url)
-        return await self._transport.handle_async_request(request)
-
-    async def aclose(self) -> None:
-        await self._transport.aclose()
+        original_url = str(request.url)
+        new_url = _rewrite_vertex_url(original_url, self.gateway_url)
+        if new_url:
+            # Set streaming header based on original URL before modifying
+            is_streaming = "alt=sse" in original_url
+            request.headers["X-UiPath-Streaming-Enabled"] = (
+                "true" if is_streaming else "false"
+            )
+            # Update host header to match the new URL
+            request.headers["host"] = new_url.host
+            request.url = new_url
+        return await super().handle_async_request(request)
 
 
 class UiPathChatVertex(ChatGoogleGenerativeAI):
@@ -103,6 +102,8 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
     _model_name: str = PrivateAttr()
     _uipath_token: str = PrivateAttr()
     _uipath_llmgw_url: Optional[str] = PrivateAttr(default=None)
+    _agenthub_config: Optional[str] = PrivateAttr(default=None)
+    _byo_connection_id: Optional[str] = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -111,6 +112,8 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         token: Optional[str] = None,
         model_name: str = GeminiModels.gemini_2_5_flash,
         temperature: Optional[float] = None,
+        agenthub_config: Optional[str] = None,
+        byo_connection_id: Optional[str] = None,
         **kwargs: Any,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -131,18 +134,21 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
             )
 
         uipath_url = self._build_base_url(model_name)
-        headers = self._build_headers(token)
+        headers = self._build_headers(token, agenthub_config, byo_connection_id)
+
+        client_kwargs = get_httpx_client_kwargs()
+        verify = client_kwargs.get("verify", True)
 
         http_options = genai_types.HttpOptions(
             httpx_client=httpx.Client(
-                transport=_UrlRewriteTransport(uipath_url),
+                transport=_UrlRewriteTransport(uipath_url, verify=verify),
                 headers=headers,
-                **get_httpx_client_kwargs(),
+                **client_kwargs,
             ),
             httpx_async_client=httpx.AsyncClient(
-                transport=_AsyncUrlRewriteTransport(uipath_url),
+                transport=_AsyncUrlRewriteTransport(uipath_url, verify=verify),
                 headers=headers,
-                **get_httpx_client_kwargs(),
+                **client_kwargs,
             ),
         )
 
@@ -168,6 +174,8 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         self._model_name = model_name
         self._uipath_token = token
         self._uipath_llmgw_url = uipath_url
+        self._agenthub_config = agenthub_config
+        self._byo_connection_id = byo_connection_id
 
         if self.temperature is not None and not 0 <= self.temperature <= 2.0:
             raise ValueError("temperature must be in the range [0.0, 2.0]")
@@ -182,11 +190,19 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         self.default_metadata = tuple(additional_headers.items())
 
     @staticmethod
-    def _build_headers(token: str) -> dict[str, str]:
+    def _build_headers(
+        token: str,
+        agenthub_config: Optional[str] = None,
+        byo_connection_id: Optional[str] = None,
+    ) -> dict[str, str]:
         """Build HTTP headers for UiPath Gateway requests."""
         headers = {
             "Authorization": f"Bearer {token}",
         }
+        if agenthub_config:
+            headers["X-UiPath-AgentHub-Config"] = agenthub_config
+        if byo_connection_id:
+            headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = byo_connection_id
         if job_key := os.getenv("UIPATH_JOB_KEY"):
             headers["X-UiPath-JobKey"] = job_key
         if process_key := os.getenv("UIPATH_PROCESS_KEY"):
