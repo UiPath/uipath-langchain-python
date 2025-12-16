@@ -21,13 +21,20 @@ class OpenAIModels:
     # GPT-5.1 models
     gpt_5_1_2025_11_13 = "gpt-5.1-2025-11-13"
 
+    # GPT-5.2 models
+    gpt_5_2_2025_12_11 = "gpt-5.2-2025-12-11"
+
 
 class GeminiModels:
     """Supported Google Gemini model identifiers."""
 
+    # Gemini 2 models
     gemini_2_5_pro = "gemini-2.5-pro"
     gemini_2_5_flash = "gemini-2.5-flash"
     gemini_2_0_flash_001 = "gemini-2.0-flash-001"
+
+    # Gemini 3 models
+    gemini_3_pro_preview = "gemini-3-pro-preview"
 
 
 class BedrockModels:
@@ -38,5 +45,7 @@ class BedrockModels:
 
     # Claude 4 models
     anthropic_claude_sonnet_4 = "anthropic.claude-sonnet-4-20250514-v1:0"
+
+    # Claude 4.5 models
     anthropic_claude_sonnet_4_5 = "anthropic.claude-sonnet-4-5-20250929-v1:0"
     anthropic_claude_haiku_4_5 = "anthropic.claude-haiku-4-5-20251001-v1:0"
