@@ -1,5 +1,7 @@
 """Tests for EscalateAction guardrail failure behavior."""
 
+from __future__ import annotations
+
 import json
 from unittest.mock import MagicMock, patch
 
@@ -12,15 +14,52 @@ from uipath.runtime.errors import UiPathErrorCode
 from uipath_langchain.agent.exceptions import AgentTerminationException
 from uipath_langchain.agent.guardrails.actions.escalate_action import EscalateAction
 from uipath_langchain.agent.guardrails.types import (
-    AgentGuardrailsGraphState,
     ExecutionStage,
 )
+from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
 
 
 class TestEscalateAction:
     @pytest.mark.asyncio
-    async def test_node_name_pre_llm(self):
-        """PreExecution + LLM: name is sanitized correctly."""
+    @pytest.mark.parametrize(
+        ("scope", "stage", "expected_node_name"),
+        [
+            (
+                GuardrailScope.LLM,
+                ExecutionStage.PRE_EXECUTION,
+                "my_guardrail_1_hitl_pre_execution_llm",
+            ),
+            (
+                GuardrailScope.LLM,
+                ExecutionStage.POST_EXECUTION,
+                "my_guardrail_1_hitl_post_execution_llm",
+            ),
+            (
+                GuardrailScope.AGENT,
+                ExecutionStage.PRE_EXECUTION,
+                "my_guardrail_1_hitl_pre_execution_agent",
+            ),
+            (
+                GuardrailScope.AGENT,
+                ExecutionStage.POST_EXECUTION,
+                "my_guardrail_1_hitl_post_execution_agent",
+            ),
+            (
+                GuardrailScope.TOOL,
+                ExecutionStage.PRE_EXECUTION,
+                "my_guardrail_1_hitl_pre_execution_tool",
+            ),
+            (
+                GuardrailScope.TOOL,
+                ExecutionStage.POST_EXECUTION,
+                "my_guardrail_1_hitl_post_execution_tool",
+            ),
+        ],
+    )
+    async def test_node_name(
+        self, scope: GuardrailScope, stage: ExecutionStage, expected_node_name: str
+    ) -> None:
+        """Node name is sanitized correctly for each scope/stage."""
         action = EscalateAction(
             app_name="TestApp",
             app_folder_path="TestFolder",
@@ -28,39 +67,17 @@ class TestEscalateAction:
             assignee="test@example.com",
         )
         guardrail = MagicMock()
-        guardrail.name = "My Guardrail v1"
+        guardrail.name = "My Guardrail 1"
         guardrail.description = "Test description"
 
         node_name, _ = action.action_node(
             guardrail=guardrail,
-            scope=GuardrailScope.LLM,
-            execution_stage=ExecutionStage.PRE_EXECUTION,
+            scope=scope,
+            execution_stage=stage,
             guarded_component_name="test_node",
         )
 
-        assert node_name == "my_guardrail_v1_hitl_pre_execution_llm"
-
-    @pytest.mark.asyncio
-    async def test_node_name_post_agent(self):
-        """PostExecution + AGENT: name is sanitized correctly."""
-        action = EscalateAction(
-            app_name="TestApp",
-            app_folder_path="TestFolder",
-            version=1,
-            assignee="test@example.com",
-        )
-        guardrail = MagicMock()
-        guardrail.name = "Special-Guardrail@2024"
-        guardrail.description = "Test description"
-
-        node_name, _ = action.action_node(
-            guardrail=guardrail,
-            scope=GuardrailScope.AGENT,
-            execution_stage=ExecutionStage.POST_EXECUTION,
-            guarded_component_name="test_node",
-        )
-
-        assert node_name == "special_guardrail_2024_hitl_post_execution_agent"
+        assert node_name == expected_node_name
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")

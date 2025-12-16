@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any, Optional
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
@@ -25,12 +25,21 @@ class AgentGraphState(BaseModel):
     termination: AgentTermination | None = None
 
 
+class AgentGuardrailsGraphState(AgentGraphState):
+    """Agent Guardrails Graph state for guardrail subgraph."""
+
+    guardrail_validation_result: Optional[str] = None
+    agent_result: Optional[dict[str, Any]] = None
+
+
 class AgentGraphNode(StrEnum):
     INIT = "init"
+    GUARDED_INIT = "guarded-init"
     AGENT = "agent"
     LLM = "llm"
     TOOLS = "tools"
     TERMINATE = "terminate"
+    GUARDED_TERMINATE = "guarded-terminate"
 
 
 class AgentGraphConfig(BaseModel):

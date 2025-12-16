@@ -10,15 +10,21 @@ from uipath.platform.guardrails import (
     GuardrailScope,
 )
 
-from uipath_langchain.agent.guardrails.types import ExecutionStage
-
-from .actions.base_action import GuardrailAction, GuardrailActionNode
-from .guardrail_nodes import (
-    create_agent_guardrail_node,
+from uipath_langchain.agent.guardrails.actions.base_action import (
+    GuardrailAction,
+    GuardrailActionNode,
+)
+from uipath_langchain.agent.guardrails.guardrail_nodes import (
+    create_agent_init_guardrail_node,
+    create_agent_terminate_guardrail_node,
     create_llm_guardrail_node,
     create_tool_guardrail_node,
 )
-from .types import AgentGuardrailsGraphState
+from uipath_langchain.agent.guardrails.types import ExecutionStage
+from uipath_langchain.agent.react.types import (
+    AgentGraphState,
+    AgentGuardrailsGraphState,
+)
 
 _VALIDATOR_ALLOWED_STAGES = {
     "prompt_injection": {ExecutionStage.PRE_EXECUTION},
@@ -232,31 +238,64 @@ def create_tools_guardrails_subgraph(
     return result
 
 
-def create_agent_guardrails_subgraph(
-    agent_node: tuple[str, Any],
+def create_agent_init_guardrails_subgraph(
+    init_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
-    execution_stage: ExecutionStage,
 ):
-    """Create a subgraph for AGENT-scoped guardrails that applies checks at the specified stage.
-
-    This is intended for wrapping nodes like INIT or TERMINATE, where guardrails should run
-    either before (pre-execution) or after (post-execution) the node logic.
-    """
+    """Create a subgraph for INIT node that applies guardrails on the state messages."""
     applicable_guardrails = [
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
         if GuardrailScope.AGENT in guardrail.selector.scopes
     ]
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
-        return agent_node[1]
+        return init_node[1]
 
     return _create_guardrails_subgraph(
-        main_inner_node=agent_node,
+        main_inner_node=init_node,
         guardrails=applicable_guardrails,
         scope=GuardrailScope.AGENT,
-        execution_stages=[execution_stage],
-        node_factory=create_agent_guardrail_node,
+        execution_stages=[ExecutionStage.POST_EXECUTION],
+        node_factory=create_agent_init_guardrail_node,
     )
+
+
+def create_agent_terminate_guardrails_subgraph(
+    terminate_node: tuple[str, Any],
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+):
+    """Create a subgraph for TERMINATE node that applies guardrails on the agent result."""
+    node_name, node_func = terminate_node
+
+    def terminate_wrapper(state: Any) -> dict[str, Any]:
+        # Call original terminate node
+        result = node_func(state)
+        # Store result in state
+        return {"agent_result": result, "messages": state.messages}
+
+    applicable_guardrails = [
+        (guardrail, _)
+        for (guardrail, _) in (guardrails or [])
+        if GuardrailScope.AGENT in guardrail.selector.scopes
+    ]
+    if applicable_guardrails is None or len(applicable_guardrails) == 0:
+        return terminate_node[1]
+
+    subgraph = _create_guardrails_subgraph(
+        main_inner_node=(node_name, terminate_wrapper),
+        guardrails=applicable_guardrails,
+        scope=GuardrailScope.AGENT,
+        execution_stages=[ExecutionStage.POST_EXECUTION],
+        node_factory=create_agent_terminate_guardrail_node,
+    )
+
+    async def run_terminate_subgraph(
+        state: AgentGraphState,
+    ) -> dict[str, Any]:
+        result_state = await subgraph.ainvoke(state)
+        return result_state["agent_result"]
+
+    return run_terminate_subgraph
 
 
 def create_tool_guardrails_subgraph(

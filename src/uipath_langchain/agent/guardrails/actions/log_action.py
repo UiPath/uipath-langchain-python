@@ -6,7 +6,7 @@ from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
-from ..types import AgentGuardrailsGraphState
+from ...react.types import AgentGuardrailsGraphState
 from .base_action import GuardrailAction, GuardrailActionNode
 
 logger = logging.getLogger(__name__)
