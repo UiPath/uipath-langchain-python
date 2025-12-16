@@ -57,7 +57,7 @@ uv run uipath --help
 cd examples/basic
 
 uv run uipath auth --alpha
-uv run uipath run
+uv run uipath run agent.json '{}'
 ```
 
 ### Agent Configuration
