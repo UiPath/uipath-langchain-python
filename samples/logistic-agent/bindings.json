@@ -1,0 +1,69 @@
+{
+  "$schema": "https://cloud.uipath.com/draft/2024-12/bindings",
+  "version": "2.0",
+  "resources": [
+    {
+      "resource": "index",
+      "key": "company_policy.Shared",
+      "value": {
+        "name": {
+          "defaultValue": "company_policy",
+          "isExpression": false,
+          "displayName": "Name"
+        },
+        "folderPath": {
+          "defaultValue": "Shared",
+          "isExpression": false,
+          "displayName": "Folder Path"
+        }
+      },
+      "metadata": {
+        "ActivityName": "retrieve_async",
+        "BindingsVersion": "2.2",
+        "DisplayLabel": "FullName"
+      }
+    },
+    {
+      "resource": "index",
+      "key": "Shipment_index_dev.Shared",
+      "value": {
+        "name": {
+          "defaultValue": "Shipment_index_dev",
+          "isExpression": false,
+          "displayName": "Name"
+        },
+        "folderPath": {
+          "defaultValue": "Shared",
+          "isExpression": false,
+          "displayName": "Folder Path"
+        }
+      },
+      "metadata": {
+        "ActivityName": "retrieve_async",
+        "BindingsVersion": "2.2",
+        "DisplayLabel": "FullName"
+      }
+    },
+    {
+      "resource": "app",
+      "key": "SimpleApprovalApp.Shared/fusion app",
+      "value": {
+        "name": {
+          "defaultValue": "SimpleApprovalApp",
+          "isExpression": false,
+          "displayName": "App Name"
+        },
+        "folderPath": {
+          "defaultValue": "Shared/fusion app",
+          "isExpression": false,
+          "displayName": "App Folder Path"
+        }
+      },
+      "metadata": {
+        "ActivityName": "create_async",
+        "BindingsVersion": "2.2",
+        "DisplayLabel": "SimpleApprovalApp"
+      }
+    }
+  ]
+}

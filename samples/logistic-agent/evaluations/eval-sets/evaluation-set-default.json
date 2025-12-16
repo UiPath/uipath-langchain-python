@@ -1,0 +1,103 @@
+{
+  "version": "1.0",
+  "id": "DefaultEvaluationSet",
+  "name": "Default Evaluation Set",
+  "evaluatorRefs": [
+    "evaluator-llm-judge-trajectory-1765871655357",
+    "evaluator-tool-call-order-1765871126253",
+    "DiscountEvaluator"
+  ],
+  "evaluations": [
+    {
+      "id": "da075546-9194-40a7-9a65-c26d556f0d5b",
+      "name": "New order successful",
+      "inputs": {
+        "email_content": "Hello,\n\nWe need to arrange transportation for electronic components from our warehouse in London to our assembly facility in Oslo.\n\nShipment details:\n- 25 pallets of semiconductor components\n- Total weight: approximately 2,500 kg\n- Pickup location: Unit 12, Industrial Park, London W12 4PR\n- Delivery address: Nydalsveien 23, 0484 Oslo, Norway\n- Required delivery date: December 23, 2025\n- Special handling: Temperature controlled (15-25°C)\n\nCould you please provide:\n1. Quote for express service\n2. Estimated transit time\n3. Tracking capabilities\n4. Insurance options\n\nWe're looking to establish a long-term partnership for our European logistics needs if this initial shipment goes well.\n\nPlease send the quotation by end of day tomorrow.\n\nBest regards,\nMaria Jensen\nProcurement Manager\nTechCore Solutions Inc.\nPhone: +44 20 7946 1234",
+        "email_address": "test@nordicwholesale.no"
+      },
+      "evaluationCriterias": {
+        "evaluator-llm-judge-trajectory-1765871655357": null,
+        "evaluator-tool-call-order-1765871126253": null,
+        "DiscountEvaluator": null
+      },
+      "createdAt": "2025-12-16T07:46:46.193Z",
+      "updatedAt": "2025-12-16T07:59:44.490Z"
+    },
+    {
+      "id": "complaint-with-human-approval",
+      "name": "Complaint with Human Review Approval",
+      "inputs": {
+        "email_content": "I am extremely disappointed with your service. The shipment we ordered last week arrived 3 days late, and several packages were damaged. This has caused significant delays in our production schedule and we have lost money because of this. We need an explanation and compensation immediately. This is completely unacceptable!",
+        "email_address": "test@nordicwholesale.no",
+        "confidence_threshold": 80
+      },
+      "evaluationCriterias": {
+        "evaluator-llm-judge-trajectory-1765871655357": {
+          "expectedAgentBehavior": "The agent should classify the email as a complaint, generate an appropriate response, route it for human review due to low confidence, get approval from the mocked human reviewer, and return the final email response."
+        },
+        "evaluator-tool-call-order-1765871126253": null
+      },
+      "mockingStrategy": {
+        "type": "mockito",
+        "behaviors": [
+          {
+            "function": "create_approval_task",
+            "arguments": {
+              "args": [],
+              "kwargs": {}
+            },
+            "then": [
+              {
+                "type": "return",
+                "value": {
+                  "Approved": true,
+                  "Comment": "Approved - Response looks professional and addresses the customer's concerns appropriately."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "new-order-discount-validation",
+      "name": "New Order with Discount Calculation Validation",
+      "inputs": {
+        "email_content": "Hello,\n\nWe would like to place a new order for shipment of industrial equipment.\n\nOrder details:\n- 15 pallets of machinery parts\n- Total weight: approximately 1,800 kg\n- Pickup location: Warehouse 5, Bergen Industrial Zone, Bergen, Norway\n- Delivery address: Trondheimsveien 150, 0570 Oslo, Norway\n- Required delivery date: December 20, 2025\n- Special handling: Fragile items, requires careful loading\n\nPlease provide a quotation including:\n1. Total estimated cost\n2. Transit time\n3. Any applicable discounts based on our order history\n\nThank you,\nOle Pedersen\nLogistics Manager\nNordic Wholesale AS",
+        "email_address": "test@nordicwholesale.no",
+        "confidence_threshold": 99
+      },
+      "evaluationCriterias": {
+        "evaluator-llm-judge-trajectory-1765871655357": {
+          "expectedAgentBehavior": "The agent should classify the email as NEW_ORDER, calculate the discount based on order history from the last 7 days, retrieve shipment pricing data, calculate transport distance, apply the discount, and provide a professional order confirmation email."
+        },
+        "evaluator-tool-call-order-1765871126253": null,
+        "DiscountEvaluator": null
+      },
+      "mockingStrategy": {
+        "type": "mockito",
+        "behaviors": [
+          {
+            "function": "create_approval_task",
+            "arguments": {
+              "args": [{"_target_": "mockito.any"}, {"_target_": "mockito.any"}],
+              "kwargs": {}
+            },
+            "then": [
+              {
+                "type": "return",
+                "value": {
+                  "Approved": true,
+                  "Comment": "Approved - Pricing and discount calculation looks correct."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "fileName": "evaluation-set-default.json",
+  "updatedAt": "2025-12-16T07:59:44.490Z",
+  "selectedEntrypoint": "agent"
+}

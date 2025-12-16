@@ -1,0 +1,298 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "927022ff-b9f0-44a5-98be-98a43894ae2d",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "email_address": {
+                        "description": "Customer email address",
+                        "title": "Email Address",
+                        "type": "string"
+                    },
+                    "email_content": {
+                        "description": "Content of the customer email",
+                        "title": "Email Content",
+                        "type": "string"
+                    },
+                    "confidence_threshold": {
+                        "default": 80,
+                        "description": "Confidence threshold (0-100) below which human review is required",
+                        "maximum": 100,
+                        "minimum": 0,
+                        "title": "Confidence Threshold",
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "email_address",
+                    "email_content"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "error": {
+                        "type": "string"
+                    },
+                    "email": {
+                        "type": "string"
+                    }
+                },
+                "required": []
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "prepare_input",
+                        "name": "prepare_input",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "validate_company",
+                        "name": "validate_company",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "understand_request",
+                        "name": "understand_request",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "handle_complaint",
+                        "name": "handle_complaint",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "calculate_discount_node",
+                        "name": "calculate_discount_node",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "handle_new_order",
+                        "name": "handle_new_order",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "handle_route_restriction",
+                        "name": "handle_route_restriction",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "handle_logistic_request",
+                        "name": "handle_logistic_request",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "handle_unknown",
+                        "name": "handle_unknown",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "collect_output",
+                        "name": "collect_output",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "collect_output_new_order",
+                        "name": "collect_output_new_order",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "human_review",
+                        "name": "human_review",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "finalize_output",
+                        "name": "finalize_output",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "handle_error",
+                        "name": "handle_error",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "prepare_input",
+                        "label": null
+                    },
+                    {
+                        "source": "calculate_discount_node",
+                        "target": "handle_new_order",
+                        "label": null
+                    },
+                    {
+                        "source": "collect_output",
+                        "target": "finalize_output",
+                        "label": null
+                    },
+                    {
+                        "source": "collect_output",
+                        "target": "human_review",
+                        "label": null
+                    },
+                    {
+                        "source": "collect_output_new_order",
+                        "target": "finalize_output",
+                        "label": null
+                    },
+                    {
+                        "source": "collect_output_new_order",
+                        "target": "human_review",
+                        "label": null
+                    },
+                    {
+                        "source": "handle_complaint",
+                        "target": "collect_output",
+                        "label": null
+                    },
+                    {
+                        "source": "handle_logistic_request",
+                        "target": "finalize_output",
+                        "label": null
+                    },
+                    {
+                        "source": "handle_logistic_request",
+                        "target": "human_review",
+                        "label": null
+                    },
+                    {
+                        "source": "handle_new_order",
+                        "target": "collect_output_new_order",
+                        "label": null
+                    },
+                    {
+                        "source": "handle_new_order",
+                        "target": "handle_route_restriction",
+                        "label": null
+                    },
+                    {
+                        "source": "handle_route_restriction",
+                        "target": "finalize_output",
+                        "label": null
+                    },
+                    {
+                        "source": "handle_route_restriction",
+                        "target": "human_review",
+                        "label": null
+                    },
+                    {
+                        "source": "handle_unknown",
+                        "target": "finalize_output",
+                        "label": null
+                    },
+                    {
+                        "source": "handle_unknown",
+                        "target": "human_review",
+                        "label": null
+                    },
+                    {
+                        "source": "human_review",
+                        "target": "finalize_output",
+                        "label": null
+                    },
+                    {
+                        "source": "human_review",
+                        "target": "validate_company",
+                        "label": null
+                    },
+                    {
+                        "source": "prepare_input",
+                        "target": "validate_company",
+                        "label": null
+                    },
+                    {
+                        "source": "understand_request",
+                        "target": "calculate_discount_node",
+                        "label": null
+                    },
+                    {
+                        "source": "understand_request",
+                        "target": "handle_complaint",
+                        "label": null
+                    },
+                    {
+                        "source": "understand_request",
+                        "target": "handle_logistic_request",
+                        "label": null
+                    },
+                    {
+                        "source": "understand_request",
+                        "target": "handle_unknown",
+                        "label": null
+                    },
+                    {
+                        "source": "validate_company",
+                        "target": "handle_error",
+                        "label": null
+                    },
+                    {
+                        "source": "validate_company",
+                        "target": "understand_request",
+                        "label": null
+                    },
+                    {
+                        "source": "finalize_output",
+                        "target": "__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "handle_error",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}
