@@ -69,7 +69,7 @@ class TestHitlActionTrigger:
                 )
 
                 httpx_mock.add_response(
-                    url=f"{get_org_scoped_url(base_url)}/apps_/default/api/v1/default/deployed-action-apps-schemas?search=HITL APP",
+                    url=f"{get_org_scoped_url(base_url)}/apps_/default/api/v1/default/deployed-action-apps-schemas?search=HITL APP&filterByDeploymentTitle=true",
                     text=json.dumps(
                         {
                             "deployed": [
