@@ -2822,7 +2822,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.2.30"
+version = "2.2.32"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -2842,9 +2842,9 @@ dependencies = [
     { name = "uipath-core" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/51/b5/0b2320ac4f978eb665380a1244adbe58986dd9b7809ea17204b41b296a52/uipath-2.2.30.tar.gz", hash = "sha256:a035edb8c4245738840e0d3953904c84255d18e86ab5058d9387b30125aaab1c", size = 3420128, upload-time = "2025-12-12T08:56:59.837Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b8/5e/f35547201b1aa3ebcd92a7bb7f1ac1bcbb487f620132d70280592fe956e3/uipath-2.2.32.tar.gz", hash = "sha256:09e85a414c5eb93b1628c18bbce570e7505777dd811b0d93ea3aca94d05842ec", size = 3420279, upload-time = "2025-12-16T11:06:23.991Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/ee/db944c6fd4ad1f3c41c724e6be969494fae23e86b73f4e4cdb4ccd06e869/uipath-2.2.30-py3-none-any.whl", hash = "sha256:5727f967752a567569ef62ae96680b18bf9eb79c0b21820c647cd8e7ed38152e", size = 392043, upload-time = "2025-12-12T08:56:58.115Z" },
+    { url = "https://files.pythonhosted.org/packages/80/a7/cb0a3eff9ceb476ea74b3fe030ee87a9ec6613a85b24ed03cc67d1b71da3/uipath-2.2.32-py3-none-any.whl", hash = "sha256:38f485523026da30a09a53a02f3fb9badd7ce67865105fc8a28d8a94ef8526a3", size = 392014, upload-time = "2025-12-16T11:06:21.931Z" },
 ]
 
 [[package]]
@@ -2863,7 +2863,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.1.30"
+version = "0.1.31"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -2922,7 +2922,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.56" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.2.30,<2.3.0" },
+    { name = "uipath", specifier = ">=2.2.32,<2.3.0" },
 ]
 provides-extras = ["vertex", "bedrock"]
 
