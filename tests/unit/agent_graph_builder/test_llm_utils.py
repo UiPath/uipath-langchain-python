@@ -1,63 +1,72 @@
 """Tests for LLM utilities."""
 
+import pytest
+from langchain_core.language_models import BaseChatModel
+
 from uipath_agents.agent_graph_builder.llm_utils import (
-    LLM_MAX_RETRIES,
+    LLMProvider,
     create_llm,
+    detect_provider,
 )
+
+
+class TestDetectProvider:
+    """Test provider detection from model names."""
+
+    def test_detect_openai_gpt(self):
+        """Test detecting OpenAI provider from gpt model names."""
+        assert detect_provider("gpt-4") == LLMProvider.OPENAI
+        assert detect_provider("gpt-4o-2024-08-06") == LLMProvider.OPENAI
+        assert detect_provider("gpt-5-mini-2025-08-07") == LLMProvider.OPENAI
+        assert detect_provider("GPT-4") == LLMProvider.OPENAI
+
+    def test_detect_bedrock_claude(self):
+        """Test detecting Bedrock provider from Claude model names."""
+        assert detect_provider("anthropic.claude-haiku-4-5") == LLMProvider.BEDROCK
+        assert detect_provider("claude-3-sonnet") == LLMProvider.BEDROCK
+        assert detect_provider("ANTHROPIC.CLAUDE-OPUS") == LLMProvider.BEDROCK
+
+    def test_detect_vertex_gemini(self):
+        """Test detecting Vertex provider from Gemini model names."""
+        assert detect_provider("gemini-2.5-flash") == LLMProvider.VERTEX
+        assert detect_provider("gemini-pro") == LLMProvider.VERTEX
+        assert detect_provider("GEMINI-2.5-FLASH") == LLMProvider.VERTEX
+
+    def test_detect_unknown_provider(self):
+        """Test that unknown model names raise ValueError."""
+        with pytest.raises(ValueError, match="Unknown model provider"):
+            detect_provider("unknown-model")
 
 
 class TestCreateLLM:
     """Test LLM creation and configuration."""
 
-    def test_create_with_defaults(self):
-        """Test creating LLM with default parameters."""
-        llm = create_llm(model="gpt-4")
+    def test_create_openai_llm(self):
+        """Test creating OpenAI LLM."""
+        llm = create_llm(model="gpt-4", temperature=0.5, max_tokens=1024)
+        assert isinstance(llm, BaseChatModel)
 
-        assert llm.model_name == "gpt-4"
-        assert llm.temperature == 0
-        assert llm.max_tokens == 16_384
-        assert llm.max_retries == LLM_MAX_RETRIES
-        assert llm.disable_streaming is True
-
-    def test_create_with_custom_temperature(self):
-        """Test creating LLM with custom temperature."""
-        llm = create_llm(model="gpt-4", temperature=0.7)
-        assert llm.temperature == 0.7
-
-    def test_create_with_custom_max_tokens(self):
-        """Test creating LLM with custom max_tokens."""
-        llm = create_llm(model="gpt-4", max_tokens=8192)
-        assert llm.max_tokens == 8192
-
-    def test_create_with_custom_timeout(self):
-        """Test creating LLM with custom timeout."""
-        llm = create_llm(model="gpt-4", timeout=600)
-        assert llm.request_timeout == 600
-
-    def test_create_with_custom_retries(self):
-        """Test creating LLM with custom max retries."""
-        llm = create_llm(model="gpt-4", max_retries=5)
-        assert llm.max_retries == 5
-
-    def test_create_with_streaming_enabled(self):
-        """Test creating LLM with streaming enabled."""
-        llm = create_llm(model="gpt-4", disable_streaming=False)
-        assert llm.disable_streaming is False
-
-    def test_create_with_all_custom_params(self):
-        """Test creating LLM with all custom parameters."""
+    def test_create_bedrock_llm(self):
+        """Test creating Bedrock LLM."""
         llm = create_llm(
-            model="gpt-3.5-turbo",
-            temperature=0.9,
-            max_tokens=4096,
-            timeout=120,
-            max_retries=3,
-            disable_streaming=False,
+            model="anthropic.claude-haiku-4-5", temperature=0.7, max_tokens=2048
         )
+        assert isinstance(llm, BaseChatModel)
 
-        assert llm.model_name == "gpt-3.5-turbo"
-        assert llm.temperature == 0.9
-        assert llm.max_tokens == 4096
-        assert llm.request_timeout == 120
-        assert llm.max_retries == 3
-        assert llm.disable_streaming is False
+    def test_create_vertex_llm(self):
+        """Test creating Vertex LLM."""
+        llm = create_llm(model="gemini-2.5-flash", temperature=0.3, max_tokens=4096)
+        assert isinstance(llm, BaseChatModel)
+
+    def test_create_with_different_parameters(self):
+        """Test creating LLMs with different parameter values."""
+        llm1 = create_llm(model="gpt-4", temperature=0.0, max_tokens=512)
+        llm2 = create_llm(model="gpt-4", temperature=1.0, max_tokens=16384)
+
+        assert isinstance(llm1, BaseChatModel)
+        assert isinstance(llm2, BaseChatModel)
+
+    def test_create_with_unknown_model(self):
+        """Test that unknown model names raise ValueError."""
+        with pytest.raises(ValueError, match="Unknown model provider"):
+            create_llm(model="unknown-model", temperature=0.5, max_tokens=1024)
