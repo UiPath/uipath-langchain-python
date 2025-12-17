@@ -131,10 +131,7 @@ def _extract_tool_output_data(state: AgentGuardrailsGraphState) -> dict[str, Any
                 # JSON array or primitive - wrap it
                 return {"output": parsed}
         except json.JSONDecodeError:
-            logger.warning(
-                "Tool output is not valid JSON, wrapping in dict: %s",
-                content[:100] if len(content) > 100 else content,
-            )
+            logger.warning("Tool output is not valid JSON")
             return {"output": content}
     elif isinstance(content, dict):
         return content

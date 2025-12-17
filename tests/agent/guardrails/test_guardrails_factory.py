@@ -165,12 +165,16 @@ class TestCreateWordRuleFunc:
     def test_contains_operator(self) -> None:
         func = _create_word_rule_func(AgentWordOperator.CONTAINS, "test")
         assert func("this is a test") is True
+        assert func("this is a TEST") is True  # case-insensitive
+        assert func("this is a TeSt") is True  # case-insensitive
         assert func("no match") is False
 
     def test_does_not_contain_operator(self) -> None:
         func = _create_word_rule_func(AgentWordOperator.DOES_NOT_CONTAIN, "test")
         assert func("no match") is True
         assert func("this is a test") is False
+        assert func("this is a TEST") is False  # case-insensitive
+        assert func("this is a TeSt") is False  # case-insensitive
 
     def test_equals_operator(self) -> None:
         func = _create_word_rule_func(AgentWordOperator.EQUALS, "exact")
@@ -218,9 +222,11 @@ class TestCreateWordRuleFunc:
         assert func("abc") is False
         assert func("1234") is False
 
-    def test_matches_regex_with_none_value(self) -> None:
-        func = _create_word_rule_func(AgentWordOperator.MATCHES_REGEX, None)
-        assert func("anything") is False
+    def test_matches_regex_with_none_value_raises_assertion_error(self) -> None:
+        with pytest.raises(
+            AssertionError, match="value cannot be None for MATCHES_REGEX operator"
+        ):
+            _create_word_rule_func(AgentWordOperator.MATCHES_REGEX, None)
 
     def test_contains_with_none_value_raises_assertion_error(self) -> None:
         with pytest.raises(

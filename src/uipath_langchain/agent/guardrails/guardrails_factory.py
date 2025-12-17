@@ -34,6 +34,12 @@ from uipath_langchain.agent.guardrails.actions import (
 )
 
 
+def _assert_value_not_none(value: str | None, operator: AgentWordOperator) -> str:
+    """Assert value is not None and return as string."""
+    assert value is not None, f"value cannot be None for {operator.name} operator"
+    return value
+
+
 def _create_word_rule_func(
     operator: AgentWordOperator, value: str | None
 ) -> Callable[[str], bool]:
@@ -48,40 +54,37 @@ def _create_word_rule_func(
     """
     match operator:
         case AgentWordOperator.CONTAINS:
-            assert value is not None, "value cannot be None for CONTAINS operator"
-            return lambda s: value in s
+            val = _assert_value_not_none(value, operator)
+            return lambda s: val.lower() in s.lower()
         case AgentWordOperator.DOES_NOT_CONTAIN:
-            assert value is not None, (
-                "value cannot be None for DOES_NOT_CONTAIN operator"
-            )
-            return lambda s: value not in s
+            val = _assert_value_not_none(value, operator)
+            return lambda s: val.lower() not in s.lower()
         case AgentWordOperator.EQUALS:
-            return lambda s: s == value
+            val = _assert_value_not_none(value, operator)
+            return lambda s: s == val
         case AgentWordOperator.DOES_NOT_EQUAL:
-            return lambda s: s != value
+            val = _assert_value_not_none(value, operator)
+            return lambda s: s != val
         case AgentWordOperator.STARTS_WITH:
-            assert value is not None, "value cannot be None for STARTS_WITH operator"
-            return lambda s: s.startswith(value)
+            val = _assert_value_not_none(value, operator)
+            return lambda s: s.startswith(val)
         case AgentWordOperator.DOES_NOT_START_WITH:
-            assert value is not None, (
-                "value cannot be None for DOES_NOT_START_WITH operator"
-            )
-            return lambda s: not s.startswith(value)
+            val = _assert_value_not_none(value, operator)
+            return lambda s: not s.startswith(val)
         case AgentWordOperator.ENDS_WITH:
-            assert value is not None, "value cannot be None for ENDS_WITH operator"
-            return lambda s: s.endswith(value)
+            val = _assert_value_not_none(value, operator)
+            return lambda s: s.endswith(val)
         case AgentWordOperator.DOES_NOT_END_WITH:
-            assert value is not None, (
-                "value cannot be None for DOES_NOT_END_WITH operator"
-            )
-            return lambda s: not s.endswith(value)
+            val = _assert_value_not_none(value, operator)
+            return lambda s: not s.endswith(val)
         case AgentWordOperator.IS_EMPTY:
             return lambda s: len(s) == 0
         case AgentWordOperator.IS_NOT_EMPTY:
             return lambda s: len(s) > 0
         case AgentWordOperator.MATCHES_REGEX:
-            pattern = re.compile(value) if value else None
-            return lambda s: bool(pattern.match(s)) if pattern else False
+            val = _assert_value_not_none(value, operator)
+            pattern = re.compile(val)
+            return lambda s: bool(pattern.match(s))
         case _:
             raise ValueError(f"Unsupported word operator: {operator}")
 
