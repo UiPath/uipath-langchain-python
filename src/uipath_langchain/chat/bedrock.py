@@ -48,10 +48,14 @@ class AwsBedrockCompletionsPassthroughClient:
         model: str,
         token: str,
         api_flavor: str,
+        agenthub_config: Optional[str] = None,
+        byo_connection_id: Optional[str] = None,
     ):
         self.model = model
         self.token = token
         self.api_flavor = api_flavor
+        self.agenthub_config = agenthub_config
+        self.byo_connection_id = byo_connection_id
         self._vendor = "awsbedrock"
         self._url: Optional[str] = None
 
@@ -101,6 +105,10 @@ class AwsBedrockCompletionsPassthroughClient:
             "X-UiPath-Streaming-Enabled": streaming,
         }
 
+        if self.agenthub_config:
+            headers["X-UiPath-AgentHub-Config"] = self.agenthub_config
+        if self.byo_connection_id:
+            headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = self.byo_connection_id
         job_key = os.getenv("UIPATH_JOB_KEY")
         process_key = os.getenv("UIPATH_PROCESS_KEY")
         if job_key:
@@ -118,6 +126,8 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
         tenant_id: Optional[str] = None,
         token: Optional[str] = None,
         model_name: str = BedrockModels.anthropic_claude_haiku_4_5,
+        agenthub_config: Optional[str] = None,
+        byo_connection_id: Optional[str] = None,
         **kwargs,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -141,6 +151,8 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
             model=model_name,
             token=token,
             api_flavor="converse",
+            agenthub_config=agenthub_config,
+            byo_connection_id=byo_connection_id,
         )
 
         client = passthrough_client.get_client()
@@ -156,6 +168,8 @@ class UiPathChatBedrock(ChatBedrock):
         tenant_id: Optional[str] = None,
         token: Optional[str] = None,
         model_name: str = BedrockModels.anthropic_claude_haiku_4_5,
+        agenthub_config: Optional[str] = None,
+        byo_connection_id: Optional[str] = None,
         **kwargs,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -179,6 +193,8 @@ class UiPathChatBedrock(ChatBedrock):
             model=model_name,
             token=token,
             api_flavor="invoke",
+            agenthub_config=agenthub_config,
+            byo_connection_id=byo_connection_id,
         )
 
         client = passthrough_client.get_client()
