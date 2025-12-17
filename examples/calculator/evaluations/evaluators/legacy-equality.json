@@ -1,0 +1,11 @@
+{
+  "fileName": "legacy-equality.json",
+  "id": "e5f6a7b8-c9d0-1e2f-3a4b-5c6d7e8f9a0b",
+  "name": "Equality Evaluator",
+  "description": "An evaluator that judges the agent based on expected output.",
+  "category": 0,
+  "type": 1,
+  "targetOutputKey": "*",
+  "createdAt": "2025-12-16T00:00:00.000Z",
+  "updatedAt": "2025-12-16T00:00:00.000Z"
+}

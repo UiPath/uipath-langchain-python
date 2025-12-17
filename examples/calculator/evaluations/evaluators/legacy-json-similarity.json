@@ -1,0 +1,11 @@
+{
+  "fileName": "legacy-json-similarity.json",
+  "id": "a7b8c9d0-e1f2-3a4b-5c6d-7e8f9a0b1c2d",
+  "name": "JSON Similarity Evaluator",
+  "description": "An evaluator that compares JSON structures with tolerance for numeric and string differences.",
+  "category": 0,
+  "type": 6,
+  "targetOutputKey": "*",
+  "createdAt": "2025-12-16T00:00:00.000Z",
+  "updatedAt": "2025-12-16T00:00:00.000Z"
+}

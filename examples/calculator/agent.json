@@ -1,0 +1,67 @@
+{
+  "id": "ca9e1b22-e201-4e7c-859d-2436075c833c",
+  "version": "1.0.0",
+  "name": "Calculator Agent",
+  "metadata": {
+    "storageVersion": "31.0.0",
+    "isConversational": false
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a calculator agent. You perform mathematical operations. When given a calculation, compute the result and return it.",
+      "contentTokens": [
+        {
+          "type": "simpleText",
+          "rawString": "You are a calculator agent. You perform mathematical operations. When given a calculation, compute the result and return it."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "Calculate: {{a}} {{operator}} {{b}}",
+      "contentTokens": [
+        {
+          "type": "simpleText",
+          "rawString": "Calculate: {{a}} {{operator}} {{b}}"
+        }
+      ]
+    }
+  ],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "a": {
+        "type": "number",
+        "description": "First operand"
+      },
+      "b": {
+        "type": "number",
+        "description": "Second operand"
+      },
+      "operator": {
+        "type": "string",
+        "description": "Mathematical operator (+, -, *, /)"
+      }
+    },
+    "required": ["a", "b", "operator"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "result": {
+        "type": "number",
+        "description": "The result of the calculation"
+      }
+    }
+  },
+  "settings": {
+    "model": "gpt-4.1-2025-04-14",
+    "maxTokens": 16384,
+    "temperature": 0,
+    "engine": "basic-v2",
+    "maxIterations": 25
+  },
+  "resources": [],
+  "features": []
+}
