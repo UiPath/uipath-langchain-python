@@ -47,6 +47,7 @@ def _create_openai_llm(
         temperature=temperature,
         max_tokens=max_tokens,
         api_version=azure_open_ai_latest_api_version,
+        use_responses_api=True,
     )
 
 
