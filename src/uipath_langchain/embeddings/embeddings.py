@@ -4,6 +4,7 @@ from typing import Any
 import httpx
 from langchain_openai.embeddings import AzureOpenAIEmbeddings, OpenAIEmbeddings
 from pydantic import Field
+from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
 from uipath_langchain._utils._request_mixin import UiPathRequestMixin
@@ -26,19 +27,24 @@ class UiPathAzureOpenAIEmbeddings(UiPathRequestMixin, AzureOpenAIEmbeddings):
     )
 
     def __init__(self, **kwargs):
+        default_client_kwargs = get_httpx_client_kwargs()
+        client_kwargs = {
+            **default_client_kwargs,
+            "event_hooks": {
+                "request": [self._log_request_duration],
+                "response": [self._log_response_duration],
+            },
+        }
+        aclient_kwargs = {
+            **default_client_kwargs,
+            "event_hooks": {
+                "request": [self._alog_request_duration],
+                "response": [self._alog_response_duration],
+            },
+        }
         super().__init__(
-            http_client=httpx.Client(
-                event_hooks={
-                    "request": [self._log_request_duration],
-                    "response": [self._log_response_duration],
-                }
-            ),
-            http_async_client=httpx.AsyncClient(
-                event_hooks={
-                    "request": [self._alog_request_duration],
-                    "response": [self._alog_response_duration],
-                }
-            ),
+            http_client=httpx.Client(**client_kwargs),
+            http_async_client=httpx.AsyncClient(**aclient_kwargs),
             **kwargs,
         )
         # Monkey-patch the OpenAI client to use your custom methods
