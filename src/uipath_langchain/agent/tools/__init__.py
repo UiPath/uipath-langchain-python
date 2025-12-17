@@ -2,6 +2,7 @@
 
 from .context_tool import create_context_tool
 from .integration_tool import create_integration_tool
+from .mcp_tool import create_mcp_tools
 from .process_tool import create_process_tool
 from .tool_factory import (
     create_tools_from_resources,
@@ -14,4 +15,5 @@ __all__ = [
     "create_context_tool",
     "create_process_tool",
     "create_integration_tool",
+    "create_mcp_tools",
 ]

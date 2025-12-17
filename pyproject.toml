@@ -18,6 +18,8 @@ dependencies = [
     "openinference-instrumentation-langchain>=0.1.56",
     "jsonschema-pydantic-converter>=0.1.5",
     "jsonpath-ng>=1.7.0",
+    "mcp>=1.24.0",
+    "langchain-mcp-adapters>=0.2.1",
 ]
 
 classifiers = [
