@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 
 from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 from uipath.agent.models.agent import LowCodeAgentDefinition
 
 from .constants import (
@@ -50,10 +51,18 @@ def load_agent_configuration(file_path: Path) -> LowCodeAgentDefinition:
         return LowCodeAgentDefinition.model_validate_json(file_path.read_text())
     except ValidationError as e:
         raise InputValidationError(
-            f"{AGENT_ENTRYPOINT} failed schema validation. Error: {e}",
+            f"{AGENT_ENTRYPOINT} failed schema validation. Error: {e}\n\n{errorDetailsListToMessage(e.errors())}",
             validation_errors=e.errors(),
         ) from e
     except (ValueError, TypeError) as e:
         raise ConfigurationError(
             f"Invalid {AGENT_ENTRYPOINT} structure. Error: {e}"
         ) from e
+
+
+def errorDetailsListToMessage(details: list[ErrorDetails]):
+    return "\n  ".join(map(errorDetailsToMessage, details))
+
+
+def errorDetailsToMessage(details: ErrorDetails):
+    return f"(type: {details.get('type')}, loc: {details.get('loc')}, msg: {details.get('msg')})"
