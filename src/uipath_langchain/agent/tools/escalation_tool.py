@@ -18,7 +18,6 @@ from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.common import CreateEscalation
 
-from ..react.types import AgentGraphNode, AgentTerminationSource
 from .utils import sanitize_tool_name
 
 
@@ -79,6 +78,8 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
     async def escalation_tool_fn(
         runtime: ToolRuntime, **kwargs: Any
     ) -> Command[Any] | Any:
+        from ..react.types import AgentGraphNode, AgentTerminationSource
+
         task_title = channel.task_title or "Escalation Task"
 
         result = interrupt(
