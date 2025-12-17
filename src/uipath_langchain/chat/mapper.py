@@ -200,7 +200,6 @@ class UiPathChatMessagesMapper:
                             content_part_id=f"chunk-{message.id}-0",
                             chunk=UiPathConversationContentPartChunkEvent(
                                 data=text,
-                                content_part_sequence=0,
                             ),
                         )
 
@@ -218,7 +217,6 @@ class UiPathChatMessagesMapper:
                             content_part_id=f"chunk-{message.id}-0",
                             chunk=UiPathConversationContentPartChunkEvent(
                                 data=args,
-                                content_part_sequence=0,
                             ),
                         )
                         # Continue so that multiple tool_call_chunks in the same block list
@@ -231,7 +229,6 @@ class UiPathChatMessagesMapper:
                     content_part_id=f"content-{message.id}",
                     chunk=UiPathConversationContentPartChunkEvent(
                         data=message.content,
-                        content_part_sequence=0,
                     ),
                 )
 
@@ -254,10 +251,46 @@ class UiPathChatMessagesMapper:
                 else None
             )
 
-            # If no AI message ID was found, we cannot properly associate this tool result
+            content_value: Any = message.content
+            if isinstance(content_value, str):
+                try:
+                    content_value = json.loads(content_value)
+                except (json.JSONDecodeError, TypeError):
+                    # Keep as string if not valid JSON
+                    pass
+
+            # If no AI message ID was found, create an empty message to associate the tool_call with
             if not result_message_id:
-                logger.warning(
-                    f"Tool message {message.tool_call_id} has no associated AI message ID. Skipping."
+                result_message_id = str(uuid4())
+
+                return UiPathConversationMessageEvent(
+                    message_id=result_message_id,
+                    start=UiPathConversationMessageStartEvent(
+                        role="assistant", timestamp=timestamp
+                    ),
+                    content_part=UiPathConversationContentPartEvent(
+                        content_part_id=f"content-{result_message_id}",
+                        start=UiPathConversationContentPartStartEvent(
+                            mime_type="text/plain"
+                        ),
+                        chunk=UiPathConversationContentPartChunkEvent(
+                            data=""
+                        ),
+                        end=UiPathConversationContentPartEndEvent()
+                    ),
+                    tool_call=UiPathConversationToolCallEvent(
+                        tool_call_id=message.tool_call_id,
+                        start=UiPathConversationToolCallStartEvent(
+                            tool_name=message.name,
+                            arguments=None,
+                            timestamp=timestamp,
+                        ),
+                        end=UiPathConversationToolCallEndEvent(
+                            timestamp=timestamp,
+                            output=UiPathInlineValue(inline=content_value),
+                        ),
+                    ),
+                    end=UiPathConversationMessageEndEvent()
                 )
 
             # Clean up the mapping after use
@@ -266,14 +299,6 @@ class UiPathChatMessagesMapper:
                 and message.tool_call_id in self.tool_call_to_ai_message
             ):
                 del self.tool_call_to_ai_message[message.tool_call_id]
-
-            content_value: Any = message.content
-            if isinstance(content_value, str):
-                try:
-                    content_value = json.loads(content_value)
-                except (json.JSONDecodeError, TypeError):
-                    # Keep as string if not valid JSON
-                    pass
 
             return UiPathConversationMessageEvent(
                 message_id=result_message_id or str(uuid4()),
