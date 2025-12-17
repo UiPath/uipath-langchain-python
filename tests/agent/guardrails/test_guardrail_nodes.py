@@ -127,7 +127,7 @@ class TestAgentInitGuardrailNodes:
         expected_name: str,
     ) -> None:
         """Agent init node: routes to success and passes message payload to evaluator."""
-        guardrail = MagicMock()
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
         fake = _patch_uipath(monkeypatch, validation_passed=True, reason=None)
 
@@ -161,7 +161,7 @@ class TestAgentInitGuardrailNodes:
         expected_name: str,
     ) -> None:
         """Agent init node: routes to failure and sets guardrail_validation_result."""
-        guardrail = MagicMock()
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
         _patch_uipath(monkeypatch, validation_passed=False, reason="policy_violation")
 
@@ -196,7 +196,7 @@ class TestAgentTerminateGuardrailNodes:
         expected_name: str,
     ) -> None:
         """Agent terminate node: routes to success and passes agent_result payload to evaluator."""
-        guardrail = MagicMock()
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
         fake = _patch_uipath(monkeypatch, validation_passed=True, reason=None)
 
@@ -231,7 +231,7 @@ class TestAgentTerminateGuardrailNodes:
         expected_name: str,
     ) -> None:
         """Agent terminate node: routes to failure and sets guardrail_validation_result."""
-        guardrail = MagicMock()
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
         _patch_uipath(monkeypatch, validation_passed=False, reason="policy_violation")
 
@@ -266,7 +266,7 @@ class TestToolGuardrailNodes:
         expected_name: str,
     ) -> None:
         """Tool node: routes to success and passes the expected payload to evaluator."""
-        guardrail = MagicMock()
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
         fake = _patch_uipath(monkeypatch, validation_passed=True, reason=None)
 
@@ -319,7 +319,7 @@ class TestToolGuardrailNodes:
         expected_name: str,
     ) -> None:
         """Tool node: routes to failure and sets guardrail_validation_result."""
-        guardrail = MagicMock()
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
         _patch_uipath(monkeypatch, validation_passed=False, reason="policy_violation")
 
