@@ -248,9 +248,6 @@ def attach_pre_agent_guardrails(
 ) -> str:
     """Attach AGENT-scoped guardrails after INIT at the parent graph level.
 
-    This mirrors `create_agent_init_guardrails_subgraph()`, but instead of compiling
-    a nested graph, it adds the guardrail nodes directly onto the provided graph.
-
     Args:
         builder: The parent `StateGraph` to attach nodes to.
         guardrails: All configured (guardrail, action) tuples.
@@ -266,15 +263,15 @@ def attach_pre_agent_guardrails(
         for (guardrail, action) in (guardrails or [])
         if GuardrailScope.AGENT in guardrail.selector.scopes
     ]
+    applicable_guardrails = _filter_guardrails_by_stage(
+        applicable_guardrails, ExecutionStage.PRE_EXECUTION
+    )
     if not applicable_guardrails:
         return next_node_name
 
-    post_guardrails = _filter_guardrails_by_stage(
-        applicable_guardrails, ExecutionStage.PRE_EXECUTION
-    )
     return _build_guardrail_node_chain(
         builder,
-        post_guardrails,
+        applicable_guardrails,
         GuardrailScope.AGENT,
         ExecutionStage.PRE_EXECUTION,
         create_agent_init_guardrail_node,
@@ -283,26 +280,72 @@ def attach_pre_agent_guardrails(
     )
 
 
-def create_agent_init_guardrails_subgraph(
-    init_node: tuple[str, Any],
+def attach_post_agent_guardrails(
+    builder: StateGraph[AgentGuardrailsGraphState],
+    terminate_node: Callable[[AgentGraphState], dict[str, Any]],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
-):
-    """Create a subgraph for INIT node that applies guardrails on the state messages."""
+    *,
+    terminate_node_name: str,
+    next_node_name: str,
+) -> str:
+    """Attach POST_EXECUTION AGENT guardrails after TERMINATE at the parent graph level.
+
+    Args:
+        builder: The parent `StateGraph` to attach nodes to.
+        terminate_node: The underlying terminate callable producing the agent output.
+        guardrails: All configured (guardrail, action) tuples.
+        terminate_node_name: The node name of the TERMINATE node in the parent graph.
+        next_node_name: The node name to route to after the guardrails pass.
+
+            Unlike INIT (where the "next" node is a real functional step like `AGENT`),
+            TERMINATE needs a *final output node* to return the already-computed result.
+            That is why callers typically pass `AgentGraphNode.GUARDED_TERMINATE` here:
+            it is a small node that returns `state.agent_result` after guardrails pass.
+
+    Returns:
+        The node name that the caller should connect to END:
+        - `terminate_node_name` when no applicable guardrails exist
+        - `next_node_name` when POST_EXECUTION guardrails are attached
+    """
     applicable_guardrails = [
-        (guardrail, _)
-        for (guardrail, _) in (guardrails or [])
+        (guardrail, action)
+        for (guardrail, action) in (guardrails or [])
         if GuardrailScope.AGENT in guardrail.selector.scopes
     ]
-    if applicable_guardrails is None or len(applicable_guardrails) == 0:
-        return init_node[1]
-
-    return _create_guardrails_subgraph(
-        main_inner_node=init_node,
-        guardrails=applicable_guardrails,
-        scope=GuardrailScope.AGENT,
-        execution_stages=[ExecutionStage.POST_EXECUTION],
-        node_factory=create_agent_init_guardrail_node,
+    applicable_guardrails = _filter_guardrails_by_stage(
+        applicable_guardrails, ExecutionStage.POST_EXECUTION
     )
+
+    # Fast path: no guardrails (or none applicable) -> keep the graph simple.
+    if not applicable_guardrails:
+        builder.add_node(terminate_node_name, terminate_node)
+        return terminate_node_name
+
+    def _terminate_store_result(state: AgentGraphState) -> dict[str, Any]:
+        """Store terminate output in state so post-execution guardrails can validate it."""
+        result = terminate_node(state)
+        return {"agent_result": result}
+
+    def _terminate_output(state: AgentGuardrailsGraphState) -> dict[str, Any]:
+        """Return the terminate output as the graph output after guardrails passed."""
+        if state.agent_result is None:
+            raise ValueError("Missing `agent_result` in terminate output node.")
+        return state.agent_result
+
+    builder.add_node(terminate_node_name, _terminate_store_result)
+    builder.add_node(next_node_name, _terminate_output)
+
+    first_guardrail_node = _build_guardrail_node_chain(
+        builder,
+        applicable_guardrails,
+        GuardrailScope.AGENT,
+        ExecutionStage.POST_EXECUTION,
+        create_agent_terminate_guardrail_node,
+        next_node_name,
+        terminate_node_name,
+    )
+    builder.add_edge(terminate_node_name, first_guardrail_node)
+    return next_node_name
 
 
 def create_agent_terminate_guardrails_subgraph(

@@ -12,8 +12,8 @@ from uipath.platform.guardrails import BaseGuardrail
 from ..guardrails.actions import GuardrailAction
 from ..tools import create_tool_node
 from .guardrails.guardrails_subgraph import (
+    attach_post_agent_guardrails,
     attach_pre_agent_guardrails,
-    create_agent_terminate_guardrails_subgraph,
     create_llm_guardrails_subgraph,
     create_tools_guardrails_subgraph,
 )
@@ -115,12 +115,6 @@ def create_agent(
     for tool_name, tool_node in tool_nodes_with_guardrails.items():
         builder.add_node(tool_name, tool_node)
 
-    terminate_with_guardrails_subgraph = create_agent_terminate_guardrails_subgraph(
-        (AgentGraphNode.GUARDED_TERMINATE, terminate_node),
-        guardrails,
-    )
-    builder.add_node(AgentGraphNode.TERMINATE, terminate_with_guardrails_subgraph)
-
     builder.add_edge(START, AgentGraphNode.INIT)
 
     llm_node = create_llm_node(model, llm_tools)
@@ -137,6 +131,15 @@ def create_agent(
     )
     builder.add_edge(AgentGraphNode.INIT, init_next)
 
+    terminate_end_node = attach_post_agent_guardrails(
+        cast(StateGraph[AgentGuardrailsGraphState], builder),
+        terminate_node,
+        guardrails,
+        terminate_node_name=AgentGraphNode.TERMINATE,
+        next_node_name=END,
+    )
+    builder.add_edge(AgentGraphNode.TERMINATE, terminate_end_node)
+
     tool_node_names = list(tool_nodes_with_guardrails.keys())
     builder.add_conditional_edges(
         AgentGraphNode.AGENT,
@@ -146,7 +149,5 @@ def create_agent(
 
     for tool_name in tool_node_names:
         builder.add_edge(tool_name, AgentGraphNode.AGENT)
-
-    builder.add_edge(AgentGraphNode.TERMINATE, END)
 
     return builder
