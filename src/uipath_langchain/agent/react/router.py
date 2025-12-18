@@ -6,9 +6,8 @@ from langchain_core.messages import AIMessage, AnyMessage, ToolCall
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
 from ..exceptions import AgentNodeRoutingException
-from .constants import MAX_SUCCESSIVE_COMPLETIONS
 from .types import AgentGraphNode, AgentGraphState
-from .utils import count_successive_completions
+from .utils import count_consecutive_thinking_messages
 
 FLOW_CONTROL_TOOLS = [END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name]
 
@@ -48,50 +47,62 @@ def __validate_last_message_is_AI(messages: list[AnyMessage]) -> AIMessage:
     return last_message
 
 
-def route_agent(
-    state: AgentGraphState,
-) -> list[str] | Literal[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE]:
-    """Route after agent: handles all routing logic including control flow detection.
+def create_route_agent(thinking_messages_limit: int = 0):
+    """Create a routing function configured with thinking_messages_limit.
 
-    Routing logic:
-    1. If multiple tool calls exist, filter out control flow tools (EndExecution, RaiseError)
-    2. If control flow tool(s) remain, route to TERMINATE
-    3. If regular tool calls remain, route to specific tool nodes (return list of tool names)
-    4. If no tool calls, handle successive completions
+    Args:
+        thinking_messages_limit: Max consecutive thinking messages before error
 
     Returns:
-        - list[str]: Tool node names for parallel execution
-        - AgentGraphNode.AGENT: For successive completions
-        - AgentGraphNode.TERMINATE: For control flow termination
-
-    Raises:
-        AgentNodeRoutingException: When encountering unexpected state (empty messages, non-AIMessage, or excessive completions)
+        Routing function for LangGraph conditional edges
     """
-    messages = state.messages
-    last_message = __validate_last_message_is_AI(messages)
 
-    tool_calls = list(last_message.tool_calls) if last_message.tool_calls else []
-    tool_calls = __filter_control_flow_tool_calls(tool_calls)
+    def route_agent(
+        state: AgentGraphState,
+    ) -> list[str] | Literal[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE]:
+        """Route after agent: handles all routing logic including control flow detection.
 
-    if tool_calls and __has_control_flow_tool(tool_calls):
-        return AgentGraphNode.TERMINATE
+        Routing logic:
+        1. If multiple tool calls exist, filter out control flow tools (EndExecution, RaiseError)
+        2. If control flow tool(s) remain, route to TERMINATE
+        3. If regular tool calls remain, route to specific tool nodes (return list of tool names)
+        4. If no tool calls, handle consecutive completions
 
-    if tool_calls:
-        return [tc["name"] for tc in tool_calls]
+        Returns:
+            - list[str]: Tool node names for parallel execution
+            - AgentGraphNode.AGENT: For consecutive completions
+            - AgentGraphNode.TERMINATE: For control flow termination
 
-    successive_completions = count_successive_completions(messages)
+        Raises:
+            AgentNodeRoutingException: When encountering unexpected state (empty messages, non-AIMessage, or excessive completions)
+        """
+        messages = state.messages
+        last_message = __validate_last_message_is_AI(messages)
 
-    if successive_completions > MAX_SUCCESSIVE_COMPLETIONS:
+        tool_calls = list(last_message.tool_calls) if last_message.tool_calls else []
+        tool_calls = __filter_control_flow_tool_calls(tool_calls)
+
+        if tool_calls and __has_control_flow_tool(tool_calls):
+            return AgentGraphNode.TERMINATE
+
+        if tool_calls:
+            return [tc["name"] for tc in tool_calls]
+
+        consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
+
+        if consecutive_thinking_messages > thinking_messages_limit:
+            raise AgentNodeRoutingException(
+                f"Agent exceeded consecutive completions limit without producing tool calls "
+                f"(completions: {consecutive_thinking_messages}, max: {thinking_messages_limit}). "
+                f"This should not happen as tool_choice='required' is enforced at the limit."
+            )
+
+        if last_message.content:
+            return AgentGraphNode.AGENT
+
         raise AgentNodeRoutingException(
-            f"Agent exceeded successive completions limit without producing tool calls "
-            f"(completions: {successive_completions}, max: {MAX_SUCCESSIVE_COMPLETIONS}). "
-            f"This should not happen as tool_choice='required' is enforced at the limit."
+            f"Agent produced empty response without tool calls "
+            f"(completions: {consecutive_thinking_messages}, has_content: False)"
         )
 
-    if last_message.content:
-        return AgentGraphNode.AGENT
-
-    raise AgentNodeRoutingException(
-        f"Agent produced empty response without tool calls "
-        f"(completions: {successive_completions}, has_content: False)"
-    )
+    return route_agent

@@ -46,3 +46,8 @@ class AgentGraphConfig(BaseModel):
     recursion_limit: int = Field(
         default=50, ge=1, description="Maximum recursion limit for the agent graph"
     )
+    thinking_messages_limit: int = Field(
+        default=0,
+        ge=0,
+        description="Max consecutive thinking messages before enforcing tool usage. 0 = force tools every time.",
+    )

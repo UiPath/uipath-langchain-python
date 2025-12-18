@@ -28,7 +28,7 @@ def resolve_output_model(
     return END_EXECUTION_TOOL.args_schema
 
 
-def count_successive_completions(messages: Sequence[BaseMessage]) -> int:
+def count_consecutive_thinking_messages(messages: Sequence[BaseMessage]) -> int:
     """Count consecutive AIMessages without tool calls at end of message history."""
     if not messages:
         return 0
