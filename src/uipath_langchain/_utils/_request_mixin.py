@@ -137,6 +137,8 @@ class UiPathRequestMixin(BaseModel):
     max_tokens: int | None = 1000
     frequency_penalty: float | None = None
     presence_penalty: float | None = None
+    agenthub_config: str | None = None
+    byo_connection_id: str | None = None
 
     logger: logging.Logger | None = None
     max_retries: int | None = 5
@@ -748,6 +750,12 @@ class UiPathRequestMixin(BaseModel):
                 "Authorization": f"Bearer {self.access_token}",
                 "X-UiPath-LlmGateway-TimeoutSeconds": str(self.default_request_timeout),
             }
+            if self.agenthub_config:
+                self._auth_headers["X-UiPath-AgentHub-Config"] = self.agenthub_config
+            if self.byo_connection_id:
+                self._auth_headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = (
+                    self.byo_connection_id
+                )
             if self.is_normalized and self.model_name:
                 self._auth_headers["X-UiPath-LlmGateway-NormalizedApi-ModelName"] = (
                     self.model_name

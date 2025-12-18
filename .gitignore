@@ -180,3 +180,5 @@ cython_debug/
 **/__uipath/
 **/.langgraph_api
 **/testcases/**/uipath.json
+
+/playground.py

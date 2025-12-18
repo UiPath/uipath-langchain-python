@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 from pydantic import Field
 from pydantic_settings import BaseSettings
+from uipath._utils._ssl_context import get_httpx_client_kwargs
 
 
 class UiPathCachedPathsSettings(BaseSettings):
@@ -58,7 +59,7 @@ def get_uipath_token_header(
             client_secret=settings.client_secret,
             grant_type="client_credentials",
         )
-        with httpx.Client() as client:
+        with httpx.Client(**get_httpx_client_kwargs()) as client:
             res = client.post(url_get_token, data=token_credentials)
             res_json = res.json()
             uipath_token_header = res_json.get("access_token")
@@ -79,7 +80,7 @@ async def get_token_header_async(
             grant_type="client_credentials",
         )
 
-        with httpx.Client() as client:
+        with httpx.Client(**get_httpx_client_kwargs()) as client:
             res_json = client.post(url_get_token, data=token_credentials).json()
             uipath_token_header = res_json.get("access_token")
 
