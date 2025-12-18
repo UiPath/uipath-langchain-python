@@ -7,7 +7,7 @@ from .process_tool import create_process_tool
 from .tool_factory import (
     create_tools_from_resources,
 )
-from .tool_node import create_tool_node
+from .tool_node import ToolWrapperMixin, UiPathToolNode, create_tool_node
 
 __all__ = [
     "create_tools_from_resources",
@@ -16,4 +16,6 @@ __all__ = [
     "create_process_tool",
     "create_integration_tool",
     "create_mcp_tools",
+    "UiPathToolNode",
+    "ToolWrapperMixin",
 ]
