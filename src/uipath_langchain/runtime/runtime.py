@@ -214,8 +214,8 @@ class UiPathLangGraphRuntime:
             messages = graph_input.get("messages", None)
             if messages and isinstance(messages, list):
                 graph_input["messages"] = self.chat.map_messages(messages)
-        if options and options.resume:
-            return Command(resume=graph_input)
+        # if options and options.resume:
+        # return Command(resume=graph_input)
         return graph_input
 
     async def _get_graph_state(
