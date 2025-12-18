@@ -1,6 +1,3 @@
-from .feature_flags import FeatureFlagsConfig, get_feature_flags
+from .feature_flags import get_flags
 
-__all__ = [
-    "FeatureFlagsConfig",
-    "get_feature_flags",
-]
+__all__ = ["get_flags"]

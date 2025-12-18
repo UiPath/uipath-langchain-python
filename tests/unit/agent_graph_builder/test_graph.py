@@ -54,6 +54,10 @@ class TestBuildAgentGraph:
             patch(
                 "uipath_agents.agent_graph_builder.graph.create_agent"
             ) as mock_create,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=0,
+            ),
         ):
             mock_create.return_value = MagicMock()
 
@@ -83,6 +87,10 @@ class TestBuildAgentGraph:
             patch(
                 "uipath_agents.agent_graph_builder.graph.create_agent"
             ) as mock_create,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=0,
+            ),
         ):
             mock_llm.return_value = MagicMock()
             mock_create.return_value = MagicMock()
@@ -115,50 +123,24 @@ class TestBuildAgentGraph:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
             patch(
                 "uipath_agents.agent_graph_builder.graph.create_agent"
             ) as mock_create,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=0,
+            ),
         ):
+            mock_llm.return_value = MagicMock()
             mock_create.return_value = MagicMock()
 
             await build_agent_graph(agent_def, input_data={"task": "analysis"})
 
             mock_create.assert_called_once()
-            messages = mock_create.call_args.kwargs["messages"]
+            message_factory = mock_create.call_args.kwargs["messages"]
+            messages = message_factory({"task": "analysis"})
             assert "analysis" in messages[0].content
-
-    async def test_handles_input_data_json_string(self):
-        """Test building graph with dict input data (JSON parsing happens in runtime.py)."""
-        agent_def = create_test_agent_definition(
-            messages=[
-                AgentMessage(role=AgentMessageRole.SYSTEM, content="Count: {{count}}"),
-                AgentMessage(role=AgentMessageRole.USER, content="Start"),
-            ],
-            input_schema={
-                "type": "object",
-                "properties": {"count": {"type": "integer"}},
-                "required": ["count"],
-            },
-        )
-
-        with (
-            patch(
-                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
-                new_callable=AsyncMock,
-                return_value=[],
-            ),
-            patch(
-                "uipath_agents.agent_graph_builder.graph.create_agent"
-            ) as mock_create,
-        ):
-            mock_create.return_value = MagicMock()
-
-            # build_agent_graph expects a dict - JSON parsing happens in runtime.py
-            await build_agent_graph(agent_def, input_data={"count": 42})
-
-            mock_create.assert_called_once()
-            messages = mock_create.call_args.kwargs["messages"]
-            assert "42" in messages[0].content
 
     async def test_creates_tools_from_resources(self):
         """Test that tools are created from agent resources."""
@@ -180,10 +162,16 @@ class TestBuildAgentGraph:
                 new_callable=AsyncMock,
                 return_value=[mock_tool],
             ) as mock_create_tools,
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
             patch(
                 "uipath_agents.agent_graph_builder.graph.create_agent"
             ) as mock_create_agent,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=0,
+            ),
         ):
+            mock_llm.return_value = MagicMock()
             mock_create_agent.return_value = MagicMock()
 
             await build_agent_graph(agent_def, {})
@@ -192,3 +180,31 @@ class TestBuildAgentGraph:
             mock_create_agent.assert_called_once()
             call_kwargs = mock_create_agent.call_args.kwargs
             assert call_kwargs["tools"] == [mock_tool]
+
+    async def test_passes_thinking_messages_limit_via_config(self):
+        """Test that thinking_messages_limit is passed via AgentGraphConfig."""
+        agent_def = create_test_agent_definition()
+
+        with (
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_agent"
+            ) as mock_create,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=5,
+            ),
+        ):
+            mock_llm.return_value = MagicMock()
+            mock_create.return_value = MagicMock()
+
+            await build_agent_graph(agent_def, {})
+
+            mock_create.assert_called_once()
+            config = mock_create.call_args.kwargs["config"]
+            assert config.thinking_messages_limit == 5

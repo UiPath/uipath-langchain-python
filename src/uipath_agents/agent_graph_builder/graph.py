@@ -16,11 +16,10 @@ from uipath_langchain.agent.react import (
 )
 from uipath_langchain.agent.tools import create_tools_from_resources
 
+from .config import get_thinking_messages_limit
 from .llm_utils import create_llm
 from .message_utils import build_agent_messages
 
-# Maximum number of agent loop iterations before termination
-# Set to 50 to prevent infinite loops while allowing complex reasoning chains
 AGENT_LOOP_RECURSION_LIMIT = 50
 
 
@@ -87,9 +86,11 @@ async def build_agent_graph(
 
     guardrails = build_guardrails_with_actions(agent_definition.guardrails)
 
-    # Create agent config with feature flags
     agent_config = AgentGraphConfig(
         recursion_limit=AGENT_LOOP_RECURSION_LIMIT,
+        thinking_messages_limit=get_thinking_messages_limit(
+            agent_definition.settings.model
+        ),
     )
 
     return create_agent(
