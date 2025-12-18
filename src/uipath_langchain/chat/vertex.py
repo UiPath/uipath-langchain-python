@@ -47,7 +47,7 @@ def _rewrite_vertex_url(original_url: str, gateway_url: str) -> httpx.URL | None
     Returns the gateway URL, or None if no rewrite needed.
     """
     if "generateContent" in original_url or "streamGenerateContent" in original_url:
-        return httpx.URL(gateway_url + "?api-version=v1")
+        return httpx.URL(gateway_url)
     return None
 
 
