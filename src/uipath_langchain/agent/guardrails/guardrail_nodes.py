@@ -3,19 +3,107 @@ import logging
 import re
 from typing import Any, Callable
 
-from langchain_core.messages import AIMessage
 from langgraph.types import Command
+from uipath.core.guardrails import (
+    DeterministicGuardrail,
+    DeterministicGuardrailsService,
+)
 from uipath.platform import UiPath
 from uipath.platform.guardrails import (
     BaseGuardrail,
+    BuiltInValidatorGuardrail,
     GuardrailScope,
 )
+from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
-from uipath_langchain.agent.guardrails.utils import get_message_content
+from uipath_langchain.agent.guardrails.utils import (
+    _extract_tool_input_data,
+    _extract_tool_output_data,
+    get_message_content,
+)
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
 
+from ..exceptions import AgentTerminationException
+
 logger = logging.getLogger(__name__)
+
+
+def _evaluate_deterministic_guardrail(
+    state: AgentGuardrailsGraphState,
+    guardrail: DeterministicGuardrail,
+    execution_stage: ExecutionStage,
+    input_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]],
+    output_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]] | None,
+):
+    """Evaluate deterministic guardrail.
+
+    Args:
+        state: The current agent graph state.
+        guardrail: The deterministic guardrail to evaluate.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+        input_data_extractor: Function to extract input data from state.
+        output_data_extractor: Function to extract output data from state (optional).
+
+    Returns:
+        The guardrail evaluation result.
+    """
+    service = DeterministicGuardrailsService()
+    input_data = input_data_extractor(state)
+
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        return service.evaluate_pre_deterministic_guardrail(
+            input_data=input_data, guardrail=guardrail
+        )
+    else:  # POST_EXECUTION
+        output_data = output_data_extractor(state) if output_data_extractor else {}
+        return service.evaluate_post_deterministic_guardrail(
+            input_data=input_data,
+            output_data=output_data,
+            guardrail=guardrail,
+        )
+
+
+def _evaluate_builtin_guardrail(
+    state: AgentGuardrailsGraphState,
+    guardrail: BuiltInValidatorGuardrail,
+    payload_generator: Callable[[AgentGuardrailsGraphState], str],
+):
+    """Evaluate built-in validator guardrail.
+
+    Args:
+        state: The current agent graph state.
+        guardrail: The built-in validator guardrail to evaluate.
+        payload_generator: Function to generate payload text from state.
+
+    Returns:
+        The guardrail evaluation result.
+    """
+    text = payload_generator(state)
+    uipath = UiPath()
+    return uipath.guardrails.evaluate_guardrail(text, guardrail)
+
+
+def _create_validation_command(
+    result,
+    success_node: str,
+    failure_node: str,
+) -> Command[Any]:
+    """Create command based on validation result.
+
+    Args:
+        result: The guardrail evaluation result.
+        success_node: Node to route to on validation pass.
+        failure_node: Node to route to on validation fail.
+
+    Returns:
+        Command to update state and route to appropriate node.
+    """
+    if not result.validation_passed:
+        return Command(
+            goto=failure_node, update={"guardrail_validation_result": result.reason}
+        )
+    return Command(goto=success_node, update={"guardrail_validation_result": None})
 
 
 def _create_guardrail_node(
@@ -25,6 +113,10 @@ def _create_guardrail_node(
     payload_generator: Callable[[AgentGuardrailsGraphState], str],
     success_node: str,
     failure_node: str,
+    input_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]]
+    | None = None,
+    output_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]]
+    | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail evaluation nodes.
 
@@ -38,19 +130,41 @@ def _create_guardrail_node(
     async def node(
         state: AgentGuardrailsGraphState,
     ):
-        text = payload_generator(state)
         try:
-            uipath = UiPath()
-            result = uipath.guardrails.evaluate_guardrail(text, guardrail)
-        except Exception as exc:
-            logger.error("Failed to evaluate guardrail: %s", exc)
-            raise
+            # Route to appropriate evaluation service based on guardrail type and scope
+            if (
+                isinstance(guardrail, DeterministicGuardrail)
+                and scope == GuardrailScope.TOOL
+                and input_data_extractor is not None
+            ):
+                result = _evaluate_deterministic_guardrail(
+                    state,
+                    guardrail,
+                    execution_stage,
+                    input_data_extractor,
+                    output_data_extractor,
+                )
+            elif isinstance(guardrail, BuiltInValidatorGuardrail):
+                result = _evaluate_builtin_guardrail(
+                    state, guardrail, payload_generator
+                )
+            else:
+                raise AgentTerminationException(
+                    code=UiPathErrorCode.EXECUTION_ERROR,
+                    title="Unsupported guardrail type",
+                    detail=f"Guardrail type '{type(guardrail).__name__}' is not supported. "
+                    f"Expected DeterministicGuardrail or BuiltInValidatorGuardrail.",
+                )
 
-        if not result.validation_passed:
-            return Command(
-                goto=failure_node, update={"guardrail_validation_result": result.reason}
+            return _create_validation_command(result, success_node, failure_node)
+
+        except Exception as exc:
+            logger.error(
+                "Failed to evaluate guardrail '%s': %s",
+                guardrail.name,
+                exc,
             )
-        return Command(goto=success_node, update={"guardrail_validation_result": None})
+            raise
 
     return node_name, node
 
@@ -149,31 +263,19 @@ def create_tool_guardrail_node(
             return ""
 
         if execution_stage == ExecutionStage.PRE_EXECUTION:
-            if not isinstance(state.messages[-1], AIMessage):
-                return ""
-            message = state.messages[-1]
-
-            if not message.tool_calls:
-                return ""
-
-            # Find the first tool call with matching name
-            for tool_call in message.tool_calls:
-                call_name = (
-                    tool_call.get("name")
-                    if isinstance(tool_call, dict)
-                    else getattr(tool_call, "name", None)
-                )
-                if call_name == tool_name:
-                    # Extract args from the tool call
-                    args = (
-                        tool_call.get("args")
-                        if isinstance(tool_call, dict)
-                        else getattr(tool_call, "args", None)
-                    )
-                    if args is not None:
-                        return json.dumps(args)
+            # Extract tool args as dict and convert to JSON string
+            args_dict = _extract_tool_input_data(state, tool_name, execution_stage)
+            if args_dict:
+                return json.dumps(args_dict)
 
         return get_message_content(state.messages[-1])
+
+    # Create closures for input/output data extraction (for deterministic guardrails)
+    def _input_data_extractor(state: AgentGuardrailsGraphState) -> dict[str, Any]:
+        return _extract_tool_input_data(state, tool_name, execution_stage)
+
+    def _output_data_extractor(state: AgentGuardrailsGraphState) -> dict[str, Any]:
+        return _extract_tool_output_data(state)
 
     return _create_guardrail_node(
         guardrail,
@@ -182,4 +284,6 @@ def create_tool_guardrail_node(
         _payload_generator,
         success_node,
         failure_node,
+        _input_data_extractor,
+        _output_data_extractor,
     )

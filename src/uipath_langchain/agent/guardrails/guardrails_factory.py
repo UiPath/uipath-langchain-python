@@ -1,13 +1,28 @@
 import logging
-from typing import Sequence
+import re
+from typing import Callable, Sequence
 
 from uipath.agent.models.agent import (
+    AgentBooleanOperator,
+    AgentBooleanRule,
+    AgentCustomGuardrail,
     AgentGuardrail,
     AgentGuardrailBlockAction,
     AgentGuardrailEscalateAction,
     AgentGuardrailLogAction,
     AgentGuardrailSeverityLevel,
+    AgentNumberOperator,
+    AgentNumberRule,
     AgentUnknownGuardrail,
+    AgentWordOperator,
+    AgentWordRule,
+)
+from uipath.core.guardrails import (
+    BooleanRule,
+    DeterministicGuardrail,
+    NumberRule,
+    UniversalRule,
+    WordRule,
 )
 from uipath.platform.guardrails import BaseGuardrail
 
@@ -17,6 +32,180 @@ from uipath_langchain.agent.guardrails.actions import (
     GuardrailAction,
     LogAction,
 )
+
+
+def _assert_value_not_none(value: str | None, operator: AgentWordOperator) -> str:
+    """Assert value is not None and return as string."""
+    assert value is not None, f"value cannot be None for {operator.name} operator"
+    return value
+
+
+def _create_word_rule_func(
+    operator: AgentWordOperator, value: str | None
+) -> Callable[[str], bool]:
+    """Create a callable function from AgentWordOperator and value.
+
+    Args:
+        operator: The word operator to convert.
+        value: The value to compare against (may be None for isEmpty/isNotEmpty).
+
+    Returns:
+        A callable that takes a string and returns a boolean.
+    """
+    match operator:
+        case AgentWordOperator.CONTAINS:
+            val = _assert_value_not_none(value, operator)
+            return lambda s: val.lower() in s.lower()
+        case AgentWordOperator.DOES_NOT_CONTAIN:
+            val = _assert_value_not_none(value, operator)
+            return lambda s: val.lower() not in s.lower()
+        case AgentWordOperator.EQUALS:
+            val = _assert_value_not_none(value, operator)
+            return lambda s: s == val
+        case AgentWordOperator.DOES_NOT_EQUAL:
+            val = _assert_value_not_none(value, operator)
+            return lambda s: s != val
+        case AgentWordOperator.STARTS_WITH:
+            val = _assert_value_not_none(value, operator)
+            return lambda s: s.startswith(val)
+        case AgentWordOperator.DOES_NOT_START_WITH:
+            val = _assert_value_not_none(value, operator)
+            return lambda s: not s.startswith(val)
+        case AgentWordOperator.ENDS_WITH:
+            val = _assert_value_not_none(value, operator)
+            return lambda s: s.endswith(val)
+        case AgentWordOperator.DOES_NOT_END_WITH:
+            val = _assert_value_not_none(value, operator)
+            return lambda s: not s.endswith(val)
+        case AgentWordOperator.IS_EMPTY:
+            return lambda s: len(s) == 0
+        case AgentWordOperator.IS_NOT_EMPTY:
+            return lambda s: len(s) > 0
+        case AgentWordOperator.MATCHES_REGEX:
+            val = _assert_value_not_none(value, operator)
+            pattern = re.compile(val)
+            return lambda s: bool(pattern.match(s))
+        case _:
+            raise ValueError(f"Unsupported word operator: {operator}")
+
+
+def _create_number_rule_func(
+    operator: AgentNumberOperator, value: float
+) -> Callable[[float], bool]:
+    """Create a callable function from AgentNumberOperator and value.
+
+    Args:
+        operator: The number operator to convert.
+        value: The value to compare against.
+
+    Returns:
+        A callable that takes a float and returns a boolean.
+    """
+    match operator:
+        case AgentNumberOperator.EQUALS:
+            return lambda n: n == value
+        case AgentNumberOperator.DOES_NOT_EQUAL:
+            return lambda n: n != value
+        case AgentNumberOperator.GREATER_THAN:
+            return lambda n: n > value
+        case AgentNumberOperator.GREATER_THAN_OR_EQUAL:
+            return lambda n: n >= value
+        case AgentNumberOperator.LESS_THAN:
+            return lambda n: n < value
+        case AgentNumberOperator.LESS_THAN_OR_EQUAL:
+            return lambda n: n <= value
+        case _:
+            raise ValueError(f"Unsupported number operator: {operator}")
+
+
+def _create_boolean_rule_func(
+    operator: AgentBooleanOperator, value: bool
+) -> Callable[[bool], bool]:
+    """Create a callable function from AgentBooleanOperator and value.
+
+    Args:
+        operator: The boolean operator to convert.
+        value: The value to compare against.
+
+    Returns:
+        A callable that takes a boolean and returns a boolean.
+    """
+    match operator:
+        case AgentBooleanOperator.EQUALS:
+            return lambda b: b == value
+        case _:
+            raise ValueError(f"Unsupported boolean operator: {operator}")
+
+
+def _convert_agent_rule_to_deterministic(
+    agent_rule: AgentWordRule | AgentNumberRule | AgentBooleanRule | UniversalRule,
+) -> WordRule | NumberRule | BooleanRule | UniversalRule:
+    """Convert an Agent rule to its Deterministic equivalent.
+
+    Args:
+        agent_rule: The agent rule to convert.
+
+    Returns:
+        The corresponding deterministic rule with a callable function.
+    """
+    if isinstance(agent_rule, UniversalRule):
+        # UniversalRule is already compatible
+        return agent_rule
+
+    if isinstance(agent_rule, AgentWordRule):
+        return WordRule(
+            rule_type="word",
+            field_selector=agent_rule.field_selector,
+            detects_violation=_create_word_rule_func(
+                agent_rule.operator, agent_rule.value
+            ),
+        )
+
+    if isinstance(agent_rule, AgentNumberRule):
+        return NumberRule(
+            rule_type="number",
+            field_selector=agent_rule.field_selector,
+            detects_violation=_create_number_rule_func(
+                agent_rule.operator, agent_rule.value
+            ),
+        )
+
+    if isinstance(agent_rule, AgentBooleanRule):
+        return BooleanRule(
+            rule_type="boolean",
+            field_selector=agent_rule.field_selector,
+            detects_violation=_create_boolean_rule_func(
+                agent_rule.operator, agent_rule.value
+            ),
+        )
+
+    raise ValueError(f"Unsupported agent rule type: {type(agent_rule)}")
+
+
+def _convert_agent_custom_guardrail_to_deterministic(
+    guardrail: AgentCustomGuardrail,
+) -> DeterministicGuardrail:
+    """Convert AgentCustomGuardrail to DeterministicGuardrail.
+
+    Args:
+        guardrail: The agent custom guardrail to convert.
+
+    Returns:
+        A DeterministicGuardrail with converted rules.
+    """
+    converted_rules = [
+        _convert_agent_rule_to_deterministic(rule) for rule in guardrail.rules
+    ]
+
+    return DeterministicGuardrail(
+        id=guardrail.id,
+        name=guardrail.name,
+        description=guardrail.description,
+        enabled_for_evals=guardrail.enabled_for_evals,
+        selector=guardrail.selector,
+        guardrail_type="custom",
+        rules=converted_rules,
+    )
 
 
 def build_guardrails_with_actions(
@@ -38,10 +227,17 @@ def build_guardrails_with_actions(
         if isinstance(guardrail, AgentUnknownGuardrail):
             continue
 
+        # Convert AgentCustomGuardrail to DeterministicGuardrail
+        converted_guardrail: BaseGuardrail = guardrail
+        if isinstance(guardrail, AgentCustomGuardrail):
+            converted_guardrail = _convert_agent_custom_guardrail_to_deterministic(
+                guardrail
+            )
+
         action = guardrail.action
 
         if isinstance(action, AgentGuardrailBlockAction):
-            result.append((guardrail, BlockAction(action.reason)))
+            result.append((converted_guardrail, BlockAction(action.reason)))
         elif isinstance(action, AgentGuardrailLogAction):
             severity_level_map = {
                 AgentGuardrailSeverityLevel.ERROR: logging.ERROR,
@@ -51,14 +247,14 @@ def build_guardrails_with_actions(
             level = severity_level_map.get(action.severity_level, logging.INFO)
             result.append(
                 (
-                    guardrail,
+                    converted_guardrail,
                     LogAction(message=action.message, level=level),
                 )
             )
         elif isinstance(action, AgentGuardrailEscalateAction):
             result.append(
                 (
-                    guardrail,
+                    converted_guardrail,
                     EscalateAction(
                         app_name=action.app.name,
                         app_folder_path=action.app.folder_name,
