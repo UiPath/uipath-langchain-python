@@ -1,9 +1,13 @@
-"""Tests for init-node (agent-scope) guardrails subgraph construction."""
+"""Tests for init-node (agent-scope) guardrails wiring.
+
+The init node is no longer wrapped in a compiled subgraph. Instead, guardrail nodes
+are attached at the parent graph level after INIT.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Sequence
-from unittest.mock import MagicMock
 
 from _pytest.monkeypatch import MonkeyPatch
 from uipath.core.guardrails import BaseGuardrail, GuardrailSelector
@@ -18,54 +22,71 @@ from tests.agent.guardrails.test_guardrail_utils import (
 from uipath_langchain.agent.guardrails.actions import GuardrailAction
 
 
+@dataclass(frozen=True, slots=True)
+class _DummyGuardrail:
+    """Minimal guardrail stand-in for unit tests."""
+
+    name: str
+    selector: GuardrailSelector
+
+
 class TestAgentInitGuardrailsSubgraph:
-    def test_no_applicable_guardrails_returns_original_node(self):
-        """If no guardrails match the AGENT scope, the original node should be returned."""
-        inner = ("inner", lambda s: s)
+    def test_no_applicable_guardrails_returns_next_node(self) -> None:
+        """If no guardrails match the AGENT scope, routing should go to the next node."""
+        graph = FakeStateGraph(object)
         guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] = []
 
         # Case with empty guardrails
-        result = mod.create_agent_init_guardrails_subgraph(
-            init_node=inner, guardrails=guardrails
+        result = mod.attach_pre_agent_guardrails(
+            builder=graph,
+            guardrails=guardrails,
+            init_node_name="init",
+            next_node_name="agent",
         )
-        assert result == inner[1]
+        assert result == "agent"
 
         # Case with None guardrails
-        result_none = mod.create_agent_init_guardrails_subgraph(
-            init_node=inner, guardrails=None
+        result_none = mod.attach_pre_agent_guardrails(
+            builder=graph,
+            guardrails=None,
+            init_node_name="init",
+            next_node_name="agent",
         )
-        assert result_none == inner[1]
+        assert result_none == "agent"
 
         # Case with guardrails but none matching AGENT scope
-        non_matching_guardrail = MagicMock()
-        non_matching_guardrail.selector = GuardrailSelector(scopes=[GuardrailScope.LLM])
-        guardrails_non_match = [(non_matching_guardrail, MagicMock())]
-
-        result_non_match = mod.create_agent_init_guardrails_subgraph(
-            init_node=inner, guardrails=guardrails_non_match
+        non_matching_guardrail = _DummyGuardrail(
+            name="llm_guardrail",
+            selector=GuardrailSelector(scopes=[GuardrailScope.LLM]),
         )
-        assert result_non_match == inner[1]
+        guardrails_non_match = [(non_matching_guardrail, fake_action("noop"))]
+
+        result_non_match = mod.attach_pre_agent_guardrails(
+            builder=graph,
+            guardrails=guardrails_non_match,
+            init_node_name="init",
+            next_node_name="agent",
+        )
+        assert result_non_match == "agent"
 
     def test_two_guardrails_build_post_chain(self, monkeypatch: MonkeyPatch) -> None:
-        """Two AGENT guardrails should create a POST_EXECUTION chain with failure edges."""
-        monkeypatch.setattr(mod, "StateGraph", FakeStateGraph)
-        monkeypatch.setattr(mod, "START", "START")
-        monkeypatch.setattr(mod, "END", "END")
+        """Two AGENT guardrails should create a PRE_EXECUTION chain with failure edges."""
         monkeypatch.setattr(
             mod, "create_agent_init_guardrail_node", fake_factory("eval")
         )
 
-        guardrail1 = MagicMock()
-        guardrail1.name = "guardrail1"
-        guardrail1.selector = GuardrailSelector(scopes=[GuardrailScope.AGENT])
-
-        guardrail2 = MagicMock()
-        guardrail2.name = "guardrail2"
-        guardrail2.selector = GuardrailSelector(scopes=[GuardrailScope.AGENT])
-
-        non_matching = MagicMock()
-        non_matching.name = "llm_guardrail"
-        non_matching.selector = GuardrailSelector(scopes=[GuardrailScope.LLM])
+        guardrail1 = _DummyGuardrail(
+            name="guardrail1",
+            selector=GuardrailSelector(scopes=[GuardrailScope.AGENT]),
+        )
+        guardrail2 = _DummyGuardrail(
+            name="guardrail2",
+            selector=GuardrailSelector(scopes=[GuardrailScope.AGENT]),
+        )
+        non_matching = _DummyGuardrail(
+            name="llm_guardrail",
+            selector=GuardrailSelector(scopes=[GuardrailScope.LLM]),
+        )
 
         guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] = [
             (guardrail1, fake_action("log")),
@@ -73,33 +94,34 @@ class TestAgentInitGuardrailsSubgraph:
             (non_matching, fake_action("noop")),
         ]
 
-        inner = ("inner", lambda s: s)
-        result_graph = mod.create_agent_init_guardrails_subgraph(
-            init_node=inner,
+        graph = FakeStateGraph(object)
+        first_node = mod.attach_pre_agent_guardrails(
+            builder=graph,
             guardrails=guardrails,
+            init_node_name="init",
+            next_node_name="agent",
         )
 
-        post_g1 = "eval_post_execution_guardrail1"
-        log_post_g1 = "log_post_execution_guardrail1"
-        post_g2 = "eval_post_execution_guardrail2"
-        block_post_g2 = "block_post_execution_guardrail2"
+        assert first_node == "eval_pre_execution_guardrail1"
+
+        pre_g1 = "eval_pre_execution_guardrail1"
+        log_pre_g1 = "log_pre_execution_guardrail1"
+        pre_g2 = "eval_pre_execution_guardrail2"
+        block_pre_g2 = "block_pre_execution_guardrail2"
 
         expected_edges = {
-            ("START", "inner"),
-            ("inner", post_g1),
-            (log_post_g1, post_g2),
-            (block_post_g2, "END"),
+            (log_pre_g1, pre_g2),
+            (block_pre_g2, "agent"),
         }
-        assert expected_edges.issubset(set(result_graph.edges))
+        assert expected_edges.issubset(set(graph.added_edges))
 
-        node_names = {name for name, _ in result_graph.nodes}
+        node_names = {name for name, _ in graph.added_nodes}
         for name in [
-            "inner",
-            post_g1,
-            post_g2,
-            log_post_g1,
-            block_post_g2,
+            pre_g1,
+            pre_g2,
+            log_pre_g1,
+            block_pre_g2,
         ]:
             assert name in node_names
-        assert "eval_post_execution_llm_guardrail" not in node_names
-        assert "noop_post_execution_llm_guardrail" not in node_names
+        assert "eval_pre_execution_llm_guardrail" not in node_names
+        assert "noop_pre_execution_llm_guardrail" not in node_names

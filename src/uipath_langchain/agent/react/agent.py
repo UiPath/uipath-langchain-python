@@ -12,7 +12,7 @@ from uipath.platform.guardrails import BaseGuardrail
 from ..guardrails.actions import GuardrailAction
 from ..tools import create_tool_node
 from .guardrails.guardrails_subgraph import (
-    create_agent_init_guardrails_subgraph,
+    attach_pre_agent_guardrails,
     create_agent_terminate_guardrails_subgraph,
     create_llm_guardrails_subgraph,
     create_tools_guardrails_subgraph,
@@ -30,18 +30,31 @@ from .terminate_node import (
     create_terminate_node,
 )
 from .tools import create_flow_control_tools
-from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState
+from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState, AgentGuardrailsGraphState
 
 InputT = TypeVar("InputT", bound=BaseModel)
 OutputT = TypeVar("OutputT", bound=BaseModel)
+StateT = TypeVar("StateT", bound=BaseModel)
 
 
-def create_state_with_input(input_schema: Type[InputT]):
-    InnerAgentGraphState = type(
-        "InnerAgentGraphState",
-        (AgentGraphState, input_schema),
-        {},
-    )
+def create_state_with_input(input_schema: Type[InputT],
+    *,
+    base_state: Type[StateT] = AgentGraphState,
+) -> Type[BaseModel]:
+    """Create a dynamic Agent graph state model that includes user input fields.
+
+    LangGraph requires a concrete Pydantic model for state. We create one dynamically
+    by mixing the chosen base state with the user-provided `input_schema`.
+
+    Args:
+        input_schema: Pydantic model defining the agent input shape.
+        base_state: Base state model to extend. Use `AgentGuardrailsGraphState` when
+            guardrail nodes are attached at the parent graph level.
+
+    Returns:
+        A dynamically created Pydantic model type.
+    """
+    InnerAgentGraphState = type("InnerAgentGraphState", (base_state, input_schema), {})
 
     cast(type[BaseModel], InnerAgentGraphState).model_rebuild()
     return InnerAgentGraphState
@@ -83,18 +96,21 @@ def create_agent(
     )
     terminate_node = create_terminate_node(output_schema)
 
+    base_state: type[BaseModel]
+    if guardrails:
+        base_state = AgentGuardrailsGraphState
+    else:
+        base_state = AgentGraphState
+
     InnerAgentGraphState = create_state_with_input(
-        input_schema if input_schema is not None else BaseModel
+        input_schema if input_schema is not None else BaseModel,
+        base_state=cast(type[BaseModel], base_state),
     )
 
     builder: StateGraph[AgentGraphState, None, InputT, OutputT] = StateGraph(
         InnerAgentGraphState, input_schema=input_schema, output_schema=output_schema
     )
-    init_with_guardrails_subgraph = create_agent_init_guardrails_subgraph(
-        (AgentGraphNode.GUARDED_INIT, init_node),
-        guardrails,
-    )
-    builder.add_node(AgentGraphNode.INIT, init_with_guardrails_subgraph)
+    builder.add_node(AgentGraphNode.INIT, init_node)
 
     for tool_name, tool_node in tool_nodes_with_guardrails.items():
         builder.add_node(tool_name, tool_node)
@@ -112,7 +128,14 @@ def create_agent(
         (AgentGraphNode.LLM, llm_node), guardrails
     )
     builder.add_node(AgentGraphNode.AGENT, llm_with_guardrails_subgraph)
-    builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
+
+    init_next = attach_pre_agent_guardrails(
+        cast(StateGraph[AgentGuardrailsGraphState], builder),
+        guardrails,
+        init_node_name=AgentGraphNode.INIT,
+        next_node_name=AgentGraphNode.AGENT,
+    )
+    builder.add_edge(AgentGraphNode.INIT, init_next)
 
     tool_node_names = list(tool_nodes_with_guardrails.keys())
     builder.add_conditional_edges(

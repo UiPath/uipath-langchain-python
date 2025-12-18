@@ -156,6 +156,7 @@ def _build_guardrail_node_chain(
         execution_stage: Whether this is "PreExecution" or "PostExecution" guardrails.
         node_factory: Factory function to create guardrail evaluation nodes.
         next_node: The node name to route to after all guardrails pass.
+        guarded_node_name: Name of the component being guarded (used for action context).
 
     Returns:
         The name of the first guardrail node in the chain (or next_node if no guardrails).
@@ -236,6 +237,50 @@ def create_tools_guardrails_subgraph(
         result[tool_name] = subgraph
 
     return result
+
+
+def attach_pre_agent_guardrails(
+    builder: StateGraph[AgentGuardrailsGraphState],
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    *,
+    init_node_name: str,
+    next_node_name: str,
+) -> str:
+    """Attach AGENT-scoped guardrails after INIT at the parent graph level.
+
+    This mirrors `create_agent_init_guardrails_subgraph()`, but instead of compiling
+    a nested graph, it adds the guardrail nodes directly onto the provided graph.
+
+    Args:
+        builder: The parent `StateGraph` to attach nodes to.
+        guardrails: All configured (guardrail, action) tuples.
+        init_node_name: The node name of the INIT node in the parent graph.
+        next_node_name: The node name to route to after the guardrails pass.
+
+    Returns:
+        The name of the first attached guardrail node, or `next_node_name` if no
+        applicable guardrails exist.
+    """
+    applicable_guardrails = [
+        (guardrail, action)
+        for (guardrail, action) in (guardrails or [])
+        if GuardrailScope.AGENT in guardrail.selector.scopes
+    ]
+    if not applicable_guardrails:
+        return next_node_name
+
+    post_guardrails = _filter_guardrails_by_stage(
+        applicable_guardrails, ExecutionStage.PRE_EXECUTION
+    )
+    return _build_guardrail_node_chain(
+        builder,
+        post_guardrails,
+        GuardrailScope.AGENT,
+        ExecutionStage.PRE_EXECUTION,
+        create_agent_init_guardrail_node,
+        next_node_name,
+        init_node_name,
+    )
 
 
 def create_agent_init_guardrails_subgraph(

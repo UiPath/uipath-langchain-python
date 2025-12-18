@@ -117,8 +117,8 @@ class EscalateAction(GuardrailAction):
 def _get_node_name(
     execution_stage: ExecutionStage, guardrail: BaseGuardrail, scope: GuardrailScope
 ) -> str:
-    sanitized = re.sub(r"\W+", "_", guardrail.name).strip("_").lower()
-    node_name = f"{sanitized}_hitl_{execution_stage.name.lower()}_{scope.lower()}"
+    raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}_hitl"
+    node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
     return node_name
 
 
