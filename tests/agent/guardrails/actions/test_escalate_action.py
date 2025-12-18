@@ -242,7 +242,7 @@ class TestEscalateAction:
 
         # Verify ToolOutputs is used for PostExecution
         call_args = mock_interrupt.call_args[0][0]
-        assert call_args.data["Outputs"] == '["Test response"]'
+        assert call_args.data["Outputs"] == "Test response"
         assert "Inputs" not in call_args.data
 
     @pytest.mark.asyncio
@@ -287,12 +287,13 @@ class TestEscalateAction:
 
         await node(state)
 
-        # Verify interrupt was called with tool calls and content in ToolOutputs
+        # Verify interrupt was called with tool calls (name and args) in ToolOutputs
         call_args = mock_interrupt.call_args[0][0]
         tool_outputs = call_args.data["Outputs"]
         parsed = json.loads(tool_outputs)
-        assert len(parsed) == 2  # Tool call content + message content
-        assert parsed[1] == "AI response"
+        assert len(parsed) == 1  # Tool call data with name and args
+        assert parsed[0]["name"] == "test_tool"
+        assert parsed[0]["args"] == {"content": {"input": "test"}}
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -367,10 +368,10 @@ class TestEscalateAction:
 
         result = await node(state)
 
-        # Verify HumanMessage content was updated (ignores tool calls)
+        # Verify HumanMessage content was updated with fallback (raw JSON string)
         assert isinstance(result, Command)
         assert result.update is not None
-        assert result.update["messages"][0].content == "Updated content"
+        assert result.update["messages"][0].content == json.dumps(reviewed_content)
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -388,12 +389,8 @@ class TestEscalateAction:
         guardrail.name = "Test Guardrail"
         guardrail.description = "Test description"
 
-        reviewed_tool_content = {"updated": "tool_content"}
-        reviewed_message_content = "Updated message"
-        reviewed_outputs = [
-            json.dumps(reviewed_tool_content),
-            reviewed_message_content,
-        ]
+        reviewed_tool_args = {"updated": "tool_content"}
+        reviewed_outputs = [{"name": "test_tool", "args": reviewed_tool_args}]
         mock_escalation_result = MagicMock()
         mock_escalation_result.action = "Approve"
         mock_escalation_result.data = {"ReviewedOutputs": json.dumps(reviewed_outputs)}
@@ -420,12 +417,11 @@ class TestEscalateAction:
 
         result = await node(state)
 
-        # Verify tool calls and message content were updated
+        # Verify tool calls args were updated by matching name
         assert isinstance(result, Command)
         assert result.update is not None
         updated_message = result.update["messages"][0]
-        assert updated_message.tool_calls[0]["args"]["content"] == reviewed_tool_content
-        assert updated_message.content == reviewed_message_content
+        assert updated_message.tool_calls[0]["args"] == reviewed_tool_args
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -1206,7 +1202,7 @@ class TestEscalateAction:
 
     @pytest.mark.asyncio
     async def test_extract_llm_content_post_execution_tool_calls_no_content_field(self):
-        """Extract LLM content PostExecution: tool calls without content field are skipped."""
+        """Extract LLM content PostExecution: extracts all tool calls with name and args."""
         from uipath_langchain.agent.guardrails.actions.escalate_action import (
             _extract_llm_escalation_content,
         )
@@ -1227,9 +1223,10 @@ class TestEscalateAction:
 
         assert isinstance(result, str)
         parsed = json.loads(result)
-        # Should only contain message content, not tool call content
+        # Should extract tool call data with name and args
         assert len(parsed) == 1
-        assert parsed[0] == "Response"
+        assert parsed[0]["name"] == "tool_without_content"
+        assert parsed[0]["args"] == {"param": "value"}
 
     @pytest.mark.asyncio
     async def test_extract_escalation_content_empty_messages_raises_exception(self):

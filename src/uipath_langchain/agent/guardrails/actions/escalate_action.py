@@ -196,39 +196,54 @@ def _process_llm_escalation_response(
             if not reviewed_outputs_json:
                 return {}
 
-            content_list = json.loads(reviewed_outputs_json)
-            if not content_list:
+            reviewed_tool_calls_list = json.loads(reviewed_outputs_json)
+            if not reviewed_tool_calls_list:
                 return {}
+
+            # Track if tool calls were successfully processed
+            tool_calls_processed = False
 
             # For AI messages, process tool calls if present
             if isinstance(last_message, AIMessage):
                 ai_message: AIMessage = last_message
-                content_index = 0
 
-                if ai_message.tool_calls:
+                if ai_message.tool_calls and isinstance(reviewed_tool_calls_list, list):
                     tool_calls = list(ai_message.tool_calls)
-                    for tool_call in tool_calls:
-                        args = tool_call["args"]
-                        if (
-                            isinstance(args, dict)
-                            and "content" in args
-                            and args["content"] is not None
-                        ):
-                            if content_index < len(content_list):
-                                updated_content = json.loads(
-                                    content_list[content_index]
-                                )
-                                args["content"] = updated_content
-                                tool_call["args"] = args
-                                content_index += 1
-                    ai_message.tool_calls = tool_calls
 
-                if len(content_list) > content_index:
-                    ai_message.content = content_list[-1]
-            else:
-                # Fallback for other message types
-                if content_list:
-                    last_message.content = content_list[-1]
+                    # Create a name-to-args mapping from reviewed tool call data
+                    reviewed_tool_calls_map = {}
+                    for reviewed_data in reviewed_tool_calls_list:
+                        if (
+                            isinstance(reviewed_data, dict)
+                            and "name" in reviewed_data
+                            and "args" in reviewed_data
+                        ):
+                            reviewed_tool_calls_map[reviewed_data["name"]] = (
+                                reviewed_data["args"]
+                            )
+
+                    # Update tool calls with reviewed args by matching name
+                    if reviewed_tool_calls_map:
+                        for tool_call in tool_calls:
+                            tool_name = (
+                                tool_call.get("name")
+                                if isinstance(tool_call, dict)
+                                else getattr(tool_call, "name", None)
+                            )
+                            if tool_name and tool_name in reviewed_tool_calls_map:
+                                if isinstance(tool_call, dict):
+                                    tool_call["args"] = reviewed_tool_calls_map[
+                                        tool_name
+                                    ]
+                                else:
+                                    tool_call.args = reviewed_tool_calls_map[tool_name]
+
+                        ai_message.tool_calls = tool_calls
+                        tool_calls_processed = True
+
+            # Fallback: update message content if tool_calls weren't processed
+            if not tool_calls_processed:
+                last_message.content = reviewed_outputs_json
 
         return Command(update={"messages": msgs})
     except Exception as e:
@@ -388,23 +403,16 @@ def _extract_llm_escalation_content(
     # For AI messages, process tool calls if present
     if isinstance(last_message, AIMessage):
         ai_message: AIMessage = last_message
-        content_list: list[str] = []
 
         if ai_message.tool_calls:
+            content_list: list[Dict[str, Any]] = []
             for tool_call in ai_message.tool_calls:
-                args = tool_call["args"]
-                if (
-                    isinstance(args, dict)
-                    and "content" in args
-                    and args["content"] is not None
-                ):
-                    content_list.append(json.dumps(args["content"]))
-
-        message_content = get_message_content(last_message)
-        if message_content:
-            content_list.append(message_content)
-
-        return json.dumps(content_list)
+                tool_call_data = {
+                    "name": tool_call.get("name"),
+                    "args": tool_call.get("args"),
+                }
+                content_list.append(tool_call_data)
+            return json.dumps(content_list)
 
     # Fallback for other message types
     return get_message_content(last_message)
