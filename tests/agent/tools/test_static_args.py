@@ -1,18 +1,23 @@
 """Tests for static_args.py module."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.tools import BaseTool, StructuredTool
+from pydantic import BaseModel, Field
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
     AgentIntegrationToolProperties,
     AgentIntegrationToolResourceConfig,
+    AgentToolStaticArgumentProperties,
     BaseAgentResourceConfig,
 )
 from uipath.platform.connections import Connection
 
 from uipath_langchain.agent.tools.static_args import (
     apply_static_args,
+    apply_static_argument_properties_to_schema,
     resolve_integration_static_args,
     resolve_static_args,
 )
@@ -414,3 +419,157 @@ class TestApplyStaticArgs:
 
         expected = {"config": {"new_section": {"setting": "value"}}}
         assert result == expected
+
+
+def _get_enum_from_schema(schema: dict, property_name: str) -> list | None:
+    """Get enum value from schema, handling $ref/$defs pattern.
+
+    The jsonschema_pydantic_converter may place enums in $defs and use $ref.
+    It may also use 'const' instead of 'enum' for single values.
+    This helper handles all these cases.
+    """
+    prop = schema.get("properties", {}).get(property_name, {})
+
+    # Direct enum on property
+    if "enum" in prop:
+        return prop["enum"]
+
+    return None
+
+
+class SimpleInput(BaseModel):
+    """Simple input model for testing."""
+
+    host: str
+    port: int = Field(default=8080)
+    api_key: str
+
+
+class NestedInput(BaseModel):
+    """Nested input model for testing."""
+
+    class ServerConfig(BaseModel):
+        host: str
+        port: int
+
+    user_id: str
+    config: ServerConfig
+
+
+class TestApplyStaticArgumentPropertiesToSchema:
+    """Test cases for apply_static_argument_properties_to_schema function.
+
+    This tests the tool-level integration. Schema modification details are tested in test_schema_editing.py.
+    """
+
+    @pytest.fixture
+    def simple_tool(self) -> StructuredTool:
+        """Create a simple tool for testing."""
+
+        async def tool_fn(host: str, port: int = 8080, api_key: str = "") -> str:
+            return f"{host}:{port}"
+
+        return StructuredTool(
+            name="test_tool",
+            description="A test tool",
+            args_schema=SimpleInput,
+            coroutine=tool_fn,
+        )
+
+    @pytest.fixture
+    def agent_input(self) -> dict[str, Any]:
+        """Common agent input for tests."""
+        return {"user_id": "user123", "query": "test query"}
+
+    def test_returns_original_tool_when_no_properties(
+        self, simple_tool: StructuredTool, agent_input: dict[str, Any]
+    ) -> None:
+        """Test that the original tool is returned when argument_properties is empty."""
+        result = apply_static_argument_properties_to_schema(
+            simple_tool, {}, agent_input
+        )
+
+        assert result is simple_tool
+
+    def test_returns_modified_tool_with_static_properties(
+        self, simple_tool: StructuredTool, agent_input: dict[str, Any]
+    ) -> None:
+        """Test that a modified tool is returned when static properties are provided."""
+        props = {
+            "$['host']": AgentToolStaticArgumentProperties(
+                is_sensitive=False,
+                value="api.example.com",
+            ),
+            "$['api_key']": AgentToolStaticArgumentProperties(
+                is_sensitive=True,
+                value="secret-key-123",
+            ),
+        }
+
+        result = apply_static_argument_properties_to_schema(
+            simple_tool, props, agent_input
+        )
+
+        # Should return a different tool instance
+        assert result is not simple_tool
+        assert result.name == simple_tool.name
+        assert result.description == simple_tool.description
+
+        schema = result.args_schema
+        assert "pre-configured" in schema.model_fields["api_key"].description
+        assert schema.model_fields["api_key"].annotation
+        assert not schema.model_fields["api_key"].is_required()
+
+        assert list(schema.model_fields["host"].annotation) == ["api.example.com"]
+
+    def test_skips_invalid_argument_properties(
+        self, simple_tool: StructuredTool, agent_input: dict[str, Any]
+    ) -> None:
+        props = {
+            "$['nonexistent_field']": AgentToolStaticArgumentProperties(
+                is_sensitive=False,
+                value="test",
+            ),
+            "$['api_key']": AgentToolStaticArgumentProperties(
+                is_sensitive=False,
+                value="public-key",
+            ),
+        }
+
+        # Should not raise an error
+        result = apply_static_argument_properties_to_schema(
+            simple_tool, props, agent_input
+        )
+        schema = result.args_schema
+        assert list(schema.model_fields["api_key"].annotation) == ["public-key"]
+        assert "nonexistent_field" not in schema.model_fields
+
+    def test_tool_without_args_schema_returns_original(
+        self, agent_input: dict[str, Any]
+    ) -> None:
+        """Test that tools without args_schema return the original tool."""
+
+        class SimpleBaseTool(BaseTool):
+            """A simple tool without args_schema."""
+
+            name: str = "simple_tool"
+            description: str = "A simple tool"
+
+            def _run(self, **kwargs: Any) -> str:
+                return "test"
+
+        tool_without_schema = SimpleBaseTool()
+
+        props = {
+            "$['name']": AgentToolStaticArgumentProperties(
+                is_sensitive=False,
+                value="test",
+            )
+        }
+
+        result = apply_static_argument_properties_to_schema(
+            tool_without_schema, props, agent_input
+        )
+
+        # Should return original tool since there's no schema to modify
+        assert result is tool_without_schema
