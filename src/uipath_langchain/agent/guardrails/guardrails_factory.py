@@ -9,6 +9,7 @@ from uipath.agent.models.agent import (
     AgentGuardrail,
     AgentGuardrailBlockAction,
     AgentGuardrailEscalateAction,
+    AgentGuardrailFilterAction,
     AgentGuardrailLogAction,
     AgentGuardrailSeverityLevel,
     AgentNumberOperator,
@@ -29,9 +30,11 @@ from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 from uipath_langchain.agent.guardrails.actions import (
     BlockAction,
     EscalateAction,
+    FilterAction,
     GuardrailAction,
     LogAction,
 )
+from uipath_langchain.agent.guardrails.utils import _sanitize_selector_tool_names
 
 
 def _assert_value_not_none(value: str | None, operator: AgentWordOperator) -> str:
@@ -191,18 +194,21 @@ def _convert_agent_custom_guardrail_to_deterministic(
         guardrail: The agent custom guardrail to convert.
 
     Returns:
-        A DeterministicGuardrail with converted rules.
+        A DeterministicGuardrail with converted rules and sanitized selector.
     """
     converted_rules = [
         _convert_agent_rule_to_deterministic(rule) for rule in guardrail.rules
     ]
+
+    # Sanitize tool names in selector for Tool scope guardrails
+    sanitized_selector = _sanitize_selector_tool_names(guardrail.selector)
 
     return DeterministicGuardrail(
         id=guardrail.id,
         name=guardrail.name,
         description=guardrail.description,
         enabled_for_evals=guardrail.enabled_for_evals,
-        selector=guardrail.selector,
+        selector=sanitized_selector,
         guardrail_type="custom",
         rules=converted_rules,
     )
@@ -227,8 +233,7 @@ def build_guardrails_with_actions(
         if isinstance(guardrail, AgentUnknownGuardrail):
             continue
 
-        # Convert AgentCustomGuardrail to DeterministicGuardrail
-        converted_guardrail: BaseGuardrail = guardrail
+        converted_guardrail: BaseGuardrail
         if isinstance(guardrail, AgentCustomGuardrail):
             converted_guardrail = _convert_agent_custom_guardrail_to_deterministic(
                 guardrail
@@ -246,6 +251,9 @@ def build_guardrails_with_actions(
                     f"Found invalid scopes: {[scope.name for scope in non_tool_scopes]}. "
                     f"Please configure this guardrail to use only TOOL scope."
                 )
+        else:
+            converted_guardrail = guardrail
+            _sanitize_selector_tool_names(converted_guardrail.selector)
 
         action = guardrail.action
 
@@ -276,4 +284,6 @@ def build_guardrails_with_actions(
                     ),
                 )
             )
+        elif isinstance(action, AgentGuardrailFilterAction):
+            result.append((converted_guardrail, FilterAction(fields=action.fields)))
     return result

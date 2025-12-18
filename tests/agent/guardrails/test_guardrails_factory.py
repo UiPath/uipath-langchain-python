@@ -5,7 +5,7 @@ import types
 from typing import cast
 
 import pytest
-from uipath.agent.models.agent import (
+from uipath.agent.models.agent import (  # type: ignore[attr-defined]
     AgentBooleanOperator,
     AgentBooleanRule,
     AgentCustomGuardrail,
@@ -15,6 +15,7 @@ from uipath.agent.models.agent import (
     AgentGuardrailBlockAction,
     AgentGuardrailEscalateAction,
     AgentGuardrailEscalateActionApp,
+    AgentGuardrailFilterAction,
     AgentGuardrailLogAction,
     AgentGuardrailSeverityLevel,
     AgentGuardrailUnknownAction,
@@ -22,6 +23,7 @@ from uipath.agent.models.agent import (
     AgentNumberRule,
     AgentWordOperator,
     AgentWordRule,
+    FieldReference,
 )
 from uipath.agent.models.agent import (
     AgentGuardrail as AgentGuardrailModel,
@@ -29,12 +31,14 @@ from uipath.agent.models.agent import (
 from uipath.core.guardrails import (
     BooleanRule,
     DeterministicGuardrail,
+    GuardrailSelector,
     NumberRule,
     WordRule,
 )
 
 from uipath_langchain.agent.guardrails.actions.block_action import BlockAction
 from uipath_langchain.agent.guardrails.actions.escalate_action import EscalateAction
+from uipath_langchain.agent.guardrails.actions.filter_action import FilterAction
 from uipath_langchain.agent.guardrails.actions.log_action import LogAction
 from uipath_langchain.agent.guardrails.guardrails_factory import (
     _convert_agent_custom_guardrail_to_deterministic,
@@ -58,6 +62,7 @@ class TestGuardrailsFactory:
             AgentGuardrailModel,
             types.SimpleNamespace(
                 name="guardrail_name",
+                selector=GuardrailSelector(),
                 action=AgentGuardrailBlockAction(
                     action_type=AgentGuardrailActionType.BLOCK,
                     reason="stop now",
@@ -79,6 +84,7 @@ class TestGuardrailsFactory:
             AgentGuardrailModel,
             types.SimpleNamespace(
                 name="guardrail_log",
+                selector=GuardrailSelector(),
                 action=AgentGuardrailLogAction(
                     action_type=AgentGuardrailActionType.LOG,
                     message="note this",
@@ -102,6 +108,7 @@ class TestGuardrailsFactory:
             AgentGuardrailModel,
             types.SimpleNamespace(
                 name="guardrail_1",
+                selector=GuardrailSelector(),
                 action=AgentGuardrailUnknownAction(
                     action_type=AgentGuardrailActionType.UNKNOWN,
                 ),
@@ -112,6 +119,7 @@ class TestGuardrailsFactory:
             AgentGuardrailModel,
             types.SimpleNamespace(
                 name="guardrail_2",
+                selector=GuardrailSelector(),
                 action=AgentGuardrailBlockAction(
                     action_type=AgentGuardrailActionType.BLOCK,
                     reason="block it",
@@ -139,6 +147,7 @@ class TestGuardrailsFactory:
             AgentGuardrailModel,
             types.SimpleNamespace(
                 name="guardrail_escalate",
+                selector=GuardrailSelector(),
                 action=AgentGuardrailEscalateAction(
                     action_type=AgentGuardrailActionType.ESCALATE,
                     app=app,
@@ -273,6 +282,134 @@ class TestGuardrailsFactory:
             match=r"Deterministic guardrail 'test-guardrail-mixed' can only be used with TOOL scope.*Found invalid scopes.*LLM",
         ):
             build_guardrails_with_actions([guardrail])
+
+    def test_filter_action_is_mapped_with_fields(self) -> None:
+        """FILTER action is mapped to FilterAction with correct fields."""
+        fields = [
+            FieldReference(path="data.password", source="input"),
+            FieldReference(path="data.ssn", source="input"),
+        ]
+        guardrail = cast(
+            AgentGuardrailModel,
+            types.SimpleNamespace(
+                name="guardrail_filter",
+                selector=GuardrailSelector(),
+                action=AgentGuardrailFilterAction(
+                    action_type=AgentGuardrailActionType.FILTER,
+                    fields=fields,
+                ),
+            ),
+        )
+
+        result = build_guardrails_with_actions([guardrail])
+
+        assert len(result) == 1
+        gr, action = result[0]
+        assert gr is guardrail
+        assert isinstance(action, FilterAction)
+        assert action.fields == fields
+        assert len(action.fields) == 2
+        assert action.fields[0].path == "data.password"
+        assert action.fields[1].path == "data.ssn"
+
+    def test_filter_action_with_custom_guardrail(self) -> None:
+        """FILTER action works with AgentCustomGuardrail and converts to DeterministicGuardrail."""
+        agent_guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "filter-test-id",
+                "name": "filter-guardrail",
+                "description": "Filter sensitive data",
+                "enabledForEvals": True,
+                "selector": {"$selectorType": "all"},
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {
+                            "$selectorType": "specific",
+                            "fields": [{"path": "data.secret", "source": "input"}],
+                        },
+                        "operator": "isNotEmpty",
+                        "value": None,
+                    }
+                ],
+                "action": {
+                    "$actionType": "filter",
+                    "fields": [{"path": "data.secret", "source": "input"}],
+                },
+            }
+        )
+
+        result = build_guardrails_with_actions([agent_guardrail])
+
+        assert len(result) == 1
+        gr, action = result[0]
+        # Guardrail should be converted to DeterministicGuardrail
+        assert isinstance(gr, DeterministicGuardrail)
+        assert gr.name == "filter-guardrail"
+        assert isinstance(action, FilterAction)
+        assert len(action.fields) == 1
+
+    def test_multiple_guardrails_with_different_actions_including_filter(self) -> None:
+        """Multiple guardrails with different action types including FILTER are all mapped."""
+        fields = [FieldReference(path="data.token", source="input")]
+
+        block_guardrail = cast(
+            AgentGuardrailModel,
+            types.SimpleNamespace(
+                name="block_gr",
+                selector=GuardrailSelector(),
+                action=AgentGuardrailBlockAction(
+                    action_type=AgentGuardrailActionType.BLOCK,
+                    reason="blocked",
+                ),
+            ),
+        )
+
+        filter_guardrail = cast(
+            AgentGuardrailModel,
+            types.SimpleNamespace(
+                name="filter_gr",
+                selector=GuardrailSelector(),
+                action=AgentGuardrailFilterAction(
+                    action_type=AgentGuardrailActionType.FILTER,
+                    fields=fields,
+                ),
+            ),
+        )
+
+        log_guardrail = cast(
+            AgentGuardrailModel,
+            types.SimpleNamespace(
+                name="log_gr",
+                selector=GuardrailSelector(),
+                action=AgentGuardrailLogAction(
+                    action_type=AgentGuardrailActionType.LOG,
+                    message="logged",
+                    severity_level=AgentGuardrailSeverityLevel.INFO,
+                ),
+            ),
+        )
+
+        result = build_guardrails_with_actions(
+            [block_guardrail, filter_guardrail, log_guardrail]
+        )
+
+        assert len(result) == 3
+
+        # Check block action
+        assert isinstance(result[0][1], BlockAction)
+        assert result[0][1].reason == "blocked"
+
+        # Check filter action
+        assert isinstance(result[1][1], FilterAction)
+        assert result[1][1].fields == fields
+        assert len(result[1][1].fields) == 1
+        assert result[1][1].fields[0].path == "data.token"
+
+        # Check log action
+        assert isinstance(result[2][1], LogAction)
+        assert result[2][1].message == "logged"
 
 
 class TestCreateWordRuleFunc:
