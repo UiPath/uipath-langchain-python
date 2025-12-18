@@ -18,12 +18,10 @@ from uipath_langchain.agent.react.utils import (
 )
 
 # the type safety can be improved with generics
-ToolWrapperType = Callable[
-    [BaseTool, ToolCall, Any], dict[str, Any] | Command[Any] | None
-]
+ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
+ToolWrapperType = Callable[[BaseTool, ToolCall, Any], ToolWrapperReturnType]
 AsyncToolWrapperType = Callable[
-    [BaseTool, ToolCall, Any],
-    Awaitable[dict[str, Any] | Command[Any] | None],
+    [BaseTool, ToolCall, Any], Awaitable[ToolWrapperReturnType]
 ]
 OutputType = dict[Literal["messages"], list[ToolMessage]] | Command[Any] | None
 

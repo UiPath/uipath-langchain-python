@@ -2,24 +2,26 @@
 
 from typing import Any
 
+from jsonschema_pydantic_converter import transform as create_model
+from langchain.tools import BaseTool
+from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
 from langgraph.types import interrupt
 from uipath.agent.models.agent import AgentProcessToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform.common import InvokeProcess
 
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
-    get_job_attachment_wrapper,
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.static_args import handle_static_args
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
 )
+from uipath_langchain.agent.tools.tool_node import (
+    ToolWrapperReturnType,
+)
+from uipath_langchain.agent.wrappers import job_attachment_wrapper
 
-from .structured_tool_with_output_type import StructuredToolWithOutputType
-from .tool_node import ToolWrapperMixin
 from .utils import sanitize_tool_name
-
-
-class ProcessTool(StructuredToolWithOutputType, ToolWrapperMixin):
-    pass
 
 
 def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredTool:
@@ -48,8 +50,15 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             )
         )
 
-    wrapper = get_job_attachment_wrapper(output_type=output_model)
-    tool = ProcessTool(
+    async def process_tool_wrapper(
+        tool: BaseTool,
+        call: ToolCall,
+        state: AgentGraphState,
+    ) -> ToolWrapperReturnType:
+        call["args"] = handle_static_args(resource, state, call["args"])
+        return await job_attachment_wrapper(tool, call, state, output_type=output_model)
+
+    tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
@@ -60,6 +69,8 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             "display_name": process_name,
             "folder_path": folder_path,
         },
+        argument_properties=resource.argument_properties,
     )
-    tool.set_tool_wrappers(awrapper=wrapper)
+    tool.set_tool_wrappers(awrapper=process_tool_wrapper)
+
     return tool
