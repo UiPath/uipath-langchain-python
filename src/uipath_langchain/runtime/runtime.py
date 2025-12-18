@@ -135,10 +135,17 @@ class UiPathLangGraphRuntime:
                 if chunk_type == "messages":
                     if isinstance(data, tuple):
                         message, _ = data
-                        event = UiPathRuntimeMessageEvent(
-                            payload=self.chat.map_event(message),
-                        )
-                        yield event
+                        try:
+                            events = self.chat.map_event(message)
+                        except Exception as e:
+                            logger.warning(f"Error mapping message event: {e}")
+                            events = None
+                        if events:
+                            for mapped_event in events:
+                                event = UiPathRuntimeMessageEvent(
+                                    payload=mapped_event,
+                                )
+                                yield event
 
                 # Emit UiPathRuntimeStateEvent for state updates
                 elif chunk_type == "updates":
