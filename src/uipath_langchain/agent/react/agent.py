@@ -24,7 +24,7 @@ from .llm_node import (
     create_llm_node,
 )
 from .router import (
-    route_agent,
+    create_route_agent,
 )
 from .terminate_node import (
     create_terminate_node,
@@ -58,7 +58,7 @@ def create_agent(
     config: AgentGraphConfig | None = None,
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None = None,
 ) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
-    """Build agent graph with INIT -> AGENT(subgraph) <-> TOOLS loop, terminated by control flow tools.
+    """Build agent graph with INIT -> AGENT (subgraph) <-> TOOLS loop, terminated by control flow tools.
 
     The AGENT node is a subgraph that runs:
     - before-agent guardrail middlewares
@@ -107,7 +107,7 @@ def create_agent(
 
     builder.add_edge(START, AgentGraphNode.INIT)
 
-    llm_node = create_llm_node(model, llm_tools)
+    llm_node = create_llm_node(model, llm_tools, config.thinking_messages_limit)
     llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
         (AgentGraphNode.LLM, llm_node), guardrails
     )
@@ -115,6 +115,7 @@ def create_agent(
     builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
     tool_node_names = list(tool_nodes_with_guardrails.keys())
+    route_agent = create_route_agent(config.thinking_messages_limit)
     builder.add_conditional_edges(
         AgentGraphNode.AGENT,
         route_agent,
