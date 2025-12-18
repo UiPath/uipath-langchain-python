@@ -90,15 +90,20 @@ class EscalateAction(GuardrailAction):
                 # PRE_EXECUTION: Only Inputs field from last message
                 input_content = _extract_escalation_content(
                     state.messages[-1],
+                    state,
                     scope,
                     execution_stage,
                     guarded_component_name,
                 )
                 data["Inputs"] = input_content
             else:  # POST_EXECUTION
-                # Extract Inputs from second-to-last message using PRE_EXECUTION logic
+                if scope == GuardrailScope.AGENT:
+                    input_message = state.messages[1]
+                else:
+                    input_message = state.messages[-2]
                 input_content = _extract_escalation_content(
-                    state.messages[-2],
+                    input_message,
+                    state,
                     scope,
                     ExecutionStage.PRE_EXECUTION,
                     guarded_component_name,
@@ -107,6 +112,7 @@ class EscalateAction(GuardrailAction):
                 # Extract Outputs from last message using POST_EXECUTION logic
                 output_content = _extract_escalation_content(
                     state.messages[-1],
+                    state,
                     scope,
                     execution_stage,
                     guarded_component_name,
@@ -119,7 +125,7 @@ class EscalateAction(GuardrailAction):
                 CreateEscalation(
                     app_name=self.app_name,
                     app_folder_path=self.app_folder_path,
-                    title=self.app_name,
+                    title="Agents Guardrail Task",
                     data=data,
                     assignee=self.assignee,
                 )
@@ -137,7 +143,7 @@ class EscalateAction(GuardrailAction):
             raise AgentTerminationException(
                 code=UiPathErrorCode.EXECUTION_ERROR,
                 title="Escalation rejected",
-                detail=f"Action was rejected after reviewing the task created by guardrail [{guardrail.name}]. Please contact your administrator.",
+                detail=f"Please contact your administrator. Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data['Reason']}",
             )
 
         return node_name, _node
@@ -179,8 +185,8 @@ def _validate_message_count(
 def _get_node_name(
     execution_stage: ExecutionStage, guardrail: BaseGuardrail, scope: GuardrailScope
 ) -> str:
-    sanitized = re.sub(r"\W+", "_", guardrail.name).strip("_").lower()
-    node_name = f"{sanitized}_hitl_{execution_stage.name.lower()}_{scope.lower()}"
+    raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}_hitl"
+    node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
     return node_name
 
 
@@ -200,8 +206,8 @@ def _process_escalation_response(
         execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
 
     Returns:
-        For LLM/TOOL scope: Command to update messages with reviewed inputs/outputs, or empty dict.
-        For AGENT scope: Empty dict (no message alteration).
+        Command updates for the state (e.g., updating messages / tool calls / agent_result),
+        or an empty dict if no update is needed.
     """
     match scope:
         case GuardrailScope.LLM:
@@ -213,7 +219,70 @@ def _process_escalation_response(
                 state, escalation_result, execution_stage, guarded_node_name
             )
         case GuardrailScope.AGENT:
+            return _process_agent_escalation_response(
+                state, escalation_result, execution_stage
+            )
+
+
+def _process_agent_escalation_response(
+    state: AgentGuardrailsGraphState,
+    escalation_result: Dict[str, Any],
+    execution_stage: ExecutionStage,
+) -> Dict[str, Any] | Command[Any]:
+    """Process escalation response for AGENT scope guardrails.
+
+    For AGENT scope:
+    - PRE_EXECUTION: updates the last message content using `ReviewedInputs`
+    - POST_EXECUTION: updates `agent_result` using `ReviewedOutputs`
+
+    Args:
+        state: The current agent graph state.
+        escalation_result: The result from the escalation interrupt containing reviewed inputs/outputs.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Returns:
+        Command to update state, or empty dict if no updates are needed.
+
+    Raises:
+        AgentTerminationException: If escalation response processing fails.
+    """
+    try:
+        reviewed_field = get_reviewed_field_name(execution_stage)
+        if reviewed_field not in escalation_result:
             return {}
+
+        reviewed_value = escalation_result.get(reviewed_field)
+        if not reviewed_value:
+            return {}
+
+        try:
+            parsed = json.loads(reviewed_value)
+        except json.JSONDecodeError:
+            parsed = reviewed_value
+
+        if execution_stage == ExecutionStage.PRE_EXECUTION:
+            msgs = state.messages.copy()
+            if not msgs:
+                return {}
+            msgs[-1].content = parsed
+            return Command(update={"messages": msgs})
+
+        # POST_EXECUTION: update agent_result
+        return Command(update={"agent_result": parsed})
+    except Exception as e:
+        raise AgentTerminationException(
+            code=UiPathErrorCode.EXECUTION_ERROR,
+            title="Escalation rejected",
+            detail=str(e),
+        ) from e
+
+
+def get_reviewed_field_name(execution_stage):
+    return (
+        "ReviewedInputs"
+        if execution_stage == ExecutionStage.PRE_EXECUTION
+        else "ReviewedOutputs"
+    )
 
 
 def _process_llm_escalation_response(
@@ -237,11 +306,7 @@ def _process_llm_escalation_response(
         AgentTerminationException: If escalation response processing fails.
     """
     try:
-        reviewed_field = (
-            "ReviewedInputs"
-            if execution_stage == ExecutionStage.PRE_EXECUTION
-            else "ReviewedOutputs"
-        )
+        reviewed_field = get_reviewed_field_name(execution_stage)
 
         msgs = state.messages.copy()
         if not msgs or reviewed_field not in escalation_result:
@@ -342,11 +407,7 @@ def _process_tool_escalation_response(
         AgentTerminationException: If escalation response processing fails.
     """
     try:
-        reviewed_field = (
-            "ReviewedInputs"
-            if execution_stage == ExecutionStage.PRE_EXECUTION
-            else "ReviewedOutputs"
-        )
+        reviewed_field = get_reviewed_field_name(execution_stage)
 
         msgs = state.messages.copy()
         if not msgs or reviewed_field not in escalation_result:
@@ -404,6 +465,7 @@ def _process_tool_escalation_response(
 
 def _extract_escalation_content(
     message: BaseMessage,
+    state: AgentGuardrailsGraphState,
     scope: GuardrailScope,
     execution_stage: ExecutionStage,
     guarded_node_name: str,
@@ -424,11 +486,34 @@ def _extract_escalation_content(
         case GuardrailScope.LLM:
             return _extract_llm_escalation_content(message, execution_stage)
         case GuardrailScope.AGENT:
-            return _extract_agent_escalation_content(message, execution_stage)
+            return _extract_agent_escalation_content(message, state, execution_stage)
         case GuardrailScope.TOOL:
             return _extract_tool_escalation_content(
                 message, execution_stage, guarded_node_name
             )
+
+
+def _extract_agent_escalation_content(
+    message: BaseMessage,
+    state: AgentGuardrailsGraphState,
+    execution_stage: ExecutionStage,
+) -> str | list[str | Dict[str, Any]]:
+    """Extract escalation content for AGENT scope guardrails.
+
+    Args:
+        message: The message used to extract the agent input content.
+        state: The current agent guardrails graph state. Used to read `agent_result` for POST_EXECUTION.
+        execution_stage: PRE_EXECUTION or POST_EXECUTION.
+
+    Returns:
+        - PRE_EXECUTION: the agent input string (from message content).
+        - POST_EXECUTION: a JSON-serialized representation of `state.agent_result`.
+    """
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        return get_message_content(cast(AnyMessage, message))
+
+    output_content = state.agent_result or ""
+    return json.dumps(output_content)
 
 
 def _extract_llm_escalation_content(
@@ -449,8 +534,7 @@ def _extract_llm_escalation_content(
         if isinstance(message, ToolMessage):
             return message.content
 
-        content = get_message_content(cast(AnyMessage, message))
-        return json.dumps(content) if content else ""
+        return get_message_content(cast(AnyMessage, message))
 
     # For AI messages, process tool calls if present
     if isinstance(message, AIMessage):
@@ -468,21 +552,6 @@ def _extract_llm_escalation_content(
 
     # Fallback for other message types
     return get_message_content(cast(AnyMessage, message))
-
-
-def _extract_agent_escalation_content(
-    message: BaseMessage, execution_stage: ExecutionStage
-) -> str | list[str | Dict[str, Any]]:
-    """Extract escalation content for AGENT scope guardrails.
-
-    Args:
-        message: The message to extract content from.
-        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
-
-    Returns:
-        str: Empty string (AGENT scope guardrails do not extract escalation content).
-    """
-    return ""
 
 
 def _extract_tool_escalation_content(
