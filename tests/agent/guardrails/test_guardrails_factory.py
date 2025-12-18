@@ -169,7 +169,7 @@ class TestGuardrailsFactory:
                 "enabledForEvals": True,
                 "selector": {
                     "$selectorType": "scoped",
-                    "scopes": ["llm"],  # LLM scope - should be rejected
+                    "scopes": ["Llm"],  # LLM scope - should be rejected
                     "matchNames": None,
                 },
                 "rules": [
@@ -204,7 +204,7 @@ class TestGuardrailsFactory:
                 "enabledForEvals": True,
                 "selector": {
                     "$selectorType": "scoped",
-                    "scopes": ["agent"],  # AGENT scope - should be rejected
+                    "scopes": ["Agent"],  # AGENT scope - should be rejected
                     "matchNames": None,
                 },
                 "rules": [
@@ -239,7 +239,7 @@ class TestGuardrailsFactory:
                 "enabledForEvals": True,
                 "selector": {
                     "$selectorType": "scoped",
-                    "scopes": ["tool"],  # TOOL scope - should be accepted
+                    "scopes": ["Tool"],  # TOOL scope - should be accepted
                     "matchNames": ["my_tool"],
                 },
                 "rules": [
@@ -276,7 +276,7 @@ class TestGuardrailsFactory:
                 "enabledForEvals": True,
                 "selector": {
                     "$selectorType": "scoped",
-                    "scopes": ["tool", "llm"],  # Mixed scopes - should be rejected
+                    "scopes": ["Tool", "Llm"],  # Mixed scopes - should be rejected
                     "matchNames": ["my_tool"],
                 },
                 "rules": [
