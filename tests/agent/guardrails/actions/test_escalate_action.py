@@ -1177,7 +1177,7 @@ class TestEscalateAction:
     async def test_extract_llm_content_pre_execution_tool_message(self):
         """Extract LLM content PreExecution with ToolMessage: returns tool message content."""
         from uipath_langchain.agent.guardrails.actions.escalate_action import (
-            _extract_llm_escalation_content,
+            _extract_agent_llm_escalation_content,
         )
 
         tool_message = ToolMessage(
@@ -1186,7 +1186,7 @@ class TestEscalateAction:
         )
         state = AgentGuardrailsGraphState(messages=[tool_message])
 
-        result = _extract_llm_escalation_content(state, ExecutionStage.PRE_EXECUTION)
+        result = _extract_agent_llm_escalation_content(state, ExecutionStage.PRE_EXECUTION)
 
         assert result == "Tool result"
 
@@ -1194,13 +1194,13 @@ class TestEscalateAction:
     async def test_extract_llm_content_pre_execution_empty_content(self):
         """Extract LLM content PreExecution with empty content: returns empty string."""
         from uipath_langchain.agent.guardrails.actions.escalate_action import (
-            _extract_llm_escalation_content,
+            _extract_agent_llm_escalation_content,
         )
 
         ai_message = AIMessage(content="")
         state = AgentGuardrailsGraphState(messages=[ai_message])
 
-        result = _extract_llm_escalation_content(state, ExecutionStage.PRE_EXECUTION)
+        result = _extract_agent_llm_escalation_content(state, ExecutionStage.PRE_EXECUTION)
 
         assert result == ""
 
@@ -1208,7 +1208,7 @@ class TestEscalateAction:
     async def test_extract_llm_content_post_execution_tool_calls_no_content_field(self):
         """Extract LLM content PostExecution: tool calls without content field are skipped."""
         from uipath_langchain.agent.guardrails.actions.escalate_action import (
-            _extract_llm_escalation_content,
+            _extract_agent_llm_escalation_content,
         )
 
         ai_message = AIMessage(
@@ -1223,7 +1223,7 @@ class TestEscalateAction:
         )
         state = AgentGuardrailsGraphState(messages=[ai_message])
 
-        result = _extract_llm_escalation_content(state, ExecutionStage.POST_EXECUTION)
+        result = _extract_agent_llm_escalation_content(state, ExecutionStage.POST_EXECUTION)
 
         assert isinstance(result, str)
         parsed = json.loads(result)

@@ -143,7 +143,7 @@ def _process_escalation_response(
     """
     match scope:
         case GuardrailScope.LLM:
-            return _process_llm_escalation_response(
+            return _process_agent_llm_escalation_response(
                 state, escalation_result, execution_stage
             )
         case GuardrailScope.TOOL:
@@ -151,10 +151,12 @@ def _process_escalation_response(
                 state, escalation_result, execution_stage, guarded_node_name
             )
         case GuardrailScope.AGENT:
-            return {}
+            return _process_agent_llm_escalation_response(
+                state, escalation_result, execution_stage
+            )
 
 
-def _process_llm_escalation_response(
+def _process_agent_llm_escalation_response(
     state: AgentGuardrailsGraphState,
     escalation_result: Dict[str, Any],
     execution_stage: ExecutionStage,
@@ -350,16 +352,16 @@ def _extract_escalation_content(
 
     match scope:
         case GuardrailScope.LLM:
-            return _extract_llm_escalation_content(state, execution_stage)
+            return _extract_agent_llm_escalation_content(state, execution_stage)
         case GuardrailScope.AGENT:
-            return _extract_agent_escalation_content(state, execution_stage)
+            return _extract_agent_llm_escalation_content(state, execution_stage)
         case GuardrailScope.TOOL:
             return _extract_tool_escalation_content(
                 state, execution_stage, guarded_node_name
             )
 
 
-def _extract_llm_escalation_content(
+def _extract_agent_llm_escalation_content(
     state: AgentGuardrailsGraphState, execution_stage: ExecutionStage
 ) -> str | list[str | Dict[str, Any]]:
     """Extract escalation content for LLM scope guardrails.
@@ -404,21 +406,6 @@ def _extract_llm_escalation_content(
 
     # Fallback for other message types
     return get_message_content(last_message)
-
-
-def _extract_agent_escalation_content(
-    state: AgentGuardrailsGraphState, execution_stage: ExecutionStage
-) -> str | list[str | Dict[str, Any]]:
-    """Extract escalation content for AGENT scope guardrails.
-
-    Args:
-        state: The current agent graph state.
-        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
-
-    Returns:
-        str: Empty string (AGENT scope guardrails do not extract escalation content).
-    """
-    return ""
 
 
 def _extract_tool_escalation_content(
