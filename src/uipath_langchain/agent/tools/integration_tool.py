@@ -3,13 +3,13 @@
 import copy
 from typing import Any
 
-from jsonschema_pydantic_converter import transform as create_model
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
 
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.tool_node import ToolWrapperMixin
 from uipath_langchain.agent.wrappers.static_args_wrapper import get_static_args_wrapper
 

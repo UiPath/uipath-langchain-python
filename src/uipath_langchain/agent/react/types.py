@@ -1,9 +1,13 @@
+import uuid
 from enum import StrEnum
 from typing import Annotated, Any, Optional
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
+from uipath.platform.attachments import Attachment
+
+from uipath_langchain.agent.react.utils import add_job_attachments
 
 
 class AgentTerminationSource(StrEnum):
@@ -22,6 +26,7 @@ class AgentGraphState(BaseModel):
     """Agent Graph state for standard loop execution."""
 
     messages: Annotated[list[AnyMessage], add_messages] = []
+    job_attachments: Annotated[dict[uuid.UUID, Attachment], add_job_attachments] = {}
     termination: AgentTermination | None = None
 
 

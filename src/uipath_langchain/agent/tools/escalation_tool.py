@@ -3,7 +3,6 @@
 from enum import Enum
 from typing import Any
 
-from jsonschema_pydantic_converter import transform as create_model
 from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import StructuredTool
@@ -15,6 +14,8 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform.common import CreateEscalation
+
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
 from ..react.types import AgentGraphNode, AgentTerminationSource
 from .utils import sanitize_tool_name
