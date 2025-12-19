@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import re
 from typing import Any, Dict, Literal, cast
@@ -507,7 +508,23 @@ def _extract_tool_escalation_content(
     else:
         if not isinstance(message, ToolMessage):
             return ""
-        return message.content
+        content = message.content
+
+        # If content is already dict/list, serialize to JSON
+        if isinstance(content, (dict, list)):
+            return json.dumps(content)
+
+        # If content is a string that looks like a Python literal, convert to JSON
+        if isinstance(content, str):
+            try:
+                # Try to parse as Python literal and convert to JSON
+                parsed_content = ast.literal_eval(content)
+                return json.dumps(parsed_content)
+            except (ValueError, SyntaxError):
+                # If parsing fails, return as-is
+                pass
+
+        return content
 
 
 def _execution_stage_to_escalation_field(
