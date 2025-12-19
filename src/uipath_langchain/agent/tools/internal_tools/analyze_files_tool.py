@@ -42,7 +42,7 @@ def create_analyze_file_tool(
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def tool_fn(runtime: ToolRuntime, **kwargs: Any):
+    async def tool_fn(**kwargs: Any):
         return "Tool result message."
 
     return StructuredToolWithOutputType(
