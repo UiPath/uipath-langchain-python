@@ -3,6 +3,7 @@ import os
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph
@@ -41,6 +42,7 @@ class UiPathLangGraphRuntime:
         graph: CompiledStateGraph[Any, Any, Any, Any],
         runtime_id: str | None = None,
         entrypoint: str | None = None,
+        callbacks: list[BaseCallbackHandler] | None = None,
     ):
         """
         Initialize the runtime.
@@ -53,6 +55,7 @@ class UiPathLangGraphRuntime:
         self.graph: CompiledStateGraph[Any, Any, Any, Any] = graph
         self.runtime_id: str = runtime_id or "default"
         self.entrypoint: str | None = entrypoint
+        self.callbacks: list[BaseCallbackHandler] = callbacks or []
         self.chat = UiPathChatMessagesMapper()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
@@ -196,7 +199,7 @@ class UiPathLangGraphRuntime:
         """Build graph execution configuration."""
         graph_config: RunnableConfig = {
             "configurable": {"thread_id": self.runtime_id},
-            "callbacks": [],
+            "callbacks": self.callbacks,
         }
 
         # Add optional config from environment
