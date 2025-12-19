@@ -158,18 +158,27 @@ class TestGuardrailsFactory:
         assert action.version == 2
         assert action.assignee == "admin@example.com"
 
-    def test_deterministic_guardrail_with_llm_scope_raises_value_error(self) -> None:
-        """DeterministicGuardrails (AgentCustomGuardrails) with LLM scope should raise ValueError."""
+    @pytest.mark.parametrize(
+        "scope,scope_lower",
+        [
+            ("Llm", "llm"),
+            ("Agent", "agent"),
+        ],
+    )
+    def test_deterministic_guardrail_with_invalid_scope_raises_value_error(
+        self, scope: str, scope_lower: str
+    ) -> None:
+        """DeterministicGuardrails with LLM or AGENT scope should raise ValueError."""
         guardrail = AgentCustomGuardrail.model_validate(
             {
                 "$guardrailType": "custom",
-                "id": "test-llm-scope",
-                "name": "test-guardrail-llm",
-                "description": "Test guardrail with LLM scope",
+                "id": f"test-{scope_lower}-scope",
+                "name": f"test-guardrail-{scope_lower}",
+                "description": f"Test guardrail with {scope} scope",
                 "enabledForEvals": True,
                 "selector": {
                     "$selectorType": "scoped",
-                    "scopes": ["Llm"],  # LLM scope - should be rejected
+                    "scopes": [scope],  # Invalid scope - should be rejected
                     "matchNames": None,
                 },
                 "rules": [
@@ -189,42 +198,7 @@ class TestGuardrailsFactory:
 
         with pytest.raises(
             ValueError,
-            match=r"Deterministic guardrail 'test-guardrail-llm' can only be used with TOOL scope.*Found invalid scopes.*LLM",
-        ):
-            build_guardrails_with_actions([guardrail])
-
-    def test_deterministic_guardrail_with_agent_scope_raises_value_error(self) -> None:
-        """DeterministicGuardrails with AGENT scope should raise ValueError."""
-        guardrail = AgentCustomGuardrail.model_validate(
-            {
-                "$guardrailType": "custom",
-                "id": "test-agent-scope",
-                "name": "test-guardrail-agent",
-                "description": "Test guardrail with AGENT scope",
-                "enabledForEvals": True,
-                "selector": {
-                    "$selectorType": "scoped",
-                    "scopes": ["Agent"],  # AGENT scope - should be rejected
-                    "matchNames": None,
-                },
-                "rules": [
-                    {
-                        "$ruleType": "word",
-                        "fieldSelector": {
-                            "$selectorType": "specific",
-                            "fields": [{"path": "message.content", "source": "input"}],
-                        },
-                        "operator": "contains",
-                        "value": "forbidden",
-                    }
-                ],
-                "action": {"$actionType": "block", "reason": "test"},
-            }
-        )
-
-        with pytest.raises(
-            ValueError,
-            match=r"Deterministic guardrail 'test-guardrail-agent' can only be used with TOOL scope.*Found invalid scopes.*AGENT",
+            match=rf"Deterministic guardrail 'test-guardrail-{scope_lower}' can only be used with TOOL scope.*Found invalid scopes.*{scope.upper()}",
         ):
             build_guardrails_with_actions([guardrail])
 
