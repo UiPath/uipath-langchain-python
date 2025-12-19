@@ -5,7 +5,7 @@ from typing import Any, Callable, Sequence
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from .utils import (
+from .job_attachments import (
     get_job_attachments,
 )
 
@@ -23,7 +23,7 @@ def create_init_node(
 
         job_attachments = get_job_attachments(input_schema, state)
         job_attachments_dict = {
-            att.id: att for att in job_attachments if att.id is not None
+            str(att.id): att for att in job_attachments if att.id is not None
         }
 
         return {

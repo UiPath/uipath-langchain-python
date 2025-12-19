@@ -26,7 +26,7 @@ class AgentGraphState(BaseModel):
     """Agent Graph state for standard loop execution."""
 
     messages: Annotated[list[AnyMessage], add_messages] = []
-    job_attachments: Annotated[dict[uuid.UUID, Attachment], add_job_attachments] = {}
+    job_attachments: Annotated[dict[str, Attachment], add_job_attachments] = {}
     termination: AgentTermination | None = None
 
 

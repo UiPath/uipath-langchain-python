@@ -1,6 +1,5 @@
 from typing import Any
 
-from langchain.tools import ToolRuntime
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
@@ -11,7 +10,15 @@ from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_mo
 from uipath_langchain.agent.tools.structured_tool_with_output_type import (
     StructuredToolWithOutputType,
 )
+from uipath_langchain.agent.tools.tool_node import ToolWrapperMixin
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
+from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
+    get_job_attachment_wrapper,
+)
+
+
+class AnalyzeFileTool(StructuredToolWithOutputType, ToolWrapperMixin):
+    pass
 
 
 def create_analyze_file_tool(
@@ -43,12 +50,15 @@ def create_analyze_file_tool(
         output_schema=output_model.model_json_schema(),
     )
     async def tool_fn(**kwargs: Any):
-        return "Tool result message."
+        return "The event name is 'Toamna' by Tudor Gheorghe"
 
-    return StructuredToolWithOutputType(
+    wrapper = get_job_attachment_wrapper(resource)
+    tool = AnalyzeFileTool(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
         coroutine=tool_fn,
         output_type=output_model,
     )
+    tool.set_tool_wrappers(awrapper=wrapper)
+    return tool

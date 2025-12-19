@@ -46,6 +46,7 @@ def create_model(
                     and annotation.__name__ == type_def.__name__
                 ):
                     # Store the actual annotation type, not the old namespace one
+                    annotation.__name__ = type_name
                     corrected_namespace[type_name] = annotation
                     break
 
