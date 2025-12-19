@@ -4,16 +4,21 @@ import copy
 from typing import Any
 
 from jsonschema_pydantic_converter import transform as create_model
-from langchain.tools import ToolRuntime
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
 
-from .static_args import handle_static_args
+from uipath_langchain.agent.tools.tool_node import ToolWrapperMixin
+from uipath_langchain.agent.wrappers.static_args_wrapper import get_static_args_wrapper
+
 from .structured_tool_with_output_type import StructuredToolWithOutputType
-from .utils import sanitize_tool_name
+from .utils import sanitize_dict_for_serialization, sanitize_tool_name
+
+
+class StructuredToolWithStaticArgs(StructuredToolWithOutputType, ToolWrapperMixin):
+    pass
 
 
 def remove_asterisk_from_properties(fields: dict[str, Any]) -> dict[str, Any]:
@@ -150,32 +155,27 @@ def create_integration_tool(
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def integration_tool_fn(runtime: ToolRuntime, **kwargs: Any):
+    async def integration_tool_fn(**kwargs: Any):
         try:
-            # we manually validating here and not passing input_model to StructuredTool
-            # because langchain itself will block their own injected arguments (like runtime) if the model is strict
-            val_args = input_model.model_validate(kwargs)
-            args = handle_static_args(
-                resource=resource,
-                runtime=runtime,
-                input_args=val_args.model_dump(),
-            )
             result = await sdk.connections.invoke_activity_async(
                 activity_metadata=activity_metadata,
                 connection_id=connection_id,
-                activity_input=args,
+                activity_input=sanitize_dict_for_serialization(kwargs),
             )
         except Exception:
             raise
 
         return result
 
-    tool = StructuredToolWithOutputType(
+    wrapper = get_static_args_wrapper(resource)
+
+    tool = StructuredToolWithStaticArgs(
         name=tool_name,
         description=resource.description,
-        args_schema=resource.input_schema,
+        args_schema=input_model,
         coroutine=integration_tool_fn,
         output_type=output_model,
     )
+    tool.set_tool_wrappers(awrapper=wrapper)
 
     return tool

@@ -1,9 +1,9 @@
 from functools import partial
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
+from langgraph._internal._runnable import RunnableCallable
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
-from langgraph.prebuilt import ToolNode
 from uipath.platform.guardrails import (
     BaseGuardrail,
     BuiltInValidatorGuardrail,
@@ -221,13 +221,13 @@ def create_llm_guardrails_subgraph(
 
 
 def create_tools_guardrails_subgraph(
-    tool_nodes: dict[str, ToolNode],
+    tool_nodes: Mapping[str, RunnableCallable],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
-) -> dict[str, ToolNode]:
+) -> dict[str, RunnableCallable]:
     """Create tool nodes with guardrails.
     Args:
     """
-    result: dict[str, ToolNode] = {}
+    result: dict[str, RunnableCallable] = {}
     for tool_name, tool_node in tool_nodes.items():
         subgraph = create_tool_guardrails_subgraph(
             (tool_name, tool_node),
