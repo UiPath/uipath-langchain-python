@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, cast
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
 from langgraph.types import Command, interrupt
 from uipath.platform.common import CreateEscalation
 from uipath.platform.guardrails import (
@@ -72,19 +72,47 @@ class EscalateAction(GuardrailAction):
         async def _node(
             state: AgentGuardrailsGraphState,
         ) -> Dict[str, Any] | Command[Any]:
-            input = _extract_escalation_content(
-                state, scope, execution_stage, guarded_component_name
-            )
-            escalation_field = _execution_stage_to_escalation_field(execution_stage)
+            # Validate message count based on execution stage
+            _validate_message_count(state, execution_stage)
 
-            data = {
+            # Build base data dictionary with common fields
+            data: Dict[str, Any] = {
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
                 "Component": scope.name.lower(),
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
                 "GuardrailResult": state.guardrail_validation_result,
-                escalation_field: input,
             }
+
+            # Add stage-specific fields
+            if execution_stage == ExecutionStage.PRE_EXECUTION:
+                # PRE_EXECUTION: Only Inputs field from last message
+                input_content = _extract_escalation_content(
+                    state.messages[-1],
+                    scope,
+                    execution_stage,
+                    guarded_component_name,
+                )
+                data["Inputs"] = input_content
+            else:  # POST_EXECUTION
+                # Extract Inputs from second-to-last message using PRE_EXECUTION logic
+                input_content = _extract_escalation_content(
+                    state.messages[-2],
+                    scope,
+                    ExecutionStage.PRE_EXECUTION,
+                    guarded_component_name,
+                )
+
+                # Extract Outputs from last message using POST_EXECUTION logic
+                output_content = _extract_escalation_content(
+                    state.messages[-1],
+                    scope,
+                    execution_stage,
+                    guarded_component_name,
+                )
+
+                data["Inputs"] = input_content
+                data["Outputs"] = output_content
 
             escalation_result = interrupt(
                 CreateEscalation(
@@ -112,6 +140,39 @@ class EscalateAction(GuardrailAction):
             )
 
         return node_name, _node
+
+
+def _validate_message_count(
+    state: AgentGuardrailsGraphState,
+    execution_stage: ExecutionStage,
+) -> None:
+    """Validate that state has the required number of messages for the execution stage.
+
+    Args:
+        state: The current agent graph state.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Raises:
+        AgentTerminationException: If the state doesn't have enough messages.
+    """
+    required_messages = 1 if execution_stage == ExecutionStage.PRE_EXECUTION else 2
+    actual_messages = len(state.messages)
+
+    if actual_messages < required_messages:
+        stage_name = (
+            "PRE_EXECUTION"
+            if execution_stage == ExecutionStage.PRE_EXECUTION
+            else "POST_EXECUTION"
+        )
+        detail = f"{stage_name} requires at least {required_messages} message{'s' if required_messages > 1 else ''} in state, but found {actual_messages}."
+        if execution_stage == ExecutionStage.POST_EXECUTION:
+            detail += " Cannot extract Inputs from previous message."
+
+        raise AgentTerminationException(
+            code=UiPathErrorCode.EXECUTION_ERROR,
+            title=f"Invalid state for {stage_name}",
+            detail=detail,
+        )
 
 
 def _get_node_name(
@@ -341,50 +402,41 @@ def _process_tool_escalation_response(
 
 
 def _extract_escalation_content(
-    state: AgentGuardrailsGraphState,
+    message: BaseMessage,
     scope: GuardrailScope,
     execution_stage: ExecutionStage,
     guarded_node_name: str,
 ) -> str | list[str | Dict[str, Any]]:
-    """Extract escalation content from state based on guardrail scope and execution stage.
+    """Extract escalation content from a message based on guardrail scope and execution stage.
 
     Args:
-        state: The current agent graph state.
+        message: The message to extract content from.
         scope: The guardrail scope (LLM/AGENT/TOOL).
         execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+        guarded_node_name: Name of the guarded component.
 
     Returns:
         str or list[str | Dict[str, Any]]: For LLM scope, returns JSON string or list with message/tool call content.
         For AGENT scope, returns empty string. For TOOL scope, returns JSON string or list with tool-specific content.
-
-    Raises:
-        AgentTerminationException: If no messages are found in state.
     """
-    if not state.messages:
-        raise AgentTerminationException(
-            code=UiPathErrorCode.EXECUTION_ERROR,
-            title="Invalid state message",
-            detail="No message found into agent state",
-        )
-
     match scope:
         case GuardrailScope.LLM:
-            return _extract_llm_escalation_content(state, execution_stage)
+            return _extract_llm_escalation_content(message, execution_stage)
         case GuardrailScope.AGENT:
-            return _extract_agent_escalation_content(state, execution_stage)
+            return _extract_agent_escalation_content(message, execution_stage)
         case GuardrailScope.TOOL:
             return _extract_tool_escalation_content(
-                state, execution_stage, guarded_node_name
+                message, execution_stage, guarded_node_name
             )
 
 
 def _extract_llm_escalation_content(
-    state: AgentGuardrailsGraphState, execution_stage: ExecutionStage
+    message: BaseMessage, execution_stage: ExecutionStage
 ) -> str | list[str | Dict[str, Any]]:
     """Extract escalation content for LLM scope guardrails.
 
     Args:
-        state: The current agent graph state.
+        message: The message to extract content from.
         execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
 
     Returns:
@@ -392,17 +444,16 @@ def _extract_llm_escalation_content(
         For PostExecution, returns JSON string (array) with tool call content and message content.
         Returns empty string if no content found.
     """
-    last_message = state.messages[-1]
     if execution_stage == ExecutionStage.PRE_EXECUTION:
-        if isinstance(last_message, ToolMessage):
-            return last_message.content
+        if isinstance(message, ToolMessage):
+            return message.content
 
-        content = get_message_content(last_message)
+        content = get_message_content(cast(AnyMessage, message))
         return json.dumps(content) if content else ""
 
     # For AI messages, process tool calls if present
-    if isinstance(last_message, AIMessage):
-        ai_message: AIMessage = last_message
+    if isinstance(message, AIMessage):
+        ai_message: AIMessage = message
 
         if ai_message.tool_calls:
             content_list: list[Dict[str, Any]] = []
@@ -415,16 +466,16 @@ def _extract_llm_escalation_content(
             return json.dumps(content_list)
 
     # Fallback for other message types
-    return get_message_content(last_message)
+    return get_message_content(cast(AnyMessage, message))
 
 
 def _extract_agent_escalation_content(
-    state: AgentGuardrailsGraphState, execution_stage: ExecutionStage
+    message: BaseMessage, execution_stage: ExecutionStage
 ) -> str | list[str | Dict[str, Any]]:
     """Extract escalation content for AGENT scope guardrails.
 
     Args:
-        state: The current agent graph state.
+        message: The message to extract content from.
         execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
 
     Returns:
@@ -434,12 +485,12 @@ def _extract_agent_escalation_content(
 
 
 def _extract_tool_escalation_content(
-    state: AgentGuardrailsGraphState, execution_stage: ExecutionStage, tool_name: str
+    message: BaseMessage, execution_stage: ExecutionStage, tool_name: str
 ) -> str | list[str | Dict[str, Any]]:
     """Extract escalation content for TOOL scope guardrails.
 
     Args:
-        state: The current agent graph state.
+        message: The message to extract content from.
         execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
         tool_name: Optional tool name to filter tool calls. If provided, only extracts args for matching tool.
 
@@ -448,16 +499,15 @@ def _extract_tool_escalation_content(
         for the specified tool name, or empty string if not found. For PostExecution, returns string with
         tool message content, or empty string if message type doesn't match.
     """
-    last_message = state.messages[-1]
     if execution_stage == ExecutionStage.PRE_EXECUTION:
-        args = _extract_tool_args_from_message(last_message, tool_name)
+        args = _extract_tool_args_from_message(cast(AnyMessage, message), tool_name)
         if args:
             return json.dumps(args)
         return ""
     else:
-        if not isinstance(last_message, ToolMessage):
+        if not isinstance(message, ToolMessage):
             return ""
-        return last_message.content
+        return message.content
 
 
 def _execution_stage_to_escalation_field(

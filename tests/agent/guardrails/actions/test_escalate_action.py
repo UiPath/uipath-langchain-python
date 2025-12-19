@@ -235,15 +235,144 @@ class TestEscalateAction:
         )
 
         state = AgentGuardrailsGraphState(
-            messages=[AIMessage(content="Test response")],
+            messages=[
+                HumanMessage(content="Test input message"),
+                AIMessage(content="Test response"),
+            ],
         )
 
         await node(state)
 
-        # Verify ToolOutputs is used for PostExecution
+        # Verify both Inputs and Outputs are present for PostExecution
         call_args = mock_interrupt.call_args[0][0]
+        assert call_args.data["Inputs"] == '"Test input message"'  # JSON-encoded
         assert call_args.data["Outputs"] == "Test response"
-        assert "Inputs" not in call_args.data
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_post_execution_single_message_llm_raises_error(self, mock_interrupt):
+        """PostExecution with only 1 message for LLM scope: raises AgentTerminationException."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            assignee="test@example.com",
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        # Mock should not be called since validation happens before interrupt
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_node",
+        )
+
+        # Only one message in state - should raise error
+        state = AgentGuardrailsGraphState(
+            messages=[AIMessage(content="Only one message")],
+        )
+
+        with pytest.raises(AgentTerminationException) as excinfo:
+            await node(state)
+
+        # Verify error details
+        assert excinfo.value.error_info.title == "Invalid state for POST_EXECUTION"
+        assert "requires at least 2 messages" in excinfo.value.error_info.detail
+        assert "found 1" in excinfo.value.error_info.detail
+        assert (
+            excinfo.value.error_info.code
+            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        )
+
+        # Verify interrupt was never called
+        assert not mock_interrupt.called
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_post_execution_single_message_tool_raises_error(
+        self, mock_interrupt
+    ):
+        """TOOL PostExecution with only 1 message: raises AgentTerminationException."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            assignee="test@example.com",
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.TOOL,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_tool",
+        )
+
+        # Only ToolMessage without preceding AIMessage
+        state = AgentGuardrailsGraphState(
+            messages=[ToolMessage(content="Tool result", tool_call_id="call_1")],
+        )
+
+        with pytest.raises(AgentTerminationException) as excinfo:
+            await node(state)
+
+        assert excinfo.value.error_info.title == "Invalid state for POST_EXECUTION"
+        assert "requires at least 2 messages" in excinfo.value.error_info.detail
+        assert not mock_interrupt.called
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_post_execution_single_message_agent_raises_error(
+        self, mock_interrupt
+    ):
+        """AGENT PostExecution with only 1 message: raises AgentTerminationException."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            assignee="test@example.com",
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.AGENT,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="test_node",
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[AIMessage(content="Only one message")],
+        )
+
+        with pytest.raises(AgentTerminationException) as excinfo:
+            await node(state)
+
+        assert excinfo.value.error_info.title == "Invalid state for POST_EXECUTION"
+        assert "requires at least 2 messages" in excinfo.value.error_info.detail
+        assert not mock_interrupt.called
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -283,12 +412,18 @@ class TestEscalateAction:
                 }
             ],
         )
-        state = AgentGuardrailsGraphState(messages=[ai_message])
+        state = AgentGuardrailsGraphState(
+            messages=[
+                HumanMessage(content="Input message"),
+                ai_message,
+            ]
+        )
 
         await node(state)
 
-        # Verify interrupt was called with tool calls (name and args) in ToolOutputs
+        # Verify interrupt was called with tool calls (name and args) in Outputs and Inputs
         call_args = mock_interrupt.call_args[0][0]
+        assert call_args.data["Inputs"] == '"Input message"'  # JSON-encoded
         tool_outputs = call_args.data["Outputs"]
         parsed = json.loads(tool_outputs)
         assert len(parsed) == 1  # Tool call data with name and args
@@ -363,7 +498,10 @@ class TestEscalateAction:
         )
 
         state = AgentGuardrailsGraphState(
-            messages=[HumanMessage(content="Original content")],
+            messages=[
+                AIMessage(content="Previous AI message"),
+                HumanMessage(content="Original content"),
+            ],
         )
 
         result = await node(state)
@@ -371,7 +509,12 @@ class TestEscalateAction:
         # Verify HumanMessage content was updated with fallback (raw JSON string)
         assert isinstance(result, Command)
         assert result.update is not None
-        assert result.update["messages"][0].content == json.dumps(reviewed_content)
+        assert (
+            result.update["messages"][0].content == "Previous AI message"
+        )  # First message unchanged
+        assert result.update["messages"][1].content == json.dumps(
+            reviewed_content
+        )  # Last message updated
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -413,14 +556,22 @@ class TestEscalateAction:
                 }
             ],
         )
-        state = AgentGuardrailsGraphState(messages=[ai_message])
+        state = AgentGuardrailsGraphState(
+            messages=[
+                HumanMessage(content="Previous input"),
+                ai_message,
+            ]
+        )
 
         result = await node(state)
 
         # Verify tool calls args were updated by matching name
         assert isinstance(result, Command)
         assert result.update is not None
-        updated_message = result.update["messages"][0]
+        assert (
+            result.update["messages"][0].content == "Previous input"
+        )  # First message unchanged
+        updated_message = result.update["messages"][1]
         assert updated_message.tool_calls[0]["args"] == reviewed_tool_args
 
     @pytest.mark.asyncio
@@ -546,7 +697,10 @@ class TestEscalateAction:
         )
 
         result = _extract_escalation_content(
-            state, GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, "test_node"
+            state.messages[-1],
+            GuardrailScope.AGENT,
+            ExecutionStage.PRE_EXECUTION,
+            "test_node",
         )
 
         assert result == ""
@@ -697,17 +851,28 @@ class TestEscalateAction:
             guarded_component_name="test_tool",
         )
 
+        ai_message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "test_tool",
+                    "args": {"input": "test_value"},
+                    "id": "call_1",
+                }
+            ],
+        )
         tool_message = ToolMessage(
             content="Original tool output",
             tool_call_id="call_1",
         )
-        state = AgentGuardrailsGraphState(messages=[tool_message])
+        state = AgentGuardrailsGraphState(messages=[ai_message, tool_message])
 
         result = await node(state)
 
         assert isinstance(result, Command)
         assert result.update is not None
-        updated_message = result.update["messages"][0]
+        assert result.update["messages"][0].content == ""  # First message unchanged
+        updated_message = result.update["messages"][1]
         assert updated_message.content == reviewed_output
 
     @pytest.mark.asyncio
@@ -736,15 +901,28 @@ class TestEscalateAction:
             guarded_component_name="test_tool",
         )
 
+        ai_message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "test_tool",
+                    "args": {"param": "value"},
+                    "id": "call_1",
+                }
+            ],
+        )
         tool_message = ToolMessage(
             content="Tool execution result",
             tool_call_id="call_1",
         )
-        state = AgentGuardrailsGraphState(messages=[tool_message])
+        state = AgentGuardrailsGraphState(messages=[ai_message, tool_message])
 
         await node(state)
 
         call_args = mock_interrupt.call_args[0][0]
+        assert (
+            call_args.data["Inputs"] == '{"param": "value"}'
+        )  # Extracted from AIMessage tool_calls
         assert call_args.data["Outputs"] == "Tool execution result"
 
     @pytest.mark.asyncio
@@ -812,7 +990,10 @@ class TestEscalateAction:
         )
 
         state = AgentGuardrailsGraphState(
-            messages=[AIMessage(content="Not a tool message")],
+            messages=[
+                HumanMessage(content="Previous message"),
+                AIMessage(content="Not a tool message"),
+            ],
         )
 
         result = await node(state)
@@ -1090,10 +1271,9 @@ class TestEscalateAction:
                 },
             ],
         )
-        state = AgentGuardrailsGraphState(messages=[ai_message])
 
         result = _extract_tool_escalation_content(
-            state, ExecutionStage.PRE_EXECUTION, "test_tool"
+            ai_message, ExecutionStage.PRE_EXECUTION, "test_tool"
         )
 
         assert isinstance(result, str)
@@ -1111,10 +1291,9 @@ class TestEscalateAction:
             content="Tool execution result",
             tool_call_id="call_1",
         )
-        state = AgentGuardrailsGraphState(messages=[tool_message])
 
         result = _extract_tool_escalation_content(
-            state, ExecutionStage.POST_EXECUTION, "test_tool"
+            tool_message, ExecutionStage.POST_EXECUTION, "test_tool"
         )
 
         assert result == "Tool execution result"
@@ -1126,12 +1305,10 @@ class TestEscalateAction:
             _extract_tool_escalation_content,
         )
 
-        state = AgentGuardrailsGraphState(
-            messages=[HumanMessage(content="Not an AI message")]
-        )
+        message = HumanMessage(content="Not an AI message")
 
         result = _extract_tool_escalation_content(
-            state, ExecutionStage.PRE_EXECUTION, "test_tool"
+            message, ExecutionStage.PRE_EXECUTION, "test_tool"
         )
 
         assert result == ""
@@ -1143,12 +1320,10 @@ class TestEscalateAction:
             _extract_tool_escalation_content,
         )
 
-        state = AgentGuardrailsGraphState(
-            messages=[AIMessage(content="Not a tool message")]
-        )
+        message = AIMessage(content="Not a tool message")
 
         result = _extract_tool_escalation_content(
-            state, ExecutionStage.POST_EXECUTION, "test_tool"
+            message, ExecutionStage.POST_EXECUTION, "test_tool"
         )
 
         assert result == ""
@@ -1161,10 +1336,9 @@ class TestEscalateAction:
         )
 
         ai_message = AIMessage(content="No tool calls")
-        state = AgentGuardrailsGraphState(messages=[ai_message])
 
         result = _extract_tool_escalation_content(
-            state, ExecutionStage.PRE_EXECUTION, "test_tool"
+            ai_message, ExecutionStage.PRE_EXECUTION, "test_tool"
         )
 
         assert result == ""
@@ -1180,9 +1354,10 @@ class TestEscalateAction:
             content="Tool result",
             tool_call_id="call_1",
         )
-        state = AgentGuardrailsGraphState(messages=[tool_message])
 
-        result = _extract_llm_escalation_content(state, ExecutionStage.PRE_EXECUTION)
+        result = _extract_llm_escalation_content(
+            tool_message, ExecutionStage.PRE_EXECUTION
+        )
 
         assert result == "Tool result"
 
@@ -1194,9 +1369,10 @@ class TestEscalateAction:
         )
 
         ai_message = AIMessage(content="")
-        state = AgentGuardrailsGraphState(messages=[ai_message])
 
-        result = _extract_llm_escalation_content(state, ExecutionStage.PRE_EXECUTION)
+        result = _extract_llm_escalation_content(
+            ai_message, ExecutionStage.PRE_EXECUTION
+        )
 
         assert result == ""
 
@@ -1217,9 +1393,10 @@ class TestEscalateAction:
                 }
             ],
         )
-        state = AgentGuardrailsGraphState(messages=[ai_message])
 
-        result = _extract_llm_escalation_content(state, ExecutionStage.POST_EXECUTION)
+        result = _extract_llm_escalation_content(
+            ai_message, ExecutionStage.POST_EXECUTION
+        )
 
         assert isinstance(result, str)
         parsed = json.loads(result)
@@ -1229,22 +1406,32 @@ class TestEscalateAction:
         assert parsed[0]["args"] == {"param": "value"}
 
     @pytest.mark.asyncio
-    async def test_extract_escalation_content_empty_messages_raises_exception(self):
-        """Extract escalation content with empty messages: raises AgentTerminationException."""
+    async def test_validate_message_count_empty_messages_raises_exception(self):
+        """Validate message count with empty messages: raises AgentTerminationException."""
         from uipath_langchain.agent.guardrails.actions.escalate_action import (
-            _extract_escalation_content,
+            _validate_message_count,
         )
 
         state = AgentGuardrailsGraphState(messages=[])
 
+        # Test PRE_EXECUTION validation
         with pytest.raises(AgentTerminationException) as excinfo:
-            _extract_escalation_content(
-                state, GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION, "test_node"
-            )
+            _validate_message_count(state, ExecutionStage.PRE_EXECUTION)
 
         assert (
             excinfo.value.error_info.code
             == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
         )
-        assert excinfo.value.error_info.title == "Invalid state message"
-        assert "No message found" in excinfo.value.error_info.detail
+        assert excinfo.value.error_info.title == "Invalid state for PRE_EXECUTION"
+        assert "requires at least 1 message" in excinfo.value.error_info.detail
+
+        # Test POST_EXECUTION validation
+        with pytest.raises(AgentTerminationException) as excinfo:
+            _validate_message_count(state, ExecutionStage.POST_EXECUTION)
+
+        assert (
+            excinfo.value.error_info.code
+            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        )
+        assert excinfo.value.error_info.title == "Invalid state for POST_EXECUTION"
+        assert "requires at least 2 messages" in excinfo.value.error_info.detail

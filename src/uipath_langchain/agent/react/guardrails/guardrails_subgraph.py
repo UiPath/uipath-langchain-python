@@ -116,7 +116,7 @@ def _create_guardrails_subgraph(
             ExecutionStage.POST_EXECUTION,
             node_factory,
             END,
-            inner_node,
+            inner_name,
         )
         subgraph.add_edge(inner_name, first_post_exec_guardrail_node)
     else:
