@@ -154,6 +154,7 @@ def create_integration_tool(
         description=resource.description,
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
+        example_calls=resource.properties.example_calls,
     )
     async def integration_tool_fn(**kwargs: Any):
         try:

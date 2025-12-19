@@ -27,6 +27,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
         description=resource.description,
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
+        example_calls=resource.properties.example_calls,
     )
     async def process_tool_fn(**kwargs: Any):
         return interrupt(
