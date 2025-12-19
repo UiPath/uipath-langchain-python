@@ -3,6 +3,7 @@ import os
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph
@@ -41,6 +42,7 @@ class UiPathLangGraphRuntime:
         graph: CompiledStateGraph[Any, Any, Any, Any],
         runtime_id: str | None = None,
         entrypoint: str | None = None,
+        callbacks: list[BaseCallbackHandler] | None = None,
     ):
         """
         Initialize the runtime.
@@ -53,6 +55,7 @@ class UiPathLangGraphRuntime:
         self.graph: CompiledStateGraph[Any, Any, Any, Any] = graph
         self.runtime_id: str = runtime_id or "default"
         self.entrypoint: str | None = entrypoint
+        self.callbacks: list[BaseCallbackHandler] = callbacks or []
         self.chat = UiPathChatMessagesMapper()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
@@ -135,10 +138,17 @@ class UiPathLangGraphRuntime:
                 if chunk_type == "messages":
                     if isinstance(data, tuple):
                         message, _ = data
-                        event = UiPathRuntimeMessageEvent(
-                            payload=self.chat.map_event(message),
-                        )
-                        yield event
+                        try:
+                            events = self.chat.map_event(message)
+                        except Exception as e:
+                            logger.warning(f"Error mapping message event: {e}")
+                            events = None
+                        if events:
+                            for mapped_event in events:
+                                event = UiPathRuntimeMessageEvent(
+                                    payload=mapped_event,
+                                )
+                                yield event
 
                 # Emit UiPathRuntimeStateEvent for state updates
                 elif chunk_type == "updates":
@@ -189,7 +199,7 @@ class UiPathLangGraphRuntime:
         """Build graph execution configuration."""
         graph_config: RunnableConfig = {
             "configurable": {"thread_id": self.runtime_id},
-            "callbacks": [],
+            "callbacks": self.callbacks,
         }
 
         # Add optional config from environment
