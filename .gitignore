@@ -182,3 +182,4 @@ cython_debug/
 **/testcases/**/uipath.json
 
 /playground.py
+/.claude/settings.local.json
