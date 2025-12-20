@@ -293,29 +293,7 @@ class UiPathLangGraphRuntime:
 
     def _is_interrupted(self, state: StateSnapshot) -> bool:
         """Check if execution was interrupted (static or dynamic)."""
-        # Check for static interrupts (interrupt_before/after)
-        if hasattr(state, "next") and state.next:
-            return True
-
-        # Check for dynamic interrupts (interrupt() inside node)
-        if hasattr(state, "tasks"):
-            for task in state.tasks:
-                if hasattr(task, "interrupts") and task.interrupts:
-                    return True
-
-        return False
-
-    def _get_dynamic_interrupt(self, state: StateSnapshot) -> Interrupt | None:
-        """Get the first dynamic interrupt if any."""
-        if not hasattr(state, "tasks"):
-            return None
-
-        for task in state.tasks:
-            if hasattr(task, "interrupts") and task.interrupts:
-                for interrupt in task.interrupts:
-                    if isinstance(interrupt, Interrupt):
-                        return interrupt
-        return None
+        return bool(state.next)
 
     async def _create_runtime_result(
         self,
@@ -344,13 +322,27 @@ class UiPathLangGraphRuntime:
         graph_state: StateSnapshot,
     ) -> UiPathRuntimeResult:
         """Create result for suspended execution."""
-        # Check if it's a dynamic interrupt
-        dynamic_interrupt = self._get_dynamic_interrupt(graph_state)
+        interrupt_map: dict[str, Any] = {}
 
-        if dynamic_interrupt:
-            # Dynamic interrupt - should create and save resume trigger
+        # Get nodes that are still scheduled to run
+        next_nodes = set(graph_state.next) if graph_state.next else set()
+
+        if graph_state.interrupts:
+            for interrupt in graph_state.interrupts:
+                if isinstance(interrupt, Interrupt):
+                    # Find which task this interrupt belongs to
+                    for task in graph_state.tasks:
+                        if task.interrupts and interrupt in task.interrupts:
+                            # Only include if this task's node is still in next
+                            if task.name in next_nodes:
+                                interrupt_map[interrupt.id] = interrupt.value
+                            break
+
+        # If we have dynamic interrupts, return suspended with interrupt map
+        # The output is used to create the resume triggers
+        if interrupt_map:
             return UiPathRuntimeResult(
-                output=dynamic_interrupt.value,
+                output=interrupt_map,
                 status=UiPathRuntimeStatus.SUSPENDED,
             )
         else:

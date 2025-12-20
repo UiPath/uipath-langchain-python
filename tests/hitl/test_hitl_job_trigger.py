@@ -99,17 +99,19 @@ class TestHitlJobTrigger:
 
                     # Check the first job trigger data
                     cursor.execute(
-                        "SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers"
+                        "SELECT runtime_id, interrupt_id, data FROM __uipath_resume_triggers"
                     )
                     triggers = cursor.fetchall()
                     assert len(triggers) == 1
-                    type, key, name, folder_path, folder_key, payload = triggers[0]
-                    assert type == "Job"
-                    assert name == "Job"
-                    assert folder_path == "process-folder-path"
-                    assert folder_key is None
-                    assert "input_arg_1" in payload
-                    assert "value_1" in payload
+                    runtime_id, interrupt_id, data = triggers[0]
+
+                    trigger_data = json.loads(data)
+                    assert trigger_data["trigger_type"] == "Job"
+                    assert trigger_data["trigger_name"] == "Job"
+                    assert trigger_data["folder_path"] == "process-folder-path"
+                    assert trigger_data["folder_key"] is None
+                    assert "input_arg_1" in data
+                    assert "value_1" in data
                 finally:
                     if conn:
                         conn.close()
@@ -121,7 +123,7 @@ class TestHitlJobTrigger:
                 # Mock response for first resume: job output arguments
                 output_args_dict = {"output_arg_1": "response from invoke process"}
                 httpx_mock.add_response(
-                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={key})",
+                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={trigger_data['item_key']})",
                     json={
                         "key": f"{job_key}",
                         "id": 123,
@@ -167,18 +169,23 @@ class TestHitlJobTrigger:
                     assert len(tables) == 1
 
                     # Check the second job trigger data (from wait job)
-                    cursor.execute("""SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers
-                                      ORDER BY timestamp DESC
-                                      """)
+                    cursor.execute("""SELECT runtime_id, interrupt_id, data FROM __uipath_resume_triggers
+                                    ORDER BY timestamp DESC
+                                    """)
                     triggers = cursor.fetchall()
-                    assert len(triggers) == 2
-                    type, key, name, folder_key, folder_path, payload = triggers[0]
-                    assert type == "Job"
-                    assert name == "Job"
-                    assert folder_path is None
-                    assert folder_key is None
-                    assert "123" in payload
-                    assert key == "487d9dc7-30fe-4926-b5f0-35a956914042"
+                    assert len(triggers) == 1
+                    runtime_id, interrupt_id, data = triggers[0]
+
+                    trigger_data = json.loads(data)
+                    assert trigger_data["trigger_type"] == "Job"
+                    assert trigger_data["trigger_name"] == "Job"
+                    assert trigger_data["folder_path"] is None
+                    assert trigger_data["folder_key"] is None
+                    assert "123" in data
+                    assert (
+                        trigger_data["item_key"]
+                        == "487d9dc7-30fe-4926-b5f0-35a956914042"
+                    )
                 finally:
                     if conn:
                         conn.close()
@@ -191,7 +198,7 @@ class TestHitlJobTrigger:
                 output_args_dict = {"output_arg_2": "response from wait job"}
 
                 httpx_mock.add_response(
-                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={key})",
+                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={trigger_data['item_key']})",
                     json={
                         "key": f"{job_key}",
                         "id": 123,

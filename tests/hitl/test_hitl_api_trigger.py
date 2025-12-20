@@ -67,7 +67,6 @@ class TestHitlApiTrigger:
                         input=None, options=UiPathExecuteOptions(resume=False)
                     )
 
-                print(context.result)
                 assert context.result is not None
 
                 # Verify that __uipath directory and state.db were created
@@ -89,15 +88,19 @@ class TestHitlApiTrigger:
 
                     # Check the inserted trigger data from first execution
                     cursor.execute(
-                        "SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers"
+                        "SELECT runtime_id, interrupt_id, data FROM __uipath_resume_triggers"
                     )
                     triggers = cursor.fetchall()
                     assert len(triggers) == 1
-                    type, key, name, folder_path, folder_key, payload = triggers[0]
-                    assert type == "Api"
-                    assert name == "Api"
-                    assert folder_path == folder_key is None
-                    assert payload == "interrupt message"
+                    runtime_id, interrupt_id, data = triggers[0]
+
+                    # Parse the JSON data
+                    trigger_data = json.loads(data)
+                    assert trigger_data["trigger_type"] == "Api"
+                    assert trigger_data["trigger_name"] == "Api"
+                    assert trigger_data["folder_path"] is None
+                    assert trigger_data["folder_key"] is None
+                    assert trigger_data["payload"] == "interrupt message"
                 finally:
                     if conn:
                         conn.close()
@@ -109,7 +112,7 @@ class TestHitlApiTrigger:
                 # Mock API response for resume scenario
                 base_url = os.getenv("UIPATH_URL")
                 httpx_mock.add_response(
-                    url=f"{base_url}/orchestrator_/api/JobTriggers/GetPayload/{key}",
+                    url=f"{base_url}/orchestrator_/api/JobTriggers/GetPayload/{trigger_data['api_resume']['inbox_id']}",
                     status_code=200,
                     text=json.dumps({"payload": "human response"}),
                 )
