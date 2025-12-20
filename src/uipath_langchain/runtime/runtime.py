@@ -1,5 +1,6 @@
 import logging
 import os
+from contextvars import ContextVar
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
@@ -30,6 +31,12 @@ from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_sc
 from ._serialize import serialize_output
 
 logger = logging.getLogger(__name__)
+
+# Context var for per-execution callback injection (set by wrappers like TelemetryRuntimeWrapper)
+# This allows injecting callbacks at execution time without mutating self.callbacks
+execution_callbacks: ContextVar[list[BaseCallbackHandler] | None] = ContextVar(
+    "uipath_execution_callbacks", default=None
+)
 
 
 class UiPathLangGraphRuntime:
@@ -197,9 +204,15 @@ class UiPathLangGraphRuntime:
 
     def _get_graph_config(self) -> RunnableConfig:
         """Build graph execution configuration."""
+        # Copy callbacks to prevent mutation, extend with context callbacks
+        callbacks = list(self.callbacks)
+        ctx_callbacks = execution_callbacks.get()
+        if ctx_callbacks:
+            callbacks.extend(ctx_callbacks)
+
         graph_config: RunnableConfig = {
             "configurable": {"thread_id": self.runtime_id},
-            "callbacks": self.callbacks,
+            "callbacks": callbacks,
         }
 
         # Add optional config from environment
