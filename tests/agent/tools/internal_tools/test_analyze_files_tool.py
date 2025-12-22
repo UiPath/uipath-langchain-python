@@ -73,7 +73,7 @@ class TestCreateAnalyzeFileTool:
         )
 
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.get_job_attachment_wrapper"
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
     @patch(
         "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.llm_call_with_files"
@@ -135,7 +135,7 @@ class TestCreateAnalyzeFileTool:
         assert files[0].url == "https://example.com/file.pdf"
 
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.get_job_attachment_wrapper"
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
     async def test_create_analyze_file_tool_missing_analysis_task(
         self, mock_get_wrapper, resource_config, mock_llm
@@ -157,7 +157,7 @@ class TestCreateAnalyzeFileTool:
             await tool.coroutine(attachments=[mock_attachment])
 
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.get_job_attachment_wrapper"
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
     async def test_create_analyze_file_tool_missing_attachments(
         self, mock_get_wrapper, resource_config, mock_llm
@@ -173,7 +173,7 @@ class TestCreateAnalyzeFileTool:
             await tool.coroutine(analysisTask="Summarize the document")
 
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.get_job_attachment_wrapper"
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
     @patch(
         "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.llm_call_with_files"

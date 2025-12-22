@@ -17,7 +17,6 @@ from uipath.platform.common import CreateEscalation
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
-from ..react.types import AgentGraphNode, AgentTerminationSource
 from .utils import sanitize_tool_name
 
 
@@ -83,6 +82,7 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         if outcome == EscalationAction.END:
             output_detail = f"Escalation output: {escalation_output}"
             termination_title = f"Agent run ended based on escalation outcome {outcome} with directive {escalation_action}"
+            from ..react.types import AgentGraphNode, AgentTerminationSource
 
             return Command(
                 update={

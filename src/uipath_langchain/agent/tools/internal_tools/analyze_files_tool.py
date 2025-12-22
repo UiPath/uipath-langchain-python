@@ -17,9 +17,6 @@ from uipath_langchain.agent.tools.structured_tool_with_output_type import (
 )
 from uipath_langchain.agent.tools.tool_node import ToolWrapperMixin
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
-from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
-    get_job_attachment_wrapper,
-)
 
 ANALYZE_FILES_SYSTEM_MESSAGE = (
     "Process the provided files to complete the given task. "
@@ -35,6 +32,10 @@ class AnalyzeFileTool(StructuredToolWithOutputType, ToolWrapperMixin):
 def create_analyze_file_tool(
     resource: AgentInternalToolResourceConfig, llm: BaseChatModel
 ) -> StructuredTool:
+    from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
+        get_job_attachment_wrapper,
+    )
+
     tool_name = sanitize_tool_name(resource.name)
     input_model = create_model(resource.input_schema)
     output_model = create_model(resource.output_schema)
