@@ -12,7 +12,7 @@ from uipath.platform.attachments import Attachment
 
 def get_job_attachments(
     schema: type[BaseModel],
-    data: dict[str, Any],
+    data: dict[str, Any] | BaseModel,
 ) -> list[Attachment]:
     """Extract job attachments from data based on schema and convert to Attachment objects.
 

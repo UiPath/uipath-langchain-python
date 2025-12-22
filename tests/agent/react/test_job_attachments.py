@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from pydantic import BaseModel
 from uipath.platform.attachments import Attachment
@@ -42,7 +43,7 @@ class TestGetJobAttachments:
             },
         }
         model = create_model(schema)
-        data = {}
+        data: dict[str, Any] = {}
 
         result = get_job_attachments(model, data)
 
@@ -203,7 +204,7 @@ class TestGetJobAttachments:
             },
         }
         model = create_model(schema)
-        data = {"attachments": []}
+        data: dict[str, Any] = {"attachments": []}
 
         result = get_job_attachments(model, data)
 
@@ -257,7 +258,7 @@ class TestGetJobAttachments:
 
         # Create a Pydantic model instance
         class TestModel(BaseModel):
-            attachment: dict
+            attachment: dict[str, Any]
 
         test_uuid = "550e8400-e29b-41d4-a716-446655440099"
         data_model = TestModel(
@@ -438,8 +439,8 @@ class TestAddJobAttachments:
 
     def test_both_empty_dictionaries(self):
         """Should return empty dict when both inputs are empty."""
-        left = {}
-        right = {}
+        left: dict[str, Attachment] = {}
+        right: dict[str, Attachment] = {}
 
         result = add_job_attachments(left, right)
 
@@ -449,7 +450,7 @@ class TestAddJobAttachments:
         """Should return right dict when left is empty."""
         uuid1 = uuid.UUID("550e8400-e29b-41d4-a716-446655440001")
         right = {
-            uuid1: Attachment.model_validate(
+            str(uuid1): Attachment.model_validate(
                 {
                     "ID": str(uuid1),
                     "FullName": "file1.pdf",
@@ -462,13 +463,13 @@ class TestAddJobAttachments:
 
         assert result == right
         assert len(result) == 1
-        assert result[uuid1].full_name == "file1.pdf"
+        assert result[str(uuid1)].full_name == "file1.pdf"
 
     def test_left_has_attachments_right_empty(self):
         """Should return left dict when right is empty."""
         uuid1 = uuid.UUID("550e8400-e29b-41d4-a716-446655440001")
         left = {
-            uuid1: Attachment.model_validate(
+            str(uuid1): Attachment.model_validate(
                 {
                     "ID": str(uuid1),
                     "FullName": "file1.pdf",
@@ -481,7 +482,7 @@ class TestAddJobAttachments:
 
         assert result == left
         assert len(result) == 1
-        assert result[uuid1].full_name == "file1.pdf"
+        assert result[str(uuid1)].full_name == "file1.pdf"
 
     def test_no_overlapping_uuids(self):
         """Should merge dicts with no overlapping keys."""
@@ -489,7 +490,7 @@ class TestAddJobAttachments:
         uuid2 = uuid.UUID("550e8400-e29b-41d4-a716-446655440002")
 
         left = {
-            uuid1: Attachment.model_validate(
+            str(uuid1): Attachment.model_validate(
                 {
                     "ID": str(uuid1),
                     "FullName": "file1.pdf",
@@ -498,7 +499,7 @@ class TestAddJobAttachments:
             )
         }
         right = {
-            uuid2: Attachment.model_validate(
+            str(uuid2): Attachment.model_validate(
                 {
                     "ID": str(uuid2),
                     "FullName": "file2.pdf",
@@ -510,17 +511,17 @@ class TestAddJobAttachments:
         result = add_job_attachments(left, right)
 
         assert len(result) == 2
-        assert uuid1 in result
-        assert uuid2 in result
-        assert result[uuid1].full_name == "file1.pdf"
-        assert result[uuid2].full_name == "file2.pdf"
+        assert str(uuid1) in result
+        assert str(uuid2) in result
+        assert result[str(uuid1)].full_name == "file1.pdf"
+        assert result[str(uuid2)].full_name == "file2.pdf"
 
     def test_overlapping_uuid_right_takes_precedence(self):
         """Should use right value when same UUID exists in both dicts."""
         uuid1 = uuid.UUID("550e8400-e29b-41d4-a716-446655440001")
 
         left = {
-            uuid1: Attachment.model_validate(
+            str(uuid1): Attachment.model_validate(
                 {
                     "ID": str(uuid1),
                     "FullName": "old_file.pdf",
@@ -529,7 +530,7 @@ class TestAddJobAttachments:
             )
         }
         right = {
-            uuid1: Attachment.model_validate(
+            str(uuid1): Attachment.model_validate(
                 {
                     "ID": str(uuid1),
                     "FullName": "new_file.pdf",
@@ -541,7 +542,7 @@ class TestAddJobAttachments:
         result = add_job_attachments(left, right)
 
         assert len(result) == 1
-        assert result[uuid1].full_name == "new_file.pdf"  # Right takes precedence
+        assert result[str(uuid1)].full_name == "new_file.pdf"  # Right takes precedence
 
     def test_mixed_overlapping_and_unique(self):
         """Should correctly merge dicts with both overlapping and unique keys."""
@@ -550,14 +551,14 @@ class TestAddJobAttachments:
         uuid3 = uuid.UUID("550e8400-e29b-41d4-a716-446655440003")
 
         left = {
-            uuid1: Attachment.model_validate(
+            str(uuid1): Attachment.model_validate(
                 {
                     "ID": str(uuid1),
                     "FullName": "file1_old.pdf",
                     "MimeType": "application/pdf",
                 }
             ),
-            uuid2: Attachment.model_validate(
+            str(uuid2): Attachment.model_validate(
                 {
                     "ID": str(uuid2),
                     "FullName": "file2.pdf",
@@ -566,14 +567,14 @@ class TestAddJobAttachments:
             ),
         }
         right = {
-            uuid1: Attachment.model_validate(
+            str(uuid1): Attachment.model_validate(
                 {
                     "ID": str(uuid1),
                     "FullName": "file1_new.pdf",
                     "MimeType": "application/pdf",
                 }
             ),
-            uuid3: Attachment.model_validate(
+            str(uuid3): Attachment.model_validate(
                 {
                     "ID": str(uuid3),
                     "FullName": "file3.pdf",
@@ -585,9 +586,9 @@ class TestAddJobAttachments:
         result = add_job_attachments(left, right)
 
         assert len(result) == 3
-        assert result[uuid1].full_name == "file1_new.pdf"  # Right overrides
-        assert result[uuid2].full_name == "file2.pdf"  # From left only
-        assert result[uuid3].full_name == "file3.pdf"  # From right only
+        assert result[str(uuid1)].full_name == "file1_new.pdf"  # Right overrides
+        assert result[str(uuid2)].full_name == "file2.pdf"  # From left only
+        assert result[str(uuid3)].full_name == "file3.pdf"  # From right only
 
     def test_multiple_attachments_same_operation(self):
         """Should handle merging multiple attachments at once."""
@@ -597,14 +598,14 @@ class TestAddJobAttachments:
         uuid4 = uuid.UUID("550e8400-e29b-41d4-a716-446655440004")
 
         left = {
-            uuid1: Attachment.model_validate(
+            str(uuid1): Attachment.model_validate(
                 {
                     "ID": str(uuid1),
                     "FullName": "file1.pdf",
                     "MimeType": "application/pdf",
                 }
             ),
-            uuid2: Attachment.model_validate(
+            str(uuid2): Attachment.model_validate(
                 {
                     "ID": str(uuid2),
                     "FullName": "file2.pdf",
@@ -613,14 +614,14 @@ class TestAddJobAttachments:
             ),
         }
         right = {
-            uuid3: Attachment.model_validate(
+            str(uuid3): Attachment.model_validate(
                 {
                     "ID": str(uuid3),
                     "FullName": "file3.pdf",
                     "MimeType": "application/pdf",
                 }
             ),
-            uuid4: Attachment.model_validate(
+            str(uuid4): Attachment.model_validate(
                 {
                     "ID": str(uuid4),
                     "FullName": "file4.pdf",
@@ -632,4 +633,4 @@ class TestAddJobAttachments:
         result = add_job_attachments(left, right)
 
         assert len(result) == 4
-        assert all(uid in result for uid in [uuid1, uuid2, uuid3, uuid4])
+        assert all(str(uid) in result for uid in [uuid1, uuid2, uuid3, uuid4])

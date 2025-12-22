@@ -1,9 +1,11 @@
 """Tests for job_attachment_wrapper module."""
 
 import uuid
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 from uipath.agent.models.agent import BaseAgentToolResourceConfig
@@ -105,7 +107,9 @@ class TestGetJobAttachmentWrapper:
         mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths")
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths"
+    )
     async def test_tool_with_no_attachment_paths(
         self,
         mock_get_paths,
@@ -126,7 +130,9 @@ class TestGetJobAttachmentWrapper:
         mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths")
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths"
+    )
     async def test_tool_with_valid_attachments(
         self,
         mock_get_paths,
@@ -143,11 +149,14 @@ class TestGetJobAttachmentWrapper:
         mock_state.job_attachments = {str(mock_attachment.id): mock_attachment}
 
         # Setup tool call with attachment ID
-        tool_call = {
-            "name": "test_tool",
-            "args": {"attachment": {"ID": str(mock_attachment.id)}, "name": "test"},
-            "id": "call_123",
-        }
+        tool_call = cast(
+            ToolCall,
+            {
+                "name": "test_tool",
+                "args": {"attachment": {"ID": str(mock_attachment.id)}, "name": "test"},
+                "id": "call_123",
+            },
+        )
 
         wrapper = get_job_attachment_wrapper(mock_resource)
         result = await wrapper(mock_tool, tool_call, mock_state)
@@ -160,7 +169,9 @@ class TestGetJobAttachmentWrapper:
         assert "attachment" in called_args
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths")
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths"
+    )
     async def test_tool_with_missing_attachment(
         self,
         mock_get_paths,
@@ -173,11 +184,14 @@ class TestGetJobAttachmentWrapper:
         mock_get_paths.return_value = ["$.attachment"]
 
         attachment_id = uuid.uuid4()
-        tool_call = {
-            "name": "test_tool",
-            "args": {"attachment": {"ID": str(attachment_id)}, "name": "test"},
-            "id": "call_123",
-        }
+        tool_call = cast(
+            ToolCall,
+            {
+                "name": "test_tool",
+                "args": {"attachment": {"ID": str(attachment_id)}, "name": "test"},
+                "id": "call_123",
+            },
+        )
 
         # Empty state - attachment not found
         mock_state.job_attachments = {}
@@ -192,7 +206,9 @@ class TestGetJobAttachmentWrapper:
         mock_tool.ainvoke.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths")
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths"
+    )
     async def test_tool_with_multiple_missing_attachments(
         self,
         mock_get_paths,
@@ -207,17 +223,20 @@ class TestGetJobAttachmentWrapper:
         attachment_id_1 = uuid.uuid4()
         attachment_id_2 = uuid.uuid4()
 
-        tool_call = {
-            "name": "test_tool",
-            "args": {
-                "attachments": [
-                    {"ID": str(attachment_id_1)},
-                    {"ID": str(attachment_id_2)},
-                ],
-                "name": "test",
+        tool_call = cast(
+            ToolCall,
+            {
+                "name": "test_tool",
+                "args": {
+                    "attachments": [
+                        {"ID": str(attachment_id_1)},
+                        {"ID": str(attachment_id_2)},
+                    ],
+                    "name": "test",
+                },
+                "id": "call_123",
             },
-            "id": "call_123",
-        }
+        )
 
         # Empty state - both attachments not found
         mock_state.job_attachments = {}
@@ -239,7 +258,9 @@ class TestGetJobAttachmentWrapper:
         mock_tool.ainvoke.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths")
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths"
+    )
     async def test_tool_with_invalid_uuid(
         self,
         mock_get_paths,
@@ -252,11 +273,14 @@ class TestGetJobAttachmentWrapper:
         mock_get_paths.return_value = ["$.attachment"]
 
         invalid_id = "not-a-valid-uuid"
-        tool_call = {
-            "name": "test_tool",
-            "args": {"attachment": {"ID": invalid_id}, "name": "test"},
-            "id": "call_123",
-        }
+        tool_call = cast(
+            ToolCall,
+            {
+                "name": "test_tool",
+                "args": {"attachment": {"ID": invalid_id}, "name": "test"},
+                "id": "call_123",
+            },
+        )
 
         mock_state.job_attachments = {}
 
@@ -269,7 +293,9 @@ class TestGetJobAttachmentWrapper:
         mock_tool.ainvoke.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths")
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths"
+    )
     async def test_tool_with_partial_valid_attachments(
         self,
         mock_get_paths,
@@ -286,17 +312,20 @@ class TestGetJobAttachmentWrapper:
         mock_state.job_attachments = {str(mock_attachment.id): mock_attachment}
         invalid_id = uuid.uuid4()
 
-        tool_call = {
-            "name": "test_tool",
-            "args": {
-                "attachments": [
-                    {"ID": str(mock_attachment.id)},
-                    {"ID": str(invalid_id)},
-                ],
-                "name": "test",
+        tool_call = cast(
+            ToolCall,
+            {
+                "name": "test_tool",
+                "args": {
+                    "attachments": [
+                        {"ID": str(mock_attachment.id)},
+                        {"ID": str(invalid_id)},
+                    ],
+                    "name": "test",
+                },
+                "id": "call_123",
             },
-            "id": "call_123",
-        }
+        )
 
         wrapper = get_job_attachment_wrapper(mock_resource)
         result = await wrapper(mock_tool, tool_call, mock_state)
@@ -308,7 +337,9 @@ class TestGetJobAttachmentWrapper:
         mock_tool.ainvoke.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths")
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths"
+    )
     async def test_tool_with_complex_nested_structure(
         self,
         mock_get_paths,
@@ -371,45 +402,48 @@ class TestGetJobAttachmentWrapper:
         ]
 
         # Create complex nested tool call structure
-        tool_call = {
-            "name": "complex_tool",
-            "args": {
-                "request": {
-                    "metadata": {
-                        "primary_attachment": {"ID": str(attachment1_id)},
-                        "description": "Main request",
-                    },
-                    "documents": [
-                        {"ID": str(attachment2_id)},
-                        {"ID": str(missing_attachment_id)},  # This one is missing
-                    ],
-                },
-                "workflow": {
-                    "name": "process_docs",
-                    "steps": [
-                        {
-                            "name": "step1",
-                            "input_files": [{"ID": str(attachment3_id)}],
+        tool_call = cast(
+            ToolCall,
+            {
+                "name": "complex_tool",
+                "args": {
+                    "request": {
+                        "metadata": {
+                            "primary_attachment": {"ID": str(attachment1_id)},
+                            "description": "Main request",
                         },
-                        {
-                            "name": "step2",
-                            "input_files": [
-                                {"ID": str(attachment1_id)},
-                            ],
-                        },
-                    ],
-                },
-                "backup": {
-                    "archive": {
-                        "files": [
+                        "documents": [
                             {"ID": str(attachment2_id)},
-                        ]
-                    }
+                            {"ID": str(missing_attachment_id)},  # This one is missing
+                        ],
+                    },
+                    "workflow": {
+                        "name": "process_docs",
+                        "steps": [
+                            {
+                                "name": "step1",
+                                "input_files": [{"ID": str(attachment3_id)}],
+                            },
+                            {
+                                "name": "step2",
+                                "input_files": [
+                                    {"ID": str(attachment1_id)},
+                                ],
+                            },
+                        ],
+                    },
+                    "backup": {
+                        "archive": {
+                            "files": [
+                                {"ID": str(attachment2_id)},
+                            ]
+                        }
+                    },
+                    "other_field": "some_value",
                 },
-                "other_field": "some_value",
+                "id": "call_complex_123",
             },
-            "id": "call_complex_123",
-        }
+        )
 
         wrapper = get_job_attachment_wrapper(mock_resource)
         result = await wrapper(mock_tool, tool_call, mock_state)
@@ -429,7 +463,9 @@ class TestGetJobAttachmentWrapper:
         mock_tool.ainvoke.assert_not_awaited()
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths")
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_paths"
+    )
     async def test_tool_with_complex_nested_structure_all_valid(
         self,
         mock_get_paths,
@@ -490,36 +526,39 @@ class TestGetJobAttachmentWrapper:
         ]
 
         # Create complex nested tool call structure with all valid attachments
-        tool_call = {
-            "name": "complex_tool",
-            "args": {
-                "request": {
-                    "metadata": {
-                        "primary_attachment": {"ID": str(attachment1_id)},
-                        "description": "Main request",
+        tool_call = cast(
+            ToolCall,
+            {
+                "name": "complex_tool",
+                "args": {
+                    "request": {
+                        "metadata": {
+                            "primary_attachment": {"ID": str(attachment1_id)},
+                            "description": "Main request",
+                        },
+                        "documents": [
+                            {"ID": str(attachment2_id)},
+                            {"ID": str(attachment3_id)},
+                        ],
                     },
-                    "documents": [
-                        {"ID": str(attachment2_id)},
-                        {"ID": str(attachment3_id)},
-                    ],
+                    "workflow": {
+                        "name": "process_docs",
+                        "steps": [
+                            {
+                                "name": "step1",
+                                "input_files": [{"ID": str(attachment1_id)}],
+                            },
+                            {
+                                "name": "step2",
+                                "input_files": [{"ID": str(attachment2_id)}],
+                            },
+                        ],
+                    },
+                    "other_field": "some_value",
                 },
-                "workflow": {
-                    "name": "process_docs",
-                    "steps": [
-                        {
-                            "name": "step1",
-                            "input_files": [{"ID": str(attachment1_id)}],
-                        },
-                        {
-                            "name": "step2",
-                            "input_files": [{"ID": str(attachment2_id)}],
-                        },
-                    ],
-                },
-                "other_field": "some_value",
+                "id": "call_complex_456",
             },
-            "id": "call_complex_456",
-        }
+        )
 
         wrapper = get_job_attachment_wrapper(mock_resource)
         result = await wrapper(mock_tool, tool_call, mock_state)
@@ -543,4 +582,3 @@ class TestGetJobAttachmentWrapper:
         primary_attachment = called_args["request"]["metadata"]["primary_attachment"]
         assert isinstance(primary_attachment, dict)
         assert "name" in primary_attachment or "ID" in primary_attachment
-

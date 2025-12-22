@@ -1,6 +1,5 @@
 """ReAct Agent loop utilities."""
 
-import uuid
 from typing import Any, Sequence
 
 from langchain_core.messages import AIMessage, BaseMessage
@@ -53,15 +52,15 @@ def count_consecutive_thinking_messages(messages: Sequence[BaseMessage]) -> int:
 
 
 def add_job_attachments(
-    left: dict[uuid.UUID, Attachment], right: dict[uuid.UUID, Attachment]
-) -> dict[uuid.UUID, Attachment]:
+    left: dict[str, Attachment], right: dict[str, Attachment]
+) -> dict[str, Attachment]:
     """Merge attachment dictionaries, with right values taking precedence.
 
-    This reducer function merges two dictionaries of attachments by UUID.
+    This reducer function merges two dictionaries of attachments by UUID string.
     If the same UUID exists in both dictionaries, the value from 'right' takes precedence.
 
     Args:
-        left: Existing dictionary of attachments keyed by UUID
+        left: Existing dictionary of attachments keyed by UUID string
         right: New dictionary of attachments to merge
 
     Returns:
