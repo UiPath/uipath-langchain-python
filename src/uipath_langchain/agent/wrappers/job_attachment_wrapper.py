@@ -1,4 +1,4 @@
-from typing import Any, Type, cast
+from typing import Any
 
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool
@@ -51,9 +51,8 @@ def get_job_attachment_wrapper(
         if isinstance(tool.args_schema, type) and issubclass(
             tool.args_schema, BaseModel
         ):
-            schema = cast(Type[BaseModel], tool.args_schema)
             errors: list[str] = []
-            paths = get_job_attachment_paths(schema)
+            paths = get_job_attachment_paths(tool.args_schema)
             modified_input_args = replace_job_attachment_ids(
                 paths, input_args, state.job_attachments, errors
             )
