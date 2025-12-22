@@ -17,6 +17,7 @@ from uipath.agent.models.agent import (
     AgentUnknownGuardrail,
     AgentWordOperator,
     AgentWordRule,
+    StandardRecipient,
 )
 from uipath.core.guardrails import (
     BooleanRule,
@@ -273,17 +274,18 @@ def build_guardrails_with_actions(
                 )
             )
         elif isinstance(action, AgentGuardrailEscalateAction):
-            result.append(
-                (
-                    converted_guardrail,
-                    EscalateAction(
-                        app_name=action.app.name,
-                        app_folder_path=action.app.folder_name,
-                        version=action.app.version,
-                        assignee=action.recipient.value,
-                    ),
+            if isinstance(action.recipient, StandardRecipient):
+                result.append(
+                    (
+                        converted_guardrail,
+                        EscalateAction(
+                            app_name=action.app.name,
+                            app_folder_path=action.app.folder_name,
+                            version=action.app.version,
+                            assignee=action.recipient.value,
+                        ),
+                    )
                 )
-            )
         elif isinstance(action, AgentGuardrailFilterAction):
             result.append((converted_guardrail, FilterAction(fields=action.fields)))
     return result

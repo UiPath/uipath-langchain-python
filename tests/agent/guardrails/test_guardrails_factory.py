@@ -9,7 +9,6 @@ from uipath.agent.models.agent import (  # type: ignore[attr-defined]
     AgentBooleanOperator,
     AgentBooleanRule,
     AgentCustomGuardrail,
-    AgentEscalationRecipient,
     AgentEscalationRecipientType,
     AgentGuardrailActionType,
     AgentGuardrailBlockAction,
@@ -24,6 +23,7 @@ from uipath.agent.models.agent import (  # type: ignore[attr-defined]
     AgentWordOperator,
     AgentWordRule,
     FieldReference,
+    StandardRecipient,
 )
 from uipath.agent.models.agent import (
     AgentGuardrail as AgentGuardrailModel,
@@ -139,7 +139,7 @@ class TestGuardrailsFactory:
             folder_name="/TestFolder",
             version=2,
         )
-        recipient = AgentEscalationRecipient(
+        recipient = StandardRecipient(
             type=AgentEscalationRecipientType.USER_EMAIL,
             value="admin@example.com",
         )
