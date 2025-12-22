@@ -46,7 +46,7 @@ def get_job_attachment_wrapper(
             Tool invocation result, or error dict if attachment validation fails
         """
         input_args = call["args"]
-        new_input_args = input_args
+        modified_input_args = input_args
 
         if isinstance(tool.args_schema, type) and issubclass(
             tool.args_schema, BaseModel
@@ -54,13 +54,13 @@ def get_job_attachment_wrapper(
             schema = cast(Type[BaseModel], tool.args_schema)
             errors: list[str] = []
             paths = get_job_attachment_paths(schema)
-            new_input_args = replace_job_attachment_ids(
+            modified_input_args = replace_job_attachment_ids(
                 paths, input_args, state.job_attachments, errors
             )
 
             if errors:
                 return {"error": "\n".join(errors)}
 
-        return await tool.ainvoke(new_input_args)
+        return await tool.ainvoke(modified_input_args)
 
     return job_attachment_wrapper

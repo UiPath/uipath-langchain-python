@@ -51,85 +51,6 @@ def get_job_attachment_paths(model: type[BaseModel]) -> list[str]:
     return _get_json_paths_by_type(model, "Job_attachment")
 
 
-def replace_job_attachment_ids(
-    json_paths: list[str],
-    tool_args: dict[str, Any],
-    state: dict[str, Attachment],
-    errors: list[str],
-) -> dict[str, Any]:
-    """Replace job attachment IDs in tool_args with full attachment objects from state.
-
-    For each JSON path, this function finds matching objects in tool_args and
-    replaces them with corresponding attachment objects from state. The matching
-    is done by looking up the object's 'ID' field in the state dictionary.
-
-    If an ID is not a valid UUID or is not present in state, an error message
-    is added to the errors list.
-
-    Args:
-        json_paths: List of JSONPath expressions (e.g., ["$.attachment", "$.attachments[*]"])
-        tool_args: The dictionary containing tool arguments to modify
-        state: Dictionary mapping attachment UUID strings to Attachment objects
-        errors: List to collect error messages for invalid or missing IDs
-
-    Returns:
-        Modified copy of tool_args with attachment IDs replaced by full objects
-
-    Example:
-        >>> state = {
-        ...     "123e4567-e89b-12d3-a456-426614174000": Attachment(id="123e4567-e89b-12d3-a456-426614174000", name="file1.pdf"),
-        ...     "223e4567-e89b-12d3-a456-426614174001": Attachment(id="223e4567-e89b-12d3-a456-426614174001", name="file2.pdf")
-        ... }
-        >>> tool_args = {
-        ...     "attachment": {"ID": "123"},
-        ...     "other_field": "value"
-        ... }
-        >>> paths = ['$.attachment']
-        >>> errors = []
-        >>> replace_job_attachment_ids(paths, tool_args, state, errors)
-        {'attachment': {'ID': '123', 'name': 'file1.pdf', ...}, 'other_field': 'value'}
-    """
-    result = copy.deepcopy(tool_args)
-
-    for json_path in json_paths:
-        expr = parse(json_path)
-        matches = expr.find(result)
-
-        for match in matches:
-            current_value = match.value
-
-            if isinstance(current_value, dict) and "ID" in current_value:
-                attachment_id_str = str(current_value["ID"])
-
-                try:
-                    uuid.UUID(attachment_id_str)
-                except (ValueError, AttributeError):
-                    errors.append(
-                        _create_job_attachment_error_message(attachment_id_str)
-                    )
-                    continue
-
-                if attachment_id_str in state:
-                    replacement_value = state[attachment_id_str]
-                    match.full_path.update(
-                        result, replacement_value.model_dump(by_alias=True, mode="json")
-                    )
-                else:
-                    errors.append(
-                        _create_job_attachment_error_message(attachment_id_str)
-                    )
-
-    return result
-
-
-def _create_job_attachment_error_message(attachment_id_str: str) -> str:
-    return (
-        f"Could not find JobAttachment with ID='{attachment_id_str}'. "
-        f"Try again invoking the tool and please make sure that you pass "
-        f"valid JobAttachment IDs associated with existing JobAttachments in the current context."
-    )
-
-
 def _get_json_paths_by_type(model: type[BaseModel], type_name: str) -> list[str]:
     """Get JSONPath expressions for all fields that reference a specific type.
 
@@ -211,38 +132,6 @@ def _get_json_paths_by_type(model: type[BaseModel], type_name: str) -> list[str]
     return _recursive_search(model, "")
 
 
-def _extract_values_by_paths(
-    obj: dict[str, Any] | BaseModel, json_paths: list[str]
-) -> list[Any]:
-    """Extract values from an object using JSONPath expressions.
-
-    Args:
-        obj: The object (dict or Pydantic model) to extract values from
-        json_paths: List of JSONPath expressions (e.g., ["$.attachment", "$.attachments[*]"])
-
-    Returns:
-        List of all extracted values (flattened)
-
-    Example:
-        >>> obj = {
-        ...     "attachment": {"id": "123"},
-        ...     "attachments": [{"id": "456"}, {"id": "789"}]
-        ... }
-        >>> paths = ['$.attachment', '$.attachments[*]']
-        >>> _extract_values_by_paths(obj, paths)
-        [{'id': '123'}, {'id': '456'}, {'id': '789'}]
-    """
-    data = obj.model_dump() if isinstance(obj, BaseModel) else obj
-
-    results = []
-    for json_path in json_paths:
-        expr = parse(json_path)
-        matches = expr.find(data)
-        results.extend([match.value for match in matches])
-
-    return results
-
-
 def _get_target_type(model: type[BaseModel], type_name: str) -> Any:
     """Get the target type from the model's module.
 
@@ -284,7 +173,6 @@ def _create_type_matcher(type_name: str, target_type: Any) -> Any:
 
     return matches_type
 
-
 def _unwrap_optional(annotation: Any) -> Any:
     """Unwrap Optional/Union types to get the underlying type.
 
@@ -305,3 +193,116 @@ def _unwrap_optional(annotation: Any) -> Any:
 
 def _is_pydantic_model(annotation: Any) -> bool:
     return isinstance(annotation, type) and issubclass(annotation, BaseModel)
+
+def replace_job_attachment_ids(
+    json_paths: list[str],
+    tool_args: dict[str, Any],
+    state: dict[str, Attachment],
+    errors: list[str],
+) -> dict[str, Any]:
+    """Replace job attachment IDs in tool_args with full attachment objects from state.
+
+    For each JSON path, this function finds matching objects in tool_args and
+    replaces them with corresponding attachment objects from state. The matching
+    is done by looking up the object's 'ID' field in the state dictionary.
+
+    If an ID is not a valid UUID or is not present in state, an error message
+    is added to the errors list.
+
+    Args:
+        json_paths: List of JSONPath expressions (e.g., ["$.attachment", "$.attachments[*]"])
+        tool_args: The dictionary containing tool arguments to modify
+        state: Dictionary mapping attachment UUID strings to Attachment objects
+        errors: List to collect error messages for invalid or missing IDs
+
+    Returns:
+        Modified copy of tool_args with attachment IDs replaced by full objects
+
+    Example:
+        >>> state = {
+        ...     "123e4567-e89b-12d3-a456-426614174000": Attachment(id="123e4567-e89b-12d3-a456-426614174000", name="file1.pdf"),
+        ...     "223e4567-e89b-12d3-a456-426614174001": Attachment(id="223e4567-e89b-12d3-a456-426614174001", name="file2.pdf")
+        ... }
+        >>> tool_args = {
+        ...     "attachment": {"ID": "123"},
+        ...     "other_field": "value"
+        ... }
+        >>> paths = ['$.attachment']
+        >>> errors = []
+        >>> replace_job_attachment_ids(paths, tool_args, state, errors)
+        {'attachment': {'ID': '123', 'name': 'file1.pdf', ...}, 'other_field': 'value'}
+    """
+    result = copy.deepcopy(tool_args)
+
+    for json_path in json_paths:
+        expr = parse(json_path)
+        matches = expr.find(result)
+
+        for match in matches:
+            current_value = match.value
+
+            if isinstance(current_value, dict) and "ID" in current_value:
+                attachment_id_str = str(current_value["ID"])
+
+                try:
+                    uuid.UUID(attachment_id_str)
+                except (ValueError, AttributeError):
+                    errors.append(
+                        _create_job_attachment_error_message(attachment_id_str)
+                    )
+                    continue
+
+                if attachment_id_str in state:
+                    replacement_value = state[attachment_id_str]
+                    match.full_path.update(
+                        result, replacement_value.model_dump(by_alias=True, mode="json")
+                    )
+                else:
+                    errors.append(
+                        _create_job_attachment_error_message(attachment_id_str)
+                    )
+
+    return result
+
+
+def _create_job_attachment_error_message(attachment_id_str: str) -> str:
+    return (
+        f"Could not find JobAttachment with ID='{attachment_id_str}'. "
+        f"Try again invoking the tool and please make sure that you pass "
+        f"valid JobAttachment IDs associated with existing JobAttachments in the current context."
+    )
+
+
+def _extract_values_by_paths(
+    obj: dict[str, Any] | BaseModel, json_paths: list[str]
+) -> list[Any]:
+    """Extract values from an object using JSONPath expressions.
+
+    Args:
+        obj: The object (dict or Pydantic model) to extract values from
+        json_paths: List of JSONPath expressions (e.g., ["$.attachment", "$.attachments[*]"])
+
+    Returns:
+        List of all extracted values (flattened)
+
+    Example:
+        >>> obj = {
+        ...     "attachment": {"id": "123"},
+        ...     "attachments": [{"id": "456"}, {"id": "789"}]
+        ... }
+        >>> paths = ['$.attachment', '$.attachments[*]']
+        >>> _extract_values_by_paths(obj, paths)
+        [{'id': '123'}, {'id': '456'}, {'id': '789'}]
+    """
+    data = obj.model_dump() if isinstance(obj, BaseModel) else obj
+
+    results = []
+    for json_path in json_paths:
+        expr = parse(json_path)
+        matches = expr.find(data)
+        results.extend([match.value for match in matches])
+
+    return results
+
+
+

@@ -24,21 +24,6 @@ class AnalyzeFileTool(StructuredToolWithOutputType, ToolWrapperMixin):
 def create_analyze_file_tool(
     resource: AgentInternalToolResourceConfig,
 ) -> StructuredTool:
-    """
-    Creates an internal tool based on the resource configuration.
-
-    Routes to the appropriate handler based on the tool_type specified in
-    the resource properties.
-
-    Args:
-        resource: Internal tool resource configuration
-
-    Returns:
-        A structured tool that can be used by LangChain agents
-
-    Raises:
-        ValueError: If schema creation fails or tool_type is not supported
-    """
     tool_name = sanitize_tool_name(resource.name)
     input_model = create_model(resource.input_schema)
     output_model = create_model(resource.output_schema)

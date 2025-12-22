@@ -34,28 +34,12 @@ _INTERNAL_TOOL_HANDLERS: dict[
 def create_internal_tool(resource: AgentInternalToolResourceConfig) -> StructuredTool:
     """Create an internal tool based on the resource configuration.
 
-    Args:
-        resource: Internal tool resource configuration containing the tool type and
-                 properties needed for tool creation.
-
-    Returns:
-        A LangChain StructuredTool instance configured for the specified internal tool.
-
     Raises:
         ValueError: If the tool type is not supported (no handler exists for it).
 
-    Example:
-        >>> resource = AgentInternalToolResourceConfig(
-        ...     properties=AgentInternalToolProperties(
-        ...         tool_type=AgentInternalToolType.ANALYZE_FILES
-        ...     )
-        ... )
-        >>> tool = create_internal_tool(resource)
-        >>> result = tool.invoke({"file_content": "..."})
     """
     tool_type = resource.properties.tool_type
 
-    # Get the appropriate handler for this tool type
     handler = _INTERNAL_TOOL_HANDLERS.get(tool_type)
     if handler is None:
         raise ValueError(
