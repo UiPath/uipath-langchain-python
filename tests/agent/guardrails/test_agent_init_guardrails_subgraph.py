@@ -47,7 +47,7 @@ class TestAgentInitGuardrailsSubgraph:
         assert result_non_match == inner[1]
 
     def test_two_guardrails_build_post_chain(self, monkeypatch: MonkeyPatch) -> None:
-        """Two AGENT guardrails should create a POST_EXECUTION chain with failure edges."""
+        """Two AGENT guardrails should run after INIT, but be evaluated as PRE_EXECUTION."""
         monkeypatch.setattr(mod, "StateGraph", FakeStateGraph)
         monkeypatch.setattr(mod, "START", "START")
         monkeypatch.setattr(mod, "END", "END")
@@ -79,27 +79,27 @@ class TestAgentInitGuardrailsSubgraph:
             guardrails=guardrails,
         )
 
-        post_g1 = "eval_post_execution_guardrail1"
-        log_post_g1 = "log_post_execution_guardrail1"
-        post_g2 = "eval_post_execution_guardrail2"
-        block_post_g2 = "block_post_execution_guardrail2"
+        pre_g1 = "eval_pre_execution_guardrail1"
+        log_pre_g1 = "log_pre_execution_guardrail1"
+        pre_g2 = "eval_pre_execution_guardrail2"
+        block_pre_g2 = "block_pre_execution_guardrail2"
 
         expected_edges = {
             ("START", "inner"),
-            ("inner", post_g1),
-            (log_post_g1, post_g2),
-            (block_post_g2, "END"),
+            ("inner", pre_g1),
+            (log_pre_g1, pre_g2),
+            (block_pre_g2, "END"),
         }
         assert expected_edges.issubset(set(result_graph.edges))
 
         node_names = {name for name, _ in result_graph.nodes}
         for name in [
             "inner",
-            post_g1,
-            post_g2,
-            log_post_g1,
-            block_post_g2,
+            pre_g1,
+            pre_g2,
+            log_pre_g1,
+            block_pre_g2,
         ]:
             assert name in node_names
-        assert "eval_post_execution_llm_guardrail" not in node_names
-        assert "noop_post_execution_llm_guardrail" not in node_names
+        assert "eval_pre_execution_llm_guardrail" not in node_names
+        assert "noop_pre_execution_llm_guardrail" not in node_names

@@ -204,6 +204,16 @@ def create_llm_guardrails_subgraph(
     llm_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
 ):
+    """Create a guarded LLM node.
+
+    Args:
+        llm_node: Tuple of (node_name, node_callable) for the LLM node.
+        guardrails: Optional sequence of (guardrail, action) tuples.
+
+    Returns:
+        Either the original node callable (if no applicable guardrails) or a compiled
+        LangGraph subgraph that enforces the configured guardrails.
+    """
     applicable_guardrails = [
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
@@ -226,8 +236,14 @@ def create_tools_guardrails_subgraph(
     tool_nodes: Mapping[str, RunnableCallable],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
 ) -> dict[str, RunnableCallable]:
-    """Create tool nodes with guardrails.
+    """Create tool nodes with guardrails applied.
     Args:
+        tool_nodes: Mapping of tool name to a LangGraph `ToolNode`.
+        guardrails: Optional sequence of (guardrail, action) tuples.
+
+    Returns:
+        A mapping of tool name to either the original `ToolNode` or a compiled subgraph
+        that enforces the matching tool guardrails.
     """
     result: dict[str, RunnableCallable] = {}
     for tool_name, tool_node in tool_nodes.items():
@@ -243,24 +259,49 @@ def create_tools_guardrails_subgraph(
 def create_agent_init_guardrails_subgraph(
     init_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
-):
-    """Create a subgraph for INIT node that applies guardrails on the state messages."""
+) -> Any:
+    """Create a subgraph for the INIT node and apply AGENT guardrails after INIT.
+
+    This subgraph intentionally **runs the INIT node first** (so it can seed/normalize
+    the agent state), and then evaluates guardrails as **PRE_EXECUTION**. This lets
+    guardrails intended to run "before agent execution" validate the post-init state.
+
+    Args:
+        init_node: Tuple of (node_name, node_callable) for the INIT node.
+        guardrails: Optional sequence of (guardrail, action) tuples.
+
+    Returns:
+        Either the original node callable (if no applicable guardrails) or a compiled
+        LangGraph subgraph that runs INIT then enforces PRE_EXECUTION AGENT guardrails.
+    """
     applicable_guardrails = [
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
         if GuardrailScope.AGENT in guardrail.selector.scopes
         and not isinstance(guardrail, DeterministicGuardrail)
     ]
+    applicable_guardrails = _filter_guardrails_by_stage(
+        applicable_guardrails, ExecutionStage.PRE_EXECUTION
+    )
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
         return init_node[1]
 
-    return _create_guardrails_subgraph(
-        main_inner_node=init_node,
+    inner_name, inner_node = init_node
+    subgraph = StateGraph(AgentGuardrailsGraphState)
+    subgraph.add_node(inner_name, inner_node)
+    subgraph.add_edge(START, inner_name)
+
+    first_guardrail_node = _build_guardrail_node_chain(
+        subgraph=subgraph,
         guardrails=applicable_guardrails,
         scope=GuardrailScope.AGENT,
-        execution_stages=[ExecutionStage.POST_EXECUTION],
+        execution_stage=ExecutionStage.PRE_EXECUTION,
         node_factory=create_agent_init_guardrail_node,
+        next_node=END,
+        guarded_node_name=inner_name,
     )
+    subgraph.add_edge(inner_name, first_guardrail_node)
+    return subgraph.compile()
 
 
 def create_agent_terminate_guardrails_subgraph(
@@ -306,6 +347,16 @@ def create_tool_guardrails_subgraph(
     tool_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
 ):
+    """Create a guarded tool node.
+
+    Args:
+        tool_node: Tuple of (tool_name, tool_node_callable).
+        guardrails: Optional sequence of (guardrail, action) tuples.
+
+    Returns:
+        Either the original tool node callable (if no matching guardrails) or a compiled
+        LangGraph subgraph that enforces the matching tool guardrails.
+    """
     tool_name, _ = tool_node
     applicable_guardrails = [
         (guardrail, action)
