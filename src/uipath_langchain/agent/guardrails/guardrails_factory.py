@@ -24,7 +24,7 @@ from uipath.core.guardrails import (
     UniversalRule,
     WordRule,
 )
-from uipath.platform.guardrails import BaseGuardrail
+from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 
 from uipath_langchain.agent.guardrails.actions import (
     BlockAction,
@@ -233,6 +233,19 @@ def build_guardrails_with_actions(
             converted_guardrail = _convert_agent_custom_guardrail_to_deterministic(
                 guardrail
             )
+            # Validate that DeterministicGuardrails only have TOOL scope
+            non_tool_scopes = [
+                scope
+                for scope in converted_guardrail.selector.scopes
+                if scope != GuardrailScope.TOOL
+            ]
+
+            if non_tool_scopes:
+                raise ValueError(
+                    f"Deterministic guardrail '{converted_guardrail.name}' can only be used with TOOL scope. "
+                    f"Found invalid scopes: {[scope.name for scope in non_tool_scopes]}. "
+                    f"Please configure this guardrail to use only TOOL scope."
+                )
 
         action = guardrail.action
 

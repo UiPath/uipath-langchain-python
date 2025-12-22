@@ -4,6 +4,7 @@ from typing import Any, Callable, Mapping, Sequence
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
+from uipath.core.guardrails import DeterministicGuardrail
 from uipath.platform.guardrails import (
     BaseGuardrail,
     BuiltInValidatorGuardrail,
@@ -207,6 +208,7 @@ def create_llm_guardrails_subgraph(
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
         if GuardrailScope.LLM in guardrail.selector.scopes
+        and not isinstance(guardrail, DeterministicGuardrail)
     ]
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
         return llm_node[1]
@@ -247,6 +249,7 @@ def create_agent_init_guardrails_subgraph(
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
         if GuardrailScope.AGENT in guardrail.selector.scopes
+        and not isinstance(guardrail, DeterministicGuardrail)
     ]
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
         return init_node[1]
@@ -277,6 +280,7 @@ def create_agent_terminate_guardrails_subgraph(
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
         if GuardrailScope.AGENT in guardrail.selector.scopes
+        and not isinstance(guardrail, DeterministicGuardrail)
     ]
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
         return terminate_node[1]

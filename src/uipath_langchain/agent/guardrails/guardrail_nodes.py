@@ -149,12 +149,22 @@ def _create_guardrail_node(
                     state, guardrail, payload_generator
                 )
             else:
-                raise AgentTerminationException(
-                    code=UiPathErrorCode.EXECUTION_ERROR,
-                    title="Unsupported guardrail type",
-                    detail=f"Guardrail type '{type(guardrail).__name__}' is not supported. "
-                    f"Expected DeterministicGuardrail or BuiltInValidatorGuardrail.",
-                )
+                # Provide specific error message for DeterministicGuardrails with wrong scope
+                if isinstance(guardrail, DeterministicGuardrail):
+                    raise AgentTerminationException(
+                        code=UiPathErrorCode.EXECUTION_ERROR,
+                        title="Invalid guardrail scope",
+                        detail=f"DeterministicGuardrail '{guardrail.name}' can only be used with TOOL scope. "
+                        f"Current scope: {scope.name}. "
+                        f"Please configure this guardrail to use only TOOL scope.",
+                    )
+                else:
+                    raise AgentTerminationException(
+                        code=UiPathErrorCode.EXECUTION_ERROR,
+                        title="Unsupported guardrail type",
+                        detail=f"Guardrail type '{type(guardrail).__name__}' is not supported. "
+                        f"Expected DeterministicGuardrail (TOOL scope only) or BuiltInValidatorGuardrail.",
+                    )
 
             return _create_validation_command(result, success_node, failure_node)
 

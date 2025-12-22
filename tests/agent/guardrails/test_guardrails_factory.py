@@ -158,6 +158,122 @@ class TestGuardrailsFactory:
         assert action.version == 2
         assert action.assignee == "admin@example.com"
 
+    @pytest.mark.parametrize(
+        "scope,scope_lower",
+        [
+            ("Llm", "llm"),
+            ("Agent", "agent"),
+        ],
+    )
+    def test_deterministic_guardrail_with_invalid_scope_raises_value_error(
+        self, scope: str, scope_lower: str
+    ) -> None:
+        """DeterministicGuardrails with LLM or AGENT scope should raise ValueError."""
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": f"test-{scope_lower}-scope",
+                "name": f"test-guardrail-{scope_lower}",
+                "description": f"Test guardrail with {scope} scope",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": [scope],  # Invalid scope - should be rejected
+                    "matchNames": None,
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {
+                            "$selectorType": "specific",
+                            "fields": [{"path": "message.content", "source": "input"}],
+                        },
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=rf"Deterministic guardrail 'test-guardrail-{scope_lower}' can only be used with TOOL scope.*Found invalid scopes.*{scope.upper()}",
+        ):
+            build_guardrails_with_actions([guardrail])
+
+    def test_deterministic_guardrail_with_tool_scope_succeeds(self) -> None:
+        """DeterministicGuardrails with TOOL scope should be accepted."""
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-tool-scope",
+                "name": "test-guardrail-tool",
+                "description": "Test guardrail with TOOL scope",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool"],  # TOOL scope - should be accepted
+                    "matchNames": ["my_tool"],
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {
+                            "$selectorType": "specific",
+                            "fields": [{"path": "message.content", "source": "input"}],
+                        },
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        result = build_guardrails_with_actions([guardrail])
+
+        assert len(result) == 1
+        converted_guardrail, action = result[0]
+        assert isinstance(converted_guardrail, DeterministicGuardrail)
+        assert converted_guardrail.name == "test-guardrail-tool"
+        assert isinstance(action, BlockAction)
+
+    def test_deterministic_guardrail_with_mixed_scopes_raises_value_error(self) -> None:
+        """DeterministicGuardrails with mixed scopes including non-TOOL should raise ValueError."""
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-mixed-scope",
+                "name": "test-guardrail-mixed",
+                "description": "Test guardrail with mixed scopes",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool", "Llm"],  # Mixed scopes - should be rejected
+                    "matchNames": ["my_tool"],
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {
+                            "$selectorType": "specific",
+                            "fields": [{"path": "message.content", "source": "input"}],
+                        },
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Deterministic guardrail 'test-guardrail-mixed' can only be used with TOOL scope.*Found invalid scopes.*LLM",
+        ):
+            build_guardrails_with_actions([guardrail])
+
 
 class TestCreateWordRuleFunc:
     """Tests for _create_word_rule_func."""
