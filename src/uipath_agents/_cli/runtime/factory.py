@@ -18,6 +18,10 @@ from uipath_langchain.runtime.storage import SqliteResumableStorage
 from uipath_agents.agent_graph_builder import build_agent_graph
 
 from ..._observability import configure_telemetry, shutdown_telemetry
+from ..._observability.callback import UiPathTracingCallback
+from ..._observability.runtime_wrapper import TelemetryRuntimeWrapper
+from ..._observability.span_processor import SourceMarkerProcessor
+from ..._observability.tracer import UiPathTracer
 from ..constants import AGENT_ENTRYPOINT
 from ..utils import _prepare_agent_run_files, load_agent_configuration
 from .runtime import AgentsLangGraphRuntime
@@ -40,6 +44,9 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
         """Setup tracing and instrumentation."""
         super()._setup_instrumentation(trace_manager)
+        if trace_manager:
+            trace_manager.tracer_provider.add_span_processor(SourceMarkerProcessor())
+
         configure_telemetry(trace_manager)
 
     def discover_entrypoints(self) -> list[str]:
@@ -103,19 +110,28 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             entrypoint: Agent entrypoint name
 
         Returns:
-            Configured AgentLangGraphRuntime instance wrapped in UiPathResumableRuntime
+            Configured runtime stack: Base → Telemetry → Resumable
 
         Note:
-            We override this to use AgentLangGraphRuntime instead of UiPathLangGraphRuntime.
-            The parent method hardcodes the runtime class, so we can't call super() here.
+            Runtime wrapping order:
+            1. AgentsLangGraphRuntime (base - handles LangGraph execution)
+            2. TelemetryRuntimeWrapper (adds tracing spans)
+            3. UiPathResumableRuntime (adds persistence/resume)
+
+            The callback is passed via constructor to the base runtime,
+            ensuring it persists across debug/chat re-executions where
+            the same runtime instance is executed multiple times.
         """
+        tracer = UiPathTracer()
+        callback = UiPathTracingCallback(tracer)
         base_runtime = AgentsLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
+            callbacks=[callback],
         )
-
-        return await self._wrap_in_resumable_runtime(base_runtime)
+        telemetry_runtime = TelemetryRuntimeWrapper(base_runtime, tracer, callback)
+        return await self._wrap_in_resumable_runtime(telemetry_runtime)
 
     async def _wrap_in_resumable_runtime(
         self, base_runtime: UiPathRuntimeProtocol

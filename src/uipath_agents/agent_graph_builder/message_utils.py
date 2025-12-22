@@ -12,8 +12,8 @@ from uipath.agent.react import AGENT_SYSTEM_PROMPT_TEMPLATE
 
 logger = logging.getLogger(__name__)
 
-# Whitelist pattern: only allow alphanumeric, dots, and underscores in arguments syntax
-SAFE_ARGUMENT_PATTERN: Pattern[str] = re.compile(r"^[a-zA-Z0-9_.]+$")
+# Whitelist pattern: allow alphanumeric, dots, underscores, and array notation []*
+SAFE_ARGUMENT_PATTERN: Pattern[str] = re.compile(r"^[a-zA-Z0-9_.\[\]*]+$")
 
 
 def apply_system_prompt_template(system_prompt_content: str, agent_name: str) -> str:
@@ -48,11 +48,14 @@ def build_agent_messages(
     if user_message is None:
         raise ValueError("Agent configuration must contain exactly one user message")
 
+    # Support both {{input.x}} (Studio Web) and {{x}} (direct) formats
+    wrapped_input = {"input": input_arguments, **input_arguments}
+
     system_prompt_content = interpolate_message(
-        system_message.content or "", input_arguments
+        system_message.content or "", wrapped_input
     )
     system_prompt = apply_system_prompt_template(system_prompt_content, agent_name)
-    user_prompt = interpolate_message(user_message.content or "", input_arguments)
+    user_prompt = interpolate_message(user_message.content or "", wrapped_input)
 
     return [
         SystemMessage(content=system_prompt),
