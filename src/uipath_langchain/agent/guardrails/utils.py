@@ -60,9 +60,7 @@ def _extract_tool_args_from_message(
                             return parsed
                     except json.JSONDecodeError:
                         logger.warning(
-                            "Failed to parse tool args as JSON for tool '%s': %s",
-                            tool_name,
-                            args[:100] if len(args) > 100 else args,
+                            "Failed to parse tool args as JSON for tool '%s'", tool_name
                         )
                         return {}
 
@@ -95,10 +93,7 @@ def _extract_tools_args_from_message(message: AnyMessage) -> list[dict[str, Any]
                     if isinstance(parsed, dict):
                         result.append(parsed)
                 except json.JSONDecodeError:
-                    logger.warning(
-                        "Failed to parse tool args as JSON: %s",
-                        args[:100] if len(args) > 100 else args,
-                    )
+                    logger.warning("Failed to parse tool args as JSON")
 
     return result
 
