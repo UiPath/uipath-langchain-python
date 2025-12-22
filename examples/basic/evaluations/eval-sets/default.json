@@ -1,0 +1,133 @@
+{
+  "version": "1.0",
+  "id": "NewSchemaSampleEval",
+  "name": "New Schema Sample Evaluation",
+  "evaluatorRefs": [
+    "ContainsEvaluator",
+    "ExactMatchEvaluator",
+    "JsonSimilarityEvaluator",
+    "LLMJudgeOutputEvaluator",
+    "LLMJudgeStrictJSONSimilarityOutputEvaluator",
+    "TrajectoryEvaluator"
+  ],
+  "evaluations": [
+    {
+      "id": "test-basic-contains",
+      "name": "Test Basic Contains Date",
+      "inputs": {},
+      "evaluationCriterias": {
+        "ContainsEvaluator": {
+          "searchText": "December 16"
+        }
+      }
+    },
+    {
+      "id": "test-basic-exact-match",
+      "name": "Test Basic Exact Match",
+      "inputs": {},
+      "evaluationCriterias": {
+        "ExactMatchEvaluator": {
+          "expectedOutput": {
+            "content": "The current date is December 16, 2025."
+          }
+        }
+      }
+    },
+    {
+      "id": "test-contains-year",
+      "name": "Test Contains Year 2025",
+      "inputs": {},
+      "evaluationCriterias": {
+        "ContainsEvaluator": {
+          "searchText": "2025"
+        }
+      }
+    },
+    {
+      "id": "test-json-similarity",
+      "name": "Test JSON Structure Similarity",
+      "inputs": {},
+      "evaluationCriterias": {
+        "JsonSimilarityEvaluator": {
+          "expectedOutput": {
+            "content": "The current date is December 16, 2025."
+          }
+        }
+      }
+    },
+    {
+      "id": "test-llm-judge-semantic",
+      "name": "Test LLM Judge Semantic Similarity",
+      "inputs": {},
+      "evaluationCriterias": {
+        "LLMJudgeOutputEvaluator": {
+          "expectedOutput": {
+            "content": "Today's date is December 16, 2025."
+          }
+        }
+      }
+    },
+    {
+      "id": "test-llm-judge-strict-json",
+      "name": "Test LLM Judge Strict JSON Similarity",
+      "inputs": {},
+      "evaluationCriterias": {
+        "LLMJudgeStrictJSONSimilarityOutputEvaluator": {
+          "expectedOutput": {
+            "content": "The current date is December 16, 2025."
+          }
+        }
+      }
+    },
+    {
+      "id": "test-trajectory",
+      "name": "Test Agent Trajectory",
+      "inputs": {},
+      "evaluationCriterias": {
+        "TrajectoryEvaluator": {
+          "expectedAgentBehavior": "The agent should understand the question about the current date and provide a clear, accurate response that includes the full date (month, day, and year)."
+        }
+      }
+    },
+    {
+      "id": "test-multi-evaluator",
+      "name": "Test Multiple Evaluators Together",
+      "inputs": {},
+      "evaluationCriterias": {
+        "ContainsEvaluator": {
+          "searchText": "December"
+        },
+        "ExactMatchEvaluator": {
+          "expectedOutput": {
+            "content": "The current date is December 16, 2025."
+          }
+        },
+        "TrajectoryEvaluator": {
+          "expectedAgentBehavior": "The agent should provide the current date in a complete sentence format."
+        }
+      }
+    },
+    {
+      "id": "test-contains-case-sensitive",
+      "name": "Test Contains Case Sensitivity",
+      "inputs": {},
+      "evaluationCriterias": {
+        "ContainsEvaluator": {
+          "searchText": "december"
+        }
+      }
+    },
+    {
+      "id": "test-semantic-variation",
+      "name": "Test Semantic Variation Acceptance",
+      "inputs": {},
+      "evaluationCriterias": {
+        "LLMJudgeOutputEvaluator": {
+          "expectedOutput": {
+            "content": "It is December 16th, 2025."
+          }
+        }
+      }
+    }
+  ]
+}

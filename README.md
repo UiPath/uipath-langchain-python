@@ -138,6 +138,38 @@ uv run uipath debug agent.json    '{}'
 -   Files are loaded from `.agent-builder/` and copied to the top level before execution
 -   Establishes bidirectional communication with Studio Web for breakpoints, logs, and state inspection
 
+**Eval**
+
+The command used to run evaluation sets against your agent (source code from the `uipath` CLI package). Evaluations help you test agent behavior against expected outcomes using various evaluators like exact matching, similarity scoring, and trajectory analysis.
+
+```bash
+# Run evaluations from the current directory (auto-discovers agent and eval-set)
+uv run uipath eval
+
+# Run a specific eval-set file
+uv run uipath eval agent.json evaluations/eval-sets/default.json
+
+# Run with multiple parallel workers for faster execution
+uv run uipath eval --workers 4
+
+# Run specific evaluations by ID
+uv run uipath eval --eval-ids "['test-basic', 'test-advanced']"
+
+# Run without reporting results to Studio Web
+uv run uipath eval --no-report
+
+# Save evaluation results to a file
+uv run uipath eval --output-file results.json
+```
+
+**Evaluation Structure**
+
+The evaluation framework expects an `evaluations/` directory with:
+-   `eval-sets/`: JSON files defining test cases and evaluation criteria
+-   `evaluators/`: JSON files defining how to evaluate agent outputs (exact match, similarity, contains, etc.)
+
+See `examples/basic/evaluations/` for a complete example of how to structure your evaluation files.
+
 **Dev**
 
 Currently work in progress. It's available for standard coded agents but not yet adapted for agents.
