@@ -18,8 +18,9 @@ from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.guardrails.utils import (
-    _extract_tool_input_data,
+    _extract_tool_args_from_message,
     _extract_tool_output_data,
+    _extract_tools_args_from_message,
     get_message_content,
 )
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
@@ -188,7 +189,11 @@ def create_llm_guardrail_node(
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
-        return get_message_content(state.messages[-1])
+        match execution_stage:
+            case ExecutionStage.PRE_EXECUTION:
+                return get_message_content(state.messages[-1])
+            case ExecutionStage.POST_EXECUTION:
+                return json.dumps(_extract_tools_args_from_message(state.messages[-1]))
 
     return _create_guardrail_node(
         guardrail,
@@ -273,8 +278,8 @@ def create_tool_guardrail_node(
             return ""
 
         if execution_stage == ExecutionStage.PRE_EXECUTION:
-            # Extract tool args as dict and convert to JSON string
-            args_dict = _extract_tool_input_data(state, tool_name, execution_stage)
+            last_message = state.messages[-1]
+            args_dict = _extract_tool_args_from_message(last_message, tool_name)
             if args_dict:
                 return json.dumps(args_dict)
 
@@ -282,7 +287,16 @@ def create_tool_guardrail_node(
 
     # Create closures for input/output data extraction (for deterministic guardrails)
     def _input_data_extractor(state: AgentGuardrailsGraphState) -> dict[str, Any]:
-        return _extract_tool_input_data(state, tool_name, execution_stage)
+        if execution_stage == ExecutionStage.PRE_EXECUTION:
+            if len(state.messages) < 1:
+                return {}
+            message = state.messages[-1]
+        else:  # POST_EXECUTION
+            if len(state.messages) < 2:
+                return {}
+            message = state.messages[-2]
+
+        return _extract_tool_args_from_message(message, tool_name)
 
     def _output_data_extractor(state: AgentGuardrailsGraphState) -> dict[str, Any]:
         return _extract_tool_output_data(state)
