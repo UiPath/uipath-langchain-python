@@ -13,7 +13,7 @@ from .job_attachments import (
 def create_init_node(
     messages: Sequence[SystemMessage | HumanMessage]
     | Callable[[Any], Sequence[SystemMessage | HumanMessage]],
-    input_schema: type[BaseModel],
+    input_schema: type[BaseModel] | None,
 ):
     def graph_state_init(state: Any):
         if callable(messages):
@@ -21,7 +21,8 @@ def create_init_node(
         else:
             resolved_messages = messages
 
-        job_attachments = get_job_attachments(input_schema, state)
+        schema = input_schema if input_schema is not None else BaseModel
+        job_attachments = get_job_attachments(schema, state)
         job_attachments_dict = {
             str(att.id): att for att in job_attachments if att.id is not None
         }

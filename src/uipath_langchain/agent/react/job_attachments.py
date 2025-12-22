@@ -28,13 +28,7 @@ def get_job_attachments(
 
     result = []
     for attachment in job_attachments:
-        if isinstance(attachment, BaseModel):
-            attachment_dict = attachment.model_dump(by_alias=True)
-            result.append(Attachment.model_validate(attachment_dict))
-        elif isinstance(attachment, dict):
-            result.append(Attachment.model_validate(attachment))
-        else:
-            result.append(Attachment.model_validate(attachment))
+        result.append(Attachment.model_validate(attachment, from_attributes=True))
 
     return result
 
@@ -270,7 +264,7 @@ def replace_job_attachment_ids(
 def _create_job_attachment_error_message(attachment_id_str: str) -> str:
     return (
         f"Could not find JobAttachment with ID='{attachment_id_str}'. "
-        f"Try again invoking the tool and please make sure that you pass "
+        f"Try invoking the tool again and please make sure that you pass "
         f"valid JobAttachment IDs associated with existing JobAttachments in the current context."
     )
 

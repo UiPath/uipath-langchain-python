@@ -14,6 +14,14 @@ from uipath_langchain.agent.react.utils import (
 class TestGetJobAttachments:
     """Test job attachment extraction from data based on schema."""
 
+    def test_base_model_schema(self):
+        """Should return empty list when schema is BaseModel (no fields)."""
+        data = {"name": "test", "value": 42}
+
+        result = get_job_attachments(BaseModel, data)
+
+        assert result == []
+
     def test_no_attachments_in_schema(self):
         """Should return empty list when schema has no job-attachment fields."""
         schema = {
