@@ -40,6 +40,7 @@ def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
         description=resource.description,
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
+        example_calls=[],  # Examples cannot be provided for context.
     )
     async def context_tool_fn(query: str) -> dict[str, Any]:
         return {"documents": await retriever.ainvoke(query)}

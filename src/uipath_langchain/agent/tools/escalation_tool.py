@@ -48,6 +48,7 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         description=resource.description,
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
+        example_calls=channel.properties.example_calls,
     )
     async def escalation_tool_fn(
         runtime: ToolRuntime, **kwargs: Any
