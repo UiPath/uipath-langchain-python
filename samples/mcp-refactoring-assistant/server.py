@@ -1,5 +1,3 @@
-from typing import Any, Dict, List
-
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.prompts.base import Message
 from prompts import (extract_method, improve_naming, remove_duplication,
@@ -11,7 +9,7 @@ mcp = FastMCP("code-refactoring-assistant")
 
 # Register Code Analysis Tools
 @mcp.tool()
-def analyze_code_complexity(code: str) -> Dict[str, Any]:
+def analyze_code_complexity(code: str) -> dict:
     """Analyze Python code complexity using heuristics.
 
     Args:
@@ -24,7 +22,7 @@ def analyze_code_complexity(code: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
-def detect_code_smells(code: str) -> Dict[str, Any]:
+def detect_code_smells(code: str) -> dict:
     """Detect common code smells in Python code.
 
     Args:
@@ -40,9 +38,9 @@ def detect_code_smells(code: str) -> Dict[str, Any]:
 def get_refactoring_guide(
     issue_type: str,
     code: str = "",
-    complexity_info: Dict[str, Any] = None,
-    smells_info: Dict[str, Any] = None
-) -> Dict[str, Any]:
+    complexity_info: dict | None = None,
+    smells_info: dict | None = None
+) -> dict:
     """Get guidance on which refactoring prompt to use for a specific issue.
 
     Args:
@@ -65,7 +63,7 @@ def get_refactoring_guide(
 
 # Register Refactoring Prompts
 @mcp.prompt()
-def extract_method_prompt(code: str, target_lines: str = "auto") -> List[Message]:
+def extract_method_prompt(code: str, target_lines: str = "auto") -> list[Message]:
     """Guide for extracting a method from complex code.
 
     Args:
@@ -79,7 +77,7 @@ def extract_method_prompt(code: str, target_lines: str = "auto") -> List[Message
 
 
 @mcp.prompt()
-def simplify_conditional_prompt(code: str, pattern: str = "guard_clause") -> List[Message]:
+def simplify_conditional_prompt(code: str, pattern: str = "guard_clause") -> list[Message]:
     """Guide for simplifying complex conditional logic.
 
     Args:
@@ -93,7 +91,7 @@ def simplify_conditional_prompt(code: str, pattern: str = "guard_clause") -> Lis
 
 
 @mcp.prompt()
-def remove_duplication_prompt(code: str, duplicate_blocks: str) -> List[Message]:
+def remove_duplication_prompt(code: str, duplicate_blocks: str) -> list[Message]:
     """Guide for removing code duplication.
 
     Args:
@@ -107,7 +105,7 @@ def remove_duplication_prompt(code: str, duplicate_blocks: str) -> List[Message]
 
 
 @mcp.prompt()
-def improve_naming_prompt(code: str, symbols: str, context: str = "") -> List[Message]:
+def improve_naming_prompt(code: str, symbols: str, context: str = "") -> list[Message]:
     """Guide for improving variable and function names.
 
     Args:

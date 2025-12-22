@@ -1,14 +1,12 @@
-"""Refactoring guide tool that maps code issues to refactoring prompts."""
-
-from typing import Any, Dict, Optional
+﻿"""Refactoring guide tool that maps code issues to refactoring prompts."""
 
 
 def get_refactoring_guide(
     issue_type: str,
     code: str = "",
-    complexity_info: Optional[Dict[str, Any]] = None,
-    smells_info: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+    complexity_info: dict | None = None,
+    smells_info: dict | None = None
+) -> dict:
     """Get guidance on which refactoring prompt to use for a specific issue.
 
 
@@ -101,27 +99,45 @@ def get_refactoring_guide(
 
     # Construct arguments dict based on prompt requirements
     if prompt_name == "extract_method_prompt":
-        arguments = {
-            "code": code,
-            "target_lines": "auto"  # Agent can override if needed
+        return {
+            "prompt_name": prompt_name,
+            "arguments": {
+                "code": code,
+                "target_lines": "auto"
+            },
+            "description": guide["description"],
+            "priority": guide["priority"]
         }
-    elif prompt_name == "simplify_conditional_prompt":
+
+    if prompt_name == "simplify_conditional_prompt":
         # Determine pattern based on issue type
         pattern = "guard_clause" if issue_type == "deep_nesting" else "early_return"
-        arguments = {
-            "code": code,
-            "pattern": pattern
+        return {
+            "prompt_name": prompt_name,
+            "arguments": {
+                "code": code,
+                "pattern": pattern
+            },
+            "description": guide["description"],
+            "priority": guide["priority"]
         }
-    elif prompt_name == "remove_duplication_prompt":
+
+    if prompt_name == "remove_duplication_prompt":
         # Extract duplicate info from smells_info if available
         duplicate_blocks = "auto-detected duplicates"
         if smells_info and "duplicate_code" in smells_info.get("smells", []):
             duplicate_blocks = "See code analysis for duplicate blocks"
-        arguments = {
-            "code": code,
-            "duplicate_blocks": duplicate_blocks
+        return {
+            "prompt_name": prompt_name,
+            "arguments": {
+                "code": code,
+                "duplicate_blocks": duplicate_blocks
+            },
+            "description": guide["description"],
+            "priority": guide["priority"]
         }
-    elif prompt_name == "improve_naming_prompt":
+
+    if prompt_name == "improve_naming_prompt":
         # Extract poor naming symbols from smells_info
         symbols = "x,y,z"  # Default, agent can override
         if smells_info:
@@ -129,19 +145,22 @@ def get_refactoring_guide(
                          if s.get("type") == "poor_naming"]
             if poor_names:
                 symbols = ",".join(poor_names)
-        arguments = {
-            "code": code,
-            "symbols": symbols,
-            "context": ""  # Optional, agent can provide
+        return {
+            "prompt_name": prompt_name,
+            "arguments": {
+                "code": code,
+                "symbols": symbols,
+                "context": ""  # Optional, agent can provide
+            },
+            "description": guide["description"],
+            "priority": guide["priority"]
         }
-    else:
-        # Fallback: just provide code
-        arguments = {"code": code}
 
-    # Return structured response ready for client.get_prompt()
+    # Fallback: just provide code
     return {
         "prompt_name": prompt_name,
-        "arguments": arguments,
+        "arguments": {"code": code},
         "description": guide["description"],
         "priority": guide["priority"]
     }
+

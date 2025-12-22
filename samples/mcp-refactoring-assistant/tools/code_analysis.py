@@ -1,10 +1,9 @@
 """Code analysis tools for detecting complexity and code smells."""
 
 import re
-from typing import Any, Dict
 
 
-def analyze_code_complexity(code: str) -> Dict[str, Any]:
+def analyze_code_complexity(code: str) -> dict:
     """Analyze Python code complexity using heuristics.
 
     Args:
@@ -64,7 +63,7 @@ def analyze_code_complexity(code: str) -> Dict[str, Any]:
     }
 
 
-def detect_code_smells(code: str) -> Dict[str, Any]:
+def detect_code_smells(code: str) -> dict:
     """Detect common code smells in Python code.
 
     Args:

@@ -398,7 +398,7 @@ Guardrails service
 
 ```python
 # Validate input text using the provided guardrail.
-sdk.guardrails.evaluate_guardrail(input_data: str | dict[str, Any], guardrail: uipath.platform.guardrails.guardrails.BuiltInValidatorGuardrail) -> uipath.core.guardrails.guardrails.GuardrailValidationResult
+sdk.guardrails.evaluate_guardrail(input_data: str | dict[str, Any], guardrail: Annotated[Union[uipath.platform.guardrails.guardrails.CustomGuardrail, uipath.platform.guardrails.guardrails.BuiltInValidatorGuardrail], FieldInfo(annotation=NoneType, required=True, discriminator='guardrail_type')]) -> uipath.platform.guardrails.guardrails.GuardrailValidationResult
 
 ```
 

@@ -4,48 +4,55 @@
 import json
 import sys
 from pathlib import Path
-from typing import Any, Optional
 
 from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import BaseModel
+
 from uipath_langchain.chat import UiPathChat
 
 model = UiPathChat(model="gpt-4o-2024-08-06", temperature=0.7)
 
 server_path = Path(__file__).parent / "server.py"
 
-_client = None
-_react_agent = None
+manager = None
 
 
-async def _get_client():
-    """Get or initialize the MCP client."""
-    global _client
-    if _client is None:
-        _client = MultiServerMCPClient({
-            "code-refactoring": {
-                "command": sys.executable,
-                "args": [str(server_path)],
-                "transport": "stdio",
-            },
-        })
-    return _client
+class MCPManager:
+    def __init__(self):
+        self._client: MultiServerMCPClient | None = None
+        self._react_agent = None
+
+    async def get_client(self):
+        if self._client is None:
+            self._client = MultiServerMCPClient({
+                "code-refactoring": {
+                    "command": sys.executable,
+                    "args": [str(server_path)],
+                    "transport": "stdio",
+                },
+            })
+        return self._client
+
+    async def get_agent(self):
+        if self._react_agent is None:
+            client = await self.get_client()
+            tools = await client.get_tools()
+
+            model_with_tools = model.bind_tools(
+                tools,
+                tool_choice={"type": "function", "function": {"name": "get_refactoring_guide"}}
+            )
+            self._react_agent = create_agent(model_with_tools, tools=tools)
+        return self._react_agent
 
 
-async def _get_agent():
-    """Get or initialize the ReAct agent with MCP tools."""
-    global _react_agent
-    if _react_agent is None:
-        client = await _get_client()
-        tools = await client.get_tools()
-        _react_agent = create_agent(model, tools=tools)
-    return _react_agent
+manager = MCPManager()
 
 
-def _try_parse_json(value: Any) -> Optional[dict]:
+def _try_parse_json(value) -> dict | None:
     """Robustly parse JSON from various formats (dict, str, list)."""
     if value is None:
         return None
@@ -95,27 +102,25 @@ class State(BaseModel):
 
 async def agent_node(state: State) -> State:
     """Agent analyzes code and determines which prompt to use."""
-    react_agent = await _get_agent()
+    react_agent = await manager.get_agent()
 
-    initial_msg = HumanMessage(
-        content=f"""You are a refactoring assistant.
-
-1) Analyze this code using analyze_code_complexity
-2) Detect issues using detect_code_smells
-3) Call get_refactoring_guide with:
-   - issue_type: the main issue detected
-   - code: the code to refactor
-   - complexity_info: results from step 1
-   - smells_info: results from step 2
-
-The get_refactoring_guide tool will return {{\"prompt_name\": \"...\", \"arguments\": {{...}}}} ready for the next step.
-
-CODE:
-{state.code}
-"""
+    system_msg = SystemMessage(
+        content=(
+            "You are a refactoring assistant.\n\n"
+            "1) Analyze this code using analyze_code_complexity\n"
+            "2) Detect issues using detect_code_smells\n"
+            "3) Call get_refactoring_guide with:\n"
+            "   - issue_type: the main issue detected\n"
+            "   - code: the code to refactor\n"
+            "   - complexity_info: results from step 1\n"
+            "   - smells_info: results from step 2\n\n"
+            'The get_refactoring_guide tool will return {"prompt_name": "...", "arguments": {...}} ready for the next step.'
+        )
     )
 
-    messages_state = MessagesState(messages=[initial_msg])
+    user_msg = HumanMessage(content=state.code)
+
+    messages_state = MessagesState(messages=[system_msg, user_msg])
     result = await react_agent.ainvoke(messages_state)
 
     prompt_name = ""
@@ -132,19 +137,11 @@ CODE:
                     break
 
     if not prompt_name:
-        return State(
-            code=state.code,
-            prompt_name="",
-            prompt_arguments={},
-        )
+        return State(code=state.code, prompt_name="", prompt_arguments={})
 
     prompt_args.setdefault('code', state.code)
 
-    return State(
-        code=state.code,
-        prompt_name=prompt_name,
-        prompt_arguments=prompt_args,
-    )
+    return State(code=state.code, prompt_name=prompt_name, prompt_arguments=prompt_args)
 
 
 async def prompt_node(state: State) -> Output:
@@ -155,7 +152,7 @@ async def prompt_node(state: State) -> Output:
                    "Please ensure the agent analyzed the code and called get_refactoring_guide."
         )
 
-    client = await _get_client()
+    client = await manager.get_client()
 
     prompt_messages = await client.get_prompt(
         "code-refactoring",
@@ -178,4 +175,5 @@ builder.add_edge("agent", "prompt")
 builder.add_edge("prompt", END)
 
 graph = builder.compile()
+
 
