@@ -10,7 +10,6 @@ from langchain_core.messages import (
     ToolMessage,
 )
 
-from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
@@ -61,45 +60,42 @@ def _extract_tool_args_from_message(
                             return parsed
                     except json.JSONDecodeError:
                         logger.warning(
-                            "Failed to parse tool args as JSON for tool '%s': %s",
-                            tool_name,
-                            args[:100] if len(args) > 100 else args,
+                            "Failed to parse tool args as JSON for tool '%s'", tool_name
                         )
                         return {}
 
     return {}
 
 
-def _extract_tool_input_data(
-    state: AgentGuardrailsGraphState, tool_name: str, execution_stage: ExecutionStage
-) -> dict[str, Any]:
-    """Extract tool call arguments as dict for deterministic guardrails.
+def _extract_tools_args_from_message(message: AnyMessage) -> list[dict[str, Any]]:
+    if not isinstance(message, AIMessage):
+        return []
 
-    Args:
-        state: The current agent graph state.
-        tool_name: Name of the tool to extract arguments from.
-        execution_stage: PRE_EXECUTION or POST_EXECUTION.
+    if not message.tool_calls:
+        return []
 
-    Returns:
-        Dict containing tool call arguments, or empty dict if not found.
-        - For PRE_EXECUTION: extracts from last message
-        - For POST_EXECUTION: extracts from second-to-last message
-    """
-    if not state.messages:
-        return {}
+    result: list[dict[str, Any]] = []
 
-    # For PRE_EXECUTION, look at last message
-    # For POST_EXECUTION, look at second-to-last message (before the ToolMessage)
-    if execution_stage == ExecutionStage.PRE_EXECUTION:
-        if len(state.messages) < 1:
-            return {}
-        message = state.messages[-1]
-    else:  # POST_EXECUTION
-        if len(state.messages) < 2:
-            return {}
-        message = state.messages[-2]
+    for tool_call in message.tool_calls:
+        args = (
+            tool_call.get("args")
+            if isinstance(tool_call, dict)
+            else getattr(tool_call, "args", None)
+        )
+        if args is not None:
+            # Args should already be a dict
+            if isinstance(args, dict):
+                result.append(args)
+            # If it's a JSON string, parse it
+            elif isinstance(args, str):
+                try:
+                    parsed = json.loads(args)
+                    if isinstance(parsed, dict):
+                        result.append(parsed)
+                except json.JSONDecodeError:
+                    logger.warning("Failed to parse tool args as JSON")
 
-    return _extract_tool_args_from_message(message, tool_name)
+    return result
 
 
 def _extract_tool_output_data(state: AgentGuardrailsGraphState) -> dict[str, Any]:
