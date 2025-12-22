@@ -12,6 +12,7 @@ from langchain_core.messages import (
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -131,8 +132,18 @@ def _extract_tool_output_data(state: AgentGuardrailsGraphState) -> dict[str, Any
                 # JSON array or primitive - wrap it
                 return {"output": parsed}
         except json.JSONDecodeError:
-            logger.warning("Tool output is not valid JSON")
-            return {"output": content}
+            # Try to parse as Python literal (dict/list representation)
+            try:
+                import ast
+
+                parsed = ast.literal_eval(content)
+                if isinstance(parsed, dict):
+                    return parsed
+                else:
+                    return {"output": parsed}
+            except (ValueError, SyntaxError):
+                logger.warning("Tool output is not valid JSON or Python literal")
+                return {"output": content}
     elif isinstance(content, dict):
         return content
     else:
@@ -144,3 +155,27 @@ def get_message_content(msg: AnyMessage) -> str:
     if isinstance(msg, (HumanMessage, SystemMessage)):
         return msg.content if isinstance(msg.content, str) else str(msg.content)
     return str(getattr(msg, "content", "")) if hasattr(msg, "content") else ""
+
+
+def _sanitize_selector_tool_names(selector):
+    """Sanitize tool names in the selector's match_names for Tool scope guardrails.
+
+    This ensures that the tool names in the selector match the sanitized tool names
+    used in the actual tool nodes.
+
+    Args:
+        selector: The guardrail selector object.
+
+    Returns:
+        The selector with sanitized match_names (if applicable).
+    """
+    from uipath.platform.guardrails import GuardrailScope
+
+    # Only sanitize for Tool scope guardrails
+    if GuardrailScope.TOOL in selector.scopes and selector.match_names is not None:
+        # Sanitize each tool name in match_names
+        sanitized_names = [sanitize_tool_name(name) for name in selector.match_names]
+        # Update the selector with sanitized names
+        selector.match_names = sanitized_names
+
+    return selector
