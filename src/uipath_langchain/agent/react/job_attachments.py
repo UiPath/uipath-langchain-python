@@ -173,6 +173,7 @@ def _create_type_matcher(type_name: str, target_type: Any) -> Any:
 
     return matches_type
 
+
 def _unwrap_optional(annotation: Any) -> Any:
     """Unwrap Optional/Union types to get the underlying type.
 
@@ -193,6 +194,7 @@ def _unwrap_optional(annotation: Any) -> Any:
 
 def _is_pydantic_model(annotation: Any) -> bool:
     return isinstance(annotation, type) and issubclass(annotation, BaseModel)
+
 
 def replace_job_attachment_ids(
     json_paths: list[str],
@@ -303,6 +305,3 @@ def _extract_values_by_paths(
         results.extend([match.value for match in matches])
 
     return results
-
-
-
