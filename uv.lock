@@ -3878,7 +3878,7 @@ requires-dist = [
     { name = "azure-monitor-opentelemetry", specifier = ">=1.7.0" },
     { name = "langgraph", specifier = ">=1.0.0" },
     { name = "uipath", specifier = "==2.2.41" },
-    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.1.41" },
+    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.1.42" },
 ]
 
 [package.metadata.requires-dev]
@@ -3912,7 +3912,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.1.41"
+version = "0.1.42"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
@@ -3931,9 +3931,9 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "uipath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e0/8b/3c2e7e0af1ee5281a27183b51c0d395c256c113f11e9aacf1bd7eec84796/uipath_langchain-0.1.41.tar.gz", hash = "sha256:05a2974ccbbfa8dfd55110f2a71f5b5e2c13eed6c21d55a4aab9c5cb0b60f4ed", size = 7341353, upload-time = "2025-12-22T16:31:11.066Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4f/8b/a4e102af880b8615295ebe865d47df10e95b45fe2daa949b54831be6e990/uipath_langchain-0.1.42.tar.gz", hash = "sha256:e0ce5357f5c055d2783999f05ddbb93955d275bd91e1d2d4269c91dc491938fb", size = 7342259, upload-time = "2025-12-22T16:47:56.821Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/63/bd/0143e124131f405673d0e5fffa3addbc70373ed724947c6c691651350e97/uipath_langchain-0.1.41-py3-none-any.whl", hash = "sha256:56c02490149485eef41a033dadc20771ce62b297192bab00bcb851f61957fcc9", size = 102719, upload-time = "2025-12-22T16:31:09.516Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/e1/c45c735bc68d7983a697d327adcd5c9c5d9bca4d60b7acbada9bf4d37cee/uipath_langchain-0.1.42-py3-none-any.whl", hash = "sha256:582004691c472e6f760b178f97d36e5f36e7a4282addb3f8429186dccb48a122", size = 102680, upload-time = "2025-12-22T16:47:55.168Z" },
 ]
 
 [package.optional-dependencies]
