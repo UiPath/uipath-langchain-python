@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from uipath.platform.guardrails import BaseGuardrail
 
 from ..guardrails.actions import GuardrailAction
-from ..tools import create_tool_node
 from .guardrails.guardrails_subgraph import (
     create_agent_init_guardrails_subgraph,
     create_agent_terminate_guardrails_subgraph,
@@ -67,6 +66,8 @@ def create_agent(
 
     Control flow tools (end_execution, raise_error) are auto-injected alongside regular tools.
     """
+    from ..tools import create_tool_node
+
     if config is None:
         config = AgentGraphConfig()
 

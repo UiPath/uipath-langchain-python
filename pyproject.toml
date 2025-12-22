@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.1.43"
+version = "0.1.44"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -69,7 +69,8 @@ dev = [
     "pytest-asyncio>=1.0.0",
     "pre-commit>=4.1.0",
     "numpy>=1.24.0",
-    "pytest_httpx>=0.35.0"
+    "pytest_httpx>=0.35.0",
+    "rust-just>=1.39.0",
 ]
 
 [tool.hatch.build.targets.wheel]
