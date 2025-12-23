@@ -1,5 +1,6 @@
 """Factory functions for creating tools from agent resources."""
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool, StructuredTool
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
@@ -18,11 +19,13 @@ from .internal_tools import create_internal_tool
 from .process_tool import create_process_tool
 
 
-async def create_tools_from_resources(agent: LowCodeAgentDefinition) -> list[BaseTool]:
+async def create_tools_from_resources(
+    agent: LowCodeAgentDefinition, llm: BaseChatModel
+) -> list[BaseTool]:
     tools: list[BaseTool] = []
 
     for resource in agent.resources:
-        tool = await _build_tool_for_resource(resource)
+        tool = await _build_tool_for_resource(resource, llm)
         if tool is not None:
             tools.append(tool)
 
@@ -30,7 +33,7 @@ async def create_tools_from_resources(agent: LowCodeAgentDefinition) -> list[Bas
 
 
 async def _build_tool_for_resource(
-    resource: BaseAgentResourceConfig,
+    resource: BaseAgentResourceConfig, llm: BaseChatModel
 ) -> StructuredTool | None:
     if isinstance(resource, AgentProcessToolResourceConfig):
         return create_process_tool(resource)
@@ -45,6 +48,6 @@ async def _build_tool_for_resource(
         return create_integration_tool(resource)
 
     elif isinstance(resource, AgentInternalToolResourceConfig):
-        return create_internal_tool(resource)
+        return create_internal_tool(resource, llm)
 
     return None

@@ -4,7 +4,6 @@ from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import BaseModel
-from uipath.agent.models.agent import BaseAgentToolResourceConfig
 
 from uipath_langchain.agent.react.job_attachments import (
     get_job_attachment_paths,
@@ -14,9 +13,7 @@ from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import AsyncToolWrapperType
 
 
-def get_job_attachment_wrapper(
-    resource: BaseAgentToolResourceConfig,
-) -> AsyncToolWrapperType:
+def get_job_attachment_wrapper() -> AsyncToolWrapperType:
     """Create a tool wrapper that validates and replaces job attachment IDs with full attachment objects.
 
     This wrapper extracts job attachment paths from the tool's schema, validates that all

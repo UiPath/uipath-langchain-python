@@ -16,6 +16,7 @@ Example:
 
 from typing import Callable
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
@@ -25,13 +26,16 @@ from uipath.agent.models.agent import (
 from .analyze_files_tool import create_analyze_file_tool
 
 _INTERNAL_TOOL_HANDLERS: dict[
-    AgentInternalToolType, Callable[[AgentInternalToolResourceConfig], StructuredTool]
+    AgentInternalToolType,
+    Callable[[AgentInternalToolResourceConfig, BaseChatModel], StructuredTool],
 ] = {
     AgentInternalToolType.ANALYZE_FILES: create_analyze_file_tool,
 }
 
 
-def create_internal_tool(resource: AgentInternalToolResourceConfig) -> StructuredTool:
+def create_internal_tool(
+    resource: AgentInternalToolResourceConfig, llm: BaseChatModel
+) -> StructuredTool:
     """Create an internal tool based on the resource configuration.
 
     Raises:
@@ -47,4 +51,4 @@ def create_internal_tool(resource: AgentInternalToolResourceConfig) -> Structure
             f"Supported types: {list[AgentInternalToolType](_INTERNAL_TOOL_HANDLERS.keys())}"
         )
 
-    return handler(resource)
+    return handler(resource, llm)
