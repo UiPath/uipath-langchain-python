@@ -8,7 +8,6 @@ import pytest
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
-from uipath.agent.models.agent import BaseAgentToolResourceConfig
 from uipath.platform.attachments import Attachment
 
 from uipath_langchain.agent.react.types import AgentGraphState
@@ -26,11 +25,6 @@ class MockAttachmentSchema(BaseModel):
 
 class TestGetJobAttachmentWrapper:
     """Test cases for get_job_attachment_wrapper function."""
-
-    @pytest.fixture
-    def mock_resource(self):
-        """Create a mock resource config."""
-        return MagicMock(spec=BaseAgentToolResourceConfig)
 
     @pytest.fixture
     def mock_tool(self):
@@ -69,12 +63,12 @@ class TestGetJobAttachmentWrapper:
 
     @pytest.mark.asyncio
     async def test_tool_without_args_schema(
-        self, mock_resource, mock_tool, mock_tool_call, mock_state
+        self, mock_tool, mock_tool_call, mock_state
     ):
         """Test that tool is invoked normally when args_schema is None."""
         mock_tool.args_schema = None
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         assert result == {"result": "success"}
@@ -82,12 +76,12 @@ class TestGetJobAttachmentWrapper:
 
     @pytest.mark.asyncio
     async def test_tool_with_dict_args_schema(
-        self, mock_resource, mock_tool, mock_tool_call, mock_state
+        self, mock_tool, mock_tool_call, mock_state
     ):
         """Test that tool is invoked normally when args_schema is a dict."""
         mock_tool.args_schema = {"type": "object", "properties": {}}
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         assert result == {"result": "success"}
@@ -95,12 +89,12 @@ class TestGetJobAttachmentWrapper:
 
     @pytest.mark.asyncio
     async def test_tool_with_non_basemodel_schema(
-        self, mock_resource, mock_tool, mock_tool_call, mock_state
+        self, mock_tool, mock_tool_call, mock_state
     ):
         """Test that tool is invoked normally when args_schema is not a BaseModel."""
         mock_tool.args_schema = str
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         assert result == {"result": "success"}
@@ -113,7 +107,6 @@ class TestGetJobAttachmentWrapper:
     async def test_tool_with_no_attachment_paths(
         self,
         mock_get_paths,
-        mock_resource,
         mock_tool,
         mock_tool_call,
         mock_state,
@@ -122,7 +115,7 @@ class TestGetJobAttachmentWrapper:
         mock_tool.args_schema = MockAttachmentSchema
         mock_get_paths.return_value = []
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         assert result == {"result": "success"}
@@ -136,7 +129,6 @@ class TestGetJobAttachmentWrapper:
     async def test_tool_with_valid_attachments(
         self,
         mock_get_paths,
-        mock_resource,
         mock_tool,
         mock_attachment,
         mock_state,
@@ -158,7 +150,7 @@ class TestGetJobAttachmentWrapper:
             },
         )
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         assert result == {"result": "success"}
@@ -175,7 +167,6 @@ class TestGetJobAttachmentWrapper:
     async def test_tool_with_missing_attachment(
         self,
         mock_get_paths,
-        mock_resource,
         mock_tool,
         mock_state,
     ):
@@ -196,7 +187,7 @@ class TestGetJobAttachmentWrapper:
         # Empty state - attachment not found
         mock_state.job_attachments = {}
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         assert isinstance(result, dict)
@@ -212,7 +203,6 @@ class TestGetJobAttachmentWrapper:
     async def test_tool_with_multiple_missing_attachments(
         self,
         mock_get_paths,
-        mock_resource,
         mock_tool,
         mock_state,
     ):
@@ -241,7 +231,7 @@ class TestGetJobAttachmentWrapper:
         # Empty state - both attachments not found
         mock_state.job_attachments = {}
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         assert isinstance(result, dict)
@@ -264,7 +254,6 @@ class TestGetJobAttachmentWrapper:
     async def test_tool_with_invalid_uuid(
         self,
         mock_get_paths,
-        mock_resource,
         mock_tool,
         mock_state,
     ):
@@ -284,7 +273,7 @@ class TestGetJobAttachmentWrapper:
 
         mock_state.job_attachments = {}
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         assert isinstance(result, dict)
@@ -299,7 +288,6 @@ class TestGetJobAttachmentWrapper:
     async def test_tool_with_partial_valid_attachments(
         self,
         mock_get_paths,
-        mock_resource,
         mock_tool,
         mock_attachment,
         mock_state,
@@ -327,7 +315,7 @@ class TestGetJobAttachmentWrapper:
             },
         )
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         assert isinstance(result, dict)
@@ -343,7 +331,6 @@ class TestGetJobAttachmentWrapper:
     async def test_tool_with_complex_nested_structure(
         self,
         mock_get_paths,
-        mock_resource,
         mock_tool,
         mock_state,
     ):
@@ -445,7 +432,7 @@ class TestGetJobAttachmentWrapper:
             },
         )
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         # Should return error for the missing attachment
@@ -469,7 +456,6 @@ class TestGetJobAttachmentWrapper:
     async def test_tool_with_complex_nested_structure_all_valid(
         self,
         mock_get_paths,
-        mock_resource,
         mock_tool,
         mock_state,
     ):
@@ -560,7 +546,7 @@ class TestGetJobAttachmentWrapper:
             },
         )
 
-        wrapper = get_job_attachment_wrapper(mock_resource)
+        wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         # Should succeed without errors
