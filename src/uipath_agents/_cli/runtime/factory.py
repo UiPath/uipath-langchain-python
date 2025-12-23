@@ -56,7 +56,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
     async def _load_graph(
         self, entrypoint: str
     ) -> StateGraph[Any, Any, Any] | CompiledStateGraph[Any, Any, Any, Any]:
-        """Load agent graph for the given entrypoint.
+        """Load agent graph for the given entrypoint and validate input against schema.
 
         Args:
             entrypoint: Agent file path (agent.json)
@@ -73,13 +73,13 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             agent_json_path = Path.cwd() / entrypoint
             agent_definition = load_agent_configuration(agent_json_path)
 
-            agent_input: dict[str, Any] = {}
             if not self.context.resume:
-                agent_input = validate_json_against_json_schema(
+                # Validate input against schema
+                validate_json_against_json_schema(
                     agent_definition.input_schema, self.context.input
                 )
 
-            return await build_agent_graph(agent_definition, input_data=agent_input)
+            return await build_agent_graph(agent_definition)
 
         except FileNotFoundError as e:
             raise LangGraphRuntimeError(

@@ -4,10 +4,11 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, List, Pattern
+from typing import Any, Callable, List, Pattern, Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from uipath.agent.models.agent import AgentMessage
+from pydantic import BaseModel
+from uipath.agent.models.agent import AgentMessage, LowCodeAgentDefinition
 from uipath.agent.react import AGENT_SYSTEM_PROMPT_TEMPLATE
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,56 @@ def serialize_argument(
     if isinstance(value, (list, dict, bool)):
         return json.dumps(value, ensure_ascii=False)
     return str(value)
+
+
+def extract_input_data_from_state(
+    state: BaseModel | dict[str, Any],
+    input_model: type[BaseModel],
+) -> dict[str, Any]:
+    """Extract only input schema fields from graph state, filtering out internal fields.
+
+    This prevents internal LangGraph state fields (messages, termination, agent_outcome, etc.)
+    from leaking into template interpolation.
+
+    Args:
+        state: The combined agent graph state (InnerAgentGraphState = AgentGraphState + input_schema).
+               At runtime, this is a dynamically created class that inherits from both.
+        input_model: The input schema model defining allowed fields
+
+    Returns:
+        Dictionary containing only graph input arguments defined in the agent's input_schema
+    """
+    if isinstance(state, BaseModel):
+        graph_state = state.model_dump()
+    else:
+        graph_state = state
+    return input_model.model_validate(graph_state, from_attributes=True).model_dump()
+
+
+def create_message_factory(
+    agent_definition: LowCodeAgentDefinition,
+    input_model: type[BaseModel],
+) -> Callable[[BaseModel | dict[str, Any]], Sequence[SystemMessage | HumanMessage]]:
+    """Create a callable that builds messages at runtime using interpolation.
+
+    Args:
+        agent_definition: Agent definition containing messages with templates
+        input_model: The input schema model to extract field names from
+
+    Returns:
+        A callable that takes the agent's graph state and returns interpolated messages.
+        InnerAgentGraphState is created dynamically as: type("InnerAgentGraphState", (AgentGraphState, input_schema), {})
+    """
+
+    def message_factory(
+        state: BaseModel | dict[str, Any],
+    ) -> List[SystemMessage | HumanMessage]:
+        input_arguments = extract_input_data_from_state(state, input_model)
+        return build_agent_messages(
+            agent_definition.messages, input_arguments, agent_definition.name or ""
+        )
+
+    return message_factory
 
 
 def interpolate_message(content: str, input_values: dict[str, Any]) -> str:

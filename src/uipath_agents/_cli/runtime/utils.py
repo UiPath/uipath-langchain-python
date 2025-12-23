@@ -10,7 +10,18 @@ def validate_json_against_json_schema(
     json_schema: dict[str, Any],
     arguments: Optional[Union[str, dict[str, Any]]] = None,
 ) -> dict[str, Any]:
-    """Validate arguments against json schema."""
+    """Validate arguments against json schema.
+
+    Args:
+        json_schema: JSON schema definition
+        arguments: Input data to validate (dict or JSON string)
+
+    Returns:
+        Validated data as dictionary
+
+    Raises:
+        InputValidationError: If validation fails
+    """
     try:
         if arguments is None or arguments == "":
             return {}
