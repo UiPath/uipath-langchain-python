@@ -1,0 +1,8 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "./joke_agent_with_guardrails.py:graph"
+  },
+  "env": ".env"
+}
+
