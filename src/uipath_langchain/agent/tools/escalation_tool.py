@@ -10,13 +10,14 @@ from langchain_core.tools import StructuredTool
 from langgraph.types import Command, interrupt
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
+    AgentEscalationRecipient,
     AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
 )
 from uipath.eval.mocks import mockable
+from uipath.platform import UiPath
 from uipath.platform.common import CreateEscalation
 
-from ..react.types import AgentGraphNode, AgentTerminationSource
 from .utils import sanitize_tool_name
 
 
@@ -25,6 +26,34 @@ class EscalationAction(str, Enum):
 
     CONTINUE = "continue"
     END = "end"
+
+
+def resolve_recipient_value(recipient: AgentEscalationRecipient) -> str | None:
+    """Resolve recipient value based on recipient type."""
+    if recipient.type == AgentEscalationRecipientType.ASSET_USER_EMAIL:
+        return resolve_asset(recipient.asset_name, recipient.folder_path)
+
+    # For USER_EMAIL, USER_ID, and GROUP_ID, return the value directly
+    if hasattr(recipient, "value"):
+        return recipient.value
+
+    return None
+
+
+def resolve_asset(asset_name: str, folder_path: str) -> str | None:
+    """Retrieve asset value."""
+    try:
+        client = UiPath()
+        result = client.assets.retrieve(name=asset_name, folder_path=folder_path)
+
+        if not result or not result.value:
+            raise ValueError(f"Asset '{asset_name}' has no value configured.")
+
+        return result.value
+    except Exception as e:
+        raise ValueError(
+            f"Failed to resolve asset '{asset_name}' in folder '{folder_path}': {str(e)}"
+        ) from e
 
 
 def create_escalation_tool(resource: AgentEscalationResourceConfig) -> StructuredTool:
@@ -37,10 +66,7 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
     output_model: Any = create_model(channel.output_schema)
 
     assignee: str | None = (
-        channel.recipients[0].value
-        if channel.recipients
-        and channel.recipients[0].type == AgentEscalationRecipientType.USER_EMAIL
-        else None
+        resolve_recipient_value(channel.recipients[0]) if channel.recipients else None
     )
 
     @mockable(
@@ -53,6 +79,8 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
     async def escalation_tool_fn(
         runtime: ToolRuntime, **kwargs: Any
     ) -> Command[Any] | Any:
+        from ..react.types import AgentGraphNode, AgentTerminationSource
+
         task_title = channel.task_title or "Escalation Task"
 
         result = interrupt(
