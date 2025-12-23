@@ -1,6 +1,7 @@
 """Tool creation and management for LowCode agents."""
 
 from .context_tool import create_context_tool
+from .escalation_tool import create_escalation_tool
 from .integration_tool import create_integration_tool
 from .mcp_tool import create_mcp_tools
 from .process_tool import create_process_tool
@@ -15,6 +16,7 @@ __all__ = [
     "create_context_tool",
     "create_process_tool",
     "create_integration_tool",
+    "create_escalation_tool",
     "create_mcp_tools",
     "UiPathToolNode",
     "ToolWrapperMixin",
