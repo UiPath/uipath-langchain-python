@@ -2,12 +2,13 @@
 
 from typing import Any
 
-from jsonschema_pydantic_converter import transform as create_model
 from langchain_core.tools import StructuredTool
 from langgraph.types import interrupt
 from uipath.agent.models.agent import AgentProcessToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform.common import InvokeProcess
+
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_tool_name

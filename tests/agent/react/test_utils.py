@@ -2,7 +2,9 @@
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from uipath_langchain.agent.react.utils import count_consecutive_thinking_messages
+from uipath_langchain.agent.react.utils import (
+    count_consecutive_thinking_messages,
+)
 
 
 class TestCountSuccessiveCompletions:
