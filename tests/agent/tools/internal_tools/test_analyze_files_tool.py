@@ -115,6 +115,7 @@ class TestCreateAnalyzeFileTool:
             ID=str(uuid.uuid4()), FullName="test.pdf", MimeType="application/pdf"
         )
 
+        assert tool.coroutine is not None
         result = await tool.coroutine(
             analysisTask="Summarize the document", attachments=[mock_attachment]
         )
@@ -149,6 +150,7 @@ class TestCreateAnalyzeFileTool:
             ID=str(uuid.uuid4()), FullName="test.pdf", MimeType="application/pdf"
         )
 
+        assert tool.coroutine is not None
         with pytest.raises(
             ValueError, match="Argument 'analysisTask' is not available"
         ):
@@ -166,6 +168,7 @@ class TestCreateAnalyzeFileTool:
 
         tool = create_analyze_file_tool(resource_config, mock_llm)
 
+        assert tool.coroutine is not None
         with pytest.raises(ValueError, match="Argument 'attachments' is not available"):
             await tool.coroutine(analysisTask="Summarize the document")
 
@@ -216,6 +219,7 @@ class TestCreateAnalyzeFileTool:
             ),
         ]
 
+        assert tool.coroutine is not None
         result = await tool.coroutine(
             analysisTask="Compare these documents", attachments=mock_attachments
         )
