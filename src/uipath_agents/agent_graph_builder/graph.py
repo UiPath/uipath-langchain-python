@@ -31,13 +31,12 @@ async def build_agent_graph(
         StateGraph configured with the agent definition and feature flags.
     """
 
-    tools = await create_tools_from_resources(agent_definition)
     llm = create_llm(
         model=agent_definition.settings.model,
         temperature=agent_definition.settings.temperature,
         max_tokens=agent_definition.settings.max_tokens,
     )
-
+    tools = await create_tools_from_resources(agent_definition, llm)
     input_model = resolve_input_model(agent_definition.input_schema)
     output_model = resolve_output_model(agent_definition.output_schema)
 

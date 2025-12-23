@@ -1,7 +1,7 @@
 from typing import Any, Optional, Union
 
 from pydantic import ValidationError
-from uipath.utils.dynamic_schema import jsonschema_to_pydantic
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
 from ..exceptions import InputValidationError
 
@@ -26,7 +26,7 @@ def validate_json_against_json_schema(
         if arguments is None or arguments == "":
             return {}
 
-        pydantic_model = jsonschema_to_pydantic(json_schema)
+        pydantic_model = create_model(json_schema)
 
         if isinstance(arguments, str):
             parsed_data = pydantic_model.model_validate_json(arguments)
