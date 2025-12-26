@@ -5,18 +5,15 @@ description = "Math and Weather Local MCP Server Agent"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 dependencies = [
     "langchain-anthropic>=1.2.0",
-    "uipath-langchain>=0.1.0, <0.2.0",
     "langchain-mcp-adapters>=0.1.14",
     "mcp>=1.15.0",
-    "uipath>=2.2.0, <2.3.0",
+    "uipath>=2.3.0, <2.4.0",
+    "uipath-langchain>=0.2.0, <0.3.0",
 ]
 requires-python = ">=3.11"
 
-[tool.setuptools]
-py-modules = []
-
 [dependency-groups]
 dev = [
-    "uipath-dev>=0.0.5",
+    "uipath-dev>=0.0.14",
 ]
 
