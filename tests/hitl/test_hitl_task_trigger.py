@@ -131,16 +131,18 @@ class TestHitlActionTrigger:
 
                     # Check the first action trigger data
                     cursor.execute(
-                        "SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers"
+                        "SELECT runtime_id, interrupt_id, data FROM __uipath_resume_triggers"
                     )
                     triggers = cursor.fetchall()
                     assert len(triggers) == 1
-                    type, key, name, folder_path, folder_key, payload = triggers[0]
-                    assert type == "Task"
-                    assert folder_path == "app-folder-path"
-                    assert folder_key is None
-                    assert "agent question" in payload
-                    assert "Action Required" in payload
+                    runtime_id, interrupt_id, data = triggers[0]
+
+                    trigger_data = json.loads(data)
+                    assert trigger_data["trigger_type"] == "Task"
+                    assert trigger_data["folder_path"] == "app-folder-path"
+                    assert trigger_data["folder_key"] is None
+                    assert "agent question" in data
+                    assert "Action Required" in data
                 finally:
                     if conn:
                         conn.close()
@@ -151,7 +153,7 @@ class TestHitlActionTrigger:
 
                 # Mock response for first resume: human response from create action
                 httpx_mock.add_response(
-                    url=f"{base_url}/orchestrator_/tasks/GenericTasks/GetTaskDataByKey?taskKey={key}",
+                    url=f"{base_url}/orchestrator_/tasks/GenericTasks/GetTaskDataByKey?taskKey={trigger_data['item_key']}",
                     json={
                         "id": 1,
                         "title": "Action Required: Report Review",
@@ -196,18 +198,23 @@ class TestHitlActionTrigger:
                     assert len(tables) == 1
 
                     # Check the second trigger data (from wait action)
-                    cursor.execute("""SELECT type, key, name, folder_path, folder_key, payload FROM __uipath_resume_triggers
-                                      ORDER BY timestamp DESC
-                                      """)
+                    cursor.execute("""SELECT runtime_id, interrupt_id, data FROM __uipath_resume_triggers
+                                    ORDER BY timestamp DESC
+                                    """)
                     triggers = cursor.fetchall()
-                    assert len(triggers) == 2
-                    type, key, name, folder_key, folder_path, payload = triggers[0]
-                    assert type == "Task"
-                    assert name == "Task"
-                    assert folder_path is None
-                    assert folder_key is None
-                    assert "agent question from wait action" in payload
-                    assert key == "1662478a-65b4-4a09-8e22-d707e5bd64f3"
+                    assert len(triggers) == 1
+                    runtime_id, interrupt_id, data = triggers[0]
+
+                    trigger_data = json.loads(data)
+                    assert trigger_data["trigger_type"] == "Task"
+                    assert trigger_data["trigger_name"] == "Task"
+                    assert trigger_data["folder_path"] is None
+                    assert trigger_data["folder_key"] is None
+                    assert "agent question from wait action" in data
+                    assert (
+                        trigger_data["item_key"]
+                        == "1662478a-65b4-4a09-8e22-d707e5bd64f3"
+                    )
                 finally:
                     if conn:
                         conn.close()
@@ -218,7 +225,7 @@ class TestHitlActionTrigger:
 
                 # Mock response for second resume: human response from wait action
                 httpx_mock.add_response(
-                    url=f"{base_url}/orchestrator_/tasks/GenericTasks/GetTaskDataByKey?taskKey={key}",
+                    url=f"{base_url}/orchestrator_/tasks/GenericTasks/GetTaskDataByKey?taskKey={trigger_data['item_key']}",
                     json={
                         "id": 1,
                         "title": "Action Required: Report Review",
