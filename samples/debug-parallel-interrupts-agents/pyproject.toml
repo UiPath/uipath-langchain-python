@@ -1,0 +1,16 @@
+[project]
+name = "debug-parallel-agent"
+version = "0.0.1"
+description = "Debug Agent"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "uipath-langchain>=0.2.0, <0.3.0",
+    "uipath>=2.3.0, <2.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "uipath-dev>=0.0.14",
+]
+

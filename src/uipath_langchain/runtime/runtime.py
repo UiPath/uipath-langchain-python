@@ -163,6 +163,8 @@ class UiPathLangGraphRuntime:
 
                         # Emit state update event for each node
                         for node_name, agent_data in data.items():
+                            if node_name in ("__metadata__",):
+                                continue
                             if isinstance(agent_data, dict):
                                 state_event = UiPathRuntimeStateEvent(
                                     payload=serialize_output(agent_data),
@@ -293,7 +295,9 @@ class UiPathLangGraphRuntime:
 
     def _is_interrupted(self, state: StateSnapshot) -> bool:
         """Check if execution was interrupted (static or dynamic)."""
-        return bool(state.next)
+        # An execution is considered interrupted if there are any next nodes (static interrupt)
+        # or if there are any dynamic interrupts present
+        return bool(state.next) or bool(state.interrupts)
 
     async def _create_runtime_result(
         self,
@@ -324,17 +328,14 @@ class UiPathLangGraphRuntime:
         """Create result for suspended execution."""
         interrupt_map: dict[str, Any] = {}
 
-        # Get nodes that are still scheduled to run
-        next_nodes = set(graph_state.next) if graph_state.next else set()
-
         if graph_state.interrupts:
             for interrupt in graph_state.interrupts:
                 if isinstance(interrupt, Interrupt):
                     # Find which task this interrupt belongs to
                     for task in graph_state.tasks:
                         if task.interrupts and interrupt in task.interrupts:
-                            # Only include if this task's node is still in next
-                            if task.name in next_nodes:
+                            # Only include if this task is still waiting for interrupt resolution
+                            if task.interrupts and not task.result:
                                 interrupt_map[interrupt.id] = interrupt.value
                             break
 
@@ -362,7 +363,7 @@ class UiPathLangGraphRuntime:
         if next_nodes:
             # Breakpoint is BEFORE these nodes (interrupt_before)
             breakpoint_type = "before"
-            breakpoint_node = next_nodes[0]
+            breakpoint_node = ", ".join(next_nodes)
         else:
             # Breakpoint is AFTER the last executed node (interrupt_after)
             # Get the last executed node from tasks

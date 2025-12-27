@@ -1,0 +1,13 @@
+flowchart TB
+  __start__(__start__)
+  branch_a_first(branch_a_first)
+  branch_a_second(branch_a_second)
+  branch_b_first(branch_b_first)
+  branch_b_second(branch_b_second)
+  __end__(__end__)
+  __start__ --> branch_a_first
+  __start__ --> branch_b_first
+  branch_a_first --> branch_a_second
+  branch_b_first --> branch_b_second
+  branch_a_second --> __end__
+  branch_b_second --> __end__
