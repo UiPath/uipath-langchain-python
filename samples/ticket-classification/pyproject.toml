@@ -9,19 +9,16 @@ dependencies = [
     "langchain-openai>=1.1.0",
     "langgraph-checkpoint-sqlite>=3.0.0",
     "python-dotenv>=1.0.1",
-    "uipath-langchain>=0.1.0, <0.2.0",
     "pydantic>=2.10.6",
     "aiohttp>=3.11.12",
     "typing-extensions>=4.12.2",
     "ipython>=8.32.0",
-    "uipath>=2.2.0, <2.3.0",
+    "uipath>=2.3.0, <2.4.0",
+    "uipath-langchain>=0.2.0, <0.3.0",
 ]
 requires-python = ">=3.11"
 
-[tool.setuptools]
-py-modules = []
-
 [dependency-groups]
 dev = [
-    "uipath-dev>=0.0.5",
+    "uipath-dev>=0.0.14",
 ]

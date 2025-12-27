@@ -1,65 +1,18 @@
 [project]
 name = "email-organizer-agent"
-version = "0.0.12"
+version = "0.0.1"
 description = "Email Organizer Agent: Outlook rule creator"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
-
 requires-python = ">=3.11"
 dependencies = [
     "langgraph>=1.0.4",
     "langchain-anthropic>=1.2.0",
     "langchain-community>=0.4.1",
-    "uipath-langchain>=0.1.0, <0.2.0",
-    "uipath>=2.2.0, <2.3.0",
+    "uipath-langchain>=0.2.0, <0.3.0",
+    "uipath>=2.3.0, <2.4.0",
 ]
-
-[project.optional-dependencies]
-dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
-
-[build-system]
-requires = ["setuptools>=73.0.0", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-py-modules = []
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-dir]
-"" = "src"
-
-[tool.setuptools.package-data]
-"*" = ["py.typed"]
-
-[tool.ruff]
-lint.select = [
-    "E",    # pycodestyle
-    "F",    # pyflakes
-    "I",    # isort
-    "D",    # pydocstyle
-    "D401", # First line should be in imperative mood
-    "T201",
-    "UP",
-]
-lint.ignore = [
-    "UP006",
-    "UP007",
-    "UP035",
-    "D417",
-    "E501",
-]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*" = ["D", "UP"]
-
-[[tool.uv.index]]
-name = "testpypi"
-url = "https://test.pypi.org/simple/"
-publish-url = "https://test.pypi.org/legacy/"
-explicit = true
 
 [dependency-groups]
 dev = [
-    "uipath-dev>=0.0.5",
+    "uipath-dev>=0.0.14",
 ]
