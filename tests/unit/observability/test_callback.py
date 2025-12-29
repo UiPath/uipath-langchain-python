@@ -56,13 +56,18 @@ class TestLlmCallbackEvents:
         assert run_id not in callback._spans
         assert _model_key(run_id) not in callback._spans
 
-        # Verify spans were created with correct attributes
+        # Verify spans were created
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 2
 
-        span_types = {s.attributes["type"] for s in spans}
-        assert SpanType.COMPLETION.value in span_types
-        assert SpanType.LLM_CALL.value in span_types
+        span_names = {s.name for s in spans}
+        assert "LLM call" in span_names
+        assert "Model run" in span_names
+        # LLM call has type "llmCall", Model run has type "completion"
+        llm_span = next(s for s in spans if s.name == "LLM call")
+        model_span = next(s for s in spans if s.name == "Model run")
+        assert llm_span.attributes["span_type"] == SpanType.LLM_CALL.value
+        assert model_span.attributes["span_type"] == SpanType.COMPLETION.value
 
     def test_on_llm_error_closes_spans_with_error(self, callback, span_exporter):
         """Test that on_llm_error closes spans with error status."""
@@ -91,9 +96,8 @@ class TestLlmCallbackEvents:
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 2
 
-        model_span = next(
-            s for s in spans if s.attributes["type"] == SpanType.LLM_CALL.value
-        )
+        # Model run span has the model attribute
+        model_span = next(s for s in spans if s.name == "Model run")
         assert model_span.attributes["model"] == "gpt-4-turbo"
 
 
@@ -121,7 +125,7 @@ class TestToolCallbackEvents:
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
-        assert spans[0].attributes["type"] == SpanType.TOOL_CALL.value
+        assert spans[0].attributes["span_type"] == SpanType.TOOL_CALL.value
         assert spans[0].attributes["toolName"] == "calculator"
         assert spans[0].name == "Tool call - calculator"
 
@@ -151,9 +155,7 @@ class TestModelNameExtraction:
         callback.on_llm_end(None, run_id=run_id)
 
         spans = span_exporter.get_finished_spans()
-        model_span = next(
-            s for s in spans if s.attributes["type"] == SpanType.LLM_CALL.value
-        )
+        model_span = next(s for s in spans if s.name == "Model run")
         assert model_span.attributes["model"] == "gpt-4"
 
     def test_extracts_model_from_kwargs_model(self, callback, span_exporter):
@@ -165,9 +167,7 @@ class TestModelNameExtraction:
         callback.on_llm_end(None, run_id=run_id)
 
         spans = span_exporter.get_finished_spans()
-        model_span = next(
-            s for s in spans if s.attributes["type"] == SpanType.LLM_CALL.value
-        )
+        model_span = next(s for s in spans if s.name == "Model run")
         assert model_span.attributes["model"] == "claude-3"
 
     def test_falls_back_to_name(self, callback, span_exporter):
@@ -179,9 +179,7 @@ class TestModelNameExtraction:
         callback.on_llm_end(None, run_id=run_id)
 
         spans = span_exporter.get_finished_spans()
-        model_span = next(
-            s for s in spans if s.attributes["type"] == SpanType.LLM_CALL.value
-        )
+        model_span = next(s for s in spans if s.name == "Model run")
         assert model_span.attributes["model"] == "CustomLLM"
 
     def test_falls_back_to_unknown(self, callback, span_exporter):
@@ -193,9 +191,7 @@ class TestModelNameExtraction:
         callback.on_llm_end(None, run_id=run_id)
 
         spans = span_exporter.get_finished_spans()
-        model_span = next(
-            s for s in spans if s.attributes["type"] == SpanType.LLM_CALL.value
-        )
+        model_span = next(s for s in spans if s.name == "Model run")
         assert model_span.attributes["model"] == "unknown"
 
 
@@ -277,9 +273,10 @@ class TestAgentSpanParenting:
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 3  # agent + llm + model
 
-        agent = next(s for s in spans if s.attributes["type"] == "agentRun")
-        llm = next(s for s in spans if s.attributes["type"] == "completion")
-        model = next(s for s in spans if s.attributes["type"] == "llmCall")
+        # Find spans by name (both LLM call and Model run have type "completion")
+        agent = next(s for s in spans if s.name.startswith("Agent run"))
+        llm = next(s for s in spans if s.name == "LLM call")
+        model = next(s for s in spans if s.name == "Model run")
 
         # LLM span should be child of agent
         assert llm.parent.span_id == agent.context.span_id
@@ -300,8 +297,8 @@ class TestAgentSpanParenting:
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 2
 
-        agent = next(s for s in spans if s.attributes["type"] == "agentRun")
-        tool = next(s for s in spans if s.attributes["type"] == "toolCall")
+        agent = next(s for s in spans if s.attributes["span_type"] == "agentRun")
+        tool = next(s for s in spans if s.attributes["span_type"] == "toolCall")
 
         assert tool.parent.span_id == agent.context.span_id
 

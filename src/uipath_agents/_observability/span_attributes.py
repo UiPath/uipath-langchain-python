@@ -5,9 +5,22 @@ the Temporal implementation in agents/backend/Execution.Shared/Traces/.
 """
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+@dataclass(frozen=True)
+class AgentSpanInfo:
+    """Immutable container for agent metadata needed by telemetry spans.
+
+    Decouples observability from full agent definition model.
+    """
+
+    name: str
+    input_schema: Optional[Dict[str, Any]] = None
+    output_schema: Optional[Dict[str, Any]] = None
 
 
 class SpanType:
@@ -106,21 +119,16 @@ class BaseSpanAttributes(BaseModel, ABC):
     def to_otel_attributes(self) -> Dict[str, Any]:
         """Convert to OpenTelemetry attribute dict.
 
-        Returns dict with 'type' included and None values excluded.
-        Dict/list values are JSON serialized since OTEL only supports primitives.
+        Returns dict with both 'type' and 'span_type' (for backend compatibility).
+        None values excluded. Complex objects kept as-is for span processor.
         """
-        import json
-
-        attrs = {"type": self.type}
+        # Include both 'type' (Temporal schema) and 'span_type' (backend extraction)
+        attrs: Dict[str, Any] = {"type": self.type, "span_type": self.type}
         data = self.model_dump(by_alias=True, exclude_none=True, exclude={"error"})
-        for key, value in data.items():
-            if isinstance(value, (dict, list)):
-                attrs[key] = json.dumps(value)
-            else:
-                attrs[key] = value
+        attrs.update(data)
 
         if self.error:
-            attrs["error"] = self.error.model_dump_json(by_alias=True)
+            attrs["error"] = self.error.model_dump(by_alias=True)
         return attrs
 
 
@@ -148,16 +156,54 @@ class AgentRunSpanAttributes(BaseSpanAttributes):
         return SpanType.AGENT_RUN
 
 
-class CompletionSpanAttributes(BaseSpanAttributes):
-    """Attributes for completion (outer LLM call) spans.
+class ModelSettings(BaseModel):
+    """Model settings matching Temporal ModelSpanSettings."""
 
-    Maps to Temporal LlmCallSpanAttributes with type="completion".
+    model_config = ConfigDict(populate_by_name=True)
+
+    max_tokens: Optional[int] = Field(None, alias="maxTokens")
+    temperature: Optional[float] = Field(None, alias="temperature")
+
+
+class Usage(BaseModel):
+    """Token usage matching Temporal Usage record."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    completion_tokens: int = Field(..., alias="completionTokens")
+    prompt_tokens: int = Field(..., alias="promptTokens")
+    total_tokens: int = Field(..., alias="totalTokens")
+    is_byo_execution: bool = Field(False, alias="isByoExecution")
+    execution_deployment_type: Optional[str] = Field(
+        None, alias="executionDeploymentType"
+    )
+    is_pii_masked: bool = Field(False, alias="isPiiMasked")
+    llm_calls: int = Field(1, alias="llmCalls")
+
+
+class ToolCall(BaseModel):
+    """Tool call matching Temporal ToolCall record."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(..., alias="id")
+    name: str = Field(..., alias="name")
+    arguments: Dict[str, Any] = Field(..., alias="arguments")
+
+
+class CompletionSpanAttributes(BaseSpanAttributes):
+    """Attributes for Model run spans.
+
+    Maps to Temporal CompletionSpanAttributes with type="completion".
     """
 
     model_config = ConfigDict(populate_by_name=True)
 
-    input: Optional[str] = Field(None, alias="input")
-    content: Optional[str] = Field(None, alias="content")  # For conversational agents
+    model: Optional[str] = Field(None, alias="model")
+    # Settings as nested object (matches Temporal schema)
+    settings: Optional["ModelSettings"] = Field(None, alias="settings")
+    tool_calls: Optional[List["ToolCall"]] = Field(None, alias="toolCalls")
+    usage: Optional["Usage"] = Field(None, alias="usage")
 
     @property
     def type(self) -> str:
@@ -165,19 +211,12 @@ class CompletionSpanAttributes(BaseSpanAttributes):
 
 
 class LlmCallSpanAttributes(BaseSpanAttributes):
-    """Attributes for inner LLM call (model run) spans."""
+    """Attributes for LLM call spans (outer wrapper, no model)."""
 
     model_config = ConfigDict(populate_by_name=True)
 
-    model: str = Field(..., alias="model")
-    provider: Optional[str] = Field(None, alias="provider")
-    temperature: Optional[float] = Field(None, alias="temperature")
-    max_tokens: Optional[int] = Field(None, alias="maxTokens")
-
-    # Token usage
-    input_tokens: Optional[int] = Field(None, alias="inputTokens")
-    output_tokens: Optional[int] = Field(None, alias="outputTokens")
-    total_tokens: Optional[int] = Field(None, alias="totalTokens")
+    # Settings as nested object (matches Temporal)
+    settings: Optional["ModelSettings"] = Field(None, alias="settings")
 
     @property
     def type(self) -> str:

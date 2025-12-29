@@ -7,6 +7,7 @@ import pytest
 
 from uipath_agents._observability.callback import UiPathTracingCallback
 from uipath_agents._observability.runtime_wrapper import TelemetryRuntimeWrapper
+from uipath_agents._observability.span_attributes import AgentSpanInfo
 from uipath_agents._observability.tracer import UiPathTracer
 
 
@@ -106,16 +107,32 @@ class TestTelemetryRuntimeWrapper:
 
     def test_metadata_extraction(self, tracer, callback):
         """Test agent name and prompts extraction from delegate."""
-        # With entrypoint
+        # With agent_info provided
         mock_delegate = MagicMock()
-        mock_delegate.entrypoint = "my-agent.json"
         mock_delegate._get_trace_prompts.return_value = ("system", "user")
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
-        assert wrapper._get_agent_name() == "my-agent.json"
+        agent_info = AgentSpanInfo(
+            name="my-agent",
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+        )
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, agent_info=agent_info
+        )
+        assert wrapper._get_agent_name() == "my-agent"
         assert wrapper._get_prompts() == ("system", "user")
+        assert wrapper._get_schemas() == ({"type": "object"}, {"type": "string"})
 
-        # Without entrypoint - falls back to unknown
+        # Without agent_info - falls back to runtime_id
+        mock_delegate_with_id = MagicMock()
+        mock_delegate_with_id.runtime_id = "test-runtime-id"
+        wrapper_fallback = TelemetryRuntimeWrapper(
+            mock_delegate_with_id, tracer, callback
+        )
+        assert wrapper_fallback._get_agent_name() == "test-runtime-id"
+        assert wrapper_fallback._get_schemas() == (None, None)
+
+        # Without agent_info or runtime_id - falls back to unknown
         mock_delegate_empty = MagicMock(spec=[])
         wrapper_empty = TelemetryRuntimeWrapper(mock_delegate_empty, tracer, callback)
         assert wrapper_empty._get_agent_name() == "unknown"

@@ -20,6 +20,7 @@ from uipath_agents.agent_graph_builder import build_agent_graph
 from ..._observability import configure_telemetry, shutdown_telemetry
 from ..._observability.callback import UiPathTracingCallback
 from ..._observability.runtime_wrapper import TelemetryRuntimeWrapper
+from ..._observability.span_attributes import AgentSpanInfo
 from ..._observability.span_processor import SourceMarkerProcessor
 from ..._observability.tracer import UiPathTracer
 from ..constants import AGENT_ENTRYPOINT
@@ -40,6 +41,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             context: UiPathRuntimeContext to use for runtime creation
         """
         super().__init__(context)
+        self._agent_info: AgentSpanInfo | None = None
 
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
         """Setup tracing and instrumentation."""
@@ -72,6 +74,13 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
 
             agent_json_path = Path.cwd() / entrypoint
             agent_definition = load_agent_configuration(agent_json_path)
+
+            # Store agent info for telemetry (avoids re-loading config later)
+            self._agent_info = AgentSpanInfo(
+                name=agent_definition.name or "unknown",
+                input_schema=agent_definition.input_schema,
+                output_schema=agent_definition.output_schema,
+            )
 
             if not self.context.resume:
                 # Validate input against schema
@@ -130,7 +139,9 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             entrypoint=entrypoint,
             callbacks=[callback],
         )
-        telemetry_runtime = TelemetryRuntimeWrapper(base_runtime, tracer, callback)
+        telemetry_runtime = TelemetryRuntimeWrapper(
+            base_runtime, tracer, callback, agent_info=self._agent_info
+        )
         return await self._wrap_in_resumable_runtime(telemetry_runtime)
 
     async def _wrap_in_resumable_runtime(

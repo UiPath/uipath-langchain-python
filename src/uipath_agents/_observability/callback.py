@@ -79,15 +79,25 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
         Creates:
         - LLM call span (outer, type: completion) at key run_id
-        - Model run span (inner, type: llmCall) at key _model_span_key(run_id)
+        - Model run span (inner, type: completion) at key _model_span_key(run_id)
         """
         model_name = self._extract_model_name(serialized)
+        max_tokens, temperature = self._extract_settings(serialized)
         parent = self._get_span_or_root(parent_run_id)
 
-        llm_span = self._tracer.start_llm_call(parent_span=parent)
+        # LLM call: no model (model only on child span)
+        llm_span = self._tracer.start_llm_call(
+            max_tokens=max_tokens, temperature=temperature, parent_span=parent
+        )
         self._spans[run_id] = llm_span
 
-        model_span = self._tracer.start_model_run(model_name, parent_span=llm_span)
+        # Model run: has model and settings
+        model_span = self._tracer.start_model_run(
+            model_name,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            parent_span=llm_span,
+        )
         self._spans[self._model_span_key(run_id)] = model_span
 
     # -------------------------------------------------------------------------
@@ -161,6 +171,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
             # Close model span first (inner), then LLM span (outer)
             model_span = self._spans.pop(self._model_span_key(run_id), None)
             if model_span:
+                # Add usage and toolCalls to model span
+                self._set_usage_attributes(model_span, response)
+                self._set_tool_calls_attributes(model_span, response)
                 self._tracer.end_span_ok(model_span)
             llm_span = self._spans.pop(run_id, None)
             if llm_span:
@@ -258,6 +271,67 @@ class UiPathTracingCallback(BaseCallbackHandler):
             or kwargs.get("model")
             or serialized.get("name", "unknown")
         )
+
+    def _extract_settings(
+        self, serialized: Dict[str, Any]
+    ) -> tuple[Optional[int], Optional[float]]:
+        """Extract max_tokens and temperature from LLM config.
+
+        Returns:
+            Tuple of (max_tokens, temperature)
+        """
+        kwargs = serialized.get("kwargs", {})
+        max_tokens = kwargs.get("max_tokens")
+        temperature = kwargs.get("temperature")
+        return max_tokens, temperature
+
+    def _set_usage_attributes(self, span: Span, response: Optional[LLMResult]) -> None:
+        """Extract and set token usage on span."""
+        if not response or not response.llm_output:
+            return
+
+        token_usage = response.llm_output.get("token_usage") or response.llm_output.get(
+            "usage"
+        )
+        if not token_usage:
+            return
+
+        usage = {
+            "completionTokens": token_usage.get("completion_tokens", 0),
+            "promptTokens": token_usage.get("prompt_tokens", 0),
+            "totalTokens": token_usage.get("total_tokens", 0),
+            "isByoExecution": False,
+            "llmCalls": 1,
+        }
+        span.set_attribute("usage", json.dumps(usage))
+
+    def _set_tool_calls_attributes(
+        self, span: Span, response: Optional[LLMResult]
+    ) -> None:
+        """Extract and set tool calls on span."""
+        if not response or not response.generations or not response.generations[0]:
+            return
+
+        generation = response.generations[0][0]
+        message = getattr(generation, "message", None)
+        if not message:
+            return
+
+        tool_calls = getattr(message, "tool_calls", None)
+        if not tool_calls:
+            return
+
+        formatted_calls = []
+        for tc in tool_calls:
+            formatted_calls.append(
+                {
+                    "id": tc.get("id", ""),
+                    "name": tc.get("name", ""),
+                    "arguments": tc.get("args", {}),
+                }
+            )
+        if formatted_calls:
+            span.set_attribute("toolCalls", json.dumps(formatted_calls))
 
     def cleanup(self) -> None:
         for span in self._spans.values():

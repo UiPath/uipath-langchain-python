@@ -19,6 +19,7 @@ from .span_attributes import (
     BaseSpanAttributes,
     CompletionSpanAttributes,
     LlmCallSpanAttributes,
+    ModelSettings,
     ToolCallSpanAttributes,
 )
 
@@ -46,12 +47,21 @@ class UiPathTracer:
     def _apply_attributes(span: Span, attrs: BaseSpanAttributes) -> None:
         """Apply typed attributes to an OpenTelemetry span.
 
+        OTEL only accepts primitives. Complex objects (dict/list) are JSON
+        serialized here. To avoid double-escaping in storage, the span
+        processor should handle final serialization.
+
         Args:
             span: The span to set attributes on
             attrs: Typed attributes to apply
         """
         for key, value in attrs.to_otel_attributes().items():
-            if value is not None:
+            if value is None:
+                continue
+            # OTEL only accepts primitives - serialize complex objects
+            if isinstance(value, (dict, list)):
+                span.set_attribute(key, json.dumps(value))
+            else:
                 span.set_attribute(key, value)
 
     @contextmanager
@@ -64,6 +74,8 @@ class UiPathTracer:
         system_prompt: Optional[str] = None,
         user_prompt: Optional[str] = None,
         input_data: Optional[Dict[str, Any]] = None,
+        input_schema: Optional[Dict[str, Any]] = None,
+        output_schema: Optional[Dict[str, Any]] = None,
     ) -> Generator[Span, None, None]:
         """Start an agent run span (root span for agent execution).
 
@@ -76,6 +88,8 @@ class UiPathTracer:
             system_prompt: The system prompt used for the agent
             user_prompt: The user prompt/input for this run
             input_data: Input arguments passed to the agent
+            input_schema: JSON schema for agent input
+            output_schema: JSON schema for agent output
 
         Yields:
             The OpenTelemetry Span object
@@ -90,6 +104,8 @@ class UiPathTracer:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             input=input_data,
+            input_schema=input_schema,
+            output_schema=output_schema,
         )
 
         with self._tracer.start_as_current_span(
@@ -109,13 +125,20 @@ class UiPathTracer:
                 span.set_status(Status(StatusCode.ERROR, str(e)))
                 raise
 
-    def start_llm_call(self, parent_span: Optional[Span] = None) -> Span:
+    def start_llm_call(
+        self,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
         """Start an LLM call span (outer wrapper for LLM iteration).
 
         Returns a span that must be explicitly ended.
         Use for callback-based instrumentation where context managers don't fit.
 
         Args:
+            max_tokens: Maximum tokens for generation
+            temperature: Temperature for generation
             parent_span: Optional parent span. If None, uses current span.
 
         Returns:
@@ -129,13 +152,20 @@ class UiPathTracer:
             kind=SpanKind.INTERNAL,
             context=context,
         )
-        # Use typed attributes
-        attrs = CompletionSpanAttributes()
+        # LLM call: type=llmCall, no model (model only on child Model run span)
+        settings = None
+        if max_tokens is not None or temperature is not None:
+            settings = ModelSettings(max_tokens=max_tokens, temperature=temperature)
+        attrs = LlmCallSpanAttributes(settings=settings)
         self._apply_attributes(span, attrs)
         return span
 
     def start_model_run(
-        self, model_name: str, parent_span: Optional[Span] = None
+        self,
+        model_name: str,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        parent_span: Optional[Span] = None,
     ) -> Span:
         """Start a model run span (inner actual API call).
 
@@ -143,6 +173,8 @@ class UiPathTracer:
 
         Args:
             model_name: Name of the model being called
+            max_tokens: Maximum tokens for generation
+            temperature: Temperature for generation
             parent_span: Optional parent span. If None, uses current span.
 
         Returns:
@@ -156,8 +188,14 @@ class UiPathTracer:
             kind=SpanKind.INTERNAL,
             context=context,
         )
-        # Use typed attributes
-        attrs = LlmCallSpanAttributes(model=model_name)
+        # Model run: type="completion", has model and nested settings
+        settings = None
+        if max_tokens is not None or temperature is not None:
+            settings = ModelSettings(max_tokens=max_tokens, temperature=temperature)
+        attrs = CompletionSpanAttributes(
+            model=model_name,
+            settings=settings,
+        )
         self._apply_attributes(span, attrs)
         return span
 

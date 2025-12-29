@@ -8,6 +8,7 @@ Manual instrumentation is always enabled for dual instrumentation:
 - OpenInference spans → AppInsights (debugging)
 """
 
+import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict, Optional
 
@@ -22,7 +23,10 @@ from uipath.runtime.events import UiPathRuntimeEvent
 from uipath.runtime.schema import UiPathRuntimeSchema
 
 from .callback import UiPathTracingCallback
+from .span_attributes import AgentSpanInfo
 from .tracer import UiPathTracer
+
+logger = logging.getLogger(__name__)
 
 
 class TelemetryRuntimeWrapper:
@@ -48,10 +52,12 @@ class TelemetryRuntimeWrapper:
         delegate: UiPathRuntimeProtocol,
         tracer: UiPathTracer,
         callback: UiPathTracingCallback,
+        agent_info: Optional[AgentSpanInfo] = None,
     ):
         self._delegate = delegate
         self._tracer = tracer
         self._callback = callback
+        self._agent_info = agent_info
 
     @property
     def delegate(self) -> UiPathRuntimeProtocol:
@@ -101,6 +107,7 @@ class TelemetryRuntimeWrapper:
         """
         agent_name = self._get_agent_name()
         system_prompt, user_prompt = self._get_prompts()
+        input_schema, output_schema = self._get_schemas()
 
         with self._tracer.start_agent_run(
             agent_name=agent_name,
@@ -108,6 +115,8 @@ class TelemetryRuntimeWrapper:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             input_data=self._normalize_input(input_data),
+            input_schema=input_schema,
+            output_schema=output_schema,
         ) as agent_span:
             self._callback.set_agent_span(agent_span)
             try:
@@ -116,8 +125,8 @@ class TelemetryRuntimeWrapper:
                 self._callback.cleanup()
 
     def _get_agent_name(self) -> str:
-        if hasattr(self._delegate, "entrypoint") and self._delegate.entrypoint:
-            return self._delegate.entrypoint
+        if self._agent_info:
+            return self._agent_info.name
         if hasattr(self._delegate, "runtime_id"):
             return self._delegate.runtime_id
         return "unknown"
@@ -126,6 +135,11 @@ class TelemetryRuntimeWrapper:
         if hasattr(self._delegate, "runtime_id"):
             return self._delegate.runtime_id
         return None
+
+    def _get_schemas(self) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        if self._agent_info:
+            return self._agent_info.input_schema, self._agent_info.output_schema
+        return None, None
 
     def _get_prompts(self) -> tuple[Optional[str], Optional[str]]:
         if hasattr(self._delegate, "_get_trace_prompts"):

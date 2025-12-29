@@ -37,7 +37,7 @@ class TestAgentRunSpan:
         spans = span_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
 
-        assert attrs["type"] == SpanType.AGENT_RUN.value
+        assert attrs["span_type"] == SpanType.AGENT_RUN.value
         assert attrs["agentName"] == "TestAgent"
         assert attrs["agentId"] == "test-id-123"
         assert attrs["source"] == "langchain"
@@ -69,13 +69,13 @@ class TestLlmCallSpan:
     """Tests for LLM call span creation."""
 
     def test_creates_span_with_correct_type(self, tracer, span_exporter):
-        """Test LLM call span has correct type attribute."""
+        """Test LLM call span has correct type attribute (llmCall, not completion)."""
         span = tracer.start_llm_call()
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
-        assert spans[0].attributes["type"] == SpanType.COMPLETION.value
+        assert spans[0].attributes["span_type"] == SpanType.LLM_CALL.value
 
     def test_span_name(self, tracer, span_exporter):
         """Test LLM call span has correct name."""
@@ -90,14 +90,15 @@ class TestModelRunSpan:
     """Tests for model run span creation."""
 
     def test_creates_span_with_model_attribute(self, tracer, span_exporter):
-        """Test model run span has model attribute."""
+        """Test model run span has model attribute and completion type."""
         span = tracer.start_model_run(model_name="gpt-4")
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
 
-        assert attrs["type"] == SpanType.LLM_CALL.value
+        # Model run uses completion type (matching Temporal schema)
+        assert attrs["span_type"] == SpanType.COMPLETION.value
         assert attrs["model"] == "gpt-4"
 
 
@@ -112,7 +113,7 @@ class TestToolCallSpan:
         spans = span_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
 
-        assert attrs["type"] == SpanType.TOOL_CALL.value
+        assert attrs["span_type"] == SpanType.TOOL_CALL.value
         assert attrs["toolName"] == "calculator"
         assert spans[0].name == "Tool call - calculator"
 
@@ -125,7 +126,7 @@ class TestToolCallSpan:
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
-        assert spans[0].attributes["type"] == SpanType.PROCESS_TOOL.value
+        assert spans[0].attributes["span_type"] == SpanType.PROCESS_TOOL.value
 
 
 class TestAgentOutputSpan:
@@ -138,7 +139,7 @@ class TestAgentOutputSpan:
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
         assert spans[0].name == "Agent output"
-        assert spans[0].attributes["type"] == SpanType.AGENT_OUTPUT.value
+        assert spans[0].attributes["span_type"] == SpanType.AGENT_OUTPUT.value
         assert '"result": "success"' in spans[0].attributes["output"]
 
     def test_handles_string_output(self, tracer, span_exporter):
@@ -169,10 +170,10 @@ class TestSpanHierarchy:
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 3
 
-        # Find spans by type
-        agent_span = next(s for s in spans if s.attributes["type"] == "agentRun")
-        llm_span_result = next(s for s in spans if s.attributes["type"] == "completion")
-        model_span_result = next(s for s in spans if s.attributes["type"] == "llmCall")
+        # Find spans by name (both LLM call and Model run have type "completion")
+        agent_span = next(s for s in spans if s.name.startswith("Agent run"))
+        llm_span_result = next(s for s in spans if s.name == "LLM call")
+        model_span_result = next(s for s in spans if s.name == "Model run")
 
         # Agent span is root (no parent)
         assert agent_span.parent is None
