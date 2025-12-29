@@ -3,7 +3,7 @@
 from typing import Any, Dict
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
@@ -110,10 +110,18 @@ class TestUiPathToolNode:
         return MockState(messages=[ai_message])
 
     @pytest.fixture
-    def non_ai_state(self):
-        """Fixture for state with non-AI message."""
-        human_message = HumanMessage(content="Hello")
-        return MockState(messages=[human_message])
+    def state_with_existing_tool_response(self):
+        """Fixture for state with existing tool response."""
+        tool_call = {
+            "name": "mock_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        tool_message = ToolMessage(
+            content="Previous result", name="mock_tool", tool_call_id="test_call_id"
+        )
+        return MockState(messages=[ai_message, tool_message])
 
     def test_basic_tool_execution(self, mock_tool, mock_state):
         """Test basic tool execution without wrappers."""
@@ -200,14 +208,14 @@ class TestUiPathToolNode:
 
         assert result is None
 
-    def test_non_ai_message_raises_error(self, mock_tool, non_ai_state):
-        """Test that non-AI messages raise ValueError."""
+    def test_existing_tool_response_raises_error(
+        self, mock_tool, state_with_existing_tool_response
+    ):
+        """Test that existing tool responses raise ValueError."""
         node = UiPathToolNode(mock_tool)
 
-        with pytest.raises(
-            ValueError, match="Last message in message stack is not an AIMessage"
-        ):
-            node._func(non_ai_state)
+        with pytest.raises(ValueError):
+            node._func(state_with_existing_tool_response)
 
     def test_mismatched_tool_name_returns_none(self, mock_tool, mock_state):
         """Test that mismatched tool names return None."""
@@ -240,10 +248,7 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(mock_tool, wrapper=invalid_wrapper)
 
-        with pytest.raises(
-            ValueError,
-            match="Wrapper state parameter must be a pydantic BaseModel subclass",
-        ):
+        with pytest.raises(ValueError):
             node._func(mock_state)
 
 

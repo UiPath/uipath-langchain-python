@@ -2,56 +2,17 @@
 
 from typing import Literal
 
-from langchain_core.messages import AIMessage, AnyMessage, ToolCall
-from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
-
 from ..exceptions import AgentNodeRoutingException
-from .types import AgentGraphNode, AgentGraphState
-from .utils import count_consecutive_thinking_messages
-
-FLOW_CONTROL_TOOLS = [END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name]
-
-
-def __filter_control_flow_tool_calls(
-    tool_calls: list[ToolCall],
-) -> list[ToolCall]:
-    """Remove control flow tools when multiple tool calls exist."""
-    if len(tool_calls) <= 1:
-        return tool_calls
-
-    return [tc for tc in tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS]
+from .types import (
+    FLOW_CONTROL_TOOLS,
+    AgentGraphNode,
+    AgentGraphState,
+)
+from .utils import find_latest_ai_message
 
 
-def __has_control_flow_tool(tool_calls: list[ToolCall]) -> bool:
-    """Check if any tool call is of a control flow tool."""
-    return any(tc.get("name") in FLOW_CONTROL_TOOLS for tc in tool_calls)
-
-
-def __validate_last_message_is_AI(messages: list[AnyMessage]) -> AIMessage:
-    """Validate and return last message from state.
-
-    Raises:
-        AgentNodeRoutingException: If messages are empty or last message is not AIMessage
-    """
-    if not messages:
-        raise AgentNodeRoutingException(
-            "No messages in state - cannot route after agent"
-        )
-
-    last_message = messages[-1]
-    if not isinstance(last_message, AIMessage):
-        raise AgentNodeRoutingException(
-            f"Last message is not AIMessage (type: {type(last_message).__name__}) - cannot route after agent"
-        )
-
-    return last_message
-
-
-def create_route_agent(thinking_messages_limit: int = 0):
-    """Create a routing function configured with thinking_messages_limit.
-
-    Args:
-        thinking_messages_limit: Max consecutive thinking messages before error
+def create_route_agent():
+    """Create a routing function for LangGraph conditional edges.
 
     Returns:
         Routing function for LangGraph conditional edges
@@ -59,50 +20,58 @@ def create_route_agent(thinking_messages_limit: int = 0):
 
     def route_agent(
         state: AgentGraphState,
-    ) -> list[str] | Literal[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE]:
-        """Route after agent: handles all routing logic including control flow detection.
+    ) -> str | Literal[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE]:
+        """Route after agent: looks at current tool call index and routes to corresponding tool node.
 
         Routing logic:
-        1. If multiple tool calls exist, filter out control flow tools (EndExecution, RaiseError)
-        2. If control flow tool(s) remain, route to TERMINATE
-        3. If regular tool calls remain, route to specific tool nodes (return list of tool names)
-        4. If no tool calls, handle consecutive completions
+        1. If current_tool_call_index is None, route back to LLM
+        2. If current_tool_call_index is set, route to the corresponding tool node
+        3. Handle control flow tools for termination
 
         Returns:
-            - list[str]: Tool node names for parallel execution
-            - AgentGraphNode.AGENT: For consecutive completions
+            - str: Tool node name for single tool execution
+            - AgentGraphNode.AGENT: When no current tool call index
             - AgentGraphNode.TERMINATE: For control flow termination
 
         Raises:
-            AgentNodeRoutingException: When encountering unexpected state (empty messages, non-AIMessage, or excessive completions)
+            AgentNodeRoutingException: When encountering unexpected state
         """
-        messages = state.messages
-        last_message = __validate_last_message_is_AI(messages)
+        current_index = state.current_tool_call_index
 
-        tool_calls = list(last_message.tool_calls) if last_message.tool_calls else []
-        tool_calls = __filter_control_flow_tool_calls(tool_calls)
-
-        if tool_calls and __has_control_flow_tool(tool_calls):
-            return AgentGraphNode.TERMINATE
-
-        if tool_calls:
-            return [tc["name"] for tc in tool_calls]
-
-        consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
-
-        if consecutive_thinking_messages > thinking_messages_limit:
-            raise AgentNodeRoutingException(
-                f"Agent exceeded consecutive completions limit without producing tool calls "
-                f"(completions: {consecutive_thinking_messages}, max: {thinking_messages_limit}). "
-                f"This should not happen as tool_choice='required' is enforced at the limit."
-            )
-
-        if last_message.content:
+        # no tool call in progress, route back to LLM
+        if current_index is None:
             return AgentGraphNode.AGENT
 
-        raise AgentNodeRoutingException(
-            f"Agent produced empty response without tool calls "
-            f"(completions: {consecutive_thinking_messages}, has_content: False)"
+        messages = state.messages
+
+        if not messages:
+            raise AgentNodeRoutingException(
+                "No messages in state - cannot route after agent"
+            )
+
+        latest_ai_message = find_latest_ai_message(messages)
+
+        if latest_ai_message is None:
+            raise AgentNodeRoutingException(
+                "No AIMessage found in messages - cannot route after agent"
+            )
+
+        tool_calls = (
+            list(latest_ai_message.tool_calls) if latest_ai_message.tool_calls else []
         )
+
+        if current_index >= len(tool_calls):
+            raise AgentNodeRoutingException(
+                f"Current tool call index {current_index} exceeds available tool calls ({len(tool_calls)})"
+            )
+
+        current_tool_call = tool_calls[current_index]
+        tool_name = current_tool_call["name"]
+
+        # handle control flow tools for termination
+        if tool_name in FLOW_CONTROL_TOOLS:
+            return AgentGraphNode.TERMINATE
+
+        return tool_name
 
     return route_agent
