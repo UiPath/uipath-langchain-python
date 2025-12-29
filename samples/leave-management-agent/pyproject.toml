@@ -1,0 +1,20 @@
+[project]
+name = "leave_management_agent"
+version = "1.0.0"
+description = "leave_management_agent"
+authors = [{ name = "Rajneesh Khare", email = "rajneeshkhare94@gmail.com" }]
+requires-python = ">=3.10"
+dependencies = [
+    "uipath-langchain",
+    "langchain-mcp-adapters",
+    "mcp",
+    "langgraph",
+    "pydantic",
+    "python-dotenv",
+    "httpx"
+]
+
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
