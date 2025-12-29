@@ -4,12 +4,13 @@ from collections.abc import Sequence
 from inspect import signature
 from typing import Any, Awaitable, Callable, Literal
 
-from langchain_core.messages.ai import AIMessage
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
 from pydantic import BaseModel
+
+from uipath_langchain.agent.react.utils import find_latest_ai_message
 
 # the type safety can be improved with generics
 ToolWrapperType = Callable[
@@ -78,12 +79,30 @@ class UiPathToolNode(RunnableCallable):
         if not hasattr(state, "messages"):
             raise ValueError("State does not have messages key")
 
-        last_message = state.messages[-1]
-        if not isinstance(last_message, AIMessage):
-            raise ValueError("Last message in message stack is not an AIMessage.")
+        latest_ai_message = find_latest_ai_message(state.messages)
+        if latest_ai_message is None or not latest_ai_message.tool_calls:
+            return None
 
-        for tool_call in last_message.tool_calls:
+        latest_ai_index = next(
+            i
+            for i, msg in enumerate(reversed(state.messages))
+            if msg is latest_ai_message
+        )
+        messages_after_ai = state.messages[len(state.messages) - latest_ai_index :]
+
+        for tool_call in latest_ai_message.tool_calls:
             if tool_call["name"] == self.tool.name:
+                existing_tool_response_ids = {
+                    msg.tool_call_id
+                    for msg in messages_after_ai
+                    if isinstance(msg, ToolMessage)
+                    and msg.tool_call_id == tool_call["id"]
+                }
+                if tool_call["id"] in existing_tool_response_ids:
+                    raise ValueError(
+                        f"Tool response already exists for tool call {tool_call['id']}"
+                    )
+
                 return tool_call
         return None
 

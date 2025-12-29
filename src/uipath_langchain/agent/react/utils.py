@@ -2,7 +2,7 @@
 
 from typing import Any, Sequence
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL
 from uipath.platform.attachments import Attachment
@@ -73,3 +73,18 @@ def add_job_attachments(
         return right
 
     return {**left, **right}
+
+
+def find_latest_ai_message(messages: list[AnyMessage]) -> AIMessage | None:
+    """Find and return the latest AIMessage from a list of messages.
+
+    Args:
+        messages: List of messages to search through
+
+    Returns:
+        The latest AIMessage found, or None if no AIMessage exists
+    """
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            return message
+    return None
