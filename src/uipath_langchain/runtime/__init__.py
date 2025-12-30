@@ -5,7 +5,7 @@ from uipath.runtime import (
 )
 
 from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
-from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
+from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime, execution_callbacks
 from uipath_langchain.runtime.schema import (
     get_entrypoints_schema,
     get_graph_schema,
@@ -33,4 +33,5 @@ __all__ = [
     "get_graph_schema",
     "UiPathLangGraphRuntimeFactory",
     "UiPathLangGraphRuntime",
+    "execution_callbacks",
 ]
