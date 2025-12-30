@@ -142,15 +142,16 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         telemetry_runtime = TelemetryRuntimeWrapper(
             base_runtime, tracer, callback, agent_info=self._agent_info
         )
-        return await self._wrap_in_resumable_runtime(telemetry_runtime)
+        return await self._wrap_in_resumable_runtime(telemetry_runtime, runtime_id)
 
     async def _wrap_in_resumable_runtime(
-        self, base_runtime: UiPathRuntimeProtocol
+        self, base_runtime: UiPathRuntimeProtocol, runtime_id: str
     ) -> UiPathResumableRuntime:
         """Wrap a base runtime in UiPathResumableRuntime with storage and trigger manager.
 
         Args:
             base_runtime: The base runtime to wrap
+            runtime_id: Unique identifier for the runtime instance
 
         Returns:
             UiPathResumableRuntime wrapping the base runtime
@@ -163,6 +164,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             delegate=base_runtime,
             storage=storage,
             trigger_manager=trigger_manager,
+            runtime_id=runtime_id,
         )
 
     async def dispose(self) -> None:
