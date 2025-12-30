@@ -11,7 +11,6 @@ from uipath.platform.connections import ActivityMetadata, ActivityParameterLocat
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.tool_node import ToolWrapperMixin
-from uipath_langchain.agent.wrappers.static_args_wrapper import get_static_args_wrapper
 
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_dict_for_serialization, sanitize_tool_name
@@ -167,6 +166,10 @@ def create_integration_tool(
             raise
 
         return result
+
+    from uipath_langchain.agent.wrappers.static_args_wrapper import (
+        get_static_args_wrapper,
+    )
 
     wrapper = get_static_args_wrapper(resource)
 
