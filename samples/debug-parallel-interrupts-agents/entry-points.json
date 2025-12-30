@@ -1,0 +1,125 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "cb08200e-af49-438d-830c-8b6fcacecc76",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "branch_a_first_result": {
+                        "type": "string"
+                    },
+                    "branch_a_second_result": {
+                        "type": "string"
+                    },
+                    "branch_b_first_result": {
+                        "type": "string"
+                    },
+                    "branch_b_second_result": {
+                        "type": "string"
+                    }
+                },
+                "required": []
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "branch_a_first_result": {
+                        "type": "string"
+                    },
+                    "branch_a_second_result": {
+                        "type": "string"
+                    },
+                    "branch_b_first_result": {
+                        "type": "string"
+                    },
+                    "branch_b_second_result": {
+                        "type": "string"
+                    }
+                },
+                "required": []
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "branch_a_first",
+                        "name": "branch_a_first",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "branch_a_second",
+                        "name": "branch_a_second",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "branch_b_first",
+                        "name": "branch_b_first",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "branch_b_second",
+                        "name": "branch_b_second",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "branch_a_first",
+                        "label": null
+                    },
+                    {
+                        "source": "__start__",
+                        "target": "branch_b_first",
+                        "label": null
+                    },
+                    {
+                        "source": "branch_a_first",
+                        "target": "branch_a_second",
+                        "label": null
+                    },
+                    {
+                        "source": "branch_b_first",
+                        "target": "branch_b_second",
+                        "label": null
+                    },
+                    {
+                        "source": "branch_a_second",
+                        "target": "__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "branch_b_second",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}

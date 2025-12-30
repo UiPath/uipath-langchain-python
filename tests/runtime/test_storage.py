@@ -285,3 +285,33 @@ class TestTriggerStorage:
             assert workflow_id == expected_context["workflow_id"]
             assert status == "active"
             assert data == expected_context["data"]
+
+    @pytest.mark.asyncio
+    async def test_kv_isolation_stress_test(self, storage: SqliteResumableStorage):
+        """Stress test KV store isolation."""
+        tasks = []
+
+        # Create many KV operations with different combinations
+        for runtime in range(10):
+            for namespace in range(10):
+                for key in range(10):
+                    tasks.append(
+                        storage.set_value(
+                            f"runtime-{runtime}",
+                            f"ns-{namespace}",
+                            f"key-{key}",
+                            f"value-{runtime}-{namespace}-{key}",
+                        )
+                    )
+
+        await asyncio.gather(*tasks)
+
+        # Verify each value is correctly isolated
+        for runtime in range(10):
+            for namespace in range(10):
+                for key in range(10):
+                    value = await storage.get_value(
+                        f"runtime-{runtime}", f"ns-{namespace}", f"key-{key}"
+                    )
+                    expected = f"value-{runtime}-{namespace}-{key}"
+                    assert value == expected, f"Expected {expected}, got {value}"
