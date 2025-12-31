@@ -180,7 +180,6 @@ def _create_guardrail_node(
 
     # Attach observability metadata as function attribute
     node.__metadata__ = {  # type: ignore[attr-defined]
-        "guardrail_type": "evaluation",
         "guardrail_name": guardrail.name,
         "guardrail_description": getattr(guardrail, "description", None),
         "guardrail_scope": scope.value,
