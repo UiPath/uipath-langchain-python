@@ -38,17 +38,17 @@ class TestProcessToolMetadata:
     def test_process_tool_metadata_has_tool_type(self, process_resource):
         """Test that metadata contains tool_type for span detection."""
         tool = create_process_tool(process_resource)
-
+        assert tool.metadata is not None
         assert tool.metadata["tool_type"] == "process"
 
     def test_process_tool_metadata_has_display_name(self, process_resource):
         """Test that metadata contains display_name from process_name."""
         tool = create_process_tool(process_resource)
-
+        assert tool.metadata is not None
         assert tool.metadata["display_name"] == "MyProcess"
 
     def test_process_tool_metadata_has_folder_path(self, process_resource):
         """Test that metadata contains folder_path for span attributes."""
         tool = create_process_tool(process_resource)
-
+        assert tool.metadata is not None
         assert tool.metadata["folder_path"] == "/Shared/MyFolder"

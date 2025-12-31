@@ -543,10 +543,12 @@ class TestGuardrailNodeMetadata:
             failure_node="nope",
         )
 
-        assert node.__metadata__["guardrail_name"] == "TestGuardrail"
-        assert node.__metadata__["guardrail_scope"] == "Llm"
-        assert node.__metadata__["guardrail_stage"] == "preExecution"
-        assert node.__metadata__["tool_name"] is None
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert metadata["guardrail_name"] == "TestGuardrail"
+        assert metadata["guardrail_scope"] == "Llm"
+        assert metadata["guardrail_stage"] == "preExecution"
+        assert metadata["tool_name"] is None
 
     def test_tool_guardrail_node_has_tool_name(self):
         """Test that TOOL scope guardrail has tool_name in metadata."""
@@ -561,8 +563,10 @@ class TestGuardrailNodeMetadata:
             tool_name="my_tool",
         )
 
-        assert node.__metadata__["guardrail_scope"] == "Tool"
-        assert node.__metadata__["tool_name"] == "my_tool"
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert metadata["guardrail_scope"] == "Tool"
+        assert metadata["tool_name"] == "my_tool"
 
     def test_agent_init_guardrail_node_metadata(self):
         """Test that AGENT init guardrail has correct scope in metadata."""
@@ -576,5 +580,7 @@ class TestGuardrailNodeMetadata:
             failure_node="nope",
         )
 
-        assert node.__metadata__["guardrail_scope"] == "Agent"
-        assert node.__metadata__["guardrail_stage"] == "postExecution"
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert metadata["guardrail_scope"] == "Agent"
+        assert metadata["guardrail_stage"] == "postExecution"
