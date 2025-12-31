@@ -3,7 +3,7 @@ import logging
 import re
 from typing import Any, Callable
 
-from langgraph.utils.runnable import RunnableCallable
+from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
 from uipath.core.guardrails import (
     DeterministicGuardrail,
