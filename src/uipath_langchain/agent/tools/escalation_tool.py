@@ -111,7 +111,7 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         metadata={
             "tool_type": "escalation",
             "display_name": channel.properties.app_name,
-            "channel_type": "actionCenter",
+            "channel_type": channel.type,
             "assignee": assignee,
         },
     )
