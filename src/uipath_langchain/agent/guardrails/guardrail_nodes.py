@@ -3,7 +3,6 @@ import logging
 import re
 from typing import Any, Callable
 
-from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
 from uipath.core.guardrails import (
     DeterministicGuardrail,
@@ -120,10 +119,10 @@ def _create_guardrail_node(
     output_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]]
     | None = None,
     tool_name: str | None = None,
-) -> tuple[str, RunnableCallable]:
+) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail evaluation nodes.
 
-    Returns a node wrapped in RunnableCallable with observability metadata:
+    Returns a node with observability metadata attached as __metadata__ attribute:
     - goto success_node on validation pass
     - goto failure_node on validation fail
     """
@@ -179,22 +178,17 @@ def _create_guardrail_node(
             )
             raise
 
-    # Wrap in RunnableCallable with observability metadata
-    wrapped_node = RunnableCallable(
-        func=None,
-        afunc=node,
-        name=node_name,
-        metadata={
-            "guardrail_type": "evaluation",
-            "guardrail_name": guardrail.name,
-            "guardrail_description": getattr(guardrail, "description", None),
-            "guardrail_scope": scope.value,
-            "guardrail_stage": execution_stage.value,
-            "tool_name": tool_name,
-        },
-    )
+    # Attach observability metadata as function attribute
+    node.__metadata__ = {  # type: ignore[attr-defined]
+        "guardrail_type": "evaluation",
+        "guardrail_name": guardrail.name,
+        "guardrail_description": getattr(guardrail, "description", None),
+        "guardrail_scope": scope.value,
+        "guardrail_stage": execution_stage.value,
+        "tool_name": tool_name,
+    }
 
-    return node_name, wrapped_node
+    return node_name, node
 
 
 def create_llm_guardrail_node(
@@ -202,7 +196,7 @@ def create_llm_guardrail_node(
     execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
-) -> tuple[str, RunnableCallable]:
+) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
@@ -227,7 +221,7 @@ def create_agent_init_guardrail_node(
     execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
-) -> tuple[str, RunnableCallable]:
+) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         if not state.messages:
             return ""
@@ -248,7 +242,7 @@ def create_agent_terminate_guardrail_node(
     execution_stage: ExecutionStage,
     success_node: str,
     failure_node: str,
-) -> tuple[str, RunnableCallable]:
+) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
         return str(state.agent_result)
 
@@ -268,7 +262,7 @@ def create_tool_guardrail_node(
     success_node: str,
     failure_node: str,
     tool_name: str,
-) -> tuple[str, RunnableCallable]:
+) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Create a guardrail node for TOOL scope guardrails.
 
     Args:
