@@ -90,6 +90,10 @@ python_files = "test_*.py"
 addopts = "-ra -q"
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
+markers = [
+    "e2e: End-to-end tests that require UiPath authentication",
+    "slow: Tests that take a long time to run",
+]
 
 [[tool.uv.index]]
 name = "alpha"

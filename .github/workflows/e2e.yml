@@ -1,0 +1,99 @@
+name: E2E Tests
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - pyproject.toml
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+    inputs:
+      run_slow_tests:
+        description: "Run slow tests (evals)"
+        required: false
+        default: "false"
+        type: boolean
+
+env:
+  UV_SYSTEM_PYTHON: 1
+
+jobs:
+  # Job 1: Validate example configurations (no secrets required)
+  # This checks that all example agent.json, eval-sets, and evaluators are valid
+  e2e-validation:
+    name: Validate Examples
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Validate example configurations
+        run: |
+          echo "=== Validating example agent.json files and eval configurations ==="
+          uv run pytest tests/e2e/ -v -s -m "e2e" -k "test_agent_json or test_eval_sets or test_evaluators" --tb=short
+
+  # Job 2: Run e2e tests that require authentication
+  # This actually runs the uipath CLI commands against the alpha environment
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    environment: alpha
+    needs: e2e-validation  # Only run if validation passes
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run e2e tests (uipath run command)
+        env:
+          UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
+          UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
+          UIPATH_URL: ${{ secrets.UIPATH_URL }}
+          UIPATH_PROJECT_ID: ${{ secrets.UIPATH_PROJECT_ID }}
+        run: |
+          echo "=== Running e2e tests for 'uipath run' command ==="
+          uv run pytest tests/e2e/test_run.py -v -s -m "e2e" --tb=short
+
+      - name: Run e2e tests (uipath eval command)
+        if: ${{ github.event.inputs.run_slow_tests == 'true' || github.event_name == 'push' }}
+        env:
+          UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
+          UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
+          UIPATH_URL: ${{ secrets.UIPATH_URL }}
+          UIPATH_PROJECT_ID: ${{ secrets.UIPATH_PROJECT_ID }}
+        run: |
+          echo "=== Running e2e tests for 'uipath eval' command ==="
+          uv run pytest tests/e2e/test_eval.py -v -s -m "e2e" --tb=short
