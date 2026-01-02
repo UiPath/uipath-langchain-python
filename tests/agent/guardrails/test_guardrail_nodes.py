@@ -509,3 +509,78 @@ class TestGuardrailHelperFunctions:
         assert "MagicMock" in error_message
         assert "DeterministicGuardrail" in error_message
         assert "BuiltInValidatorGuardrail" in error_message
+
+
+class TestGuardrailNodeMetadata:
+    """Tests for guardrail node __metadata__ attribute for observability."""
+
+    def test_llm_guardrail_node_has_metadata(self):
+        """Test that LLM guardrail node has __metadata__ attribute."""
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "TestGuardrail"
+        guardrail.description = "Test description"
+
+        _, node = create_llm_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+
+        assert hasattr(node, "__metadata__")
+        assert isinstance(node.__metadata__, dict)
+
+    def test_llm_guardrail_node_metadata_fields(self):
+        """Test that LLM guardrail node has correct metadata fields."""
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "TestGuardrail"
+        guardrail.description = "Test description"
+
+        _, node = create_llm_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert metadata["guardrail_name"] == "TestGuardrail"
+        assert metadata["guardrail_scope"] == "Llm"
+        assert metadata["guardrail_stage"] == "preExecution"
+        assert metadata["tool_name"] is None
+
+    def test_tool_guardrail_node_has_tool_name(self):
+        """Test that TOOL scope guardrail has tool_name in metadata."""
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "TestGuardrail"
+
+        _, node = create_tool_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert metadata["guardrail_scope"] == "Tool"
+        assert metadata["tool_name"] == "my_tool"
+
+    def test_agent_init_guardrail_node_metadata(self):
+        """Test that AGENT init guardrail has correct scope in metadata."""
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "TestGuardrail"
+
+        _, node = create_agent_init_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert metadata["guardrail_scope"] == "Agent"
+        assert metadata["guardrail_stage"] == "postExecution"

@@ -118,10 +118,11 @@ def _create_guardrail_node(
     | None = None,
     output_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]]
     | None = None,
+    tool_name: str | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail evaluation nodes.
 
-    Returns a node that evaluates the guardrail and routes via Command:
+    Returns a node with observability metadata attached as __metadata__ attribute:
     - goto success_node on validation pass
     - goto failure_node on validation fail
     """
@@ -176,6 +177,15 @@ def _create_guardrail_node(
                 exc,
             )
             raise
+
+    # Attach observability metadata as function attribute
+    node.__metadata__ = {  # type: ignore[attr-defined]
+        "guardrail_name": guardrail.name,
+        "guardrail_description": getattr(guardrail, "description", None),
+        "guardrail_scope": scope.value,
+        "guardrail_stage": execution_stage.value,
+        "tool_name": tool_name,
+    }
 
     return node_name, node
 
@@ -310,4 +320,5 @@ def create_tool_guardrail_node(
         failure_node,
         _input_data_extractor,
         _output_data_extractor,
+        tool_name,
     )

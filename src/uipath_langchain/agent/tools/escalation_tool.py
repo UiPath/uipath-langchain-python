@@ -108,6 +108,12 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         description=resource.description,
         args_schema=input_model,
         coroutine=escalation_tool_fn,
+        metadata={
+            "tool_type": "escalation",
+            "display_name": channel.properties.app_name,
+            "channel_type": channel.type,
+            "assignee": assignee,
+        },
     )
 
     return tool
