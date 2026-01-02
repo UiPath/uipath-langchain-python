@@ -427,6 +427,27 @@ class AgentPostGuardrailsSpanAttributes(BaseSpanAttributes):
         return SpanType.AGENT_POST_GUARDRAILS
 
 
+class EscalationToolSpanAttributes(BaseSpanAttributes):
+    """Attributes for escalation tool spans.
+
+    Matches Temporal EscalationToolSpanAttributes.
+    Child span under Tool call with app name.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
+    channel_type: Optional[str] = Field(None, alias="channelType")
+    assigned_to: Optional[str] = Field(None, alias="assignedTo")
+    task_id: Optional[str] = Field(None, alias="taskId")
+    task_url: Optional[str] = Field(None, alias="taskUrl")
+    result: Optional[Any] = Field(None, alias="result")
+
+    @property
+    def type(self) -> str:
+        return SpanType.ESCALATION_TOOL
+
+
 class ToolGuardrailEvaluationSpanAttributes(GuardrailEvaluationSpanAttributes):
     """Attributes for tool guardrail evaluation spans."""
 
@@ -442,6 +463,7 @@ SpanAttributes = Union[
     LlmCallSpanAttributes,
     ToolCallSpanAttributes,
     ProcessToolSpanAttributes,
+    EscalationToolSpanAttributes,
     AgentOutputSpanAttributes,
     GuardrailEvaluationSpanAttributes,
     LlmPreGuardrailsSpanAttributes,

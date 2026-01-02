@@ -22,6 +22,7 @@ from ..._observability.callback import UiPathTracingCallback
 from ..._observability.runtime_wrapper import TelemetryRuntimeWrapper
 from ..._observability.span_attributes import AgentSpanInfo
 from ..._observability.span_processor import SourceMarkerProcessor
+from ..._observability.sqlite_trace_context_storage import SqliteTraceContextStorage
 from ..._observability.tracer import UiPathTracer
 from ..constants import AGENT_ENTRYPOINT
 from ..utils import _prepare_agent_run_files, load_agent_configuration
@@ -124,13 +125,22 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         Note:
             Runtime wrapping order:
             1. AgentsLangGraphRuntime (base - handles LangGraph execution)
-            2. TelemetryRuntimeWrapper (adds tracing spans)
+            2. TelemetryRuntimeWrapper (adds tracing spans + trace context preservation)
             3. UiPathResumableRuntime (adds persistence/resume)
 
             The callback is passed via constructor to the base runtime,
             ensuring it persists across debug/chat re-executions where
             the same runtime instance is executed multiple times.
+
+            Trace context storage is shared between TelemetryRuntimeWrapper
+            (for trace context preservation) and UiPathResumableRuntime
+            (for agent state persistence).
         """
+        # Create storage first - shared between telemetry and resumable runtime
+        memory = await self._get_memory()
+        storage = SqliteResumableStorage(memory)
+        trace_context_storage = SqliteTraceContextStorage(storage)
+
         tracer = UiPathTracer()
         callback = UiPathTracingCallback(tracer)
         base_runtime = AgentsLangGraphRuntime(
@@ -140,24 +150,32 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             callbacks=[callback],
         )
         telemetry_runtime = TelemetryRuntimeWrapper(
-            base_runtime, tracer, callback, agent_info=self._agent_info
+            base_runtime,
+            tracer,
+            callback,
+            agent_info=self._agent_info,
+            trace_context_storage=trace_context_storage,
         )
-        return await self._wrap_in_resumable_runtime(telemetry_runtime, runtime_id)
+        return await self._wrap_in_resumable_runtime(
+            telemetry_runtime, storage, runtime_id
+        )
 
     async def _wrap_in_resumable_runtime(
-        self, base_runtime: UiPathRuntimeProtocol, runtime_id: str
+        self,
+        base_runtime: UiPathRuntimeProtocol,
+        storage: SqliteResumableStorage,
+        runtime_id: str,
     ) -> UiPathResumableRuntime:
         """Wrap a base runtime in UiPathResumableRuntime with storage and trigger manager.
 
         Args:
             base_runtime: The base runtime to wrap
+            storage: Pre-created storage (shared with TelemetryRuntimeWrapper)
             runtime_id: Unique identifier for the runtime instance
 
         Returns:
             UiPathResumableRuntime wrapping the base runtime
         """
-        memory = await self._get_memory()
-        storage = SqliteResumableStorage(memory)
         trigger_manager = UiPathResumeTriggerHandler()
 
         return UiPathResumableRuntime(

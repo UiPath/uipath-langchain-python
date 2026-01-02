@@ -18,8 +18,10 @@ from .span_attributes import (
     AgentRunSpanAttributes,
     BaseSpanAttributes,
     CompletionSpanAttributes,
+    EscalationToolSpanAttributes,
     LlmCallSpanAttributes,
     ModelSettings,
+    ProcessToolSpanAttributes,
     ToolCallSpanAttributes,
 )
 
@@ -225,6 +227,85 @@ class UiPathTracer:
         )
         # Use typed attributes - pass span_type to override the type field
         attrs = ToolCallSpanAttributes(tool_name=tool_name, span_type=tool_type.value)
+        self._apply_attributes(span, attrs)
+        return span
+
+    def start_escalation_tool(
+        self,
+        app_name: str,
+        *,
+        arguments: Optional[Dict[str, Any]] = None,
+        channel_type: Optional[str] = None,
+        assignee: Optional[str] = None,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start an escalation tool span (child of tool call).
+
+        Creates a span named after the action app for HITL escalations.
+        This matches the Temporal pattern where tool call spans have
+        a child span named after the app (e.g., "SimpleApprovalApp").
+
+        Args:
+            app_name: Name of the action center app (used as span name)
+            arguments: Arguments passed to the escalation
+            channel_type: Type of channel (e.g., "actionCenter")
+            assignee: Who the task is assigned to
+            parent_span: Optional parent span. If None, uses current span.
+
+        Returns:
+            The started Span (caller must call span.end())
+        """
+        parent = parent_span or trace.get_current_span()
+        context = trace.set_span_in_context(parent) if parent else None
+
+        span = self._tracer.start_span(
+            app_name,
+            kind=SpanKind.INTERNAL,
+            context=context,
+        )
+
+        attrs = EscalationToolSpanAttributes(
+            arguments=arguments,
+            channel_type=channel_type,
+            assigned_to=assignee,
+        )
+        self._apply_attributes(span, attrs)
+        return span
+
+    def start_process_tool(
+        self,
+        process_name: str,
+        *,
+        arguments: Optional[Dict[str, Any]] = None,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start a process tool span (child of tool call).
+
+        Creates a span named after the process for interruptible process calls.
+        This matches the pattern where tool call spans have a child span
+        named after the process (e.g., "InvoiceProcessor").
+
+        Args:
+            process_name: Name of the UiPath process (used as span name)
+            arguments: Arguments passed to the process
+            parent_span: Optional parent span. If None, uses current span.
+
+        Returns:
+            The started Span (caller must call span.end())
+        """
+        parent = parent_span or trace.get_current_span()
+        context = trace.set_span_in_context(parent) if parent else None
+
+        span = self._tracer.start_span(
+            process_name,
+            kind=SpanKind.INTERNAL,
+            context=context,
+        )
+
+        attrs = ProcessToolSpanAttributes(
+            tool_name=process_name,
+            arguments=arguments,
+        )
         self._apply_attributes(span, attrs)
         return span
 

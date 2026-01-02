@@ -48,12 +48,33 @@ class UiPathTracingCallback(BaseCallbackHandler):
         # LLM spans stored at run_id, model spans at run_id ^ 1 (XOR with 1)
         self._spans: Dict[UUID, Span] = {}
         self._prompts_captured: bool = False
+        # Pending interruptible tool spans (for suspend/resume)
+        self._pending_tool_name: Optional[str] = None
+        self._pending_tool_span: Optional[Span] = None
+        self._pending_process_span: Optional[Span] = None
+        # Resume mode - skip creating tool spans for first matching tool
+        self._resume_tool_name: Optional[str] = None
 
     def set_agent_span(self, agent_span: Span) -> None:
-        """Set the root agent span for this execution."""
         self._agent_span = agent_span
         self._spans.clear()
         self._prompts_captured = False
+        self._pending_tool_name = None
+        self._pending_tool_span = None
+        self._pending_process_span = None
+
+    def set_resume_context(self, tool_name: str) -> None:
+        """Set resume context - skip creating spans for this tool on first encounter."""
+        self._resume_tool_name = tool_name
+
+    def get_pending_tool_info(
+        self,
+    ) -> tuple[Optional[str], Optional[Span], Optional[Span]]:
+        return (
+            self._pending_tool_name,
+            self._pending_tool_span,
+            self._pending_process_span,
+        )
 
     def _get_span_or_root(self, run_id: Optional[UUID]) -> Optional[Span]:
         if run_id and run_id in self._spans:
@@ -206,6 +227,14 @@ class UiPathTracingCallback(BaseCallbackHandler):
     # Tool Events
     # -------------------------------------------------------------------------
 
+    def _interruptible_span_key(self, run_id: UUID) -> UUID:
+        """Derive a unique key for interruptible tool child span from a tool run_id.
+
+        Similar to _model_span_key, uses XOR to create distinct but
+        deterministic key for the child span (escalation or process).
+        """
+        return UUID(int=run_id.int ^ 2)
+
     def on_tool_start(
         self,
         serialized: Dict[str, Any],
@@ -219,10 +248,41 @@ class UiPathTracingCallback(BaseCallbackHandler):
     ) -> None:
         try:
             tool_name = serialized.get("name", "unknown")
-            parent = self._get_span_or_root(parent_run_id)
 
+            # Extract tool_type and display_name from metadata (set by uipath-langchain)
+            tool_type = metadata.get("tool_type") if metadata else None
+            tool_display_name = metadata.get("display_name") if metadata else None
+
+            # Resume mode: skip span creation for the resumed tool
+            if self._resume_tool_name and tool_name == self._resume_tool_name:
+                logger.debug("Resume mode: skipping span creation for %s", tool_name)
+                self._resume_tool_name = None  # Only skip once
+                # Mark this run_id as "skip" so on_tool_end knows not to end spans
+                self._spans[run_id] = None  # type: ignore
+                return
+
+            parent = self._get_span_or_root(parent_run_id)
             span = self._tracer.start_tool_call(tool_name, parent_span=parent)
             self._spans[run_id] = span
+
+            if tool_type and tool_display_name:
+                child_span = None
+                if tool_type == "escalation":
+                    child_span = self._tracer.start_escalation_tool(
+                        app_name=tool_display_name,
+                        parent_span=span,
+                    )
+                elif tool_type == "process":
+                    child_span = self._tracer.start_process_tool(
+                        process_name=tool_display_name,
+                        parent_span=span,
+                    )
+                if child_span:
+                    self._spans[self._interruptible_span_key(run_id)] = child_span
+                    # Track as pending for suspend scenario
+                    self._pending_tool_name = tool_name
+                    self._pending_tool_span = span
+                    self._pending_process_span = child_span
 
         except Exception:
             logger.exception("Error in on_tool_start callback")
@@ -236,9 +296,20 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
-            span = self._spans.pop(run_id)
-            if span:
+            # Close interruptible child span first, then tool span (parent)
+            child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
+            if child_span:
+                self._tracer.end_span_ok(child_span)
+                # Clear pending if this was the pending span
+                if child_span == self._pending_process_span:
+                    self._pending_process_span = None
+
+            span = self._spans.pop(run_id, None)
+            if span:  # None means this was a skipped resume tool
                 self._tracer.end_span_ok(span)
+                if span == self._pending_tool_span:
+                    self._pending_tool_span = None
+                    self._pending_tool_name = None
 
         except Exception:
             logger.exception("Error in on_tool_end callback")
@@ -252,9 +323,15 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
-            span = self._spans.pop(run_id)
+            exc = error if isinstance(error, Exception) else Exception(str(error))
+
+            # Close interruptible child span first, then tool span (parent)
+            child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
+            if child_span:
+                self._tracer.end_span_error(child_span, exc)
+
+            span = self._spans.pop(run_id, None)
             if span:
-                exc = error if isinstance(error, Exception) else Exception(str(error))
                 self._tracer.end_span_error(span, exc)
 
         except Exception:

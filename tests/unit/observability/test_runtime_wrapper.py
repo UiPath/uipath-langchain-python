@@ -4,10 +4,12 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from uipath.runtime import UiPathRuntimeStatus
 
 from uipath_agents._observability.callback import UiPathTracingCallback
 from uipath_agents._observability.runtime_wrapper import TelemetryRuntimeWrapper
 from uipath_agents._observability.span_attributes import AgentSpanInfo
+from uipath_agents._observability.trace_context_storage import TraceContextData
 from uipath_agents._observability.tracer import UiPathTracer
 
 
@@ -288,3 +290,256 @@ class TestCallbackPersistence:
 
         # Both executions used same wrapper (and thus same callback)
         assert mock_delegate.execute.call_count == 2
+
+
+@pytest.fixture
+def mock_trace_context_storage():
+    """Create a mock trace context storage with async methods."""
+    storage = MagicMock()
+    storage.load_trace_context = AsyncMock(return_value=None)
+    storage.save_trace_context = AsyncMock()
+    storage.clear_trace_context = AsyncMock()
+    return storage
+
+
+class TestInterruptibleTraceContext:
+    """Tests for interruptible process trace context preservation."""
+
+    @pytest.mark.asyncio
+    async def test_init_accepts_trace_context_storage(
+        self, mock_delegate, tracer, callback, mock_trace_context_storage
+    ):
+        """Test wrapper accepts optional trace_context_storage parameter."""
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer,
+            callback,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        assert wrapper._trace_context_storage is mock_trace_context_storage
+
+    @pytest.mark.asyncio
+    async def test_init_without_storage_works(self, mock_delegate, tracer, callback):
+        """Test wrapper works without trace context storage (backward compatibility)."""
+        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+
+        assert wrapper._trace_context_storage is None
+
+    @pytest.mark.asyncio
+    async def test_suspended_saves_trace_context(
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_trace_context_storage,
+    ):
+        """Test SUSPENDED result saves trace context for re-parenting."""
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = mock_result
+
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer,
+            callback,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        await wrapper.execute({"input": "test"}, None)
+
+        # Context should be saved for re-parenting on resume
+        mock_trace_context_storage.save_trace_context.assert_called_once()
+        call_args = mock_trace_context_storage.save_trace_context.call_args
+        assert call_args[0][0] == "test-id"  # runtime_id
+        saved_context = call_args[0][1]
+        assert "trace_id" in saved_context
+        assert "span_id" in saved_context
+
+    @pytest.mark.asyncio
+    async def test_successful_clears_trace_context(
+        self, mock_delegate, tracer, callback, mock_trace_context_storage
+    ):
+        """Test SUCCESSFUL result clears saved trace context."""
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        mock_result.output = {"result": "done"}
+        mock_delegate.execute.return_value = mock_result
+
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer,
+            callback,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        await wrapper.execute({"input": "test"}, None)
+
+        mock_trace_context_storage.clear_trace_context.assert_called_once_with(
+            "test-id"
+        )
+
+    @pytest.mark.asyncio
+    async def test_faulted_clears_trace_context(
+        self, mock_delegate, tracer, callback, mock_trace_context_storage
+    ):
+        """Test FAULTED result clears saved trace context."""
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.FAULTED
+        mock_delegate.execute.return_value = mock_result
+
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer,
+            callback,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        await wrapper.execute({"input": "test"}, None)
+
+        mock_trace_context_storage.clear_trace_context.assert_called_once_with(
+            "test-id"
+        )
+
+    @pytest.mark.asyncio
+    async def test_resume_loads_saved_context(
+        self, mock_delegate, tracer, callback, mock_trace_context_storage
+    ):
+        """Test resume execution loads saved trace context."""
+        saved_context = TraceContextData(
+            trace_id="abc123def456789012345678901234567890",
+            span_id="1234567890123456",
+            parent_span_id=None,
+            name="Agent run - test-agent",
+            start_time="2024-01-15T10:30:00Z",
+            attributes={"agentId": "test-id"},
+            pending_tool_span_id=None,
+            pending_process_span_id=None,
+            pending_tool_name=None,
+        )
+        mock_trace_context_storage.load_trace_context = AsyncMock(
+            return_value=saved_context
+        )
+
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        mock_result.output = {"result": "done"}
+        mock_delegate.execute.return_value = mock_result
+
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer,
+            callback,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        await wrapper.execute({"input": "resume"}, None)
+
+        # Should have loaded context
+        mock_trace_context_storage.load_trace_context.assert_called_once_with("test-id")
+
+    @pytest.mark.asyncio
+    async def test_full_suspend_resume_flow(
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+    ):
+        """Test complete suspend → resume → complete flow with re-parenting."""
+        # Simulate storage behavior
+        stored_context = None
+
+        async def mock_save(runtime_id, context):
+            nonlocal stored_context
+            stored_context = context
+
+        async def mock_load(runtime_id):
+            return stored_context
+
+        async def mock_clear(runtime_id):
+            nonlocal stored_context
+            stored_context = None
+
+        storage = MagicMock()
+        storage.save_trace_context = AsyncMock(side_effect=mock_save)
+        storage.load_trace_context = AsyncMock(side_effect=mock_load)
+        storage.clear_trace_context = AsyncMock(side_effect=mock_clear)
+
+        # First execution: SUSPENDED
+        suspended_result = MagicMock()
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
+
+        # Second execution: SUCCESSFUL
+        success_result = MagicMock()
+        success_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        success_result.output = {"result": "done"}
+
+        mock_delegate.execute.side_effect = [suspended_result, success_result]
+
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer,
+            callback,
+            trace_context_storage=storage,
+        )
+
+        # First execute - suspends
+        result1 = await wrapper.execute({"input": "initial"}, None)
+        assert result1.status == UiPathRuntimeStatus.SUSPENDED
+
+        # Context should be saved for re-parenting
+        assert stored_context is not None
+        assert "trace_id" in stored_context
+
+        # Second execute - resume (will re-parent to original trace)
+        result2 = await wrapper.execute({"input": "resume"}, None)
+        assert result2.status == UiPathRuntimeStatus.SUCCESSFUL
+
+        # Context should be cleared after success
+        assert stored_context is None
+
+    @pytest.mark.asyncio
+    async def test_no_storage_still_works(self, mock_delegate, tracer, callback):
+        """Test wrapper works without storage (no upsert/save, just normal execution)."""
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = mock_result
+
+        # No storage provided
+        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+
+        # Should not raise
+        result = await wrapper.execute({"input": "test"}, None)
+        assert result.status == UiPathRuntimeStatus.SUSPENDED
+
+    @pytest.mark.asyncio
+    async def test_stream_suspended_saves_context(
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_trace_context_storage,
+    ):
+        """Test stream with SUSPENDED result saves trace context."""
+        from uipath.runtime import UiPathRuntimeResult
+
+        suspended_result = MagicMock(spec=UiPathRuntimeResult)
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
+
+        async def mock_stream(*args, **kwargs):
+            yield "event1"
+            yield suspended_result
+
+        mock_delegate.stream = mock_stream
+
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer,
+            callback,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        events = [e async for e in wrapper.stream({"input": "test"}, None)]
+
+        assert len(events) == 2
+        mock_trace_context_storage.save_trace_context.assert_called_once()
