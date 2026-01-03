@@ -3,9 +3,9 @@
 from enum import Enum
 from typing import Any
 
-from langchain.tools import ToolRuntime
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import StructuredTool
+from langchain_core.messages.tool import ToolCall
+from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import Command, interrupt
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
@@ -17,6 +17,8 @@ from uipath.platform.common import CreateEscalation
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
+from ..react.types import AgentGraphNode, AgentGraphState, AgentTerminationSource
+from .tool_node import ToolWrapperMixin
 from .utils import sanitize_tool_name
 
 
@@ -27,7 +29,11 @@ class EscalationAction(str, Enum):
     END = "end"
 
 
-def create_escalation_tool(resource: AgentEscalationResourceConfig) -> StructuredTool:
+class StructuredToolWithWrapper(StructuredTool, ToolWrapperMixin):
+    pass
+
+
+def create_escalation_tool(resource: AgentEscalationResourceConfig) -> BaseTool:
     """Uses interrupt() for Action Center human-in-the-loop."""
 
     tool_name: str = f"escalate_{sanitize_tool_name(resource.name)}"
@@ -50,9 +56,7 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         output_schema=output_model.model_json_schema(),
         example_calls=channel.properties.example_calls,
     )
-    async def escalation_tool_fn(
-        runtime: ToolRuntime, **kwargs: Any
-    ) -> Command[Any] | Any:
+    async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
         task_title = channel.task_title or "Escalation Task"
 
         result = interrupt(
@@ -73,23 +77,41 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
         escalation_action = getattr(result, "action", None)
         escalation_output = getattr(result, "data", {})
 
-        outcome = (
+        outcome_str = (
             channel.outcome_mapping.get(escalation_action)
             if channel.outcome_mapping and escalation_action
             else None
         )
+        outcome = (
+            EscalationAction(outcome_str) if outcome_str else EscalationAction.CONTINUE
+        )
 
-        if outcome == EscalationAction.END:
-            output_detail = f"Escalation output: {escalation_output}"
-            termination_title = f"Agent run ended based on escalation outcome {outcome} with directive {escalation_action}"
-            from ..react.types import AgentGraphNode, AgentTerminationSource
+        return {
+            "action": outcome,
+            "output": escalation_output,
+            "escalation_action": escalation_action,
+        }
+
+    async def escalation_wrapper(
+        tool: BaseTool,
+        call: ToolCall,
+        state: AgentGraphState,
+    ) -> dict[str, Any] | Command[Any]:
+        result = await tool.ainvoke(call["args"])
+
+        if result["action"] == EscalationAction.END:
+            output_detail = f"Escalation output: {result['output']}"
+            termination_title = (
+                f"Agent run ended based on escalation outcome {result['action']} "
+                f"with directive {result['escalation_action']}"
+            )
 
             return Command(
                 update={
                     "messages": [
                         ToolMessage(
                             content=f"{termination_title}. {output_detail}",
-                            tool_call_id=runtime.tool_call_id,
+                            tool_call_id=call["id"],
                         )
                     ],
                     "termination": {
@@ -101,9 +123,9 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
                 goto=AgentGraphNode.TERMINATE,
             )
 
-        return escalation_output
+        return result["output"]
 
-    tool = StructuredTool(
+    tool = StructuredToolWithWrapper(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
@@ -115,5 +137,6 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
             "assignee": assignee,
         },
     )
+    tool.set_tool_wrappers(awrapper=escalation_wrapper)
 
     return tool

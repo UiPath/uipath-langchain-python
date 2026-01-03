@@ -6,6 +6,7 @@ from typing import Any, Awaitable, Callable, Literal
 
 from langchain_core.messages.ai import AIMessage
 from langchain_core.messages.tool import ToolCall, ToolMessage
+from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
@@ -48,7 +49,7 @@ class UiPathToolNode(RunnableCallable):
         self.wrapper = wrapper
         self.awrapper = awrapper
 
-    def _func(self, state: Any) -> OutputType:
+    def _func(self, state: Any, config: RunnableConfig | None = None) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
             return None
@@ -57,10 +58,11 @@ class UiPathToolNode(RunnableCallable):
             result = self.wrapper(self.tool, call, filtered_state)
         else:
             result = self.tool.invoke(call["args"])
-
         return self._process_result(call, result)
 
-    async def _afunc(self, state: Any) -> OutputType:
+    async def _afunc(
+        self, state: Any, config: RunnableConfig | None = None
+    ) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
             return None
@@ -69,7 +71,6 @@ class UiPathToolNode(RunnableCallable):
             result = await self.awrapper(self.tool, call, filtered_state)
         else:
             result = await self.tool.ainvoke(call["args"])
-
         return self._process_result(call, result)
 
     def _extract_tool_call(self, state: Any) -> ToolCall | None:
