@@ -92,7 +92,7 @@ class UiPathLangGraphRuntimeFactory:
         return self._config
 
     async def _load_graph(
-        self, entrypoint: str
+        self, entrypoint: str, **kwargs
     ) -> StateGraph[Any, Any, Any] | CompiledStateGraph[Any, Any, Any, Any]:
         """
         Load a graph for the given entrypoint.
@@ -181,7 +181,7 @@ class UiPathLangGraphRuntimeFactory:
         return builder.compile(checkpointer=memory)
 
     async def _resolve_and_compile_graph(
-        self, entrypoint: str, memory: AsyncSqliteSaver
+        self, entrypoint: str, memory: AsyncSqliteSaver, **kwargs
     ) -> CompiledStateGraph[Any, Any, Any, Any]:
         """
         Resolve a graph from configuration and compile it.
@@ -201,7 +201,7 @@ class UiPathLangGraphRuntimeFactory:
             if entrypoint in self._graph_cache:
                 return self._graph_cache[entrypoint]
 
-            loaded_graph = await self._load_graph(entrypoint)
+            loaded_graph = await self._load_graph(entrypoint, **kwargs)
 
             compiled_graph = await self._compile_graph(loaded_graph, memory)
 
@@ -249,6 +249,7 @@ class UiPathLangGraphRuntimeFactory:
         compiled_graph: CompiledStateGraph[Any, Any, Any, Any],
         runtime_id: str,
         entrypoint: str,
+        **kwargs,
     ) -> UiPathRuntimeProtocol:
         """
         Create a runtime instance from a compiled graph.
@@ -279,7 +280,7 @@ class UiPathLangGraphRuntimeFactory:
         )
 
     async def new_runtime(
-        self, entrypoint: str, runtime_id: str
+        self, entrypoint: str, runtime_id: str, **kwargs
     ) -> UiPathRuntimeProtocol:
         """
         Create a new LangGraph runtime instance.
@@ -294,12 +295,15 @@ class UiPathLangGraphRuntimeFactory:
         # Get shared memory instance
         memory = await self._get_memory()
 
-        compiled_graph = await self._resolve_and_compile_graph(entrypoint, memory)
+        compiled_graph = await self._resolve_and_compile_graph(
+            entrypoint, memory, **kwargs
+        )
 
         return await self._create_runtime_instance(
             compiled_graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
+            **kwargs,
         )
 
     async def dispose(self) -> None:
