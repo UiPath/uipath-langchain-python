@@ -57,7 +57,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         return [AGENT_ENTRYPOINT]
 
     async def _load_graph(
-        self, entrypoint: str
+        self, entrypoint: str, **kwargs
     ) -> StateGraph[Any, Any, Any] | CompiledStateGraph[Any, Any, Any, Any]:
         """Load agent graph for the given entrypoint and validate input against schema.
 
@@ -111,6 +111,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         compiled_graph: CompiledStateGraph[Any, Any, Any, Any],
         runtime_id: str,
         entrypoint: str,
+        **kwargs,
     ) -> UiPathRuntimeProtocol:
         """Create an agent runtime instance from a compiled graph.
 
