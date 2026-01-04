@@ -1,7 +1,7 @@
 """Factory functions for creating tools from agent resources."""
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentEscalationResourceConfig,
@@ -34,7 +34,7 @@ async def create_tools_from_resources(
 
 async def _build_tool_for_resource(
     resource: BaseAgentResourceConfig, llm: BaseChatModel
-) -> StructuredTool | None:
+) -> BaseTool | None:
     if isinstance(resource, AgentProcessToolResourceConfig):
         return create_process_tool(resource)
 
