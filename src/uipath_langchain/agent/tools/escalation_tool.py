@@ -32,10 +32,10 @@ class EscalationAction(str, Enum):
     END = "end"
 
 
-def resolve_recipient_value(recipient: AgentEscalationRecipient) -> str | None:
+async def resolve_recipient_value(recipient: AgentEscalationRecipient) -> str | None:
     """Resolve recipient value based on recipient type."""
     if isinstance(recipient, AssetRecipient):
-        return resolve_asset(recipient.asset_name, recipient.folder_path)
+        return await resolve_asset(recipient.asset_name, recipient.folder_path)
 
     if isinstance(recipient, StandardRecipient):
         return recipient.value
@@ -43,11 +43,13 @@ def resolve_recipient_value(recipient: AgentEscalationRecipient) -> str | None:
     return None
 
 
-def resolve_asset(asset_name: str, folder_path: str) -> str | None:
+async def resolve_asset(asset_name: str, folder_path: str) -> str | None:
     """Retrieve asset value."""
     try:
         client = UiPath()
-        result = client.assets.retrieve(name=asset_name, folder_path=folder_path)
+        result = await client.assets.retrieve_async(
+            name=asset_name, folder_path=folder_path
+        )
 
         if not result or not result.value:
             raise ValueError(f"Asset '{asset_name}' has no value configured.")
@@ -63,7 +65,9 @@ class StructuredToolWithWrapper(StructuredTool, ToolWrapperMixin):
     pass
 
 
-def create_escalation_tool(resource: AgentEscalationResourceConfig) -> StructuredTool:
+async def create_escalation_tool(
+    resource: AgentEscalationResourceConfig,
+) -> StructuredTool:
     """Uses interrupt() for Action Center human-in-the-loop."""
 
     tool_name: str = f"escalate_{sanitize_tool_name(resource.name)}"
@@ -73,7 +77,9 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> Structure
     output_model: Any = create_model(channel.output_schema)
 
     assignee: str | None = (
-        resolve_recipient_value(channel.recipients[0]) if channel.recipients else None
+        await resolve_recipient_value(channel.recipients[0])
+        if channel.recipients
+        else None
     )
 
     @mockable(
