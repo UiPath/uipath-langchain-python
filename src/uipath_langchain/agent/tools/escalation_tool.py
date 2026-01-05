@@ -10,8 +10,9 @@ from langgraph.types import Command, interrupt
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipient,
-    AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
+    AssetRecipient,
+    StandardRecipient,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
@@ -33,13 +34,10 @@ class EscalationAction(str, Enum):
 
 def resolve_recipient_value(recipient: AgentEscalationRecipient) -> str | None:
     """Resolve recipient value based on recipient type."""
-    if (
-        recipient.type == AgentEscalationRecipientType.ASSET_USER_EMAIL
-        or recipient.type == AgentEscalationRecipientType.ASSET_GROUP_NAME
-    ):
+    if isinstance(recipient, AssetRecipient):
         return resolve_asset(recipient.asset_name, recipient.folder_path)
 
-    if hasattr(recipient, "value"):
+    if isinstance(recipient, StandardRecipient):
         return recipient.value
 
     return None
