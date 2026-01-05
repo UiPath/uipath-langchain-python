@@ -57,8 +57,8 @@ def create_terminate_node(
     """
 
     def terminate_node(state: AgentGraphState):
-        if state.termination:
-            _handle_agent_termination(state.termination)
+        if state.inner_state.termination:
+            _handle_agent_termination(state.inner_state.termination)
 
         last_message = state.messages[-1]
         if not isinstance(last_message, AIMessage):

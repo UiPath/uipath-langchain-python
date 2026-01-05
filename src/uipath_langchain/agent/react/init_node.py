@@ -15,7 +15,7 @@ def create_init_node(
     | Callable[[Any], Sequence[SystemMessage | HumanMessage]],
     input_schema: type[BaseModel] | None,
 ):
-    def graph_state_init(state: Any):
+    def graph_state_init(state: Any) -> Any:
         if callable(messages):
             resolved_messages = messages(state)
         else:
@@ -29,7 +29,9 @@ def create_init_node(
 
         return {
             "messages": list(resolved_messages),
-            "job_attachments": job_attachments_dict,
+            "inner_state": {
+                "job_attachments": job_attachments_dict,
+            },
         }
 
     return graph_state_init

@@ -36,14 +36,14 @@ OutputT = TypeVar("OutputT", bound=BaseModel)
 
 
 def create_state_with_input(input_schema: Type[InputT]):
-    InnerAgentGraphState = type(
-        "InnerAgentGraphState",
+    CompleteAgentGraphState = type(
+        "CompleteAgentGraphState",
         (AgentGraphState, input_schema),
         {},
     )
 
-    cast(type[BaseModel], InnerAgentGraphState).model_rebuild()
-    return InnerAgentGraphState
+    cast(type[BaseModel], CompleteAgentGraphState).model_rebuild()
+    return CompleteAgentGraphState
 
 
 def create_agent(
@@ -85,12 +85,12 @@ def create_agent(
     )
     terminate_node = create_terminate_node(output_schema)
 
-    InnerAgentGraphState = create_state_with_input(
+    CompleteAgentGraphState = create_state_with_input(
         input_schema if input_schema is not None else BaseModel
     )
 
     builder: StateGraph[AgentGraphState, None, InputT, OutputT] = StateGraph(
-        InnerAgentGraphState, input_schema=input_schema, output_schema=output_schema
+        CompleteAgentGraphState, input_schema=input_schema, output_schema=output_schema
     )
     init_with_guardrails_subgraph = create_agent_init_guardrails_subgraph(
         (AgentGraphNode.GUARDED_INIT, init_node),
