@@ -6,7 +6,7 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 from uipath.platform.attachments import Attachment
 
-from uipath_langchain.agent.react.utils import add_job_attachments
+from uipath_langchain.agent.react.reducers import add_job_attachments, merge_objects
 
 
 class AgentTerminationSource(StrEnum):
@@ -21,12 +21,18 @@ class AgentTermination(BaseModel):
     detail: str = ""
 
 
+class InnerAgentGraphState(BaseModel):
+    job_attachments: Annotated[dict[str, Attachment], add_job_attachments] = {}
+    termination: AgentTermination | None = None
+
+
 class AgentGraphState(BaseModel):
     """Agent Graph state for standard loop execution."""
 
     messages: Annotated[list[AnyMessage], add_messages] = []
-    job_attachments: Annotated[dict[str, Attachment], add_job_attachments] = {}
-    termination: AgentTermination | None = None
+    inner_state: Annotated[InnerAgentGraphState, merge_objects] = Field(
+        default_factory=InnerAgentGraphState
+    )
 
 
 class AgentGuardrailsGraphState(AgentGraphState):

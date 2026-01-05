@@ -114,10 +114,12 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> BaseTool:
                             tool_call_id=call["id"],
                         )
                     ],
-                    "termination": {
-                        "source": AgentTerminationSource.ESCALATION,
-                        "title": termination_title,
-                        "detail": output_detail,
+                    "inner_state": {
+                        "termination": {
+                            "source": AgentTerminationSource.ESCALATION,
+                            "title": termination_title,
+                            "detail": output_detail,
+                        }
                     },
                 },
                 goto=AgentGraphNode.TERMINATE,

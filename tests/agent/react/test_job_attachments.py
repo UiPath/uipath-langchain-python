@@ -1,12 +1,13 @@
 import uuid
 from typing import Any
 
+from jsonschema_pydantic_converter import transform_with_modules
 from pydantic import BaseModel
 from uipath.platform.attachments import Attachment
 
 from uipath_langchain.agent.react.job_attachments import get_job_attachments
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.utils import (
+from uipath_langchain.agent.react.reducers import (
     add_job_attachments,
 )
 
@@ -343,7 +344,7 @@ class TestGetJobAttachments:
                 }
             },
         }
-        model = create_model(schema)
+        model, _ = transform_with_modules(schema)
         test_uuid = "550e8400-e29b-41d4-a716-446655440200"
         data = {
             "result": {

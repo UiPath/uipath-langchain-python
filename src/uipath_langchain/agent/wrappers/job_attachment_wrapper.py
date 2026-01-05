@@ -51,7 +51,7 @@ def get_job_attachment_wrapper() -> AsyncToolWrapperType:
             errors: list[str] = []
             paths = get_job_attachment_paths(tool.args_schema)
             modified_input_args = replace_job_attachment_ids(
-                paths, input_args, state.job_attachments, errors
+                paths, input_args, state.inner_state.job_attachments, errors
             )
 
             if errors:

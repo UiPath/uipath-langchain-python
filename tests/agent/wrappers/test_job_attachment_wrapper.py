@@ -10,7 +10,7 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 from uipath.platform.attachments import Attachment
 
-from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphState
 from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
     get_job_attachment_wrapper,
 )
@@ -46,7 +46,8 @@ class TestGetJobAttachmentWrapper:
     def mock_state(self):
         """Create a mock agent graph state."""
         state = MagicMock(spec=AgentGraphState)
-        state.job_attachments = {}
+        state.inner_state = InnerAgentGraphState()
+        state.inner_state.job_attachments = {}
         state.messages = []
         return state
 
@@ -138,7 +139,9 @@ class TestGetJobAttachmentWrapper:
         mock_get_paths.return_value = ["$.attachment"]
 
         # Setup state with valid attachment (string keys)
-        mock_state.job_attachments = {str(mock_attachment.id): mock_attachment}
+        mock_state.inner_state.job_attachments = {
+            str(mock_attachment.id): mock_attachment
+        }
 
         # Setup tool call with attachment ID
         tool_call = cast(
@@ -185,7 +188,7 @@ class TestGetJobAttachmentWrapper:
         )
 
         # Empty state - attachment not found
-        mock_state.job_attachments = {}
+        mock_state.inner_state.job_attachments = {}
 
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
@@ -229,7 +232,7 @@ class TestGetJobAttachmentWrapper:
         )
 
         # Empty state - both attachments not found
-        mock_state.job_attachments = {}
+        mock_state.inner_state.job_attachments = {}
 
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
@@ -271,7 +274,7 @@ class TestGetJobAttachmentWrapper:
             },
         )
 
-        mock_state.job_attachments = {}
+        mock_state.inner_state.job_attachments = {}
 
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
@@ -297,7 +300,9 @@ class TestGetJobAttachmentWrapper:
         mock_get_paths.return_value = ["$.attachments[*]"]
 
         # One valid, one invalid (string keys)
-        mock_state.job_attachments = {str(mock_attachment.id): mock_attachment}
+        mock_state.inner_state.job_attachments = {
+            str(mock_attachment.id): mock_attachment
+        }
         invalid_id = uuid.uuid4()
 
         tool_call = cast(
@@ -374,7 +379,7 @@ class TestGetJobAttachmentWrapper:
         )
 
         # Setup state with available attachments (string keys)
-        mock_state.job_attachments = {
+        mock_state.inner_state.job_attachments = {
             str(attachment1_id): attachment1,
             str(attachment2_id): attachment2,
             str(attachment3_id): attachment3,
@@ -498,7 +503,7 @@ class TestGetJobAttachmentWrapper:
         )
 
         # Setup state with all attachments (string keys)
-        mock_state.job_attachments = {
+        mock_state.inner_state.job_attachments = {
             str(attachment1_id): attachment1,
             str(attachment2_id): attachment2,
             str(attachment3_id): attachment3,
