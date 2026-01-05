@@ -9,9 +9,9 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import Command, interrupt
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
+    AgentEscalationRecipient,
     AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
-    AgentEscalationRecipient,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath

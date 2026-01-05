@@ -1,6 +1,7 @@
 """Tests for escalation_tool.py metadata."""
 
 from unittest.mock import MagicMock, patch
+
 import pytest
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
