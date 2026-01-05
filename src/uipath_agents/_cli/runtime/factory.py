@@ -23,6 +23,7 @@ from ..._observability.runtime_wrapper import TelemetryRuntimeWrapper
 from ..._observability.span_attributes import AgentSpanInfo
 from ..._observability.span_processor import SourceMarkerProcessor
 from ..._observability.sqlite_trace_context_storage import SqliteTraceContextStorage
+from ..._observability.telemetry_callback import AppInsightsTelemetryCallback
 from ..._observability.tracer import UiPathTracer
 from ..constants import AGENT_ENTRYPOINT
 from ..utils import _prepare_agent_run_files, load_agent_configuration
@@ -76,11 +77,58 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             agent_json_path = Path.cwd() / entrypoint
             agent_definition = load_agent_configuration(agent_json_path)
 
-            # Store agent info for telemetry (avoids re-loading config later)
+            model = None
+            max_tokens = None
+            temperature = None
+            engine = None
+            max_iterations = None
+            if hasattr(agent_definition, "settings") and agent_definition.settings:
+                settings = agent_definition.settings
+                model = (
+                    str(settings.model)
+                    if hasattr(settings, "model") and settings.model
+                    else None
+                )
+                max_tokens = (
+                    settings.max_tokens
+                    if hasattr(settings, "max_tokens") and settings.max_tokens
+                    else None
+                )
+                temperature = (
+                    settings.temperature
+                    if hasattr(settings, "temperature") and settings.temperature
+                    else None
+                )
+                engine = (
+                    str(settings.engine)
+                    if hasattr(settings, "engine") and settings.engine
+                    else None
+                )
+                max_iterations = (
+                    settings.max_iterations
+                    if hasattr(settings, "max_iterations") and settings.max_iterations
+                    else None
+                )
+
+            is_conversational = None
+            if hasattr(agent_definition, "metadata") and agent_definition.metadata:
+                metadata = agent_definition.metadata
+                is_conversational = (
+                    metadata.is_conversational
+                    if hasattr(metadata, "is_conversational")
+                    else None
+                )
+
             self._agent_info = AgentSpanInfo(
                 name=agent_definition.name or "unknown",
                 input_schema=agent_definition.input_schema,
                 output_schema=agent_definition.output_schema,
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                engine=engine,
+                max_iterations=max_iterations,
+                is_conversational=is_conversational,
             )
 
             if not self.context.resume:
@@ -143,17 +191,20 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         trace_context_storage = SqliteTraceContextStorage(storage)
 
         tracer = UiPathTracer()
-        callback = UiPathTracingCallback(tracer)
+        tracing_callback = UiPathTracingCallback(tracer)
+        telemetry_callback = AppInsightsTelemetryCallback()
+
         base_runtime = AgentsLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
-            callbacks=[callback],
+            callbacks=[tracing_callback, telemetry_callback],
         )
         telemetry_runtime = TelemetryRuntimeWrapper(
             base_runtime,
             tracer,
-            callback,
+            tracing_callback,
+            telemetry_callback=telemetry_callback,
             agent_info=self._agent_info,
             trace_context_storage=trace_context_storage,
         )

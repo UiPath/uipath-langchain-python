@@ -109,6 +109,18 @@ jobs:
           echo "=== Running e2e tests for 'uipath run' command ==="
           uv run pytest tests/e2e/test_run.py -v -s -m "e2e" --junitxml=run-results.xml --tb=short
 
+      - name: Run e2e tests (telemetry)
+        env:
+          UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
+          UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
+          UIPATH_URL: ${{ secrets.UIPATH_URL }}
+          UIPATH_PROJECT_ID: ${{ secrets.UIPATH_PROJECT_ID }}
+          APPLICATIONINSIGHTS_CONNECTION_STRING: ${{ secrets.APPLICATIONINSIGHTS_CONNECTION_STRING }}
+          APPLICATIONINSIGHTS_API_KEY: ${{ secrets.APPLICATIONINSIGHTS_API_KEY }}
+        run: |
+          echo "=== Running e2e tests for telemetry functionality ==="
+          uv run pytest tests/e2e/test_telemetry.py -v -s -m "e2e" --junitxml=telemetry-results.xml --tb=short
+
       - name: Run e2e tests (uipath eval command)
         env:
           UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}

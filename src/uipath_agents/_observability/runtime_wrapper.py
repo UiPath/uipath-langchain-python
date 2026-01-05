@@ -13,6 +13,9 @@ Supports interruptible process trace context preservation:
 """
 
 import logging
+import os
+import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Dict, Optional
@@ -31,6 +34,12 @@ from uipath.runtime.schema import UiPathRuntimeSchema
 
 from .callback import UiPathTracingCallback
 from .span_attributes import AgentSpanInfo
+from .telemetry_callback import (
+    AGENTRUN_COMPLETED,
+    AGENTRUN_FAILED,
+    AGENTRUN_STARTED,
+    AppInsightsTelemetryCallback,
+)
 from .trace_context_storage import TraceContextData, TraceContextStorage
 from .tracer import UiPathTracer
 
@@ -67,6 +76,7 @@ class TelemetryRuntimeWrapper:
         delegate: UiPathRuntimeProtocol,
         tracer: UiPathTracer,
         callback: UiPathTracingCallback,
+        telemetry_callback: Optional[AppInsightsTelemetryCallback] = None,
         agent_info: Optional[AgentSpanInfo] = None,
         trace_context_storage: Optional[TraceContextStorage] = None,
     ):
@@ -76,15 +86,18 @@ class TelemetryRuntimeWrapper:
             delegate: The runtime to wrap with telemetry
             tracer: UiPathTracer for creating spans
             callback: Callback for LangChain event instrumentation
-            agent_info: Optional agent metadata for span attributes
+            telemetry_callback: Optional callback for Application Insights telemetry
+            agent_info: Optional agent metadata for span attributes and telemetry enrichment
             trace_context_storage: Optional storage for trace context preservation
                 across suspend/resume cycles. If None, trace context is not preserved.
         """
         self._delegate = delegate
         self._tracer = tracer
         self._callback = callback
+        self._telemetry_callback = telemetry_callback
         self._agent_info = agent_info
         self._trace_context_storage = trace_context_storage
+        self._agent_run_id = str(uuid.uuid4())
 
     @property
     def delegate(self) -> UiPathRuntimeProtocol:
@@ -109,20 +122,23 @@ class TelemetryRuntimeWrapper:
         Returns:
             Execution result with status
         """
+        start_time = time.time()
         # Check for existing trace context (resume scenario)
         saved_context = await self._load_trace_context_if_resuming()
 
-        async with self._agent_span_context(input, saved_context) as agent_span:
+        async with self._agent_span_context(
+            input, saved_context, start_time
+        ) as agent_span:
             result = await self._delegate.execute(input, options)
+            duration_ms = int((time.time() - start_time) * 1000)
 
             if result.status == UiPathRuntimeStatus.SUSPENDED:
                 await self._handle_suspended(agent_span)
             elif result.status == UiPathRuntimeStatus.SUCCESSFUL:
-                self._emit_output_if_successful(result)
+                self._emit_output_if_successful(result, duration_ms, agent_span)
                 await self._clear_trace_context()
             elif result.status == UiPathRuntimeStatus.FAULTED:
                 await self._clear_trace_context()
-
             return result
 
     async def stream(
@@ -141,9 +157,12 @@ class TelemetryRuntimeWrapper:
         Yields:
             Runtime events during execution
         """
+        start_time = time.time()
         saved_context = await self._load_trace_context_if_resuming()
 
-        async with self._agent_span_context(input, saved_context) as agent_span:
+        async with self._agent_span_context(
+            input, saved_context, start_time
+        ) as agent_span:
             final_result: Optional[UiPathRuntimeResult] = None
 
             async for event in self._delegate.stream(input, options):
@@ -152,10 +171,14 @@ class TelemetryRuntimeWrapper:
                 yield event
 
             if final_result:
+                duration_ms = int((time.time() - start_time) * 1000)
+
                 if final_result.status == UiPathRuntimeStatus.SUSPENDED:
                     await self._handle_suspended(agent_span)
                 elif final_result.status == UiPathRuntimeStatus.SUCCESSFUL:
-                    self._emit_output_if_successful(final_result)
+                    self._emit_output_if_successful(
+                        final_result, duration_ms, agent_span
+                    )
                     await self._clear_trace_context()
                 elif final_result.status == UiPathRuntimeStatus.FAULTED:
                     await self._clear_trace_context()
@@ -184,6 +207,7 @@ class TelemetryRuntimeWrapper:
         self,
         input_data: Any = None,
         saved_context: Optional[TraceContextData] = None,
+        start_time: Optional[float] = None,
     ) -> AsyncGenerator[Span, None]:
         """Context manager for agent span lifecycle.
 
@@ -194,6 +218,7 @@ class TelemetryRuntimeWrapper:
         Args:
             input_data: Input data for the agent (used for new spans)
             saved_context: Previously saved trace context (resume scenario)
+            start_time: Start time for telemetry tracking
 
         Yields:
             The agent span for the execution
@@ -210,15 +235,18 @@ class TelemetryRuntimeWrapper:
                     yield agent_span
                 finally:
                     self._callback.cleanup()
+                    if self._telemetry_callback:
+                        self._telemetry_callback.cleanup()
         else:
             # Normal: create new trace context
             agent_name = self._get_agent_name()
+            agent_id = self._get_agent_id()
             system_prompt, user_prompt = self._get_prompts()
             input_schema, output_schema = self._get_schemas()
 
             with self._tracer.start_agent_run(
                 agent_name=agent_name,
-                agent_id=self._get_agent_id(),
+                agent_id=agent_id,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 input_data=self._normalize_input(input_data),
@@ -226,10 +254,59 @@ class TelemetryRuntimeWrapper:
                 output_schema=output_schema,
             ) as agent_span:
                 self._callback.set_agent_span(agent_span)
+
+                if self._telemetry_callback:
+                    self._telemetry_callback.set_agent_info(agent_name, agent_id)
+
+                    base_properties: Dict[str, Any] = {
+                        "AgentName": agent_name,
+                    }
+
+                    if agent_id:
+                        base_properties["AgentId"] = agent_id
+
+                    enriched_properties = self._get_enriched_properties(base_properties)
+
+                    self._telemetry_callback.track_event(
+                        AGENTRUN_STARTED, enriched_properties
+                    )
+
                 try:
                     yield agent_span
+                except Exception as e:
+                    if self._telemetry_callback:
+                        duration_ms = (
+                            int((time.time() - start_time) * 1000)
+                            if start_time
+                            else None
+                        )
+
+                        base_properties = {
+                            "AgentName": agent_name,
+                            "Timestamp": datetime.utcnow().isoformat(),
+                            "ErrorMessage": str(e)[
+                                :500
+                            ],  # Truncate long error messages
+                            "ErrorType": type(e).__name__,
+                        }
+
+                        if agent_id:
+                            base_properties["AgentId"] = agent_id
+                        if duration_ms is not None:
+                            base_properties["DurationMs"] = duration_ms
+
+                        enriched_properties = self._get_enriched_properties(
+                            base_properties
+                        )
+
+                        self._telemetry_callback.track_event(
+                            AGENTRUN_FAILED, enriched_properties
+                        )
+                    raise
                 finally:
                     self._callback.cleanup()
+                    if self._telemetry_callback:
+                        self._telemetry_callback.cleanup()
 
     @asynccontextmanager
     async def _restore_trace_context(
@@ -376,6 +453,48 @@ class TelemetryRuntimeWrapper:
             return self._delegate.runtime_id
         return "unknown"
 
+    def _get_enriched_properties(
+        self, base_properties: Dict[str, Any], agent_span: Optional[Span] = None
+    ) -> Dict[str, Any]:
+        """Get enriched telemetry properties from AgentSpanInfo and execution context."""
+        properties = base_properties.copy()
+
+        if agent_span:
+            span_context = agent_span.get_span_context()
+            if span_context and span_context.trace_id:
+                properties["TraceId"] = format(span_context.trace_id, "032x")
+
+        properties["AgentRunId"] = self._agent_run_id
+
+        if self._agent_info:
+            if self._agent_info.model:
+                properties["Model"] = str(self._agent_info.model)
+
+            if self._agent_info.max_tokens is not None:
+                properties["MaxTokens"] = str(self._agent_info.max_tokens)
+
+            if self._agent_info.temperature is not None:
+                properties["Temperature"] = str(self._agent_info.temperature)
+
+            if self._agent_info.engine:
+                properties["Engine"] = str(self._agent_info.engine)
+
+            if self._agent_info.max_iterations is not None:
+                properties["MaxIterations"] = str(self._agent_info.max_iterations)
+
+            if self._agent_info.is_conversational is not None:
+                properties["IsConversational"] = str(self._agent_info.is_conversational)
+
+        properties["AgentRunSource"] = "playground"
+        properties["ApplicationName"] = "UiPath.AgentService"
+
+        properties["CloudOrganizationId"] = os.getenv(
+            "UIPATH_CLOUD_ORGANIZATION_ID", ""
+        )
+        properties["CloudUserId"] = os.getenv("UIPATH_CLOUD_USER_ID", "")
+
+        return properties
+
     def _get_agent_id(self) -> Optional[str]:
         if hasattr(self._delegate, "runtime_id"):
             return self._delegate.runtime_id
@@ -396,6 +515,33 @@ class TelemetryRuntimeWrapper:
             return input_data
         return None
 
-    def _emit_output_if_successful(self, result: UiPathRuntimeResult) -> None:
+    def _emit_output_if_successful(
+        self,
+        result: UiPathRuntimeResult,
+        duration_ms: Optional[int] = None,
+        agent_span: Optional[Span] = None,
+    ) -> None:
         if result.status == UiPathRuntimeStatus.SUCCESSFUL:
             self._tracer.emit_agent_output(result.output)
+
+            if self._telemetry_callback:
+                agent_name = self._get_agent_name()
+                agent_id = self._get_agent_id()
+
+                base_properties: Dict[str, Any] = {
+                    "AgentName": agent_name,
+                }
+
+                if agent_id:
+                    base_properties["AgentId"] = agent_id
+
+                if duration_ms is not None:
+                    base_properties["DurationMs"] = duration_ms
+
+                enriched_properties = self._get_enriched_properties(
+                    base_properties, agent_span
+                )
+
+                self._telemetry_callback.track_event(
+                    AGENTRUN_COMPLETED, enriched_properties
+                )

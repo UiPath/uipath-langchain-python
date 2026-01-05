@@ -22,6 +22,13 @@ class AgentSpanInfo:
     input_schema: Optional[Dict[str, Any]] = None
     output_schema: Optional[Dict[str, Any]] = None
 
+    model: Optional[str] = None
+    max_tokens: Optional[int] = None
+    temperature: Optional[float] = None
+    engine: Optional[str] = None
+    max_iterations: Optional[int] = None
+    is_conversational: Optional[bool] = None
+
 
 class SpanType:
     """Span type constants matching Temporal SpanType."""
