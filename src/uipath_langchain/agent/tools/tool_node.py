@@ -12,6 +12,9 @@ from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
 from pydantic import BaseModel
 
+from ..exceptions import AgentToolTerminationRequest
+from ..react.types import AgentGraphNode
+
 # the type safety can be improved with generics
 ToolWrapperType = Callable[
     [BaseTool, ToolCall, Any], dict[str, Any] | Command[Any] | None
@@ -53,12 +56,15 @@ class UiPathToolNode(RunnableCallable):
         call = self._extract_tool_call(state)
         if call is None:
             return None
-        if self.wrapper:
-            filtered_state = self._filter_state(state, self.wrapper)
-            result = self.wrapper(self.tool, call, filtered_state)
-        else:
-            result = self.tool.invoke(call["args"])
-        return self._process_result(call, result)
+        try:
+            if self.wrapper:
+                filtered_state = self._filter_state(state, self.wrapper)
+                result = self.wrapper(self.tool, call, filtered_state)
+            else:
+                result = self.tool.invoke(call["args"])
+            return self._process_result(call, result)
+        except AgentToolTerminationRequest as e:
+            return self._handle_termination_request(call, e)
 
     async def _afunc(
         self, state: Any, config: RunnableConfig | None = None
@@ -66,12 +72,15 @@ class UiPathToolNode(RunnableCallable):
         call = self._extract_tool_call(state)
         if call is None:
             return None
-        if self.awrapper:
-            filtered_state = self._filter_state(state, self.awrapper)
-            result = await self.awrapper(self.tool, call, filtered_state)
-        else:
-            result = await self.tool.ainvoke(call["args"])
-        return self._process_result(call, result)
+        try:
+            if self.awrapper:
+                filtered_state = self._filter_state(state, self.awrapper)
+                result = await self.awrapper(self.tool, call, filtered_state)
+            else:
+                result = await self.tool.ainvoke(call["args"])
+            return self._process_result(call, result)
+        except AgentToolTerminationRequest as e:
+            return self._handle_termination_request(call, e)
 
     def _extract_tool_call(self, state: Any) -> ToolCall | None:
         """Extract the tool call from the state messages."""
@@ -99,6 +108,27 @@ class UiPathToolNode(RunnableCallable):
                 content=str(result), name=call["name"], tool_call_id=call["id"]
             )
             return {"messages": [message]}
+
+    def _handle_termination_request(
+        self, call: ToolCall, e: AgentToolTerminationRequest
+    ) -> Command[Any]:
+        """Convert tool termination request to graph Command."""
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=f"{e.title}. {e.detail}",
+                        tool_call_id=call["id"],
+                    )
+                ],
+                "termination": {
+                    "source": e.source,
+                    "title": e.title,
+                    "detail": e.detail,
+                },
+            },
+            goto=AgentGraphNode.TERMINATE,
+        )
 
     def _filter_state(
         self, state: Any, wrapper: ToolWrapperType | AsyncToolWrapperType

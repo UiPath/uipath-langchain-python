@@ -3,10 +3,8 @@
 from enum import Enum
 from typing import Any
 
-from langchain_core.messages import ToolMessage
-from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.types import Command, interrupt
+from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipientType,
@@ -17,8 +15,8 @@ from uipath.platform.common import CreateEscalation
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
-from ..react.types import AgentGraphNode, AgentGraphState, AgentTerminationSource
-from .tool_node import ToolWrapperMixin
+from ..exceptions import AgentToolTerminationRequest
+from ..react.types import AgentTerminationSource
 from .utils import sanitize_tool_name
 
 
@@ -27,10 +25,6 @@ class EscalationAction(str, Enum):
 
     CONTINUE = "continue"
     END = "end"
-
-
-class StructuredToolWithWrapper(StructuredTool, ToolWrapperMixin):
-    pass
 
 
 def create_escalation_tool(resource: AgentEscalationResourceConfig) -> BaseTool:
@@ -86,46 +80,20 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> BaseTool:
             EscalationAction(outcome_str) if outcome_str else EscalationAction.CONTINUE
         )
 
-        return {
-            "action": outcome,
-            "output": escalation_output,
-            "escalation_action": escalation_action,
-        }
-
-    async def escalation_wrapper(
-        tool: BaseTool,
-        call: ToolCall,
-        state: AgentGraphState,
-    ) -> dict[str, Any] | Command[Any]:
-        result = await tool.ainvoke(call["args"])
-
-        if result["action"] == EscalationAction.END:
-            output_detail = f"Escalation output: {result['output']}"
-            termination_title = (
-                f"Agent run ended based on escalation outcome {result['action']} "
-                f"with directive {result['escalation_action']}"
+        if outcome == EscalationAction.END:
+            raise AgentToolTerminationRequest(
+                source=AgentTerminationSource.ESCALATION,
+                title=(
+                    f"Agent run ended based on escalation outcome {outcome} "
+                    f"with directive {escalation_action}"
+                ),
+                detail=f"Escalation output: {escalation_output}",
+                output=escalation_output,
             )
 
-            return Command(
-                update={
-                    "messages": [
-                        ToolMessage(
-                            content=f"{termination_title}. {output_detail}",
-                            tool_call_id=call["id"],
-                        )
-                    ],
-                    "termination": {
-                        "source": AgentTerminationSource.ESCALATION,
-                        "title": termination_title,
-                        "detail": output_detail,
-                    },
-                },
-                goto=AgentGraphNode.TERMINATE,
-            )
+        return escalation_output
 
-        return result["output"]
-
-    tool = StructuredToolWithWrapper(
+    return StructuredTool(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
@@ -137,6 +105,3 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> BaseTool:
             "assignee": assignee,
         },
     )
-    tool.set_tool_wrappers(awrapper=escalation_wrapper)
-
-    return tool
