@@ -39,7 +39,6 @@ def resolve_recipient_value(recipient: AgentEscalationRecipient) -> str | None:
     ):
         return resolve_asset(recipient.asset_name, recipient.folder_path)
 
-    # For USER_EMAIL, USER_ID, and GROUP_ID, return the value directly
     if hasattr(recipient, "value"):
         return recipient.value
 
@@ -61,8 +60,10 @@ def resolve_asset(asset_name: str, folder_path: str) -> str | None:
             f"Failed to resolve asset '{asset_name}' in folder '{folder_path}': {str(e)}"
         ) from e
 
+
 class StructuredToolWithWrapper(StructuredTool, ToolWrapperMixin):
     pass
+
 
 def create_escalation_tool(resource: AgentEscalationResourceConfig) -> StructuredTool:
     """Uses interrupt() for Action Center human-in-the-loop."""
