@@ -166,6 +166,19 @@ class TelemetryRuntimeWrapper:
     async def dispose(self) -> None:
         await self._delegate.dispose()
 
+    def get_agent_model(self) -> str | None:
+        """Get the agent's configured LLM model from the delegate runtime.
+
+        Delegates to the wrapped runtime's get_agent_model() if it exists.
+        This allows the eval runtime to traverse through wrapper chains.
+
+        Returns:
+            The model name (e.g., 'gpt-4o-2024-11-20'), or None if not found.
+        """
+        if hasattr(self._delegate, "get_agent_model"):
+            return self._delegate.get_agent_model()
+        return None
+
     @asynccontextmanager
     async def _agent_span_context(
         self,

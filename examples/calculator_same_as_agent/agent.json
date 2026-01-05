@@ -1,0 +1,78 @@
+{
+    "id": "calculator-same-as-agent-example",
+    "version": "1.1.0",
+    "name": "Calculator Same-As-Agent Example",
+    "settings": {
+        "model": "gpt-4o-2024-11-20",
+        "maxTokens": 16384,
+        "temperature": 0,
+        "engine": "basic-v2",
+        "maxIterations": 25
+    },
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "first_number": {
+                "type": "number",
+                "description": "The first number to add."
+            },
+            "second_number": {
+                "type": "number",
+                "description": "The second number to add."
+            }
+        }
+    },
+    "outputSchema": {
+        "type": "object",
+        "properties": {
+            "result": {
+                "type": "number",
+                "description": "The result of the addition."
+            }
+        }
+    },
+    "metadata": {
+        "storageVersion": "39.0.0",
+        "isConversational": false
+    },
+    "type": "lowCode",
+    "projectId": "26f54b50-f4e3-4b36-9e2b-3342e3b1c217",
+    "messages": [
+        {
+            "role": "system",
+            "content": "You are a calculator agent. Your purpose is to add two numbers and provide the result. You must only provide the result of the addition, without any additional text or explanation.",
+            "contentTokens": [
+                {
+                    "type": "simpleText",
+                    "rawString": "You are a calculator agent. Your purpose is to add two numbers and provide the result. You must only provide the result of the addition, without any additional text or explanation."
+                }
+            ]
+        },
+        {
+            "role": "user",
+            "content": "Add the following numbers: <first\\_number>{{first_number}}</first\\_number> and <second\\_number>{{second_number}}</second\\_number>.",
+            "contentTokens": [
+                {
+                    "type": "simpleText",
+                    "rawString": "Add the following numbers: <first\\_number>"
+                },
+                {
+                    "type": "variable",
+                    "rawString": "input.first_number"
+                },
+                {
+                    "type": "simpleText",
+                    "rawString": "</first\\_number> and <second\\_number>"
+                },
+                {
+                    "type": "variable",
+                    "rawString": "input.second_number"
+                },
+                {
+                    "type": "simpleText",
+                    "rawString": "</second\\_number>."
+                }
+            ]
+        }
+    ]
+}

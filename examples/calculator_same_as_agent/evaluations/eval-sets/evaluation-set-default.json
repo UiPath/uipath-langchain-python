@@ -1,0 +1,120 @@
+{
+    "fileName": "evaluation-set-default.json",
+    "id": "863a7d17-f7ce-4926-b992-2532d31bf294",
+    "name": "Default Evaluation Set",
+    "batchSize": 10,
+    "timeoutMinutes": 20,
+    "evaluatorRefs": [
+        "5d20b789-da25-4500-a9d4-377374b26784",
+        "e2567bb8-3ee1-47df-9378-8c00683b4c3a"
+    ],
+    "evaluations": [
+        {
+            "id": "eb9c3a08-07b7-432a-8450-2881b25d21dd",
+            "name": "Simple Addition",
+            "inputs": {
+                "first_number": 12,
+                "second_number": 32
+            },
+            "expectedOutput": {
+                "result": 44
+            },
+            "expectedAgentBehavior": "The agent should add 12 and 32 to get 44.",
+            "simulationInstructions": "",
+            "simulateInput": false,
+            "inputGenerationInstructions": "",
+            "simulateTools": false,
+            "evalSetId": "863a7d17-f7ce-4926-b992-2532d31bf294",
+            "createdAt": "2025-12-20T01:50:42.461Z",
+            "updatedAt": "2025-12-20T01:50:42.461Z",
+            "source": "debugRun"
+        },
+        {
+            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+            "name": "Large Numbers",
+            "inputs": {
+                "first_number": 9999,
+                "second_number": 1
+            },
+            "expectedOutput": {
+                "result": 10000
+            },
+            "expectedAgentBehavior": "The agent should correctly add large numbers 9999 and 1 to get 10000.",
+            "simulationInstructions": "",
+            "simulateInput": false,
+            "inputGenerationInstructions": "",
+            "simulateTools": false,
+            "evalSetId": "863a7d17-f7ce-4926-b992-2532d31bf294",
+            "createdAt": "2025-12-22T00:00:00.000Z",
+            "updatedAt": "2025-12-22T00:00:00.000Z",
+            "source": "manual"
+        },
+        {
+            "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+            "name": "Negative Numbers",
+            "inputs": {
+                "first_number": -5,
+                "second_number": 10
+            },
+            "expectedOutput": {
+                "result": 5
+            },
+            "expectedAgentBehavior": "The agent should handle negative numbers correctly, adding -5 and 10 to get 5.",
+            "simulationInstructions": "",
+            "simulateInput": false,
+            "inputGenerationInstructions": "",
+            "simulateTools": false,
+            "evalSetId": "863a7d17-f7ce-4926-b992-2532d31bf294",
+            "createdAt": "2025-12-22T00:00:00.000Z",
+            "updatedAt": "2025-12-22T00:00:00.000Z",
+            "source": "manual"
+        },
+        {
+            "id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+            "name": "Decimal Numbers",
+            "inputs": {
+                "first_number": 3.14,
+                "second_number": 2.86
+            },
+            "expectedOutput": {
+                "result": 6
+            },
+            "expectedAgentBehavior": "The agent should handle decimal numbers correctly, adding 3.14 and 2.86 to get 6.",
+            "simulationInstructions": "",
+            "simulateInput": false,
+            "inputGenerationInstructions": "",
+            "simulateTools": false,
+            "evalSetId": "863a7d17-f7ce-4926-b992-2532d31bf294",
+            "createdAt": "2025-12-22T00:00:00.000Z",
+            "updatedAt": "2025-12-22T00:00:00.000Z",
+            "source": "manual"
+        },
+        {
+            "id": "d4e5f6a7-b8c9-0123-defa-456789012345",
+            "name": "Zero Addition",
+            "inputs": {
+                "first_number": 0,
+                "second_number": 42
+            },
+            "expectedOutput": {
+                "result": 42
+            },
+            "expectedAgentBehavior": "The agent should handle zero correctly, adding 0 and 42 to get 42.",
+            "simulationInstructions": "",
+            "simulateInput": false,
+            "inputGenerationInstructions": "",
+            "simulateTools": false,
+            "evalSetId": "863a7d17-f7ce-4926-b992-2532d31bf294",
+            "createdAt": "2025-12-22T00:00:00.000Z",
+            "updatedAt": "2025-12-22T00:00:00.000Z",
+            "source": "manual"
+        }
+    ],
+    "modelSettings": [],
+    "agentMemoryEnabled": false,
+    "agentMemorySettings": [],
+    "lineByLineEvaluation": false,
+    "createdAt": "2025-12-20T01:46:00.425Z",
+    "updatedAt": "2025-12-22T00:00:00.000Z",
+    "category": 1
+}

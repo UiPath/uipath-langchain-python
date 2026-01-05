@@ -543,3 +543,41 @@ class TestInterruptibleTraceContext:
 
         assert len(events) == 2
         mock_trace_context_storage.save_trace_context.assert_called_once()
+
+
+class TestGetAgentModel:
+    """Tests for get_agent_model delegation."""
+
+    def test_get_agent_model_delegates_to_runtime(self, tracer, callback):
+        """Test get_agent_model delegates to the wrapped runtime."""
+        mock_delegate = MagicMock()
+        mock_delegate.get_agent_model.return_value = "gpt-4o-2024-11-20"
+
+        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        model = wrapper.get_agent_model()
+
+        assert model == "gpt-4o-2024-11-20"
+        mock_delegate.get_agent_model.assert_called_once()
+
+    def test_get_agent_model_returns_none_when_delegate_lacks_method(
+        self, tracer, callback
+    ):
+        """Test get_agent_model returns None when delegate doesn't have the method."""
+        mock_delegate = MagicMock(spec=[])  # Empty spec, no get_agent_model
+
+        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        model = wrapper.get_agent_model()
+
+        assert model is None
+
+    def test_get_agent_model_returns_none_when_delegate_returns_none(
+        self, tracer, callback
+    ):
+        """Test get_agent_model returns None when delegate returns None."""
+        mock_delegate = MagicMock()
+        mock_delegate.get_agent_model.return_value = None
+
+        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        model = wrapper.get_agent_model()
+
+        assert model is None
