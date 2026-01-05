@@ -30,15 +30,26 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 EXAMPLES_DIR = REPO_ROOT / "examples"
 
 # Available examples that can be tested
-AVAILABLE_EXAMPLES = ["calculator", "basic", "basic_with_ootb_guardrails"]
+AVAILABLE_EXAMPLES = [
+    "calculator",
+    # "calculator_same_as_agent",  # TODO: Add after PR #62 is merged
+    "basic",
+    "basic_with_ootb_guardrails",
+]
 
 # Examples with evaluations configured
-EXAMPLES_WITH_EVALS = ["calculator", "basic"]
+EXAMPLES_WITH_EVALS = [
+    "calculator",
+    "basic",
+]  # TODO: Add calculator_same_as_agent after PR #62
 
 
 def get_env_var(name: str, required: bool = True) -> str | None:
     """Get environment variable with optional requirement check."""
     value = os.environ.get(name)
+    if value:
+        # Strip whitespace to handle secrets with trailing spaces/newlines
+        value = value.strip()
     if required and not value:
         pytest.skip(f"Required environment variable {name} not set")
     return value
@@ -172,13 +183,17 @@ def _get_access_token(base_url: str, client_id: str, client_secret: str) -> str:
     parsed = urlparse(base_url)
     token_url = f"{parsed.scheme}://{parsed.netloc}/identity_/connect/token"
 
-    # Request token without specifying scope (uses all available scopes)
+    # Request token with scopes for execution and reporting
+    # OR.Execution - Required for running agents
+    # OR.Users.Read - Required for getting user info for reporting
+    # OR.Folders.Read - Required for accessing personal workspace for reporting
     response = httpx.post(
         token_url,
         data={
             "grant_type": "client_credentials",
             "client_id": client_id,
             "client_secret": client_secret,
+            "scope": "OR.Execution OR.Users.Read OR.Folders.Read",
         },
     )
 
