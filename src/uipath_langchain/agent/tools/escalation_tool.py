@@ -9,10 +9,13 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import Command, interrupt
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
-    AgentEscalationRecipientType,
+    AgentEscalationRecipient,
     AgentEscalationResourceConfig,
+    AssetRecipient,
+    StandardRecipient,
 )
 from uipath.eval.mocks import mockable
+from uipath.platform import UiPath
 from uipath.platform.common import CreateEscalation
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
@@ -29,11 +32,42 @@ class EscalationAction(str, Enum):
     END = "end"
 
 
+async def resolve_recipient_value(recipient: AgentEscalationRecipient) -> str | None:
+    """Resolve recipient value based on recipient type."""
+    if isinstance(recipient, AssetRecipient):
+        return await resolve_asset(recipient.asset_name, recipient.folder_path)
+
+    if isinstance(recipient, StandardRecipient):
+        return recipient.value
+
+    return None
+
+
+async def resolve_asset(asset_name: str, folder_path: str) -> str | None:
+    """Retrieve asset value."""
+    try:
+        client = UiPath()
+        result = await client.assets.retrieve_async(
+            name=asset_name, folder_path=folder_path
+        )
+
+        if not result or not result.value:
+            raise ValueError(f"Asset '{asset_name}' has no value configured.")
+
+        return result.value
+    except Exception as e:
+        raise ValueError(
+            f"Failed to resolve asset '{asset_name}' in folder '{folder_path}': {str(e)}"
+        ) from e
+
+
 class StructuredToolWithWrapper(StructuredTool, ToolWrapperMixin):
     pass
 
 
-def create_escalation_tool(resource: AgentEscalationResourceConfig) -> BaseTool:
+async def create_escalation_tool(
+    resource: AgentEscalationResourceConfig,
+) -> StructuredTool:
     """Uses interrupt() for Action Center human-in-the-loop."""
 
     tool_name: str = f"escalate_{sanitize_tool_name(resource.name)}"
@@ -43,9 +77,8 @@ def create_escalation_tool(resource: AgentEscalationResourceConfig) -> BaseTool:
     output_model: Any = create_model(channel.output_schema)
 
     assignee: str | None = (
-        channel.recipients[0].value
+        await resolve_recipient_value(channel.recipients[0])
         if channel.recipients
-        and channel.recipients[0].type == AgentEscalationRecipientType.USER_EMAIL
         else None
     )
 
