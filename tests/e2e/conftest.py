@@ -32,7 +32,7 @@ EXAMPLES_DIR = REPO_ROOT / "examples"
 # Available examples that can be tested
 AVAILABLE_EXAMPLES = [
     "calculator",
-    # "calculator_same_as_agent",  # TODO: Add after PR #62 is merged
+    "calculator_same_as_agent",
     "basic",
     "basic_with_ootb_guardrails",
 ]
@@ -40,8 +40,9 @@ AVAILABLE_EXAMPLES = [
 # Examples with evaluations configured
 EXAMPLES_WITH_EVALS = [
     "calculator",
+    "calculator_same_as_agent",
     "basic",
-]  # TODO: Add calculator_same_as_agent after PR #62
+]
 
 
 def get_env_var(name: str, required: bool = True) -> str | None:

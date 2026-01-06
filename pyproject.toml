@@ -5,7 +5,7 @@ description = "UiPath Agents"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
-  "uipath==2.4.2",
+  "uipath==2.4.3",
   "uipath-langchain[vertex,bedrock]==0.3.1",
   "langgraph>=1.0.0",
   "azure-monitor-opentelemetry>=1.7.0",
