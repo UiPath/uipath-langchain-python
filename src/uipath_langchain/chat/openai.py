@@ -1,10 +1,11 @@
 import logging
 import os
-from typing import Optional
+from typing import Any, AsyncIterator, Optional
 
 import httpx
 from langchain_openai import AzureChatOpenAI
 from uipath._utils._ssl_context import get_httpx_client_kwargs
+from uipath.platform.chat._llm_gateway_service import _get_llm_semaphore
 from uipath.utils import EndpointManager
 
 from .supported_models import OpenAIModels
@@ -161,3 +162,30 @@ class UiPathChatOpenAI(AzureChatOpenAI):
                 raise ValueError("UIPATH_URL environment variable is required")
 
         return self._url
+
+    async def _agenerate(
+        self,
+        messages: Any,
+        stop: Any = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Override to add LLM request throttling."""
+        async with _get_llm_semaphore():
+            return await super()._agenerate(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
+
+    async def _astream(
+        self,
+        messages: Any,
+        stop: Any = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
+        """Override to add LLM request throttling for streaming."""
+        async with _get_llm_semaphore():
+            async for chunk in super()._astream(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            ):
+                yield chunk

@@ -21,6 +21,7 @@ from tenacity import (
     wait_exponential_jitter,
 )
 from uipath._utils._ssl_context import get_httpx_client_kwargs
+from uipath.platform.chat._llm_gateway_service import _get_llm_semaphore
 from uipath.runtime.errors import (
     UiPathErrorCategory,
     UiPathErrorCode,
@@ -183,8 +184,7 @@ class UiPathRequestMixin(BaseModel):
 
             # Handle HTTP errors and map them to OpenAI exceptions
             try:
-                content = response.content  # Read content to avoid closed stream issues
-                print(f"Response content: {content.decode('utf-8')}")
+                _ = response.content  # Read content to avoid closed stream issues
                 response.raise_for_status()
             except httpx.HTTPStatusError as err:
                 if self.logger:
@@ -248,39 +248,40 @@ class UiPathRequestMixin(BaseModel):
     ) -> dict[str, Any]:
         # if self.logger:
         #     self.logger.info(f"Completion request: {request_body['messages'][:2]}")
-        client_kwargs = get_httpx_client_kwargs()
-        async with httpx.AsyncClient(
-            **client_kwargs,  # Apply SSL configuration
-            event_hooks={
-                "request": [self._alog_request_duration],
-                "response": [self._alog_response_duration],
-            },
-        ) as client:
-            response = await client.post(
-                url,
-                headers=headers,
-                json=request_body,
-                timeout=self.default_request_timeout,
-            )
-            # Handle HTTP errors and map them to OpenAI exceptions
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as err:
-                if self.logger:
-                    self.logger.error(
-                        "Error querying LLM: %s (%s)",
-                        err.response.reason_phrase,
-                        err.response.status_code,
-                        extra={
-                            "ActionName": self.settings.action_name,
-                            "ActionId": self.settings.action_id,
-                        }
-                        if self.settings
-                        else None,
-                    )
-                raise self._make_status_error_from_response(err.response) from err
+        async with _get_llm_semaphore():
+            client_kwargs = get_httpx_client_kwargs()
+            async with httpx.AsyncClient(
+                **client_kwargs,  # Apply SSL configuration
+                event_hooks={
+                    "request": [self._alog_request_duration],
+                    "response": [self._alog_response_duration],
+                },
+            ) as client:
+                response = await client.post(
+                    url,
+                    headers=headers,
+                    json=request_body,
+                    timeout=self.default_request_timeout,
+                )
+                # Handle HTTP errors and map them to OpenAI exceptions
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as err:
+                    if self.logger:
+                        self.logger.error(
+                            "Error querying LLM: %s (%s)",
+                            err.response.reason_phrase,
+                            err.response.status_code,
+                            extra={
+                                "ActionName": self.settings.action_name,
+                                "ActionId": self.settings.action_id,
+                            }
+                            if self.settings
+                            else None,
+                        )
+                    raise self._make_status_error_from_response(err.response) from err
 
-            return response.json()
+                return response.json()
 
     async def _acall(
         self, url: str, request_body: dict[str, Any], headers: dict[str, str]
@@ -509,86 +510,93 @@ class UiPathRequestMixin(BaseModel):
         self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
     ) -> AsyncIterator[Dict[str, Any]]:
         """Async stream SSE responses from the LLM."""
-        client_kwargs = get_httpx_client_kwargs()
-        async with httpx.AsyncClient(
-            **client_kwargs,
-            event_hooks={
-                "request": [self._alog_request_duration],
-                "response": [self._alog_response_duration],
-            },
-        ) as client:
-            async with client.stream(
-                "POST",
-                url,
-                headers=headers,
-                json=request_body,
-                timeout=self.default_request_timeout,
-            ) as response:
-                try:
-                    response.raise_for_status()
-                except httpx.HTTPStatusError as err:
-                    if self.logger:
-                        self.logger.error(
-                            "Error querying LLM: %s (%s)",
-                            err.response.reason_phrase,
-                            err.response.status_code,
-                            extra={
-                                "ActionName": self.settings.action_name,
-                                "ActionId": self.settings.action_id,
-                            }
-                            if self.settings
-                            else None,
-                        )
-                    # Read the response body for streaming responses
-                    await err.response.aread()
-                    raise self._make_status_error_from_response(err.response) from err
+        async with _get_llm_semaphore():
+            client_kwargs = get_httpx_client_kwargs()
+            async with httpx.AsyncClient(
+                **client_kwargs,
+                event_hooks={
+                    "request": [self._alog_request_duration],
+                    "response": [self._alog_response_duration],
+                },
+            ) as client:
+                async with client.stream(
+                    "POST",
+                    url,
+                    headers=headers,
+                    json=request_body,
+                    timeout=self.default_request_timeout,
+                ) as response:
+                    try:
+                        response.raise_for_status()
+                    except httpx.HTTPStatusError as err:
+                        if self.logger:
+                            self.logger.error(
+                                "Error querying LLM: %s (%s)",
+                                err.response.reason_phrase,
+                                err.response.status_code,
+                                extra={
+                                    "ActionName": self.settings.action_name,
+                                    "ActionId": self.settings.action_id,
+                                }
+                                if self.settings
+                                else None,
+                            )
+                        # Read the response body for streaming responses
+                        await err.response.aread()
+                        raise self._make_status_error_from_response(
+                            err.response
+                        ) from err
 
-                async for line in response.aiter_lines():
-                    line = line.strip()
-                    if not line:
-                        continue
-
-                    if self.logger:
-                        self.logger.debug(f"[SSE] Raw line: {line}")
-
-                    if line.startswith("data:"):
-                        data = line[
-                            5:
-                        ].strip()  # Remove "data:" prefix and strip whitespace
-                        if data == "[DONE]":
-                            break
-                        if not data:  # Skip empty data lines
+                    async for line in response.aiter_lines():
+                        line = line.strip()
+                        if not line:
                             continue
-                        try:
-                            parsed = json.loads(data)
-                            # Skip empty chunks (some APIs send them as keepalive)
-                            # Check for truly empty: empty id AND (no choices or empty choices list)
-                            if (not parsed.get("id") or parsed.get("id") == "") and (
-                                not parsed.get("choices")
-                                or len(parsed.get("choices", [])) == 0
-                            ):
+
+                        if self.logger:
+                            self.logger.debug(f"[SSE] Raw line: {line}")
+
+                        if line.startswith("data:"):
+                            data = line[
+                                5:
+                            ].strip()  # Remove "data:" prefix and strip whitespace
+                            if data == "[DONE]":
+                                break
+                            if not data:  # Skip empty data lines
+                                continue
+                            try:
+                                parsed = json.loads(data)
+                                # Skip empty chunks (some APIs send them as keepalive)
+                                # Check for truly empty: empty id AND (no choices or empty choices list)
+                                if (
+                                    not parsed.get("id") or parsed.get("id") == ""
+                                ) and (
+                                    not parsed.get("choices")
+                                    or len(parsed.get("choices", [])) == 0
+                                ):
+                                    if self.logger:
+                                        self.logger.debug(
+                                            "[SSE] Skipping empty keepalive chunk"
+                                        )
+                                    continue
+                                yield parsed
+                            except json.JSONDecodeError as e:
                                 if self.logger:
-                                    self.logger.debug(
-                                        "[SSE] Skipping empty keepalive chunk"
+                                    self.logger.warning(
+                                        f"Failed to parse SSE chunk: {data}, error: {e}"
                                     )
                                 continue
-                            yield parsed
-                        except json.JSONDecodeError as e:
-                            if self.logger:
-                                self.logger.warning(
-                                    f"Failed to parse SSE chunk: {data}, error: {e}"
-                                )
-                            continue
-                    else:
-                        # Handle lines without "data: " prefix (some APIs send raw JSON)
-                        try:
-                            parsed = json.loads(line)
-                            if self.logger:
-                                self.logger.debug(f"[SSE] Parsed raw JSON: {parsed}")
-                            yield parsed
-                        except json.JSONDecodeError:
-                            # Not JSON, skip
-                            pass
+                        else:
+                            # Handle lines without "data: " prefix (some APIs send raw JSON)
+                            try:
+                                parsed = json.loads(line)
+                                if self.logger:
+                                    self.logger.debug(
+                                        f"[SSE] Parsed raw JSON: {parsed}"
+                                    )
+                                yield parsed
+                            except json.JSONDecodeError:
+                                # Not JSON, skip
+                                pass
 
     def _make_status_error_from_response(
         self,

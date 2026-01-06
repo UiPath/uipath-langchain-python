@@ -3,6 +3,7 @@ from typing import Any, Optional
 
 import httpx
 from uipath._utils._ssl_context import get_httpx_client_kwargs
+from uipath.platform.chat._llm_gateway_service import _get_llm_semaphore
 from uipath.utils import EndpointManager
 
 from .supported_models import GeminiModels
@@ -223,6 +224,19 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
             model=model_name,
         )
         return f"{env_uipath_url.rstrip('/')}/{formatted_endpoint}"
+
+    async def _agenerate(
+        self,
+        messages: Any,
+        stop: Any = None,
+        run_manager: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Override to add LLM request throttling."""
+        async with _get_llm_semaphore():
+            return await super()._agenerate(
+                messages, stop=stop, run_manager=run_manager, **kwargs
+            )
 
     def _stream(self, messages, stop=None, run_manager=None, **kwargs):
         """Streaming fallback - calls _generate and yields single response."""
