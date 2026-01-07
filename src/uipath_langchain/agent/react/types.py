@@ -2,6 +2,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Optional
 
 from langchain_core.messages import AnyMessage
+from langchain_core.messages.tool import ToolCall
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 from uipath.platform.attachments import Attachment
@@ -32,6 +33,9 @@ class AgentGraphState(BaseModel):
     messages: Annotated[list[AnyMessage], add_messages] = []
     inner_state: Annotated[InnerAgentGraphState, merge_objects] = Field(
         default_factory=InnerAgentGraphState
+    )
+    tool_call: Optional[ToolCall] = (
+        None  # This field is used to pass tool inputs to tool nodes.
     )
 
 
