@@ -9,6 +9,7 @@ from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import BaseModel
 
+from uipath_langchain.agent.react.types import AgentGraphState, UiPathToolNodeInput
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
     UiPathToolNode,
@@ -317,3 +318,57 @@ class TestCreateToolNode:
         result = create_tool_node([])
 
         assert result == {}
+
+
+class TestUiPathToolNodeInput:
+    """Test cases for UiPathToolNode with UiPathToolNodeInput."""
+
+    @pytest.fixture
+    def mock_tool(self):
+        """Fixture for mock tool."""
+        return MockTool()
+
+    @pytest.fixture
+    def tool_node_input(self):
+        """Fixture for UiPathToolNodeInput."""
+        tool_call = {
+            "name": "mock_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        agent_state = AgentGraphState(
+            messages=[], user_id="test_user", session_id="test_session"
+        )
+        return UiPathToolNodeInput(tool_call=tool_call, agent_state=agent_state)
+
+    def test_accepts_uipath_tool_node_input(self, mock_tool, tool_node_input):
+        """Test that UiPathToolNode accepts UiPathToolNodeInput."""
+        node = UiPathToolNode(mock_tool)
+
+        result = node._func(tool_node_input)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+
+    def test_extracts_call_and_state_for_wrapper(self, mock_tool, tool_node_input):
+        """Test that call and state are correctly extracted and passed to wrapper."""
+        node = UiPathToolNode(mock_tool, wrapper=mock_wrapper)
+
+        result = node._func(tool_node_input)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        tool_message = result["messages"][0]
+        assert "user: test_user" in tool_message.content
+
+    def test_validates_tool_call_name(self, mock_tool, tool_node_input):
+        """Test that tool call name is validated."""
+        tool_node_input.tool_call["name"] = "different_tool"
+        node = UiPathToolNode(mock_tool)
+
+        with pytest.raises(
+            ValueError,
+            match="Tool call name 'different_tool' does not match tool name 'mock_tool'",
+        ):
+            node._func(tool_node_input)

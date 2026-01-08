@@ -10,6 +10,9 @@ from pydantic import BaseModel
 from uipath.platform.guardrails import BaseGuardrail
 
 from ..guardrails.actions import GuardrailAction
+from .aggregator_node import (
+    create_aggregator_node,
+)
 from .guardrails.guardrails_subgraph import (
     create_agent_init_guardrails_subgraph,
     create_agent_terminate_guardrails_subgraph,
@@ -107,6 +110,10 @@ def create_agent(
     )
     builder.add_node(AgentGraphNode.TERMINATE, terminate_with_guardrails_subgraph)
 
+    # Add aggregator node
+    aggregator_node = create_aggregator_node()
+    builder.add_node(AgentGraphNode.AGGREGATOR, aggregator_node)
+
     builder.add_edge(START, AgentGraphNode.INIT)
 
     llm_node = create_llm_node(model, llm_tools, config.thinking_messages_limit)
@@ -125,7 +132,10 @@ def create_agent(
     )
 
     for tool_name in tool_node_names:
-        builder.add_edge(tool_name, AgentGraphNode.AGENT)
+        builder.add_edge(tool_name, AgentGraphNode.AGGREGATOR)
+
+    # Aggregator goes back to agent
+    builder.add_edge(AgentGraphNode.AGGREGATOR, AgentGraphNode.AGENT)
 
     builder.add_edge(AgentGraphNode.TERMINATE, END)
 

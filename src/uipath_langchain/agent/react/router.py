@@ -1,12 +1,13 @@
 """Routing functions for conditional edges in the agent graph."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall
+from langgraph.types import Send
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
 from ..exceptions import AgentNodeRoutingException
-from .types import AgentGraphNode, AgentGraphState
+from .types import AgentGraphNode, AgentGraphState, UiPathToolNodeInput
 from .utils import count_consecutive_thinking_messages
 
 FLOW_CONTROL_TOOLS = [END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name]
@@ -58,8 +59,8 @@ def create_route_agent(thinking_messages_limit: int = 0):
     """
 
     def route_agent(
-        state: AgentGraphState,
-    ) -> list[str] | Literal[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE]:
+        state: Any,
+    ) -> list[str | Send] | Literal[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE]:
         """Route after agent: handles all routing logic including control flow detection.
 
         Routing logic:
@@ -76,7 +77,13 @@ def create_route_agent(thinking_messages_limit: int = 0):
         Raises:
             AgentNodeRoutingException: When encountering unexpected state (empty messages, non-AIMessage, or excessive completions)
         """
-        messages = state.messages
+
+        # we cannot type hint state as CompleteAgentGraphState because it's defined at runtime
+        # and directly using AgentGraphState in the type hint, even if extra="allow" is set, does not work
+        agent_state: AgentGraphState = AgentGraphState.model_validate(
+            state, from_attributes=True
+        )
+        messages: list[AnyMessage] = agent_state.messages
         last_message = __validate_last_message_is_AI(messages)
 
         tool_calls = list(last_message.tool_calls) if last_message.tool_calls else []
@@ -86,7 +93,15 @@ def create_route_agent(thinking_messages_limit: int = 0):
             return AgentGraphNode.TERMINATE
 
         if tool_calls:
-            return [tc["name"] for tc in tool_calls]
+            return [
+                Send(
+                    tc["name"],
+                    UiPathToolNodeInput(
+                        **agent_state.model_dump(), tool_call_id=tc["id"]
+                    ),
+                )
+                for tc in tool_calls
+            ]
 
         consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
 

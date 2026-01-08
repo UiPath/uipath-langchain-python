@@ -1,7 +1,7 @@
 import re
 from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 from uipath.core.guardrails.guardrails import FieldReference, FieldSource
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
@@ -11,6 +11,7 @@ from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ...exceptions import AgentTerminationException
 from ...react.types import AgentGuardrailsGraphState
+from ...react.utils import extract_tool_call_from_state
 from .base_action import GuardrailAction, GuardrailActionNode
 
 
@@ -143,66 +144,36 @@ def _filter_tool_input_fields(
     if not has_input_fields:
         return {}
 
-    msgs = state.messages.copy()
-    if not msgs:
+    tool_call_id = getattr(state, "tool_call_id", None)
+    tool_call, message = extract_tool_call_from_state(
+        state, tool_name, tool_call_id, return_message=True
+    )
+
+    if tool_call is None:
         return {}
 
-    # Find the AIMessage with tool calls
-    # At PRE_EXECUTION, this is always the last message
-    ai_message = None
-    for i in range(len(msgs) - 1, -1, -1):
-        msg = msgs[i]
-        if isinstance(msg, AIMessage) and msg.tool_calls:
-            ai_message = msg
-            break
-
-    if ai_message is None:
+    args = tool_call["args"]
+    if not args or not isinstance(args, dict):
         return {}
 
-    # Find and filter the tool call with matching name
-    # Type assertion: we know ai_message is AIMessage from the check above
-    assert isinstance(ai_message, AIMessage)
-    tool_calls = list(ai_message.tool_calls)
+    # Filter out the specified input fields
+    filtered_args = args.copy()
     modified = False
 
-    for tool_call in tool_calls:
-        call_name = (
-            tool_call.get("name")
-            if isinstance(tool_call, dict)
-            else getattr(tool_call, "name", None)
-        )
+    for field_ref in fields_to_filter:
+        # Only filter input fields
+        if field_ref.source == FieldSource.INPUT and field_ref.path in filtered_args:
+            del filtered_args[field_ref.path]
+            modified = True
 
-        if call_name == tool_name:
-            # Get the current args
-            args = (
-                tool_call.get("args")
-                if isinstance(tool_call, dict)
-                else getattr(tool_call, "args", None)
-            )
+        if modified:
+            tool_call["args"] = filtered_args
+            message.tool_calls = [
+                tool_call if tool_call["id"] == tc["id"] else tc
+                for tc in message.tool_calls
+            ]
 
-            if args and isinstance(args, dict):
-                # Filter out the specified input fields
-                filtered_args = args.copy()
-                for field_ref in fields_to_filter:
-                    # Only filter input fields
-                    if (
-                        field_ref.source == FieldSource.INPUT
-                        and field_ref.path in filtered_args
-                    ):
-                        del filtered_args[field_ref.path]
-                        modified = True
-
-                # Update the tool call with filtered args
-                if isinstance(tool_call, dict):
-                    tool_call["args"] = filtered_args
-                else:
-                    tool_call.args = filtered_args
-
-            break
-
-    if modified:
-        ai_message.tool_calls = tool_calls
-        return Command(update={"messages": msgs})
+        return Command(update={"messages": [message]})
 
     return {}
 

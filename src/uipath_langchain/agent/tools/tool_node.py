@@ -4,13 +4,14 @@ from collections.abc import Sequence
 from inspect import signature
 from typing import Any, Awaitable, Callable, Literal
 
-from langchain_core.messages.ai import AIMessage
 from langchain_core.messages.tool import ToolCall, ToolMessage
-from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
 from pydantic import BaseModel
+
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.react.utils import extract_tool_call_from_state
 
 # the type safety can be improved with generics
 ToolWrapperType = Callable[
@@ -27,8 +28,8 @@ class UiPathToolNode(RunnableCallable):
     """
     A ToolNode that can be used in a React agent graph.
     It extracts the tool call from the state messages and invokes the tool.
+    Alternatively, it can accept a UiPathToolNodeInput directly.
     It supports optional synchronous and asynchronous wrappers for custom processing.
-    Generic over the state model.
     Args:
         tool: The tool to invoke.
         wrapper: An optional synchronous wrapper for custom processing.
@@ -49,8 +50,8 @@ class UiPathToolNode(RunnableCallable):
         self.wrapper = wrapper
         self.awrapper = awrapper
 
-    def _func(self, state: Any, config: RunnableConfig | None = None) -> OutputType:
-        call = self._extract_tool_call(state)
+    def _func(self, input: AgentGraphState) -> OutputType:
+        call, state = self._extract_tool_call(input)
         if call is None:
             return None
         if self.wrapper:
@@ -60,10 +61,8 @@ class UiPathToolNode(RunnableCallable):
             result = self.tool.invoke(call["args"])
         return self._process_result(call, result)
 
-    async def _afunc(
-        self, state: Any, config: RunnableConfig | None = None
-    ) -> OutputType:
-        call = self._extract_tool_call(state)
+    async def _afunc(self, input: AgentGraphState) -> OutputType:
+        call, state = self._extract_tool_call(input)
         if call is None:
             return None
         if self.awrapper:
@@ -73,20 +72,16 @@ class UiPathToolNode(RunnableCallable):
             result = await self.tool.ainvoke(call["args"])
         return self._process_result(call, result)
 
-    def _extract_tool_call(self, state: Any) -> ToolCall | None:
-        """Extract the tool call from the state messages."""
-
-        if not hasattr(state, "messages"):
-            raise ValueError("State does not have messages key")
-
-        last_message = state.messages[-1]
-        if not isinstance(last_message, AIMessage):
-            raise ValueError("Last message in message stack is not an AIMessage.")
-
-        for tool_call in last_message.tool_calls:
-            if tool_call["name"] == self.tool.name:
-                return tool_call
-        return None
+    def _extract_tool_call(
+        self, input: AgentGraphState
+    ) -> tuple[ToolCall | None, AgentGraphState]:
+        """
+        Extract the tool call and agent state from the input.
+        Uses the shared utility function for consistent tool call extraction logic.
+        """
+        tool_call_id = getattr(input, "tool_call_id", None)
+        tool_call = extract_tool_call_from_state(input, self.tool.name, tool_call_id)
+        return tool_call, input
 
     def _process_result(
         self, call: ToolCall, result: dict[str, Any] | Command[Any] | None
@@ -101,7 +96,7 @@ class UiPathToolNode(RunnableCallable):
             return {"messages": [message]}
 
     def _filter_state(
-        self, state: Any, wrapper: ToolWrapperType | AsyncToolWrapperType
+        self, state: AgentGraphState, wrapper: ToolWrapperType | AsyncToolWrapperType
     ) -> BaseModel:
         """Filter the state to the expected model type."""
         model_type = list(signature(wrapper).parameters.values())[2].annotation
@@ -109,7 +104,7 @@ class UiPathToolNode(RunnableCallable):
             raise ValueError(
                 "Wrapper state parameter must be a pydantic BaseModel subclass."
             )
-        return model_type.model_validate(state, from_attributes=True)
+        return model_type.model_validate(state, from_attributes=True, extra="allow")
 
 
 class ToolWrapperMixin:

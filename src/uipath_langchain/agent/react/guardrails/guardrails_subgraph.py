@@ -23,14 +23,31 @@ from uipath_langchain.agent.guardrails.guardrail_nodes import (
 )
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.react.types import (
+    AgentGraphNode,
     AgentGraphState,
     AgentGuardrailsGraphState,
+    SubgraphOutputModel,
 )
 
 _VALIDATOR_ALLOWED_STAGES = {
     "prompt_injection": {ExecutionStage.PRE_EXECUTION},
     "pii_detection": {ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION},
 }
+
+
+def _tool_call_state_handler(state: AgentGuardrailsGraphState) -> dict[str, Any]:
+    """Handle tool call state by moving contents to substates if tool_call is present."""
+    if state.tool_call_id is not None:
+        # Move current state contents to substates under tool_call_id
+        return {
+            "substates": {
+                state.tool_call_id: {
+                    "messages": state.messages,
+                    "inner_state": state.inner_state,
+                }
+            }
+        }
+    return {}
 
 
 def _filter_guardrails_by_stage(
@@ -83,7 +100,7 @@ def _create_guardrails_subgraph(
     """
     inner_name, inner_node = main_inner_node
 
-    subgraph = StateGraph(AgentGuardrailsGraphState)
+    subgraph = StateGraph(AgentGuardrailsGraphState, output_schema=SubgraphOutputModel)
 
     subgraph.add_node(inner_name, inner_node)
 
@@ -105,6 +122,10 @@ def _create_guardrails_subgraph(
     else:
         subgraph.add_edge(START, inner_name)
 
+    # Always add the tool call state handler node at the end
+    tool_call_handler_name = AgentGraphNode.TOOL_CALL_STATE_HANDLER
+    subgraph.add_node(tool_call_handler_name, _tool_call_state_handler)
+
     # Add post execution guardrail nodes
     if ExecutionStage.POST_EXECUTION in execution_stages:
         post_guardrails = _filter_guardrails_by_stage(
@@ -116,12 +137,15 @@ def _create_guardrails_subgraph(
             scope,
             ExecutionStage.POST_EXECUTION,
             node_factory,
-            END,
+            tool_call_handler_name,
             inner_name,
         )
         subgraph.add_edge(inner_name, first_post_exec_guardrail_node)
     else:
-        subgraph.add_edge(inner_name, END)
+        subgraph.add_edge(inner_name, tool_call_handler_name)
+
+    # Always connect tool call handler to END
+    subgraph.add_edge(tool_call_handler_name, END)
 
     return subgraph.compile()
 

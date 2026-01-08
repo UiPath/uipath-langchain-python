@@ -3,10 +3,14 @@ from typing import Annotated, Any, Optional
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from uipath.platform.attachments import Attachment
 
-from uipath_langchain.agent.react.reducers import add_job_attachments, merge_objects
+from uipath_langchain.agent.react.reducers import (
+    add_job_attachments,
+    merge_objects,
+    replace_once,
+)
 
 
 class AgentTerminationSource(StrEnum):
@@ -23,16 +27,24 @@ class AgentTermination(BaseModel):
 
 class InnerAgentGraphState(BaseModel):
     job_attachments: Annotated[dict[str, Attachment], add_job_attachments] = {}
-    termination: AgentTermination | None = None
+    termination: Annotated[AgentTermination | None, replace_once] = None
 
 
 class AgentGraphState(BaseModel):
     """Agent Graph state for standard loop execution."""
 
+    substates: Annotated[dict[str, Any], merge_objects] = {}
     messages: Annotated[list[AnyMessage], add_messages] = []
     inner_state: Annotated[InnerAgentGraphState, merge_objects] = Field(
         default_factory=InnerAgentGraphState
     )
+    model_config = ConfigDict(extra="allow")
+
+
+class SubgraphOutputModel(BaseModel):
+    """Subgraph output model."""
+
+    substates: dict[str, Any]
 
 
 class AgentGuardrailsGraphState(AgentGraphState):
@@ -40,6 +52,7 @@ class AgentGuardrailsGraphState(AgentGraphState):
 
     guardrail_validation_result: Optional[str] = None
     agent_result: Optional[dict[str, Any]] = None
+    tool_call_id: Optional[str] = None
 
 
 class AgentGraphNode(StrEnum):
@@ -50,6 +63,8 @@ class AgentGraphNode(StrEnum):
     TOOLS = "tools"
     TERMINATE = "terminate"
     GUARDED_TERMINATE = "guarded-terminate"
+    TOOL_CALL_STATE_HANDLER = "tool-call-state-handler"
+    AGGREGATOR = "aggregator"
 
 
 class AgentGraphConfig(BaseModel):
@@ -61,3 +76,9 @@ class AgentGraphConfig(BaseModel):
         ge=0,
         description="Max consecutive thinking messages before enforcing tool usage. 0 = force tools every time.",
     )
+
+
+class UiPathToolNodeInput(AgentGraphState):
+    """Tool node input model."""
+
+    tool_call_id: str

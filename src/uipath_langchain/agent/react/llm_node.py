@@ -1,6 +1,6 @@
 """LLM node for ReAct Agent graph."""
 
-from typing import Literal, Sequence
+from typing import Any, Literal, Sequence
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage
@@ -53,8 +53,15 @@ def create_llm_node(
     base_llm = model.bind_tools(bindable_tools) if bindable_tools else model
     tool_choice_required_value = _get_required_tool_choice_by_model(model)
 
-    async def llm_node(state: AgentGraphState):
-        messages: list[AnyMessage] = state.messages
+    async def llm_node(state: Any):
+        # we need to use Any here because LangGraph has weird edge behavior
+        # if the type annotation for the state in the edge function is Any/BaseModel/dict/etc aka not a specific model
+        # then LangGraph will pass the **same** state that was passed to the previous node
+        # meaning if we want the full state in the edge, we need to pass the full state here as well
+        # unfortunately, using AgentGraphState in the annotation and relying on extra="allow" does not work
+        # so we are doing the validation manually here
+        agent_state = AgentGraphState.model_validate(state, from_attributes=True)
+        messages: list[AnyMessage] = agent_state.messages
 
         consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
 

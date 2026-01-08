@@ -31,19 +31,19 @@ def add_job_attachments(
 
 
 def merge_objects(left: Any, right: Any) -> Any:
-    """Merge a Pydantic model with another model or dict, with right values taking precedence.
+    """Merge a Pydantic model or dict with another model or dict, with right values taking precedence.
 
     Applies field-specific reducers from annotation metadata when merging values.
 
     Args:
-        left: Existing Pydantic BaseModel instance
+        left: Existing Pydantic BaseModel instance or dict
         right: New Pydantic BaseModel instance or dict to merge
 
     Returns:
-        New Pydantic model instance with merged values
+        New Pydantic model instance with merged values (if left is BaseModel) or merged dict (if left is dict)
 
     Raises:
-        TypeError: If left is not a Pydantic BaseModel or right is not a BaseModel or dict
+        TypeError: If left or right are not Pydantic BaseModel or dict
     """
     if not right:
         return left
@@ -52,12 +52,22 @@ def merge_objects(left: Any, right: Any) -> Any:
         return right
 
     # validate input types
-    if not isinstance(left, BaseModel):
-        raise TypeError("Left object must be a Pydantic BaseModel")
+    if not isinstance(left, (BaseModel, dict)):
+        raise TypeError("Left object must be a Pydantic BaseModel or dict")
 
     if not isinstance(right, (BaseModel, dict)):
         raise TypeError("Right object must be a Pydantic BaseModel or dict")
 
+    # If left is a dict, perform simple dict merging
+    if isinstance(left, dict):
+        merged_values = left.copy()
+        if isinstance(right, BaseModel):
+            merged_values.update(right.model_dump())
+        else:
+            merged_values.update(right)
+        return merged_values
+
+    # If left is a BaseModel, use the original logic
     model_fields = type(left).model_fields
     merged_values = {}
 
@@ -80,11 +90,19 @@ def merge_objects(left: Any, right: Any) -> Any:
         left_value = merged_values[field_name]
 
         # apply reducer if defined
-        if field_info.metadata and callable(field_info.metadata[0]):
-            reducer_func = field_info.metadata[0]
+        if field_info.metadata and callable(field_info.metadata[-1]):
+            reducer_func = field_info.metadata[-1]
             merged_values[field_name] = reducer_func(left_value, right_value)
         else:
             merged_values[field_name] = right_value
 
     # return new model instance with merged values
     return type(left)(**merged_values)
+
+
+def replace_once(left: Any | None, right: Any | None) -> Any | None:
+    """Reducer to replace left value with right value if left is None."""
+    if left is None:
+        return right
+
+    return left
