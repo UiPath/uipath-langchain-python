@@ -105,6 +105,8 @@ def assert_traces(traces_file: str, expected_file: str) -> None:
     print(f"Loaded {len(traces)} traces from {traces_file}")
     print(f"Checking {len(expected_spans)} expected spans...")
     missing_spans = []
+    # Track which spans have already been matched to prevent double-matching
+    used_span_indices: set[int] = set()
     for expected in expected_spans:
         # Find a matching span
         found = False
@@ -112,9 +114,13 @@ def assert_traces(traces_file: str, expected_file: str) -> None:
         # Handle both string and list of names
         name_str = name if isinstance(name, str) else f"[{' | '.join(name)}]"
 
-        for span in traces:
+        for i, span in enumerate(traces):
+            # Skip spans that have already been matched
+            if i in used_span_indices:
+                continue
             if matches_expected(span, expected):
                 found = True
+                used_span_indices.add(i)
                 print(f"✓ Found span: {name_str}")
                 break
         if not found:
