@@ -3833,9 +3833,10 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.4.3"
+version = "2.4.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "applicationinsights" },
     { name = "click" },
     { name = "coverage" },
     { name = "httpx" },
@@ -3853,9 +3854,9 @@ dependencies = [
     { name = "uipath-core" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ee/d1/af3a1f5821f4f213ab70fdc750be8cf9b4f359859d501a5e3e59bacb528e/uipath-2.4.3.tar.gz", hash = "sha256:f99c7fcfadb87be229010077b9d38b313b20b6ec8d53e8d291a412d18fd4520b", size = 3410113, upload-time = "2026-01-06T02:59:34.415Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/3e/14bc0e7b96b2a8bfcdc9b0ad9580c04695e5e358f8106f2cbc40058cb536/uipath-2.4.5.tar.gz", hash = "sha256:ba036372aa05036c399fe84b272d1af3c63b4408a030ca4e4a72feeed3c9afb2", size = 3430577, upload-time = "2026-01-08T18:37:03.322Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/bb/217ac2245949da4474b5134950a6b87ec32f4ce02ea1ed47ff165738e12b/uipath-2.4.3-py3-none-any.whl", hash = "sha256:9ba626a852706382bebbec7bf9c1cee0d93dc7f0c0cbf8a55264c1dda1989293", size = 402985, upload-time = "2026-01-06T02:59:32.493Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/04/60f8404d08b93c7da9691f7614539e677152fae97899acba7e786aa78f91/uipath-2.4.5-py3-none-any.whl", hash = "sha256:49bedba2025d30ec947f3dcdc9a753e063e2bd4fe4d394a227cf3f7da608a58b", size = 407952, upload-time = "2026-01-08T18:37:01.435Z" },
 ]
 
 [[package]]
@@ -3863,7 +3864,6 @@ name = "uipath-agents"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
-    { name = "applicationinsights" },
     { name = "azure-monitor-opentelemetry" },
     { name = "langgraph" },
     { name = "uipath" },
@@ -3887,10 +3887,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "applicationinsights", specifier = ">=0.11.10" },
     { name = "azure-monitor-opentelemetry", specifier = ">=1.7.0" },
     { name = "langgraph", specifier = ">=1.0.0" },
-    { name = "uipath", specifier = "==2.4.3" },
+    { name = "uipath", specifier = "==2.4.5" },
     { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.3.1" },
 ]
 
