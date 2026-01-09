@@ -350,3 +350,112 @@ class TestEvalExecution:
         )
 
         assert_eval_success(returncode, eval_results, output)
+
+    @pytest.mark.e2e
+    def test_calculator_trace_hierarchy(
+        self, authenticated_session: dict[str, str], project_id: str, tmp_path: Path
+    ):
+        """Test evaluation trace has correct span hierarchy.
+
+        Verifies that the trace structure follows the expected hierarchy:
+        - Evaluation Set Run (root)
+          - Evaluation
+            - root
+              - Agent run
+          - Evaluator
+            - Evaluation output
+        """
+        if not project_id:
+            pytest.skip("UIPATH_PROJECT_ID not set")
+
+        example_dir = EXAMPLES_DIR / "calculator"
+        trace_file = tmp_path / "trace.jsonl"
+
+        # Run eval with trace output
+        command = ["eval", "agent.json", "--trace-file", str(trace_file), "--no-report"]
+        result = run_uipath_command(
+            command=command,
+            cwd=example_dir,
+            env=authenticated_session,
+            timeout=300,
+        )
+
+        assert result.returncode == 0, f"Eval command failed:\n{result.stdout}"
+        assert trace_file.exists(), "Trace file was not created"
+
+        # Parse trace spans
+        spans = []
+        with open(trace_file) as f:
+            for line in f:
+                if line.strip():
+                    spans.append(json.loads(line))
+
+        assert spans, "No spans found in trace file"
+
+        # Verify expected hierarchy: Evaluation Set Run -> Evaluation -> root -> Agent run
+        eval_set_run = next(
+            (s for s in spans if s.get("name") == "Evaluation Set Run"), None
+        )
+        assert eval_set_run, "No 'Evaluation Set Run' span found"
+        eval_set_run_id = eval_set_run.get("context", {}).get("span_id")
+
+        # Find Evaluation child
+        evaluation = next(
+            (
+                s
+                for s in spans
+                if s.get("name") == "Evaluation"
+                and s.get("parent_id") == eval_set_run_id
+            ),
+            None,
+        )
+        assert evaluation, "No 'Evaluation' span found as child of Evaluation Set Run"
+        evaluation_id = evaluation.get("context", {}).get("span_id")
+
+        # Find root child
+        root = next(
+            (
+                s
+                for s in spans
+                if s.get("name") == "root" and s.get("parent_id") == evaluation_id
+            ),
+            None,
+        )
+        assert root, "No 'root' span found as child of Evaluation"
+        root_id = root.get("context", {}).get("span_id")
+
+        # Find Agent run child
+        agent_run = next(
+            (
+                s
+                for s in spans
+                if "Agent run" in s.get("name", "") and s.get("parent_id") == root_id
+            ),
+            None,
+        )
+        assert agent_run, "No 'Agent run' span found as child of root"
+
+        # Verify evaluator structure: Evaluation -> Evaluator -> Evaluation output
+        evaluator = next(
+            (
+                s
+                for s in spans
+                if "Evaluator:" in s.get("name", "")
+                and s.get("parent_id") == evaluation_id
+            ),
+            None,
+        )
+        assert evaluator, "No 'Evaluator' span found as child of Evaluation"
+        evaluator_id = evaluator.get("context", {}).get("span_id")
+
+        # Find Evaluation output child
+        eval_output = next(
+            (
+                s
+                for s in spans
+                if s.get("name") == "Evaluation output"
+                and s.get("parent_id") == evaluator_id
+            ),
+            None,
+        )
+        assert eval_output, "No 'Evaluation output' span found as child of Evaluator"
