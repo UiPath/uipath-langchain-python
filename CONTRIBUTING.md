@@ -1,6 +1,6 @@
 # Contributing to UiPath Agents Python
 
-Most of the times when working on this repo, you'll also need to do some changes in `uipath-langchain-python` and/or `uipath-python`. In order to work with all 3 repositories at the same time, the standard way is to configure them as `editable` dependencies. You can start with just the `uipath-agents-python` project and continue with the setup for the other repositories when needed.
+Most of the time when working on this repo, you'll also need to do some changes in `uipath-langchain-python` and/or `uipath-python`. In order to work with all 3 repositories at the same time, the standard way is to configure them as `editable` dependencies. You can start with just the `uipath-agents-python` project and continue with the setup for the other repositories when needed.
 
 ## Development Strategies
 
@@ -88,34 +88,67 @@ Due to how the SDKs are structured, most of the code used for agents in stored i
     # └── uipath-python/
     ```
 
-2. **Update `pyproject.toml`** in `uipath-agents-python` and add the following section:
+2. **Configure Playground Project** -- Add your agent definitions to the playground project (see [Dedicated Playground Project](#dedicated-playground-project))
 
-    ```toml
-    [tool.uv.sources]
-    uipath = { path = "../uipath-python", editable = true }
-    uipath-langchain = { path = "../uipath-langchain-python", editable = true }
-    ```
+3. **Configure editable dependencies** - Choose one of the following approaches:
 
-3. **Sync dependencies** for `uipath-agents-python`:
+    #### Option A: Automated Setup (Recommended)
+
+    Copy the setup scripts from `uipath-agents-python/.pycharm/` to your `python-workspace` directory and run the setup script:
 
     ```bash
-    uv sync
+    # in [python-workspace]
+    cp uipath-agents-python/.pycharm/setup-local-dev.sh .
+    cp uipath-agents-python/.pycharm/clean-local-dev.sh .
+    chmod +x setup-local-dev.sh clean-local-dev.sh
+    ./setup-local-dev.sh
     ```
 
-4. **Update `pyproject.toml`** in `uipath-langchain-python` and add the following section:
+    The script will automatically:
+    - Add `[tool.uv.sources]` sections to the required `pyproject.toml` files
+    - Sync dependencies for both `uipath-agents-python` and `uipath-langchain-python`
 
-    ```toml
-    [tool.uv.sources]
-    uipath = { path = "../uipath-python", editable = true }
-    ```
-
-5. **Sync dependencies** for `uipath-langchain-python`:
+    To clean up the editable dependencies later (e.g., before committing changes), run:
 
     ```bash
-    uv sync
+    # in [python-workspace]
+    ./clean-local-dev.sh
     ```
 
-6. You now have all the related repositories set up locally and linked for local development and direct feedback.
+    #### Option B: Manual Setup
+
+    If you prefer to configure manually:
+
+    1. **Update `pyproject.toml`** in `uipath-agents-python` and add the following section:
+
+        ```toml
+        [tool.uv.sources]
+        uipath = { path = "../uipath-python", editable = true }
+        uipath-langchain = { path = "../uipath-langchain-python", editable = true }
+        ```
+
+    2. **Sync dependencies** for `uipath-agents-python`:
+
+        ```bash
+        cd uipath-agents-python
+        uv sync
+        ```
+
+    3. **Update `pyproject.toml`** in `uipath-langchain-python` and add the following section:
+
+        ```toml
+        [tool.uv.sources]
+        uipath = { path = "../uipath-python", editable = true }
+        ```
+
+    4. **Sync dependencies** for `uipath-langchain-python`:
+
+        ```bash
+        cd uipath-langchain-python
+        uv sync
+        ```
+
+4. You now have all the related repositories set up locally and linked for local development and direct feedback.
 
 ---
 
@@ -137,55 +170,40 @@ Do note that there are 2 configurations: one for starting an agent and one for r
 
 If you're using the `python-workspace` approach, you can copy the `.vscode` directory to the workspace and update the `cwd` property for the launch tasks to point to your agent's location (e.g. `${workspaceFolder}/playground/basic`).
 
-### PyCharm Setup
-
-Configure you Python interpreter to point to `.venv/bin/python`. Most of it's terminals will do some things automatically like activating the virtual environment if detected.
-
-_More details to be added by someone using this._
-
 #### Windows + WSL
 
 This comes with the additional challange of adding the interpreter from the WSL instance. To my knowledge, this is only available in the Pro or higher version.
 
 When adding the interpreter, choose the `On WSL` option, follow the wizard and choose the `Virtualenv Enviornment`.
 
+### PyCharm Setup
+
+This setup is strongly recommended with [Multiple Repositories setup](#multiple-repositories).
+
+1. **Create a PyCharm workspace**:
+   - Open PyCharm and create a new workspace by selecting the root folder (`python-workspace`)
+   - The workspace should include all 4 folders: `playground`, `uipath-agents-python`, `uipath-langchain-python`, and `uipath-python`
+
+2. **Configure the Python interpreter**:
+   - Set your Python interpreter to point to `playground/.venv/bin/python` (or `playground\.venv\Scripts\python.exe` on Windows)
+   - PyCharm terminals will automatically activate the virtual environment when detected
+
+3. **Copy PyCharm configuration files**:
+   - Copy the entire runConfigurations directory from `uipath-agents-python/.pycharm/runConfigurations` into your `python-workspace/.idea` (`cp -R .pycharm/runConfigurations .idea/`)
+   - Restart PyCharm and check if run configurations are visible
+   - If your agent requires input parameters, change configuration script parameters to the format where strings are escaped: `run agent.json {\"word\":\"donkey\"}`
+
+4. **Set up editable dependencies** (if working with multiple repositories):
+   - Use the setup scripts to automatically configure the local development environment (see [Multiple Repositories](#multiple-repositories) section for details)
+   - Alternatively, follow the manual setup instructions in that section
+
 ### PyCharm Debugging
 
-PyCharm unfortunately has it's own python debugging server and protocol and it does not play nice with others. Adding a direct start/resume configuration as we have for VS Code will not work.
+Once the workspace is configured with all repositories and editable dependencies are set up, debugging works seamlessly across all projects:
 
-1. Add a new configuration for `Python Debug Server`. You can keep the default IDE host name and ports. It'll give you some instructions on how to add the special pycharm debug package to you code and set it up.
-
-    ```bash
-    # 1. Add pydevd-pycharm ...:
-    pip install pydevd-pycharm~=252.27397.106
-
-    # 2. Add the following command to connect to the Debug Server:
-    import pydevd_pycharm
-    pydevd_pycharm.settrace('localhost', port=5678, stdout_to_server=True, stderr_to_server=True)
-    ```
-
-2. Install the `pydevd-pycharm` package to the `uipath-agents-python` project using `uv`
-
-    ```bash
-    uv add --dev pydevd-pycharm~=252.27397.106
-    ```
-
-3. Add the python script to the top of a file that's used during execution (e.g. [cli_run.py](src/uipath_agents/_cli/cli_run.py))
-
-    ```python
-    1. import pydevd_pycharm # type: ignore
-    2. pydevd_pycharm.settrace('localhost', port=5678, stdout_to_server=True, stderr_to_server=True)
-    ```
-
-4. Start the debug session in PyCharm; it will wait for the code to connect to the debug server
-
-5. Run your code as you do normally
-
-    ```bash
-    uv run uipath agent.json '{}'
-    ```
-
-6. PyCharm should display a window to choose how to do path mapping. Using auto-detect with the 1st option should work fine.
+- **Set breakpoints** anywhere in the code across `uipath-agents-python`, `uipath-langchain-python`, or `uipath-python`
+- **Run any configuration in debug mode** - PyCharm will stop at breakpoints in any of the three repositories
+- **Note**: This requires that the `pyproject.toml` files are configured to use local editable versions of the libraries (see [Multiple Repositories](#multiple-repositories) section)
 
 #### Windows + WSL
 
