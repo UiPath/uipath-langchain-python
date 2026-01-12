@@ -1,7 +1,9 @@
 {
+  "version": "1.0",
+  "id": "test-suspend-resume-eval",
   "name": "Suspend Resume Test",
   "description": "Test evaluation set for suspend/resume pattern with RPA process invocation",
-  "modelSettings": {},
+  "evaluatorRefs": [],
   "evaluations": [
     {
       "id": "test_suspend_basic",
@@ -9,7 +11,7 @@
       "inputs": {
         "query": "Test suspend and resume with RPA process"
       },
-      "evaluationCriteria": {}
+      "evaluationCriterias": {}
     },
     {
       "id": "test_suspend_complex",
@@ -17,7 +19,7 @@
       "inputs": {
         "query": "Process complex data structure with multiple parameters"
       },
-      "evaluationCriteria": {}
+      "evaluationCriterias": {}
     }
   ]
 }
