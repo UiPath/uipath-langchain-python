@@ -77,17 +77,20 @@ class EscalateAction(GuardrailAction):
             # Validate message count based on execution stage
             _validate_message_count(state, execution_stage)
 
-            (redirect_url, tenant_name) = _get_agent_execution_viewer_url()
             # Build base data dictionary with common fields
             data: Dict[str, Any] = {
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
-                "TenantName": tenant_name,
-                "AgentTrace": redirect_url,
                 "Component": scope.name.lower(),
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
                 "GuardrailResult": state.guardrail_validation_result,
             }
+
+            # Add tenant and trace URL if base_url is configured
+            cloud_base_url = UiPathConfig.base_url
+            if cloud_base_url is not None:
+                data["TenantName"] = _get_tenant_name(cloud_base_url)
+                data["AgentTrace"] = _get_agent_execution_viewer_url(cloud_base_url)
 
             # Add stage-specific fields
             if execution_stage == ExecutionStage.PRE_EXECUTION:
@@ -630,38 +633,43 @@ def _execution_stage_to_string(
     return "PostExecution"
 
 
-def _get_agent_execution_viewer_url() -> tuple[str, str]:
-    """Generate the agent execution viewer URL based on execution context.
+def _get_tenant_name(cloud_base_url: str) -> str:
+    """Extract the tenant name from the UiPath base URL.
 
     Args:
-        cloud_base_url: Optional cloud base URL. If not provided, will be extracted from environment.
+        cloud_base_url: The UiPath cloud base URL to extract tenant name from.
 
     Returns:
-        The constructed viewer URL for the agent execution.
-
-    Note:
-        Currently uses hardcoded values for agentId and packageVersion.
-        These should be made configurable in the future.
+        str: The tenant name extracted from the base URL.
     """
-    cloud_base_url = UiPathConfig.base_url
     uiPath_Url = UiPathUrl(cloud_base_url)
-    tenant_name = uiPath_Url.tenant_name
+    return uiPath_Url.tenant_name
+
+
+def _get_agent_execution_viewer_url(cloud_base_url: str) -> str:
+    """Generate the agent execution viewer URL based on execution context.
+
+    Constructs the appropriate URL for viewing agent execution traces. The URL format
+    depends on whether the agent is running in a studio project (development) or
+    deployed (production) context.
+
+    Args:
+        cloud_base_url: The UiPath cloud base URL to use for constructing the viewer URL.
+
+    Returns:
+        str: The constructed agent execution viewer URL.
+    """
+    uiPath_Url = UiPathUrl(cloud_base_url)
     organization_id = UiPathConfig.organization_id
     agent_id = UiPathConfig.project_id
 
     # Route to appropriate URL based on source
     if UiPathConfig.is_studio_project:
-        return (
-            f"{uiPath_Url.base_url}/{organization_id}/studio_/designer/{agent_id}",
-            tenant_name,
-        )
+        return f"{uiPath_Url.base_url}/{organization_id}/studio_/designer/{agent_id}"
     else:
         execution_folder_id = UiPathConfig.folder_key
         process_uuid = UiPathConfig.process_uuid
         trace_id = UiPathConfig.trace_id
         package_version = UiPathConfig.process_version
 
-        return (
-            f"{uiPath_Url.base_url}/{organization_id}/agents_/deployed/{execution_folder_id}/{process_uuid}/{agent_id}/{package_version}/traces/{trace_id}",
-            tenant_name,
-        )
+        return f"{uiPath_Url.base_url}/{organization_id}/agents_/deployed/{execution_folder_id}/{process_uuid}/{agent_id}/{package_version}/traces/{trace_id}"
