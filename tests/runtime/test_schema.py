@@ -1,13 +1,32 @@
 """Tests for schema utility functions."""
 
-from unittest.mock import MagicMock
+from dataclasses import dataclass, field
+from typing import Any
 
+import pytest
+from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
+from typing_extensions import TypedDict
+from uipath.runtime.schema import transform_references
 
-from uipath_langchain.runtime.schema import (
-    _resolve_refs,
-    get_entrypoints_schema,
-)
+from uipath_langchain.runtime import UiPathLangGraphRuntime
+
+
+def generate_simple_langgraph_graph(input_schema: type, output_schema: type):
+    # note: type ignore are needed here since mypy can t validate a dynamically created object's type
+    def node(state: input_schema) -> input_schema:  # type: ignore
+        return state
+
+    builder = StateGraph(
+        state_schema=input_schema,
+        input_schema=input_schema,
+        output_schema=output_schema,
+    )  # type: ignore
+    builder.add_node("node", node)
+    builder.add_edge(START, "node")
+    builder.add_edge("node", END)
+    graph = builder.compile()
+    return graph
 
 
 class TestResolveRefs:
@@ -20,7 +39,7 @@ class TestResolveRefs:
             "properties": {"name": {"type": "string"}, "age": {"type": "integer"}},
         }
 
-        result, has_circular = _resolve_refs(schema)
+        result, has_circular = transform_references(schema)
 
         assert result == schema
         assert has_circular is False
@@ -37,7 +56,7 @@ class TestResolveRefs:
             },
         }
 
-        result, has_circular = _resolve_refs(schema)
+        result, has_circular = transform_references(schema)
 
         assert result["properties"]["user"]["type"] == "object"
         assert result["properties"]["user"]["properties"]["name"]["type"] == "string"
@@ -58,7 +77,7 @@ class TestResolveRefs:
             },
         }
 
-        result, has_circular = _resolve_refs(schema)
+        result, has_circular = transform_references(schema)
 
         assert has_circular is True
         # Check that circular ref was replaced with simplified schema
@@ -87,7 +106,7 @@ class TestResolveRefs:
             },
         }
 
-        result, has_circular = _resolve_refs(schema)
+        result, has_circular = transform_references(schema)
 
         assert result["properties"]["person"]["type"] == "object"
         assert result["properties"]["person"]["properties"]["name"]["type"] == "string"
@@ -114,7 +133,7 @@ class TestResolveRefs:
             },
         }
 
-        result, has_circular = _resolve_refs(schema)
+        result, has_circular = transform_references(schema)
 
         assert result["properties"]["users"]["items"]["type"] == "object"
         assert (
@@ -140,7 +159,7 @@ class TestResolveRefs:
             },
         }
 
-        result, has_circular = _resolve_refs(schema)
+        result, has_circular = transform_references(schema)
 
         assert has_circular is True
 
@@ -148,28 +167,7 @@ class TestResolveRefs:
 class TestGenerateSchemaFromGraph:
     """Tests for the generate_schema_from_graph function."""
 
-    def test_graph_without_schemas(self):
-        """Should return empty schemas when graph has no input/output schemas."""
-        mock_graph = MagicMock()
-        del mock_graph.input_schema
-        del mock_graph.output_schema
-
-        result = get_entrypoints_schema(mock_graph)
-
-        assert result.schema["input"] == {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        }
-        assert result.schema["output"] == {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        }
-        assert result.has_input_circular_dependency is False
-        assert result.has_output_circular_dependency is False
-
-    def test_graph_with_simple_schemas(self):
+    async def test_graph_with_simple_schemas(self):
         """Should extract input and output schemas from graph."""
 
         class InputModel(BaseModel):
@@ -179,88 +177,289 @@ class TestGenerateSchemaFromGraph:
         class OutputModel(BaseModel):
             response: str = Field(description="Agent response")
 
-        mock_graph = MagicMock()
-        mock_graph.input_schema = InputModel
-        mock_graph.output_schema = OutputModel
+        runtime = UiPathLangGraphRuntime(
+            graph=generate_simple_langgraph_graph(
+                input_schema=InputModel, output_schema=OutputModel
+            ),
+            entrypoint="test_entrypoint",
+        )
 
-        result = get_entrypoints_schema(mock_graph)
+        entire_schema = await runtime.get_schema()
+        input_schema = entire_schema.input
+        output_schema = entire_schema.output
 
-        assert "query" in result.schema["input"]["properties"]
-        assert "max_results" in result.schema["input"]["properties"]
-        assert result.schema["input"]["properties"]["query"]["type"] == "string"
-        assert "response" in result.schema["output"]["properties"]
-        assert result.schema["output"]["properties"]["response"]["type"] == "string"
-        assert result.has_input_circular_dependency is False
-        assert result.has_output_circular_dependency is False
+        assert "query" in input_schema["properties"]
+        assert "max_results" in input_schema["properties"]
+        assert input_schema["properties"]["query"]["type"] == "string"
+        assert "response" in output_schema["properties"]
+        assert output_schema["properties"]["response"]["type"] == "string"
 
-    def test_graph_with_circular_input_schema(self):
-        """Should detect circular dependencies in input schema."""
+    async def test_graph_with_complex_pydantic_schemas(self):
+        """Should extract complex nested input and output schemas from graph."""
 
-        class NodeInput(BaseModel):
-            value: str
-            children: list["NodeInput"] = Field(default_factory=list)
+        class Address(BaseModel):
+            street: str
+            city: str
+            zip_code: str | None = None
 
-        mock_graph = MagicMock()
-        mock_graph.input_schema = NodeInput
-        del mock_graph.output_schema
-
-        result = get_entrypoints_schema(mock_graph)
-
-        assert result.has_input_circular_dependency is True
-        assert result.has_output_circular_dependency is False
-        assert "value" in result.schema["input"]["properties"]
-
-    def test_graph_with_circular_output_schema(self):
-        """Should detect circular dependencies in output schema."""
-
-        class TreeOutput(BaseModel):
+        class User(BaseModel):
             name: str
-            parent: "TreeOutput | None" = None
+            age: int
+            email: str | None = None
+            addresses: list[Address] = Field(default_factory=list)
 
-        mock_graph = MagicMock()
-        del mock_graph.input_schema
-        mock_graph.output_schema = TreeOutput
+        class InputModel(BaseModel):
+            user: User
+            tags: list[str] = Field(default_factory=list)
+            metadata: dict[str, Any] = Field(default_factory=dict)
+            priority: int = Field(default=5, ge=1, le=10)
 
-        result = get_entrypoints_schema(mock_graph)
+        class ResultItem(BaseModel):
+            id: str
+            score: float
+            data: dict[str, Any]
 
-        assert result.has_input_circular_dependency is False
-        assert result.has_output_circular_dependency is True
-        assert "name" in result.schema["output"]["properties"]
+        class OutputModel(BaseModel):
+            results: list[ResultItem]
+            total_count: int
+            success: bool = True
 
-    def test_graph_with_both_circular_schemas(self):
-        """Should detect circular dependencies in both input and output schemas."""
+        runtime = UiPathLangGraphRuntime(
+            graph=generate_simple_langgraph_graph(
+                input_schema=InputModel, output_schema=OutputModel
+            ),
+            entrypoint="test_entrypoint",
+        )
 
-        class CircularInput(BaseModel):
-            data: str
-            ref: "CircularInput | None" = None
+        entire_schema = await runtime.get_schema()
+        input_schema = entire_schema.input
+        output_schema = entire_schema.output
 
-        class CircularOutput(BaseModel):
-            result: str
-            next: "CircularOutput | None" = None
+        assert "user" in input_schema["properties"]
+        assert "tags" in input_schema["properties"]
+        assert "metadata" in input_schema["properties"]
+        assert "priority" in input_schema["properties"]
+        assert input_schema["properties"]["tags"]["type"] == "array"
+        assert input_schema["properties"]["metadata"]["type"] == "object"
 
-        mock_graph = MagicMock()
-        mock_graph.input_schema = CircularInput
-        mock_graph.output_schema = CircularOutput
+        assert "results" in output_schema["properties"]
+        assert "total_count" in output_schema["properties"]
+        assert "success" in output_schema["properties"]
+        assert output_schema["properties"]["results"]["type"] == "array"
+        assert output_schema["properties"]["total_count"]["type"] == "integer"
 
-        result = get_entrypoints_schema(mock_graph)
+    async def test_graph_with_complex_dataclass_schemas(self):
+        """Should extract complex nested dataclass input and output schemas from graph."""
 
-        assert result.has_input_circular_dependency is True
-        assert result.has_output_circular_dependency is True
-        assert "data" in result.schema["input"]["properties"]
-        assert "result" in result.schema["output"]["properties"]
+        @dataclass
+        class Address:
+            street: str
+            city: str
+            zip_code: str | None = None
 
-    def test_graph_with_required_fields(self):
+        @dataclass
+        class User:
+            name: str
+            age: int
+            email: str | None = None
+            addresses: list[Address] = field(default_factory=list)
+
+        @dataclass
+        class InputModel:
+            user: User
+            tags: list[str] = field(default_factory=list)
+            metadata: dict[str, Any] = field(default_factory=dict)
+            priority: int = 5
+
+        @dataclass
+        class ResultItem:
+            id: str
+            score: float
+            data: dict[str, Any]
+
+        @dataclass
+        class OutputModel:
+            results: list[ResultItem]
+            total_count: int
+            success: bool = True
+
+        runtime = UiPathLangGraphRuntime(
+            graph=generate_simple_langgraph_graph(
+                input_schema=InputModel, output_schema=OutputModel
+            ),
+            entrypoint="test_entrypoint",
+        )
+
+        entire_schema = await runtime.get_schema()
+        input_schema = entire_schema.input
+        output_schema = entire_schema.output
+
+        assert "user" in input_schema["properties"]
+        assert "tags" in input_schema["properties"]
+        assert "metadata" in input_schema["properties"]
+        assert "priority" in input_schema["properties"]
+        assert input_schema["properties"]["tags"]["type"] == "array"
+        assert input_schema["properties"]["metadata"]["type"] == "object"
+
+        assert "results" in output_schema["properties"]
+        assert "total_count" in output_schema["properties"]
+        assert "success" in output_schema["properties"]
+        assert output_schema["properties"]["results"]["type"] == "array"
+        assert output_schema["properties"]["total_count"]["type"] == "integer"
+
+    async def test_graph_with_complex_typeddict_schemas(self):
+        """Should extract complex nested TypedDict input and output schemas from graph."""
+
+        class Address(TypedDict):
+            street: str
+            city: str
+            zip_code: str | None
+
+        class User(TypedDict):
+            name: str
+            age: int
+            email: str | None
+            addresses: list[Address]
+
+        class InputModel(TypedDict):
+            user: User
+            tags: list[str]
+            metadata: dict[str, Any]
+            priority: int
+
+        class ResultItem(TypedDict):
+            id: str
+            score: float
+            data: dict[str, Any]
+
+        class OutputModel(TypedDict):
+            results: list[ResultItem]
+            total_count: int
+            success: bool
+
+        runtime = UiPathLangGraphRuntime(
+            graph=generate_simple_langgraph_graph(
+                input_schema=InputModel, output_schema=OutputModel
+            ),
+            entrypoint="test_entrypoint",
+        )
+
+        entire_schema = await runtime.get_schema()
+        input_schema = entire_schema.input
+        output_schema = entire_schema.output
+
+        assert "user" in input_schema["properties"]
+        assert "tags" in input_schema["properties"]
+        assert "metadata" in input_schema["properties"]
+        assert "priority" in input_schema["properties"]
+        assert input_schema["properties"]["tags"]["type"] == "array"
+        assert input_schema["properties"]["metadata"]["type"] == "object"
+
+        assert "results" in output_schema["properties"]
+        assert "total_count" in output_schema["properties"]
+        assert "success" in output_schema["properties"]
+        assert output_schema["properties"]["results"]["type"] == "array"
+        assert output_schema["properties"]["total_count"]["type"] == "integer"
+
+    async def test_graph_with_required_fields(self):
         """Should extract required fields from schemas."""
 
         class StrictModel(BaseModel):
             required_field: str
             optional_field: str | None = None
 
-        mock_graph = MagicMock()
-        mock_graph.input_schema = StrictModel
-        del mock_graph.output_schema
+        runtime = UiPathLangGraphRuntime(
+            graph=generate_simple_langgraph_graph(
+                input_schema=StrictModel, output_schema=StrictModel
+            ),
+            entrypoint="test_entrypoint",
+        )
 
-        result = get_entrypoints_schema(mock_graph)
+        entire_schema = await runtime.get_schema()
+        input_schema = entire_schema.input
+        output_schema = entire_schema.output
 
-        assert "required_field" in result.schema["input"]["required"]
-        assert "optional_field" not in result.schema["input"]["required"]
+        assert "required_field" in input_schema["required"]
+        assert "optional_field" not in input_schema["required"]
+
+        assert "required_field" in output_schema["required"]
+        assert "optional_field" not in output_schema["required"]
+
+
+class TestSchemaGeneration:
+    @pytest.mark.parametrize(
+        "input_model_code",
+        [
+            """
+# pydantic BaseModel
+
+from pydantic import BaseModel, Field
+from uipath.platform.attachments import Attachment
+
+class InputModel(BaseModel):
+    input_file: Attachment
+    other_field: int | None = Field(default=None)""",
+            """
+# dataclass
+
+from uipath.platform.attachments import Attachment
+from dataclasses import dataclass
+@dataclass
+class InputModel:
+    input_file: Attachment
+    other_field: int | None = None""",
+            """
+# TypedDict
+
+from typing_extensions import TypedDict
+from typing_extensions import NotRequired
+from uipath.platform.attachments import Attachment
+class InputModel(TypedDict):
+    input_file: Attachment
+    other_field: NotRequired[int | None]
+    """,
+        ],
+    )
+    async def test_schema_generation_resolves_attachments(
+        self, input_model_code: str
+    ) -> None:
+        """Test that attachments are resolved in runtime schema"""
+
+        # execute model code to get its schema
+        exec_globals: dict[str, Any] = {}
+        exec(input_model_code, exec_globals)
+        InputModel = exec_globals["InputModel"]
+
+        runtime = UiPathLangGraphRuntime(
+            graph=generate_simple_langgraph_graph(
+                input_schema=InputModel, output_schema=InputModel
+            ),
+            entrypoint="test_entrypoint",
+        )
+
+        def check_attachment_in_schema(schema: dict[str, Any]):
+            assert "definitions" in schema
+            assert "job-attachment" in schema["definitions"]
+            assert schema["definitions"]["job-attachment"]["type"] == "object"
+            assert (
+                schema["definitions"]["job-attachment"]["x-uipath-resource-kind"]
+                == "JobAttachment"
+            )
+            assert all(
+                prop_name in schema["definitions"]["job-attachment"]["properties"]
+                for prop_name in ["ID", "FullName", "MimeType", "Metadata"]
+            )
+
+            assert len(schema["properties"]) == 2
+            assert all(
+                prop_name in schema["properties"]
+                for prop_name in ["input_file", "other_field"]
+            )
+            assert schema["required"] == ["input_file"]
+
+        entire_schema = await runtime.get_schema()
+
+        input_schema = entire_schema.input
+        output_schema = entire_schema.output
+        check_attachment_in_schema(input_schema)
+        check_attachment_in_schema(output_schema)
