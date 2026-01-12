@@ -1,7 +1,7 @@
 """Tests for job_attachment_wrapper module."""
 
 import uuid
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -41,9 +41,9 @@ class TestGetJobAttachmentWrapper:
 
     def assert_command_success(
         self,
-        result,
+        result: Command[Any],
         tool_call_id: str = "call_123",
-        job_attachments: dict | None = None,
+        job_attachments: dict[str, Any] | None = None,
         expected_content: str | None = "{'result': 'success'}",
     ):
         """Assert that result is a successful Command with expected structure."""
@@ -61,7 +61,11 @@ class TestGetJobAttachmentWrapper:
         assert "inner_state" in result.update
         assert result.update["inner_state"]["job_attachments"] == job_attachments
 
-    def assert_error_result(self, result, expected_error_substring: str):
+    def assert_error_result(
+        self,
+        result: dict[str, Any] | Command[Any] | None,
+        expected_error_substring: str,
+    ):
         """Assert that result is an error dict containing expected substring."""
         assert isinstance(result, dict)
         assert "error" in result
@@ -126,6 +130,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
+        assert isinstance(result, Command)
         self.assert_command_success(result)
         mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
 
@@ -139,6 +144,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
+        assert isinstance(result, Command)
         self.assert_command_success(result)
         mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
 
@@ -152,6 +158,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
+        assert isinstance(result, Command)
         self.assert_command_success(result)
         mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
 
@@ -173,6 +180,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
+        assert isinstance(result, Command)
         self.assert_command_success(result)
         mock_get_paths.assert_called_once_with(MockAttachmentSchema)
         mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
@@ -210,6 +218,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
+        assert isinstance(result, Command)
         self.assert_command_success(result)
         # Verify that tool.ainvoke was called (with replaced attachment)
         mock_tool.ainvoke.assert_awaited_once()
@@ -248,6 +257,7 @@ class TestGetJobAttachmentWrapper:
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         self.assert_error_result(result, "Could not find JobAttachment")
+        assert isinstance(result, dict)
         assert str(attachment_id) in result["error"]
         mock_tool.ainvoke.assert_not_awaited()
 
@@ -290,6 +300,7 @@ class TestGetJobAttachmentWrapper:
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         self.assert_error_result(result, "Could not find JobAttachment")
+        assert isinstance(result, dict)
         # Check that both attachment IDs are in the error message
         assert str(attachment_id_1) in result["error"]
         assert str(attachment_id_2) in result["error"]
@@ -370,6 +381,7 @@ class TestGetJobAttachmentWrapper:
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         self.assert_error_result(result, str(invalid_id))
+        assert isinstance(result, dict)
         assert str(mock_attachment.id) not in result["error"]
         mock_tool.ainvoke.assert_not_awaited()
 
@@ -460,6 +472,7 @@ class TestGetJobAttachmentWrapper:
 
         # Should return error for the missing attachment
         self.assert_error_result(result, "Could not find JobAttachment")
+        assert isinstance(result, dict)
         assert str(missing_attachment_id) in result["error"]
         # Valid attachments should not be in error message
         assert str(attachment1_id) not in result["error"]
@@ -543,6 +556,7 @@ class TestGetJobAttachmentWrapper:
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         # Should succeed without errors
+        assert isinstance(result, Command)
         self.assert_command_success(result, tool_call_id="call_complex_456")
         # Tool should be invoked with replaced attachments
         mock_tool.ainvoke.assert_awaited_once()
@@ -591,6 +605,7 @@ class TestGetJobAttachmentWrapper:
         # Should succeed and include the output attachment in inner_state
         assert isinstance(result, Command)
         assert hasattr(result, "update")
+        assert result.update is not None
         assert "inner_state" in result.update
         assert "job_attachments" in result.update["inner_state"]
         assert (
@@ -642,6 +657,7 @@ class TestGetJobAttachmentWrapper:
 
         # Should succeed and include all attachments
         assert isinstance(result, Command)
+        assert result.update is not None
         job_attachments = result.update["inner_state"]["job_attachments"]
         assert len(job_attachments) == 3
         assert str(attachment1_id) in job_attachments
@@ -669,6 +685,7 @@ class TestGetJobAttachmentWrapper:
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         # Should succeed with empty job_attachments
+        assert isinstance(result, Command)
         self.assert_command_success(result, expected_content=None)
 
     @pytest.mark.asyncio
@@ -708,6 +725,7 @@ class TestGetJobAttachmentWrapper:
 
         # Should only include attachment with id
         assert isinstance(result, Command)
+        assert result.update is not None
         job_attachments = result.update["inner_state"]["job_attachments"]
         assert len(job_attachments) == 1
         assert str(attachment_with_id.id) in job_attachments
