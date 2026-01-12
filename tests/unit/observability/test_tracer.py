@@ -60,6 +60,41 @@ class TestAgentRunSpan:
         assert attrs["agentId"] == "test-id-123"
         assert attrs["source"] == "langchain"
 
+    def test_includes_execution_type_from_env(self, tracer, span_exporter, monkeypatch):
+        """Test agent run span includes executionType from UIPATH_IS_DEBUG env."""
+        monkeypatch.setenv("UIPATH_IS_DEBUG", "True")
+
+        with tracer.start_agent_run(agent_name="TestAgent"):
+            pass
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["executionType"] == 0  # DEBUG
+
+    def test_includes_agent_version_from_env(self, tracer, span_exporter, monkeypatch):
+        """Test agent run span includes agentVersion from UIPATH_PROCESS_VERSION env."""
+        monkeypatch.setenv("UIPATH_PROCESS_VERSION", "2.0.5")
+
+        with tracer.start_agent_run(agent_name="TestAgent"):
+            pass
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["agentVersion"] == "2.0.5"
+
+    def test_execution_type_defaults_to_runtime(
+        self, tracer, span_exporter, monkeypatch
+    ):
+        """Test executionType defaults to RUNTIME when env not set (per OR)."""
+        monkeypatch.delenv("UIPATH_IS_DEBUG", raising=False)
+
+        with tracer.start_agent_run(agent_name="TestAgent"):
+            pass
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["executionType"] == 1  # RUNTIME
+
     def test_conversational_agent_span_name(self, tracer, span_exporter):
         """Test conversational agent has correct span name."""
         with tracer.start_agent_run(

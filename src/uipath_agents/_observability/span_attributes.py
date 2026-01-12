@@ -4,11 +4,46 @@ These classes provide type-safe span attribute handling matching
 the Temporal implementation in agents/backend/Execution.Shared/Traces/.
 """
 
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# --- Environment Variable Names ---
+ENV_UIPATH_IS_DEBUG = "UIPATH_IS_DEBUG"
+ENV_UIPATH_PROCESS_VERSION = "UIPATH_PROCESS_VERSION"
+
+
+class ExecutionType(IntEnum):
+    """Execution type matching Temporal/Orchestrator schema.
+
+    Debug (0): Studio debug, playground, local development
+    Runtime (1): Production job from Orchestrator
+    """
+
+    DEBUG = 0
+    RUNTIME = 1
+
+
+def get_execution_type() -> int:
+    """Get execution type from environment.
+
+    Returns:
+        ExecutionType.DEBUG (0) if UIPATH_IS_DEBUG=true
+        ExecutionType.RUNTIME (1) if UIPATH_IS_DEBUG=false or not set
+    """
+    env_value = os.getenv(ENV_UIPATH_IS_DEBUG, "").lower()
+    if env_value == "true":
+        return ExecutionType.DEBUG
+    return ExecutionType.RUNTIME
+
+
+def get_agent_version() -> Optional[str]:
+    """Get agent version from environment."""
+    return os.getenv(ENV_UIPATH_PROCESS_VERSION) or None
 
 
 @dataclass(frozen=True)
@@ -157,6 +192,10 @@ class AgentRunSpanAttributes(BaseSpanAttributes):
     output_schema: Optional[Dict[str, Any]] = Field(None, alias="outputSchema")
     input: Optional[Dict[str, Any]] = Field(None, alias="input")
     output: Optional[Any] = Field(None, alias="output")
+
+    # Execution context fields
+    execution_type: Optional[int] = Field(None, alias="executionType")
+    agent_version: Optional[str] = Field(None, alias="agentVersion")
 
     @property
     def type(self) -> str:

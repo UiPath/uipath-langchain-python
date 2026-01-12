@@ -35,6 +35,8 @@ from .span_attributes import (
     ModelSettings,
     ProcessToolSpanAttributes,
     ToolCallSpanAttributes,
+    get_agent_version,
+    get_execution_type,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,6 +189,8 @@ class UiPathTracer:
             input=input_data,
             input_schema=input_schema,
             output_schema=output_schema,
+            execution_type=get_execution_type(),
+            agent_version=get_agent_version(),
         )
 
         with self._tracer.start_as_current_span(
