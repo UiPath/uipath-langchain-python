@@ -1,4 +1,4 @@
-"""Test agent for suspend/resume with RPA process invocation."""
+"""Tool-calling agent demonstrating suspend/resume with RPA process invocation."""
 
 import logging
 from typing import Any
