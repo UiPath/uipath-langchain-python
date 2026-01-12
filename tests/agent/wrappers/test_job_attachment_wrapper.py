@@ -7,10 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool
+from langgraph.types import Command
 from pydantic import BaseModel, Field
 from uipath.platform.attachments import Attachment
 
 from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphState
+from uipath_langchain.agent.tools.structured_tool_with_output_type import (
+    StructuredToolWithOutputType,
+)
 from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
     get_job_attachment_wrapper,
 )
@@ -23,8 +27,58 @@ class MockAttachmentSchema(BaseModel):
     name: str
 
 
+class MockOutputSchema(BaseModel):
+    """Mock output schema with attachment fields."""
+
+    result_attachment: Attachment | None = Field(None, description="Result attachment")
+    additional_attachments: list[Attachment] = Field(
+        default_factory=list, description="Additional attachments"
+    )
+
+
 class TestGetJobAttachmentWrapper:
     """Test cases for get_job_attachment_wrapper function."""
+
+    def assert_command_success(
+        self,
+        result,
+        tool_call_id: str = "call_123",
+        job_attachments: dict | None = None,
+        expected_content: str | None = "{'result': 'success'}",
+    ):
+        """Assert that result is a successful Command with expected structure."""
+        if job_attachments is None:
+            job_attachments = {}
+
+        assert isinstance(result, Command)
+        assert hasattr(result, "update")
+        assert result.update is not None
+        assert "messages" in result.update
+        assert len(result.update["messages"]) == 1
+        if expected_content is not None:
+            assert result.update["messages"][0].content == expected_content
+        assert result.update["messages"][0].tool_call_id == tool_call_id
+        assert "inner_state" in result.update
+        assert result.update["inner_state"]["job_attachments"] == job_attachments
+
+    def assert_error_result(self, result, expected_error_substring: str):
+        """Assert that result is an error dict containing expected substring."""
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert expected_error_substring in result["error"]
+
+    def create_mock_attachment(self, attachment_id: uuid.UUID) -> MagicMock:
+        """Create a mock attachment with given ID."""
+        attachment = MagicMock(spec=Attachment)
+        attachment.id = attachment_id
+        attachment.model_dump = MagicMock(
+            return_value={
+                "ID": str(attachment_id),
+                "name": f"document_{attachment_id}.pdf",
+                "size": 1024,
+            }
+        )
+        return attachment
 
     @pytest.fixture
     def mock_tool(self):
@@ -72,7 +126,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
-        assert result == {"result": "success"}
+        self.assert_command_success(result)
         mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
 
     @pytest.mark.asyncio
@@ -85,7 +139,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
-        assert result == {"result": "success"}
+        self.assert_command_success(result)
         mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
 
     @pytest.mark.asyncio
@@ -98,7 +152,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
-        assert result == {"result": "success"}
+        self.assert_command_success(result)
         mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
 
     @pytest.mark.asyncio
@@ -119,7 +173,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
-        assert result == {"result": "success"}
+        self.assert_command_success(result)
         mock_get_paths.assert_called_once_with(MockAttachmentSchema)
         mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
 
@@ -156,7 +210,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
-        assert result == {"result": "success"}
+        self.assert_command_success(result)
         # Verify that tool.ainvoke was called (with replaced attachment)
         mock_tool.ainvoke.assert_awaited_once()
         called_args = mock_tool.ainvoke.call_args[0][0]
@@ -193,10 +247,8 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
-        assert isinstance(result, dict)
-        assert "error" in result
+        self.assert_error_result(result, "Could not find JobAttachment")
         assert str(attachment_id) in result["error"]
-        assert "Could not find JobAttachment" in result["error"]
         mock_tool.ainvoke.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -237,17 +289,13 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
-        assert isinstance(result, dict)
-        assert "error" in result
-
+        self.assert_error_result(result, "Could not find JobAttachment")
         # Check that both attachment IDs are in the error message
         assert str(attachment_id_1) in result["error"]
         assert str(attachment_id_2) in result["error"]
-
         # Check that errors are newline-separated
         error_lines = result["error"].split("\n")
         assert len(error_lines) == 2
-
         mock_tool.ainvoke.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -279,9 +327,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
-        assert isinstance(result, dict)
-        assert "error" in result
-        assert invalid_id in result["error"]
+        self.assert_error_result(result, invalid_id)
         mock_tool.ainvoke.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -323,9 +369,7 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper()
         result = await wrapper(mock_tool, tool_call, mock_state)
 
-        assert isinstance(result, dict)
-        assert "error" in result
-        assert str(invalid_id) in result["error"]
+        self.assert_error_result(result, str(invalid_id))
         assert str(mock_attachment.id) not in result["error"]
         mock_tool.ainvoke.assert_not_awaited()
 
@@ -348,35 +392,9 @@ class TestGetJobAttachmentWrapper:
         attachment3_id = uuid.uuid4()
         missing_attachment_id = uuid.uuid4()
 
-        attachment1 = MagicMock(spec=Attachment)
-        attachment1.id = attachment1_id
-        attachment1.model_dump = MagicMock(
-            return_value={
-                "ID": str(attachment1_id),
-                "name": "document1.pdf",
-                "size": 1024,
-            }
-        )
-
-        attachment2 = MagicMock(spec=Attachment)
-        attachment2.id = attachment2_id
-        attachment2.model_dump = MagicMock(
-            return_value={
-                "ID": str(attachment2_id),
-                "name": "document2.pdf",
-                "size": 2048,
-            }
-        )
-
-        attachment3 = MagicMock(spec=Attachment)
-        attachment3.id = attachment3_id
-        attachment3.model_dump = MagicMock(
-            return_value={
-                "ID": str(attachment3_id),
-                "name": "document3.pdf",
-                "size": 3072,
-            }
-        )
+        attachment1 = self.create_mock_attachment(attachment1_id)
+        attachment2 = self.create_mock_attachment(attachment2_id)
+        attachment3 = self.create_mock_attachment(attachment3_id)
 
         # Setup state with available attachments (string keys)
         mock_state.inner_state.job_attachments = {
@@ -441,16 +459,12 @@ class TestGetJobAttachmentWrapper:
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         # Should return error for the missing attachment
-        assert isinstance(result, dict)
-        assert "error" in result
+        self.assert_error_result(result, "Could not find JobAttachment")
         assert str(missing_attachment_id) in result["error"]
-        assert "Could not find JobAttachment" in result["error"]
-
         # Valid attachments should not be in error message
         assert str(attachment1_id) not in result["error"]
         assert str(attachment2_id) not in result["error"]
         assert str(attachment3_id) not in result["error"]
-
         # Tool should not be invoked due to error
         mock_tool.ainvoke.assert_not_awaited()
 
@@ -472,35 +486,9 @@ class TestGetJobAttachmentWrapper:
         attachment2_id = uuid.uuid4()
         attachment3_id = uuid.uuid4()
 
-        attachment1 = MagicMock(spec=Attachment)
-        attachment1.id = attachment1_id
-        attachment1.model_dump = MagicMock(
-            return_value={
-                "ID": str(attachment1_id),
-                "name": "document1.pdf",
-                "size": 1024,
-            }
-        )
-
-        attachment2 = MagicMock(spec=Attachment)
-        attachment2.id = attachment2_id
-        attachment2.model_dump = MagicMock(
-            return_value={
-                "ID": str(attachment2_id),
-                "name": "document2.pdf",
-                "size": 2048,
-            }
-        )
-
-        attachment3 = MagicMock(spec=Attachment)
-        attachment3.id = attachment3_id
-        attachment3.model_dump = MagicMock(
-            return_value={
-                "ID": str(attachment3_id),
-                "name": "document3.pdf",
-                "size": 3072,
-            }
-        )
+        attachment1 = self.create_mock_attachment(attachment1_id)
+        attachment2 = self.create_mock_attachment(attachment2_id)
+        attachment3 = self.create_mock_attachment(attachment3_id)
 
         # Setup state with all attachments (string keys)
         mock_state.inner_state.job_attachments = {
@@ -555,8 +543,7 @@ class TestGetJobAttachmentWrapper:
         result = await wrapper(mock_tool, tool_call, mock_state)
 
         # Should succeed without errors
-        assert result == {"result": "success"}
-
+        self.assert_command_success(result, tool_call_id="call_complex_456")
         # Tool should be invoked with replaced attachments
         mock_tool.ainvoke.assert_awaited_once()
         called_args = mock_tool.ainvoke.call_args[0][0]
@@ -573,3 +560,156 @@ class TestGetJobAttachmentWrapper:
         primary_attachment = called_args["request"]["metadata"]["primary_attachment"]
         assert isinstance(primary_attachment, dict)
         assert "name" in primary_attachment or "ID" in primary_attachment
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachments")
+    async def test_structured_tool_with_output_attachments(
+        self, mock_get_job_attachments, mock_tool_call, mock_state
+    ):
+        """Test that attachments in tool output are extracted and added to state."""
+        # Create output attachments
+        output_attachment_id = uuid.uuid4()
+        output_attachment = self.create_mock_attachment(output_attachment_id)
+
+        # Mock get_job_attachments to return our attachment
+        mock_get_job_attachments.return_value = [output_attachment]
+
+        # Create a StructuredToolWithOutputType tool
+        mock_tool = MagicMock(spec=StructuredToolWithOutputType)
+        mock_tool.args_schema = None
+        mock_tool.output_type = MockOutputSchema
+        mock_tool.ainvoke = AsyncMock(
+            return_value={
+                "result_attachment": output_attachment.model_dump(),
+                "additional_attachments": [],
+            }
+        )
+
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
+
+        # Should succeed and include the output attachment in inner_state
+        assert isinstance(result, Command)
+        assert hasattr(result, "update")
+        assert "inner_state" in result.update
+        assert "job_attachments" in result.update["inner_state"]
+        assert (
+            str(output_attachment_id) in result.update["inner_state"]["job_attachments"]
+        )
+        assert (
+            result.update["inner_state"]["job_attachments"][str(output_attachment_id)]
+            == output_attachment
+        )
+        # Verify get_job_attachments was called with correct parameters
+        mock_get_job_attachments.assert_called_once_with(
+            MockOutputSchema, mock_tool.ainvoke.return_value
+        )
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachments")
+    async def test_structured_tool_with_multiple_output_attachments(
+        self, mock_get_job_attachments, mock_tool_call, mock_state
+    ):
+        """Test that multiple attachments in tool output are all extracted."""
+        # Create multiple output attachments
+        attachment1_id = uuid.uuid4()
+        attachment2_id = uuid.uuid4()
+        attachment3_id = uuid.uuid4()
+
+        attachment1 = self.create_mock_attachment(attachment1_id)
+        attachment2 = self.create_mock_attachment(attachment2_id)
+        attachment3 = self.create_mock_attachment(attachment3_id)
+
+        # Mock get_job_attachments to return all attachments
+        mock_get_job_attachments.return_value = [attachment1, attachment2, attachment3]
+
+        # Create a StructuredToolWithOutputType tool
+        mock_tool = MagicMock(spec=StructuredToolWithOutputType)
+        mock_tool.args_schema = None
+        mock_tool.output_type = MockOutputSchema
+        mock_tool.ainvoke = AsyncMock(
+            return_value={
+                "result_attachment": attachment1.model_dump(),
+                "additional_attachments": [
+                    attachment2.model_dump(),
+                    attachment3.model_dump(),
+                ],
+            }
+        )
+
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
+
+        # Should succeed and include all attachments
+        assert isinstance(result, Command)
+        job_attachments = result.update["inner_state"]["job_attachments"]
+        assert len(job_attachments) == 3
+        assert str(attachment1_id) in job_attachments
+        assert str(attachment2_id) in job_attachments
+        assert str(attachment3_id) in job_attachments
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachments")
+    async def test_structured_tool_with_no_output_attachments(
+        self, mock_get_job_attachments, mock_tool_call, mock_state
+    ):
+        """Test StructuredToolWithOutputType with no attachments in output."""
+        # Mock get_job_attachments to return empty list
+        mock_get_job_attachments.return_value = []
+
+        # Create a StructuredToolWithOutputType tool
+        mock_tool = MagicMock(spec=StructuredToolWithOutputType)
+        mock_tool.args_schema = None
+        mock_tool.output_type = MockOutputSchema
+        mock_tool.ainvoke = AsyncMock(
+            return_value={"result_attachment": None, "additional_attachments": []}
+        )
+
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
+
+        # Should succeed with empty job_attachments
+        self.assert_command_success(result, expected_content=None)
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachments")
+    async def test_structured_tool_filters_attachments_with_none_id(
+        self, mock_get_job_attachments, mock_tool_call, mock_state
+    ):
+        """Test that attachments with None id are filtered out."""
+        # Create attachments - one with id, one without
+        attachment_with_id = self.create_mock_attachment(uuid.uuid4())
+        attachment_without_id = MagicMock(spec=Attachment)
+        attachment_without_id.id = None
+        attachment_without_id.model_dump = MagicMock(
+            return_value={"ID": None, "name": "no_id_attachment.pdf", "size": 512}
+        )
+
+        # Mock get_job_attachments to return both attachments
+        # The wrapper should filter out the one with None id
+        mock_get_job_attachments.return_value = [
+            attachment_with_id,
+            attachment_without_id,
+        ]
+
+        # Create a StructuredToolWithOutputType tool
+        mock_tool = MagicMock(spec=StructuredToolWithOutputType)
+        mock_tool.args_schema = None
+        mock_tool.output_type = MockOutputSchema
+        mock_tool.ainvoke = AsyncMock(
+            return_value={
+                "result_attachment": attachment_with_id.model_dump(),
+                "additional_attachments": [attachment_without_id.model_dump()],
+            }
+        )
+
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
+
+        # Should only include attachment with id
+        assert isinstance(result, Command)
+        job_attachments = result.update["inner_state"]["job_attachments"]
+        assert len(job_attachments) == 1
+        assert str(attachment_with_id.id) in job_attachments
+        assert None not in job_attachments
+        assert "None" not in job_attachments

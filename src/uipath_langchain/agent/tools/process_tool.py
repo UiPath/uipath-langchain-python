@@ -9,9 +9,17 @@ from uipath.eval.mocks import mockable
 from uipath.platform.common import InvokeProcess
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
+    get_job_attachment_wrapper,
+)
 
 from .structured_tool_with_output_type import StructuredToolWithOutputType
+from .tool_node import ToolWrapperMixin
 from .utils import sanitize_tool_name
+
+
+class ProcessTool(StructuredToolWithOutputType, ToolWrapperMixin):
+    pass
 
 
 def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredTool:
@@ -40,7 +48,8 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             )
         )
 
-    tool = StructuredToolWithOutputType(
+    wrapper = get_job_attachment_wrapper()
+    tool = ProcessTool(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
@@ -52,5 +61,5 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             "folder_path": folder_path,
         },
     )
-
+    tool.set_tool_wrappers(awrapper=wrapper)
     return tool
