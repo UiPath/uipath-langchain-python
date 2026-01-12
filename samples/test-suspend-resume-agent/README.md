@@ -16,11 +16,24 @@ This agent has a single node that calls `interrupt(InvokeProcess(...))` to suspe
 
 ## Running the Agent
 
+### Quick Test (Automated)
+```bash
+cd /home/chibionos/r2/uipath-langchain-python/samples/test-suspend-resume-agent
+
+# Run automated Python test
+python3 test_suspend_resume.py
+
+# Or run CLI-based test
+./test_cli_suspend_resume.sh
+```
+
+### Evaluation Run
 ```bash
 # Run evaluation with detailed logging
-cd /home/chibionos/r2/uipath-langchain-python/samples/test-suspend-resume-agent
 uv run --with ../../. uipath eval agent evaluations/test_suspend_resume.json
 ```
+
+**📖 For complete suspend/resume testing guide, see [SUSPEND_RESUME_GUIDE.md](SUSPEND_RESUME_GUIDE.md)**
 
 ## Logging Output
 
