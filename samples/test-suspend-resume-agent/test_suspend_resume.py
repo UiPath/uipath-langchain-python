@@ -37,7 +37,7 @@ async def test_suspend_resume():
     input_data = Input(query="Test suspend and resume with RPA process")
 
     try:
-        result = await graph.ainvoke(input_data.model_dump(), config)
+        result = await graph.ainvoke(input_data.model_dump(), config)  # type: ignore[arg-type]
         print(f"\n✅ First execution result: {result}")
     except Exception as e:
         # LangGraph raises an exception when interrupted
@@ -49,7 +49,7 @@ async def test_suspend_resume():
     print("STEP 2: Checking agent state after suspension")
     print("=" * 80 + "\n")
 
-    state_snapshot = await graph.aget_state(config)
+    state_snapshot = await graph.aget_state(config)  # type: ignore[arg-type]
     print(f"State values: {state_snapshot.values}")
     print(f"Next node to execute: {state_snapshot.next}")
 
@@ -79,7 +79,7 @@ async def test_suspend_resume():
     # Resume execution - LangGraph will continue from where it left off
     try:
         # Use Command to resume
-        result = await graph.ainvoke(Command(resume=resume_payload), config)
+        result = await graph.ainvoke(Command(resume=resume_payload), config)  # type: ignore[arg-type]
         print(f"\n🟢 Resume execution result: {result}")
     except Exception as e:
         print(f"\n⚠️  Resume attempt: {type(e).__name__}: {e}")
@@ -87,14 +87,14 @@ async def test_suspend_resume():
         # Alternative: Just invoke again without any input
         # LangGraph should continue from the checkpoint
         print("\nTrying alternative resume method (invoke without input)...")
-        result = await graph.ainvoke(None, config)
+        result = await graph.ainvoke(None, config)  # type: ignore[arg-type]
         print(f"\n🟢 Alternative resume result: {result}")
 
     print("\n" + "=" * 80)
     print("STEP 4: Verification - checking final state")
     print("=" * 80 + "\n")
 
-    final_state = await graph.aget_state(config)
+    final_state = await graph.aget_state(config)  # type: ignore[arg-type]
     print(f"Final state values: {final_state.values}")
     print(f"Next node: {final_state.next}")
     print(f"Pending tasks: {len(final_state.tasks) if final_state.tasks else 0}")

@@ -1,6 +1,7 @@
 """Test agent for suspend/resume with RPA process invocation."""
 
 import logging
+from typing import Any
 
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
@@ -20,7 +21,7 @@ class InvokeProcess(BaseModel):
     """Model representing an RPA process invocation request."""
 
     name: str
-    input_arguments: dict
+    input_arguments: dict[str, Any]
     process_folder_path: str = "Shared"
     process_folder_key: str | None = None
 
@@ -78,7 +79,7 @@ async def invoke_process_node(state: State) -> State:
 
 
 # Build the graph
-builder = StateGraph(state_schema=State, input=Input, output=Output)
+builder = StateGraph(state_schema=State)
 
 # Add single node that invokes the process
 builder.add_node("invoke_process", invoke_process_node)
