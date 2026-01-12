@@ -151,6 +151,7 @@ class UiPathChatMessagesMapper:
         Returns:
             A UiPathConversationMessageEvent if the message should be emitted, None otherwise.
         """
+
         # Format timestamp as ISO 8601 UTC with milliseconds: 2025-01-04T10:30:00.123Z
         timestamp = (
             datetime.now(timezone.utc)
@@ -307,21 +308,8 @@ class UiPathChatMessagesMapper:
                 )
             ]
 
-        # --- Fallback for other BaseMessage types ---
-        text_content = self._extract_text(message.content)
-        return [
-            UiPathConversationMessageEvent(
-                message_id=message.id,
-                start=UiPathConversationMessageStartEvent(
-                    role="assistant", timestamp=timestamp
-                ),
-                content_part=UiPathConversationContentPartEvent(
-                    content_part_id=f"cp-{message.id}",
-                    chunk=UiPathConversationContentPartChunkEvent(data=text_content),
-                ),
-                end=UiPathConversationMessageEndEvent(),
-            )
-        ]
+        # Don't send events for system or user messages. Agent messages are handled above.
+        return []
 
 
 __all__ = ["UiPathChatMessagesMapper"]

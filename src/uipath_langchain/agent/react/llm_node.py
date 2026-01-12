@@ -37,6 +37,7 @@ def create_llm_node(
     model: BaseChatModel,
     tools: Sequence[BaseTool] | None = None,
     thinking_messages_limit: int = MAX_CONSECUTIVE_THINKING_MESSAGES,
+    is_conversational: bool = False
 ):
     """Create LLM node with dynamic tool_choice enforcement.
 
@@ -58,7 +59,7 @@ def create_llm_node(
 
         consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
 
-        if bindable_tools and consecutive_thinking_messages >= thinking_messages_limit:
+        if not is_conversational and bindable_tools and consecutive_thinking_messages >= thinking_messages_limit:
             llm = base_llm.bind(tool_choice=tool_choice_required_value)
         else:
             llm = base_llm

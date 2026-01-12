@@ -50,6 +50,7 @@ class AgentGraphNode(StrEnum):
     TOOLS = "tools"
     TERMINATE = "terminate"
     GUARDED_TERMINATE = "guarded-terminate"
+    USER_MESSAGE_WAIT = "user-message-wait"
 
 
 class AgentGraphConfig(BaseModel):
@@ -60,4 +61,7 @@ class AgentGraphConfig(BaseModel):
         default=0,
         ge=0,
         description="Max consecutive thinking messages before enforcing tool usage. 0 = force tools every time.",
+    )
+    is_conversational: bool = Field(
+        default=False, description="If set, creates a graph for conversational agents"
     )

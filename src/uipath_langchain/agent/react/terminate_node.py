@@ -47,6 +47,7 @@ def _handle_agent_termination(termination: AgentTermination) -> NoReturn:
 
 def create_terminate_node(
     response_schema: type[BaseModel] | None = None,
+    is_conversational: bool = False
 ):
     """Handles Agent Graph termination for multiple sources and output or error propagation to Orchestrator.
 
@@ -60,23 +61,24 @@ def create_terminate_node(
         if state.inner_state.termination:
             _handle_agent_termination(state.inner_state.termination)
 
-        last_message = state.messages[-1]
-        if not isinstance(last_message, AIMessage):
+        if not is_conversational:
+            last_message = state.messages[-1]
+            if not isinstance(last_message, AIMessage):
+                raise AgentNodeRoutingException(
+                    f"Expected last message to be AIMessage, got {type(last_message).__name__}"
+                )
+
+            for tool_call in last_message.tool_calls:
+                tool_name = tool_call["name"]
+
+                if tool_name == END_EXECUTION_TOOL.name:
+                    return _handle_end_execution(tool_call["args"], response_schema)
+
+                if tool_name == RAISE_ERROR_TOOL.name:
+                    _handle_raise_error(tool_call["args"])
+
             raise AgentNodeRoutingException(
-                f"Expected last message to be AIMessage, got {type(last_message).__name__}"
+                "No control flow tool call found in terminate node. Unexpected state."
             )
-
-        for tool_call in last_message.tool_calls:
-            tool_name = tool_call["name"]
-
-            if tool_name == END_EXECUTION_TOOL.name:
-                return _handle_end_execution(tool_call["args"], response_schema)
-
-            if tool_name == RAISE_ERROR_TOOL.name:
-                _handle_raise_error(tool_call["args"])
-
-        raise AgentNodeRoutingException(
-            "No control flow tool call found in terminate node. Unexpected state."
-        )
 
     return terminate_node
