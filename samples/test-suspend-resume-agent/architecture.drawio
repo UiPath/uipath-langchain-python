@@ -1,0 +1,115 @@
+<mxfile host="Electron" modified="2025-01-12T12:00:00.000Z" agent="Draw.io" version="24.0.0">
+  <diagram name="Suspend-Resume Architecture" id="architecture">
+    <mxGraphModel dx="1434" dy="844" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="Suspend/Resume Evaluation Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="320" y="20" width="520" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Agent Layer -->
+        <mxCell id="agent-layer" value="Agent Layer" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="1080" height="180" as="geometry" />
+        </mxCell>
+
+        <mxCell id="graph" value="graph.py&#xa;(LangGraph Agent)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12" vertex="1" parent="agent-layer">
+          <mxGeometry x="80" y="40" width="160" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="invoke-node" value="invoke_process_node&#xa;&#xa;• Creates InvokeProcess&#xa;• Calls interrupt()&#xa;• Suspends execution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=left" vertex="1" parent="agent-layer">
+          <mxGeometry x="280" y="40" width="180" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="state" value="State&#xa;&#xa;• query: str&#xa;• result: str" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left" vertex="1" parent="agent-layer">
+          <mxGeometry x="500" y="40" width="140" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="models" value="Pydantic Models&#xa;&#xa;• Input&#xa;• Output&#xa;• InvokeProcess" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left" vertex="1" parent="agent-layer">
+          <mxGeometry x="680" y="40" width="150" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="checkpointer" value="MemorySaver&#xa;Checkpointer&#xa;&#xa;Enables interrupts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11" vertex="1" parent="agent-layer">
+          <mxGeometry x="870" y="40" width="140" height="100" as="geometry" />
+        </mxCell>
+
+        <!-- Arrow from graph to invoke-node -->
+        <mxCell id="edge1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="agent-layer" source="graph" target="invoke-node">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Evaluation Layer -->
+        <mxCell id="eval-layer" value="Evaluation Layer" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="280" width="1080" height="220" as="geometry" />
+        </mxCell>
+
+        <mxCell id="eval-sets" value="Evaluation Sets&#xa;&#xa;test_suspend_resume.json&#xa;• Tests actual suspend&#xa;• 2 test cases&#xa;&#xa;test_with_evaluators.json&#xa;• Tests evaluator execution&#xa;• 2 test cases" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left" vertex="1" parent="eval-layer">
+          <mxGeometry x="80" y="40" width="220" height="140" as="geometry" />
+        </mxCell>
+
+        <mxCell id="evaluators" value="Evaluators&#xa;&#xa;SuspendResumeTrajectoryEvaluator&#xa;• LLM-based trajectory check&#xa;• Validates interrupt() call&#xa;• Checks InvokeProcess structure&#xa;&#xa;SuspendCheckEvaluator&#xa;• Contains-based check&#xa;• Validates log messages" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=left" vertex="1" parent="eval-layer">
+          <mxGeometry x="340" y="40" width="280" height="140" as="geometry" />
+        </mxCell>
+
+        <mxCell id="eval-runtime" value="Evaluation Runtime&#xa;&#xa;• Detects SUSPENDED status&#xa;• Skips evaluators on suspend&#xa;• Runs evaluators on completion&#xa;• Generates triggers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left" vertex="1" parent="eval-layer">
+          <mxGeometry x="660" y="40" width="240" height="140" as="geometry" />
+        </mxCell>
+
+        <!-- Execution Flow -->
+        <mxCell id="flow-layer" value="Execution Flow" style="swimlane;horizontal=0;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="520" width="1080" height="260" as="geometry" />
+        </mxCell>
+
+        <mxCell id="step1" value="1. Run Evaluation&#xa;&#xa;uipath eval agent&#xa;evaluations/eval-sets/&#xa;test_suspend_resume.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=center" vertex="1" parent="flow-layer">
+          <mxGeometry x="80" y="40" width="180" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="step2" value="2. Agent Executes&#xa;&#xa;• invoke_process_node runs&#xa;• Creates InvokeProcess&#xa;• Calls interrupt()&#xa;• SUSPENDS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=center" vertex="1" parent="flow-layer">
+          <mxGeometry x="300" y="40" width="180" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="step3" value="3. Runtime Detects&#xa;&#xa;• Status: SUSPENDED&#xa;• Extracts triggers&#xa;• Skips evaluators&#xa;• Returns triggers" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=center" vertex="1" parent="flow-layer">
+          <mxGeometry x="520" y="40" width="180" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="step4" value="4. Resume &amp; Complete&#xa;&#xa;• RPA process completes&#xa;• Agent resumes&#xa;• Status: SUCCESSFUL&#xa;• Evaluators RUN" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center" vertex="1" parent="flow-layer">
+          <mxGeometry x="740" y="40" width="180" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="note" value="Note: Evaluators only run when execution completes (SUCCESSFUL status).&#xa;During suspension (SUSPENDED status), evaluators are skipped." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;align=left;verticalAlign=top;fontStyle=2" vertex="1" parent="flow-layer">
+          <mxGeometry x="80" y="160" width="840" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- Flow arrows -->
+        <mxCell id="flow-edge1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;fillColor=#d5e8d4;strokeColor=#82b366;" edge="1" parent="flow-layer" source="step1" target="step2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="flow-edge2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;fillColor=#fff2cc;strokeColor=#d6b656;" edge="1" parent="flow-layer" source="step2" target="step3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="flow-edge3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeWidth=2;fillColor=#f8cecc;strokeColor=#b85450;" edge="1" parent="flow-layer" source="step3" target="step4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Connecting layers -->
+        <mxCell id="layer-edge1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;dashed=1;strokeWidth=2;" edge="1" parent="1" source="invoke-node" target="eval-runtime">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="410" y="260" as="sourcePoint" />
+            <mxPoint x="780" y="320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <mxCell id="layer-label1" value="Suspends execution" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];fontSize=10;fontStyle=2" vertex="1" connectable="0" parent="layer-edge1">
+          <mxGeometry x="-0.1" y="2" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

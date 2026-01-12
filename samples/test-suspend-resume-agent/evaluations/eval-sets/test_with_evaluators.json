@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "id": "test-with-evaluators",
+  "name": "Test With Evaluators Running",
+  "description": "Test evaluation set that completes execution to demonstrate evaluators running",
+  "evaluatorRefs": [
+    "SuspendCheckEvaluator"
+  ],
+  "evaluations": [
+    {
+      "id": "test_complete_basic",
+      "name": "Basic completion test",
+      "inputs": {
+        "query": "Test process invocation pattern"
+      },
+      "evaluationCriterias": {
+        "SuspendCheckEvaluator": {
+          "searchText": "SUSPENDING EXECUTION"
+        }
+      }
+    },
+    {
+      "id": "test_complete_complex",
+      "name": "Complex completion test",
+      "inputs": {
+        "query": "Process data with multiple parameters"
+      },
+      "evaluationCriterias": {
+        "SuspendCheckEvaluator": {
+          "searchText": "SUSPENDING EXECUTION"
+        }
+      }
+    }
+  ]
+}

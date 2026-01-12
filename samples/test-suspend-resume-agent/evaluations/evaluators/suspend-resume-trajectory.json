@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "SuspendResumeTrajectoryEvaluator",
+  "description": "Evaluates the agent's execution trajectory for proper suspend/resume pattern with RPA process invocation.",
+  "evaluatorTypeId": "uipath-llm-judge-trajectory-similarity",
+  "evaluatorConfig": {
+    "name": "SuspendResumeTrajectoryEvaluator",
+    "model": "gpt-4.1-2025-04-14",
+    "prompt": "Evaluate the agent's execution trajectory for proper suspend/resume pattern implementation.\n\nExpected Agent Behavior: {{ExpectedAgentBehavior}}\nAgent Run History: {{AgentRunHistory}}\n\nAssess whether the agent:\n1. Called interrupt() to suspend execution at the appropriate point\n2. Created a proper InvokeProcess request with correct structure\n3. Included all necessary parameters (process name, query, etc.)\n4. Followed the expected execution flow for suspend/resume pattern\n\nProvide a score from 0-100 based on how well the agent followed the expected trajectory and properly implemented the suspend/resume pattern.",
+    "temperature": 0.0,
+    "defaultEvaluationCriteria": {
+      "expectedAgentBehavior": "The agent should call interrupt() to suspend execution while waiting for an RPA process to complete, with proper InvokeProcess details in the trace."
+    }
+  }
+}

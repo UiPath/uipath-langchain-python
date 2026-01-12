@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "id": "test-suspend-resume-eval",
+  "name": "Suspend Resume Test",
+  "description": "Test evaluation set for suspend/resume pattern with RPA process invocation",
+  "evaluatorRefs": [
+    "SuspendResumeTrajectoryEvaluator",
+    "SuspendCheckEvaluator"
+  ],
+  "evaluations": [
+    {
+      "id": "test_suspend_basic",
+      "name": "Basic suspend test",
+      "inputs": {
+        "query": "Test suspend and resume with RPA process"
+      },
+      "evaluationCriterias": {
+        "SuspendResumeTrajectoryEvaluator": {
+          "expectedAgentBehavior": "The agent should call interrupt() to suspend execution while waiting for the TestProcess RPA process to complete. The execution trace should contain a GraphInterrupt exception with InvokeProcess details including process name 'TestProcess' and query parameter."
+        },
+        "SuspendCheckEvaluator": {
+          "searchText": "SUSPENDING EXECUTION"
+        }
+      }
+    },
+    {
+      "id": "test_suspend_complex",
+      "name": "Complex query suspend test",
+      "inputs": {
+        "query": "Process complex data structure with multiple parameters"
+      },
+      "evaluationCriterias": {
+        "SuspendResumeTrajectoryEvaluator": {
+          "expectedAgentBehavior": "The agent should call interrupt() to suspend execution with InvokeProcess request for TestProcess. The trace should show the suspend happened in the invoke_process node with proper InvokeProcess structure."
+        },
+        "SuspendCheckEvaluator": {
+          "searchText": "SUSPENDING EXECUTION"
+        }
+      }
+    }
+  ]
+}

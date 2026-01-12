@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "id": "SuspendCheckEvaluator",
+  "description": "Checks if the execution contains suspend-related indicators in the output.",
+  "evaluatorTypeId": "uipath-contains",
+  "evaluatorConfig": {
+    "name": "SuspendCheckEvaluator",
+    "targetOutputKey": "logs",
+    "negated": false,
+    "ignoreCase": false,
+    "defaultEvaluationCriteria": {
+      "searchText": "SUSPENDING EXECUTION"
+    }
+  }
+}
