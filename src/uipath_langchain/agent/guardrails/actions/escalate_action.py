@@ -7,7 +7,8 @@ from typing import Any, Dict, Literal, cast
 
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
 from langgraph.types import Command, interrupt
-from uipath.platform.common import CreateEscalation
+from uipath._utils import UiPathUrl
+from uipath.platform.common import CreateEscalation, UiPathConfig
 from uipath.platform.guardrails import (
     BaseGuardrail,
     GuardrailScope,
@@ -76,10 +77,13 @@ class EscalateAction(GuardrailAction):
             # Validate message count based on execution stage
             _validate_message_count(state, execution_stage)
 
+            (redirect_url, tenant_name) = _get_agent_execution_viewer_url()
             # Build base data dictionary with common fields
             data: Dict[str, Any] = {
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
+                "TenantName": tenant_name,
+                "AgentTrace": redirect_url,
                 "Component": scope.name.lower(),
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
                 "GuardrailResult": state.guardrail_validation_result,
@@ -624,3 +628,40 @@ def _execution_stage_to_string(
     if execution_stage == ExecutionStage.PRE_EXECUTION:
         return "PreExecution"
     return "PostExecution"
+
+
+def _get_agent_execution_viewer_url() -> tuple[str, str]:
+    """Generate the agent execution viewer URL based on execution context.
+
+    Args:
+        cloud_base_url: Optional cloud base URL. If not provided, will be extracted from environment.
+
+    Returns:
+        The constructed viewer URL for the agent execution.
+
+    Note:
+        Currently uses hardcoded values for agentId and packageVersion.
+        These should be made configurable in the future.
+    """
+    cloud_base_url = UiPathConfig.base_url
+    uiPath_Url = UiPathUrl(cloud_base_url)
+    tenant_name = uiPath_Url.tenant_name
+    organization_id = UiPathConfig.organization_id
+    agent_id = UiPathConfig.project_id
+
+    # Route to appropriate URL based on source
+    if UiPathConfig.is_studio_project:
+        return (
+            f"{uiPath_Url.base_url}/{organization_id}/studio_/designer/{agent_id}",
+            tenant_name,
+        )
+    else:
+        execution_folder_id = UiPathConfig.folder_key
+        process_uuid = UiPathConfig.process_uuid
+        trace_id = UiPathConfig.trace_id
+        package_version = UiPathConfig.process_version
+
+        return (
+            f"{uiPath_Url.base_url}/{organization_id}/agents_/deployed/{execution_folder_id}/{process_uuid}/{agent_id}/{package_version}/traces/{trace_id}",
+            tenant_name,
+        )
