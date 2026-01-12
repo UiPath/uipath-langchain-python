@@ -89,6 +89,8 @@ class SqliteTraceContextStorage(TraceContextStorage):
             pending_tool_span_id=value.get("pending_tool_span_id"),
             pending_process_span_id=value.get("pending_process_span_id"),
             pending_tool_name=value.get("pending_tool_name"),
+            pending_tool_span=value.get("pending_tool_span"),
+            pending_process_span=value.get("pending_process_span"),
         )
 
     async def clear_trace_context(self, runtime_id: str) -> None:

@@ -38,6 +38,8 @@ def sample_context():
         pending_tool_span_id=None,
         pending_process_span_id=None,
         pending_tool_name=None,
+        pending_tool_span=None,
+        pending_process_span=None,
     )
 
 
@@ -157,6 +159,8 @@ class TestTraceContextData:
             pending_tool_span_id=None,
             pending_process_span_id=None,
             pending_tool_name=None,
+            pending_tool_span=None,
+            pending_process_span=None,
         )
 
         assert data["trace_id"] == "abc123"
@@ -178,6 +182,8 @@ class TestTraceContextData:
             pending_tool_span_id=None,
             pending_process_span_id=None,
             pending_tool_name=None,
+            pending_tool_span=None,
+            pending_process_span=None,
         )
 
         assert data["parent_span_id"] is None

@@ -16,6 +16,18 @@ _UUID_PATTERN = re.compile(
 # Span names to filter
 _FILTERED_SPAN_NAMES = frozenset({"Evaluators"})
 
+# SDK internal spans use run_type="uipath" attribute
+_SDK_INTERNAL_RUN_TYPE = "uipath"
+
+
+def _is_sdk_internal_span(span: Span) -> bool:
+    """Check if span is from uipath-python SDK.
+
+    SDK methods decorated with @traced(run_type="uipath") set this attribute.
+    """
+    attrs = span.attributes
+    return attrs is not None and attrs.get("run_type") == _SDK_INTERNAL_RUN_TYPE
+
 
 def _should_filter_span(span: Span) -> bool:
     """Check if span should be filtered based on name.
@@ -40,6 +52,7 @@ class SourceMarkerProcessor(SpanProcessor):
 
     Tags the following spans with telemetry.filter="drop":
     - OpenInference spans (they go to AppInsights instead of LLMOps)
+    - SDK internal spans (run_type="uipath" attribute)
     - Spans with GUID names or named "Evaluators"
 
     The LlmOpsHttpExporter skips spans marked for drop.
@@ -49,7 +62,7 @@ class SourceMarkerProcessor(SpanProcessor):
 
     def on_start(self, span: Span, parent_context: Context | None = None) -> None:
         """Mark spans to be dropped by LlmOpsHttpExporter."""
-        if is_openinference_span(span):
+        if is_openinference_span(span) or _is_sdk_internal_span(span):
             span.set_attribute(self.FILTER_ATTRIBUTE, "drop")
             return
 

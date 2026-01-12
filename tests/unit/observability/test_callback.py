@@ -321,3 +321,72 @@ class TestAgentSpanParenting:
             # Previous spans should be cleared
             assert len(callback._spans) == 0
             assert callback._prompts_captured is False
+
+
+class TestGraphInterruptHandling:
+    """Tests for GraphInterrupt detection in tool errors."""
+
+    def test_is_graph_interrupt_by_type_name(self, callback):
+        """Test _is_graph_interrupt detects GraphInterrupt by type name."""
+
+        class GraphInterrupt(Exception):
+            pass
+
+        error = GraphInterrupt("Suspended for HITL")
+        assert callback._is_graph_interrupt(error) is True
+
+    def test_is_graph_interrupt_by_str_prefix(self, callback):
+        """Test _is_graph_interrupt detects GraphInterrupt by string prefix."""
+        # Some errors may convert to "GraphInterrupt(...)" string
+        error = Exception("GraphInterrupt(Waiting for approval)")
+        assert callback._is_graph_interrupt(error) is True
+
+    def test_is_not_graph_interrupt_for_regular_error(self, callback):
+        """Test _is_graph_interrupt returns False for regular errors."""
+        error = ValueError("Some other error")
+        assert callback._is_graph_interrupt(error) is False
+
+    def test_on_tool_error_skips_span_close_for_graph_interrupt(
+        self, callback, span_exporter
+    ):
+        """Test on_tool_error does NOT close spans for GraphInterrupt."""
+
+        class GraphInterrupt(Exception):
+            pass
+
+        run_id = uuid4()
+        serialized = {"name": "interruptible_tool"}
+
+        callback.on_tool_start(serialized, "input", run_id=run_id)
+
+        # Span should be tracked
+        assert run_id in callback._spans
+
+        # Trigger GraphInterrupt - span should NOT be closed
+        callback.on_tool_error(GraphInterrupt("Suspended"), run_id=run_id)
+
+        # Span should still be tracked (not closed)
+        assert run_id in callback._spans
+
+        # No finished spans
+        spans = span_exporter.get_finished_spans()
+        assert len(spans) == 0
+
+        # Cleanup for test hygiene
+        callback.cleanup()
+
+    def test_on_tool_error_closes_span_for_regular_error(self, callback, span_exporter):
+        """Test on_tool_error closes spans for non-GraphInterrupt errors."""
+        run_id = uuid4()
+        serialized = {"name": "failing_tool"}
+
+        callback.on_tool_start(serialized, "input", run_id=run_id)
+        callback.on_tool_error(RuntimeError("Tool failed"), run_id=run_id)
+
+        # Span should be removed
+        assert run_id not in callback._spans
+
+        # Span should be finished
+        spans = span_exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert "error" in spans[0].attributes

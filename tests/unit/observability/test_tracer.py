@@ -1,6 +1,10 @@
 """Tests for UiPathTracer manual span instrumentation."""
 
+from unittest.mock import MagicMock
+
 import pytest
+from opentelemetry.sdk.trace.export import SpanExportResult
+from uipath.tracing import SpanStatus
 
 from uipath_agents._observability.schema import SpanType
 from uipath_agents._observability.tracer import UiPathTracer
@@ -12,6 +16,20 @@ from uipath_agents._observability.tracer import UiPathTracer
 def tracer(span_exporter):
     """Create a fresh tracer for testing."""
     return UiPathTracer()
+
+
+@pytest.fixture
+def mock_exporter():
+    """Create a mock exporter for upsert tests."""
+    exporter = MagicMock()
+    exporter.upsert_span = MagicMock(return_value=SpanExportResult.SUCCESS)
+    return exporter
+
+
+@pytest.fixture
+def tracer_with_exporter(span_exporter, mock_exporter):
+    """Create tracer with mock exporter."""
+    return UiPathTracer(exporter=mock_exporter)
 
 
 class TestAgentRunSpan:
@@ -181,3 +199,75 @@ class TestSpanHierarchy:
         assert llm_span_result.parent.span_id == agent_span.context.span_id
         # Model span's parent is LLM span
         assert model_span_result.parent.span_id == llm_span_result.context.span_id
+
+
+class TestUpsertSpanMethods:
+    """Tests for upsert span methods used in interruptible tools."""
+
+    def test_upsert_span_running_without_exporter_returns_false(
+        self, tracer, span_exporter
+    ):
+        """Test upsert_span_running returns False when no exporter configured."""
+        span = tracer.start_tool_call("test_tool")
+        result = tracer.upsert_span_running(span)
+        assert result is False
+        tracer.end_span_ok(span)
+
+    def test_upsert_span_running_with_exporter_calls_upsert(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test upsert_span_running calls exporter with RUNNING status."""
+        span = tracer_with_exporter.start_tool_call("test_tool")
+        result = tracer_with_exporter.upsert_span_running(span)
+
+        assert result is True
+        mock_exporter.upsert_span.assert_called_once()
+        call_args = mock_exporter.upsert_span.call_args
+        assert call_args[1]["status_override"] == SpanStatus.RUNNING
+        tracer_with_exporter.end_span_ok(span)
+
+    def test_upsert_span_complete_without_exporter_returns_false(
+        self, tracer, span_exporter
+    ):
+        """Test upsert_span_complete returns False when no exporter configured."""
+        span = tracer.start_tool_call("test_tool")
+        result = tracer.upsert_span_complete(span)
+        assert result is False
+        tracer.end_span_ok(span)
+
+    def test_upsert_span_complete_with_exporter_calls_upsert(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test upsert_span_complete calls exporter with OK status."""
+        span = tracer_with_exporter.start_tool_call("test_tool")
+        result = tracer_with_exporter.upsert_span_complete(span, SpanStatus.OK)
+
+        assert result is True
+        mock_exporter.upsert_span.assert_called_once()
+        call_args = mock_exporter.upsert_span.call_args
+        assert call_args[1]["status_override"] == SpanStatus.OK
+        tracer_with_exporter.end_span_ok(span)
+
+    def test_upsert_span_running_handles_exporter_failure(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test upsert_span_running handles exporter failure gracefully."""
+        mock_exporter.upsert_span.return_value = SpanExportResult.FAILURE
+
+        span = tracer_with_exporter.start_tool_call("test_tool")
+        result = tracer_with_exporter.upsert_span_running(span)
+
+        assert result is False
+        tracer_with_exporter.end_span_ok(span)
+
+    def test_upsert_span_running_handles_exception(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test upsert_span_running handles exceptions gracefully."""
+        mock_exporter.upsert_span.side_effect = RuntimeError("Network error")
+
+        span = tracer_with_exporter.start_tool_call("test_tool")
+        result = tracer_with_exporter.upsert_span_running(span)
+
+        assert result is False
+        tracer_with_exporter.end_span_ok(span)

@@ -40,7 +40,11 @@ from .telemetry_callback import (
     AGENTRUN_STARTED,
     AppInsightsTelemetryCallback,
 )
-from .trace_context_storage import TraceContextData, TraceContextStorage
+from .trace_context_storage import (
+    PendingSpanData,
+    TraceContextData,
+    TraceContextStorage,
+)
 from .tracer import UiPathTracer
 
 logger = logging.getLogger(__name__)
@@ -135,10 +139,15 @@ class TelemetryRuntimeWrapper:
             if result.status == UiPathRuntimeStatus.SUSPENDED:
                 await self._handle_suspended(agent_span)
             elif result.status == UiPathRuntimeStatus.SUCCESSFUL:
+                if saved_context:
+                    self._handle_resume_complete(saved_context)
                 self._emit_output_if_successful(result, duration_ms, agent_span)
                 await self._clear_trace_context()
             elif result.status == UiPathRuntimeStatus.FAULTED:
                 await self._clear_trace_context()
+            else:
+                raise ValueError(f"Unexpected runtime status: {result.status}")
+
             return result
 
     async def stream(
@@ -176,12 +185,18 @@ class TelemetryRuntimeWrapper:
                 if final_result.status == UiPathRuntimeStatus.SUSPENDED:
                     await self._handle_suspended(agent_span)
                 elif final_result.status == UiPathRuntimeStatus.SUCCESSFUL:
+                    if saved_context:
+                        self._handle_resume_complete(saved_context)
                     self._emit_output_if_successful(
                         final_result, duration_ms, agent_span
                     )
                     await self._clear_trace_context()
                 elif final_result.status == UiPathRuntimeStatus.FAULTED:
                     await self._clear_trace_context()
+                else:
+                    raise ValueError(
+                        f"Unexpected runtime status: {final_result.status}"
+                    )
 
     async def get_schema(self) -> UiPathRuntimeSchema:
         return await self._delegate.get_schema()
@@ -345,29 +360,40 @@ class TelemetryRuntimeWrapper:
                 raise
 
     async def _handle_suspended(self, agent_span: Span) -> None:
-        """Handle suspended state: save trace context for re-parenting.
+        """Handle suspended state: upsert spans and save trace context.
 
         Called when agent execution returns SUSPENDED status.
-        Saves trace context so resumed execution can link to original trace.
-        Also saves pending tool span info to avoid duplicate spans on resume.
+        Upserts pending tool/process spans with RUNNING status so they survive
+        process restart, then saves trace context for resume.
 
         Args:
             agent_span: The current agent span
         """
+        # Get pending tool span info from callback
+        tool_name, tool_span, process_span = self._callback.get_pending_tool_info()
+
+        # Upsert spans with RUNNING status before suspend
+        # This ensures spans survive process restart with correct state
+        if tool_span:
+            self._tracer.upsert_span_running(tool_span)
+        if process_span:
+            self._tracer.upsert_span_running(process_span)
+
         if self._trace_context_storage:
             runtime_id = self._get_runtime_id()
             context = self._extract_trace_context(agent_span)
 
-            # Get pending tool span info from callback
-            tool_name, tool_span, process_span = self._callback.get_pending_tool_info()
             if tool_name:
                 context["pending_tool_name"] = tool_name
+                # Save full span data for resume completion
                 if tool_span:
-                    ctx = tool_span.get_span_context()
-                    context["pending_tool_span_id"] = format(ctx.span_id, "016x")
+                    pending_tool_data = self._extract_pending_span_data(tool_span)
+                    context["pending_tool_span"] = pending_tool_data
+                    context["pending_tool_span_id"] = pending_tool_data["span_id"]
                 if process_span:
-                    ctx = process_span.get_span_context()
-                    context["pending_process_span_id"] = format(ctx.span_id, "016x")
+                    pending_process_data = self._extract_pending_span_data(process_span)
+                    context["pending_process_span"] = pending_process_data
+                    context["pending_process_span_id"] = pending_process_data["span_id"]
 
             await self._trace_context_storage.save_trace_context(runtime_id, context)
             logger.debug(
@@ -375,6 +401,62 @@ class TelemetryRuntimeWrapper:
                 runtime_id,
                 context["trace_id"],
                 tool_name,
+            )
+
+    def _extract_pending_span_data(self, span: Span) -> PendingSpanData:
+        from opentelemetry.sdk.trace import ReadableSpan
+
+        ctx = span.get_span_context()
+        data: PendingSpanData = {
+            "span_id": format(ctx.span_id, "016x"),
+            "parent_span_id": None,
+            "name": span.name if hasattr(span, "name") else "unknown",
+            "start_time_ns": 0,
+            "attributes": {},
+        }
+        # Extract parent, start_time and attributes from ReadableSpan
+        if isinstance(span, ReadableSpan):
+            if span.parent and span.parent.span_id:
+                data["parent_span_id"] = format(span.parent.span_id, "016x")
+            if span.start_time:
+                data["start_time_ns"] = span.start_time
+            if span.attributes:
+                data["attributes"] = dict(span.attributes)
+        return data
+
+    def _handle_resume_complete(self, saved_context: TraceContextData) -> None:
+        """Complete pending spans on successful resume.
+
+        Called when agent execution completes successfully after resume.
+        Upserts pending tool/process spans with OK status and final end_time.
+
+        Args:
+            saved_context: Previously saved trace context with pending span data
+        """
+        trace_id = saved_context["trace_id"]
+
+        # Complete pending tool span
+        pending_tool = saved_context.get("pending_tool_span")
+        if pending_tool:
+            self._tracer.upsert_span_complete_by_data(
+                trace_id=trace_id,
+                span_data=dict(pending_tool),
+            )
+            logger.debug(
+                "Completed pending tool span %s with OK status",
+                pending_tool.get("name", "unknown"),
+            )
+
+        # Complete pending process span (inner span, should complete first in UI)
+        pending_process = saved_context.get("pending_process_span")
+        if pending_process:
+            self._tracer.upsert_span_complete_by_data(
+                trace_id=trace_id,
+                span_data=dict(pending_process),
+            )
+            logger.debug(
+                "Completed pending process span %s with OK status",
+                pending_process.get("name", "unknown"),
             )
 
     async def _load_trace_context_if_resuming(self) -> Optional[TraceContextData]:
@@ -439,6 +521,8 @@ class TelemetryRuntimeWrapper:
             pending_tool_span_id=None,
             pending_process_span_id=None,
             pending_tool_name=None,
+            pending_tool_span=None,
+            pending_process_span=None,
         )
 
     def _get_runtime_id(self) -> str:

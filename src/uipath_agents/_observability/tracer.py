@@ -5,11 +5,23 @@ Used by UiPathTracingCallback to instrument LangGraph agents.
 """
 
 import json
+import logging
+import time
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, Optional
+from typing import Any, Dict, Generator, Optional, Protocol, cast
 
 from opentelemetry import trace
-from opentelemetry.trace import Span, SpanKind, Status, StatusCode
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export import SpanExportResult
+from opentelemetry.trace import (
+    Span,
+    SpanContext,
+    SpanKind,
+    Status,
+    StatusCode,
+    TraceFlags,
+)
+from uipath.tracing import SpanStatus
 
 from .schema import SpanName
 from .schema import SpanType as SpanTypeEnum
@@ -25,6 +37,66 @@ from .span_attributes import (
     ToolCallSpanAttributes,
 )
 
+logger = logging.getLogger(__name__)
+
+
+class SyntheticReadableSpan:
+    """Minimal ReadableSpan for upsert from saved data after process restart."""
+
+    def __init__(
+        self,
+        trace_id: str,
+        span_id: str,
+        name: str,
+        start_time_ns: int,
+        end_time_ns: int,
+        attributes: Dict[str, Any],
+        parent_span_id: Optional[str] = None,
+    ):
+        trace_id_int = int(trace_id, 16)
+        span_id_int = int(span_id, 16)
+        parent_id_int = int(parent_span_id, 16) if parent_span_id else None
+
+        self.name = name
+        self.start_time = start_time_ns
+        self.end_time = end_time_ns
+        self.attributes = attributes
+        self.status = Status(StatusCode.OK)
+        self.kind = SpanKind.INTERNAL
+        self.events: tuple[Any, ...] = ()
+        self.links: tuple[Any, ...] = ()
+        self.resource = None
+        self.instrumentation_info = None
+        self.parent = (
+            SpanContext(
+                trace_id=trace_id_int,
+                span_id=parent_id_int,
+                is_remote=False,
+                trace_flags=TraceFlags(0x01),
+            )
+            if parent_id_int
+            else None
+        )
+        self._span_context = SpanContext(
+            trace_id=trace_id_int,
+            span_id=span_id_int,
+            is_remote=False,
+            trace_flags=TraceFlags(0x01),
+        )
+
+    def get_span_context(self) -> SpanContext:
+        return self._span_context
+
+
+class SpanUpsertProtocol(Protocol):
+    """Protocol for span upsert operations."""
+
+    def upsert_span(
+        self,
+        span: ReadableSpan,
+        status_override: Optional[int] = None,
+    ) -> SpanExportResult: ...
+
 
 class UiPathTracer:
     """Manual tracer creating UiPath-schema OpenTelemetry spans.
@@ -36,14 +108,21 @@ class UiPathTracer:
     - Uses typed attribute classes for type safety
     """
 
-    def __init__(self, tracer_name: str = "uipath-agents", version: str = "1.0.0"):
+    def __init__(
+        self,
+        tracer_name: str = "uipath-agents",
+        version: str = "1.0.0",
+        exporter: Optional[SpanUpsertProtocol] = None,
+    ):
         """Initialize the tracer.
 
         Args:
             tracer_name: Name for the OpenTelemetry tracer
             version: Version string for the tracer
+            exporter: Optional exporter for upsert operations (interruptible spans)
         """
         self._tracer = trace.get_tracer(tracer_name, version)
+        self._exporter = exporter
 
     @staticmethod
     def _apply_attributes(span: Span, attrs: BaseSpanAttributes) -> None:
@@ -345,3 +424,130 @@ class UiPathTracer:
         )
         span.set_status(Status(StatusCode.ERROR, str(error)))
         span.end()
+
+    # -------------------------------------------------------------------------
+    # UpsertSpan methods for interruptible spans
+    # -------------------------------------------------------------------------
+
+    def upsert_span_running(self, span: Span) -> bool:
+        """Upsert span to backend with RUNNING status.
+
+        Used when suspending interruptible tools. Sends span state to backend
+        so it survives process restart.
+
+        Args:
+            span: The span to upsert
+
+        Returns:
+            True if upsert succeeded, False otherwise
+        """
+        if not self._exporter:
+            logger.debug("No exporter configured, skipping upsert")
+            return False
+
+        try:
+            # Span must be ReadableSpan for exporter
+            if not isinstance(span, ReadableSpan):
+                logger.warning("Span is not ReadableSpan, cannot upsert")
+                return False
+
+            result = self._exporter.upsert_span(
+                span, status_override=SpanStatus.RUNNING
+            )
+            success = result == SpanExportResult.SUCCESS
+            if success:
+                logger.debug("Upserted span %s with RUNNING status", span.name)
+            else:
+                logger.warning("Failed to upsert span %s", span.name)
+            return success
+        except Exception:
+            logger.exception("Error upserting span with RUNNING status")
+            return False
+
+    def upsert_span_complete(self, span: Span, status: int = SpanStatus.OK) -> bool:
+        """Upsert span to backend with final status.
+
+        Used when resuming interruptible tools. Sends final state to backend
+        with correct end_time (capturing full wait duration).
+
+        Args:
+            span: The span to upsert
+            status: Final status (OK, ERROR, etc.)
+
+        Returns:
+            True if upsert succeeded, False otherwise
+        """
+        if not self._exporter:
+            logger.debug("No exporter configured, skipping upsert")
+            return False
+
+        try:
+            if not isinstance(span, ReadableSpan):
+                logger.warning("Span is not ReadableSpan, cannot upsert")
+                return False
+
+            result = self._exporter.upsert_span(span, status_override=status)
+            success = result == SpanExportResult.SUCCESS
+            if success:
+                logger.debug("Upserted span %s with status %d", span.name, status)
+            else:
+                logger.warning("Failed to upsert span %s with final status", span.name)
+            return success
+        except Exception:
+            logger.exception("Error upserting span with final status")
+            return False
+
+    def upsert_span_complete_by_data(
+        self,
+        trace_id: str,
+        span_data: Dict[str, Any],  # PendingSpanData or similar dict
+        status: int = SpanStatus.OK,
+    ) -> bool:
+        """Upsert span to backend from saved data.
+
+        Used after process restart when original span objects are lost.
+        Creates a synthetic span from saved data and upserts with final status.
+
+        Args:
+            trace_id: Hex-encoded trace ID
+            span_data: Saved span data (span_id, name, start_time_ns, attributes)
+            status: Final status (OK, ERROR, etc.)
+
+        Returns:
+            True if upsert succeeded, False otherwise
+        """
+        if not self._exporter:
+            logger.debug("No exporter configured, skipping upsert")
+            return False
+
+        try:
+            synthetic_span = SyntheticReadableSpan(
+                trace_id=trace_id,
+                span_id=span_data.get("span_id", "0" * 16),
+                name=span_data.get("name", "unknown"),
+                start_time_ns=span_data.get("start_time_ns", 0),
+                end_time_ns=time.time_ns(),
+                attributes=span_data.get("attributes", {}),
+                parent_span_id=span_data.get("parent_span_id"),
+            )
+
+            # Cast to ReadableSpan - SyntheticReadableSpan implements required interface
+            result = self._exporter.upsert_span(
+                cast(ReadableSpan, synthetic_span), status_override=status
+            )
+            success = result == SpanExportResult.SUCCESS
+            if success:
+                logger.debug(
+                    "Upserted synthetic span %s with status %d",
+                    span_data.get("name", "unknown"),
+                    status,
+                )
+            else:
+                logger.warning(
+                    "Failed to upsert synthetic span %s",
+                    span_data.get("name", "unknown"),
+                )
+            return success
+        except Exception:
+            logger.exception("Error upserting span from saved data")
+            return False

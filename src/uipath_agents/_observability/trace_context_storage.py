@@ -7,19 +7,31 @@ enabling resumed executions to continue the same trace.
 from typing import Any, Optional, Protocol, TypedDict
 
 
+class PendingSpanData(TypedDict, total=False):
+    """Data for a pending span that needs completion on resume."""
+
+    span_id: str
+    parent_span_id: Optional[str]
+    name: str
+    start_time_ns: int  # Nanoseconds since epoch
+    attributes: dict[str, Any]
+
+
 class TraceContextData(TypedDict):
     """Data structure for persisted trace context."""
 
-    trace_id: str  # Hex-encoded trace ID
-    span_id: str  # Hex-encoded span ID
-    parent_span_id: Optional[str]  # Hex-encoded parent span ID (None for root)
-    name: str  # Span name
-    start_time: str  # ISO format timestamp
-    attributes: dict[str, Any]  # Span attributes to restore
-    # Pending interruptible tool spans (for resume without duplication)
-    pending_tool_span_id: Optional[str]  # Tool call span awaiting completion
-    pending_process_span_id: Optional[str]  # Process tool span awaiting completion
-    pending_tool_name: Optional[str]  # Tool name for matching on resume
+    trace_id: str
+    span_id: str
+    parent_span_id: Optional[str]
+    name: str
+    start_time: str
+    attributes: dict[str, Any]
+    # Pending interruptible tool spans
+    pending_tool_span_id: Optional[str]
+    pending_process_span_id: Optional[str]
+    pending_tool_name: Optional[str]
+    pending_tool_span: Optional[PendingSpanData]
+    pending_process_span: Optional[PendingSpanData]
 
 
 class TraceContextStorage(Protocol):

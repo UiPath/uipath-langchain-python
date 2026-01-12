@@ -11,6 +11,7 @@ from uipath.runtime import (
     UiPathRuntimeProtocol,
 )
 from uipath.runtime.errors import UiPathErrorCategory
+from uipath.tracing import LlmOpsHttpExporter
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
 from uipath_langchain.runtime.storage import SqliteResumableStorage
@@ -58,7 +59,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         return [AGENT_ENTRYPOINT]
 
     async def _load_graph(
-        self, entrypoint: str, **kwargs
+        self, entrypoint: str, **kwargs: Any
     ) -> StateGraph[Any, Any, Any] | CompiledStateGraph[Any, Any, Any, Any]:
         """Load agent graph for the given entrypoint and validate input against schema.
 
@@ -159,7 +160,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         compiled_graph: CompiledStateGraph[Any, Any, Any, Any],
         runtime_id: str,
         entrypoint: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> UiPathRuntimeProtocol:
         """Create an agent runtime instance from a compiled graph.
 
@@ -190,7 +191,8 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         storage = SqliteResumableStorage(memory)
         trace_context_storage = SqliteTraceContextStorage(storage)
 
-        tracer = UiPathTracer()
+        llmops_exporter = LlmOpsHttpExporter()
+        tracer = UiPathTracer(exporter=llmops_exporter)
         tracing_callback = UiPathTracingCallback(tracer)
         telemetry_callback = AppInsightsTelemetryCallback()
 

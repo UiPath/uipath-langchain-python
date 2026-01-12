@@ -54,6 +54,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._pending_process_span: Optional[Span] = None
         # Resume mode - skip creating tool spans for first matching tool
         self._resume_tool_name: Optional[str] = None
+        # Run IDs for re-invoked tools after resume (no spans created, originals upserted)
+        self._reinvoked_tool_run_ids: set[UUID] = set()
 
     def set_agent_span(self, agent_span: Span) -> None:
         self._agent_span = agent_span
@@ -254,16 +256,24 @@ class UiPathTracingCallback(BaseCallbackHandler):
             tool_display_name = metadata.get("display_name") if metadata else None
 
             # Resume mode: skip span creation for the resumed tool
+            # LangGraph re-invokes the interrupted tool on resume, but we skip
+            # creating a duplicate span since the original was already saved
             if self._resume_tool_name and tool_name == self._resume_tool_name:
                 logger.debug("Resume mode: skipping span creation for %s", tool_name)
                 self._resume_tool_name = None  # Only skip once
-                # Mark this run_id as "skip" so on_tool_end knows not to end spans
-                self._spans[run_id] = None  # type: ignore
+                self._reinvoked_tool_run_ids.add(run_id)
                 return
 
             parent = self._get_span_or_root(parent_run_id)
             span = self._tracer.start_tool_call(tool_name, parent_span=parent)
             self._spans[run_id] = span
+
+            # Set tool attributes: callId, arguments
+            call_id = kwargs.get("tool_call_id")
+            if call_id:
+                span.set_attribute("callId", call_id)
+            if input_str:
+                self._set_tool_arguments(span, input_str)
 
             if tool_type and tool_display_name:
                 child_span = None
@@ -296,16 +306,23 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
+            # LangGraph re-invokes tool after resume - original spans already upserted
+            if run_id in self._reinvoked_tool_run_ids:
+                self._reinvoked_tool_run_ids.discard(run_id)
+                return
+
             # Close interruptible child span first, then tool span (parent)
             child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
             if child_span:
+                self._set_tool_result(child_span, output)
                 self._tracer.end_span_ok(child_span)
                 # Clear pending if this was the pending span
                 if child_span == self._pending_process_span:
                     self._pending_process_span = None
 
             span = self._spans.pop(run_id, None)
-            if span:  # None means this was a skipped resume tool
+            if span:
+                self._set_tool_result(span, output)
                 self._tracer.end_span_ok(span)
                 if span == self._pending_tool_span:
                     self._pending_tool_span = None
@@ -313,6 +330,17 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
         except Exception:
             logger.exception("Error in on_tool_end callback")
+
+    def _is_graph_interrupt(self, error: BaseException) -> bool:
+        """Check if the error is a GraphInterrupt (suspend signal).
+
+        GraphInterrupt is raised by interruptible tools when they need to
+        suspend execution. These spans should NOT be closed with ERROR -
+        they will be handled by upsert in _handle_suspended().
+        """
+        error_str = str(error)
+        error_type = type(error).__name__
+        return error_type == "GraphInterrupt" or error_str.startswith("GraphInterrupt(")
 
     def on_tool_error(
         self,
@@ -323,6 +351,19 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
+            # LangGraph re-invokes tool after resume - original spans already upserted
+            if run_id in self._reinvoked_tool_run_ids:
+                self._reinvoked_tool_run_ids.discard(run_id)
+                return
+
+            # GraphInterrupt = suspend signal, don't close spans with error
+            # Spans will be upserted with RUNNING status by _handle_suspended()
+            if self._is_graph_interrupt(error):
+                logger.debug(
+                    "GraphInterrupt detected for tool, spans kept open for upsert"
+                )
+                return
+
             exc = error if isinstance(error, Exception) else Exception(str(error))
 
             # Close interruptible child span first, then tool span (parent)
@@ -410,10 +451,34 @@ class UiPathTracingCallback(BaseCallbackHandler):
         if formatted_calls:
             span.set_attribute("toolCalls", json.dumps(formatted_calls))
 
+    def _set_tool_arguments(self, span: Span, input_str: str) -> None:
+        try:
+            args = json.loads(input_str)
+            span.set_attribute("arguments", json.dumps(args))
+        except (json.JSONDecodeError, TypeError):
+            # input_str is not valid JSON, set as raw string
+            span.set_attribute("arguments", input_str)
+
+    def _set_tool_result(self, span: Span, output: Any) -> None:
+        if output is None:
+            return
+        if isinstance(output, (dict, list)):
+            span.set_attribute("result", json.dumps(output))
+        else:
+            span.set_attribute("result", str(output))
+
     def cleanup(self) -> None:
         for span in self._spans.values():
+            # Skip pending interruptible spans - they were upserted with RUNNING
+            # and will be completed via upsert on resume
+            if span is self._pending_tool_span or span is self._pending_process_span:
+                continue
             try:
                 span.end()
             except Exception:
                 pass
         self._spans.clear()
+        # Clear pending references without ending spans
+        self._pending_tool_span = None
+        self._pending_process_span = None
+        self._pending_tool_name = None

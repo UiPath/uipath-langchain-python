@@ -1,9 +1,10 @@
 """Tests for TelemetryRuntimeWrapper."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
+from opentelemetry.sdk.trace import ReadableSpan
 from uipath.runtime import UiPathRuntimeStatus
 
 from uipath_agents._observability.callback import UiPathTracingCallback
@@ -24,15 +25,37 @@ def mock_delegate():
 
 
 @pytest.fixture
+def mock_exporter():
+    """Create a mock exporter for upsert tests."""
+    from opentelemetry.sdk.trace.export import SpanExportResult
+
+    exporter = MagicMock()
+    exporter.upsert_span = MagicMock(return_value=SpanExportResult.SUCCESS)
+    return exporter
+
+
+@pytest.fixture
 def tracer():
     """Create a tracer."""
     return UiPathTracer()
 
 
 @pytest.fixture
+def tracer_with_exporter(mock_exporter):
+    """Create a tracer with mock exporter."""
+    return UiPathTracer(exporter=mock_exporter)
+
+
+@pytest.fixture
 def callback(tracer):
     """Create a callback."""
     return UiPathTracingCallback(tracer)
+
+
+@pytest.fixture
+def callback_with_exporter(tracer_with_exporter):
+    """Create a callback with exporter-enabled tracer."""
+    return UiPathTracingCallback(tracer_with_exporter)
 
 
 class TestTelemetryRuntimeWrapper:
@@ -52,7 +75,7 @@ class TestTelemetryRuntimeWrapper:
     async def test_execute_calls_set_agent_span(self, mock_delegate, tracer, callback):
         """Test execute calls set_agent_span on callback before execution."""
         mock_result = MagicMock()
-        mock_result.status.name = "FAILED"
+        mock_result.status = UiPathRuntimeStatus.FAULTED
         mock_delegate.execute.return_value = mock_result
 
         agent_span_set = None
@@ -146,7 +169,7 @@ class TestTelemetryRuntimeWrapper:
     ):
         """Same callback instance is used across multiple executions (debug/chat scenario)."""
         mock_result = MagicMock()
-        mock_result.status.name = "FAILED"
+        mock_result.status = UiPathRuntimeStatus.FAULTED
         mock_delegate.execute.return_value = mock_result
 
         callback.set_agent_span = MagicMock()
@@ -167,7 +190,7 @@ class TestTelemetryRuntimeWrapper:
     ):
         """Callback cleanup is called after each execution."""
         mock_result = MagicMock()
-        mock_result.status.name = "FAILED"
+        mock_result.status = UiPathRuntimeStatus.FAULTED
         mock_delegate.execute.return_value = mock_result
 
         callback.cleanup = MagicMock()
@@ -200,7 +223,7 @@ class TestTelemetryRuntimeWrapper:
     ):
         """Concurrent executions use the same callback instance."""
         mock_result = MagicMock()
-        mock_result.status.name = "FAILED"
+        mock_result.status = UiPathRuntimeStatus.FAULTED
 
         call_count = 0
 
@@ -236,7 +259,7 @@ class TestCallbackPersistence:
     ):
         """Simulate debug scenario: same runtime re-executed at breakpoints."""
         mock_result = MagicMock()
-        mock_result.status.name = "FAILED"
+        mock_result.status = UiPathRuntimeStatus.FAULTED
         mock_delegate.execute.return_value = mock_result
 
         wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
@@ -269,10 +292,10 @@ class TestCallbackPersistence:
     ):
         """Simulate chat HITL: tool needs approval, runtime re-executed after approval."""
         suspended_result = MagicMock()
-        suspended_result.status.name = "SUSPENDED"
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
 
         success_result = MagicMock()
-        success_result.status.name = "SUCCESSFUL"
+        success_result.status = UiPathRuntimeStatus.SUCCESSFUL
         success_result.output = {"response": "done"}
 
         # First call suspends (needs HITL approval), second succeeds
@@ -282,11 +305,11 @@ class TestCallbackPersistence:
 
         # Initial execution - suspends for HITL
         result1 = await wrapper.execute({"input": "initial"}, None)
-        assert result1.status.name == "SUSPENDED"
+        assert result1.status == UiPathRuntimeStatus.SUSPENDED
 
         # User approves, re-execute with resume
         result2 = await wrapper.execute({"input": "approved"}, None)
-        assert result2.status.name == "SUCCESSFUL"
+        assert result2.status == UiPathRuntimeStatus.SUCCESSFUL
 
         # Both executions used same wrapper (and thus same callback)
         assert mock_delegate.execute.call_count == 2
@@ -416,6 +439,8 @@ class TestInterruptibleTraceContext:
             pending_tool_span_id=None,
             pending_process_span_id=None,
             pending_tool_name=None,
+            pending_tool_span=None,
+            pending_process_span=None,
         )
         mock_trace_context_storage.load_trace_context = AsyncMock(
             return_value=saved_context
@@ -543,6 +568,127 @@ class TestInterruptibleTraceContext:
 
         assert len(events) == 2
         mock_trace_context_storage.save_trace_context.assert_called_once()
+
+
+class TestUpsertSpanOnSuspend:
+    """Tests for upsert span calls during suspend."""
+
+    @pytest.mark.asyncio
+    async def test_handle_suspended_calls_upsert_for_pending_spans(
+        self,
+        mock_delegate,
+        tracer_with_exporter,
+        callback_with_exporter,
+        mock_exporter,
+        mock_trace_context_storage,
+    ):
+        """Test _handle_suspended calls upsert for pending tool and process spans."""
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = mock_result
+
+        # Use create_autospec to pass isinstance(span, ReadableSpan) check
+        mock_tool_span = create_autospec(ReadableSpan, instance=True)
+        mock_tool_span.get_span_context.return_value = MagicMock(span_id=12345)
+        mock_tool_span.parent = None  # No parent span
+        mock_tool_span.start_time = 1000000000
+        mock_tool_span.attributes = {"test": "attr"}
+        mock_process_span = create_autospec(ReadableSpan, instance=True)
+        mock_process_span.get_span_context.return_value = MagicMock(span_id=67890)
+        mock_process_span.parent = None  # No parent span
+        mock_process_span.start_time = 1000000000
+        mock_process_span.attributes = {"test": "attr"}
+
+        # Mock get_pending_tool_info to return our mock spans
+        # (set_agent_span clears pending spans, so we need to mock the getter)
+        callback_with_exporter.get_pending_tool_info = MagicMock(
+            return_value=("test_tool", mock_tool_span, mock_process_span)
+        )
+
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer_with_exporter,
+            callback_with_exporter,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        await wrapper.execute({"input": "test"}, None)
+
+        # Verify upsert was called for both spans
+        assert mock_exporter.upsert_span.call_count == 2
+
+        # Both calls should have status_override=RUNNING (3)
+        for call in mock_exporter.upsert_span.call_args_list:
+            assert call[1]["status_override"] == 3  # SpanStatus.RUNNING
+
+    @pytest.mark.asyncio
+    async def test_handle_suspended_without_pending_spans_no_upsert(
+        self,
+        mock_delegate,
+        tracer_with_exporter,
+        callback_with_exporter,
+        mock_exporter,
+        mock_trace_context_storage,
+    ):
+        """Test _handle_suspended doesn't call upsert when no pending spans."""
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = mock_result
+
+        # Mock get_pending_tool_info to return no pending spans
+        callback_with_exporter.get_pending_tool_info = MagicMock(
+            return_value=(None, None, None)
+        )
+
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer_with_exporter,
+            callback_with_exporter,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        await wrapper.execute({"input": "test"}, None)
+
+        # No upsert calls
+        mock_exporter.upsert_span.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_suspended_only_tool_span_upsert(
+        self,
+        mock_delegate,
+        tracer_with_exporter,
+        callback_with_exporter,
+        mock_exporter,
+        mock_trace_context_storage,
+    ):
+        """Test _handle_suspended calls upsert only for tool span if no process span."""
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = mock_result
+
+        # Use create_autospec to pass isinstance(span, ReadableSpan) check
+        mock_tool_span = create_autospec(ReadableSpan, instance=True)
+        mock_tool_span.get_span_context.return_value = MagicMock(span_id=12345)
+        mock_tool_span.parent = None  # No parent span
+        mock_tool_span.start_time = 1000000000
+        mock_tool_span.attributes = {"test": "attr"}
+
+        # Mock get_pending_tool_info to return only tool span
+        callback_with_exporter.get_pending_tool_info = MagicMock(
+            return_value=("test_tool", mock_tool_span, None)
+        )
+
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer_with_exporter,
+            callback_with_exporter,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        await wrapper.execute({"input": "test"}, None)
+
+        # Only one upsert call (for tool span)
+        assert mock_exporter.upsert_span.call_count == 1
 
 
 class TestGetAgentModel:
