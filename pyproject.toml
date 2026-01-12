@@ -6,7 +6,7 @@ readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
     "uipath>=2.4.0, <2.5.0",
-    "uipath-runtime>=0.4.0, <0.5.0",
+    "uipath-runtime>=0.4.0,<0.5.0",
     "langgraph>=1.0.0, <2.0.0",
     "langchain-core>=1.2.5, <2.0.0",
     "aiosqlite==0.21.0",
@@ -115,3 +115,7 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+[tool.uv.sources]
+uipath = { path = "../uipath-python", editable = true }
+uipath-runtime = { path = "../uipath-runtime-python", editable = true }
