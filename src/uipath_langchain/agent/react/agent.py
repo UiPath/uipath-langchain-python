@@ -25,6 +25,7 @@ from .llm_node import (
 from .router import (
     create_route_agent,
 )
+from .router_conversational import create_route_agent_conversational
 from .terminate_node import (
     create_terminate_node,
 )
@@ -74,16 +75,18 @@ def create_agent(
     os.environ["LANGCHAIN_RECURSION_LIMIT"] = str(config.recursion_limit)
 
     agent_tools = list(tools)
-    flow_control_tools: list[BaseTool] = create_flow_control_tools(output_schema)
+    flow_control_tools: list[BaseTool] = (
+        [] if config.is_conversational else create_flow_control_tools(output_schema)
+    )
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
-    init_node = create_init_node(messages, input_schema)
+    init_node = create_init_node(messages, input_schema, config.is_conversational)
 
     tool_nodes = create_tool_node(agent_tools)
     tool_nodes_with_guardrails = create_tools_guardrails_subgraph(
         tool_nodes, guardrails
     )
-    terminate_node = create_terminate_node(output_schema)
+    terminate_node = create_terminate_node(output_schema, config.is_conversational)
 
     CompleteAgentGraphState = create_state_with_input(
         input_schema if input_schema is not None else BaseModel
@@ -109,7 +112,9 @@ def create_agent(
 
     builder.add_edge(START, AgentGraphNode.INIT)
 
-    llm_node = create_llm_node(model, llm_tools, config.thinking_messages_limit)
+    llm_node = create_llm_node(
+        model, llm_tools, config.thinking_messages_limit, config.is_conversational
+    )
     llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
         (AgentGraphNode.LLM, llm_node), guardrails
     )
@@ -117,11 +122,25 @@ def create_agent(
     builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
     tool_node_names = list(tool_nodes_with_guardrails.keys())
-    route_agent = create_route_agent(config.thinking_messages_limit)
+
+    if config.is_conversational:
+        route_agent = create_route_agent_conversational()
+        target_node_names = [
+            *tool_node_names,
+            AgentGraphNode.TERMINATE,
+        ]
+    else:
+        route_agent = create_route_agent(config.thinking_messages_limit)
+        target_node_names = [
+            AgentGraphNode.AGENT,
+            *tool_node_names,
+            AgentGraphNode.TERMINATE,
+        ]
+
     builder.add_conditional_edges(
         AgentGraphNode.AGENT,
         route_agent,
-        [AgentGraphNode.AGENT, *tool_node_names, AgentGraphNode.TERMINATE],
+        target_node_names,
     )
 
     for tool_name in tool_node_names:

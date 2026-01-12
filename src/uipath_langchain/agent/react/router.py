@@ -2,10 +2,11 @@
 
 from typing import Literal
 
-from langchain_core.messages import AIMessage, AnyMessage, ToolCall
+from langchain_core.messages import ToolCall
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
 from ..exceptions import AgentNodeRoutingException
+from .router_utils import validate_last_message_is_AI
 from .types import AgentGraphNode, AgentGraphState
 from .utils import count_consecutive_thinking_messages
 
@@ -25,26 +26,6 @@ def __filter_control_flow_tool_calls(
 def __has_control_flow_tool(tool_calls: list[ToolCall]) -> bool:
     """Check if any tool call is of a control flow tool."""
     return any(tc.get("name") in FLOW_CONTROL_TOOLS for tc in tool_calls)
-
-
-def __validate_last_message_is_AI(messages: list[AnyMessage]) -> AIMessage:
-    """Validate and return last message from state.
-
-    Raises:
-        AgentNodeRoutingException: If messages are empty or last message is not AIMessage
-    """
-    if not messages:
-        raise AgentNodeRoutingException(
-            "No messages in state - cannot route after agent"
-        )
-
-    last_message = messages[-1]
-    if not isinstance(last_message, AIMessage):
-        raise AgentNodeRoutingException(
-            f"Last message is not AIMessage (type: {type(last_message).__name__}) - cannot route after agent"
-        )
-
-    return last_message
 
 
 def create_route_agent(thinking_messages_limit: int = 0):
@@ -77,7 +58,7 @@ def create_route_agent(thinking_messages_limit: int = 0):
             AgentNodeRoutingException: When encountering unexpected state (empty messages, non-AIMessage, or excessive completions)
         """
         messages = state.messages
-        last_message = __validate_last_message_is_AI(messages)
+        last_message = validate_last_message_is_AI(messages)
 
         tool_calls = list(last_message.tool_calls) if last_message.tool_calls else []
         tool_calls = __filter_control_flow_tool_calls(tool_calls)

@@ -3,6 +3,7 @@
 from typing import Any, Callable, Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.types import Overwrite
 from pydantic import BaseModel
 
 from .job_attachments import (
@@ -14,12 +15,26 @@ def create_init_node(
     messages: Sequence[SystemMessage | HumanMessage]
     | Callable[[Any], Sequence[SystemMessage | HumanMessage]],
     input_schema: type[BaseModel] | None,
+    is_conversational: bool = False,
 ):
     def graph_state_init(state: Any) -> Any:
+        resolved_messages: Sequence[SystemMessage | HumanMessage] | Overwrite
         if callable(messages):
-            resolved_messages = messages(state)
+            resolved_messages = list(messages(state))
         else:
-            resolved_messages = messages
+            resolved_messages = list(messages)
+        if is_conversational:
+            # For conversational agents we need to reorder the messages so that the system message is first, followed by
+            # the initial user message. When resuming the conversation, the state will have the entire message history,
+            # including the system message. In this case, we need to replace the system message from the state with the
+            # newly generated one. It will have the current date/time and reflect any changes to user settings. The add
+            # reducer is used for the messages property in the state, so by default new messages are appended to the end
+            # and using Overwrite will cause LangGraph to replace the entire array instead.
+            if len(state.messages) > 0 and isinstance(state.messages[0], SystemMessage):
+                preserved_messages = state.messages[1:]
+            else:
+                preserved_messages = state.messages
+            resolved_messages = Overwrite([*resolved_messages, *preserved_messages])
 
         schema = input_schema if input_schema is not None else BaseModel
         job_attachments = get_job_attachments(schema, state)
@@ -28,7 +43,7 @@ def create_init_node(
         }
 
         return {
-            "messages": list(resolved_messages),
+            "messages": resolved_messages,
             "inner_state": {
                 "job_attachments": job_attachments_dict,
             },

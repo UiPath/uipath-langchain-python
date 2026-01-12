@@ -62,9 +62,16 @@ class UiPathLangGraphRuntimeFactory:
 
     def _get_connection_string(self) -> str:
         """Get the database connection string."""
+        if self.context.state_file_path is not None:
+            return self.context.state_file_path
+
         if self.context.runtime_dir and self.context.state_file:
             path = os.path.join(self.context.runtime_dir, self.context.state_file)
-            if not self.context.resume and self.context.job_id is None:
+            if (
+                not self.context.resume
+                and self.context.job_id is None
+                and not self.context.keep_state_file
+            ):
                 # If not resuming and no job id, delete the previous state file
                 if os.path.exists(path):
                     os.remove(path)
