@@ -48,7 +48,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             )
         )
 
-    wrapper = get_job_attachment_wrapper()
+    wrapper = get_job_attachment_wrapper(output_type=output_model)
     tool = ProcessTool(
         name=tool_name,
         description=resource.description,

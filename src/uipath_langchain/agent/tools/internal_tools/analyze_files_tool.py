@@ -63,7 +63,7 @@ def create_analyze_file_tool(
         result = await llm_call_with_files(messages, files, llm)
         return result
 
-    wrapper = get_job_attachment_wrapper()
+    wrapper = get_job_attachment_wrapper(output_type=output_model)
     tool = AnalyzeFileTool(
         name=tool_name,
         description=resource.description,

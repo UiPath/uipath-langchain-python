@@ -12,9 +12,6 @@ from pydantic import BaseModel, Field
 from uipath.platform.attachments import Attachment
 
 from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphState
-from uipath_langchain.agent.tools.structured_tool_with_output_type import (
-    StructuredToolWithOutputType,
-)
 from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
     get_job_attachment_wrapper,
 )
@@ -588,10 +585,9 @@ class TestGetJobAttachmentWrapper:
         # Mock get_job_attachments to return our attachment
         mock_get_job_attachments.return_value = [output_attachment]
 
-        # Create a StructuredToolWithOutputType tool
-        mock_tool = MagicMock(spec=StructuredToolWithOutputType)
+        # Create a tool with output type
+        mock_tool = MagicMock(spec=BaseTool)
         mock_tool.args_schema = None
-        mock_tool.output_type = MockOutputSchema
         mock_tool.ainvoke = AsyncMock(
             return_value={
                 "result_attachment": output_attachment.model_dump(),
@@ -599,7 +595,7 @@ class TestGetJobAttachmentWrapper:
             }
         )
 
-        wrapper = get_job_attachment_wrapper()
+        wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         # Should succeed and include the output attachment in inner_state
@@ -638,10 +634,9 @@ class TestGetJobAttachmentWrapper:
         # Mock get_job_attachments to return all attachments
         mock_get_job_attachments.return_value = [attachment1, attachment2, attachment3]
 
-        # Create a StructuredToolWithOutputType tool
-        mock_tool = MagicMock(spec=StructuredToolWithOutputType)
+        # Create a tool with output type
+        mock_tool = MagicMock(spec=BaseTool)
         mock_tool.args_schema = None
-        mock_tool.output_type = MockOutputSchema
         mock_tool.ainvoke = AsyncMock(
             return_value={
                 "result_attachment": attachment1.model_dump(),
@@ -652,7 +647,7 @@ class TestGetJobAttachmentWrapper:
             }
         )
 
-        wrapper = get_job_attachment_wrapper()
+        wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         # Should succeed and include all attachments
@@ -673,15 +668,14 @@ class TestGetJobAttachmentWrapper:
         # Mock get_job_attachments to return empty list
         mock_get_job_attachments.return_value = []
 
-        # Create a StructuredToolWithOutputType tool
-        mock_tool = MagicMock(spec=StructuredToolWithOutputType)
+        # Create a tool with output type
+        mock_tool = MagicMock(spec=BaseTool)
         mock_tool.args_schema = None
-        mock_tool.output_type = MockOutputSchema
         mock_tool.ainvoke = AsyncMock(
             return_value={"result_attachment": None, "additional_attachments": []}
         )
 
-        wrapper = get_job_attachment_wrapper()
+        wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         # Should succeed with empty job_attachments
@@ -709,10 +703,9 @@ class TestGetJobAttachmentWrapper:
             attachment_without_id,
         ]
 
-        # Create a StructuredToolWithOutputType tool
-        mock_tool = MagicMock(spec=StructuredToolWithOutputType)
+        # Create a tool with output type
+        mock_tool = MagicMock(spec=BaseTool)
         mock_tool.args_schema = None
-        mock_tool.output_type = MockOutputSchema
         mock_tool.ainvoke = AsyncMock(
             return_value={
                 "result_attachment": attachment_with_id.model_dump(),
@@ -720,7 +713,7 @@ class TestGetJobAttachmentWrapper:
             }
         )
 
-        wrapper = get_job_attachment_wrapper()
+        wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         # Should only include attachment with id
