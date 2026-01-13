@@ -88,6 +88,8 @@ stages:
           runOnce:
             deploy:
               steps:
+                - checkout: self
+
                 - script: |
                     curl -LsSf https://astral.sh/uv/install.sh | sh
                   displayName: Install UV
@@ -124,6 +126,8 @@ stages:
           runOnce:
             deploy:
               steps:
+                - checkout: self
+
                 - script: |
                     curl -LsSf https://astral.sh/uv/install.sh | sh
                   displayName: Install UV
