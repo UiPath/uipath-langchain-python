@@ -600,16 +600,10 @@ class TestGetJobAttachmentWrapper:
 
         # Should succeed and include the output attachment in inner_state
         assert isinstance(result, Command)
-        assert hasattr(result, "update")
-        assert result.update is not None
-        assert "inner_state" in result.update
-        assert "job_attachments" in result.update["inner_state"]
-        assert (
-            str(output_attachment_id) in result.update["inner_state"]["job_attachments"]
-        )
-        assert (
-            result.update["inner_state"]["job_attachments"][str(output_attachment_id)]
-            == output_attachment
+        self.assert_command_success(
+            result,
+            job_attachments={str(output_attachment_id): output_attachment},
+            expected_content=None,
         )
         # Verify get_job_attachments was called with correct parameters
         mock_get_job_attachments.assert_called_once_with(
@@ -652,12 +646,15 @@ class TestGetJobAttachmentWrapper:
 
         # Should succeed and include all attachments
         assert isinstance(result, Command)
-        assert result.update is not None
-        job_attachments = result.update["inner_state"]["job_attachments"]
-        assert len(job_attachments) == 3
-        assert str(attachment1_id) in job_attachments
-        assert str(attachment2_id) in job_attachments
-        assert str(attachment3_id) in job_attachments
+        self.assert_command_success(
+            result,
+            job_attachments={
+                str(attachment1_id): attachment1,
+                str(attachment2_id): attachment2,
+                str(attachment3_id): attachment3,
+            },
+            expected_content=None,
+        )
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachments")
@@ -716,11 +713,10 @@ class TestGetJobAttachmentWrapper:
         wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
-        # Should only include attachment with id
+        # Should only include attachment with id (None id filtered out)
         assert isinstance(result, Command)
-        assert result.update is not None
-        job_attachments = result.update["inner_state"]["job_attachments"]
-        assert len(job_attachments) == 1
-        assert str(attachment_with_id.id) in job_attachments
-        assert None not in job_attachments
-        assert "None" not in job_attachments
+        self.assert_command_success(
+            result,
+            job_attachments={str(attachment_with_id.id): attachment_with_id},
+            expected_content=None,
+        )
