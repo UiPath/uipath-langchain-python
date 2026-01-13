@@ -41,8 +41,8 @@ def tracer():
 
 
 @pytest.fixture
-def tracer_with_exporter(mock_exporter):
-    """Create a tracer with mock exporter."""
+def tracer_with_exporter(span_exporter, mock_exporter):
+    """Create a tracer with mock exporter and consistent global tracer state."""
     return UiPathTracer(exporter=mock_exporter)
 
 
@@ -614,12 +614,15 @@ class TestUpsertSpanOnSuspend:
 
         await wrapper.execute({"input": "test"}, None)
 
-        # Verify upsert was called for both spans
-        assert mock_exporter.upsert_span.call_count == 2
+        # 3 upserts = 1 agent start (UNSET) + 2 pending spans (RUNNING)
+        assert mock_exporter.upsert_span.call_count == 3
 
-        # Both calls should have status_override=RUNNING (3)
-        for call in mock_exporter.upsert_span.call_args_list:
-            assert call[1]["status_override"] == 3  # SpanStatus.RUNNING
+        # First call is agent span with UNSET status
+        assert mock_exporter.upsert_span.call_args_list[0][1]["status_override"] == 0
+
+        # Remaining calls are pending spans with RUNNING status
+        for call in mock_exporter.upsert_span.call_args_list[1:]:
+            assert call[1]["status_override"] == 3
 
     @pytest.mark.asyncio
     async def test_handle_suspended_without_pending_spans_no_upsert(
@@ -649,8 +652,9 @@ class TestUpsertSpanOnSuspend:
 
         await wrapper.execute({"input": "test"}, None)
 
-        # No upsert calls
-        mock_exporter.upsert_span.assert_not_called()
+        # 1 upsert = agent start only (no pending spans)
+        assert mock_exporter.upsert_span.call_count == 1
+        assert mock_exporter.upsert_span.call_args[1]["status_override"] == 0  # UNSET
 
     @pytest.mark.asyncio
     async def test_handle_suspended_only_tool_span_upsert(
@@ -687,8 +691,14 @@ class TestUpsertSpanOnSuspend:
 
         await wrapper.execute({"input": "test"}, None)
 
-        # Only one upsert call (for tool span)
-        assert mock_exporter.upsert_span.call_count == 1
+        # 2 upserts = 1 agent start (UNSET) + 1 tool span (RUNNING)
+        assert mock_exporter.upsert_span.call_count == 2
+        assert (
+            mock_exporter.upsert_span.call_args_list[0][1]["status_override"] == 0
+        )  # UNSET
+        assert (
+            mock_exporter.upsert_span.call_args_list[1][1]["status_override"] == 3
+        )  # RUNNING
 
 
 class TestGetAgentModel:
