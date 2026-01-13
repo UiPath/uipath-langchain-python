@@ -1,7 +1,10 @@
 from unittest.mock import patch
 
 import pytest
-from uipath.core.guardrails import GuardrailValidationResult
+from uipath.core.guardrails import (
+    GuardrailValidationResult,
+    GuardrailValidationResultType,
+)
 
 
 @pytest.fixture
@@ -19,7 +22,10 @@ def mock_guardrails_service():
 
     def mock_evaluate_guardrail(text, guardrail):
         """Mock guardrail evaluation - always passes validation."""
-        return GuardrailValidationResult(validation_passed=True, reason="")
+        return GuardrailValidationResult(
+            result=GuardrailValidationResultType.PASSED,
+            reason="",
+        )
 
     with patch(
         "uipath.platform.guardrails.GuardrailsService.evaluate_guardrail",

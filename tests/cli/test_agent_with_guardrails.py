@@ -23,7 +23,10 @@ from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage
-from uipath.core.guardrails import GuardrailValidationResult
+from uipath.core.guardrails import (
+    GuardrailValidationResult,
+    GuardrailValidationResultType,
+)
 from uipath.runtime import (
     UiPathExecuteOptions,
     UiPathRuntimeContext,
@@ -288,12 +291,13 @@ graph = create_agent(
                         and ".com" in text
                     ):
                         return GuardrailValidationResult(
-                            validation_passed=False,  # PII detected - should trigger block!
+                            result=GuardrailValidationResultType.VALIDATION_FAILED,
                             reason="PII detected in text",
                         )
                     else:
                         return GuardrailValidationResult(
-                            validation_passed=True, reason=""
+                            result=GuardrailValidationResultType.PASSED,
+                            reason="",
                         )
 
                 with (
@@ -422,12 +426,15 @@ graph = create_agent(
                     # Prompt injection guardrail should detect and block
                     if guardrail.name == "Prompt injection guardrail":
                         return GuardrailValidationResult(
-                            validation_passed=False,
+                            result=GuardrailValidationResultType.VALIDATION_FAILED,
                             reason="Prompt injection detected",
                         )
 
                     # All other guardrails pass
-                    return GuardrailValidationResult(validation_passed=True, reason="")
+                    return GuardrailValidationResult(
+                        result=GuardrailValidationResultType.PASSED,
+                        reason="",
+                    )
 
                 # Mock LLM - should NOT be called if guardrail blocks at LLM level
                 async def mock_llm_invoke(*args, **kwargs):
@@ -867,12 +874,15 @@ graph = create_agent(
                         and ".com" in text
                     ):
                         return GuardrailValidationResult(
-                            validation_passed=False,
+                            result=GuardrailValidationResultType.VALIDATION_FAILED,
                             reason="PII detected in tool input",
                         )
 
                     # All other guardrails pass
-                    return GuardrailValidationResult(validation_passed=True, reason="")
+                    return GuardrailValidationResult(
+                        result=GuardrailValidationResultType.PASSED,
+                        reason="",
+                    )
 
                 # Mock LLM responses - tool call contains an email address
                 async def mock_llm_invoke(*args, **kwargs):
@@ -1025,12 +1035,15 @@ graph = create_agent(
                         and ".com" in text
                     ):
                         return GuardrailValidationResult(
-                            validation_passed=False,
+                            result=GuardrailValidationResultType.VALIDATION_FAILED,
                             reason="PII detected in LLM output",
                         )
 
                     # All other guardrails pass
-                    return GuardrailValidationResult(validation_passed=True, reason="")
+                    return GuardrailValidationResult(
+                        result=GuardrailValidationResultType.PASSED,
+                        reason="",
+                    )
 
                 # Mock LLM responses - LLM output contains PII in tool call args
                 async def mock_llm_invoke(*args, **kwargs):
@@ -1228,12 +1241,15 @@ graph = create_agent(
                         and ".com" in text
                     ):
                         return GuardrailValidationResult(
-                            validation_passed=False,
+                            result=GuardrailValidationResultType.VALIDATION_FAILED,
                             reason="PII detected in LLM output",
                         )
 
                     # All other guardrails pass
-                    return GuardrailValidationResult(validation_passed=True, reason="")
+                    return GuardrailValidationResult(
+                        result=GuardrailValidationResultType.PASSED,
+                        reason="",
+                    )
 
                 # Mock LLM responses - LLM output contains PII in tool call args
                 async def mock_llm_invoke(*args, **kwargs):

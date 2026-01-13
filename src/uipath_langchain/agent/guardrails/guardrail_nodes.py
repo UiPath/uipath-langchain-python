@@ -100,10 +100,28 @@ def _create_validation_command(
     Returns:
         Command to update state and route to appropriate node.
     """
-    if not result.validation_passed:
+    from uipath.core.guardrails import GuardrailValidationResultType
+
+    # Handle new format: result has a 'result' attribute with GuardrailValidationResultType
+    if hasattr(result, "result"):
+        if result.result != GuardrailValidationResultType.PASSED:
+            return Command(
+                goto=failure_node, update={"guardrail_validation_result": result.reason}
+            )
+    # Handle old format: backwards compatibility for tests using validation_passed
+    elif hasattr(result, "validation_passed"):
+        if not result.validation_passed:
+            return Command(
+                goto=failure_node, update={"guardrail_validation_result": result.reason}
+            )
+    else:
+        # Fallback: assume failure if format is unknown
         return Command(
-            goto=failure_node, update={"guardrail_validation_result": result.reason}
+            goto=failure_node,
+            update={"guardrail_validation_result": "Unknown validation result format"},
         )
+
+    # Update guardail trace with skip/reason
     return Command(goto=success_node, update={"guardrail_validation_result": None})
 
 
