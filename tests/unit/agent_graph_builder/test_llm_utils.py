@@ -3,6 +3,7 @@
 import pytest
 from langchain_core.language_models import BaseChatModel
 
+from uipath_agents.agent_graph_builder.config import AgentExecutionType
 from uipath_agents.agent_graph_builder.llm_utils import (
     LLMProvider,
     create_llm,
@@ -43,25 +44,48 @@ class TestCreateLLM:
 
     def test_create_openai_llm(self):
         """Test creating OpenAI LLM."""
-        llm = create_llm(model="gpt-4", temperature=0.5, max_tokens=1024)
+        llm = create_llm(
+            model="gpt-4",
+            temperature=0.5,
+            max_tokens=1024,
+            execution_type=AgentExecutionType.RUNTIME,
+        )
         assert isinstance(llm, BaseChatModel)
 
     def test_create_bedrock_llm(self):
         """Test creating Bedrock LLM."""
         llm = create_llm(
-            model="anthropic.claude-haiku-4-5", temperature=0.7, max_tokens=2048
+            model="anthropic.claude-haiku-4-5",
+            temperature=0.7,
+            max_tokens=2048,
+            execution_type=AgentExecutionType.PLAYGROUND,
         )
         assert isinstance(llm, BaseChatModel)
 
     def test_create_vertex_llm(self):
         """Test creating Vertex LLM."""
-        llm = create_llm(model="gemini-2.5-flash", temperature=0.3, max_tokens=4096)
+        llm = create_llm(
+            model="gemini-2.5-flash",
+            temperature=0.3,
+            max_tokens=4096,
+            execution_type=AgentExecutionType.RUNTIME,
+        )
         assert isinstance(llm, BaseChatModel)
 
     def test_create_with_different_parameters(self):
         """Test creating LLMs with different parameter values."""
-        llm1 = create_llm(model="gpt-4", temperature=0.0, max_tokens=512)
-        llm2 = create_llm(model="gpt-4", temperature=1.0, max_tokens=16384)
+        llm1 = create_llm(
+            model="gpt-4",
+            temperature=0.0,
+            max_tokens=512,
+            execution_type=AgentExecutionType.RUNTIME,
+        )
+        llm2 = create_llm(
+            model="gpt-4",
+            temperature=1.0,
+            max_tokens=16384,
+            execution_type=AgentExecutionType.RUNTIME,
+        )
 
         assert isinstance(llm1, BaseChatModel)
         assert isinstance(llm2, BaseChatModel)
@@ -69,4 +93,9 @@ class TestCreateLLM:
     def test_create_with_unknown_model(self):
         """Test that unknown model names raise ValueError."""
         with pytest.raises(ValueError, match="Unknown model provider"):
-            create_llm(model="unknown-model", temperature=0.5, max_tokens=1024)
+            create_llm(
+                model="unknown-model",
+                temperature=0.5,
+                max_tokens=1024,
+                execution_type=AgentExecutionType.RUNTIME,
+            )

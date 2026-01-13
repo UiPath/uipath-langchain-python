@@ -2,6 +2,7 @@
 
 import json
 import logging
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,6 +12,14 @@ logger = logging.getLogger(__name__)
 
 _FF_MODEL_SETTINGS = "ModelConfigurableSettings"
 _DEFAULT_THINKING_MESSAGES_LIMIT = 0
+
+
+class AgentExecutionType(StrEnum):
+    """The type of execution for an agent run."""
+
+    PLAYGROUND = "playground"
+    RUNTIME = "runtime"
+    EVAL = "eval"
 
 
 class _ModelConfig(BaseModel):

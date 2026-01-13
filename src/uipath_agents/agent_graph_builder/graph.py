@@ -12,7 +12,7 @@ from uipath_langchain.agent.react import (
 )
 from uipath_langchain.agent.tools import create_tools_from_resources
 
-from .config import get_thinking_messages_limit
+from .config import AgentExecutionType, get_thinking_messages_limit
 from .llm_utils import create_llm
 from .message_utils import create_message_factory
 
@@ -21,6 +21,7 @@ AGENT_LOOP_RECURSION_LIMIT = 50
 
 async def build_agent_graph(
     agent_definition: LowCodeAgentDefinition,
+    execution_type: AgentExecutionType = AgentExecutionType.RUNTIME,
 ):
     """Build LangGraph agent from agent.json configuration.
 
@@ -31,10 +32,17 @@ async def build_agent_graph(
         StateGraph configured with the agent definition and feature flags.
     """
 
+    byo_connection_id = (
+        agent_definition.settings.byom_properties.connection_id
+        if agent_definition.settings.byom_properties
+        else None
+    )
     llm = create_llm(
         model=agent_definition.settings.model,
         temperature=agent_definition.settings.temperature,
         max_tokens=agent_definition.settings.max_tokens,
+        execution_type=execution_type,
+        byo_connection_id=byo_connection_id,
     )
     tools = await create_tools_from_resources(agent_definition, llm)
     input_model = resolve_input_model(agent_definition.input_schema)

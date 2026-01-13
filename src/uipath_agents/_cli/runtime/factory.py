@@ -17,6 +17,7 @@ from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
 from uipath_langchain.runtime.storage import SqliteResumableStorage
 
 from uipath_agents.agent_graph_builder import build_agent_graph
+from uipath_agents.agent_graph_builder.config import AgentExecutionType
 
 from ..._observability import configure_telemetry, shutdown_telemetry
 from ..._observability.callback import UiPathTracingCallback
@@ -138,7 +139,9 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
                     agent_definition.input_schema, self.context.input
                 )
 
-            return await build_agent_graph(agent_definition)
+            return await build_agent_graph(
+                agent_definition, execution_type=self._get_execution_type()
+            )
 
         except FileNotFoundError as e:
             raise LangGraphRuntimeError(
@@ -238,6 +241,17 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             trigger_manager=trigger_manager,
             runtime_id=runtime_id,
         )
+
+    def _get_execution_type(self) -> AgentExecutionType:
+        match self.context.command:
+            case "run":
+                return AgentExecutionType.RUNTIME
+            case "debug":
+                return AgentExecutionType.PLAYGROUND
+            case "eval":
+                return AgentExecutionType.EVAL
+            case _:
+                return AgentExecutionType.RUNTIME
 
     async def dispose(self) -> None:
         """Cleanup factory resources."""

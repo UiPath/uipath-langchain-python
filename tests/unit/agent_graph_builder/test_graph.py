@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from uipath.agent.models.agent import (
+    AgentByomProperties,
     AgentMessage,
     AgentMessageRole,
     AgentSettings,
@@ -12,6 +13,7 @@ from uipath.agent.models.agent import (
 )
 
 from uipath_agents.agent_graph_builder import build_agent_graph
+from uipath_agents.agent_graph_builder.config import AgentExecutionType
 
 
 def create_test_agent_definition(**overrides: Any) -> LowCodeAgentDefinition:
@@ -74,6 +76,10 @@ class TestBuildAgentGraph:
                 model="test-model",
                 temperature=0.5,
                 max_tokens=2048,
+                byom_properties=AgentByomProperties(
+                    connection_id="test-connection-id",
+                    connector_key="test-connector-key",
+                ),
             )
         )
 
@@ -95,12 +101,16 @@ class TestBuildAgentGraph:
             mock_llm.return_value = MagicMock()
             mock_create.return_value = MagicMock()
 
-            await build_agent_graph(agent_def)
+            await build_agent_graph(
+                agent_def, execution_type=AgentExecutionType.PLAYGROUND
+            )
 
             mock_llm.assert_called_once_with(
                 model="test-model",
                 temperature=0.5,
                 max_tokens=2048,
+                execution_type=AgentExecutionType.PLAYGROUND,
+                byo_connection_id="test-connection-id",
             )
 
     async def test_handles_input_data_dict(self):
@@ -477,7 +487,13 @@ class TestBuildAgentGraph:
                 "type": "object",
                 "properties": {
                     "is_active": {"type": "boolean"},
-                    "config": {"type": "object", "properties": {}},
+                    "config": {
+                        "type": "object",
+                        "properties": {
+                            "timeout": {"type": "integer"},
+                            "retry": {"type": "boolean"},
+                        },
+                    },
                     "count": {"type": "number"},
                 },
                 "required": ["is_active", "config"],
