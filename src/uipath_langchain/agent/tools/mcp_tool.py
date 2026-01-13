@@ -66,6 +66,8 @@ async def create_mcp_tools(
         async with semaphore:
             await session.initialize()
             tools = await load_mcp_tools(session)
+            for tool in tools:
+                tool.metadata = {"tool_type": "mcp", "display_name": tool.name}
             return _filter_tools(tools, cfg)
 
     async def create_session(

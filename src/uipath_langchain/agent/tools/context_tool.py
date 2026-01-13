@@ -75,6 +75,10 @@ def handle_semantic_search(
         args_schema=input_model,
         coroutine=context_tool_fn,
         output_type=output_model,
+        metadata={
+            "tool_type": "context",
+            "display_name": resource.name,
+        },
     )
 
 
@@ -119,6 +123,10 @@ def handle_deep_rag(
         args_schema=input_model,
         coroutine=context_tool_fn,
         output_type=output_model,
+        metadata={
+            "tool_type": "context",
+            "display_name": resource.name,
+        },
     )
 
 
@@ -193,6 +201,10 @@ def handle_batch_transform(
         args_schema=input_model,
         coroutine=context_tool_fn,
         output_type=output_model,
+        metadata={
+            "tool_type": "context",
+            "display_name": resource.name,
+        },
     )
 
 
