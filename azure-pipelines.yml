@@ -79,61 +79,69 @@ stages:
     dependsOn: [Initialize]
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
     jobs:
-      - job: Publish
+      - deployment: Publish
         displayName: Build and Publish - Alpha
+        environment: alp
         variables:
           PythonVersion: $[ stageDependencies.Initialize.GitVersion.outputs['SetVariables.PythonVersion'] ]
-        steps:
-          - script: |
-              curl -LsSf https://astral.sh/uv/install.sh | sh
-            displayName: Install UV
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: |
+                    curl -LsSf https://astral.sh/uv/install.sh | sh
+                  displayName: Install UV
 
-          - script: |
-              uv sync --frozen --all-extras
-            displayName: Install Dependencies
+                - script: |
+                    uv sync --frozen --all-extras
+                  displayName: Install Dependencies
 
-          - script: |
-              uv version $(PythonVersion)
-            displayName: Set Package Version
+                - script: |
+                    uv version $(PythonVersion)
+                  displayName: Set Package Version
 
-          - script: |
-              uv build
-            displayName: Build Package
+                - script: |
+                    uv build
+                  displayName: Build Package
 
-          - script: |
-              uv publish --index alpha
-            displayName: Publish Package
-            env:
-              UV_PUBLISH_TOKEN: $(System.AccessToken)
+                - script: |
+                    uv publish --index alpha
+                  displayName: Publish Package
+                  env:
+                    UV_PUBLISH_TOKEN: $(System.AccessToken)
 
   - stage: Publish_Production
     displayName: Publish - Production
     dependsOn: [Initialize, Publish_Alpha]
     condition: and(succeeded(), eq(dependencies.Initialize.outputs['GitVersion.SetVariables.Patch'], '0')) # only tagged and intended major/minor version increase
     jobs:
-      - job: Publish
+      - deployment: Publish
         displayName: Build and Publish - Production
+        environment: prd
         variables:
           PythonVersion: $[ stageDependencies.Initialize.GitVersion.outputs['SetVariables.PythonVersion'] ]
-        steps:
-          - script: |
-              curl -LsSf https://astral.sh/uv/install.sh | sh
-            displayName: Install UV
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: |
+                    curl -LsSf https://astral.sh/uv/install.sh | sh
+                  displayName: Install UV
 
-          - script: |
-              uv sync --frozen --all-extras
-            displayName: Install Dependencies
+                - script: |
+                    uv sync --frozen --all-extras
+                  displayName: Install Dependencies
 
-          - script: |
-              uv version $(PythonVersion)
-            displayName: Set Package Version
+                - script: |
+                    uv version $(PythonVersion)
+                  displayName: Set Package Version
 
-          - script: |
-              uv build
-            displayName: Build Package
+                - script: |
+                    uv build
+                  displayName: Build Package
 
-          - script: |
-              uv publish --index prod
-            displayName: Publish Package
-            env:
-              UV_PUBLISH_TOKEN: $(System.AccessToken)
+                - script: |
+                    uv publish --index prod
+                  displayName: Publish Package
+                  env:
+                    UV_PUBLISH_TOKEN: $(System.AccessToken)
