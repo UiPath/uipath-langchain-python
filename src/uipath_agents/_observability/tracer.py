@@ -198,6 +198,7 @@ class UiPathTracer:
             kind=SpanKind.INTERNAL,
         ) as span:
             self._apply_attributes(span, attrs)
+            self.upsert_span_started(span)
 
             try:
                 yield span
@@ -243,6 +244,7 @@ class UiPathTracer:
             settings = ModelSettings(max_tokens=max_tokens, temperature=temperature)
         attrs = LlmCallSpanAttributes(settings=settings)
         self._apply_attributes(span, attrs)
+        self.upsert_span_started(span)
         return span
 
     def start_model_run(
@@ -282,6 +284,7 @@ class UiPathTracer:
             settings=settings,
         )
         self._apply_attributes(span, attrs)
+        self.upsert_span_started(span)
         return span
 
     def start_tool_call(
@@ -311,6 +314,7 @@ class UiPathTracer:
         # Use typed attributes - pass span_type to override the type field
         attrs = ToolCallSpanAttributes(tool_name=tool_name, span_type=tool_type.value)
         self._apply_attributes(span, attrs)
+        self.upsert_span_started(span)
         return span
 
     def start_escalation_tool(
@@ -353,6 +357,7 @@ class UiPathTracer:
             assigned_to=assignee,
         )
         self._apply_attributes(span, attrs)
+        self.upsert_span_started(span)
         return span
 
     def start_process_tool(
@@ -390,6 +395,7 @@ class UiPathTracer:
             arguments=arguments,
         )
         self._apply_attributes(span, attrs)
+        self.upsert_span_started(span)
         return span
 
     def emit_agent_output(self, output: Any) -> None:
@@ -432,6 +438,20 @@ class UiPathTracer:
     # -------------------------------------------------------------------------
     # UpsertSpan methods for interruptible spans
     # -------------------------------------------------------------------------
+
+    def upsert_span_started(self, span: Span) -> bool:
+        """Upsert span on start with UNSET status for live visibility.
+
+        Enables live updates - UI shows spans immediately as they start,
+        not just when they complete.
+
+        Args:
+            span: The span to upsert
+
+        Returns:
+            True if upsert succeeded, False otherwise
+        """
+        return self.upsert_span_complete(span, status=SpanStatus.UNSET)
 
     def upsert_span_running(self, span: Span) -> bool:
         """Upsert span to backend with RUNNING status.

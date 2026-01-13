@@ -253,6 +253,7 @@ class TestUpsertSpanMethods:
     ):
         """Test upsert_span_running calls exporter with RUNNING status."""
         span = tracer_with_exporter.start_tool_call("test_tool")
+        mock_exporter.reset_mock()  # Reset after start_tool_call's upsert
         result = tracer_with_exporter.upsert_span_running(span)
 
         assert result is True
@@ -275,6 +276,7 @@ class TestUpsertSpanMethods:
     ):
         """Test upsert_span_complete calls exporter with OK status."""
         span = tracer_with_exporter.start_tool_call("test_tool")
+        mock_exporter.reset_mock()  # Reset after start_tool_call's upsert
         result = tracer_with_exporter.upsert_span_complete(span, SpanStatus.OK)
 
         assert result is True
@@ -306,3 +308,117 @@ class TestUpsertSpanMethods:
 
         assert result is False
         tracer_with_exporter.end_span_ok(span)
+
+
+class TestLiveUpdatesUpsert:
+    """Tests for live updates - spans upserting on start with UNSET status."""
+
+    def test_upsert_span_started_calls_upsert_with_unset_status(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test upsert_span_started calls exporter with UNSET status."""
+        span = tracer_with_exporter.start_tool_call("test_tool")
+
+        # start_tool_call already calls upsert_span_started internally
+        # Check that upsert was called with UNSET status
+        call_args = mock_exporter.upsert_span.call_args
+        assert call_args[1]["status_override"] == SpanStatus.UNSET
+        tracer_with_exporter.end_span_ok(span)
+
+    def test_start_llm_call_upserts_immediately(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test start_llm_call upserts span immediately with UNSET status."""
+        mock_exporter.reset_mock()
+
+        span = tracer_with_exporter.start_llm_call()
+
+        mock_exporter.upsert_span.assert_called_once()
+        call_args = mock_exporter.upsert_span.call_args
+        assert call_args[1]["status_override"] == SpanStatus.UNSET
+        tracer_with_exporter.end_span_ok(span)
+
+    def test_start_model_run_upserts_immediately(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test start_model_run upserts span immediately with UNSET status."""
+        mock_exporter.reset_mock()
+
+        span = tracer_with_exporter.start_model_run(model_name="gpt-4")
+
+        mock_exporter.upsert_span.assert_called_once()
+        call_args = mock_exporter.upsert_span.call_args
+        assert call_args[1]["status_override"] == SpanStatus.UNSET
+        tracer_with_exporter.end_span_ok(span)
+
+    def test_start_tool_call_upserts_immediately(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test start_tool_call upserts span immediately with UNSET status."""
+        mock_exporter.reset_mock()
+
+        span = tracer_with_exporter.start_tool_call(tool_name="calculator")
+
+        mock_exporter.upsert_span.assert_called_once()
+        call_args = mock_exporter.upsert_span.call_args
+        assert call_args[1]["status_override"] == SpanStatus.UNSET
+        tracer_with_exporter.end_span_ok(span)
+
+    def test_start_escalation_tool_upserts_immediately(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test start_escalation_tool upserts span immediately with UNSET status."""
+        mock_exporter.reset_mock()
+
+        span = tracer_with_exporter.start_escalation_tool(app_name="ApprovalApp")
+
+        mock_exporter.upsert_span.assert_called_once()
+        call_args = mock_exporter.upsert_span.call_args
+        assert call_args[1]["status_override"] == SpanStatus.UNSET
+        tracer_with_exporter.end_span_ok(span)
+
+    def test_start_process_tool_upserts_immediately(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test start_process_tool upserts span immediately with UNSET status."""
+        mock_exporter.reset_mock()
+
+        span = tracer_with_exporter.start_process_tool(process_name="InvoiceProcessor")
+
+        mock_exporter.upsert_span.assert_called_once()
+        call_args = mock_exporter.upsert_span.call_args
+        assert call_args[1]["status_override"] == SpanStatus.UNSET
+        tracer_with_exporter.end_span_ok(span)
+
+    def test_start_agent_run_upserts_immediately(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test start_agent_run upserts span immediately with UNSET status."""
+        mock_exporter.reset_mock()
+
+        with tracer_with_exporter.start_agent_run(agent_name="TestAgent"):
+            # Check upsert was called before yield returns
+            mock_exporter.upsert_span.assert_called_once()
+            call_args = mock_exporter.upsert_span.call_args
+            assert call_args[1]["status_override"] == SpanStatus.UNSET
+
+    def test_no_upsert_when_exporter_not_configured(self, tracer, span_exporter):
+        """Test no upsert calls when exporter is not configured."""
+        span = tracer.start_tool_call("test_tool")
+        # Should not raise, just silently skip upsert
+        tracer.end_span_ok(span)
+
+    def test_upsert_failure_does_not_prevent_span_creation(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test that upsert failure doesn't prevent span from being created."""
+        mock_exporter.upsert_span.return_value = SpanExportResult.FAILURE
+
+        span = tracer_with_exporter.start_llm_call()
+
+        # Span should still be created even if upsert failed
+        assert span is not None
+        tracer_with_exporter.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        assert len(spans) == 1
