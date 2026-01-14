@@ -179,6 +179,10 @@ def create_integration_tool(
         args_schema=input_model,
         coroutine=integration_tool_fn,
         output_type=output_model,
+        metadata={
+            "tool_type": "integration",
+            "display_name": resource.name,
+        },
     )
     tool.set_tool_wrappers(awrapper=wrapper)
 
