@@ -298,7 +298,7 @@ class TelemetryRuntimeWrapper:
 
                         base_properties = {
                             "AgentName": agent_name,
-                            "Timestamp": datetime.utcnow().isoformat(),
+                            "Timestamp": datetime.now(timezone.utc).isoformat(),
                             "ErrorMessage": str(e)[
                                 :500
                             ],  # Truncate long error messages

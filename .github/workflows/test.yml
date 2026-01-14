@@ -1,0 +1,122 @@
+name: Test
+
+on: workflow_call
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras
+
+      - name: Run unit tests with coverage
+        run: uv run pytest tests/ --cov=src/uipath_agents --cov-report=term-missing --cov-report=xml --cov-report=html --tb=short
+
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-report
+          path: htmlcov/
+          retention-days: 30
+
+      - name: Upload coverage XML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml-report
+          path: coverage.xml
+          retention-days: 30
+
+      - name: Get coverage percentage
+        if: always()
+        id: coverage
+        run: |
+          COVERAGE=$(python3 -c "
+          import xml.etree.ElementTree as ET
+          tree = ET.parse('coverage.xml')
+          root = tree.getroot()
+          line_rate = float(root.attrib.get('line-rate', 0))
+          print(int(line_rate * 100))
+          " || echo "0")
+          echo "percentage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "Coverage: $COVERAGE%"
+
+      - name: Coverage comment
+        if: github.event_name == 'pull_request'
+        uses: py-cov-action/python-coverage-comment-action@v3
+        with:
+          GITHUB_TOKEN: ${{ github.token }}
+          MINIMUM_GREEN: 80
+          MINIMUM_ORANGE: 70
+
+      - name: Add coverage details comment
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        env:
+          COVERAGE: ${{ steps.coverage.outputs.percentage }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const coverage = process.env.COVERAGE;
+            const runId = context.runId;
+            const repo = context.repo;
+            
+            const coverageEmoji = coverage >= 80 ? '🟢' : coverage >= 70 ? '🟡' : '🔴';
+            
+            const comment = `## ${coverageEmoji} Coverage Report: ${coverage}%
+            
+            📊 **Full HTML Coverage Report**: [View detailed coverage](https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId})
+            
+            Click the link above, scroll to "Artifacts" section, and download \`coverage-html-report\` to view the interactive HTML coverage report.
+            
+            ---
+            <sub>Coverage threshold: 🟢 ≥80% | 🟡 ≥70% | 🔴 <70%</sub>`;
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('Coverage Report:')
+            );
+            
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                comment_id: botComment.id,
+                body: comment
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
