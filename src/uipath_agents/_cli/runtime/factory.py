@@ -1,9 +1,12 @@
+import os
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from langgraph.graph.state import CompiledStateGraph, StateGraph
+from uipath._cli._utils._folders import get_personal_workspace_key_async
 from uipath.core import UiPathTraceManager
+from uipath.platform.common import UiPathConfig
 from uipath.platform.resume_triggers import UiPathResumeTriggerHandler
 from uipath.runtime import (
     UiPathResumableRuntime,
@@ -193,6 +196,15 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         memory = await self._get_memory()
         storage = SqliteResumableStorage(memory)
         trace_context_storage = SqliteTraceContextStorage(storage)
+
+        # Only fetch folder_key for local runs (no job_key), not production
+        if not UiPathConfig.job_key and not UiPathConfig.folder_key:
+            try:
+                folder_key = await get_personal_workspace_key_async()
+                if folder_key:
+                    os.environ["UIPATH_FOLDER_KEY"] = folder_key
+            except Exception:
+                pass  # Folder key fetch failed, LlmOps tracing may fail
 
         llmops_exporter = LlmOpsHttpExporter()
         tracer = UiPathTracer(exporter=llmops_exporter)
