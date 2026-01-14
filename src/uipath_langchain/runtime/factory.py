@@ -62,6 +62,8 @@ class UiPathLangGraphRuntimeFactory:
 
     def _get_connection_string(self) -> str:
         """Get the database connection string."""
+        print(f"DEBUG: runtime_dir = {repr(self.context.runtime_dir)}")
+        print(f"DEBUG: state_file = {repr(self.context.state_file)}")
         if self.context.runtime_dir and self.context.state_file:
             path = os.path.join(self.context.runtime_dir, self.context.state_file)
             if not self.context.resume and self.context.job_id is None:
@@ -69,10 +71,12 @@ class UiPathLangGraphRuntimeFactory:
                 if os.path.exists(path):
                     os.remove(path)
             os.makedirs(self.context.runtime_dir, exist_ok=True)
+            print(f"DEBUG: path = {repr(path)}")
             return path
 
         default_path = os.path.join("__uipath", "state.db")
         os.makedirs(os.path.dirname(default_path), exist_ok=True)
+        print(f"DEBUG: defaultpath = {repr(default_path)}")
         return default_path
 
     async def _get_memory(self) -> AsyncSqliteSaver:
@@ -80,6 +84,28 @@ class UiPathLangGraphRuntimeFactory:
         async with self._memory_lock:
             if self._memory is None:
                 connection_string = self._get_connection_string()
+                print(f"DEBUG: connection_string = {repr(connection_string)}")
+                print(
+                    f"DEBUG: Does parent dir exist? {os.path.exists(os.path.dirname(connection_string))}"
+                )
+                print(f"DEBUG: Parent dir = {repr(os.path.dirname(connection_string))}")
+                print(
+                    f"DEBUG: Can write to parent? {os.access(os.path.dirname(connection_string), os.W_OK)}"
+                )
+                print(
+                    f"DEBUG: Does database file exist? {os.path.exists(connection_string)}"
+                )
+
+                # Try to create a test file to verify we can write
+                test_file = connection_string + ".test"
+                try:
+                    with open(test_file, "w") as f:
+                        f.write("test")
+                    print(f"DEBUG: Successfully created test file at {test_file}")
+                    os.remove(test_file)
+                except Exception as e:
+                    print(f"DEBUG: FAILED to create test file: {e}")
+
                 self._memory_cm = AsyncSqliteSaver.from_conn_string(connection_string)
                 self._memory = await self._memory_cm.__aenter__()
                 await self._memory.setup()
@@ -308,6 +334,7 @@ class UiPathLangGraphRuntimeFactory:
 
     async def dispose(self) -> None:
         """Cleanup factory resources."""
+        print("DEBUG: Disposing UiPathLangGraphRuntimeFactory resources...")
         for loader in self._graph_loaders.values():
             await loader.cleanup()
 
