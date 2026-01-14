@@ -40,12 +40,12 @@ class SpanName:
     AGENT_OUTPUT = "Agent output"
 
     # Guardrail container span names (matching C# Temporal)
-    AGENT_PRE_GUARDRAILS = "Agent pre guardrails"
-    AGENT_POST_GUARDRAILS = "Agent post guardrails"
-    LLM_PRE_GUARDRAILS = "LLM pre guardrails"
-    LLM_POST_GUARDRAILS = "LLM post guardrails"
-    TOOL_PRE_GUARDRAILS = "Tool pre guardrails"
-    TOOL_POST_GUARDRAILS = "Tool post guardrails"
+    AGENT_PRE_GUARDRAILS = "Agent input guardrail check"
+    AGENT_POST_GUARDRAILS = "Agent output guardrail check"
+    LLM_PRE_GUARDRAILS = "LLM input guardrail check"
+    LLM_POST_GUARDRAILS = "LLM output guardrail check"
+    TOOL_PRE_GUARDRAILS = "Tool input guardrail check"
+    TOOL_POST_GUARDRAILS = "Tool output guardrail check"
 
     @staticmethod
     def agent_run(agent_name: str, is_conversational: bool = False) -> str:

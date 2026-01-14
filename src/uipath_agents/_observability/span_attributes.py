@@ -348,16 +348,6 @@ class AgentInputSpanAttributes(BaseSpanAttributes):
 # ---------------------------------------------------------------------------
 
 
-class GuardrailAction:
-    """Guardrail action constants."""
-
-    ALLOW = "allow"
-    BLOCK = "block"
-    WARN = "warn"
-    REDACT = "redact"
-    RETRY = "retry"
-
-
 class GuardrailEvaluationSpanAttributes(BaseSpanAttributes):
     """Attributes for guardrail evaluation spans.
 

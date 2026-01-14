@@ -395,10 +395,10 @@ class TestGraphInterruptHandling:
 class TestGuardrailActionDetection:
     """Tests for guardrail action detection from action nodes."""
 
-    def test_validation_passed_ends_immediately_with_allow(
+    def test_validation_passed_ends_immediately_with_skip(
         self, callback, tracer, span_exporter
     ):
-        """When validation passes, span ends immediately with action=allow."""
+        """When validation passes, span ends immediately with action=Skip."""
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span)
 
@@ -418,7 +418,7 @@ class TestGuardrailActionDetection:
             s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
-        assert eval_spans[0].attributes.get("action") == "allow"
+        assert eval_spans[0].attributes.get("action") == "Skip"
 
     def test_validation_failed_defers_until_action_node(
         self, callback, tracer, span_exporter
@@ -465,7 +465,7 @@ class TestGuardrailActionDetection:
             s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
-        assert eval_spans[0].attributes.get("action") == "block"
+        assert eval_spans[0].attributes.get("action") == "Block"
         assert eval_spans[0].attributes.get("validationResult") == "PII detected"
 
     def test_action_node_log_sets_correct_action(self, callback, tracer, span_exporter):
@@ -497,46 +497,12 @@ class TestGuardrailActionDetection:
             s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
-        assert eval_spans[0].attributes.get("action") == "log"
-
-    def test_action_node_escalate_sets_correct_action(
-        self, callback, tracer, span_exporter
-    ):
-        """Test action node with _escalate suffix sets action=escalate."""
-        with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
-
-            run_id = uuid4()
-            callback.on_chain_start(
-                {},
-                {},
-                run_id=run_id,
-                metadata={"langgraph_node": "agent_post_execution_sensitive_guard"},
-            )
-            callback.on_chain_end(
-                {"guardrail_validation_result": "Sensitive content"}, run_id=run_id
-            )
-
-            callback.on_chain_start(
-                {},
-                {},
-                run_id=uuid4(),
-                metadata={
-                    "langgraph_node": "agent_post_execution_sensitive_guard_escalate"
-                },
-            )
-
-        spans = span_exporter.get_finished_spans()
-        eval_spans = [
-            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
-        ]
-        assert len(eval_spans) == 1
-        assert eval_spans[0].attributes.get("action") == "escalate"
+        assert eval_spans[0].attributes.get("action") == "Log"
 
     def test_action_node_hitl_sets_correct_action(
         self, callback, tracer, span_exporter
     ):
-        """Test action node with _hitl suffix sets action=hitl."""
+        """Test action node with _hitl suffix sets action=Escalate."""
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span)
 
@@ -563,7 +529,7 @@ class TestGuardrailActionDetection:
             s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
-        assert eval_spans[0].attributes.get("action") == "hitl"
+        assert eval_spans[0].attributes.get("action") == "Escalate"
 
 
 class TestToolGuardrailParenting:

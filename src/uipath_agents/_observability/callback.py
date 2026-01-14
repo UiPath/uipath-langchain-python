@@ -36,11 +36,10 @@ class GuardrailStage:
 
 
 class GuardrailAction:
-    ALLOW = "allow"
-    LOG = "log"
-    BLOCK = "block"
-    ESCALATE = "escalate"
-    HITL = "hitl"
+    SKIP = "Skip"
+    LOG = "Log"
+    BLOCK = "Block"
+    ESCALATE = "Escalate"
 
 
 # Pattern: {scope}_{stage}_execution_{guardrail_name}
@@ -50,8 +49,7 @@ GUARDRAIL_NODE_PATTERN = re.compile(r"^(agent|llm|tool)_(pre|post)_execution_(.+
 ACTION_SUFFIX_TO_NAME = {
     "_log": GuardrailAction.LOG,
     "_block": GuardrailAction.BLOCK,
-    "_escalate": GuardrailAction.ESCALATE,
-    "_hitl": GuardrailAction.HITL,
+    "_hitl": GuardrailAction.ESCALATE,
 }
 
 
@@ -698,12 +696,12 @@ class UiPathTracingCallback(BaseCallbackHandler):
             validation_passed = validation_result is None
 
             if validation_passed:
-                # Validation passed - end span immediately with "allow"
+                # Validation passed - end span immediately with "skip"
                 self._tracer.end_guardrail_evaluation(
                     span,
                     validation_passed=True,
                     validation_result=None,
-                    action=GuardrailAction.ALLOW,
+                    action=GuardrailAction.SKIP,
                 )
             else:
                 # Validation failed - defer span ending until action node fires
