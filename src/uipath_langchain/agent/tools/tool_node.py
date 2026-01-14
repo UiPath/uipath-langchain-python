@@ -4,13 +4,14 @@ from collections.abc import Sequence
 from inspect import signature
 from typing import Any, Awaitable, Callable, Literal
 
-from langchain_core.messages.ai import AIMessage
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
 from pydantic import BaseModel
+
+from ..react.types import AgentGraphState
 
 # the type safety can be improved with generics
 ToolWrapperType = Callable[
@@ -49,7 +50,9 @@ class UiPathToolNode(RunnableCallable):
         self.wrapper = wrapper
         self.awrapper = awrapper
 
-    def _func(self, state: Any, config: RunnableConfig | None = None) -> OutputType:
+    def _func(
+        self, state: AgentGraphState, config: RunnableConfig | None = None
+    ) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
             return None
@@ -61,7 +64,7 @@ class UiPathToolNode(RunnableCallable):
         return self._process_result(call, result)
 
     async def _afunc(
-        self, state: Any, config: RunnableConfig | None = None
+        self, state: AgentGraphState, config: RunnableConfig | None = None
     ) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
@@ -73,20 +76,10 @@ class UiPathToolNode(RunnableCallable):
             result = await self.tool.ainvoke(call["args"])
         return self._process_result(call, result)
 
-    def _extract_tool_call(self, state: Any) -> ToolCall | None:
+    def _extract_tool_call(self, state: AgentGraphState) -> ToolCall | None:
         """Extract the tool call from the state messages."""
 
-        if not hasattr(state, "messages"):
-            raise ValueError("State does not have messages key")
-
-        last_message = state.messages[-1]
-        if not isinstance(last_message, AIMessage):
-            raise ValueError("Last message in message stack is not an AIMessage.")
-
-        for tool_call in last_message.tool_calls:
-            if tool_call["name"] == self.tool.name:
-                return tool_call
-        return None
+        return state.tool_call
 
     def _process_result(
         self, call: ToolCall, result: dict[str, Any] | Command[Any] | None
@@ -101,7 +94,7 @@ class UiPathToolNode(RunnableCallable):
             return {"messages": [message]}
 
     def _filter_state(
-        self, state: Any, wrapper: ToolWrapperType | AsyncToolWrapperType
+        self, state: AgentGraphState, wrapper: ToolWrapperType | AsyncToolWrapperType
     ) -> BaseModel:
         """Filter the state to the expected model type."""
         model_type = list(signature(wrapper).parameters.values())[2].annotation

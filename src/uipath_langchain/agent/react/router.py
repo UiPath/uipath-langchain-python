@@ -3,6 +3,7 @@
 from typing import Literal
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall
+from langgraph.types import Send
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
 from ..exceptions import AgentNodeRoutingException
@@ -59,7 +60,7 @@ def create_route_agent(thinking_messages_limit: int = 0):
 
     def route_agent(
         state: AgentGraphState,
-    ) -> list[str] | Literal[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE]:
+    ) -> list[str | Send] | Literal[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE]:
         """Route after agent: handles all routing logic including control flow detection.
 
         Routing logic:
@@ -86,7 +87,15 @@ def create_route_agent(thinking_messages_limit: int = 0):
             return AgentGraphNode.TERMINATE
 
         if tool_calls:
-            return [tc["name"] for tc in tool_calls]
+            return [
+                Send(
+                    tc["name"],
+                    AgentGraphState(
+                        messages=messages, inner_state=state.inner_state, tool_call=tc
+                    ),
+                )
+                for tc in tool_calls
+            ]
 
         consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
 

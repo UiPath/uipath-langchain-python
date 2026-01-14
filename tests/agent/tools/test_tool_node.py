@@ -1,6 +1,6 @@
 """Tests for tool_node.py module."""
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -55,6 +55,7 @@ class MockState(BaseModel):
     messages: list[Any] = []
     user_id: str = "test_user"
     session_id: str = "test_session"
+    tool_call: Optional[ToolCall] = None
 
 
 def mock_wrapper(
@@ -101,7 +102,7 @@ class TestUiPathToolNode:
             "id": "test_call_id",
         }
         ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
-        return MockState(messages=[ai_message])
+        return MockState(messages=[ai_message], tool_call=tool_call)
 
     @pytest.fixture
     def empty_state(self):
@@ -197,26 +198,6 @@ class TestUiPathToolNode:
         node = UiPathToolNode(mock_tool)
 
         result = node._func(empty_state)
-
-        assert result is None
-
-    def test_non_ai_message_raises_error(self, mock_tool, non_ai_state):
-        """Test that non-AI messages raise ValueError."""
-        node = UiPathToolNode(mock_tool)
-
-        with pytest.raises(
-            ValueError, match="Last message in message stack is not an AIMessage"
-        ):
-            node._func(non_ai_state)
-
-    def test_mismatched_tool_name_returns_none(self, mock_tool, mock_state):
-        """Test that mismatched tool names return None."""
-        # Change the tool call name to something different
-        mock_state.messages[-1].tool_calls[0]["name"] = "different_tool"
-
-        node = UiPathToolNode(mock_tool)
-
-        result = node._func(mock_state)
 
         assert result is None
 
