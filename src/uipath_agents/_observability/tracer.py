@@ -34,6 +34,7 @@ from .span_attributes import (
     CompletionSpanAttributes,
     EscalationToolSpanAttributes,
     GuardrailEvaluationSpanAttributes,
+    IntegrationToolSpanAttributes,
     LlmCallSpanAttributes,
     LlmPostGuardrailsSpanAttributes,
     LlmPreGuardrailsSpanAttributes,
@@ -404,6 +405,37 @@ class UiPathTracer:
         )
         self._apply_attributes(span, attrs)
         self.upsert_span_started(span)
+        return span
+
+    def start_integration_tool(
+        self,
+        tool_name: str,
+        *,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start an integration tool span (child of tool call).
+
+        Creates a child span for integration tool execution. This replaces
+        the SDK's activity_invoke span which gets filtered out from LLMOps.
+
+        Args:
+            tool_name: Name of the integration tool (used as span name)
+            parent_span: Optional parent span. If None, uses current span.
+
+        Returns:
+            The started Span (caller must call span.end())
+        """
+        parent = parent_span or trace.get_current_span()
+        context = trace.set_span_in_context(parent) if parent else None
+
+        span = self._tracer.start_span(
+            tool_name,
+            kind=SpanKind.INTERNAL,
+            context=context,
+        )
+
+        attrs = IntegrationToolSpanAttributes(tool_name=tool_name)
+        self._apply_attributes(span, attrs)
         return span
 
     def emit_agent_output(self, output: Any) -> None:

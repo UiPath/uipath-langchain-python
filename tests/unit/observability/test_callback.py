@@ -20,8 +20,18 @@ def tracer(span_exporter):
 
 @pytest.fixture
 def callback(tracer):
-    """Create callback with tracer."""
-    return UiPathTracingCallback(tracer)
+    """Create callback with tracer, cleanup after test."""
+    from opentelemetry import context
+
+    # Capture initial context token
+    initial_context = context.get_current()
+
+    cb = UiPathTracingCallback(tracer)
+    yield cb
+    cb.cleanup()  # Detach any attached OTEL context
+
+    # Force reset to initial context state
+    context.attach(initial_context)
 
 
 def _model_key(run_id: UUID) -> UUID:
@@ -390,6 +400,115 @@ class TestGraphInterruptHandling:
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
         assert "error" in spans[0].attributes
+
+
+class TestIntegrationToolCallback:
+    """Tests for integration tool child span handling."""
+
+    def _interruptible_key(self, run_id: UUID) -> UUID:
+        """Derive interruptible child span key (matches callback impl)."""
+        return UUID(int=run_id.int ^ 2)
+
+    def test_on_tool_start_creates_integration_child_span(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test that integration tool_type creates a child span."""
+        run_id = uuid4()
+        serialized = {"name": "Web_Search"}
+        metadata = {"tool_type": "integration", "display_name": "Web Search Tool"}
+
+        callback.on_tool_start(serialized, "input", run_id=run_id, metadata=metadata)
+
+        # Both tool span and integration child span should be tracked
+        assert run_id in callback._spans
+        assert self._interruptible_key(run_id) in callback._spans
+
+    def test_on_tool_end_closes_integration_child_span_first(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test that integration child span closes before tool span."""
+        run_id = uuid4()
+        serialized = {"name": "Web_Search"}
+        metadata = {"tool_type": "integration", "display_name": "Web Search Tool"}
+
+        callback.on_tool_start(serialized, "input", run_id=run_id, metadata=metadata)
+        callback.on_tool_end("result", run_id=run_id)
+
+        # Both spans should be removed
+        assert run_id not in callback._spans
+        assert self._interruptible_key(run_id) not in callback._spans
+
+        spans = span_exporter.get_finished_spans()
+        assert len(spans) == 2
+
+        tool_span = next(s for s in spans if s.name == "Tool call - Web_Search")
+        child_span = next(s for s in spans if s.name == "Web Search Tool")
+
+        # Child should be parented to tool span
+        assert child_span.parent.span_id == tool_span.context.span_id
+        assert child_span.attributes["span_type"] == SpanType.INTEGRATION_TOOL.value
+
+
+class TestContextAttachDetach:
+    """Tests for OTEL context attach/detach on tool spans."""
+
+    def test_tool_span_attaches_context_on_start(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test that on_tool_start attaches span to context."""
+        run_id = uuid4()
+        serialized = {"name": "test_tool"}
+
+        callback.on_tool_start(serialized, "input", run_id=run_id)
+
+        # Context token should be stored
+        assert run_id in callback._span_context_tokens
+
+    def test_tool_span_detaches_context_on_end(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test that on_tool_end detaches context token."""
+        run_id = uuid4()
+        serialized = {"name": "test_tool"}
+
+        callback.on_tool_start(serialized, "input", run_id=run_id)
+        assert run_id in callback._span_context_tokens
+
+        callback.on_tool_end("result", run_id=run_id)
+
+        # Context token should be removed
+        assert run_id not in callback._span_context_tokens
+
+    def test_tool_span_detaches_context_on_error(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test that on_tool_error detaches context token."""
+        run_id = uuid4()
+        serialized = {"name": "test_tool"}
+
+        callback.on_tool_start(serialized, "input", run_id=run_id)
+        assert run_id in callback._span_context_tokens
+
+        callback.on_tool_error(RuntimeError("fail"), run_id=run_id)
+
+        # Context token should be removed
+        assert run_id not in callback._span_context_tokens
+
+    def test_cleanup_detaches_all_context_tokens(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test that cleanup detaches all remaining context tokens."""
+        run_id1 = uuid4()
+        run_id2 = uuid4()
+
+        callback.on_tool_start({"name": "tool1"}, "input", run_id=run_id1)
+        callback.on_tool_start({"name": "tool2"}, "input", run_id=run_id2)
+
+        assert len(callback._span_context_tokens) == 2
+
+        callback.cleanup()
+
+        assert len(callback._span_context_tokens) == 0
 
 
 class TestGuardrailActionDetection:

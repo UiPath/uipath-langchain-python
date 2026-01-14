@@ -9,12 +9,15 @@ Key feature: Spans are created on START (not just end) for real-time visibility.
 import json
 import logging
 import re
+from contextvars import Token
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
+from opentelemetry import context, trace
+from opentelemetry.context import Context
 from opentelemetry.trace import Span
 
 from .tracer import UiPathTracer
@@ -59,9 +62,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
     Spans are created immediately on start events (not delayed until end)
     for real-time observability of long-running operations.
 
-    Context handling: Uses set_span_in_context() at span creation only,
-    avoiding hazardous attach()/detach() patterns that can corrupt context.
-
     Usage:
         tracer = UiPathTracer()
         callback = UiPathTracingCallback(tracer)
@@ -79,6 +79,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._agent_span: Optional[Span] = None
         # LLM spans stored at run_id, model spans at run_id ^ 1 (XOR with 1)
         self._spans: Dict[UUID, Span] = {}
+        self._span_context_tokens: Dict[UUID, Token[Context]] = {}
         self._prompts_captured: bool = False
         # Pending interruptible tool spans (for suspend/resume)
         self._pending_tool_name: Optional[str] = None
@@ -103,6 +104,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
     def set_agent_span(self, agent_span: Span) -> None:
         self._agent_span = agent_span
         self._spans.clear()
+        self._span_context_tokens.clear()
         self._prompts_captured = False
         self._pending_tool_name = None
         self._pending_tool_span = None
@@ -330,29 +332,40 @@ class UiPathTracingCallback(BaseCallbackHandler):
             self._spans[run_id] = span
             self._current_tool_span = span
 
+            span_context_token = context.attach(trace.set_span_in_context(span))
+            self._span_context_tokens[run_id] = span_context_token
+
             call_id = kwargs.get("tool_call_id")
             if call_id:
                 span.set_attribute("callId", call_id)
             if input_str:
                 self._set_tool_arguments(span, input_str)
 
-            if tool_type and tool_display_name:
+            if tool_type:
                 child_span = None
-                if tool_type == "escalation":
+                if tool_type == "escalation" and tool_display_name:
                     child_span = self._tracer.start_escalation_tool(
                         app_name=tool_display_name,
                         parent_span=span,
                     )
-                elif tool_type == "process":
+                elif tool_type == "process" and tool_display_name:
                     child_span = self._tracer.start_process_tool(
                         process_name=tool_display_name,
                         parent_span=span,
                     )
+                elif tool_type == "integration":
+                    child_span = self._tracer.start_integration_tool(
+                        tool_name=tool_display_name or tool_name,
+                        parent_span=span,
+                    )
+
                 if child_span:
                     self._spans[self._interruptible_span_key(run_id)] = child_span
-                    self._pending_tool_name = tool_name
-                    self._pending_tool_span = span
-                    self._pending_process_span = child_span
+                    # Track as pending for suspend scenario (escalation/process only)
+                    if tool_type in ("escalation", "process"):
+                        self._pending_tool_name = tool_name
+                        self._pending_tool_span = span
+                        self._pending_process_span = child_span
 
         except Exception:
             logger.exception("Error in on_tool_start callback")
@@ -371,13 +384,20 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 self._reinvoked_tool_run_ids.discard(run_id)
                 return
 
-            # Close inner span first, then outer
+            # Close child span first (inner), then tool span (outer)
             child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
             if child_span:
                 self._set_tool_result(child_span, output)
                 self._tracer.end_span_ok(child_span)
                 if child_span == self._pending_process_span:
                     self._pending_process_span = None
+
+            span_context_token = self._span_context_tokens.pop(run_id, None)
+            if span_context_token:
+                try:
+                    context.detach(span_context_token)
+                except ValueError:
+                    pass
 
             span = self._spans.pop(run_id, None)
             if span:
@@ -427,9 +447,17 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
             exc = error if isinstance(error, Exception) else Exception(str(error))
 
+            # Close child span first (inner), then tool span (outer)
             child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
             if child_span:
                 self._tracer.end_span_error(child_span, exc)
+
+            span_context_token = self._span_context_tokens.pop(run_id, None)
+            if span_context_token:
+                try:
+                    context.detach(span_context_token)
+                except ValueError:
+                    pass
 
             span = self._spans.pop(run_id, None)
             if span:
@@ -749,6 +777,13 @@ class UiPathTracingCallback(BaseCallbackHandler):
             logger.exception("Error in on_chain_error callback (guardrail)")
 
     def cleanup(self) -> None:
+        for span_context_token in self._span_context_tokens.values():
+            try:
+                context.detach(span_context_token)
+            except Exception:
+                pass
+        self._span_context_tokens.clear()
+
         for span in self._spans.values():
             # Skip pending interruptible spans - upserted with RUNNING, completed on resume
             if span is self._pending_tool_span or span is self._pending_process_span:

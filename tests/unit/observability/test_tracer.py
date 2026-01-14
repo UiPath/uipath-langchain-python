@@ -182,6 +182,47 @@ class TestToolCallSpan:
         assert spans[0].attributes["span_type"] == SpanType.PROCESS_TOOL.value
 
 
+class TestIntegrationToolSpan:
+    """Tests for integration tool span creation."""
+
+    def test_creates_span_with_correct_type(
+        self, tracer: UiPathTracer, span_exporter
+    ) -> None:
+        """Test integration tool span has correct type attribute."""
+        span = tracer.start_integration_tool(tool_name="Web_Search")
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert spans[0].attributes["span_type"] == SpanType.INTEGRATION_TOOL.value
+
+    def test_uses_tool_name_as_span_name(
+        self, tracer: UiPathTracer, span_exporter
+    ) -> None:
+        """Test integration tool span uses tool_name as span name."""
+        span = tracer.start_integration_tool(tool_name="My_Custom_Tool")
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        assert spans[0].name == "My_Custom_Tool"
+        assert spans[0].attributes["toolName"] == "My_Custom_Tool"
+
+    def test_respects_parent_span(self, tracer: UiPathTracer, span_exporter) -> None:
+        """Test integration tool span correctly parents to provided span."""
+        parent = tracer.start_tool_call(tool_name="wrapper_tool")
+        child = tracer.start_integration_tool(
+            tool_name="inner_tool", parent_span=parent
+        )
+        tracer.end_span_ok(child)
+        tracer.end_span_ok(parent)
+
+        spans = span_exporter.get_finished_spans()
+        parent_span = next(s for s in spans if s.name == "Tool call - wrapper_tool")
+        child_span = next(s for s in spans if s.name == "inner_tool")
+
+        assert child_span.parent.span_id == parent_span.context.span_id
+
+
 class TestAgentOutputSpan:
     """Tests for agent output span creation."""
 

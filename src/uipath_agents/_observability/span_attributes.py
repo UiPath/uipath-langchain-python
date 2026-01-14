@@ -484,6 +484,23 @@ class EscalationToolSpanAttributes(BaseSpanAttributes):
         return SpanType.ESCALATION_TOOL
 
 
+class IntegrationToolSpanAttributes(BaseSpanAttributes):
+    """Attributes for integration tool spans.
+
+    Child span under Tool call for integration tool execution.
+    Replaces the SDK's activity_invoke span which gets filtered.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tool_name: str = Field(..., alias="toolName")
+    result: Optional[Any] = Field(None, alias="result")
+
+    @property
+    def type(self) -> str:
+        return SpanType.INTEGRATION_TOOL
+
+
 class ToolGuardrailEvaluationSpanAttributes(GuardrailEvaluationSpanAttributes):
     """Attributes for tool guardrail evaluation spans."""
 
@@ -500,6 +517,7 @@ SpanAttributes = Union[
     ToolCallSpanAttributes,
     ProcessToolSpanAttributes,
     EscalationToolSpanAttributes,
+    IntegrationToolSpanAttributes,
     AgentOutputSpanAttributes,
     GuardrailEvaluationSpanAttributes,
     LlmPreGuardrailsSpanAttributes,
