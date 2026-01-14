@@ -390,3 +390,360 @@ class TestGraphInterruptHandling:
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
         assert "error" in spans[0].attributes
+
+
+class TestGuardrailActionDetection:
+    """Tests for guardrail action detection from action nodes."""
+
+    def test_validation_passed_ends_immediately_with_allow(
+        self, callback, tracer, span_exporter
+    ):
+        """When validation passes, span ends immediately with action=allow."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            run_id = uuid4()
+            # Start guardrail evaluation
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+            )
+            # End with no validation_result (passed)
+            callback.on_chain_end({}, run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        eval_spans = [
+            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+        ]
+        assert len(eval_spans) == 1
+        assert eval_spans[0].attributes.get("action") == "allow"
+
+    def test_validation_failed_defers_until_action_node(
+        self, callback, tracer, span_exporter
+    ):
+        """When validation fails, span ending is deferred until action node fires."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            run_id = uuid4()
+            # Start guardrail evaluation
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+            )
+            # End with validation_result (failed)
+            callback.on_chain_end(
+                {"guardrail_validation_result": "PII detected"}, run_id=run_id
+            )
+
+            # Span should be pending action
+            assert (
+                "agent_pre_execution_pii_guard" in callback._pending_guardrail_actions
+            )
+
+            # Action node fires with _block suffix
+            action_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=action_run_id,
+                metadata={"langgraph_node": "agent_pre_execution_pii_guard_block"},
+            )
+
+            # Pending action should be cleared
+            assert (
+                "agent_pre_execution_pii_guard"
+                not in callback._pending_guardrail_actions
+            )
+
+        spans = span_exporter.get_finished_spans()
+        eval_spans = [
+            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+        ]
+        assert len(eval_spans) == 1
+        assert eval_spans[0].attributes.get("action") == "block"
+        assert eval_spans[0].attributes.get("validationResult") == "PII detected"
+
+    def test_action_node_log_sets_correct_action(self, callback, tracer, span_exporter):
+        """Test action node with _log suffix sets action=log."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={"langgraph_node": "llm_pre_execution_prompt_injection"},
+            )
+            callback.on_chain_end(
+                {"guardrail_validation_result": "Injection detected"}, run_id=run_id
+            )
+
+            # Action node fires with _log suffix
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=uuid4(),
+                metadata={"langgraph_node": "llm_pre_execution_prompt_injection_log"},
+            )
+
+        spans = span_exporter.get_finished_spans()
+        eval_spans = [
+            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+        ]
+        assert len(eval_spans) == 1
+        assert eval_spans[0].attributes.get("action") == "log"
+
+    def test_action_node_escalate_sets_correct_action(
+        self, callback, tracer, span_exporter
+    ):
+        """Test action node with _escalate suffix sets action=escalate."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={"langgraph_node": "agent_post_execution_sensitive_guard"},
+            )
+            callback.on_chain_end(
+                {"guardrail_validation_result": "Sensitive content"}, run_id=run_id
+            )
+
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=uuid4(),
+                metadata={
+                    "langgraph_node": "agent_post_execution_sensitive_guard_escalate"
+                },
+            )
+
+        spans = span_exporter.get_finished_spans()
+        eval_spans = [
+            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+        ]
+        assert len(eval_spans) == 1
+        assert eval_spans[0].attributes.get("action") == "escalate"
+
+    def test_action_node_hitl_sets_correct_action(
+        self, callback, tracer, span_exporter
+    ):
+        """Test action node with _hitl suffix sets action=hitl."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={"langgraph_node": "llm_post_execution_review_guard"},
+            )
+            callback.on_chain_end(
+                {"guardrail_validation_result": "Review needed"}, run_id=run_id
+            )
+
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=uuid4(),
+                metadata={"langgraph_node": "llm_post_execution_review_guard_hitl"},
+            )
+
+        spans = span_exporter.get_finished_spans()
+        eval_spans = [
+            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+        ]
+        assert len(eval_spans) == 1
+        assert eval_spans[0].attributes.get("action") == "hitl"
+
+
+class TestToolGuardrailParenting:
+    """Tests for tool guardrail spans parenting to tool span."""
+
+    def test_tool_pre_guardrail_parents_to_tool_span(
+        self, callback, tracer, span_exporter
+    ):
+        """Tool pre guardrails should be children of the current tool span."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+
+            # Now a tool_pre guardrail fires
+            guard_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=guard_run_id,
+                metadata={"langgraph_node": "tool_pre_execution_input_guard"},
+            )
+            callback.on_chain_end({}, run_id=guard_run_id)
+
+            # Close tool_pre container manually since tool_end doesn't close it
+            callback._close_container("tool", "pre")
+
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_span = next(
+            s for s in spans if s.attributes.get("span_type") == "toolCall"
+        )
+        container_span = next(
+            s for s in spans if s.attributes.get("span_type") == "toolPreGuardrails"
+        )
+
+        # Container should be child of tool span
+        assert container_span.parent.span_id == tool_span.context.span_id
+
+    def test_tool_post_guardrail_parents_to_tool_span(
+        self, callback, tracer, span_exporter
+    ):
+        """Tool post guardrails should be children of the current tool span."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+
+            # Tool post guardrail fires before tool ends
+            guard_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=guard_run_id,
+                metadata={"langgraph_node": "tool_post_execution_output_guard"},
+            )
+            callback.on_chain_end({}, run_id=guard_run_id)
+
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_span = next(
+            s for s in spans if s.attributes.get("span_type") == "toolCall"
+        )
+        container_span = next(
+            s for s in spans if s.attributes.get("span_type") == "toolPostGuardrails"
+        )
+
+        assert container_span.parent.span_id == tool_span.context.span_id
+
+
+class TestPhaseTransitions:
+    """Tests for guardrail phase transition logic."""
+
+    def test_tool_pre_closes_llm_post(self, callback, tracer, span_exporter):
+        """Transitioning to tool_pre should close llm_post container."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            # LLM post guardrail creates llm_post container
+            run_id1 = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id1,
+                metadata={"langgraph_node": "llm_post_execution_guard1"},
+            )
+            callback.on_chain_end({}, run_id=run_id1)
+
+            # Should have llm_post container
+            assert ("llm", "post") in callback._guardrail_containers
+
+            # Start tool
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+
+            # Tool pre guardrail should close llm_post
+            run_id2 = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id2,
+                metadata={"langgraph_node": "tool_pre_execution_guard"},
+            )
+
+            # llm_post should be closed
+            assert ("llm", "post") not in callback._guardrail_containers
+
+            callback.on_chain_end({}, run_id=run_id2)
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+    def test_tool_post_closes_tool_pre(self, callback, tracer, span_exporter):
+        """Transitioning to tool_post should close tool_pre container."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+
+            # Tool pre guardrail
+            run_id1 = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id1,
+                metadata={"langgraph_node": "tool_pre_execution_guard"},
+            )
+            callback.on_chain_end({}, run_id=run_id1)
+
+            assert ("tool", "pre") in callback._guardrail_containers
+
+            # Tool post guardrail should close tool_pre
+            run_id2 = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id2,
+                metadata={"langgraph_node": "tool_post_execution_guard"},
+            )
+
+            assert ("tool", "pre") not in callback._guardrail_containers
+
+            callback.on_chain_end({}, run_id=run_id2)
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+    def test_agent_post_closes_tool_post(self, callback, tracer, span_exporter):
+        """Transitioning to agent_post should close tool_post container."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+
+            # Tool post guardrail
+            run_id1 = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id1,
+                metadata={"langgraph_node": "tool_post_execution_guard"},
+            )
+            callback.on_chain_end({}, run_id=run_id1)
+
+            # Don't end tool yet - agent_post fires before tool ends in some flows
+
+            assert ("tool", "post") in callback._guardrail_containers
+
+            # Agent post guardrail should close tool_post
+            run_id2 = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id2,
+                metadata={"langgraph_node": "agent_post_execution_guard"},
+            )
+
+            assert ("tool", "post") not in callback._guardrail_containers
+
+            callback.on_chain_end({}, run_id=run_id2)
+            callback.on_tool_end("result", run_id=tool_run_id)

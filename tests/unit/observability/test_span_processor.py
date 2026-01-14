@@ -80,6 +80,22 @@ class TestSourceMarkerProcessor:
 
         span.set_attribute.assert_called_once_with("telemetry.filter", "drop")
 
+    def test_marks_evaluate_guardrail_span_for_drop(
+        self, processor: SourceMarkerProcessor
+    ) -> None:
+        """Test that evaluate_guardrail noise spans are marked for drop."""
+        span = MagicMock()
+        span.name = "evaluate_guardrail"
+        span.attributes = {}
+
+        with patch(
+            "uipath_agents._observability.span_processor.is_openinference_span",
+            return_value=False,
+        ):
+            processor.on_start(span, None)
+
+        span.set_attribute.assert_called_once_with("telemetry.filter", "drop")
+
     def test_does_not_mark_regular_span(
         self, processor: SourceMarkerProcessor, mock_span: MagicMock
     ) -> None:

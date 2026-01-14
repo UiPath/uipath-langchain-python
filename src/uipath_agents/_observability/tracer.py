@@ -27,14 +27,22 @@ from .schema import SpanName
 from .schema import SpanType as SpanTypeEnum
 from .span_attributes import (
     AgentOutputSpanAttributes,
+    AgentPostGuardrailsSpanAttributes,
+    AgentPreGuardrailsSpanAttributes,
     AgentRunSpanAttributes,
     BaseSpanAttributes,
     CompletionSpanAttributes,
     EscalationToolSpanAttributes,
+    GuardrailEvaluationSpanAttributes,
     LlmCallSpanAttributes,
+    LlmPostGuardrailsSpanAttributes,
+    LlmPreGuardrailsSpanAttributes,
     ModelSettings,
     ProcessToolSpanAttributes,
     ToolCallSpanAttributes,
+    ToolGuardrailEvaluationSpanAttributes,
+    ToolPostGuardrailsSpanAttributes,
+    ToolPreGuardrailsSpanAttributes,
     get_agent_version,
     get_execution_type,
 )
@@ -575,3 +583,133 @@ class UiPathTracer:
         except Exception:
             logger.exception("Error upserting span from saved data")
             return False
+
+    # -------------------------------------------------------------------------
+    # Guardrail Spans
+    # -------------------------------------------------------------------------
+
+    def start_guardrails_container(
+        self,
+        scope: str,
+        stage: str,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start a container span for a guardrails phase.
+
+        Args:
+            scope: "agent", "llm", or "tool"
+            stage: "pre" or "post"
+            parent_span: Optional parent span. If None, uses current span.
+
+        Returns:
+            The started container Span (caller must call span.end())
+        """
+        parent = parent_span or trace.get_current_span()
+        context = trace.set_span_in_context(parent) if parent else None
+
+        span_name = SpanName.guardrails_container(scope, stage)
+        span = self._tracer.start_span(
+            span_name,
+            kind=SpanKind.INTERNAL,
+            context=context,
+        )
+
+        # Select appropriate attributes class based on scope and stage
+        attrs: BaseSpanAttributes
+        if scope == "agent":
+            if stage == "pre":
+                attrs = AgentPreGuardrailsSpanAttributes()
+            else:
+                attrs = AgentPostGuardrailsSpanAttributes()
+        elif scope == "llm":
+            if stage == "pre":
+                attrs = LlmPreGuardrailsSpanAttributes()
+            else:
+                attrs = LlmPostGuardrailsSpanAttributes()
+        else:  # tool
+            if stage == "pre":
+                attrs = ToolPreGuardrailsSpanAttributes()
+            else:
+                attrs = ToolPostGuardrailsSpanAttributes()
+
+        self._apply_attributes(span, attrs)
+        return span
+
+    def start_guardrail_evaluation(
+        self,
+        guardrail_name: str,
+        guardrail_description: Optional[str] = None,
+        scope: str = "agent",
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start an individual guardrail evaluation span.
+
+        Args:
+            guardrail_name: Name of the guardrail being evaluated
+            guardrail_description: Optional description of the guardrail
+            scope: "agent", "llm", or "tool" - determines span type
+            parent_span: Optional parent span. If None, uses current span.
+
+        Returns:
+            The started evaluation Span (caller must call end_guardrail_evaluation())
+        """
+        parent = parent_span or trace.get_current_span()
+        context = trace.set_span_in_context(parent) if parent else None
+
+        span_name = SpanName.guardrail(guardrail_name)
+        span = self._tracer.start_span(
+            span_name,
+            kind=SpanKind.INTERNAL,
+            context=context,
+        )
+
+        # Tool scope uses ToolGuardrailEvaluationSpanAttributes
+        if scope == "tool":
+            attrs: BaseSpanAttributes = ToolGuardrailEvaluationSpanAttributes(
+                guardrail_name=guardrail_name,
+                guardrail_description=guardrail_description,
+            )
+        else:
+            attrs = GuardrailEvaluationSpanAttributes(
+                guardrail_name=guardrail_name,
+                guardrail_description=guardrail_description,
+            )
+
+        self._apply_attributes(span, attrs)
+        return span
+
+    def end_guardrail_evaluation(
+        self,
+        span: Span,
+        validation_passed: bool,
+        validation_result: Optional[str] = None,
+        action: Optional[str] = None,
+        severity_level: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> None:
+        """End a guardrail evaluation span with result attributes.
+
+        Args:
+            span: The guardrail evaluation span to end
+            validation_passed: Whether the guardrail validation passed
+            validation_result: The validation result message (if failed)
+            action: The action taken ("allow", "block", "log", "escalate")
+            severity_level: Severity level for log actions
+            reason: Reason for block/skip actions
+        """
+        if validation_result:
+            span.set_attribute("validationResult", validation_result)
+        if action:
+            span.set_attribute("guardrailAction", action)
+            span.set_attribute("action", action)
+        if severity_level:
+            span.set_attribute("severityLevel", severity_level)
+        if reason:
+            span.set_attribute("reason", reason)
+
+        if validation_passed:
+            span.set_status(Status(StatusCode.OK))
+        else:
+            span.set_status(Status(StatusCode.OK))  # Guardrail failure != span error
+
+        span.end()

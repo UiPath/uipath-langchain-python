@@ -39,6 +39,14 @@ class SpanName:
     MODEL_RUN = "Model run"
     AGENT_OUTPUT = "Agent output"
 
+    # Guardrail container span names (matching C# Temporal)
+    AGENT_PRE_GUARDRAILS = "Agent pre guardrails"
+    AGENT_POST_GUARDRAILS = "Agent post guardrails"
+    LLM_PRE_GUARDRAILS = "LLM pre guardrails"
+    LLM_POST_GUARDRAILS = "LLM post guardrails"
+    TOOL_PRE_GUARDRAILS = "Tool pre guardrails"
+    TOOL_POST_GUARDRAILS = "Tool post guardrails"
+
     @staticmethod
     def agent_run(agent_name: str, is_conversational: bool = False) -> str:
         if is_conversational:
@@ -52,3 +60,17 @@ class SpanName:
     @staticmethod
     def guardrail(guardrail_name: str) -> str:
         return f"Guardrail - {guardrail_name}"
+
+    @staticmethod
+    def guardrails_container(scope: str, stage: str) -> str:
+        """Get container span name for a guardrails phase.
+
+        Args:
+            scope: "agent", "llm", or "tool"
+            stage: "pre" or "post"
+
+        Returns:
+            Human-readable container span name
+        """
+        scope_map = {"agent": "Agent", "llm": "LLM", "tool": "Tool"}
+        return f"{scope_map.get(scope, scope.capitalize())} {stage} guardrails"

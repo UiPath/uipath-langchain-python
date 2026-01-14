@@ -8,7 +8,8 @@ Key feature: Spans are created on START (not just end) for real-time visibility.
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -19,6 +20,39 @@ from opentelemetry.trace import Span
 from .tracer import UiPathTracer
 
 logger = logging.getLogger(__name__)
+
+# --- Guardrail Constants ---
+
+
+class GuardrailScope:
+    AGENT = "agent"
+    LLM = "llm"
+    TOOL = "tool"
+
+
+class GuardrailStage:
+    PRE = "pre"
+    POST = "post"
+
+
+class GuardrailAction:
+    ALLOW = "allow"
+    LOG = "log"
+    BLOCK = "block"
+    ESCALATE = "escalate"
+    HITL = "hitl"
+
+
+# Pattern: {scope}_{stage}_execution_{guardrail_name}
+GUARDRAIL_NODE_PATTERN = re.compile(r"^(agent|llm|tool)_(pre|post)_execution_(.+)$")
+
+# Map action suffix to action name
+ACTION_SUFFIX_TO_NAME = {
+    "_log": GuardrailAction.LOG,
+    "_block": GuardrailAction.BLOCK,
+    "_escalate": GuardrailAction.ESCALATE,
+    "_hitl": GuardrailAction.HITL,
+}
 
 
 class UiPathTracingCallback(BaseCallbackHandler):
@@ -56,6 +90,17 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._resume_tool_name: Optional[str] = None
         # Run IDs for re-invoked tools after resume (no spans created, originals upserted)
         self._reinvoked_tool_run_ids: set[UUID] = set()
+        # Guardrail tracking
+        self._guardrail_containers: Dict[Tuple[str, str], Span] = {}
+        self._guardrail_spans: Dict[UUID, Span] = {}
+        self._guardrail_info: Dict[UUID, Tuple[str, str, str]] = {}
+        self._current_llm_span: Optional[Span] = None
+        self._llm_span_from_guardrail: bool = False
+        # Current tool span for tool guardrail parenting
+        self._current_tool_span: Optional[Span] = None
+        # Pending guardrail actions: node_name -> (span, validation_result)
+        # When validation fails, we defer span ending until action node fires
+        self._pending_guardrail_actions: Dict[str, Tuple[Span, Optional[str]]] = {}
 
     def set_agent_span(self, agent_span: Span) -> None:
         self._agent_span = agent_span
@@ -64,6 +109,13 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._pending_tool_name = None
         self._pending_tool_span = None
         self._pending_process_span = None
+        self._guardrail_containers.clear()
+        self._guardrail_spans.clear()
+        self._guardrail_info.clear()
+        self._current_llm_span = None
+        self._llm_span_from_guardrail = False
+        self._current_tool_span = None
+        self._pending_guardrail_actions.clear()
 
     def set_resume_context(self, tool_name: str) -> None:
         """Set resume context - skip creating spans for this tool on first encounter."""
@@ -103,18 +155,30 @@ class UiPathTracingCallback(BaseCallbackHandler):
         Creates:
         - LLM call span (outer, type: completion) at key run_id
         - Model run span (inner, type: completion) at key _model_span_key(run_id)
+
+        If llmCall was created early by llm_pre guardrails, reuses it and updates attrs.
         """
+        self._close_container(GuardrailScope.AGENT, GuardrailStage.PRE)
+
         model_name = self._extract_model_name(serialized)
         max_tokens, temperature = self._extract_settings(serialized)
-        parent = self._get_span_or_root(parent_run_id)
 
-        # LLM call: no model (model only on child span)
-        llm_span = self._tracer.start_llm_call(
-            max_tokens=max_tokens, temperature=temperature, parent_span=parent
-        )
+        if self._current_llm_span and self._llm_span_from_guardrail:
+            llm_span = self._current_llm_span
+            settings = {"maxTokens": max_tokens, "temperature": temperature}
+            llm_span.set_attribute("settings", json.dumps(settings))
+            self._llm_span_from_guardrail = False
+        else:
+            parent = self._get_span_or_root(parent_run_id)
+            llm_span = self._tracer.start_llm_call(
+                max_tokens=max_tokens, temperature=temperature, parent_span=parent
+            )
+
+        self._current_llm_span = llm_span
         self._spans[run_id] = llm_span
 
-        # Model run: has model and settings
+        self._close_container(GuardrailScope.LLM, GuardrailStage.PRE)
+
         model_span = self._tracer.start_model_run(
             model_name,
             max_tokens=max_tokens,
@@ -191,16 +255,17 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
-            # Close model span first (inner), then LLM span (outer)
+            # Close inner span first, then outer
             model_span = self._spans.pop(self._model_span_key(run_id), None)
             if model_span:
-                # Add usage and toolCalls to model span
                 self._set_usage_attributes(model_span, response)
                 self._set_tool_calls_attributes(model_span, response)
                 self._tracer.end_span_ok(model_span)
             llm_span = self._spans.pop(run_id, None)
             if llm_span:
                 self._tracer.end_span_ok(llm_span)
+
+            self._close_container(GuardrailScope.LLM, GuardrailStage.POST)
 
         except Exception:
             logger.exception("Error in on_llm_end callback")
@@ -221,6 +286,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
             llm_span = self._spans.pop(run_id, None)
             if llm_span:
                 self._tracer.end_span_error(llm_span, exc)
+
+            self._close_container(GuardrailScope.LLM, GuardrailStage.POST)
 
         except Exception:
             logger.exception("Error in on_llm_error callback")
@@ -250,14 +317,10 @@ class UiPathTracingCallback(BaseCallbackHandler):
     ) -> None:
         try:
             tool_name = serialized.get("name", "unknown")
-
-            # Extract tool_type and display_name from metadata (set by uipath-langchain)
             tool_type = metadata.get("tool_type") if metadata else None
             tool_display_name = metadata.get("display_name") if metadata else None
 
-            # Resume mode: skip span creation for the resumed tool
-            # LangGraph re-invokes the interrupted tool on resume, but we skip
-            # creating a duplicate span since the original was already saved
+            # Resume mode: skip duplicate span for re-invoked tool
             if self._resume_tool_name and tool_name == self._resume_tool_name:
                 logger.debug("Resume mode: skipping span creation for %s", tool_name)
                 self._resume_tool_name = None  # Only skip once
@@ -267,8 +330,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
             parent = self._get_span_or_root(parent_run_id)
             span = self._tracer.start_tool_call(tool_name, parent_span=parent)
             self._spans[run_id] = span
+            self._current_tool_span = span
 
-            # Set tool attributes: callId, arguments
             call_id = kwargs.get("tool_call_id")
             if call_id:
                 span.set_attribute("callId", call_id)
@@ -289,7 +352,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
                     )
                 if child_span:
                     self._spans[self._interruptible_span_key(run_id)] = child_span
-                    # Track as pending for suspend scenario
                     self._pending_tool_name = tool_name
                     self._pending_tool_span = span
                     self._pending_process_span = child_span
@@ -306,17 +368,16 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
-            # LangGraph re-invokes tool after resume - original spans already upserted
+            # Skip re-invoked tool after resume - original spans already upserted
             if run_id in self._reinvoked_tool_run_ids:
                 self._reinvoked_tool_run_ids.discard(run_id)
                 return
 
-            # Close interruptible child span first, then tool span (parent)
+            # Close inner span first, then outer
             child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
             if child_span:
                 self._set_tool_result(child_span, output)
                 self._tracer.end_span_ok(child_span)
-                # Clear pending if this was the pending span
                 if child_span == self._pending_process_span:
                     self._pending_process_span = None
 
@@ -327,6 +388,10 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 if span == self._pending_tool_span:
                     self._pending_tool_span = None
                     self._pending_tool_name = None
+                if span == self._current_tool_span:
+                    # Close tool_post container before clearing current tool
+                    self._close_container(GuardrailScope.TOOL, GuardrailStage.POST)
+                    self._current_tool_span = None
 
         except Exception:
             logger.exception("Error in on_tool_end callback")
@@ -351,13 +416,11 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
-            # LangGraph re-invokes tool after resume - original spans already upserted
             if run_id in self._reinvoked_tool_run_ids:
                 self._reinvoked_tool_run_ids.discard(run_id)
                 return
 
-            # GraphInterrupt = suspend signal, don't close spans with error
-            # Spans will be upserted with RUNNING status by _handle_suspended()
+            # GraphInterrupt = suspend signal, spans upserted with RUNNING by _handle_suspended()
             if self._is_graph_interrupt(error):
                 logger.debug(
                     "GraphInterrupt detected for tool, spans kept open for upsert"
@@ -366,7 +429,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
             exc = error if isinstance(error, Exception) else Exception(str(error))
 
-            # Close interruptible child span first, then tool span (parent)
             child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
             if child_span:
                 self._tracer.end_span_error(child_span, exc)
@@ -467,10 +529,230 @@ class UiPathTracingCallback(BaseCallbackHandler):
         else:
             span.set_attribute("result", str(output))
 
+    # -------------------------------------------------------------------------
+    # Chain Events (for Guardrail Nodes)
+    # -------------------------------------------------------------------------
+
+    def _parse_guardrail_node(self, node_name: str) -> Optional[Tuple[str, str, str]]:
+        """Parse guardrail info from LangGraph node name.
+
+        Args:
+            node_name: The langgraph_node name from metadata
+
+        Returns:
+            Tuple of (scope, stage, guardrail_name) or None if not a guardrail node
+        """
+        for suffix in ACTION_SUFFIX_TO_NAME:
+            if node_name.endswith(suffix):
+                return None
+
+        match = GUARDRAIL_NODE_PATTERN.match(node_name)
+        if match:
+            scope, stage, guardrail_name = match.groups()
+            return (scope, stage, guardrail_name)
+        return None
+
+    def _get_or_create_container(
+        self, scope: str, stage: str, parent_span: Optional[Span]
+    ) -> Span:
+        key = (scope, stage)
+        if key not in self._guardrail_containers:
+            container = self._tracer.start_guardrails_container(
+                scope, stage, parent_span
+            )
+            self._guardrail_containers[key] = container
+        return self._guardrail_containers[key]
+
+    def _close_container(self, scope: str, stage: str) -> None:
+        key = (scope, stage)
+        if key in self._guardrail_containers:
+            container = self._guardrail_containers.pop(key)
+            self._tracer.end_span_ok(container)
+
+    def _close_previous_phase_containers(
+        self, current_scope: str, current_stage: str
+    ) -> None:
+        """Close containers from previous phases when transitioning.
+
+        Phase order: agent_pre -> llm_pre -> (model) -> llm_post -> tool_pre -> (tool) -> tool_post -> agent_post
+        """
+        S, T = GuardrailScope, GuardrailStage
+        if current_scope == S.LLM and current_stage == T.PRE:
+            self._close_container(S.AGENT, T.PRE)
+        elif current_scope == S.LLM and current_stage == T.POST:
+            self._close_container(S.LLM, T.PRE)
+        elif current_scope == S.TOOL and current_stage == T.PRE:
+            self._close_container(S.LLM, T.POST)
+        elif current_scope == S.TOOL and current_stage == T.POST:
+            self._close_container(S.TOOL, T.PRE)
+        elif current_scope == S.AGENT and current_stage == T.POST:
+            self._close_container(S.LLM, T.POST)
+            self._close_container(S.TOOL, T.POST)
+
+    def _check_and_handle_action_node(self, node_name: str) -> bool:
+        """Check if node is an action node and end the pending guardrail span.
+
+        Action nodes have the pattern: {evaluation_node_name}_{action}
+        where action is one of: log, block, escalate, hitl
+
+        Returns True if this was an action node (caller should skip further processing).
+        """
+        for suffix, action in ACTION_SUFFIX_TO_NAME.items():
+            if node_name.endswith(suffix):
+                # Extract evaluation node name by removing the action suffix
+                eval_node_name = node_name[: -len(suffix)]
+                if eval_node_name in self._pending_guardrail_actions:
+                    span, validation_result = self._pending_guardrail_actions.pop(
+                        eval_node_name
+                    )
+                    self._tracer.end_guardrail_evaluation(
+                        span,
+                        validation_passed=False,
+                        validation_result=validation_result,
+                        action=action,
+                    )
+                    return True
+        return False
+
+    def on_chain_start(
+        self,
+        serialized: Dict[str, Any],
+        inputs: Dict[str, Any],
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Detect guardrail nodes and create spans."""
+        try:
+            if not metadata:
+                return
+
+            node_name = metadata.get("langgraph_node", "")
+            if not node_name:
+                return
+
+            # Check if this is an action node (fires after failed validation)
+            if self._check_and_handle_action_node(node_name):
+                return
+
+            guardrail_info = self._parse_guardrail_node(node_name)
+            if not guardrail_info:
+                return
+
+            scope, stage, guardrail_name = guardrail_info
+            self._close_previous_phase_containers(scope, stage)
+
+            # Determine parent span based on scope
+            if scope == GuardrailScope.LLM:
+                if stage == GuardrailStage.PRE:
+                    # Create llmCall once per LLM turn (flag cleared by on_llm_start)
+                    if not self._llm_span_from_guardrail:
+                        self._current_llm_span = self._tracer.start_llm_call(
+                            max_tokens=None,
+                            temperature=None,
+                            parent_span=self._agent_span,
+                        )
+                        self._llm_span_from_guardrail = True
+                parent = self._current_llm_span or self._agent_span
+            elif scope == GuardrailScope.TOOL:
+                # Tool guardrails are children of the current tool span
+                parent = self._current_tool_span or self._agent_span
+            else:
+                parent = self._get_span_or_root(parent_run_id)
+
+            container = self._get_or_create_container(scope, stage, parent)
+            eval_span = self._tracer.start_guardrail_evaluation(
+                guardrail_name=guardrail_name,
+                scope=scope,
+                parent_span=container,
+            )
+            self._guardrail_spans[run_id] = eval_span
+            self._guardrail_info[run_id] = (scope, stage, guardrail_name)
+
+        except Exception:
+            logger.exception("Error in on_chain_start callback (guardrail)")
+
+    def on_chain_end(
+        self,
+        outputs: Dict[str, Any],
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
+    ) -> None:
+        """End guardrail span with results."""
+        try:
+            if run_id not in self._guardrail_spans:
+                return
+
+            span = self._guardrail_spans.pop(run_id)
+            info = self._guardrail_info.pop(run_id, None)
+
+            validation_result = None
+            if isinstance(outputs, dict):
+                validation_result = outputs.get("guardrail_validation_result")
+
+            validation_passed = validation_result is None
+
+            if validation_passed:
+                # Validation passed - end span immediately with "allow"
+                self._tracer.end_guardrail_evaluation(
+                    span,
+                    validation_passed=True,
+                    validation_result=None,
+                    action=GuardrailAction.ALLOW,
+                )
+            else:
+                # Validation failed - defer span ending until action node fires
+                # Reconstruct the evaluation node name from guardrail info
+                if info:
+                    scope, stage, guardrail_name = info
+                    eval_node_name = f"{scope}_{stage}_execution_{guardrail_name}"
+                    self._pending_guardrail_actions[eval_node_name] = (
+                        span,
+                        validation_result,
+                    )
+                else:
+                    # Fallback: end with "log" if we can't track the action
+                    self._tracer.end_guardrail_evaluation(
+                        span,
+                        validation_passed=False,
+                        validation_result=validation_result,
+                        action=GuardrailAction.LOG,
+                    )
+            # Container closing handled by phase transitions
+
+        except Exception:
+            logger.exception("Error in on_chain_end callback (guardrail)")
+
+    def on_chain_error(
+        self,
+        error: BaseException,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Handle guardrail chain errors."""
+        try:
+            if run_id not in self._guardrail_spans:
+                return
+
+            span = self._guardrail_spans.pop(run_id)
+            self._guardrail_info.pop(run_id, None)
+
+            exc = error if isinstance(error, Exception) else Exception(str(error))
+            self._tracer.end_span_error(span, exc)
+
+        except Exception:
+            logger.exception("Error in on_chain_error callback (guardrail)")
+
     def cleanup(self) -> None:
         for span in self._spans.values():
-            # Skip pending interruptible spans - they were upserted with RUNNING
-            # and will be completed via upsert on resume
+            # Skip pending interruptible spans - upserted with RUNNING, completed on resume
             if span is self._pending_tool_span or span is self._pending_process_span:
                 continue
             try:
@@ -482,3 +764,29 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._pending_tool_span = None
         self._pending_process_span = None
         self._pending_tool_name = None
+
+        for span in self._guardrail_spans.values():
+            try:
+                span.end()
+            except Exception:
+                pass
+        self._guardrail_spans.clear()
+        self._guardrail_info.clear()
+
+        # End any pending guardrail action spans
+        for span, _ in self._pending_guardrail_actions.values():
+            try:
+                span.end()
+            except Exception:
+                pass
+        self._pending_guardrail_actions.clear()
+
+        for span in self._guardrail_containers.values():
+            try:
+                span.end()
+            except Exception:
+                pass
+        self._guardrail_containers.clear()
+
+        self._current_llm_span = None
+        self._current_tool_span = None
