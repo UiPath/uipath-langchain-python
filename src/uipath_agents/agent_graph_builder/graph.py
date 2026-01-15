@@ -50,7 +50,7 @@ async def build_agent_graph(
 
     messages = create_message_factory(agent_definition, input_model)
 
-    guardrails = build_guardrails_with_actions(agent_definition.guardrails)
+    guardrails = build_guardrails_with_actions(agent_definition.guardrails, tools)
 
     agent_config = AgentGraphConfig(
         recursion_limit=AGENT_LOOP_RECURSION_LIMIT,
