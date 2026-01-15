@@ -6,6 +6,8 @@ span structure across all UiPath agent implementations.
 
 from enum import Enum
 
+GUARDRAIL_VALIDATION_RESULT_KEY = "guardrail_validation_result"
+
 
 class SpanType(str, Enum):
     """Span types matching C# Agents schema."""

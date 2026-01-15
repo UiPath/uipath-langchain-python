@@ -20,6 +20,7 @@ from opentelemetry import context, trace
 from opentelemetry.context import Context
 from opentelemetry.trace import Span
 
+from .schema import GUARDRAIL_VALIDATION_RESULT_KEY
 from .tracer import UiPathTracer
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._llm_span_from_guardrail: bool = False
         # Current tool span for tool guardrail parenting
         self._current_tool_span: Optional[Span] = None
+        self._tool_span_from_guardrail: bool = False
+        # Track when tool ended but waiting for post guardrails
+        self._tool_ended_pending_post: bool = False
         # Pending guardrail actions: node_name -> (span, validation_result)
         # When validation fails, we defer span ending until action node fires
         self._pending_guardrail_actions: Dict[str, Tuple[Span, Optional[str]]] = {}
@@ -115,7 +119,19 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._current_llm_span = None
         self._llm_span_from_guardrail = False
         self._current_tool_span = None
+        self._tool_span_from_guardrail = False
+        self._tool_ended_pending_post = False
         self._pending_guardrail_actions.clear()
+
+    def cleanup_containers(self) -> None:
+        """Close all remaining open guardrail container spans.
+
+        Should be called when agent run completes to ensure all container spans
+        are properly ended and exported.
+        """
+        for key in list(self._guardrail_containers.keys()):
+            scope, stage = key
+            self._close_container(scope, stage)
 
     def set_resume_context(self, tool_name: str) -> None:
         """Set resume context - skip creating spans for this tool on first encounter."""
@@ -326,10 +342,19 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 self._reinvoked_tool_run_ids.add(run_id)
                 return
 
-            parent = self._get_span_or_root(parent_run_id)
-            span = self._tracer.start_tool_call(tool_name, parent_span=parent)
-            self._spans[run_id] = span
-            self._current_tool_span = span
+            # Check if tool span was created early by tool_pre guardrails
+            if self._current_tool_span and self._tool_span_from_guardrail:
+                span = self._current_tool_span
+                span.update_name(f"Tool call - {tool_name}")
+                span.set_attribute("toolName", tool_name)
+                self._spans[run_id] = span
+                self._tool_span_from_guardrail = False
+                self._close_container(GuardrailScope.TOOL, GuardrailStage.PRE)
+            else:
+                parent = self._get_span_or_root(parent_run_id)
+                span = self._tracer.start_tool_call(tool_name, parent_span=parent)
+                self._spans[run_id] = span
+                self._current_tool_span = span
 
             span_context_token = context.attach(trace.set_span_in_context(span))
             self._span_context_tokens[run_id] = span_context_token
@@ -406,9 +431,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
                     self._pending_tool_span = None
                     self._pending_tool_name = None
                 if span == self._current_tool_span:
-                    # Close tool_post container before clearing current tool
-                    self._close_container(GuardrailScope.TOOL, GuardrailStage.POST)
-                    self._current_tool_span = None
+                    # Mark tool as ended, but keep _current_tool_span for post guardrails
+                    # Post guardrails fire AFTER on_tool_end in LangGraph execution order
+                    self._tool_ended_pending_post = True
 
         except Exception:
             logger.exception("Error in on_tool_end callback")
@@ -628,6 +653,15 @@ class UiPathTracingCallback(BaseCallbackHandler):
             container = self._guardrail_containers.pop(key)
             self._tracer.end_span_ok(container)
 
+        # Clear tool span after post guardrails complete
+        if (
+            scope == GuardrailScope.TOOL
+            and stage == GuardrailStage.POST
+            and self._tool_ended_pending_post
+        ):
+            self._current_tool_span = None
+            self._tool_ended_pending_post = False
+
     def _close_previous_phase_containers(
         self, current_scope: str, current_stage: str
     ) -> None:
@@ -638,6 +672,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
         S, T = GuardrailScope, GuardrailStage
         if current_scope == S.LLM and current_stage == T.PRE:
             self._close_container(S.AGENT, T.PRE)
+            # New LLM iteration: cleanup any pending tool state from previous iteration
+            self._close_container(S.TOOL, T.POST)
         elif current_scope == S.LLM and current_stage == T.POST:
             self._close_container(S.LLM, T.PRE)
         elif current_scope == S.TOOL and current_stage == T.PRE:
@@ -670,6 +706,22 @@ class UiPathTracingCallback(BaseCallbackHandler):
                         validation_result=validation_result,
                         action=action,
                     )
+
+                    # If tool_pre guardrail blocks, end the placeholder tool span
+                    if (
+                        action == GuardrailAction.BLOCK
+                        and self._tool_span_from_guardrail
+                        and "tool_pre" in eval_node_name
+                    ):
+                        self._close_container(GuardrailScope.TOOL, GuardrailStage.PRE)
+                        if self._current_tool_span:
+                            self._current_tool_span.set_attribute(
+                                "output", "Blocked by guardrail"
+                            )
+                            self._current_tool_span.end()
+                            self._current_tool_span = None
+                        self._tool_span_from_guardrail = False
+
                     return True
         return False
 
@@ -717,7 +769,12 @@ class UiPathTracingCallback(BaseCallbackHandler):
                         self._llm_span_from_guardrail = True
                 parent = self._current_llm_span or self._agent_span
             elif scope == GuardrailScope.TOOL:
-                # Tool guardrails are children of the current tool span
+                if stage == GuardrailStage.PRE and not self._current_tool_span:
+                    self._current_tool_span = self._tracer.start_tool_call(
+                        tool_name="Tool call",
+                        parent_span=self._agent_span,
+                    )
+                    self._tool_span_from_guardrail = True
                 parent = self._current_tool_span or self._agent_span
             else:
                 parent = self._get_span_or_root(parent_run_id)
@@ -752,7 +809,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
             validation_result = None
             if isinstance(outputs, dict):
-                validation_result = outputs.get("guardrail_validation_result")
+                validation_result = outputs.get(GUARDRAIL_VALIDATION_RESULT_KEY)
+            elif hasattr(outputs, "update") and isinstance(outputs.update, dict):
+                validation_result = outputs.update.get(GUARDRAIL_VALIDATION_RESULT_KEY)
 
             validation_passed = validation_result is None
 
@@ -853,6 +912,14 @@ class UiPathTracingCallback(BaseCallbackHandler):
             except Exception:
                 pass
         self._guardrail_containers.clear()
+
+        # End orphaned placeholder tool span if guardrail created it but tool never started
+        if self._tool_span_from_guardrail and self._current_tool_span:
+            try:
+                self._current_tool_span.end()
+            except Exception:
+                pass
+            self._tool_span_from_guardrail = False
 
         self._current_llm_span = None
         self._current_tool_span = None

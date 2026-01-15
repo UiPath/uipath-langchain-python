@@ -6,7 +6,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from uipath_agents._observability.callback import UiPathTracingCallback
-from uipath_agents._observability.schema import SpanType
+from uipath_agents._observability.schema import (
+    GUARDRAIL_VALIDATION_RESULT_KEY,
+    SpanType,
+)
 from uipath_agents._observability.tracer import UiPathTracer
 
 # span_exporter fixture comes from conftest.py
@@ -556,7 +559,7 @@ class TestGuardrailActionDetection:
             )
             # End with validation_result (failed)
             callback.on_chain_end(
-                {"guardrail_validation_result": "PII detected"}, run_id=run_id
+                {GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected"}, run_id=run_id
             )
 
             # Span should be pending action
@@ -600,7 +603,7 @@ class TestGuardrailActionDetection:
                 metadata={"langgraph_node": "llm_pre_execution_prompt_injection"},
             )
             callback.on_chain_end(
-                {"guardrail_validation_result": "Injection detected"}, run_id=run_id
+                {GUARDRAIL_VALIDATION_RESULT_KEY: "Injection detected"}, run_id=run_id
             )
 
             # Action node fires with _log suffix
@@ -633,7 +636,7 @@ class TestGuardrailActionDetection:
                 metadata={"langgraph_node": "llm_post_execution_review_guard"},
             )
             callback.on_chain_end(
-                {"guardrail_validation_result": "Review needed"}, run_id=run_id
+                {GUARDRAIL_VALIDATION_RESULT_KEY: "Review needed"}, run_id=run_id
             )
 
             callback.on_chain_start(
@@ -649,6 +652,84 @@ class TestGuardrailActionDetection:
         ]
         assert len(eval_spans) == 1
         assert eval_spans[0].attributes.get("action") == "Escalate"
+
+    def test_command_object_extracts_validation_result(
+        self, callback, tracer, span_exporter
+    ):
+        """Test validation result extraction from LangGraph Command objects."""
+
+        class MockCommand:
+            """Mock LangGraph Command object with update dict."""
+
+            def __init__(self, update: dict[str, Any]) -> None:
+                self.update = update
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+            )
+            # End with Command object containing validation failure
+            command = MockCommand(
+                update={GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected in input"}
+            )
+            callback.on_chain_end(command, run_id=run_id)
+
+            # Span should be pending action
+            assert (
+                "agent_pre_execution_pii_guard" in callback._pending_guardrail_actions
+            )
+
+            # Action node fires
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=uuid4(),
+                metadata={"langgraph_node": "agent_pre_execution_pii_guard_block"},
+            )
+
+        spans = span_exporter.get_finished_spans()
+        eval_spans = [
+            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+        ]
+        assert len(eval_spans) == 1
+        assert eval_spans[0].attributes.get("action") == "Block"
+        assert (
+            eval_spans[0].attributes.get("validationResult") == "PII detected in input"
+        )
+
+    def test_command_object_passed_validation(self, callback, tracer, span_exporter):
+        """Test Command object with None validation result is treated as passed."""
+
+        class MockCommand:
+            def __init__(self, update: dict[str, Any]) -> None:
+                self.update = update
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+            )
+            # Command with None validation result = passed
+            command = MockCommand(update={GUARDRAIL_VALIDATION_RESULT_KEY: None})
+            callback.on_chain_end(command, run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        eval_spans = [
+            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+        ]
+        assert len(eval_spans) == 1
+        assert eval_spans[0].attributes.get("action") == "Skip"
 
 
 class TestToolGuardrailParenting:
@@ -693,14 +774,21 @@ class TestToolGuardrailParenting:
     def test_tool_post_guardrail_parents_to_tool_span(
         self, callback, tracer, span_exporter
     ):
-        """Tool post guardrails should be children of the current tool span."""
+        """Tool post guardrails should be children of the current tool span.
+
+        In actual LangGraph execution, tool_post guardrails fire AFTER on_tool_end.
+        The callback keeps _current_tool_span until post guardrails complete.
+        """
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span)
 
             tool_run_id = uuid4()
             callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
 
-            # Tool post guardrail fires before tool ends
+            # In LangGraph: on_tool_end fires BEFORE tool_post guardrails
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+            # Tool post guardrail fires AFTER tool ends (real execution order)
             guard_run_id = uuid4()
             callback.on_chain_start(
                 {},
@@ -710,7 +798,8 @@ class TestToolGuardrailParenting:
             )
             callback.on_chain_end({}, run_id=guard_run_id)
 
-            callback.on_tool_end("result", run_id=tool_run_id)
+            # Cleanup containers (in real execution, next phase or agent end closes them)
+            callback.cleanup_containers()
 
         spans = span_exporter.get_finished_spans()
         tool_span = next(
@@ -832,3 +921,137 @@ class TestPhaseTransitions:
 
             callback.on_chain_end({}, run_id=run_id2)
             callback.on_tool_end("result", run_id=tool_run_id)
+
+
+class TestToolGuardrailRealExecutionOrder:
+    """Tests with real LangGraph execution order (guardrails fire before tool start)."""
+
+    def test_tool_pre_guardrail_before_tool_start(
+        self, callback, tracer, span_exporter
+    ):
+        """Tool pre guardrail fires BEFORE on_tool_start - should still parent correctly."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            # Real order: guardrail FIRST (before tool starts)
+            guard_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=guard_run_id,
+                metadata={"langgraph_node": "tool_pre_execution_pii_guard"},
+            )
+            callback.on_chain_end({}, run_id=guard_run_id)
+
+            # THEN tool starts
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_span = next(
+            s for s in spans if s.attributes.get("span_type") == "toolCall"
+        )
+        container = next(
+            s for s in spans if s.attributes.get("span_type") == "toolPreGuardrails"
+        )
+
+        # Container should be child of tool span
+        assert container.parent.span_id == tool_span.context.span_id
+        # Tool span should have correct name after enrichment
+        assert tool_span.name == "Tool call - my_tool"
+
+    def test_tool_blocked_by_guardrail_no_orphan(self, callback, tracer, span_exporter):
+        """When guardrail blocks, placeholder tool span should end cleanly."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            # Guardrail fires (creates placeholder tool span)
+            guard_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=guard_run_id,
+                metadata={"langgraph_node": "tool_pre_execution_pii_guard"},
+            )
+            # Placeholder should exist
+            assert callback._current_tool_span is not None
+            assert callback._tool_span_from_guardrail is True
+
+            # Guardrail fails
+            callback.on_chain_end(
+                {GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected"},
+                run_id=guard_run_id,
+            )
+
+            # Block action fires - tool will NOT execute
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=uuid4(),
+                metadata={"langgraph_node": "tool_pre_execution_pii_guard_block"},
+            )
+
+            # Placeholder should be cleaned up
+            assert callback._current_tool_span is None
+            assert callback._tool_span_from_guardrail is False
+
+        spans = span_exporter.get_finished_spans()
+        tool_spans = [s for s in spans if s.attributes.get("span_type") == "toolCall"]
+        # Placeholder was created and properly ended
+        assert len(tool_spans) == 1
+
+    def test_multiple_tool_pre_guardrails_before_tool(
+        self, callback, tracer, span_exporter
+    ):
+        """Multiple tool_pre guardrails fire before tool - all parent to same tool span."""
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span)
+
+            # First guardrail fires (creates placeholder)
+            guard1_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=guard1_id,
+                metadata={"langgraph_node": "tool_pre_execution_guard1"},
+            )
+            callback.on_chain_end({}, run_id=guard1_id)
+
+            # Verify placeholder was created
+            assert callback._current_tool_span is not None
+            placeholder_span = callback._current_tool_span
+
+            # Second guardrail fires (should reuse same placeholder)
+            guard2_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=guard2_id,
+                metadata={"langgraph_node": "tool_pre_execution_guard2"},
+            )
+            callback.on_chain_end({}, run_id=guard2_id)
+
+            # Verify same placeholder is still used
+            assert callback._current_tool_span is placeholder_span
+
+            # Tool starts
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+        spans = span_exporter.get_finished_spans()
+
+        # Only one tool span should exist (the placeholder was reused)
+        tool_spans = [s for s in spans if s.attributes.get("span_type") == "toolCall"]
+        assert len(tool_spans) == 1
+
+        tool_span = tool_spans[0]
+        container = next(
+            s for s in spans if s.attributes.get("span_type") == "toolPreGuardrails"
+        )
+
+        # Container should be child of tool span
+        assert container.parent.span_id == tool_span.context.span_id
+        # Tool should have correct name after enrichment
+        assert tool_span.name == "Tool call - my_tool"
