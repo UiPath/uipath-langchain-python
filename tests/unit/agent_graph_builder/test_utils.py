@@ -1,118 +1,53 @@
 """Tests for message utility functions."""
 
-from uipath.agent.models.agent import AgentMessageRole
+from uipath.agent.models.agent import (
+    AgentMessage,
+    AgentMessageRole,
+    TextToken,
+    TextTokenType,
+)
 
 from uipath_agents.agent_graph_builder.message_utils import (
     build_agent_messages,
-    interpolate_message,
-    safe_get_nested,
-    serialize_argument,
+    interpolate_legacy_message,
 )
 
 
-class TestSafeGetNested:
-    """Test nested dictionary access."""
-
-    def test_simple_key(self):
-        """Test accessing simple top-level key."""
-        data = {"name": "Alice"}
-        assert safe_get_nested(data, "name") == "Alice"
-
-    def test_nested_key(self):
-        """Test accessing nested keys with dot notation."""
-        data = {"user": {"name": "Alice", "age": 30}}
-        assert safe_get_nested(data, "user.name") == "Alice"
-        assert safe_get_nested(data, "user.age") == 30
-
-    def test_missing_key(self):
-        """Test accessing missing keys returns None."""
-        data = {"user": {"name": "Alice"}}
-        assert safe_get_nested(data, "user.missing") is None
-        assert safe_get_nested(data, "missing.key") is None
-
-    def test_array_value(self):
-        """Test accessing array values."""
-        data = {"items": [1, 2, 3]}
-        assert safe_get_nested(data, "items") == [1, 2, 3]
-
-    def test_deeply_nested(self):
-        """Test deeply nested access."""
-        data = {"level1": {"level2": {"level3": {"value": "deep"}}}}
-        assert safe_get_nested(data, "level1.level2.level3.value") == "deep"
-
-    def test_null_intermediate_value(self):
-        """Test access through null intermediate value."""
-        data = {"user": None}
-        assert safe_get_nested(data, "user.name") is None
-
-
-class TestSerializeValue:
-    """Test value serialization."""
-
-    def test_string(self):
-        """Test serializing strings."""
-        assert serialize_argument("hello") == "hello"
-
-    def test_number(self):
-        """Test serializing numbers."""
-        assert serialize_argument(42) == "42"
-        assert serialize_argument(3.14) == "3.14"
-
-    def test_list(self):
-        """Test serializing lists."""
-        assert serialize_argument([1, 2, 3]) == "[1, 2, 3]"
-
-    def test_dict(self):
-        """Test serializing dictionaries."""
-        result = serialize_argument({"key": "value"})
-        assert '"key"' in result
-        assert '"value"' in result
-
-    def test_none(self):
-        """Test serializing None returns empty string."""
-        assert serialize_argument(None) == ""
-
-    def test_boolean(self):
-        """Test serializing booleans (JSON-style lowercase)."""
-        assert serialize_argument(True) == "true"
-        assert serialize_argument(False) == "false"
-
-
-class TestInterpolateMessage:
-    """Test template interpolation."""
+class TestInterpolateLegacyMessage:
+    """Test legacy message interpolation."""
 
     def test_simple_placeholder(self):
         """Test simple placeholder replacement."""
-        result = interpolate_message("Hello {{name}}", {"name": "Alice"})
+        result = interpolate_legacy_message("Hello {{name}}", {"name": "Alice"})
         assert result == "Hello Alice"
 
     def test_nested_placeholder(self):
         """Test nested placeholder replacement."""
         data = {"user": {"name": "Alice"}}
-        result = interpolate_message("Hello {{user.name}}", data)
+        result = interpolate_legacy_message("Hello {{user.name}}", data)
         assert result == "Hello Alice"
 
     def test_multiple_placeholders(self):
         """Test multiple placeholder replacement."""
         data = {"first": "Alice", "last": "Smith"}
-        result = interpolate_message("{{first}} {{last}}", data)
+        result = interpolate_legacy_message("{{first}} {{last}}", data)
         assert result == "Alice Smith"
 
     def test_missing_placeholder(self):
         """Test missing placeholder is left unchanged."""
-        result = interpolate_message("Hello {{name}}", {})
+        result = interpolate_legacy_message("Hello {{name}}", {})
         assert result == "Hello {{name}}"
 
     def test_json_serialization(self):
         """Test JSON serialization of arrays."""
         data = {"items": [1, 2, 3]}
-        result = interpolate_message("Items: {{items}}", data)
+        result = interpolate_legacy_message("Items: {{items}}", data)
         assert result == "Items: [1, 2, 3]"
 
     def test_dict_serialization(self):
         """Test JSON serialization of dicts."""
         data = {"config": {"timeout": 30}}
-        result = interpolate_message("Config: {{config}}", data)
+        result = interpolate_legacy_message("Config: {{config}}", data)
         assert '"timeout"' in result
         assert "30" in result
 
@@ -120,13 +55,13 @@ class TestInterpolateMessage:
         """Test that unsafe field paths are skipped."""
         data = {"name": "Alice"}
         # This should skip the unsafe placeholder
-        result = interpolate_message("Hello {{__import__('os')}}", data)
+        result = interpolate_legacy_message("Hello {{__import__('os')}}", data)
         assert result == "Hello {{__import__('os')}}"
 
     def test_safe_underscore_field(self):
         """Test that safe underscore fields work."""
         data = {"user_name": "Alice"}
-        result = interpolate_message("Hello {{user_name}}", data)
+        result = interpolate_legacy_message("Hello {{user_name}}", data)
         assert result == "Hello Alice"
 
 
@@ -181,3 +116,120 @@ class TestBuildAgentMessages:
         assert len(result) == 2
         assert "System prompt" in result[0].content
         assert result[1].content == "User input"
+
+    def test_with_content_tokens_in_system_message(self):
+        """Test content_tokens in system message."""
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        messages = [
+            AgentMessage(
+                role=AgentMessageRole.SYSTEM,
+                content="",
+                content_tokens=[
+                    TextToken(
+                        type=TextTokenType.SIMPLE_TEXT, raw_string="You help with "
+                    ),
+                    TextToken(type=TextTokenType.VARIABLE, raw_string="input.task"),
+                ],
+            ),
+            AgentMessage(role=AgentMessageRole.USER, content="Do it"),
+        ]
+        result = build_agent_messages(messages, {"task": "coding"}, "TestAgent")
+
+        assert len(result) == 2
+        assert isinstance(result[0], SystemMessage)
+        assert isinstance(result[1], HumanMessage)
+        assert "You help with coding" in result[0].content
+        assert result[1].content == "Do it"
+
+    def test_with_content_tokens_in_user_message(self):
+        """Test content_tokens in user message."""
+        messages = [
+            AgentMessage(role=AgentMessageRole.SYSTEM, content="You are helpful"),
+            AgentMessage(
+                role=AgentMessageRole.USER,
+                content="",
+                content_tokens=[
+                    TextToken(type=TextTokenType.SIMPLE_TEXT, raw_string="Process "),
+                    TextToken(type=TextTokenType.VARIABLE, raw_string="input.item"),
+                ],
+            ),
+        ]
+        result = build_agent_messages(messages, {"item": "request"}, "TestAgent")
+
+        assert result[1].content == "Process request"
+
+    def test_mixed_legacy_and_tokens(self):
+        """Test mixing legacy content and content_tokens in different messages."""
+        messages = [
+            AgentMessage(
+                role=AgentMessageRole.SYSTEM,
+                content="Legacy: {{task}}",
+                content_tokens=None,
+            ),
+            AgentMessage(
+                role=AgentMessageRole.USER,
+                content="",
+                content_tokens=[
+                    TextToken(type=TextTokenType.SIMPLE_TEXT, raw_string="Token: "),
+                    TextToken(type=TextTokenType.VARIABLE, raw_string="input.task"),
+                ],
+            ),
+        ]
+        result = build_agent_messages(messages, {"task": "analysis"}, "TestAgent")
+
+        assert "Legacy: analysis" in result[0].content
+        assert result[1].content == "Token: analysis"
+
+    def test_tokens_with_tool_names(self):
+        """Test build_agent_messages with tool names."""
+        messages = [
+            AgentMessage(role=AgentMessageRole.SYSTEM, content="You are helpful"),
+            AgentMessage(
+                role=AgentMessageRole.USER,
+                content="",
+                content_tokens=[
+                    TextToken(type=TextTokenType.SIMPLE_TEXT, raw_string="Use "),
+                    TextToken(type=TextTokenType.VARIABLE, raw_string="tools.weather"),
+                    TextToken(type=TextTokenType.SIMPLE_TEXT, raw_string=" to check "),
+                    TextToken(type=TextTokenType.VARIABLE, raw_string="input.city"),
+                ],
+            ),
+        ]
+        result = build_agent_messages(
+            messages,
+            {"city": "London"},
+            "TestAgent",
+            tool_names=["weather", "calculator"],
+        )
+
+        assert result[1].content == "Use weather to check London"
+
+    def test_tokens_with_escalation_and_context_names(self):
+        """Test build_agent_messages with escalation and context names."""
+        messages = [
+            AgentMessage(role=AgentMessageRole.SYSTEM, content="You are helpful"),
+            AgentMessage(
+                role=AgentMessageRole.USER,
+                content="",
+                content_tokens=[
+                    TextToken(type=TextTokenType.SIMPLE_TEXT, raw_string="Search "),
+                    TextToken(type=TextTokenType.VARIABLE, raw_string="contexts.docs"),
+                    TextToken(
+                        type=TextTokenType.SIMPLE_TEXT, raw_string=" or escalate to "
+                    ),
+                    TextToken(
+                        type=TextTokenType.VARIABLE, raw_string="escalations.support"
+                    ),
+                ],
+            ),
+        ]
+        result = build_agent_messages(
+            messages,
+            {},
+            "TestAgent",
+            escalation_names=["support"],
+            context_names=["docs"],
+        )
+
+        assert result[1].content == "Search docs or escalate to support"

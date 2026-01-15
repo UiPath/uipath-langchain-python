@@ -24,6 +24,26 @@
         {
           "type": "simpleText",
           "rawString": "Calculate: {{a}} {{operator}} {{b}}"
+        },
+        {
+          "type": "variable",
+          "rawString": "input.a"
+        },
+        {
+          "type": "simpleText",
+          "rawString": " "
+        },
+        {
+          "type": "variable",
+          "rawString": "input.operator"
+        },
+        {
+          "type": "simpleText",
+          "rawString": " "
+        },
+        {
+          "type": "variable",
+          "rawString": "input.b"
         }
       ]
     }

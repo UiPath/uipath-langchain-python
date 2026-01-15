@@ -1,6 +1,5 @@
 """Message creation and template interpolation utilities."""
 
-import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -8,8 +7,20 @@ from typing import Any, Callable, List, Pattern, Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
-from uipath.agent.models.agent import AgentMessage, LowCodeAgentDefinition
+from uipath.agent.models.agent import (
+    AgentContextResourceConfig,
+    AgentEscalationResourceConfig,
+    AgentMessage,
+    BaseAgentResourceConfig,
+    BaseAgentToolResourceConfig,
+    LowCodeAgentDefinition,
+)
 from uipath.agent.react import AGENT_SYSTEM_PROMPT_TEMPLATE
+from uipath.agent.utils.text_tokens import (
+    build_string_from_tokens,
+    safe_get_nested,
+    serialize_argument,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +43,11 @@ def build_agent_messages(
     agent_messages: List[AgentMessage],
     input_arguments: dict[str, Any],
     agent_name: str,
+    tool_names: list[str] | None = None,
+    escalation_names: list[str] | None = None,
+    context_names: list[str] | None = None,
 ) -> list[SystemMessage | HumanMessage]:
-    """Convert agent messages to LangChain messages with {{variable}} interpolation.
+    """Convert agent messages to LangChain messages with variable interpolation.
 
     System messages are wrapped in AGENT_SYSTEM_PROMPT_TEMPLATE with currentDate and agentName.
     Expects exactly one system message and one user message.
@@ -49,44 +63,18 @@ def build_agent_messages(
     if user_message is None:
         raise ValueError("Agent configuration must contain exactly one user message")
 
-    # Support both {{input.x}} (Studio Web) and {{x}} (direct) formats
-    wrapped_input = {"input": input_arguments, **input_arguments}
-
-    system_prompt_content = interpolate_message(
-        system_message.content or "", wrapped_input
+    system_prompt_content = _build_message_content(
+        system_message, input_arguments, tool_names, escalation_names, context_names
     )
     system_prompt = apply_system_prompt_template(system_prompt_content, agent_name)
-    user_prompt = interpolate_message(user_message.content or "", wrapped_input)
+    user_prompt = _build_message_content(
+        user_message, input_arguments, tool_names, escalation_names, context_names
+    )
 
     return [
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_prompt),
     ]
-
-
-def safe_get_nested(data: dict[str, Any], path: str) -> Any:
-    """Get nested dictionary value using dot notation (e.g., "user.email")."""
-    keys = path.split(".")
-    current = data
-
-    for key in keys:
-        if isinstance(current, dict) and key in current:
-            current = current[key]
-        else:
-            return None
-
-    return current
-
-
-def serialize_argument(
-    value: str | int | float | bool | list[Any] | dict[str, Any] | None,
-) -> str:
-    """Serialize value for interpolation: primitives as-is, collections as JSON."""
-    if value is None:
-        return ""
-    if isinstance(value, (list, dict, bool)):
-        return json.dumps(value, ensure_ascii=False)
-    return str(value)
 
 
 def extract_input_data_from_state(
@@ -132,14 +120,65 @@ def create_message_factory(
         state: BaseModel | dict[str, Any],
     ) -> List[SystemMessage | HumanMessage]:
         input_arguments = extract_input_data_from_state(state, input_model)
-        return build_agent_messages(
-            agent_definition.messages, input_arguments, agent_definition.name or ""
-        )
+        return _create_messages_from_definition(agent_definition, input_arguments)
 
     return message_factory
 
 
-def interpolate_message(content: str, input_values: dict[str, Any]) -> str:
+def _create_messages_from_definition(
+    agent_definition: LowCodeAgentDefinition, input_arguments: dict[str, Any]
+) -> list[SystemMessage | HumanMessage]:
+    def extract_resource_names(
+        resources: Sequence[BaseAgentResourceConfig],
+        resource_type: type[BaseAgentResourceConfig],
+    ) -> list[str]:
+        """Collect the names of resources of the given type."""
+        return [r.name for r in resources if isinstance(r, resource_type)]
+
+    """Create messages from agent definition and input data."""
+    tool_names = extract_resource_names(
+        agent_definition.resources, BaseAgentToolResourceConfig
+    )
+    escalation_names = extract_resource_names(
+        agent_definition.resources, AgentEscalationResourceConfig
+    )
+    context_names = extract_resource_names(
+        agent_definition.resources, AgentContextResourceConfig
+    )
+
+    return build_agent_messages(
+        agent_definition.messages,
+        input_arguments,
+        agent_definition.name or "",
+        tool_names=tool_names,
+        escalation_names=escalation_names,
+        context_names=context_names,
+    )
+
+
+def _build_message_content(
+    message: AgentMessage,
+    input_arguments: dict[str, Any],
+    tool_names: list[str] | None = None,
+    escalation_names: list[str] | None = None,
+    context_names: list[str] | None = None,
+) -> str:
+    """Build a prompt from an AgentMessage, handling both legacy content and new content_tokens."""
+    if message.content_tokens is None:
+        # Support both {{input.x}} (Studio Web) and {{x}} (direct) formats
+        wrapped_input = {"input": input_arguments, **input_arguments}
+        return interpolate_legacy_message(message.content or "", wrapped_input)
+
+    return build_string_from_tokens(
+        message.content_tokens,
+        input_arguments,
+        tool_names,
+        escalation_names,
+        context_names,
+    )
+
+
+def interpolate_legacy_message(content: str, input_values: dict[str, Any]) -> str:
     """Replace {{variable}} placeholders with values. Supports nested paths (e.g., {{user.email}}).
 
     Uses whitelist pattern to prevent injection attacks.
