@@ -236,9 +236,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
             return
 
         for msg in messages[0]:
-            content = (
-                msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
-            )
+            sanitized = self._sanitize_file_data(msg.content)
+            content = sanitized if isinstance(sanitized, str) else json.dumps(sanitized)
             if msg.type == "system" and self._agent_span:
                 self._agent_span.set_attribute("systemPrompt", content)
             elif msg.type == "human" and self._agent_span:
@@ -469,6 +468,40 @@ class UiPathTracingCallback(BaseCallbackHandler):
     # -------------------------------------------------------------------------
     # Helper methods
     # -------------------------------------------------------------------------
+
+    def _sanitize_file_data(self, obj: Any) -> Any:
+        """Recursively sanitize content, replacing file data with placeholders."""
+        if isinstance(obj, bytes):
+            return f"<bytes: {len(obj)} bytes>"
+        if isinstance(obj, str):
+            if obj.startswith("data:") and ";base64," in obj:
+                return "<base64 data omitted>"
+            if len(obj) > 1000 and obj.isascii():
+                return "<base64 data omitted>"
+            return obj
+        if isinstance(obj, list):
+            return [self._sanitize_file_data(item) for item in obj]
+        if isinstance(obj, dict):
+            sanitized = {}
+            for key, value in obj.items():
+                if key in (
+                    "data",
+                    "bytes",
+                    "file_data",
+                    "image_url",
+                ) and not isinstance(value, dict):
+                    if isinstance(value, bytes):
+                        sanitized[key] = f"<bytes: {len(value)} bytes>"
+                    elif isinstance(value, str) and len(value) > 100:
+                        sanitized[key] = "<base64 data omitted>"
+                    elif isinstance(value, list):
+                        sanitized[key] = self._sanitize_file_data(value)
+                    else:
+                        sanitized[key] = value
+                else:
+                    sanitized[key] = self._sanitize_file_data(value)
+            return sanitized
+        return obj
 
     def _extract_model_name(self, serialized: Dict[str, Any]) -> str:
         kwargs = serialized.get("kwargs", {})
