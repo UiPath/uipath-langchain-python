@@ -54,6 +54,8 @@ def create_llm_node(
     tool_choice_required_value = _get_required_tool_choice_by_model(model)
 
     async def llm_node(state: AgentGraphState):
+        from .router import filter_control_flow_tool_calls_from_state
+
         messages: list[AnyMessage] = state.messages
 
         consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
@@ -69,6 +71,16 @@ def create_llm_node(
                 f"LLM returned {type(response).__name__} instead of AIMessage"
             )
 
-        return {"messages": [response]}
+        # Create temporary state with the response to filter tool calls
+        temp_state = AgentGraphState(
+            messages=[*messages, response],
+            inner_state=state.inner_state,
+        )
+
+        # Filter control flow tool calls from the AIMessage
+        filtered_state = filter_control_flow_tool_calls_from_state(temp_state)
+
+        # Return only the (possibly filtered) last message
+        return {"messages": [filtered_state.messages[-1]]}
 
     return llm_node
