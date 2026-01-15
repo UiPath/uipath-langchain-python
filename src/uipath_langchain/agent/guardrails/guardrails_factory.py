@@ -45,6 +45,41 @@ from uipath_langchain.agent.guardrails.actions import (
 from uipath_langchain.agent.guardrails.utils import _sanitize_selector_tool_names
 
 
+def _tool_has_input_schema(tool: BaseTool) -> bool:
+    """Check if a tool has a non-empty input schema.
+
+    Args:
+        tool: The tool to check.
+
+    Returns:
+        True if the tool has a non-empty input schema, False otherwise.
+        Defaults to True if unable to determine (for backward compatibility).
+    """
+    # Check if tool has args_schema attribute
+    if not hasattr(tool, "args_schema"):
+        # Default to True - assume tool has input schema if we can't determine
+        return True
+
+    args_schema = getattr(tool, "args_schema", None)
+    if args_schema is None:
+        # Default to True - assume tool has input schema if not explicitly set
+        return True
+
+    # Get the JSON schema from the args schema
+    try:
+        if hasattr(args_schema, "model_json_schema"):
+            schema = args_schema.model_json_schema()
+            # Check if schema has properties
+            properties = schema.get("properties", {})
+            return bool(properties)
+    except Exception:
+        # Default to True if we encounter an error
+        return True
+
+    # If we reach here, assume has input schema
+    return True
+
+
 def _tool_has_output_schema(tool: BaseTool) -> bool:
     """Check if a tool has a non-empty output schema.
 
@@ -182,15 +217,17 @@ def _compute_field_sources_for_guardrail(
     guardrail: AgentCustomGuardrail,
     tools: list[BaseTool],
 ) -> list[FieldSource]:
-    """Compute field sources based on tool output schema.
+    """Compute field sources based on tool input and output schemas.
 
     Args:
         guardrail: The guardrail to extract tool information from.
         tools: The list of tools available to the agent.
 
     Returns:
-        List of field sources: [INPUT] if tool has no output schema,
-        [INPUT, OUTPUT] if tool has output schema or no matching tool found.
+        List of field sources based on tool schema:
+        - [INPUT, OUTPUT] if tool has both schemas or no matching tool found (default)
+        - [INPUT] if tool has no output schema
+        - [OUTPUT] if tool has no input schema
     """
     # Default to both INPUT and OUTPUT
     field_sources = [FieldSource.INPUT, FieldSource.OUTPUT]
@@ -201,9 +238,16 @@ def _compute_field_sources_for_guardrail(
         matching_tool = next((t for t in tools if t.name == tool_name), None)
 
         if matching_tool:
+            has_input = _tool_has_input_schema(matching_tool)
+            has_output = _tool_has_output_schema(matching_tool)
+
             # If tool has no output schema, only use INPUT source
-            if not _tool_has_output_schema(matching_tool):
+            if has_input and not has_output:
                 field_sources = [FieldSource.INPUT]
+            # If tool has no input schema, only use OUTPUT source
+            elif not has_input and has_output:
+                field_sources = [FieldSource.OUTPUT]
+            # If tool has both or neither, use default [INPUT, OUTPUT]
 
     return field_sources
 

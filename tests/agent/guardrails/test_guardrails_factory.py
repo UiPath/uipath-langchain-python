@@ -837,6 +837,63 @@ class TestConvertAgentCustomGuardrailToDeterministic:
         # Should only have INPUT source since tool has empty output schema
         assert word_rule.field_selector.sources == [FieldSource.INPUT]
 
+    def test_convert_with_tool_without_input_schema_uses_output_only(self) -> None:
+        """When tool has no input schema, AllFieldsSelector should use only OUTPUT source."""
+        from unittest.mock import Mock
+
+        from pydantic import BaseModel
+
+        # Create a Pydantic model with properties for output schema
+        class ToolOutput(BaseModel):
+            result: str
+            status: str
+
+        # Create an empty Pydantic model for args (no properties = no input schema)
+        class EmptyToolInput(BaseModel):
+            pass
+
+        # Create a mock tool with output schema but no input schema
+        mock_tool_no_input = Mock(spec=BaseTool)
+        mock_tool_no_input.name = "test_tool"
+        mock_tool_no_input.output_type = ToolOutput
+        mock_tool_no_input.args_schema = EmptyToolInput
+
+        agent_guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool"],
+                    "matchNames": ["test_tool"],
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        result = _convert_agent_custom_guardrail_to_deterministic(
+            agent_guardrail, [mock_tool_no_input]
+        )
+
+        assert isinstance(result, DeterministicGuardrail)
+        assert len(result.rules) == 1
+        word_rule = result.rules[0]
+        assert isinstance(word_rule, WordRule)
+        assert isinstance(word_rule.field_selector, AllFieldsSelector)
+        # Should only have OUTPUT source since tool has no input schema
+        assert word_rule.field_selector.sources == [FieldSource.OUTPUT]
+
     def test_convert_custom_guardrail_with_word_rules(self) -> None:
         agent_guardrail = AgentCustomGuardrail.model_validate(
             {
