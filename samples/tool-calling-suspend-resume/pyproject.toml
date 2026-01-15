@@ -1,0 +1,6 @@
+[project]
+name = "tool-calling-suspend-resume"
+version = "0.1.0"
+description = "Tool-calling agent demonstrating suspend/resume with RPA process invocation"
+requires-python = ">=3.11"
+dependencies = []
