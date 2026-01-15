@@ -1,4 +1,7 @@
-class OpenAIModels:
+from enum import StrEnum
+
+
+class OpenAIModels(StrEnum):
     """Supported OpenAI model identifiers."""
 
     # GPT-4o models
@@ -25,7 +28,7 @@ class OpenAIModels:
     gpt_5_2_2025_12_11 = "gpt-5.2-2025-12-11"
 
 
-class GeminiModels:
+class GeminiModels(StrEnum):
     """Supported Google Gemini model identifiers."""
 
     # Gemini 2 models
@@ -37,7 +40,7 @@ class GeminiModels:
     gemini_3_pro_preview = "gemini-3-pro-preview"
 
 
-class BedrockModels:
+class BedrockModels(StrEnum):
     """Supported AWS Bedrock model identifiers."""
 
     # Claude 3.7 models
