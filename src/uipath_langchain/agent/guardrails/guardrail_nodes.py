@@ -7,6 +7,8 @@ from langgraph.types import Command
 from uipath.core.guardrails import (
     DeterministicGuardrail,
     DeterministicGuardrailsService,
+    GuardrailValidationResult,
+    GuardrailValidationResultType,
 )
 from uipath.platform import UiPath
 from uipath.platform.guardrails import (
@@ -14,7 +16,7 @@ from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
     GuardrailScope,
 )
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.guardrails.utils import (
@@ -86,43 +88,40 @@ def _evaluate_builtin_guardrail(
 
 
 def _create_validation_command(
-    result,
+    guardrail_result: GuardrailValidationResult,
     success_node: str,
     failure_node: str,
 ) -> Command[Any]:
     """Create command based on validation result.
 
     Args:
-        result: The guardrail evaluation result.
+        guardrail_result: The guardrail evaluation result.
         success_node: Node to route to on validation pass.
         failure_node: Node to route to on validation fail.
 
     Returns:
         Command to update state and route to appropriate node.
-    """
-    from uipath.core.guardrails import GuardrailValidationResultType
 
-    # Handle new format: result has a 'result' attribute with GuardrailValidationResultType
-    if hasattr(result, "result"):
-        if result.result != GuardrailValidationResultType.PASSED:
-            return Command(
-                goto=failure_node, update={"guardrail_validation_result": result.reason}
-            )
-    # Handle old format: backwards compatibility for tests using validation_passed
-    elif hasattr(result, "validation_passed"):
-        if not result.validation_passed:
-            return Command(
-                goto=failure_node, update={"guardrail_validation_result": result.reason}
-            )
-    else:
-        # Fallback: assume failure if format is unknown
+    Raises:
+        AgentTerminationException: If the result is neither PASSED nor VALIDATION_FAILED.
+    """
+    if guardrail_result.result == GuardrailValidationResultType.PASSED:
+        return Command(goto=success_node, update={"guardrail_validation_result": None})
+
+    if guardrail_result.result == GuardrailValidationResultType.VALIDATION_FAILED:
         return Command(
             goto=failure_node,
-            update={"guardrail_validation_result": "Unknown validation result format"},
+            update={"guardrail_validation_result": guardrail_result.reason},
         )
 
-    # Update guardail trace with skip/reason
-    return Command(goto=success_node, update={"guardrail_validation_result": None})
+    # For other results (FEATURE_DISABLED, ENTITLEMENTS_MISSING, etc.), interrupt execution
+    raise AgentTerminationException(
+        code=UiPathErrorCode.EXECUTION_ERROR,
+        title="Guardrail validation error",
+        detail=guardrail_result.reason
+        or f"Guardrail validation returned unexpected result: {guardrail_result.result.value}",
+        category=UiPathErrorCategory.DEPLOYMENT,
+    )
 
 
 def _create_guardrail_node(
