@@ -1,0 +1,100 @@
+[project]
+name = "uipath-agents"
+version = "0.0.0"
+description = "UiPath Agents"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.11"
+dependencies = [
+  "uipath",
+  "uipath-langchain[vertex,bedrock]",
+  "langgraph>=1.0.0",
+  "azure-monitor-opentelemetry>=1.7.0",
+]
+maintainers = [
+  { name = "Silviu Georgescu", email = "silviu.georgescu@uipath.com" },
+  { name = "Cristian Cotovanu", email = "cristian.cotovanu@uipath.com" },
+]
+
+[project.entry-points."uipath.runtime.factories"]
+agents = "uipath_agents.runtime:register_runtime_factory"
+
+[project.urls]
+Homepage = "https://uipath.com"
+Repository = "https://github.com/UiPath/uipath-agents-python"
+Documentation = "https://github.com/UiPath/uipath-agents-python/blob/main/README.md"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+  "datamodel-code-generator>=0.33.0",
+  "debugpy>=1.8.17",
+  "mypy>=1.14.1",
+  "pre-commit>=4.1.0",
+  "pytest_httpx>=0.35.0",
+  "pytest-asyncio>=1.0.0",
+  "pytest-cov>=4.1.0",
+  "pytest-mock>=3.11.1",
+  "pytest>=7.4.0",
+  "requests>=2.32.5",
+  "ruff>=0.9.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/uipath_agents"]
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+exclude = ["samples/**", "testcases/**"]
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"*" = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+exclude = ["samples/.*", "testcases/.*"]
+
+follow_imports = "silent"
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_any_generics = true
+check_untyped_defs = true
+no_implicit_reexport = true
+
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["jsonschema_pydantic.*"]
+follow_untyped_imports = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-ra -q"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+markers = [
+    "e2e: End-to-end tests that require UiPath authentication",
+    "slow: Tests that take a long time to run",
+]
+
+[tool.uv.sources]
+uipath = { path = "<YOUR_LOCAL_PATH_TO_uipath_REPO>", editable = true }
+uipath-langchain = { path = "YOUR_LOCAL_PATH_TO_uipath-langchain-python_REPO", editable = true }
