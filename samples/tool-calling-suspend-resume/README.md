@@ -10,8 +10,9 @@ This agent calls `interrupt(InvokeProcess(...))` to suspend execution while wait
 
 - Single-node graph demonstrating tool-calling suspend pattern
 - Uses LangGraph's `interrupt()` to suspend execution
-- Proper `InvokeProcess` structure for RPA invocation
-- Includes checkpointer (required for interrupts)
+- **Two graph variants**:
+  - `graph.py`: Uses `InvokeProcess` for real RPA integration
+  - `graph_simple.py`: Uses simple dict payload (no authentication required)
 - Comprehensive evaluation sets with trajectory validation
 
 ## Running Evaluations
@@ -26,11 +27,18 @@ uv run uipath eval graph evaluations/eval-sets/test_suspend_resume.json
 
 ## Evaluation Sets
 
+### `test_simple_no_auth.json`
+Quick test using the simple graph variant (no authentication required):
+- Tests basic suspend/resume pattern with dict payload
+- Validates suspension detection in logs
+- Best for initial testing and development
+
 ### `test_suspend_resume.json`
-Tests the actual suspend/resume behavior:
+Tests with actual RPA invocation:
 - Validates agent calls `interrupt()` with proper `InvokeProcess` structure
 - Checks for suspension indicators in logs
 - Uses both LLM-based trajectory evaluator and contains-based evaluator
+- Requires UiPath authentication
 
 ### `test_with_evaluators.json`
 Tests evaluator execution after completion:
@@ -56,12 +64,14 @@ Skips evaluators (run after resume)
 
 ## Key Components
 
-- **graph.py**: Main agent with single node that calls `interrupt()`
-- **evaluations/**: Evaluation sets and evaluator configurations
-  - **eval-sets/**: Test cases for suspend and evaluator testing
-  - **evaluators/**: LLM trajectory and contains evaluator configs
+- **graph.py**: Main agent with `InvokeProcess` for RPA invocation
+- **graph_simple.py**: Simplified agent using dict payload (no auth required)
+- **evaluations/**: Evaluation sets for testing suspend/resume behavior
+  - **eval-sets/test_simple_no_auth.json**: Quick test without authentication
+  - **eval-sets/test_suspend_resume.json**: Full RPA invocation test
 - **pyproject.toml**: Package metadata
 - **uipath.json**: Agent configuration
+- **langgraph.json**: Graph entrypoint definitions
 
 ## How It Works
 
