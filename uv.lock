@@ -3250,7 +3250,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.5"
+version = "2.5.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -3271,10 +3271,9 @@ dependencies = [
     { name = "uipath-core" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4c/62/de6137c448a4436876e0e57c3cbd08718a7b45c998bdb9e81865ce0c082c/uipath-2.5.tar.gz", hash = "sha256:6ef338d27763e03098d65318fbf126f8a0010f5aa07136ee0486a8283e951ad1", size = 3883309, upload-time = "2026-01-15T07:02:16.8Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/b4/2b1421fe9d5805638e99c4a50221e1fba0d642790c108ef3c9e378d171b5/uipath-2.5.2.tar.gz", hash = "sha256:9cc466c100575e35448c5748b6de284c00dae4ec197707e34306f1a712a0fc2b", size = 3883416, upload-time = "2026-01-15T10:59:32.13Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c3/63/8254f1941351b3ee9386d0b073fb3c033e7de9c67ba588a47d5511506e17/uipath-2.5-py3-none-any.whl", hash = "sha256:19f6b5d7408e32e0a9df869dc041a158919758288fdd26bbfe337b9dea12373c", size = 437244, upload-time = "2026-01-15T07:02:14.911Z" },
-    { url = "https://files.pythonhosted.org/packages/88/a4/1c81dbee07c01de70281e591c368f832afea956f2e2be7596355716709c8/uipath-2.5.0-py3-none-any.whl", hash = "sha256:7cd24c5048873dd8aaacdb12ec1722be872db9369d410b73ed77d1ce6dfc8e95", size = 437268, upload-time = "2026-01-15T08:39:47.556Z" },
+    { url = "https://files.pythonhosted.org/packages/65/ec/7f8345dc41e4d6b238021f3f21f23548a759a4449aa974854dbfd8deb13f/uipath-2.5.2-py3-none-any.whl", hash = "sha256:5d18e9f7a7dd4d8add1fb3300242828af943567c3fb3d94890205771df881412", size = 437443, upload-time = "2026-01-15T10:59:30.346Z" },
 ]
 
 [[package]]
@@ -3293,7 +3292,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.4.2"
+version = "0.4.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -3360,7 +3359,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.56" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.5.0,<2.6.0" },
+    { name = "uipath", specifier = ">=2.5.2,<2.6.0" },
     { name = "uipath-runtime", specifier = ">=0.5.0,<0.6.0" },
 ]
 provides-extras = ["vertex", "bedrock"]

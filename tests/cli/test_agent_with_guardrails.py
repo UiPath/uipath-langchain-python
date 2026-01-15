@@ -85,7 +85,7 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
 )
 from uipath_langchain.agent.react import create_agent
 
-guardrails = build_guardrails_with_actions([block_agent_pii_detection_guardrail])
+guardrails = build_guardrails_with_actions([block_agent_pii_detection_guardrail], all_tools)
 
 # Create agent graph WITH guardrails
 graph = create_agent(
@@ -219,7 +219,7 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
 )
 from uipath_langchain.agent.react import create_agent
 
-guardrails = build_guardrails_with_actions([block_agent_pii_detection_guardrail])
+guardrails = build_guardrails_with_actions([block_agent_pii_detection_guardrail], all_tools)
 
 # Create agent graph WITH guardrails
 graph = create_agent(
@@ -402,7 +402,7 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
 )
 from uipath_langchain.agent.react import create_agent
 
-guardrails = build_guardrails_with_actions([block_llm_prompt_injection_guardrail])
+guardrails = build_guardrails_with_actions([block_llm_prompt_injection_guardrail], all_tools)
 
 # Create agent graph WITH guardrails
 graph = create_agent(
@@ -537,7 +537,7 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
 )
 from uipath_langchain.agent.react import create_agent
 
-guardrails = build_guardrails_with_actions([filter_tool_custom_guardrail])
+guardrails = build_guardrails_with_actions([filter_tool_custom_guardrail], all_tools)
 
 # Create agent graph WITH guardrails
 graph = create_agent(
@@ -702,7 +702,7 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
 )
 from uipath_langchain.agent.react import create_agent
 
-guardrails = build_guardrails_with_actions([block_tool_forbidden_pattern_guardrail])
+guardrails = build_guardrails_with_actions([block_tool_forbidden_pattern_guardrail], all_tools)
 
 # Create agent graph WITH guardrails
 graph = create_agent(
@@ -846,7 +846,7 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
 )
 from uipath_langchain.agent.react import create_agent
 
-guardrails = build_guardrails_with_actions([block_tool_pii_detection_guardrail])
+guardrails = build_guardrails_with_actions([block_tool_pii_detection_guardrail], all_tools)
 
 # Create agent graph WITH guardrails
 graph = create_agent(
@@ -1007,7 +1007,7 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
 )
 from uipath_langchain.agent.react import create_agent
 
-guardrails = build_guardrails_with_actions([escalate_llm_pii_detection_guardrail])
+guardrails = build_guardrails_with_actions([escalate_llm_pii_detection_guardrail], all_tools)
 
 # Create agent graph WITH guardrails
 graph = create_agent(
@@ -1213,7 +1213,7 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
 )
 from uipath_langchain.agent.react import create_agent
 
-guardrails = build_guardrails_with_actions([escalate_llm_pii_detection_guardrail])
+guardrails = build_guardrails_with_actions([escalate_llm_pii_detection_guardrail], all_tools)
 
 # Create agent graph WITH guardrails
 graph = create_agent(
@@ -1408,7 +1408,7 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
 )
 from uipath_langchain.agent.react import create_agent
 
-guardrails = build_guardrails_with_actions([block_tool_forbidden_pattern_regex_guardrail])
+guardrails = build_guardrails_with_actions([block_tool_forbidden_pattern_regex_guardrail], all_tools)
 
 # Create agent graph WITH guardrails
 graph = create_agent(

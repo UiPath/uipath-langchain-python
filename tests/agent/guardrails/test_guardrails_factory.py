@@ -5,6 +5,7 @@ import types
 from typing import cast
 
 import pytest
+from langchain_core.tools import BaseTool
 from uipath.agent.models.agent import (  # type: ignore[attr-defined]
     AgentBooleanOperator,
     AgentBooleanRule,
@@ -29,8 +30,10 @@ from uipath.agent.models.agent import (
     AgentGuardrail as AgentGuardrailModel,
 )
 from uipath.core.guardrails import (
+    AllFieldsSelector,
     BooleanRule,
     DeterministicGuardrail,
+    FieldSource,
     GuardrailSelector,
     NumberRule,
     WordRule,
@@ -52,10 +55,10 @@ from uipath_langchain.agent.guardrails.guardrails_factory import (
 
 class TestGuardrailsFactory:
     def test_none_returns_empty(self) -> None:
-        assert build_guardrails_with_actions(None) == []
+        assert build_guardrails_with_actions(None, []) == []
 
     def test_empty_list_returns_empty(self) -> None:
-        assert build_guardrails_with_actions([]) == []
+        assert build_guardrails_with_actions([], []) == []
 
     def test_block_action_is_mapped_with_reason(self) -> None:
         guardrail = cast(
@@ -70,7 +73,7 @@ class TestGuardrailsFactory:
             ),
         )
 
-        result = build_guardrails_with_actions([guardrail])
+        result = build_guardrails_with_actions([guardrail], [])
 
         assert len(result) == 1
         gr, action = result[0]
@@ -93,7 +96,7 @@ class TestGuardrailsFactory:
             ),
         )
 
-        result = build_guardrails_with_actions([guardrail])
+        result = build_guardrails_with_actions([guardrail], [])
 
         assert len(result) == 1
         gr, action = result[0]
@@ -126,7 +129,7 @@ class TestGuardrailsFactory:
                 ),
             ),
         )
-        result = build_guardrails_with_actions([log_guardrail, block_guardrail])
+        result = build_guardrails_with_actions([log_guardrail, block_guardrail], [])
         assert len(result) == 1
         gr, action = result[0]
         assert gr is block_guardrail
@@ -156,7 +159,7 @@ class TestGuardrailsFactory:
             ),
         )
 
-        result = build_guardrails_with_actions([guardrail])
+        result = build_guardrails_with_actions([guardrail], [])
 
         assert len(result) == 1
         gr, action = result[0]
@@ -209,7 +212,7 @@ class TestGuardrailsFactory:
             ValueError,
             match=rf"Deterministic guardrail 'test-guardrail-{scope_lower}' can only be used with TOOL scope.*Found invalid scopes.*{scope.upper()}",
         ):
-            build_guardrails_with_actions([guardrail])
+            build_guardrails_with_actions([guardrail], [])
 
     def test_deterministic_guardrail_with_tool_scope_succeeds(self) -> None:
         """DeterministicGuardrails with TOOL scope should be accepted."""
@@ -240,7 +243,7 @@ class TestGuardrailsFactory:
             }
         )
 
-        result = build_guardrails_with_actions([guardrail])
+        result = build_guardrails_with_actions([guardrail], [])
 
         assert len(result) == 1
         converted_guardrail, action = result[0]
@@ -281,7 +284,7 @@ class TestGuardrailsFactory:
             ValueError,
             match=r"Deterministic guardrail 'test-guardrail-mixed' can only be used with TOOL scope.*Found invalid scopes.*LLM",
         ):
-            build_guardrails_with_actions([guardrail])
+            build_guardrails_with_actions([guardrail], [])
 
     def test_filter_action_is_mapped_with_fields(self) -> None:
         """FILTER action is mapped to FilterAction with correct fields."""
@@ -301,7 +304,7 @@ class TestGuardrailsFactory:
             ),
         )
 
-        result = build_guardrails_with_actions([guardrail])
+        result = build_guardrails_with_actions([guardrail], [])
 
         assert len(result) == 1
         gr, action = result[0]
@@ -340,7 +343,7 @@ class TestGuardrailsFactory:
             }
         )
 
-        result = build_guardrails_with_actions([agent_guardrail])
+        result = build_guardrails_with_actions([agent_guardrail], [])
 
         assert len(result) == 1
         gr, action = result[0]
@@ -392,7 +395,7 @@ class TestGuardrailsFactory:
         )
 
         result = build_guardrails_with_actions(
-            [block_guardrail, filter_guardrail, log_guardrail]
+            [block_guardrail, filter_guardrail, log_guardrail], []
         )
 
         assert len(result) == 3
@@ -575,7 +578,20 @@ class TestConvertAgentRuleToDeterministic:
                 "value": "test",
             }
         )
-        result = _convert_agent_rule_to_deterministic(agent_rule)
+        # Create a minimal guardrail for testing
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test",
+                "enabledForEvals": True,
+                "selector": {"$selectorType": "all"},
+                "rules": [],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+        result = _convert_agent_rule_to_deterministic(agent_rule, guardrail, [])
 
         assert isinstance(result, WordRule)
         assert result.rule_type == "word"
@@ -595,7 +611,20 @@ class TestConvertAgentRuleToDeterministic:
                 "value": 10.0,
             }
         )
-        result = _convert_agent_rule_to_deterministic(agent_rule)
+        # Create a minimal guardrail for testing
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test",
+                "enabledForEvals": True,
+                "selector": {"$selectorType": "all"},
+                "rules": [],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+        result = _convert_agent_rule_to_deterministic(agent_rule, guardrail, [])
 
         assert isinstance(result, NumberRule)
         assert result.rule_type == "number"
@@ -614,7 +643,20 @@ class TestConvertAgentRuleToDeterministic:
                 "value": True,
             }
         )
-        result = _convert_agent_rule_to_deterministic(agent_rule)
+        # Create a minimal guardrail for testing
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test",
+                "enabledForEvals": True,
+                "selector": {"$selectorType": "all"},
+                "rules": [],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+        result = _convert_agent_rule_to_deterministic(agent_rule, guardrail, [])
 
         assert isinstance(result, BooleanRule)
         assert result.rule_type == "boolean"
@@ -624,12 +666,326 @@ class TestConvertAgentRuleToDeterministic:
     def test_unsupported_rule_type_raises_value_error(self) -> None:
         # Create a mock rule that's not a supported type
         invalid_rule = cast(AgentWordRule, types.SimpleNamespace())
+        # Create a minimal guardrail for testing
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test",
+                "enabledForEvals": True,
+                "selector": {"$selectorType": "all"},
+                "rules": [],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
         with pytest.raises(ValueError, match="Unsupported agent rule type"):
-            _convert_agent_rule_to_deterministic(invalid_rule)
+            _convert_agent_rule_to_deterministic(invalid_rule, guardrail, [])
 
 
 class TestConvertAgentCustomGuardrailToDeterministic:
     """Tests for _convert_agent_custom_guardrail_to_deterministic."""
+
+    def test_convert_with_tool_without_output_schema_uses_input_only(self) -> None:
+        """When tool has no output schema, AllFieldsSelector should use only INPUT source."""
+        from unittest.mock import Mock
+
+        from pydantic import BaseModel
+
+        # Create a Pydantic model with properties for input schema
+        class ToolInput(BaseModel):
+            sentence: str
+
+        # Create a mock tool without output_type attribute but with input schema
+        mock_tool_no_output = Mock(spec=BaseTool)
+        mock_tool_no_output.name = "test_tool"
+        mock_tool_no_output.args_schema = ToolInput
+        # Tool doesn't have output_type attribute
+
+        agent_guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool"],
+                    "matchNames": ["test_tool"],
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        result = _convert_agent_custom_guardrail_to_deterministic(
+            agent_guardrail, [mock_tool_no_output]
+        )
+
+        assert isinstance(result, DeterministicGuardrail)
+        assert len(result.rules) == 1
+        word_rule = result.rules[0]
+        assert isinstance(word_rule, WordRule)
+        assert isinstance(word_rule.field_selector, AllFieldsSelector)
+        # Should only have INPUT source since tool has no output schema
+        assert word_rule.field_selector.sources == [FieldSource.INPUT]
+
+    def test_convert_with_tool_with_output_schema_uses_input_and_output(self) -> None:
+        """When tool has output schema, AllFieldsSelector should use both INPUT and OUTPUT sources."""
+        from unittest.mock import Mock
+
+        from pydantic import BaseModel
+
+        # Create a Pydantic model with properties for input schema
+        class ToolInput(BaseModel):
+            sentence: str
+
+        # Create a Pydantic model with properties for output schema
+        class ToolOutput(BaseModel):
+            result: str
+            status: str
+
+        # Create a mock tool with both input and output schemas
+        mock_tool_with_output = Mock(spec=BaseTool)
+        mock_tool_with_output.name = "test_tool"
+        mock_tool_with_output.args_schema = ToolInput
+        mock_tool_with_output.output_type = ToolOutput
+
+        agent_guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool"],
+                    "matchNames": ["test_tool"],
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        result = _convert_agent_custom_guardrail_to_deterministic(
+            agent_guardrail, [mock_tool_with_output]
+        )
+
+        assert isinstance(result, DeterministicGuardrail)
+        assert len(result.rules) == 1
+        word_rule = result.rules[0]
+        assert isinstance(word_rule, WordRule)
+        assert isinstance(word_rule.field_selector, AllFieldsSelector)
+        # Should have both INPUT and OUTPUT sources since tool has output schema
+        assert word_rule.field_selector.sources == [
+            FieldSource.INPUT,
+            FieldSource.OUTPUT,
+        ]
+
+    def test_convert_with_tool_with_empty_output_schema_uses_input_only(self) -> None:
+        """When tool has empty output schema (no properties), AllFieldsSelector should use only INPUT source."""
+        from unittest.mock import Mock
+
+        from pydantic import BaseModel
+
+        # Create a Pydantic model with properties for input schema
+        class ToolInput(BaseModel):
+            sentence: str
+
+        # Create a Pydantic model with NO properties (empty output schema)
+        class EmptyToolOutput(BaseModel):
+            pass
+
+        # Create a mock tool with input schema and empty output schema
+        mock_tool_empty_output = Mock(spec=BaseTool)
+        mock_tool_empty_output.name = "test_tool"
+        mock_tool_empty_output.args_schema = ToolInput
+        mock_tool_empty_output.output_type = EmptyToolOutput
+
+        agent_guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool"],
+                    "matchNames": ["test_tool"],
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        result = _convert_agent_custom_guardrail_to_deterministic(
+            agent_guardrail, [mock_tool_empty_output]
+        )
+
+        assert isinstance(result, DeterministicGuardrail)
+        assert len(result.rules) == 1
+        word_rule = result.rules[0]
+        assert isinstance(word_rule, WordRule)
+        assert isinstance(word_rule.field_selector, AllFieldsSelector)
+        # Should only have INPUT source since tool has empty output schema
+        assert word_rule.field_selector.sources == [FieldSource.INPUT]
+
+    def test_convert_with_tool_without_input_schema_uses_output_only(self) -> None:
+        """When tool has no input schema, AllFieldsSelector should use only OUTPUT source."""
+        from unittest.mock import Mock
+
+        from pydantic import BaseModel
+
+        # Create a Pydantic model with properties for output schema
+        class ToolOutput(BaseModel):
+            result: str
+            status: str
+
+        # Create an empty Pydantic model for args (no properties = no input schema)
+        class EmptyToolInput(BaseModel):
+            pass
+
+        # Create a mock tool with output schema but no input schema
+        mock_tool_no_input = Mock(spec=BaseTool)
+        mock_tool_no_input.name = "test_tool"
+        mock_tool_no_input.output_type = ToolOutput
+        mock_tool_no_input.args_schema = EmptyToolInput
+
+        agent_guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool"],
+                    "matchNames": ["test_tool"],
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        result = _convert_agent_custom_guardrail_to_deterministic(
+            agent_guardrail, [mock_tool_no_input]
+        )
+
+        assert isinstance(result, DeterministicGuardrail)
+        assert len(result.rules) == 1
+        word_rule = result.rules[0]
+        assert isinstance(word_rule, WordRule)
+        assert isinstance(word_rule.field_selector, AllFieldsSelector)
+        # Should only have OUTPUT source since tool has no input schema
+        assert word_rule.field_selector.sources == [FieldSource.OUTPUT]
+
+    def test_convert_with_empty_match_names_raises_error(self) -> None:
+        """When match_names is empty, should raise ValueError."""
+        agent_guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool"],
+                    "matchNames": [],  # Empty match_names
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        # Should raise ValueError when match_names is empty
+        with pytest.raises(
+            ValueError,
+            match="match_names is empty or not specified",
+        ):
+            _convert_agent_custom_guardrail_to_deterministic(agent_guardrail, [])
+
+    def test_convert_with_nonexistent_tool_raises_error(self) -> None:
+        """When match_names specifies a tool that doesn't exist, should raise ValueError."""
+        from unittest.mock import Mock
+
+        # Create a mock tool with a different name
+        mock_tool = Mock(spec=BaseTool)
+        mock_tool.name = "different_tool"
+
+        agent_guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool"],
+                    "matchNames": [
+                        "nonexistent_tool"
+                    ],  # Tool doesn't exist in tools list
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        # Should raise ValueError when tool is not found
+        with pytest.raises(
+            ValueError,
+            match="not found in available tools",
+        ):
+            _convert_agent_custom_guardrail_to_deterministic(
+                agent_guardrail, [mock_tool]
+            )
 
     def test_convert_custom_guardrail_with_word_rules(self) -> None:
         agent_guardrail = AgentCustomGuardrail.model_validate(
@@ -664,7 +1020,7 @@ class TestConvertAgentCustomGuardrailToDeterministic:
             }
         )
 
-        result = _convert_agent_custom_guardrail_to_deterministic(agent_guardrail)
+        result = _convert_agent_custom_guardrail_to_deterministic(agent_guardrail, [])
 
         assert isinstance(result, DeterministicGuardrail)
         assert result.id == "test-id"
@@ -718,7 +1074,7 @@ class TestConvertAgentCustomGuardrailToDeterministic:
             }
         )
 
-        result = _convert_agent_custom_guardrail_to_deterministic(agent_guardrail)
+        result = _convert_agent_custom_guardrail_to_deterministic(agent_guardrail, [])
 
         assert isinstance(result, DeterministicGuardrail)
         assert len(result.rules) == 3
@@ -740,7 +1096,7 @@ class TestConvertAgentCustomGuardrailToDeterministic:
             }
         )
 
-        result = _convert_agent_custom_guardrail_to_deterministic(agent_guardrail)
+        result = _convert_agent_custom_guardrail_to_deterministic(agent_guardrail, [])
 
         assert isinstance(result, DeterministicGuardrail)
         assert len(result.rules) == 0
