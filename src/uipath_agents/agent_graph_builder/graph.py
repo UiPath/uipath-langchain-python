@@ -57,6 +57,7 @@ async def build_agent_graph(
         thinking_messages_limit=get_thinking_messages_limit(
             agent_definition.settings.model
         ),
+        is_conversational=agent_definition.is_conversational,
     )
 
     return create_agent(

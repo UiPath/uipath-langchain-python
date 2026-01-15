@@ -3,7 +3,7 @@
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any, Callable, List, Pattern, Sequence
+from typing import Any, Callable, List, Optional, Pattern, Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
@@ -11,11 +11,16 @@ from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentEscalationResourceConfig,
     AgentMessage,
+    AgentMessageRole,
     BaseAgentResourceConfig,
     BaseAgentToolResourceConfig,
     LowCodeAgentDefinition,
 )
-from uipath.agent.react import AGENT_SYSTEM_PROMPT_TEMPLATE
+from uipath.agent.react import (
+    AGENT_SYSTEM_PROMPT_TEMPLATE,
+    PromptUserSettings,
+    get_chat_system_prompt,
+)
 from uipath.agent.utils.text_tokens import (
     build_string_from_tokens,
     safe_get_nested,
@@ -122,7 +127,17 @@ def create_message_factory(
         input_arguments = extract_input_data_from_state(state, input_model)
         return _create_messages_from_definition(agent_definition, input_arguments)
 
-    return message_factory
+    def conversational_message_factory(
+        state: BaseModel | dict[str, Any],
+    ) -> List[SystemMessage | HumanMessage]:
+        input_arguments = extract_input_data_from_state(state, input_model)
+        return build_conversational_agent_messages(agent_definition, input_arguments)
+
+    return (
+        conversational_message_factory
+        if agent_definition.is_conversational
+        else message_factory
+    )
 
 
 def _create_messages_from_definition(
@@ -205,3 +220,71 @@ def interpolate_legacy_message(content: str, input_values: dict[str, Any]) -> st
             interpolated = interpolated.replace(placeholder, serialize_argument(value))
 
     return interpolated
+
+
+def build_conversational_agent_messages(
+    agent_definition: LowCodeAgentDefinition, input_arguments: dict[str, Any]
+) -> list[SystemMessage | HumanMessage]:
+    # See note in runtime/factory.py about the use of input arguments for user settings.
+    user_settings = extract_user_settings(input_arguments)
+    if user_settings is None:
+        logger.warning(
+            "user_settings property not provided in input - user context will not be included in system prompt"
+        )
+
+    system_message: AgentMessage | None = next(
+        (
+            msg
+            for msg in agent_definition.messages
+            if msg.role == AgentMessageRole.SYSTEM
+        ),
+        None,
+    )
+    if system_message is None:
+        raise ValueError(
+            "Conversational agent configuration must contain exactly one system message"
+        )
+
+    system_prompt = get_chat_system_prompt(
+        agent_name=agent_definition.name,
+        model=agent_definition.settings.model,
+        system_message=system_message.content,
+        user_settings=user_settings,
+    )
+
+    # Note that we ignore any user messages in the agent definition's messages array. Currently agent builder is leaving
+    # a vestigial "What is the current date?" user message in the agent definition. For conversational agents the input
+    # message comes from the input arguments and are added to the initial state by UiPathLangGraphRuntime. The init node
+    # takes care of ensuring the system message is first, followed by the initial user message.
+
+    return [SystemMessage(content=system_prompt)]
+
+
+def extract_user_settings(
+    input_data: Optional[dict[str, Any]],
+) -> Optional[PromptUserSettings]:
+    """Extract user settings from input data.
+
+    Args:
+        input_data: Input data dict that may contain userSettings
+        is_resume: Whether this is a resume operation (suppresses warning)
+
+    Returns:
+        PromptUserSettings if found in input, None otherwise
+    """
+    if not input_data or not isinstance(input_data, dict):
+        return None
+
+    user_settings_data = input_data.get("userSettings")
+    if not user_settings_data or not isinstance(user_settings_data, dict):
+        return None
+
+    return PromptUserSettings(
+        name=user_settings_data.get("name"),
+        email=user_settings_data.get("email"),
+        role=user_settings_data.get("role"),
+        department=user_settings_data.get("department"),
+        company=user_settings_data.get("company"),
+        country=user_settings_data.get("country"),
+        timezone=user_settings_data.get("timezone"),
+    )

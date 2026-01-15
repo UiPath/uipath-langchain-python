@@ -1,7 +1,7 @@
 """Tests for graph building functionality."""
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from uipath.agent.models.agent import (
@@ -608,3 +608,122 @@ class TestBuildAgentGraph:
             assert '"active": true' in messages[0].content
             assert '"name": "Bob"' in messages[0].content
             assert '"active": false' in messages[0].content
+
+    async def test_passes_is_conversational_false_by_default(self):
+        """Test that is_conversational=False is passed via AgentGraphConfig by default."""
+        agent_def = create_test_agent_definition()
+
+        with (
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_agent"
+            ) as mock_create,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=0,
+            ),
+        ):
+            mock_llm.return_value = MagicMock()
+            mock_create.return_value = MagicMock()
+
+            await build_agent_graph(agent_def)
+
+            mock_create.assert_called_once()
+            config = mock_create.call_args.kwargs["config"]
+            assert config.is_conversational is False
+
+    async def test_passes_is_conversational_true_for_conversational_agent(self):
+        """Test that is_conversational=True is passed via AgentGraphConfig for conversational agents."""
+        agent_def = create_test_agent_definition()
+
+        with (
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_agent"
+            ) as mock_create,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=0,
+            ),
+            patch.object(
+                type(agent_def),
+                "is_conversational",
+                new_callable=PropertyMock,
+                return_value=True,
+            ),
+        ):
+            mock_llm.return_value = MagicMock()
+            mock_create.return_value = MagicMock()
+
+            await build_agent_graph(agent_def)
+
+            mock_create.assert_called_once()
+            config = mock_create.call_args.kwargs["config"]
+            assert config.is_conversational is True
+
+    async def test_conversational_agent_uses_conversational_message_factory(self):
+        """Test that conversational agents use the conversational message factory."""
+        agent_def = create_test_agent_definition(
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "userSettings": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                    }
+                },
+            },
+        )
+
+        with (
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_agent"
+            ) as mock_create,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=0,
+            ),
+            patch(
+                "uipath_agents.agent_graph_builder.message_utils.get_chat_system_prompt",
+                return_value="Conversational system prompt",
+            ),
+            patch.object(
+                type(agent_def),
+                "is_conversational",
+                new_callable=PropertyMock,
+                return_value=True,
+            ),
+        ):
+            mock_llm.return_value = MagicMock()
+            mock_create.return_value = MagicMock()
+
+            await build_agent_graph(agent_def)
+
+            mock_create.assert_called_once()
+            message_factory = mock_create.call_args.kwargs["messages"]
+
+            # Call the factory - for conversational agents it should return only SystemMessage
+            messages = message_factory({"userSettings": {"name": "Test User"}})
+
+            # Conversational message factory returns only a SystemMessage
+            # (it relies on init_node to manage user messages)
+            assert len(messages) == 1
+            from langchain_core.messages import SystemMessage
+
+            assert isinstance(messages[0], SystemMessage)

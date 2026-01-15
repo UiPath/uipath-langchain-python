@@ -158,9 +158,36 @@ Due to how the SDKs are structured, most of the code used for agents in stored i
 
 ### VS Code Setup
 
-A basic set of configuration options and recommended extensions can be found in [.vscode](.vscode). Feel free to disregared them if you already have your preferred setup.
+A basic set of configuration options and recommended extensions can be found in [.vscode](.vscode). Feel free to disregard them if you already have your preferred setup.
 
-The default python interpretor should already be loaded from the local `.venv`, but make sure to double check. This will probably be the main cause of problems when working cross-repostories. If the Intellisense is not working, check the configured interpretor.
+The default python interpreter should already be loaded from the local `.venv`, but make sure to double check. This will probably be the main cause of problems when working cross-repositories. If the Intellisense is not working, check the configured interpreter.
+
+We recommend using a vs-code [multi-root workspace](https://code.visualstudio.com/docs/editing/workspaces/multi-root-workspaces) 
+which will allow the mypy (type checking) and ruff (lint/formatting) plugins to find and use the config for each individual package. 
+Without this, type checking in vscode will report invalid errors. 
+
+To use a multi-root workspace, create an `ur.code-workspace` file in your workspace root, then open that file in vscode:
+
+```
+{
+  "folders": [
+    { "path": "uipath-langchain-python", "name": "uipath-langchain" },
+    { "path": "uipath-python", "name": "uipath" },
+    { "path": "uipath-runtime-python", "name": "uipath-runtime" },
+    { "path": "uipath-agents-python", "name": "uipath-agents" },
+    { "path": "uipath-llamaindex-python", "name": "uipath-llamaindex" },
+    { "path": "uipath-mcp-python", "name": "uipath-mcp" },
+    { "path": "uipath-robot-python", "name": "uipath-robot" },
+    { "path": "uipath-dev-python", "name": "uipath-dev" },
+    { "path": "uipath-core-python", "name": "uipath-core" },
+    { "path": "playground", "name": "playground" }
+  ],
+  "settings": {
+    "python.analysis.diagnosticMode": "workspace",
+    "mypy-type-checker.importStrategy": "fromEnvironment"
+  }
+}
+```
 
 ### VS Code Debugging
 
@@ -168,7 +195,9 @@ A template is available in [launch.example.json](.vscode/launch.example.json). C
 
 Do note that there are 2 configurations: one for starting an agent and one for resuming an agent after an interrupt.
 
-If you're using the `python-workspace` approach, you can copy the `.vscode` directory to the workspace and update the `cwd` property for the launch tasks to point to your agent's location (e.g. `${workspaceFolder}/playground/basic`).
+If you are using a multi-root workspace, you can copy the `.vscode` directory to your playground directory and update the `cwd` property for the
+launch tasks to point to your agent's location (e.g. `${workspaceFolder}/basic`). Because your using a multi-root
+workspace, the ${workspaceFolder} will be replaced by the package folder, not the workspace root folder.
 
 #### Windows + WSL
 

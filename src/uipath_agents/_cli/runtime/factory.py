@@ -5,7 +5,10 @@ from typing import Any
 from dotenv import load_dotenv
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from uipath._cli._utils._folders import get_personal_workspace_key_async
+from uipath.agent.models.agent import AgentDefinition
+from uipath.agent.react.conversational_prompts import PromptUserSettings
 from uipath.core import UiPathTraceManager
+from uipath.core.chat import UiPathConversationMessage
 from uipath.platform.common import UiPathConfig
 from uipath.platform.resume_triggers import UiPathResumeTriggerHandler
 from uipath.runtime import (
@@ -82,6 +85,9 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             agent_json_path = Path.cwd() / entrypoint
             agent_definition = load_agent_configuration(agent_json_path)
 
+            if agent_definition.is_conversational:
+                self._fixup_conversational_agent_definition(agent_definition)
+
             model = None
             max_tokens = None
             temperature = None
@@ -115,15 +121,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
                     else None
                 )
 
-            is_conversational = None
-            if hasattr(agent_definition, "metadata") and agent_definition.metadata:
-                metadata = agent_definition.metadata
-                is_conversational = (
-                    metadata.is_conversational
-                    if hasattr(metadata, "is_conversational")
-                    else None
-                )
-
+            # Store agent info for telemetry (avoids re-loading config later)
             self._agent_info = AgentSpanInfo(
                 name=agent_definition.name or "unknown",
                 input_schema=agent_definition.input_schema,
@@ -133,13 +131,13 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
                 temperature=temperature,
                 engine=engine,
                 max_iterations=max_iterations,
-                is_conversational=is_conversational,
+                is_conversational=agent_definition.is_conversational,
             )
 
             if not self.context.resume:
                 # Validate input against schema
                 validate_json_against_json_schema(
-                    agent_definition.input_schema, self.context.input
+                    agent_definition.input_schema, self.context.get_input()
                 )
 
             return await build_agent_graph(
@@ -160,6 +158,34 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
                 f"Unexpected error loading agent '{entrypoint}': {str(e)}",
                 UiPathErrorCategory.USER,
             ) from e
+
+    def _fixup_conversational_agent_definition(
+        self, agent_definition: AgentDefinition
+    ) -> None:
+        """Fix up a conversational agent definition."""
+        # Currently conversational agents don't support user defined input schemas, but we have
+        # https://uipath.atlassian.net/browse/JAR-9067 to enable. However, for the python runtime, we are also using the
+        # input property to provide the input message and userSettings and that usage will conflict with user defined
+        # inputs when implementing that feature. There are at least three solutions:
+        #
+        # 1) make agent builder emit the system defined schema with a nested field containing the user defined schema.
+        # Then when CAS starts the job it can include the inputs passed to the start conversation API along with the
+        # existing message and user settings inputs. In this case, the schema set here would be put in the agent
+        # definition by agent builder and this "fixup" step can be removed.
+        #
+        # 2) add a new "system_input" property that can be passed when starting/resuming the agent job and restore the
+        # input property to being user defined content only. Agent builder would then emit a schema for that property
+        # (just like for other agents, rather than special casing as done for option 1). In this case, we don't need the
+        # schema set below. The system_input property type could be statically defined, or maybe we want to make it a
+        # property bag that is used without a schema.
+        #
+        # 3) Rename these to __uipath_messages and __uipath_userSettings, and reserve the __uipath_ prefix for system
+        # properties.
+        #
+        # Note that there is an additional "fixup" that is done in the message factory: agent builder is including a
+        # vestigial user message in the agent definition ("What is the current date?"). That should be removed at some
+        # point as well.
+        agent_definition.input_schema = conversational_agent_input_schema
 
     async def _create_runtime_instance(
         self,
@@ -271,3 +297,16 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             self.context.trace_manager.flush_spans()
         shutdown_telemetry()
         await super().dispose()
+
+
+conversational_agent_input_schema: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": True,
+    "properties": {
+        "messages": {
+            "type": "array",
+            "items": UiPathConversationMessage.model_json_schema(),
+        },
+        "userSettings": PromptUserSettings.model_json_schema(),
+    },
+}

@@ -105,7 +105,7 @@ For normal local development, only the `run` command is relevant, as the `debug`
 
 **Run**
 
-The basic command used to start or resume an agent execution in production mode (source code [cli_run.py](src/uipath_agents/_cli/cli_run.py)). This command will automatically prepare agent files from `.agent-builder/` if that directory exists before executing.
+The basic command used to start or resume an agent execution in production mode (source code [cli_run.py](src/uipath_agents/_cli/cli_run.py)). This command will automatically prepare agent files from `.agent-builder/` if that directory exists before executing. Also see [Running Conversational Agents](#running-conversational-agents) below if your working with conversational agents.
 
 ```bash
 # Start the agent.json from the current directory with inline args
@@ -181,6 +181,43 @@ Currently work in progress. It's available for standard coded agents but not yet
 -   Remember to run `uv run uipath auth (--alpha)` if you get a 401 while executing the agent.
 -   You can also download the solution package from Studio Web and get the files from the `.agent-builder` directory or from an already published package.
 -   Do not confuse the `uipath debug` command with the `--debug` flag. The former is used for StudioWeb two-way communication for breakpoints, logs and so on and the latter waits for a debugger to be attached to the running process.
+
+### Running Conversational Agents
+
+Conversational agents expect input like the following, which can be placed in an `input.json` file and referenced in the run command: `uipath run agent.json --input-file input.json`.
+
+```json
+{
+  "messages": [
+    {
+      "messageId": "C1F4284E-3A1E-4EB1-AE85-A72798BADC64",
+      "role": "user",
+      "contentParts": [
+        {
+          "contentPartId": "F961EA9B-EA61-4A87-A6F1-A7D90D281C39",
+          "mimeType": "text/plain",
+          "data": {
+            "inline": "Search the web for the current weather in Seattle."
+          },
+          "createdAt": "2026-01-07T19:33:02.682Z",
+          "updatedAt": "2026-01-07T19:33:02.682Z"
+        }
+      ],
+      "spanId": "b11e0c34-978d-4b71-9eed-2430e0993eb3",
+      "createdAt": "2026-01-07T19:33:00.969Z",
+      "updatedAt": "2026-01-07T19:33:00.969Z"
+    }
+  ],
+  "userSettings": {
+    "name": "Test User",
+    "email": "test.user@example.com"
+  }
+}
+```
+
+The `messages` property provides the user input message to which the agent will respond. The `userSettings` property provides values which are placed in the agent's system prompt.
+
+By default, a new conversation is started each time you run the agent. To continue a conversation using the previous requests and response, use the `--keep-state-file` option when running the agent.
 
 ## Development Quickstart
 
