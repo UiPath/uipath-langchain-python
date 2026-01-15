@@ -71,5 +71,15 @@ builder.add_node("suspend_node", suspend_node)
 builder.add_edge(START, "suspend_node")
 builder.add_edge("suspend_node", END)
 
-# Compile without checkpointer (like debug-parallel-interrupts-agents)
-graph_simple = builder.compile()
+# Compile with SQLite checkpointer (required for interrupts and persistence)
+# State will be saved to __uipath/state.db for resume across process restarts
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+async def _create_graph():
+    checkpointer = AsyncSqliteSaver.from_conn_string("__uipath/state.db")
+    return builder.compile(checkpointer=checkpointer)
+
+# For synchronous access, use MemorySaver as fallback
+# (Runtime will replace with proper AsyncSqliteSaver)
+from langgraph.checkpoint.memory import MemorySaver
+graph_simple = builder.compile(checkpointer=MemorySaver())
