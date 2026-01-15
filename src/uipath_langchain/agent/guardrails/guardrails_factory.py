@@ -45,6 +45,37 @@ from uipath_langchain.agent.guardrails.actions import (
 from uipath_langchain.agent.guardrails.utils import _sanitize_selector_tool_names
 
 
+def _has_schema(tool: BaseTool, attribute_name: str) -> bool:
+    """Check if a tool has a non-empty schema for the given attribute.
+
+    Args:
+        tool: The tool to check.
+        attribute_name: The name of the attribute to check (e.g., 'args_schema', 'output_type').
+
+    Returns:
+        True if the tool has a non-empty schema with properties, False otherwise.
+    """
+    # Check if tool has the attribute
+    if not hasattr(tool, attribute_name):
+        return False
+
+    schema_obj = getattr(tool, attribute_name, None)
+    if schema_obj is None:
+        return False
+
+    # Get the JSON schema from the schema object
+    try:
+        if hasattr(schema_obj, "model_json_schema"):
+            schema = schema_obj.model_json_schema()
+            # Check if schema has properties
+            properties = schema.get("properties", {})
+            return bool(properties)
+    except Exception:
+        pass
+
+    return False
+
+
 def _tool_has_input_schema(tool: BaseTool) -> bool:
     """Check if a tool has a non-empty input schema.
 
@@ -53,31 +84,8 @@ def _tool_has_input_schema(tool: BaseTool) -> bool:
 
     Returns:
         True if the tool has a non-empty input schema, False otherwise.
-        Defaults to True if unable to determine (for backward compatibility).
     """
-    # Check if tool has args_schema attribute
-    if not hasattr(tool, "args_schema"):
-        # Default to True - assume tool has input schema if we can't determine
-        return True
-
-    args_schema = getattr(tool, "args_schema", None)
-    if args_schema is None:
-        # Default to True - assume tool has input schema if not explicitly set
-        return True
-
-    # Get the JSON schema from the args schema
-    try:
-        if hasattr(args_schema, "model_json_schema"):
-            schema = args_schema.model_json_schema()
-            # Check if schema has properties
-            properties = schema.get("properties", {})
-            return bool(properties)
-    except Exception:
-        # Default to True if we encounter an error
-        return True
-
-    # If we reach here, assume has input schema
-    return True
+    return _has_schema(tool, "args_schema")
 
 
 def _tool_has_output_schema(tool: BaseTool) -> bool:
@@ -89,25 +97,7 @@ def _tool_has_output_schema(tool: BaseTool) -> bool:
     Returns:
         True if the tool has a non-empty output schema, False otherwise.
     """
-    # Check if tool has output_type attribute (StructuredToolWithOutputType)
-    if not hasattr(tool, "output_type"):
-        return False
-
-    output_type = getattr(tool, "output_type", None)
-    if output_type is None:
-        return False
-
-    # Get the JSON schema from the output type
-    try:
-        if hasattr(output_type, "model_json_schema"):
-            schema = output_type.model_json_schema()
-            # Check if schema has properties
-            properties = schema.get("properties", {})
-            return bool(properties)
-    except Exception:
-        pass
-
-    return False
+    return _has_schema(tool, "output_type")
 
 
 def _assert_value_not_none(value: str | None, operator: AgentWordOperator) -> str:
@@ -224,32 +214,46 @@ def _compute_field_sources_for_guardrail(
         tools: The list of tools available to the agent.
 
     Returns:
-        List of field sources based on tool schema:
-        - [INPUT, OUTPUT] if tool has both schemas or no matching tool found (default)
-        - [INPUT] if tool has no output schema
-        - [OUTPUT] if tool has no input schema
+        List of field sources based on tool schema when matching tool is found:
+        - [] (empty) if tool has neither input nor output schema
+        - [INPUT] if tool has only input schema
+        - [OUTPUT] if tool has only output schema
+        - [INPUT, OUTPUT] if tool has both input and output schemas
+
+    Raises:
+        ValueError: If match_names is not specified/empty, or if the specified tool
+                   is not found in the provided tools list.
     """
-    # Default to both INPUT and OUTPUT
-    field_sources = [FieldSource.INPUT, FieldSource.OUTPUT]
+    field_sources = []
 
     # Deterministic guardrails have one single tool
     if guardrail.selector.match_names and len(guardrail.selector.match_names) > 0:
-        tool_name = guardrail.selector.match_names[0]
-        matching_tool = next((t for t in tools if t.name == tool_name), None)
+        matching_tool = next(
+            (t for t in tools if t.name == guardrail.selector.match_names[0]), None
+        )
 
         if matching_tool:
             has_input = _tool_has_input_schema(matching_tool)
             has_output = _tool_has_output_schema(matching_tool)
 
-            # If tool has no output schema, only use INPUT source
-            if has_input and not has_output:
-                field_sources = [FieldSource.INPUT]
-            # If tool has no input schema, only use OUTPUT source
-            elif not has_input and has_output:
-                field_sources = [FieldSource.OUTPUT]
-            # If tool has both or neither, use default [INPUT, OUTPUT]
+            # Start with empty list and add sources based on what tool has
+            if has_input:
+                field_sources.append(FieldSource.INPUT)
+            if has_output:
+                field_sources.append(FieldSource.OUTPUT)
 
-    return field_sources
+            return field_sources
+
+    # If we reach here, either match_names is not specified/empty, or no matching tool was found
+    tool_name: str | None = (
+        guardrail.selector.match_names[0] if guardrail.selector.match_names else None
+    )
+    raise ValueError(
+        f"Guardrail '{guardrail.name}' requires a valid match_names with at least one tool. "
+        f"Tool '{tool_name}' not found in available tools."
+        if tool_name
+        else "match_names is empty or not specified."
+    )
 
 
 def _convert_agent_field_selector_to_deterministic(

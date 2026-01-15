@@ -690,9 +690,16 @@ class TestConvertAgentCustomGuardrailToDeterministic:
         """When tool has no output schema, AllFieldsSelector should use only INPUT source."""
         from unittest.mock import Mock
 
-        # Create a mock tool without output_type attribute
+        from pydantic import BaseModel
+
+        # Create a Pydantic model with properties for input schema
+        class ToolInput(BaseModel):
+            sentence: str
+
+        # Create a mock tool without output_type attribute but with input schema
         mock_tool_no_output = Mock(spec=BaseTool)
         mock_tool_no_output.name = "test_tool"
+        mock_tool_no_output.args_schema = ToolInput
         # Tool doesn't have output_type attribute
 
         agent_guardrail = AgentCustomGuardrail.model_validate(
@@ -737,14 +744,19 @@ class TestConvertAgentCustomGuardrailToDeterministic:
 
         from pydantic import BaseModel
 
+        # Create a Pydantic model with properties for input schema
+        class ToolInput(BaseModel):
+            sentence: str
+
         # Create a Pydantic model with properties for output schema
         class ToolOutput(BaseModel):
             result: str
             status: str
 
-        # Create a mock tool with output_type attribute
+        # Create a mock tool with both input and output schemas
         mock_tool_with_output = Mock(spec=BaseTool)
         mock_tool_with_output.name = "test_tool"
+        mock_tool_with_output.args_schema = ToolInput
         mock_tool_with_output.output_type = ToolOutput
 
         agent_guardrail = AgentCustomGuardrail.model_validate(
@@ -792,13 +804,18 @@ class TestConvertAgentCustomGuardrailToDeterministic:
 
         from pydantic import BaseModel
 
+        # Create a Pydantic model with properties for input schema
+        class ToolInput(BaseModel):
+            sentence: str
+
         # Create a Pydantic model with NO properties (empty output schema)
         class EmptyToolOutput(BaseModel):
             pass
 
-        # Create a mock tool with empty output schema
+        # Create a mock tool with input schema and empty output schema
         mock_tool_empty_output = Mock(spec=BaseTool)
         mock_tool_empty_output.name = "test_tool"
+        mock_tool_empty_output.args_schema = ToolInput
         mock_tool_empty_output.output_type = EmptyToolOutput
 
         agent_guardrail = AgentCustomGuardrail.model_validate(
@@ -893,6 +910,82 @@ class TestConvertAgentCustomGuardrailToDeterministic:
         assert isinstance(word_rule.field_selector, AllFieldsSelector)
         # Should only have OUTPUT source since tool has no input schema
         assert word_rule.field_selector.sources == [FieldSource.OUTPUT]
+
+    def test_convert_with_empty_match_names_raises_error(self) -> None:
+        """When match_names is empty, should raise ValueError."""
+        agent_guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool"],
+                    "matchNames": [],  # Empty match_names
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        # Should raise ValueError when match_names is empty
+        with pytest.raises(
+            ValueError,
+            match="match_names is empty or not specified",
+        ):
+            _convert_agent_custom_guardrail_to_deterministic(agent_guardrail, [])
+
+    def test_convert_with_nonexistent_tool_raises_error(self) -> None:
+        """When match_names specifies a tool that doesn't exist, should raise ValueError."""
+        from unittest.mock import Mock
+
+        # Create a mock tool with a different name
+        mock_tool = Mock(spec=BaseTool)
+        mock_tool.name = "different_tool"
+
+        agent_guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test guardrail",
+                "enabledForEvals": True,
+                "selector": {
+                    "$selectorType": "scoped",
+                    "scopes": ["Tool"],
+                    "matchNames": [
+                        "nonexistent_tool"
+                    ],  # Tool doesn't exist in tools list
+                },
+                "rules": [
+                    {
+                        "$ruleType": "word",
+                        "fieldSelector": {"$selectorType": "all"},
+                        "operator": "contains",
+                        "value": "forbidden",
+                    }
+                ],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+
+        # Should raise ValueError when tool is not found
+        with pytest.raises(
+            ValueError,
+            match="not found in available tools",
+        ):
+            _convert_agent_custom_guardrail_to_deterministic(
+                agent_guardrail, [mock_tool]
+            )
 
     def test_convert_custom_guardrail_with_word_rules(self) -> None:
         agent_guardrail = AgentCustomGuardrail.model_validate(
