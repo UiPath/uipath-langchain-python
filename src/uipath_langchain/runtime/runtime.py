@@ -23,8 +23,8 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
-from uipath_langchain.chat import UiPathChatMessagesMapper
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
+from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
 
 from ._serialize import serialize_output
