@@ -22,7 +22,7 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
-from uipath_langchain.agent.wrappers import job_attachment_wrapper
+from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 
 ANALYZE_FILES_SYSTEM_MESSAGE = (
     "Process the provided files to complete the given task. "
@@ -67,13 +67,15 @@ def create_analyze_file_tool(
         result = await llm_call_with_files(messages, files, llm)
         return result
 
+    job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
+
     async def analyze_file_tool_wrapper(
         tool: BaseTool,
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
         call["args"] = handle_static_args(resource, state, call["args"])
-        return await job_attachment_wrapper(tool, call, state, output_type=output_model)
+        return await job_attachment_wrapper(tool, call, state)
 
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,

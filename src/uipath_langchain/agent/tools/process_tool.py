@@ -19,7 +19,7 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
-from uipath_langchain.agent.wrappers import job_attachment_wrapper
+from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 
 from .utils import sanitize_tool_name
 
@@ -50,13 +50,15 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             )
         )
 
+    job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
+
     async def process_tool_wrapper(
         tool: BaseTool,
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
         call["args"] = handle_static_args(resource, state, call["args"])
-        return await job_attachment_wrapper(tool, call, state, output_type=output_model)
+        return await job_attachment_wrapper(tool, call, state)
 
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,

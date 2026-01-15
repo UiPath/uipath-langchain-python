@@ -18,7 +18,6 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
     ToolWrapperReturnType,
 )
-from uipath_langchain.agent.wrappers import job_attachment_wrapper
 
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_dict_for_serialization, sanitize_tool_name

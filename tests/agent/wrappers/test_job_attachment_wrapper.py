@@ -12,7 +12,9 @@ from pydantic import BaseModel, Field
 from uipath.platform.attachments import Attachment
 
 from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphState
-from uipath_langchain.agent.wrappers import job_attachment_wrapper
+from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
+    get_job_attachment_wrapper,
+)
 
 
 class MockAttachmentSchema(BaseModel):
@@ -31,8 +33,8 @@ class MockOutputSchema(BaseModel):
     )
 
 
-class TestJobAttachmentWrapper:
-    """Test cases for job_attachment_wrapper function."""
+class TestGetJobAttachmentWrapper:
+    """Test cases for get_job_attachment_wrapper function."""
 
     def assert_command_success(
         self,
@@ -122,7 +124,8 @@ class TestJobAttachmentWrapper:
         """Test that tool is invoked normally when args_schema is None."""
         mock_tool.args_schema = None
 
-        result = await job_attachment_wrapper(mock_tool, mock_tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
@@ -135,7 +138,8 @@ class TestJobAttachmentWrapper:
         """Test that tool is invoked normally when args_schema is a dict."""
         mock_tool.args_schema = {"type": "object", "properties": {}}
 
-        result = await job_attachment_wrapper(mock_tool, mock_tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
@@ -148,7 +152,8 @@ class TestJobAttachmentWrapper:
         """Test that tool is invoked normally when args_schema is not a BaseModel."""
         mock_tool.args_schema = str
 
-        result = await job_attachment_wrapper(mock_tool, mock_tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
@@ -169,7 +174,8 @@ class TestJobAttachmentWrapper:
         mock_tool.args_schema = MockAttachmentSchema
         mock_get_paths.return_value = []
 
-        result = await job_attachment_wrapper(mock_tool, mock_tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
@@ -206,7 +212,8 @@ class TestJobAttachmentWrapper:
             },
         )
 
-        result = await job_attachment_wrapper(mock_tool, tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, tool_call, mock_state)
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
@@ -243,7 +250,8 @@ class TestJobAttachmentWrapper:
         # Empty state - attachment not found
         mock_state.inner_state.job_attachments = {}
 
-        result = await job_attachment_wrapper(mock_tool, tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, tool_call, mock_state)
 
         self.assert_error_result(result, "Could not find JobAttachment")
         assert isinstance(result, dict)
@@ -285,7 +293,8 @@ class TestJobAttachmentWrapper:
         # Empty state - both attachments not found
         mock_state.inner_state.job_attachments = {}
 
-        result = await job_attachment_wrapper(mock_tool, tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, tool_call, mock_state)
 
         self.assert_error_result(result, "Could not find JobAttachment")
         assert isinstance(result, dict)
@@ -323,7 +332,8 @@ class TestJobAttachmentWrapper:
 
         mock_state.inner_state.job_attachments = {}
 
-        result = await job_attachment_wrapper(mock_tool, tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, tool_call, mock_state)
 
         self.assert_error_result(result, invalid_id)
         mock_tool.ainvoke.assert_not_awaited()
@@ -364,7 +374,8 @@ class TestJobAttachmentWrapper:
             },
         )
 
-        result = await job_attachment_wrapper(mock_tool, tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, tool_call, mock_state)
 
         self.assert_error_result(result, str(invalid_id))
         assert isinstance(result, dict)
@@ -453,7 +464,8 @@ class TestJobAttachmentWrapper:
             },
         )
 
-        result = await job_attachment_wrapper(mock_tool, tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, tool_call, mock_state)
 
         # Should return error for the missing attachment
         self.assert_error_result(result, "Could not find JobAttachment")
@@ -537,7 +549,8 @@ class TestJobAttachmentWrapper:
             },
         )
 
-        result = await job_attachment_wrapper(mock_tool, tool_call, mock_state)
+        wrapper = get_job_attachment_wrapper()
+        result = await wrapper(mock_tool, tool_call, mock_state)
 
         # Should succeed without errors
         assert isinstance(result, Command)
@@ -582,9 +595,8 @@ class TestJobAttachmentWrapper:
             }
         )
 
-        result = await job_attachment_wrapper(
-            mock_tool, mock_tool_call, mock_state, output_type=MockOutputSchema
-        )
+        wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         # Should succeed and include the output attachment in inner_state
         assert isinstance(result, Command)
@@ -629,9 +641,8 @@ class TestJobAttachmentWrapper:
             }
         )
 
-        result = await job_attachment_wrapper(
-            mock_tool, mock_tool_call, mock_state, output_type=MockOutputSchema
-        )
+        wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         # Should succeed and include all attachments
         assert isinstance(result, Command)
@@ -661,9 +672,8 @@ class TestJobAttachmentWrapper:
             return_value={"result_attachment": None, "additional_attachments": []}
         )
 
-        result = await job_attachment_wrapper(
-            mock_tool, mock_tool_call, mock_state, output_type=MockOutputSchema
-        )
+        wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         # Should succeed with empty job_attachments
         assert isinstance(result, Command)
@@ -700,9 +710,8 @@ class TestJobAttachmentWrapper:
             }
         )
 
-        result = await job_attachment_wrapper(
-            mock_tool, mock_tool_call, mock_state, output_type=MockOutputSchema
-        )
+        wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
+        result = await wrapper(mock_tool, mock_tool_call, mock_state)
 
         # Should only include attachment with id (None id filtered out)
         assert isinstance(result, Command)

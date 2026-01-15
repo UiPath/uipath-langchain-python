@@ -73,6 +73,9 @@ class TestCreateAnalyzeFileTool:
         )
 
     @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
         "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.llm_call_with_files"
     )
     @patch(
@@ -82,6 +85,7 @@ class TestCreateAnalyzeFileTool:
         self,
         mock_resolve_attachments,
         mock_llm_call,
+        mock_get_wrapper,
         resource_config,
         mock_llm,
     ):
@@ -95,6 +99,8 @@ class TestCreateAnalyzeFileTool:
             )
         ]
         mock_llm_call.return_value = "Analysis complete"
+        mock_wrapper = Mock()
+        mock_get_wrapper.return_value = mock_wrapper
 
         # Create tool
         tool = create_analyze_file_tool(resource_config, mock_llm)
@@ -128,10 +134,16 @@ class TestCreateAnalyzeFileTool:
         assert len(files) == 1
         assert files[0].url == "https://example.com/file.pdf"
 
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
     async def test_create_analyze_file_tool_missing_analysis_task(
-        self, resource_config, mock_llm
+        self, mock_get_wrapper, resource_config, mock_llm
     ):
         """Test tool execution fails when analysisTask is missing."""
+        mock_wrapper = Mock()
+        mock_get_wrapper.return_value = mock_wrapper
+
         tool = create_analyze_file_tool(resource_config, mock_llm)
 
         mock_attachment = MockAttachment(
@@ -144,16 +156,25 @@ class TestCreateAnalyzeFileTool:
         ):
             await tool.coroutine(attachments=[mock_attachment])
 
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
     async def test_create_analyze_file_tool_missing_attachments(
-        self, resource_config, mock_llm
+        self, mock_get_wrapper, resource_config, mock_llm
     ):
         """Test tool execution fails when attachments are missing."""
+        mock_wrapper = Mock()
+        mock_get_wrapper.return_value = mock_wrapper
+
         tool = create_analyze_file_tool(resource_config, mock_llm)
 
         assert tool.coroutine is not None
         with pytest.raises(ValueError, match="Argument 'attachments' is not available"):
             await tool.coroutine(analysisTask="Summarize the document")
 
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
     @patch(
         "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.llm_call_with_files"
     )
@@ -164,6 +185,7 @@ class TestCreateAnalyzeFileTool:
         self,
         mock_resolve_attachments,
         mock_llm_call,
+        mock_get_wrapper,
         resource_config,
         mock_llm,
     ):
@@ -181,6 +203,8 @@ class TestCreateAnalyzeFileTool:
             ),
         ]
         mock_llm_call.return_value = "Multiple files analyzed"
+        mock_wrapper = Mock()
+        mock_get_wrapper.return_value = mock_wrapper
 
         tool = create_analyze_file_tool(resource_config, mock_llm)
 
