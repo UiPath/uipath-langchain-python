@@ -1,4 +1,5 @@
 import base64
+import re
 from enum import StrEnum
 from typing import Any
 
@@ -49,12 +50,33 @@ def detect_provider(model_name: str) -> LlmProvider:
     raise ValueError(f"Unsupported model: {model_name}")
 
 
-async def _download_file(url: str) -> str:
-    """Download a file from a URL and return its content as a base64 string."""
+def sanitize_filename_for_anthropic(filename: str) -> str:
+    """Sanitize a filename to conform to Anthropic's document naming requirements."""
+    if not filename or filename.isspace():
+        return "document"
+
+    sanitized = re.sub(r"[^a-zA-Z0-9_\s\-\(\)\[\]\.]", "_", filename)
+
+    sanitized = re.sub(r"\s+", " ", sanitized)
+
+    sanitized = sanitized.strip()
+
+    return sanitized if sanitized else "document"
+
+
+async def _download_file_bytes(url: str) -> bytes:
+    """Download a file from a URL and return its content bytes."""
     async with httpx.AsyncClient(**get_httpx_client_kwargs()) as client:
         response = await client.get(url)
         response.raise_for_status()
         file_content = response.content
+
+    return file_content
+
+
+async def _download_file(url: str) -> str:
+    """Download a file from a URL and return its content as a base64 string."""
+    file_content = await _download_file_bytes(url)
 
     return base64.b64encode(file_content).decode("utf-8")
 
@@ -72,7 +94,7 @@ async def build_message_content_part_from_data(
     provider = detect_provider(model)
 
     if provider == LlmProvider.BEDROCK:
-        raise ValueError("Anthropic models are not yet supported for file attachments")
+        return await _build_bedrock_content_part_from_data(url, mime_type, filename)
 
     if provider == LlmProvider.OPENAI:
         return await _build_openai_content_part_from_data(
@@ -80,9 +102,45 @@ async def build_message_content_part_from_data(
         )
 
     if provider == LlmProvider.VERTEX:
-        raise ValueError("Gemini models are not yet supported for file attachments")
+        return await _build_vertex_content_part_from_data(url, mime_type, False)
 
     raise ValueError(f"Unsupported provider: {provider}")
+
+
+async def _build_bedrock_content_part_from_data(
+    url: str,
+    mime_type: str,
+    filename: str,
+) -> dict[str, Any]:
+    """Build a content part for AWS Bedrock (Anthropic Claude models)."""
+    if is_pdf(mime_type):
+        file_bytes = await _download_file_bytes(url)
+        name = filename.rsplit(".", 1)[0] if "." in filename else filename
+        sanitized_name = sanitize_filename_for_anthropic(name)
+        return {
+            "type": "document",
+            "document": {
+                "format": "pdf",
+                "name": sanitized_name,
+                "source": {
+                    "bytes": file_bytes,
+                },
+                "citations": {"enabled": True},
+            },
+        }
+
+    if is_image(mime_type):
+        base64_content = await _download_file(url)
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": mime_type,
+                "data": base64_content,
+            },
+        }
+
+    raise ValueError(f"Unsupported mime_type: {mime_type}")
 
 
 async def _build_openai_content_part_from_data(
@@ -102,10 +160,13 @@ async def _build_openai_content_part_from_data(
             }
 
         if is_pdf(mime_type):
+            data = f"data:application/pdf;base64,{base64_content}"
             return {
-                "type": "input_file",
-                "filename": filename,
-                "file_data": base64_content,
+                "type": "file",
+                "file": {
+                    "filename": filename,
+                    "file_data": data,
+                },
             }
 
     elif is_image(mime_type):
@@ -118,6 +179,32 @@ async def _build_openai_content_part_from_data(
         return {
             "type": "input_file",
             "file_url": url,
+        }
+
+    raise ValueError(f"Unsupported mime_type: {mime_type}")
+
+
+async def _build_vertex_content_part_from_data(
+    url: str,
+    mime_type: str,
+    download_file: bool,
+) -> dict[str, Any]:
+    """Build a content part for Google Vertex AI / Gemini models."""
+    if download_file:
+        base64_content = await _download_file(url)
+        if is_image(mime_type) or is_pdf(mime_type):
+            return {
+                "type": "file",
+                "source_type": "base64",
+                "mime_type": mime_type,
+                "data": base64_content,
+            }
+
+    elif is_image(mime_type) or is_pdf(mime_type):
+        return {
+            "type": "media",
+            "file_uri": url,
+            "mime_type": mime_type,
         }
 
     raise ValueError(f"Unsupported mime_type: {mime_type}")
