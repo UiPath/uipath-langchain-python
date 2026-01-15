@@ -108,9 +108,10 @@ def create_agent(
     llm_node = create_llm_node(
         model,
         llm_tools,
-        config.is_conversational,
-        config.llm_messages_limit,
-        config.thinking_messages_limit,
+        input_schema=input_schema,
+        is_conversational=config.is_conversational,
+        llm_messages_limit=config.llm_messages_limit,
+        thinking_messages_limit=config.thinking_messages_limit,
     )
     llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
         (AgentGraphNode.LLM, llm_node), guardrails, input_schema=input_schema

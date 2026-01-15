@@ -109,9 +109,8 @@ def apply_static_argument_properties_to_schema(
     else:
         return tool
 
-    sanitized_input = sanitize_dict_for_serialization(agent_input)
     static_args = _resolve_argument_properties_to_static_arguments(
-        tool.argument_properties, sanitized_input
+        tool.argument_properties, agent_input
     )
     for json_path, static_arg in static_args.items():
         try:

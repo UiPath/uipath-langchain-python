@@ -5,6 +5,7 @@ from typing import Literal, Sequence, TypeVar
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall
 from langchain_core.tools import BaseTool
+from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
 
 from uipath_langchain.agent.tools.static_args import (
@@ -20,7 +21,7 @@ from .constants import (
     DEFAULT_MAX_LLM_MESSAGES,
 )
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
-from .utils import count_consecutive_thinking_messages
+from .utils import count_consecutive_thinking_messages, extract_input_data_from_state
 
 OPENAI_COMPATIBLE_CHAT_MODELS = (
     "UiPathChatOpenAI",
@@ -56,11 +57,13 @@ def _filter_control_flow_tool_calls(
 
 
 StateT = TypeVar("StateT", bound=AgentGraphState)
+InputT = TypeVar("InputT", bound=BaseModel)
 
 
 def create_llm_node(
     model: BaseChatModel,
-    tools: Sequence[BaseTool] | None = None,
+    tools: Sequence[BaseTool],
+    input_schema: type[InputT] | None = None,
     is_conversational: bool = False,
     llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
     thinking_messages_limit: int = DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
@@ -94,7 +97,9 @@ def create_llm_node(
 
         consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
 
-        static_schema_tools = _apply_tool_argument_properties(bindable_tools, state)
+        static_schema_tools = _apply_tool_argument_properties(
+            bindable_tools, state, input_schema
+        )
         base_llm = model.bind_tools(static_schema_tools)
 
         if (
@@ -127,10 +132,11 @@ def create_llm_node(
 def _apply_tool_argument_properties(
     tools: list[BaseTool],
     state: StateT,
+    input_schema: type[InputT] | None = None,
 ) -> list[BaseTool]:
     """Apply dynamic schema modifications to tools based on their argument_properties."""
 
-    agent_input = dict(state)
+    agent_input = extract_input_data_from_state(state, input_schema or type(state))
     return [
         apply_static_argument_properties_to_schema(tool, agent_input)
         if isinstance(tool, StructuredToolWithArgumentProperties)
