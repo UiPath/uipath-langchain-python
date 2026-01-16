@@ -8,7 +8,6 @@ from uipath._cli._utils._folders import get_personal_workspace_key_async
 from uipath.agent.models.agent import AgentDefinition
 from uipath.agent.react.conversational_prompts import PromptUserSettings
 from uipath.core import UiPathTraceManager
-from uipath.core.chat import UiPathConversationMessage
 from uipath.platform.common import UiPathConfig
 from uipath.platform.resume_triggers import UiPathResumeTriggerHandler
 from uipath.runtime import (
@@ -299,13 +298,25 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         await super().dispose()
 
 
+# The input "messages" property type and the state "messages" property type are different. The input messages property
+# has CAS format messages (as defined by UiPathConversationMessage), but the state "messages" are LangGraph message
+# objects (HumanMessage, etc.). The conversion from CAS messages to LangGraph messages is done in UiPathLangGraphRuntime
+# before starting execution. So if the schema for messages set here is the actual input type (from CAS),
+# extract_input_data_from_state in message_utils fails to validate the input because the messages have already been
+# converted. If we use the langgraph BaseMessage schema here, then the call to validate_json_against_json_schema fails
+# because the message has not been mapped at the point it is called. If we don't include "messages" in this schema at
+# all, then the converted messages aren't passed to the init node in state. So the only option right now is to set it
+# to a array of any object.
 conversational_agent_input_schema: dict[str, Any] = {
     "type": "object",
     "additionalProperties": True,
     "properties": {
         "messages": {
             "type": "array",
-            "items": UiPathConversationMessage.model_json_schema(),
+            "items": {
+                "type": "object",
+                "additionalProperties": True,
+            },
         },
         "userSettings": PromptUserSettings.model_json_schema(),
     },

@@ -28,18 +28,6 @@ class TestConversationalAgentInputSchema:
         assert "messages" in properties
         assert properties["messages"]["type"] == "array"
 
-    def test_messages_items_have_expected_structure(self):
-        """Messages items should have messageId, role, and contentParts."""
-        message_item = conversational_agent_input_schema["properties"]["messages"][
-            "items"
-        ]
-        print(f">>>> message_item: {message_item}")
-        props = message_item["properties"]
-
-        assert "messageId" in props
-        assert "role" in props
-        assert "contentParts" in props
-
     def test_schema_has_user_settings_property(self):
         """Schema should have a userSettings object property."""
         properties = conversational_agent_input_schema["properties"]
