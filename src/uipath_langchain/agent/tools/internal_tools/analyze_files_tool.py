@@ -61,7 +61,7 @@ def create_analyze_file_tool(
         files = await _resolve_job_attachment_arguments(attachments)
         if not files:
             return {"analysisResult": "No attachments provided to analyze."}
-            
+
         messages: list[AnyMessage] = [
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),
             HumanMessage(content=analysisTask),
