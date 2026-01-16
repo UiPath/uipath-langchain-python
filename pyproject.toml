@@ -45,6 +45,33 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/uipath_agents"]
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+  # Test and example code
+  "tests/",
+  "examples/",
+
+  # CI/CD and tooling
+  ".github/",
+  "*.yml",
+  "*.yaml",
+  "Dockerfile",
+
+  # IDE and dev configs
+  ".pycharm/",
+  ".claude/",
+  ".*",              # All hidden files
+  "!.gitignore",     # Except this one
+
+  # Documentation and planning
+  "plan/",
+  "*.md",            # All markdown except README.md (auto-kept)
+
+  # Local configs
+  "pytest.ini",
+  "pyproject.local.toml",
+]
+
 [tool.ruff]
 line-length = 88
 indent-width = 4
