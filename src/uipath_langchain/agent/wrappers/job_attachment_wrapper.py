@@ -11,10 +11,12 @@ from uipath_langchain.agent.react.job_attachments import (
     replace_job_attachment_ids,
 )
 from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.tool_node import AsyncToolWrapperType
+from uipath_langchain.agent.tools.tool_node import AsyncToolWrapperWithState
 
 
-def get_job_attachment_wrapper(output_type: Any | None = None) -> AsyncToolWrapperType:
+def get_job_attachment_wrapper(
+    output_type: Any | None = None,
+) -> AsyncToolWrapperWithState:
     """Create a tool wrapper that handles job attachments in both tool inputs and outputs.
 
     This wrapper performs two main functions:

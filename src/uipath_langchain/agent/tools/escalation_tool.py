@@ -3,10 +3,9 @@
 from enum import Enum
 from typing import Any
 
-from langchain_core.messages import ToolMessage
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.types import Command, interrupt
+from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipient,
@@ -17,10 +16,11 @@ from uipath.agent.models.agent import (
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.common import CreateEscalation
+from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
-from ..react.types import AgentGraphNode, AgentGraphState, AgentTerminationSource
+from ..exceptions import AgentTerminationException
 from .tool_node import ToolWrapperMixin
 from .utils import sanitize_tool_name
 
@@ -132,8 +132,7 @@ async def create_escalation_tool(
     async def escalation_wrapper(
         tool: BaseTool,
         call: ToolCall,
-        state: AgentGraphState,
-    ) -> dict[str, Any] | Command[Any]:
+    ) -> dict[str, Any] | None:
         result = await tool.ainvoke(call["args"])
 
         if result["action"] == EscalationAction.END:
@@ -143,23 +142,10 @@ async def create_escalation_tool(
                 f"with directive {result['escalation_action']}"
             )
 
-            return Command(
-                update={
-                    "messages": [
-                        ToolMessage(
-                            content=f"{termination_title}. {output_detail}",
-                            tool_call_id=call["id"],
-                        )
-                    ],
-                    "inner_state": {
-                        "termination": {
-                            "source": AgentTerminationSource.ESCALATION,
-                            "title": termination_title,
-                            "detail": output_detail,
-                        }
-                    },
-                },
-                goto=AgentGraphNode.TERMINATE,
+            raise AgentTerminationException(
+                code=UiPathErrorCode.EXECUTION_ERROR,
+                title=termination_title,
+                detail=output_detail,
             )
 
         return result["output"]

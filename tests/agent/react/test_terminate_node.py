@@ -12,16 +12,11 @@ from uipath_langchain.agent.exceptions import (
     AgentTerminationException,
 )
 from uipath_langchain.agent.react.terminate_node import create_terminate_node
-from uipath_langchain.agent.react.types import (
-    AgentTermination,
-    AgentTerminationSource,
-)
 
 
 class MockInnerState(BaseModel):
     """Mock inner state for testing."""
 
-    termination: AgentTermination | None = None
     job_attachments: dict[str, Any] = {}
 
 
@@ -52,19 +47,6 @@ class TestTerminateNodeConversational:
         """Fixture for state with human message as last."""
         return MockAgentGraphState(messages=[HumanMessage(content="User message")])
 
-    @pytest.fixture
-    def state_with_termination(self):
-        """Fixture for state with termination set (e.g., escalation)."""
-        termination = AgentTermination(
-            source=AgentTerminationSource.ESCALATION,
-            title="Escalation required",
-            detail="User requested human assistance",
-        )
-        return MockAgentGraphState(
-            messages=[AIMessage(content="response")],
-            inner_state=MockInnerState(termination=termination),
-        )
-
     def test_conversational_returns_none_no_tool_calls(
         self, terminate_node, state_with_ai_message
     ):
@@ -81,15 +63,6 @@ class TestTerminateNodeConversational:
         result = terminate_node(state_with_human_message)
 
         assert result is None
-
-    def test_conversational_handles_termination(
-        self, terminate_node, state_with_termination
-    ):
-        """Conversational mode should still handle state.inner_state.termination."""
-        with pytest.raises(AgentTerminationException) as exc_info:
-            terminate_node(state_with_termination)
-
-        assert "Escalation required" in exc_info.value.error_info.title
 
     def test_conversational_ignores_end_execution_tool(self):
         """Conversational mode should ignore END_EXECUTION tool calls."""
@@ -169,19 +142,6 @@ class TestTerminateNodeNonConversational:
         )
         return MockAgentGraphState(messages=[ai_message])
 
-    @pytest.fixture
-    def state_with_termination(self):
-        """Fixture for state with escalation termination."""
-        termination = AgentTermination(
-            source=AgentTerminationSource.ESCALATION,
-            title="Needs human review",
-            detail="Complex issue",
-        )
-        return MockAgentGraphState(
-            messages=[AIMessage(content="response")],
-            inner_state=MockInnerState(termination=termination),
-        )
-
     def test_non_conversational_handles_end_execution(
         self, terminate_node, state_with_end_execution
     ):
@@ -222,15 +182,6 @@ class TestTerminateNodeNonConversational:
             match="No control flow tool call found in terminate node",
         ):
             terminate_node(state_with_no_control_flow_tool)
-
-    def test_non_conversational_handles_termination_first(
-        self, terminate_node, state_with_termination
-    ):
-        """Non-conversational mode should check termination before tool calls."""
-        with pytest.raises(AgentTerminationException) as exc_info:
-            terminate_node(state_with_termination)
-
-        assert "Needs human review" in exc_info.value.error_info.title
 
 
 class TestTerminateNodeWithResponseSchema:

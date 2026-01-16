@@ -12,21 +12,8 @@ from uipath_langchain.agent.react.reducers import add_job_attachments, merge_obj
 FLOW_CONTROL_TOOLS = [END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name]
 
 
-class AgentTerminationSource(StrEnum):
-    ESCALATION = "escalation"
-
-
-class AgentTermination(BaseModel):
-    """Agent Graph Termination model."""
-
-    source: AgentTerminationSource
-    title: str
-    detail: str = ""
-
-
 class InnerAgentGraphState(BaseModel):
     job_attachments: Annotated[dict[str, Attachment], add_job_attachments] = {}
-    termination: AgentTermination | None = None
 
 
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
