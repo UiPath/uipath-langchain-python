@@ -1,9 +1,10 @@
 from functools import partial
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, TypeVar
 
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
+from pydantic import BaseModel
 from uipath.core.guardrails import DeterministicGuardrail
 from uipath.platform.guardrails import (
     BaseGuardrail,
@@ -26,6 +27,7 @@ from uipath_langchain.agent.react.types import (
     AgentGraphState,
     AgentGuardrailsGraphState,
 )
+from uipath_langchain.agent.react.utils import create_guardrails_state_with_input
 
 _VALIDATOR_ALLOWED_STAGES = {
     "prompt_injection": {ExecutionStage.PRE_EXECUTION},
@@ -65,6 +67,7 @@ def _create_guardrails_subgraph(
         ],
         GuardrailActionNode,
     ] = create_llm_guardrail_node,
+    input_schema: type[BaseModel] | None = None,
 ):
     """Build a subgraph that enforces guardrails around an inner node.
 
@@ -83,7 +86,8 @@ def _create_guardrails_subgraph(
     """
     inner_name, inner_node = main_inner_node
 
-    subgraph = StateGraph(AgentGuardrailsGraphState)
+    CompleteAgentGuardrailsGraphState = create_guardrails_state_with_input(input_schema)
+    subgraph = StateGraph(CompleteAgentGuardrailsGraphState)
 
     subgraph.add_node(inner_name, inner_node)
 
@@ -203,12 +207,14 @@ def _build_guardrail_node_chain(
 def create_llm_guardrails_subgraph(
     llm_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    input_schema: type[BaseModel] | None = None,
 ):
     """Create a guarded LLM node.
 
     Args:
         llm_node: Tuple of (node_name, node_callable) for the LLM node.
         guardrails: Optional sequence of (guardrail, action) tuples.
+        input_schema: Optional input schema to include in state.
 
     Returns:
         Either the original node callable (if no applicable guardrails) or a compiled
@@ -229,17 +235,20 @@ def create_llm_guardrails_subgraph(
         scope=GuardrailScope.LLM,
         execution_stages=[ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION],
         node_factory=create_llm_guardrail_node,
+        input_schema=input_schema,
     )
 
 
 def create_tools_guardrails_subgraph(
     tool_nodes: Mapping[str, RunnableCallable],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    input_schema: type[BaseModel] | None = None,
 ) -> dict[str, RunnableCallable]:
     """Create tool nodes with guardrails applied.
     Args:
         tool_nodes: Mapping of tool name to a LangGraph `ToolNode`.
         guardrails: Optional sequence of (guardrail, action) tuples.
+        input_schema: Optional input schema to include in state.
 
     Returns:
         A mapping of tool name to either the original `ToolNode` or a compiled subgraph
@@ -250,6 +259,7 @@ def create_tools_guardrails_subgraph(
         subgraph = create_tool_guardrails_subgraph(
             (tool_name, tool_node),
             guardrails,
+            input_schema=input_schema,
         )
         result[tool_name] = subgraph
 
@@ -259,6 +269,7 @@ def create_tools_guardrails_subgraph(
 def create_agent_init_guardrails_subgraph(
     init_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    input_schema: type[BaseModel] | None = None,
 ) -> Any:
     """Create a subgraph for the INIT node and apply AGENT guardrails after INIT.
 
@@ -269,6 +280,7 @@ def create_agent_init_guardrails_subgraph(
     Args:
         init_node: Tuple of (node_name, node_callable) for the INIT node.
         guardrails: Optional sequence of (guardrail, action) tuples.
+        input_schema: Optional input schema to include in state.
 
     Returns:
         Either the original node callable (if no applicable guardrails) or a compiled
@@ -287,7 +299,8 @@ def create_agent_init_guardrails_subgraph(
         return init_node[1]
 
     inner_name, inner_node = init_node
-    subgraph = StateGraph(AgentGuardrailsGraphState)
+    CompleteAgentGuardrailsGraphState = create_guardrails_state_with_input(input_schema)
+    subgraph = StateGraph(CompleteAgentGuardrailsGraphState)
     subgraph.add_node(inner_name, inner_node)
     subgraph.add_edge(START, inner_name)
 
@@ -307,6 +320,7 @@ def create_agent_init_guardrails_subgraph(
 def create_agent_terminate_guardrails_subgraph(
     terminate_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    input_schema: type[BaseModel] | None = None,
 ):
     """Create a subgraph for TERMINATE node that applies guardrails on the agent result."""
     node_name, node_func = terminate_node
@@ -314,8 +328,7 @@ def create_agent_terminate_guardrails_subgraph(
     def terminate_wrapper(state: Any) -> dict[str, Any]:
         # Call original terminate node
         result = node_func(state)
-        # Store result in state
-        return {"agent_result": result, "messages": state.messages}
+        return {"inner_state": {"agent_result": result}}
 
     applicable_guardrails = [
         (guardrail, _)
@@ -332,13 +345,16 @@ def create_agent_terminate_guardrails_subgraph(
         scope=GuardrailScope.AGENT,
         execution_stages=[ExecutionStage.POST_EXECUTION],
         node_factory=create_agent_terminate_guardrail_node,
+        input_schema=input_schema,
     )
 
+    StateT = TypeVar("StateT", bound=AgentGraphState)
+
     async def run_terminate_subgraph(
-        state: AgentGraphState,
+        state: StateT,
     ) -> dict[str, Any]:
         result_state = await subgraph.ainvoke(state)
-        return result_state["agent_result"]
+        return result_state["inner_state"].agent_result
 
     return run_terminate_subgraph
 
@@ -346,12 +362,14 @@ def create_agent_terminate_guardrails_subgraph(
 def create_tool_guardrails_subgraph(
     tool_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    input_schema: type[BaseModel] | None = None,
 ):
     """Create a guarded tool node.
 
     Args:
         tool_node: Tuple of (tool_name, tool_node_callable).
         guardrails: Optional sequence of (guardrail, action) tuples.
+        input_schema: Optional input schema to include in state.
 
     Returns:
         Either the original tool node callable (if no matching guardrails) or a compiled
@@ -374,4 +392,5 @@ def create_tool_guardrails_subgraph(
         scope=GuardrailScope.TOOL,
         execution_stages=[ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION],
         node_factory=partial(create_tool_guardrail_node, tool_name=tool_name),
+        input_schema=input_schema,
     )

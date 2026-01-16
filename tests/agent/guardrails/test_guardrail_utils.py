@@ -11,6 +11,7 @@ from uipath_langchain.agent.guardrails.actions.base_action import (
     GuardrailAction,
     GuardrailActionNode,
 )
+from uipath_langchain.agent.react.reducers import merge_objects
 
 
 class _CompiledGraph(Protocol):
@@ -75,7 +76,12 @@ class FakeStateGraphWithAinvoke(FakeStateGraph):
             main_node_name = compiled.main_node_name
             if main_node_name is None:
                 raise RuntimeError("FakeStateGraphWithAinvoke has no nodes to invoke.")
-            return node_map[main_node_name](state)
+
+            node_result = node_map[main_node_name](state)
+            updated_state = merge_objects(state, node_result)
+
+            # Mimic LangGraph behavior of reducing the state's fields, while the result is a dict
+            return dict(updated_state)
 
         compiled.ainvoke = ainvoke
         return compiled

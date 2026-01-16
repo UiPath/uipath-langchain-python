@@ -26,6 +26,13 @@ class InnerAgentGraphState(BaseModel):
     termination: AgentTermination | None = None
 
 
+class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
+    """Extended inner state for guardrails subgraph."""
+
+    guardrail_validation_result: Optional[str] = None
+    agent_result: Optional[dict[str, Any]] = None
+
+
 class AgentGraphState(BaseModel):
     """Agent Graph state for standard loop execution."""
 
@@ -38,8 +45,9 @@ class AgentGraphState(BaseModel):
 class AgentGuardrailsGraphState(AgentGraphState):
     """Agent Guardrails Graph state for guardrail subgraph."""
 
-    guardrail_validation_result: Optional[str] = None
-    agent_result: Optional[dict[str, Any]] = None
+    inner_state: Annotated[InnerAgentGuardrailsGraphState, merge_objects] = Field(
+        default_factory=InnerAgentGuardrailsGraphState
+    )
 
 
 class AgentGraphNode(StrEnum):

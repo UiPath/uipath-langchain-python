@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import types
 from typing import Any, Sequence
 from unittest.mock import MagicMock
 
 from _pytest.monkeypatch import MonkeyPatch
+from langchain_core.messages import HumanMessage
 from uipath.core.guardrails import BaseGuardrail, GuardrailSelector
 from uipath.platform.guardrails import GuardrailScope
 
@@ -17,6 +17,10 @@ from tests.agent.guardrails.test_guardrail_utils import (
     fake_factory,
 )
 from uipath_langchain.agent.guardrails.actions import GuardrailAction
+from uipath_langchain.agent.react.types import (
+    AgentGuardrailsGraphState,
+    InnerAgentGuardrailsGraphState,
+)
 
 
 class TestAgentTerminateGuardrailsSubgraph:
@@ -97,7 +101,11 @@ class TestAgentTerminateGuardrailsSubgraph:
             guardrails=guardrails,
         )
 
-        result = await run_terminate(types.SimpleNamespace(messages=["m"]))
+        terminate_state = AgentGuardrailsGraphState(
+            messages=[HumanMessage("m")],
+            inner_state=InnerAgentGuardrailsGraphState(),
+        )
+        result = await run_terminate(terminate_state)
         assert result == expected_result
 
         result_graph = captured["compiled"]

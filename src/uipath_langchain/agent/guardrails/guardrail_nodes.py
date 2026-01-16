@@ -106,12 +106,17 @@ def _create_validation_command(
         AgentTerminationException: If the result is neither PASSED nor VALIDATION_FAILED.
     """
     if guardrail_result.result == GuardrailValidationResultType.PASSED:
-        return Command(goto=success_node, update={"guardrail_validation_result": None})
+        return Command(
+            goto=success_node,
+            update={"inner_state": {"guardrail_validation_result": None}},
+        )
 
     if guardrail_result.result == GuardrailValidationResultType.VALIDATION_FAILED:
         return Command(
             goto=failure_node,
-            update={"guardrail_validation_result": guardrail_result.reason},
+            update={
+                "inner_state": {"guardrail_validation_result": guardrail_result.reason}
+            },
         )
 
     # For other results (FEATURE_DISABLED, ENTITLEMENTS_MISSING, etc.), interrupt execution
@@ -260,7 +265,7 @@ def create_agent_terminate_guardrail_node(
     failure_node: str,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     def _payload_generator(state: AgentGuardrailsGraphState) -> str:
-        return str(state.agent_result)
+        return str(state.inner_state.agent_result)
 
     return _create_guardrail_node(
         guardrail,
