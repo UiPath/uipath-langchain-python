@@ -1,12 +1,15 @@
 """Tests for guardrail node creation and routing."""
 
 import json
-import types
 from unittest.mock import MagicMock
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from uipath.core.guardrails import (
+    GuardrailValidationResult,
+    GuardrailValidationResultType,
+)
 from uipath.platform.guardrails import BuiltInValidatorGuardrail
 
 from uipath_langchain.agent.guardrails.guardrail_nodes import (
@@ -38,9 +41,27 @@ class FakeUiPath:
         self.guardrails = FakeGuardrails(result)
 
 
-def _patch_uipath(monkeypatch, *, validation_passed=True, reason=None):
-    result = types.SimpleNamespace(validation_passed=validation_passed, reason=reason)
-    fake = FakeUiPath(result)
+def _patch_uipath(
+    monkeypatch,
+    *,
+    result: GuardrailValidationResultType = GuardrailValidationResultType.PASSED,
+    reason: str = "",
+):
+    """Create a fake UiPath instance with a guardrail validation result.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        result: The validation result type.
+        reason: The reason for the validation result.
+
+    Returns:
+        FakeUiPath instance with the specified validation result.
+    """
+    validation_result = GuardrailValidationResult(
+        result=result,
+        reason=reason,
+    )
+    fake = FakeUiPath(validation_result)
     monkeypatch.setattr(
         "uipath_langchain.agent.guardrails.guardrail_nodes.UiPath",
         lambda: fake,
@@ -66,7 +87,9 @@ class TestLlmGuardrailNodes:
     ):
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
-        _patch_uipath(monkeypatch, validation_passed=True, reason=None)
+        _patch_uipath(
+            monkeypatch, result=GuardrailValidationResultType.PASSED, reason=""
+        )
         node_name, node = create_llm_guardrail_node(
             guardrail=guardrail,
             execution_stage=execution_stage,
@@ -96,7 +119,11 @@ class TestLlmGuardrailNodes:
     ):
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
-        _patch_uipath(monkeypatch, validation_passed=False, reason="policy_violation")
+        _patch_uipath(
+            monkeypatch,
+            result=GuardrailValidationResultType.VALIDATION_FAILED,
+            reason="policy_violation",
+        )
         node_name, node = create_llm_guardrail_node(
             guardrail=guardrail,
             execution_stage=execution_stage,
@@ -129,7 +156,9 @@ class TestAgentInitGuardrailNodes:
         """Agent init node: routes to success and passes message payload to evaluator."""
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
-        fake = _patch_uipath(monkeypatch, validation_passed=True, reason=None)
+        fake = _patch_uipath(
+            monkeypatch, result=GuardrailValidationResultType.PASSED, reason=""
+        )
 
         node_name, node = create_agent_init_guardrail_node(
             guardrail=guardrail,
@@ -163,7 +192,11 @@ class TestAgentInitGuardrailNodes:
         """Agent init node: routes to failure and sets guardrail_validation_result."""
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
-        _patch_uipath(monkeypatch, validation_passed=False, reason="policy_violation")
+        _patch_uipath(
+            monkeypatch,
+            result=GuardrailValidationResultType.VALIDATION_FAILED,
+            reason="policy_violation",
+        )
 
         node_name, node = create_agent_init_guardrail_node(
             guardrail=guardrail,
@@ -198,7 +231,9 @@ class TestAgentTerminateGuardrailNodes:
         """Agent terminate node: routes to success and passes agent_result payload to evaluator."""
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
-        fake = _patch_uipath(monkeypatch, validation_passed=True, reason=None)
+        fake = _patch_uipath(
+            monkeypatch, result=GuardrailValidationResultType.PASSED, reason=""
+        )
 
         node_name, node = create_agent_terminate_guardrail_node(
             guardrail=guardrail,
@@ -233,7 +268,11 @@ class TestAgentTerminateGuardrailNodes:
         """Agent terminate node: routes to failure and sets guardrail_validation_result."""
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
-        _patch_uipath(monkeypatch, validation_passed=False, reason="policy_violation")
+        _patch_uipath(
+            monkeypatch,
+            result=GuardrailValidationResultType.VALIDATION_FAILED,
+            reason="policy_violation",
+        )
 
         node_name, node = create_agent_terminate_guardrail_node(
             guardrail=guardrail,
@@ -268,7 +307,9 @@ class TestToolGuardrailNodes:
         """Tool node: routes to success and passes the expected payload to evaluator."""
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
-        fake = _patch_uipath(monkeypatch, validation_passed=True, reason=None)
+        fake = _patch_uipath(
+            monkeypatch, result=GuardrailValidationResultType.PASSED, reason=""
+        )
 
         node_name, node = create_tool_guardrail_node(
             guardrail=guardrail,
@@ -321,7 +362,11 @@ class TestToolGuardrailNodes:
         """Tool node: routes to failure and sets guardrail_validation_result."""
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
-        _patch_uipath(monkeypatch, validation_passed=False, reason="policy_violation")
+        _patch_uipath(
+            monkeypatch,
+            result=GuardrailValidationResultType.VALIDATION_FAILED,
+            reason="policy_violation",
+        )
 
         node_name, node = create_tool_guardrail_node(
             guardrail=guardrail,
@@ -366,7 +411,10 @@ class TestGuardrailHelperFunctions:
         )
 
         # Mock the service
-        mock_result = types.SimpleNamespace(validation_passed=True, reason=None)
+        mock_result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.PASSED,
+            reason="",
+        )
         mock_service = MagicMock()
         mock_service.evaluate_pre_deterministic_guardrail.return_value = mock_result
 
@@ -388,7 +436,7 @@ class TestGuardrailHelperFunctions:
             output_extractor,
         )
 
-        assert result.validation_passed is True
+        assert result.result == GuardrailValidationResultType.PASSED
         mock_service.evaluate_pre_deterministic_guardrail.assert_called_once_with(
             input_data={"test": "data"}, guardrail=guardrail
         )
@@ -403,7 +451,10 @@ class TestGuardrailHelperFunctions:
         )
 
         # Mock the service
-        mock_result = types.SimpleNamespace(validation_passed=False, reason="violation")
+        mock_result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.VALIDATION_FAILED,
+            reason="violation",
+        )
         mock_service = MagicMock()
         mock_service.evaluate_post_deterministic_guardrail.return_value = mock_result
 
@@ -425,7 +476,7 @@ class TestGuardrailHelperFunctions:
             output_extractor,
         )
 
-        assert result.validation_passed is False
+        assert result.result == GuardrailValidationResultType.VALIDATION_FAILED
         assert result.reason == "violation"
         mock_service.evaluate_post_deterministic_guardrail.assert_called_once_with(
             input_data={"input": "data"},
@@ -440,7 +491,9 @@ class TestGuardrailHelperFunctions:
             _evaluate_builtin_guardrail,
         )
 
-        fake = _patch_uipath(monkeypatch, validation_passed=True, reason=None)
+        fake = _patch_uipath(
+            monkeypatch, result=GuardrailValidationResultType.PASSED, reason=""
+        )
 
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         state = AgentGuardrailsGraphState(messages=[HumanMessage("test message")])
@@ -450,7 +503,7 @@ class TestGuardrailHelperFunctions:
 
         result = _evaluate_builtin_guardrail(state, guardrail, payload_generator)
 
-        assert result.validation_passed is True
+        assert result.result == GuardrailValidationResultType.PASSED
         assert fake.guardrails.last_text == "generated payload"
         assert fake.guardrails.last_guardrail is guardrail
 
@@ -460,7 +513,10 @@ class TestGuardrailHelperFunctions:
             _create_validation_command,
         )
 
-        result = types.SimpleNamespace(validation_passed=True, reason=None)
+        result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.PASSED,
+            reason="",
+        )
         command = _create_validation_command(result, "success_node", "failure_node")
 
         assert command.goto == "success_node"
@@ -472,13 +528,56 @@ class TestGuardrailHelperFunctions:
             _create_validation_command,
         )
 
-        result = types.SimpleNamespace(
-            validation_passed=False, reason="policy_violation"
+        result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.VALIDATION_FAILED,
+            reason="policy_violation",
         )
         command = _create_validation_command(result, "success_node", "failure_node")
 
         assert command.goto == "failure_node"
         assert command.update == {"guardrail_validation_result": "policy_violation"}
+
+    def test_create_validation_command_feature_disabled_raises_exception(self):
+        """Test that FEATURE_DISABLED result raises AgentTerminationException."""
+        from uipath.runtime.errors import UiPathErrorCategory
+
+        from uipath_langchain.agent.exceptions import AgentTerminationException
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _create_validation_command,
+        )
+
+        result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.FEATURE_DISABLED,
+            reason="Guardrail feature is disabled",
+        )
+
+        with pytest.raises(AgentTerminationException) as exc_info:
+            _create_validation_command(result, "success_node", "failure_node")
+
+        assert exc_info.value.error_info.title == "Guardrail validation error"
+        assert "Guardrail feature is disabled" in exc_info.value.error_info.detail
+        assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
+
+    def test_create_validation_command_entitlements_missing_raises_exception(self):
+        """Test that ENTITLEMENTS_MISSING result raises AgentTerminationException."""
+        from uipath.runtime.errors import UiPathErrorCategory
+
+        from uipath_langchain.agent.exceptions import AgentTerminationException
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _create_validation_command,
+        )
+
+        result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.ENTITLEMENTS_MISSING,
+            reason="Guardrail entitlement is missing",
+        )
+
+        with pytest.raises(AgentTerminationException) as exc_info:
+            _create_validation_command(result, "success_node", "failure_node")
+
+        assert exc_info.value.error_info.title == "Guardrail validation error"
+        assert "Guardrail entitlement is missing" in exc_info.value.error_info.detail
+        assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
 
     @pytest.mark.asyncio
     async def test_unsupported_guardrail_type_raises_error(self):
