@@ -6,6 +6,7 @@ from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from uipath.core import UiPathTraceManager
+from uipath.platform.common import UiPathConfig
 
 from uipath_agents._observability.utils import setup_otel_env
 
@@ -70,13 +71,14 @@ class _TelemetryState:
 def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None:
     """Configure telemetry for agents. Idempotent - only runs once.
 
-    Sets up dual instrumentation:
-    - OpenInference spans → Azure Monitor (for debugging)
-    - Manual spans → LLMOps (OpenInference spans filtered via telemetry.filter attribute)
+    Sets up exporters based on environment:
+    - OpenInference spans → Azure Monitor (for debugging, if configured)
+    - Manual spans → LLMOps HTTP (production)
+    - Manual spans → LLMOps file (local only, if LLMOPS_TRACE_FILE is set)
 
     Args:
-        trace_manager: Optional UiPathTraceManager to add Azure exporter to.
-                       If not provided, Azure Monitor exporter will be skipped.
+        trace_manager: Optional UiPathTraceManager to add exporters to.
+                       If not provided, exporters will be skipped.
     """
     if _TelemetryState.configured:
         logger.debug("Telemetry already configured, skipping")
@@ -85,6 +87,7 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
     setup_otel_env()
 
     if trace_manager:
+        # Azure Monitor exporter (OpenInference spans only)
         azure_exporter = _get_azure_exporter()
         if azure_exporter:
             # Wrap Azure exporter to only receive OpenInference spans
@@ -93,6 +96,11 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
                 azure_exporter, filter_fn=is_openinference_span
             )
             trace_manager.add_span_exporter(filtered_exporter)
+
+        # LlmOps file exporter (local execution only)
+        llmops_file_exporter = _get_llmops_file_exporter()
+        if llmops_file_exporter:
+            trace_manager.add_span_exporter(llmops_file_exporter)
 
     # _TelemetryState.instrumentors = [
     #     AsyncioInstrumentor(),
@@ -114,6 +122,34 @@ def _get_azure_exporter() -> AzureMonitorTraceExporter | None:
         logger.debug("Azure Monitor exporter not configured - no connection string")
         return None
     return AzureMonitorTraceExporter(connection_string=connection_string)
+
+
+def _get_llmops_file_exporter() -> SpanExporter | None:
+    """Get LlmOps file exporter if configured for local execution.
+
+    Only returns an exporter when:
+    - LLMOPS_TRACE_FILE environment variable is set
+    - Running locally (no job_key = not in production)
+
+    Returns:
+        LlmOpsFileExporter if conditions are met, None otherwise
+    """
+    llmops_trace_file = os.getenv("LLMOPS_TRACE_FILE")
+    if not llmops_trace_file:
+        return None
+
+    # Only allow file export for local execution (no job_key = not in production)
+    if UiPathConfig.job_key:
+        logger.debug(
+            "LLMOPS_TRACE_FILE is set but ignored in production environment "
+            "(job_key detected)"
+        )
+        return None
+
+    # Import here to avoid circular dependency
+    from uipath_agents._observability.llmops_file_exporter import LlmOpsFileExporter
+
+    return LlmOpsFileExporter(file_path=llmops_trace_file)
 
 
 def shutdown_telemetry() -> None:
