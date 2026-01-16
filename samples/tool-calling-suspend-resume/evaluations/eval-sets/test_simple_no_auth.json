@@ -1,21 +1,37 @@
 {
   "version": "1.0",
   "id": "test-simple-no-auth",
-  "name": "Simple Suspend Test (No Auth Required)",
-  "description": "Basic test for suspend/resume pattern using simple dict payload",
+  "name": "Simple Suspend/Resume Test (No Auth Required)",
+  "description": "Tests suspend/resume pattern using simple dict payload. Validates that the agent suspends, persists state, and completes after resume.",
   "evaluatorRefs": [
-    "SuspendCheckEvaluator"
+    "ResumeCompletedEvaluator",
+    "SuspendResumeTrajectoryEvaluator"
   ],
   "evaluations": [
     {
-      "id": "test_suspend_basic",
-      "name": "Basic suspend test",
+      "id": "test_suspend_resume_basic",
+      "name": "Basic suspend/resume with query",
       "inputs": {
         "query": "Test suspend with simple payload"
       },
       "evaluationCriterias": {
-        "SuspendCheckEvaluator": {
-          "searchText": "SUSPENDING EXECUTION"
+        "ResumeCompletedEvaluator": {
+          "searchText": "Completed with resume data"
+        },
+        "SuspendResumeTrajectoryEvaluator": {
+          "expectedAgentBehavior": "The agent should receive the query, suspend execution at the interrupt() call, and when resumed, complete successfully with the resume data incorporated in the result."
+        }
+      }
+    },
+    {
+      "id": "test_suspend_resume_with_different_query",
+      "name": "Suspend/resume with different query content",
+      "inputs": {
+        "query": "What happens during suspension?"
+      },
+      "evaluationCriterias": {
+        "ResumeCompletedEvaluator": {
+          "searchText": "Completed with resume data"
         }
       }
     }

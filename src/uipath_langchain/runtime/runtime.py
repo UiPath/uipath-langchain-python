@@ -220,14 +220,35 @@ class UiPathLangGraphRuntime:
         input: dict[str, Any] | None,
         options: UiPathExecuteOptions | None,
     ) -> Any:
-        """Process and return graph input."""
+        """Process and return graph input.
+
+        In resume mode with input=None:
+        - UiPathResumableRuntime wrapper fetches triggers from storage
+        - Wrapper calls trigger_manager.read_trigger() to get resume data
+        - Wrapper builds resume map: {interrupt_id: resume_data}
+        - We wrap this map with Command(resume=...) for LangGraph
+
+        In normal mode:
+        - Input is the initial state for the graph
+        """
+
         graph_input = input or {}
+
+        # In resume mode, input is the resume map from wrapper
+        # Wrap it with Command so LangGraph knows it's resume data
+        if options and options.resume:
+            logger.info(f"🔍 RUNTIME: Resume mode - raw input from wrapper: {input}")
+            if input is not None:
+                logger.info("🔍 RUNTIME: Wrapping with Command(resume=...)")
+                return Command(resume=input)
+            else:
+                logger.info("🔍 RUNTIME: Input is None - wrapper found no triggers")
+
+        # Normal mode: process messages if present
         if isinstance(graph_input, dict):
             messages = graph_input.get("messages", None)
             if messages and isinstance(messages, list):
                 graph_input["messages"] = self.chat.map_messages(messages)
-        if options and options.resume:
-            return Command(resume=graph_input)
         return graph_input
 
     async def _get_graph_state(

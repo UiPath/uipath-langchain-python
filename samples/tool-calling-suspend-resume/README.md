@@ -101,10 +101,14 @@ async def invoke_process_node(state: State) -> State:
 - **`test_suspend_step2.py`** - Resume step (can be run separately)
 - **`inspect_state.py`** - Utility to decode and inspect checkpoint database
 
-### Configuration
+### Configuration & Evaluations
 - **`pyproject.toml`** - Python dependencies
 - **`uipath.json`** - Agent configuration
-- **`evaluations/`** - Evaluation sets for testing suspend/resume behavior
+- **`langgraph.json`** - Graph definitions (graph and agent-simple)
+- **`evaluations/`** - Evaluation framework for validating suspend/resume
+  - `eval-sets/test_simple_no_auth.json` - Test cases for suspend/resume validation
+  - `evaluators/resume-completed-evaluator.json` - Contains evaluator checking completion text
+  - `evaluators/suspend-resume-trajectory-evaluator.json` - LLM judge for trajectory validation
 
 ## Running the Demo
 
@@ -133,23 +137,49 @@ uv run python demo_suspend_resume.py resume
 
 ## Using with UiPath Evaluation Runtime
 
-Test with the evaluation runtime to see how triggers are extracted:
+Test with the evaluation runtime to see how suspend/resume is validated:
 
 ```bash
-# Simple variant (no authentication required)
-uv run uipath eval agent-simple evaluations/eval-sets/test_simple_no_auth.json
+# IMPORTANT: Clean previous checkpoint state first!
+rm -rf __uipath/state.db
 
-# Full RPA variant (requires authentication)
-uv run uipath eval graph evaluations/eval-sets/test_suspend_resume.json
+# Run evaluation - agent will suspend
+uv run uipath eval agent-simple evaluations/eval-sets/test_simple_no_auth.json
 ```
+
+**What this tests**:
+- Agent executes and calls `interrupt()` → suspends
+- Evaluation runtime detects SUSPENDED status
+- Triggers are extracted (API resume triggers with inbox IDs)
+- Evaluators are skipped during suspend (they run after resume)
+- Status propagates to orchestrator
+- Checkpoint saved to `__uipath/state.db` (40KB)
 
 Expected output:
 ```
-🔴 DETECTED SUSPENSION → Runtime detects SUSPENDED status
-📋 Extracted 1 trigger(s) → Shows InvokeProcess trigger details
-⏭️ Skipping evaluators → Evaluators run after resume
-✅ Result: SUSPENDED with triggers
+EVAL RUNTIME: Resume mode: False
+🔴 EVAL RUNTIME: DETECTED SUSPENSION
+EVAL RUNTIME: Agent returned SUSPENDED status
+EVAL RUNTIME: Extracted 2 trigger(s) from suspended execution
+EVAL RUNTIME: Propagating SUSPENDED status from inner runtime
+✓ Basic suspend/resume with query - No evaluators
 ```
+
+**Note**: The `--resume` flag exists in the eval command, but the full resume flow (providing resume data to `interrupt()`) is handled by the orchestrator in production. For local testing of the complete suspend/resume cycle, use `demo_suspend_resume.py`.
+
+### Evaluators
+
+The sample includes two evaluators that validate suspend/resume behavior:
+
+**`ResumeCompletedEvaluator`** (ContainsEvaluator)
+- Checks that the result contains "Completed with resume data"
+- Validates the agent completed successfully after resume
+
+**`SuspendResumeTrajectoryEvaluator`** (LLM Judge)
+- Uses GPT-4 to evaluate the entire suspend/resume trajectory
+- Assesses whether the agent properly suspended and resumed
+
+These evaluators run AFTER resume completes, not during the suspend phase.
 
 ## Inspecting the State Database
 

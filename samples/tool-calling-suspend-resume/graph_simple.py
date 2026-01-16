@@ -58,7 +58,8 @@ async def suspend_node(state: State) -> State:
 
     # Use the resume data in the result
     result = f"Completed with resume data: {resume_data}"
-    return State(query=state.query, result=result)
+    # Return dict for LangGraph to properly serialize to checkpoint
+    return {"query": state.query, "result": result}
 
 
 # Build the graph
