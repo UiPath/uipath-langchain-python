@@ -100,8 +100,6 @@ class SpanType:
     AGENT_POST_GUARDRAILS = "agentPostGuardrails"
     GUARDRAIL_EVALUATION = "guardrailEvaluation"
     GUARDRAIL_ESCALATION = "guardrailEscalation"
-    TOOL_GUARDRAIL_EVALUATION = "toolGuardrailEvaluation"
-    TOOL_GUARDRAIL_ESCALATION = "toolGuardrailEscalation"
 
     # Governance types
     TOOL_PRE_GOVERNANCE = "toolPreGovernance"
@@ -501,14 +499,6 @@ class IntegrationToolSpanAttributes(BaseSpanAttributes):
         return SpanType.INTEGRATION_TOOL
 
 
-class ToolGuardrailEvaluationSpanAttributes(GuardrailEvaluationSpanAttributes):
-    """Attributes for tool guardrail evaluation spans."""
-
-    @property
-    def type(self) -> str:
-        return SpanType.TOOL_GUARDRAIL_EVALUATION
-
-
 # Type alias for all span attribute types
 SpanAttributes = Union[
     AgentRunSpanAttributes,
@@ -526,5 +516,4 @@ SpanAttributes = Union[
     ToolPostGuardrailsSpanAttributes,
     AgentPreGuardrailsSpanAttributes,
     AgentPostGuardrailsSpanAttributes,
-    ToolGuardrailEvaluationSpanAttributes,
 ]

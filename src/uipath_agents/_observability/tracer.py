@@ -41,7 +41,6 @@ from .span_attributes import (
     ModelSettings,
     ProcessToolSpanAttributes,
     ToolCallSpanAttributes,
-    ToolGuardrailEvaluationSpanAttributes,
     ToolPostGuardrailsSpanAttributes,
     ToolPreGuardrailsSpanAttributes,
     get_agent_version,
@@ -695,17 +694,10 @@ class UiPathTracer:
             context=context,
         )
 
-        # Tool scope uses ToolGuardrailEvaluationSpanAttributes
-        if scope == "tool":
-            attrs: BaseSpanAttributes = ToolGuardrailEvaluationSpanAttributes(
-                guardrail_name=guardrail_name,
-                guardrail_description=guardrail_description,
-            )
-        else:
-            attrs = GuardrailEvaluationSpanAttributes(
-                guardrail_name=guardrail_name,
-                guardrail_description=guardrail_description,
-            )
+        attrs = GuardrailEvaluationSpanAttributes(
+            guardrail_name=guardrail_name,
+            guardrail_description=guardrail_description,
+        )
 
         self._apply_attributes(span, attrs)
         return span
