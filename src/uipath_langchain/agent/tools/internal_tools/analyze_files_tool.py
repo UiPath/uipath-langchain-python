@@ -52,10 +52,16 @@ def create_analyze_file_tool(
         if "attachments" not in kwargs:
             raise ValueError("Argument 'attachments' is not available")
 
-        attachments = kwargs["attachments"]
         analysisTask = kwargs["analysisTask"]
+        if not analysisTask:
+            raise ValueError("Argument 'analysisTask' is not available")
+
+        attachments = kwargs["attachments"]
 
         files = await _resolve_job_attachment_arguments(attachments)
+        if not files:
+            return {"analysisResult": "No attachments provided to analyze."}
+
         messages: list[AnyMessage] = [
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),
             HumanMessage(content=analysisTask),
