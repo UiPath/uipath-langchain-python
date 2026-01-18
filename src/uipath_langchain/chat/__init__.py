@@ -29,6 +29,10 @@ def __getattr__(name):
         from . import supported_models
 
         return getattr(supported_models, name)
+    if name in ("LLMProvider", "APIFlavor"):
+        from . import types
+
+        return getattr(types, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -39,4 +43,6 @@ __all__ = [
     "OpenAIModels",
     "BedrockModels",
     "GeminiModels",
+    "LLMProvider",
+    "APIFlavor",
 ]

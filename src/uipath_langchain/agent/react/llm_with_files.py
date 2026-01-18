@@ -6,7 +6,7 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
-from .file_type_handler import build_message_content_part_from_data
+from uipath_langchain.llm import get_content_builder
 
 
 @dataclass
@@ -18,29 +18,24 @@ class FileInfo:
     mime_type: str
 
 
-def _get_model_name(model: BaseChatModel) -> str:
-    """Extract model name from a BaseChatModel instance."""
-    for attr in ["model_name", "_model_name", "model", "model_id"]:
-        value = getattr(model, attr, None)
-        if value and isinstance(value, str):
-            return value
-    raise ValueError(f"Model name not found in model {model}")
-
-
-async def create_part_for_file(
+async def build_file_content_part(
     file_info: FileInfo,
     model: BaseChatModel,
 ) -> dict[str, Any]:
-    """Create a provider-specific message content part for a file attachment.
+    """Build a provider-specific message content part for a file attachment.
 
-    Downloads the file from file_info.url and formats it for the model's provider.
+    Args:
+        file_info: File URL, name, and MIME type.
+        model: The LLM model instance (must have llm_provider and api_flavor attributes).
+
+    Returns:
+        Provider-specific content part dictionary.
     """
-    model_name = _get_model_name(model)
-    return await build_message_content_part_from_data(
+    builder = get_content_builder(model)
+    return await builder.build_file_content_part(
         url=file_info.url,
         filename=file_info.name,
         mime_type=file_info.mime_type,
-        model=model_name,
     )
 
 
@@ -64,7 +59,7 @@ async def llm_call_with_files(
 
     content_parts: list[str | dict[Any, Any]] = []
     for file_info in files:
-        content_part = await create_part_for_file(file_info, model)
+        content_part = await build_file_content_part(file_info, model)
         content_parts.append(content_part)
 
     file_message = HumanMessage(content=content_parts)

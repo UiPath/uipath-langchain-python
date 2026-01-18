@@ -6,6 +6,7 @@ from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
 from .supported_models import GeminiModels
+from .types import APIFlavor, LLMProvider
 
 
 def _check_genai_dependencies() -> None:
@@ -97,6 +98,9 @@ class _AsyncUrlRewriteTransport(httpx.AsyncHTTPTransport):
 
 class UiPathChatVertex(ChatGoogleGenerativeAI):
     """UiPath Vertex AI Chat model that routes requests through UiPath's LLM Gateway."""
+
+    llm_provider: LLMProvider = LLMProvider.VERTEX
+    api_flavor: APIFlavor = APIFlavor.VERTEX_GEMINI_GENERATE_CONTENT
 
     _vendor: str = PrivateAttr(default="vertexai")
     _model_name: str = PrivateAttr()

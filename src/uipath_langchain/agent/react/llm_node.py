@@ -1,5 +1,6 @@
 """LLM node for ReAct Agent graph."""
 
+from typing import Any, Sequence
 from typing import Literal, Sequence, TypeVar
 
 from langchain_core.language_models import BaseChatModel
@@ -8,9 +9,6 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
 
-from uipath_langchain.agent.tools.static_args import (
-    apply_static_argument_properties_to_schema,
-)
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -21,7 +19,11 @@ from .constants import (
     DEFAULT_MAX_LLM_MESSAGES,
 )
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
-from .utils import count_consecutive_thinking_messages, extract_input_data_from_state
+from uipath_langchain.chat.types import APIFlavor
+
+from .constants import MAX_CONSECUTIVE_THINKING_MESSAGES
+from .types import AgentGraphState
+from .utils import count_consecutive_thinking_messages
 
 OPENAI_COMPATIBLE_CHAT_MODELS = (
     "UiPathChatOpenAI",
@@ -34,15 +36,22 @@ OPENAI_COMPATIBLE_CHAT_MODELS = (
 
 def _get_required_tool_choice_by_model(
     model: BaseChatModel,
-) -> Literal["required", "any"]:
+) -> str | dict[str, Any]:
     """Get the appropriate tool_choice value to enforce tool usage based on model type.
 
-    "required" - OpenAI compatible required tool_choice value
-    "any" - Vertex and Bedrock parameter for required tool_choice value
+    Returns:
+        - "required" for OpenAI compatible models
+        - "any" for Bedrock Converse and Vertex models (string format)
+        - {"type": "any"} for Bedrock Invoke API (dict format required)
     """
     model_class_name = model.__class__.__name__
     if model_class_name in OPENAI_COMPATIBLE_CHAT_MODELS:
         return "required"
+
+    api_flavor = getattr(model, "api_flavor", None)
+    if api_flavor == APIFlavor.AWS_BEDROCK_INVOKE:
+        return {"type": "any"}
+
     return "any"
 
 

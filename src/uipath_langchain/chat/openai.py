@@ -4,10 +4,12 @@ from typing import Optional
 
 import httpx
 from langchain_openai import AzureChatOpenAI
+from pydantic import PrivateAttr
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
 from .supported_models import OpenAIModels
+from .types import APIFlavor, LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +66,16 @@ class UiPathSyncURLRewriteTransport(httpx.HTTPTransport):
 
 
 class UiPathChatOpenAI(AzureChatOpenAI):
+    llm_provider: LLMProvider = LLMProvider.OPENAI
+    _api_flavor: APIFlavor = PrivateAttr()
+
+    @property
+    def api_flavor(self) -> APIFlavor:
+        return self._api_flavor
+
     def __init__(
         self,
+        use_responses_api: bool,
         token: Optional[str] = None,
         model_name: str = OpenAIModels.gpt_4_1_mini_2025_04_14,
         api_version: str = "2024-12-01-preview",
@@ -104,6 +114,12 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         client_kwargs = get_httpx_client_kwargs()
         verify = client_kwargs.get("verify", True)
 
+        api_flavor = (
+            APIFlavor.OPENAI_RESPONSES
+            if use_responses_api
+            else APIFlavor.OPENAI_COMPLETIONS
+        )
+
         super().__init__(
             azure_endpoint=self._build_base_url(),
             model_name=model_name,
@@ -119,8 +135,11 @@ class UiPathChatOpenAI(AzureChatOpenAI):
             api_key=token,
             api_version=api_version,
             validate_base_url=False,
+            use_responses_api=use_responses_api,
             **kwargs,
         )
+
+        self._api_flavor = api_flavor
 
     def _build_headers(self, token: str) -> dict[str, str]:
         headers = {

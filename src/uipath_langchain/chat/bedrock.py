@@ -5,6 +5,7 @@ from typing import Optional
 from uipath.utils import EndpointManager
 
 from .supported_models import BedrockModels
+from .types import APIFlavor, LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,9 @@ class AwsBedrockCompletionsPassthroughClient:
 
 
 class UiPathChatBedrockConverse(ChatBedrockConverse):
+    llm_provider: LLMProvider = LLMProvider.BEDROCK
+    api_flavor: APIFlavor = APIFlavor.AWS_BEDROCK_CONVERSE
+
     def __init__(
         self,
         org_id: Optional[str] = None,
@@ -162,6 +166,9 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
 
 
 class UiPathChatBedrock(ChatBedrock):
+    llm_provider: LLMProvider = LLMProvider.BEDROCK
+    api_flavor: APIFlavor = APIFlavor.AWS_BEDROCK_INVOKE
+
     def __init__(
         self,
         org_id: Optional[str] = None,
