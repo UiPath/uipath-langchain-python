@@ -332,10 +332,14 @@ def _process_llm_escalation_response(
                 return {}
 
             reviewed_tool_calls_obj = json.loads(reviewed_outputs_json)
-            reviewed_tool_calls_list = reviewed_tool_calls_obj.get("tool_calls")
-
-            if not reviewed_tool_calls_list:
+            if not reviewed_tool_calls_obj:
                 return {}
+
+            reviewed_tool_calls_list = (
+                reviewed_tool_calls_obj.get("tool_calls")
+                if "tool_calls" in reviewed_tool_calls_obj
+                else None
+            )
 
             # Track if tool calls were successfully processed
             tool_calls_processed = False

@@ -159,11 +159,11 @@ class TestEscalateAction:
         assert call_args.data["GuardrailResult"] == "Validation failed"
 
         if stage == ExecutionStage.PRE_EXECUTION:
-            assert call_args.data["Inputs"] == "Test message"
+            assert call_args.data["Inputs"] == '"Test message"'
             assert "Outputs" not in call_args.data
         else:
-            assert call_args.data["Inputs"] == "Test message"
-            assert call_args.data["Outputs"] == "Output message"
+            assert call_args.data["Inputs"] == '"Test message"'
+            assert call_args.data["Outputs"] == '"Output message"'
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -222,7 +222,7 @@ class TestEscalateAction:
         assert call_args.data["ExecutionStage"] == "PostExecution"
         assert call_args.data["GuardrailResult"] == "Validation failed"
 
-        assert call_args.data["Inputs"] == "User prompt message"
+        assert call_args.data["Inputs"] == '"User prompt message"'
         assert call_args.data["Outputs"] == '{"ok": true}'
 
     @pytest.mark.asyncio
@@ -489,12 +489,13 @@ class TestEscalateAction:
 
         # Verify interrupt was called with tool calls (name and args) in Outputs and Inputs
         call_args = mock_interrupt.call_args[0][0]
-        assert call_args.data["Inputs"] == "Input message"
+        assert call_args.data["Inputs"] == '"Input message"'
         tool_outputs = call_args.data["Outputs"]
-        parsed = json.loads(tool_outputs)
-        assert len(parsed) == 1  # Tool call data with name and args
-        assert parsed[0]["name"] == "test_tool"
-        assert parsed[0]["args"] == {"content": {"input": "test"}}
+        parsed_obj = json.loads(tool_outputs)
+        parsed_list = parsed_obj["tool_calls"]
+        assert len(parsed_list) == 1  # Tool call data with name and args
+        assert parsed_list[0]["name"] == "test_tool"
+        assert parsed_list[0]["args"] == {"content": {"input": "test"}}
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -614,7 +615,9 @@ class TestEscalateAction:
         guardrail.description = "Test description"
 
         reviewed_tool_args = {"updated": "tool_content"}
-        reviewed_outputs = [{"name": "test_tool", "args": reviewed_tool_args}]
+        reviewed_outputs = {
+            "tool_calls": [{"name": "test_tool", "args": reviewed_tool_args}]
+        }
         mock_escalation_result = MagicMock()
         mock_escalation_result.action = "Approve"
         mock_escalation_result.data = {"ReviewedOutputs": json.dumps(reviewed_outputs)}
@@ -822,7 +825,7 @@ class TestEscalateAction:
         call_args = mock_interrupt.call_args[0][0]
 
         assert call_args.data["GuardrailName"] == "Test Guardrail"
-        assert call_args.data["Component"] == "tool"
+        assert call_args.data["Component"] == "test_tool"
         assert call_args.data["ExecutionStage"] == "PreExecution"
         assert call_args.data["Inputs"] == '{"input": "test"}'
 
@@ -1422,7 +1425,7 @@ class TestEscalateAction:
             ai_message, ExecutionStage.PRE_EXECUTION
         )
 
-        assert result == ""
+        assert result == '""'
 
     @pytest.mark.asyncio
     async def test_extract_llm_content_post_execution_tool_calls_no_content_field(self):
@@ -1447,11 +1450,12 @@ class TestEscalateAction:
         )
 
         assert isinstance(result, str)
-        parsed = json.loads(result)
+        parsed_obj = json.loads(result)
+        parsed_list = parsed_obj["tool_calls"]
         # Should extract tool call data with name and args
-        assert len(parsed) == 1
-        assert parsed[0]["name"] == "tool_without_content"
-        assert parsed[0]["args"] == {"param": "value"}
+        assert len(parsed_list) == 1
+        assert parsed_list[0]["name"] == "tool_without_content"
+        assert parsed_list[0]["args"] == {"param": "value"}
 
     @pytest.mark.asyncio
     async def test_validate_message_count_empty_messages_raises_exception(self):
