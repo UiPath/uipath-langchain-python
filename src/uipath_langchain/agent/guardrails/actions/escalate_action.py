@@ -82,7 +82,7 @@ class EscalateAction(GuardrailAction):
             data: Dict[str, Any] = {
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
-                "Component": scope.name.lower(),
+                "Component": _build_component_name(scope, guarded_component_name),
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
                 "GuardrailResult": state.inner_state.guardrail_validation_result,
             }
@@ -128,6 +128,9 @@ class EscalateAction(GuardrailAction):
 
                 data["Inputs"] = input_content
                 data["Outputs"] = output_content
+
+            print(guarded_component_name)
+            print(data)
 
             escalation_result = interrupt(
                 CreateEscalation(
@@ -632,6 +635,25 @@ def _execution_stage_to_escalation_field(
         "Inputs" for PRE_EXECUTION, "Outputs" for POST_EXECUTION.
     """
     return "Inputs" if execution_stage == ExecutionStage.PRE_EXECUTION else "Outputs"
+
+
+def _build_component_name(scope: GuardrailScope, guarded_component_name: str) -> str:
+    """Build component name based on guardrail scope and guarded component name.
+
+    Args:
+        scope: The guardrail scope (LLM/AGENT/TOOL).
+        guarded_component_name: Name of the guarded component.
+
+    Returns:
+        "Agent" for AGENT scope, "LLM call" for LLM scope, or guarded_component_name for TOOL scope.
+    """
+    match scope:
+        case GuardrailScope.AGENT:
+            return "Agent"
+        case GuardrailScope.LLM:
+            return "LLM call"
+        case GuardrailScope.TOOL:
+            return guarded_component_name
 
 
 def _execution_stage_to_string(
