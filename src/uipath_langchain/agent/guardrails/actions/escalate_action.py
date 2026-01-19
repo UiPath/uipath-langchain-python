@@ -537,7 +537,7 @@ def _extract_agent_escalation_content(
         - POST_EXECUTION: a JSON-serialized representation of `state.agent_result`.
     """
     if execution_stage == ExecutionStage.PRE_EXECUTION:
-        return get_message_content(cast(AnyMessage, message))
+        return json.dumps(get_message_content(cast(AnyMessage, message)))
 
     output_content = state.inner_state.agent_result or ""
     return json.dumps(output_content)
@@ -561,7 +561,7 @@ def _extract_llm_escalation_content(
         if isinstance(message, ToolMessage):
             return message.content
 
-        return get_message_content(cast(AnyMessage, message))
+        return json.dumps(get_message_content(cast(AnyMessage, message)))
 
     # For AI messages, process tool calls if present
     if isinstance(message, AIMessage):
@@ -578,7 +578,7 @@ def _extract_llm_escalation_content(
             return json.dumps(content_list)
 
     # Fallback for other message types
-    return get_message_content(cast(AnyMessage, message))
+    return json.dumps(get_message_content(cast(AnyMessage, message)))
 
 
 def _extract_tool_escalation_content(
