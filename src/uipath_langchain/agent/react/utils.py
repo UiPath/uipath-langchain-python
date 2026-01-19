@@ -77,8 +77,6 @@ def _create_state_model_with_input(
 
 
 def create_state_with_input(input_schema: type[InputT] | None) -> type[AgentGraphState]:
-    from uipath_langchain.agent.react.types import AgentGraphState
-
     return _create_state_model_with_input(
         AgentGraphState, input_schema, model_name="CompleteAgentGraphState"
     )
@@ -87,8 +85,6 @@ def create_state_with_input(input_schema: type[InputT] | None) -> type[AgentGrap
 def create_guardrails_state_with_input(
     input_schema: type[InputT] | None,
 ) -> type[AgentGuardrailsGraphState]:
-    from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
-
     return _create_state_model_with_input(
         AgentGuardrailsGraphState,
         input_schema,
