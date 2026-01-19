@@ -64,13 +64,15 @@ class AgentGraphNode(StrEnum):
 
 
 class AgentGraphConfig(BaseModel):
-    recursion_limit: int = Field(
-        default=50, ge=1, description="Maximum recursion limit for the agent graph"
+    llm_messages_limit: int = Field(
+        default=25,
+        ge=1,
+        description="Maximum number of LLM calls allowed per agent execution",
     )
     thinking_messages_limit: int = Field(
         default=0,
         ge=0,
-        description="Max consecutive thinking messages before enforcing tool usage. 0 = force tools every time.",
+        description="Max consecutive thinking messages before enforcing tool calling. 0 = force tool calling every time.",
     )
     is_conversational: bool = Field(
         default=False, description="If set, creates a graph for conversational agents"

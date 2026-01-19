@@ -1,4 +1,4 @@
-"""Exceptions for the basic agent loop."""
+"""Exceptions for the agent graph."""
 
 from uipath.runtime.errors import UiPathRuntimeError
 

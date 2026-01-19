@@ -5,8 +5,13 @@ from typing import Literal, Sequence
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall
 from langchain_core.tools import BaseTool
+from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
 
-from .constants import MAX_CONSECUTIVE_THINKING_MESSAGES
+from ..exceptions import AgentTerminationException
+from .constants import (
+    DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
+    DEFAULT_MAX_LLM_MESSAGES,
+)
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
 from .utils import count_consecutive_thinking_messages
 
@@ -46,8 +51,9 @@ def _filter_control_flow_tool_calls(
 def create_llm_node(
     model: BaseChatModel,
     tools: Sequence[BaseTool] | None = None,
-    thinking_messages_limit: int = MAX_CONSECUTIVE_THINKING_MESSAGES,
     is_conversational: bool = False,
+    llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
+    thinking_messages_limit: int = DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
 ):
     """Create LLM node with dynamic tool_choice enforcement.
 
@@ -57,6 +63,8 @@ def create_llm_node(
     Args:
         model: The chat model to use
         tools: Available tools to bind
+        is_conversational: Whether this is a conversational agent
+        llm_messages_limit: Maximum number of LLM calls allowed per execution
         thinking_messages_limit: Max consecutive LLM responses without tool calls
             before enforcing tool usage. 0 = force tools every time.
     """
@@ -66,6 +74,15 @@ def create_llm_node(
 
     async def llm_node(state: AgentGraphState):
         messages: list[AnyMessage] = state.messages
+
+        agent_ai_messages = sum(1 for msg in messages if isinstance(msg, AIMessage))
+        if agent_ai_messages >= llm_messages_limit:
+            raise AgentTerminationException(
+                code=UiPathErrorCode.EXECUTION_ERROR,
+                title=f"Maximum iterations of '{llm_messages_limit}' reached.",
+                detail="Verify the agent's trajectory or consider increasing the max iterations in the agent's settings.",
+                category=UiPathErrorCategory.USER,
+            )
 
         consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
 
