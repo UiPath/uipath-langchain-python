@@ -100,7 +100,6 @@ async def main(input_data: MainInput):
 
     # Run a retrieval chain
     model = UiPathAzureChatOpenAI(
-        model="gpt-4o-2024-08-06",
         max_retries=3,
     )
 

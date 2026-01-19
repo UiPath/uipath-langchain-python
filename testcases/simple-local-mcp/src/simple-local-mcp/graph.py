@@ -4,9 +4,9 @@ from contextlib import asynccontextmanager
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.agents import create_agent
-from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
+from uipath_langchain.chat import UiPathChat
 
-model = UiPathChat(model="gpt-4o-2024-08-06", streaming=False)
+model = UiPathChat(streaming=False)
 
 @asynccontextmanager
 async def make_graph():

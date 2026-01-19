@@ -6,7 +6,6 @@ from pydantic import BaseModel
 from uipath_langchain.chat import UiPathChat
 
 # Configuration constants
-DEFAULT_MODEL = "gpt-4o-2024-08-06"
 
 
 def get_search_tool() -> DuckDuckGoSearchResults:
@@ -41,7 +40,7 @@ DO NOT do any math as specified in your instructions.
 
 def create_llm() -> UiPathChat:
     """Create and configure the language model."""
-    return UiPathChat(model=DEFAULT_MODEL, streaming=False)
+    return UiPathChat(streaming=False)
 
 
 def create_research_agent():

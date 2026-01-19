@@ -82,7 +82,9 @@ class UiPathRequestMixin(BaseModel):
         "X-UiPath-ProcessKey": os.getenv("UIPATH_PROCESS_KEY", ""),
     }
     model_name: str | None = Field(
-        default_factory=lambda: os.getenv("UIPATH_MODEL_NAME", "gpt-4o-2024-08-06"),
+        default_factory=lambda: os.getenv(
+            "UIPATH_MODEL_NAME", "gpt-4.1-mini-2025-04-14"
+        ),
         alias="model",
     )
     settings: UiPathClientSettings | None = None

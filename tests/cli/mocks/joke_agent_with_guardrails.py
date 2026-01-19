@@ -76,7 +76,6 @@ all_tools = [sentence_analyzer_tool]
 
 # Create LLM (will be mocked in tests)
 llm = UiPathChat(
-    model="gpt-4o-2024-11-20",
     temperature=0.0,
     max_tokens=500,
 )

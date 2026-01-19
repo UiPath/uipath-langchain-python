@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 uipath = UiPath()
 
 # Constants
-DEFAULT_MODEL = "gpt-4o-2024-08-06"
 DEFAULT_CONFIDENCE = 0.0
 APP_FOLDER_PATH_PLACEHOLDER = "FOLDER_PATH_PLACEHOLDER"
 
@@ -115,7 +114,7 @@ def decide_next_node(state: GraphState) -> NextNode:
 
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    llm = UiPathChat(model=DEFAULT_MODEL)
+    llm = UiPathChat()
 
     # Add rejection message if there was a previous prediction
     if state.get("last_predicted_category"):

@@ -83,7 +83,7 @@ You can integrate the vector store into a retrieval chain with a language model:
 
 ```python
 # Run a retrieval chain
-model = UiPathAzureChatOpenAI(model="gpt-4o-2024-08-06", max_retries=3)
+model = UiPathAzureChatOpenAI(model="gpt-4.1-mini-2025-04-14", max_retries=3)
 retrieval_chain = create_retrieval_chain(vectorstore=vectorstore, model=model)
 
 query = "What is the ECCN for a laptop?"
