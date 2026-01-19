@@ -12,7 +12,7 @@ from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.llm_with_files import FileInfo, llm_call_with_files
+from uipath_langchain.agent.react.multimodal import FileInfo, llm_call_with_files
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (

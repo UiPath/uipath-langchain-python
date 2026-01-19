@@ -8,6 +8,8 @@ from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from uipath.platform.guardrails import BaseGuardrail
 
+from uipath_langchain.chat.types import UiPathPassthroughChatModel
+
 from ..guardrails.actions import GuardrailAction
 from .guardrails.guardrails_subgraph import (
     create_agent_init_guardrails_subgraph,
@@ -33,6 +35,7 @@ from .types import (
     AgentGraphConfig,
     AgentGraphNode,
     AgentGraphState,
+    AgentSettings,
 )
 from .utils import create_state_with_input
 
@@ -62,6 +65,17 @@ def create_agent(
     """
     from ..tools import create_tool_node
 
+    if not isinstance(model, UiPathPassthroughChatModel):
+        raise TypeError(
+            f"Model {type(model).__name__} does not implement UiPathPassthroughChatModel. "
+            "The model must have llm_provider and api_flavor properties."
+        )
+
+    agent_settings = AgentSettings(
+        llm_provider=model.llm_provider,
+        api_flavor=model.api_flavor,
+    )
+
     if config is None:
         config = AgentGraphConfig()
 
@@ -71,7 +85,9 @@ def create_agent(
     )
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
-    init_node = create_init_node(messages, input_schema, config.is_conversational)
+    init_node = create_init_node(
+        messages, input_schema, config.is_conversational, agent_settings
+    )
 
     tool_nodes = create_tool_node(agent_tools)
     tool_nodes_with_guardrails = create_tools_guardrails_subgraph(

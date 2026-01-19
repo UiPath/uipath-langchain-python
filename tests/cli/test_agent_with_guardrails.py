@@ -145,7 +145,7 @@ graph = create_agent(
                         )
 
                 with patch(
-                    "uipath_langchain.chat.models.UiPathChat.ainvoke",
+                    "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
                     side_effect=mock_llm_invoke,
                 ):
                     # Create runtime context
@@ -302,7 +302,7 @@ graph = create_agent(
 
                 with (
                     patch(
-                        "uipath_langchain.chat.models.UiPathChat.ainvoke",
+                        "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
                         side_effect=mock_llm_invoke,
                     ),
                     patch(
@@ -445,7 +445,7 @@ graph = create_agent(
 
                 with (
                     patch(
-                        "uipath_langchain.chat.models.UiPathChat.ainvoke",
+                        "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
                         side_effect=mock_llm_invoke,
                     ),
                     patch(
@@ -605,7 +605,7 @@ graph = create_agent(
                         )
 
                 with patch(
-                    "uipath_langchain.chat.models.UiPathChat.ainvoke",
+                    "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
                     side_effect=mock_llm_invoke,
                 ):
                     # Create runtime context
@@ -755,7 +755,7 @@ graph = create_agent(
                         )
 
                 with patch(
-                    "uipath_langchain.chat.models.UiPathChat.ainvoke",
+                    "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
                     side_effect=mock_llm_invoke,
                 ):
                     # Create runtime context
@@ -916,7 +916,7 @@ graph = create_agent(
 
                 with (
                     patch(
-                        "uipath_langchain.chat.models.UiPathChat.ainvoke",
+                        "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
                         side_effect=mock_llm_invoke,
                     ),
                     patch(
@@ -1127,7 +1127,7 @@ graph = create_agent(
 
                 with (
                     patch(
-                        "uipath_langchain.chat.models.UiPathChat.ainvoke",
+                        "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
                         side_effect=mock_llm_invoke,
                     ),
                     patch(
@@ -1307,7 +1307,7 @@ graph = create_agent(
 
                 with (
                     patch(
-                        "uipath_langchain.chat.models.UiPathChat.ainvoke",
+                        "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
                         side_effect=mock_llm_invoke,
                     ),
                     patch(
@@ -1462,7 +1462,7 @@ graph = create_agent(
                         )
 
                 with patch(
-                    "uipath_langchain.chat.models.UiPathChat.ainvoke",
+                    "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
                     side_effect=mock_llm_invoke,
                 ):
                     # Create runtime context

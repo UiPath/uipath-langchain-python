@@ -13,6 +13,7 @@ def mock_env_vars():
         "UIPATH_URL": "http://example.com",
         "UIPATH_ACCESS_TOKEN": "***",
         "UIPATH_TENANT_ID": "test-tenant-id",
+        "UIPATH_ORGANIZATION_ID": "test-org-id",
     }
 
 

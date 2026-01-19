@@ -1,7 +1,6 @@
 """LLM node for ReAct Agent graph."""
 
-from typing import Any, Sequence
-from typing import Literal, Sequence, TypeVar
+from typing import Sequence, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall
@@ -9,9 +8,13 @@ from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
 
+from uipath_langchain.agent.tools.static_args import (
+    apply_static_argument_properties_to_schema,
+)
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
+from uipath_langchain.llm import get_payload_handler
 
 from ..exceptions import AgentTerminationException
 from .constants import (
@@ -19,40 +22,7 @@ from .constants import (
     DEFAULT_MAX_LLM_MESSAGES,
 )
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
-from uipath_langchain.chat.types import APIFlavor
-
-from .constants import MAX_CONSECUTIVE_THINKING_MESSAGES
-from .types import AgentGraphState
-from .utils import count_consecutive_thinking_messages
-
-OPENAI_COMPATIBLE_CHAT_MODELS = (
-    "UiPathChatOpenAI",
-    "AzureChatOpenAI",
-    "ChatOpenAI",
-    "UiPathChat",
-    "UiPathAzureChatOpenAI",
-)
-
-
-def _get_required_tool_choice_by_model(
-    model: BaseChatModel,
-) -> str | dict[str, Any]:
-    """Get the appropriate tool_choice value to enforce tool usage based on model type.
-
-    Returns:
-        - "required" for OpenAI compatible models
-        - "any" for Bedrock Converse and Vertex models (string format)
-        - {"type": "any"} for Bedrock Invoke API (dict format required)
-    """
-    model_class_name = model.__class__.__name__
-    if model_class_name in OPENAI_COMPATIBLE_CHAT_MODELS:
-        return "required"
-
-    api_flavor = getattr(model, "api_flavor", None)
-    if api_flavor == APIFlavor.AWS_BEDROCK_INVOKE:
-        return {"type": "any"}
-
-    return "any"
+from .utils import count_consecutive_thinking_messages, extract_input_data_from_state
 
 
 def _filter_control_flow_tool_calls(
@@ -91,7 +61,8 @@ def create_llm_node(
             before enforcing tool usage. 0 = force tools every time.
     """
     bindable_tools = list(tools) if tools else []
-    tool_choice_required_value = _get_required_tool_choice_by_model(model)
+    payload_handler = get_payload_handler(model)
+    tool_choice_required_value = payload_handler.get_required_tool_choice()
 
     async def llm_node(state: StateT):
         messages: list[AnyMessage] = state.messages

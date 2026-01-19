@@ -12,7 +12,7 @@ from uipath.agent.models.agent import (
     AgentInternalToolType,
 )
 
-from uipath_langchain.agent.react.llm_with_files import FileInfo
+from uipath_langchain.agent.react.multimodal import FileInfo
 from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
     _resolve_job_attachment_arguments,

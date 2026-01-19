@@ -21,16 +21,11 @@ from uipath.utils import EndpointManager
 
 from uipath_langchain._utils._request_mixin import UiPathRequestMixin
 
-from .types import APIFlavor, LLMProvider
-
 logger = logging.getLogger(__name__)
 
 
 class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
     """Custom LLM connector for LangChain integration with UiPath."""
-
-    llm_provider: LLMProvider = LLMProvider.OPENAI
-    api_flavor: APIFlavor = APIFlavor.OPENAI_COMPLETIONS
 
     def _generate(
         self,
@@ -173,9 +168,6 @@ class UiPathAzureChatOpenAI(UiPathRequestMixin, AzureChatOpenAI):
 
 class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
     """Custom LLM connector for LangChain integration with UiPath Normalized."""
-
-    llm_provider: LLMProvider = LLMProvider.OPENAI
-    api_flavor: APIFlavor = APIFlavor.OPENAI_COMPLETIONS
 
     def _create_chat_result(
         self,
