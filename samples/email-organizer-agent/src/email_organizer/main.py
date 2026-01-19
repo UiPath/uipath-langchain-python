@@ -12,7 +12,6 @@ from email_organizer.outlook_client import OutlookClient
 from difflib import SequenceMatcher
 
 # Configuration
-DEFAULT_MODEL = "gpt-4o-2024-08-06"
 DEFAULT_CONFIDENCE = 0.0
 USER = 'me'
 MAX_EMAILS_TO_ANALYZE = 50
@@ -366,7 +365,7 @@ Analyze the email patterns and create the most valuable organizational rules.
         """
 
 
-        llm = UiPathChat(model=DEFAULT_MODEL)
+        llm = UiPathChat()
 
         structured_llm = llm.with_structured_output(RuleSuggestions)
         response = await structured_llm.ainvoke(prompt)

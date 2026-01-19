@@ -67,7 +67,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
     def __init__(
         self,
         token: Optional[str] = None,
-        model_name: str = OpenAIModels.gpt_5_mini_2025_08_07,
+        model_name: str = OpenAIModels.gpt_4_1_mini_2025_04_14,
         api_version: str = "2024-12-01-preview",
         org_id: Optional[str] = None,
         tenant_id: Optional[str] = None,

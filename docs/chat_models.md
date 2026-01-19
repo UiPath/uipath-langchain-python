@@ -32,7 +32,7 @@ You can simply change `ChatOpenAi` with `UiPathAzureChatOpenAI`, you don't have 
 from uipath_langchain.chat.models import UiPathAzureChatOpenAI
 
 llm = UiPathAzureChatOpenAI(
-    model="gpt-4o-2024-08-06",
+    model="gpt-4.1-mini-2025-04-14",
     temperature=0,
     max_tokens=4000,
     timeout=30,
@@ -43,7 +43,7 @@ llm = UiPathAzureChatOpenAI(
 
 Currently, the following models can be used with `UiPathAzureChatOpenAI` (this list can be updated in the future):
 
--   `gpt-4`, `gpt-4-1106-Preview`, `gpt-4-32k`, `gpt-4-turbo-2024-04-09`, `gpt-4-vision-preview`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-mini-2024-07-18`, `o3-mini-2025-01-31`
+-   `gpt-4`, `gpt-4-1106-Preview`, `gpt-4-32k`, `gpt-4-turbo-2024-04-09`, `gpt-4-vision-preview`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-mini-2024-07-18`, `gpt-4.1-mini-2025-04-14`, `o3-mini-2025-01-31`
 
 ## UiPathChat
 
