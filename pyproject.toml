@@ -5,7 +5,7 @@ description = "UiPath Agents"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
-  "uipath==2.5.7",
+  "uipath==2.5.9",
   "uipath-langchain[vertex,bedrock]==0.4.7",
   "langgraph>=1.0.0,<2.0.0",
   "azure-monitor-opentelemetry>=1.7.0,<2.0.0",
@@ -40,6 +40,7 @@ dev = [
   "pytest>=7.4.0",
   "requests>=2.32.5",
   "ruff>=0.9.4",
+  "uipath-dev>=0.0.17",
 ]
 
 [tool.hatch.build.targets.wheel]

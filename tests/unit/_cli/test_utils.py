@@ -187,7 +187,9 @@ class TestLoadAgentConfiguration:
         """Test loading configuration with unicode characters."""
         valid_agent_config["messages"][0]["content"] = "Process data with émojis 🚀"
         agent_file = tmp_path / "agent.json"
-        agent_file.write_text(json.dumps(valid_agent_config, ensure_ascii=False))
+        agent_file.write_text(
+            json.dumps(valid_agent_config, ensure_ascii=False), encoding="utf-8"
+        )
 
         result = load_agent_configuration(agent_file)
 

@@ -48,7 +48,9 @@ def load_agent_configuration(file_path: Path) -> LowCodeAgentDefinition:
         raise ConfigurationError(f"{AGENT_ENTRYPOINT} not found at {file_path}")
 
     try:
-        return LowCodeAgentDefinition.model_validate_json(file_path.read_text())
+        return LowCodeAgentDefinition.model_validate_json(
+            file_path.read_text(encoding="utf-8")
+        )
     except ValidationError as e:
         raise InputValidationError(
             f"{AGENT_ENTRYPOINT} failed schema validation. Error: {e}\n\n{errorDetailsListToMessage(e.errors())}",

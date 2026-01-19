@@ -1,58 +1,98 @@
-from pathlib import Path
+from typing import Any, AsyncGenerator
 
+from uipath.agent.models.agent import AgentDefinition
+from uipath.runtime import (
+    UiPathExecuteOptions,
+    UiPathRuntimeEvent,
+    UiPathRuntimeResult,
+    UiPathStreamOptions,
+)
 from uipath.runtime.schema import UiPathRuntimeSchema
-from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
+from uipath_langchain.runtime import UiPathLangGraphRuntime
 
-from ..utils import load_agent_configuration
+from .utils import validate_json_against_json_schema
 
 
 class AgentsLangGraphRuntime(UiPathLangGraphRuntime):
-    """Agent runtime that processes agent.json instead of graph introspection.
+    """Agent runtime that processes agent.json instead of graph introspection."""
 
-    Implements LLMAgentRuntimeProtocol to provide agent model information
-    for features like 'same-as-agent' model resolution in evaluators.
-    """
+    def __init__(
+        self,
+        *args,
+        agent_definition: AgentDefinition,
+        **kwargs,
+    ):
+        """Initialize the runtime.
 
-    def __init__(self, *args, **kwargs):
-        """Initialize the runtime."""
+        Args:
+            agent_definition: Pre-loaded agent configuration
+            *args: Passed to parent
+            **kwargs: Passed to parent
+        """
         super().__init__(*args, **kwargs)
-        self._agent_model: str | None = None
-        self._agent_model_loaded: bool = False
+        self._agent_definition = agent_definition
+
+    async def execute(
+        self,
+        input: dict[str, Any] | None = None,
+        options: UiPathExecuteOptions | None = None,
+    ) -> UiPathRuntimeResult:
+        """Execute the agent runtime.
+
+        Args:
+            input: Input data for the runtime
+            options: Execution options
+        Returns:
+            The runtime result
+        """
+        if not options or not options.resume:
+            validate_json_against_json_schema(
+                self._agent_definition.input_schema, input
+            )
+        return await super().execute(input, options)
+
+    async def stream(
+        self,
+        input: dict[str, Any] | None = None,
+        options: UiPathStreamOptions | None = None,
+    ) -> AsyncGenerator[UiPathRuntimeEvent, None]:
+        """Stream the agent runtime execution.
+
+        Args:
+            input: Input data for the runtime
+            options: Streaming options
+        Yields:
+            Runtime events as they occur
+        """
+        if not options or not options.resume:
+            validate_json_against_json_schema(
+                self._agent_definition.input_schema, input
+            )
+        async for event in super().stream(input, options):
+            yield event
 
     def get_agent_model(self) -> str | None:
         """Get the agent's configured LLM model.
 
-        Implements LLMAgentRuntimeProtocol. Loads the agent configuration
-        from agent.json if not already loaded and returns the model setting.
-
         Returns:
             The model name (e.g., 'gpt-4o-2024-11-20'), or None if not found.
         """
-        if not self._agent_model_loaded:
-            self._agent_model_loaded = True
-            try:
-                if self.entrypoint is None:
-                    self._agent_model = None
-                else:
-                    agent_json_path = Path.cwd() / self.entrypoint
-                    agent_definition = load_agent_configuration(agent_json_path)
-                    self._agent_model = agent_definition.settings.model
-            except Exception:
-                self._agent_model = None
-        return self._agent_model
+        if self._agent_definition.settings and self._agent_definition.settings.model:
+            return self._agent_definition.settings.model
+        return None
 
     async def get_schema(self) -> UiPathRuntimeSchema:
-        """Return the runtime schema from agent.json configuration."""
+        """Return the runtime schema from the pre-loaded agent definition."""
         if self.entrypoint is None:
             raise ValueError("Agent runtime requires an entrypoint to be set")
-
-        agent_json_path = Path.cwd() / self.entrypoint
-        agent_definition = load_agent_configuration(agent_json_path)
 
         return UiPathRuntimeSchema(
             filePath=self.entrypoint,
             uniqueId=self.runtime_id,
             type="agent",
-            input=agent_definition.input_schema or {},
-            output=agent_definition.output_schema or {},
+            input=self._agent_definition.input_schema or {},
+            output=self._agent_definition.output_schema or {},
+            metadata={
+                "model": self.get_agent_model()
+            },  # include model in metadata for same-as-agent resolution
         )

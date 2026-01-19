@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
+from uipath.agent.models.agent import AgentDefinition, AgentMetadata, AgentSettings
 
 from uipath_agents._observability.callback import UiPathTracingCallback
 from uipath_agents._observability.runtime_wrapper import TelemetryRuntimeWrapper
-from uipath_agents._observability.span_attributes import AgentSpanInfo
 from uipath_agents._observability.telemetry_callback import (
     AGENTRUN_COMPLETED,
     AGENTRUN_FAILED,
@@ -48,16 +48,22 @@ def telemetry_callback():
 @pytest.fixture
 def agent_info():
     """Create agent span info with telemetry properties."""
-    return AgentSpanInfo(
+    return AgentDefinition(
         name="test-agent",
         input_schema={"type": "object"},
         output_schema={"type": "string"},
-        model="gpt-4",
-        max_tokens=1000,
-        temperature=0.7,
-        engine="openai",
-        max_iterations=5,
-        is_conversational=True,
+        messages=[],
+        settings=AgentSettings(
+            model="gpt-4",
+            max_tokens=1000,
+            temperature=0.7,
+            engine="openai",
+            max_iterations=5,  # type: ignore [call-arg]
+        ),
+        metadata=AgentMetadata(
+            is_conversational=True,
+            storage_version="v1",
+        ),
     )
 
 
@@ -73,11 +79,11 @@ class TestTelemetryCallbackIntegration:
             tracer,
             tracing_callback,
             telemetry_callback=telemetry_callback,
-            agent_info=agent_info,
+            agent_definition=agent_info,
         )
 
         assert wrapper._telemetry_callback is telemetry_callback
-        assert wrapper._agent_info is agent_info
+        assert wrapper._agent_definition is agent_info
 
     @pytest.mark.asyncio
     async def test_execute_calls_telemetry_callback(
@@ -99,7 +105,7 @@ class TestTelemetryCallbackIntegration:
             tracer,
             tracing_callback,
             telemetry_callback=telemetry_callback,
-            agent_info=agent_info,
+            agent_definition=agent_info,
         )
 
         await wrapper.execute({"input": "test"}, None)
@@ -132,7 +138,7 @@ class TestTelemetryCallbackIntegration:
             tracer,
             tracing_callback,
             telemetry_callback=telemetry_callback,
-            agent_info=agent_info,
+            agent_definition=agent_info,
         )
 
         with pytest.raises(RuntimeError):
@@ -154,7 +160,7 @@ class TestTelemetryCallbackIntegration:
             mock_delegate,
             tracer,
             tracing_callback,
-            agent_info=agent_info,
+            agent_definition=agent_info,
         )
 
         assert wrapper._telemetry_callback is None
@@ -166,12 +172,12 @@ class TestPropertyEnrichment:
     def test_get_enriched_properties_basic(
         self, mock_delegate, tracer, tracing_callback, agent_info
     ):
-        """Test basic property enrichment from AgentSpanInfo."""
+        """Test basic property enrichment from AgentDefinition."""
         wrapper = TelemetryRuntimeWrapper(
             mock_delegate,
             tracer,
             tracing_callback,
-            agent_info=agent_info,
+            agent_definition=agent_info,
         )
 
         base_properties = {"AgentName": "test-agent"}
@@ -180,7 +186,7 @@ class TestPropertyEnrichment:
         # Verify basic properties are preserved
         assert enriched["AgentName"] == "test-agent"
 
-        # Verify AgentSpanInfo properties are added
+        # Verify AgentDefinition properties are added
         assert enriched["Model"] == "gpt-4"
         assert enriched["MaxTokens"] == "1000"
         assert enriched["Temperature"] == "0.7"
@@ -201,7 +207,7 @@ class TestPropertyEnrichment:
             mock_delegate,
             tracer,
             tracing_callback,
-            agent_info=agent_info,
+            agent_definition=agent_info,
         )
 
         # Create mock span with trace context
@@ -222,7 +228,7 @@ class TestPropertyEnrichment:
     def test_get_enriched_properties_without_agent_info(
         self, mock_delegate, tracer, tracing_callback
     ):
-        """Test property enrichment without AgentSpanInfo."""
+        """Test property enrichment without AgentDefinition."""
         wrapper = TelemetryRuntimeWrapper(
             mock_delegate,
             tracer,
@@ -235,7 +241,7 @@ class TestPropertyEnrichment:
         # Verify basic properties are preserved
         assert enriched["AgentName"] == "test-agent"
 
-        # Verify AgentSpanInfo properties are not present
+        # Verify AgentDefinition properties are not present
         assert "Model" not in enriched
         assert "MaxTokens" not in enriched
 
@@ -243,39 +249,6 @@ class TestPropertyEnrichment:
         assert enriched["AgentRunSource"] == "playground"
         assert enriched["ApplicationName"] == "UiPath.AgentService"
         assert "AgentRunId" in enriched
-
-    def test_get_enriched_properties_filters_none_values(
-        self, mock_delegate, tracer, tracing_callback
-    ):
-        """Test that None values from AgentSpanInfo are not included."""
-        # Create AgentSpanInfo with some None values
-        partial_agent_info = AgentSpanInfo(
-            name="test-agent",
-            model="gpt-4",
-            max_tokens=None,  # This should not be included
-            temperature=0.7,
-            engine=None,  # This should not be included
-            is_conversational=True,
-        )
-
-        wrapper = TelemetryRuntimeWrapper(
-            mock_delegate,
-            tracer,
-            tracing_callback,
-            agent_info=partial_agent_info,
-        )
-
-        base_properties = {"AgentName": "test-agent"}
-        enriched = wrapper._get_enriched_properties(base_properties)
-
-        # Verify properties with values are included
-        assert enriched["Model"] == "gpt-4"
-        assert enriched["Temperature"] == "0.7"
-        assert enriched["IsConversational"] == "True"
-
-        # Verify None properties are not included
-        assert "MaxTokens" not in enriched
-        assert "Engine" not in enriched
 
     @patch.dict(
         os.environ,
@@ -292,7 +265,7 @@ class TestPropertyEnrichment:
             mock_delegate,
             tracer,
             tracing_callback,
-            agent_info=agent_info,
+            agent_definition=agent_info,
         )
 
         base_properties = {"AgentName": "test-agent"}
@@ -324,7 +297,7 @@ class TestAgentRunIdConsistency:
             tracer,
             tracing_callback,
             telemetry_callback=telemetry_callback,
-            agent_info=agent_info,
+            agent_definition=agent_info,
         )
 
         await wrapper.execute({"input": "test"}, None)
@@ -354,7 +327,7 @@ class TestAgentRunIdConsistency:
             tracer,
             tracing_callback,
             telemetry_callback=telemetry_callback,
-            agent_info=agent_info,
+            agent_definition=agent_info,
         )
 
         wrapper2 = TelemetryRuntimeWrapper(
@@ -362,7 +335,7 @@ class TestAgentRunIdConsistency:
             tracer,
             tracing_callback,
             telemetry_callback=telemetry_callback,
-            agent_info=agent_info,
+            agent_definition=agent_info,
         )
 
         # Check that different instances have different run IDs

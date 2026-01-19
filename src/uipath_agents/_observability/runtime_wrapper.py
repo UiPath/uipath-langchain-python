@@ -22,6 +22,7 @@ from typing import Any, AsyncGenerator, Dict, Optional
 
 from opentelemetry import trace
 from opentelemetry.trace import Span, SpanContext, TraceFlags
+from uipath.agent.models.agent import AgentDefinition
 from uipath.runtime import (
     UiPathExecuteOptions,
     UiPathRuntimeProtocol,
@@ -33,7 +34,6 @@ from uipath.runtime.events import UiPathRuntimeEvent
 from uipath.runtime.schema import UiPathRuntimeSchema
 
 from .callback import UiPathTracingCallback
-from .span_attributes import AgentSpanInfo
 from .telemetry_callback import (
     AGENTRUN_COMPLETED,
     AGENTRUN_FAILED,
@@ -80,9 +80,9 @@ class TelemetryRuntimeWrapper:
         delegate: UiPathRuntimeProtocol,
         tracer: UiPathTracer,
         callback: UiPathTracingCallback,
-        telemetry_callback: Optional[AppInsightsTelemetryCallback] = None,
-        agent_info: Optional[AgentSpanInfo] = None,
-        trace_context_storage: Optional[TraceContextStorage] = None,
+        telemetry_callback: AppInsightsTelemetryCallback | None = None,
+        agent_definition: AgentDefinition | None = None,
+        trace_context_storage: TraceContextStorage | None = None,
     ):
         """Initialize the telemetry wrapper.
 
@@ -91,7 +91,7 @@ class TelemetryRuntimeWrapper:
             tracer: UiPathTracer for creating spans
             callback: Callback for LangChain event instrumentation
             telemetry_callback: Optional callback for Application Insights telemetry
-            agent_info: Optional agent metadata for span attributes and telemetry enrichment
+            agent_definition: Optional agent metadata for span attributes and telemetry enrichment
             trace_context_storage: Optional storage for trace context preservation
                 across suspend/resume cycles. If None, trace context is not preserved.
         """
@@ -99,7 +99,7 @@ class TelemetryRuntimeWrapper:
         self._tracer = tracer
         self._callback = callback
         self._telemetry_callback = telemetry_callback
-        self._agent_info = agent_info
+        self._agent_definition = agent_definition
         self._trace_context_storage = trace_context_storage
         self._agent_run_id = str(uuid.uuid4())
 
@@ -531,8 +531,8 @@ class TelemetryRuntimeWrapper:
         return "unknown"
 
     def _get_agent_name(self) -> str:
-        if self._agent_info:
-            return self._agent_info.name
+        if self._agent_definition:
+            return self._agent_definition.name or "Unknown"
         if hasattr(self._delegate, "runtime_id"):
             return self._delegate.runtime_id
         return "unknown"
@@ -540,7 +540,7 @@ class TelemetryRuntimeWrapper:
     def _get_enriched_properties(
         self, base_properties: Dict[str, Any], agent_span: Optional[Span] = None
     ) -> Dict[str, Any]:
-        """Get enriched telemetry properties from AgentSpanInfo and execution context."""
+        """Get enriched telemetry properties from AgentDefinition and execution context."""
         properties = base_properties.copy()
 
         if agent_span:
@@ -550,24 +550,34 @@ class TelemetryRuntimeWrapper:
 
         properties["AgentRunId"] = self._agent_run_id
 
-        if self._agent_info:
-            if self._agent_info.model:
-                properties["Model"] = str(self._agent_info.model)
+        if self._agent_definition:
+            if self._agent_definition.settings.model:
+                properties["Model"] = str(self._agent_definition.settings.model)
 
-            if self._agent_info.max_tokens is not None:
-                properties["MaxTokens"] = str(self._agent_info.max_tokens)
+            if self._agent_definition.settings.max_tokens is not None:
+                properties["MaxTokens"] = str(
+                    self._agent_definition.settings.max_tokens
+                )
+            if self._agent_definition.settings.temperature is not None:
+                properties["Temperature"] = str(
+                    self._agent_definition.settings.temperature
+                )
 
-            if self._agent_info.temperature is not None:
-                properties["Temperature"] = str(self._agent_info.temperature)
+            if self._agent_definition.settings.engine:
+                properties["Engine"] = str(self._agent_definition.settings.engine)
 
-            if self._agent_info.engine:
-                properties["Engine"] = str(self._agent_info.engine)
+            if (
+                hasattr(self._agent_definition.settings, "max_iterations")
+                and self._agent_definition.settings.max_iterations is not None
+            ):
+                properties["MaxIterations"] = str(
+                    self._agent_definition.settings.max_iterations
+                )
 
-            if self._agent_info.max_iterations is not None:
-                properties["MaxIterations"] = str(self._agent_info.max_iterations)
-
-            if self._agent_info.is_conversational is not None:
-                properties["IsConversational"] = str(self._agent_info.is_conversational)
+            if self._agent_definition.is_conversational is not None:
+                properties["IsConversational"] = str(
+                    self._agent_definition.is_conversational
+                )
 
         properties["AgentRunSource"] = "playground"
         properties["ApplicationName"] = "UiPath.AgentService"
@@ -585,8 +595,11 @@ class TelemetryRuntimeWrapper:
         return None
 
     def _get_schemas(self) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-        if self._agent_info:
-            return self._agent_info.input_schema, self._agent_info.output_schema
+        if self._agent_definition:
+            return (
+                self._agent_definition.input_schema,
+                self._agent_definition.output_schema,
+            )
         return None, None
 
     def _get_prompts(self) -> tuple[Optional[str], Optional[str]]:

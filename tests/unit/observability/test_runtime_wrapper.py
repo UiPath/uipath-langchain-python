@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
 from opentelemetry.sdk.trace import ReadableSpan
+from uipath.agent.models.agent import AgentDefinition, AgentSettings
 from uipath.runtime import UiPathRuntimeStatus
 
 from uipath_agents._observability.callback import UiPathTracingCallback
 from uipath_agents._observability.runtime_wrapper import TelemetryRuntimeWrapper
-from uipath_agents._observability.span_attributes import AgentSpanInfo
 from uipath_agents._observability.trace_context_storage import TraceContextData
 from uipath_agents._observability.tracer import UiPathTracer
 
@@ -136,13 +136,17 @@ class TestTelemetryRuntimeWrapper:
         mock_delegate = MagicMock()
         mock_delegate._get_trace_prompts.return_value = ("system", "user")
 
-        agent_info = AgentSpanInfo(
+        agent_info = AgentDefinition(
             name="my-agent",
+            messages=[],
+            settings=AgentSettings(
+                model="gpt-4o-2024-11-20", engine="v1", max_tokens=1000, temperature=0.7
+            ),
             input_schema={"type": "object"},
             output_schema={"type": "string"},
         )
         wrapper = TelemetryRuntimeWrapper(
-            mock_delegate, tracer, callback, agent_info=agent_info
+            mock_delegate, tracer, callback, agent_definition=agent_info
         )
         assert wrapper._get_agent_name() == "my-agent"
         assert wrapper._get_prompts() == ("system", "user")

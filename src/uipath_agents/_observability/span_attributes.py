@@ -6,7 +6,6 @@ the Temporal implementation in agents/backend/Execution.Shared/Traces/.
 
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any, Dict, List, Optional, Union
 
@@ -44,25 +43,6 @@ def get_execution_type() -> int:
 def get_agent_version() -> Optional[str]:
     """Get agent version from environment."""
     return os.getenv(ENV_UIPATH_PROCESS_VERSION) or None
-
-
-@dataclass(frozen=True)
-class AgentSpanInfo:
-    """Immutable container for agent metadata needed by telemetry spans.
-
-    Decouples observability from full agent definition model.
-    """
-
-    name: str
-    input_schema: Optional[Dict[str, Any]] = None
-    output_schema: Optional[Dict[str, Any]] = None
-
-    model: Optional[str] = None
-    max_tokens: Optional[int] = None
-    temperature: Optional[float] = None
-    engine: Optional[str] = None
-    max_iterations: Optional[int] = None
-    is_conversational: Optional[bool] = None
 
 
 class SpanType:
