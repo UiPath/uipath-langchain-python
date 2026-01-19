@@ -8,6 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
+from uipath.agent.models.agent import (
+    AgentEscalationRecipientType,
+    AssetRecipient,
+    StandardRecipient,
+)
 from uipath.platform.guardrails import GuardrailScope
 from uipath.runtime.errors import UiPathErrorCode
 
@@ -19,6 +24,33 @@ from uipath_langchain.agent.guardrails.types import (
 from uipath_langchain.agent.react.types import (
     AgentGuardrailsGraphState,
     InnerAgentGuardrailsGraphState,
+)
+
+DEFAULT_RECIPIENT = StandardRecipient(
+    type=AgentEscalationRecipientType.USER_EMAIL,
+    value="test@example.com",
+)
+
+STANDARD_USER_EMAIL_RECIPIENT = StandardRecipient(
+    type=AgentEscalationRecipientType.USER_EMAIL,
+    value="user@example.com",
+)
+
+STANDARD_GROUP_NAME_RECIPIENT = StandardRecipient(
+    type=AgentEscalationRecipientType.GROUP_NAME,
+    value="AdminGroup",
+)
+
+ASSET_USER_EMAIL_RECIPIENT = AssetRecipient(
+    type=AgentEscalationRecipientType.ASSET_USER_EMAIL,
+    assetName="email_asset",
+    folderPath="/Shared",
+)
+
+ASSET_GROUP_NAME_RECIPIENT = AssetRecipient(
+    type=AgentEscalationRecipientType.ASSET_GROUP_NAME,
+    assetName="group_asset",
+    folderPath="/Shared",
 )
 
 
@@ -67,7 +99,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "My Guardrail 1"
@@ -104,7 +136,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -176,7 +208,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -264,7 +296,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -339,7 +371,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -401,7 +433,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -450,7 +482,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -520,7 +552,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -560,7 +592,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -608,7 +640,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -668,7 +700,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -710,7 +742,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -745,7 +777,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -786,7 +818,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -837,7 +869,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -883,7 +915,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -934,7 +966,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -986,7 +1018,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -1022,7 +1054,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -1061,7 +1093,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -1105,7 +1137,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -1152,7 +1184,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -1199,7 +1231,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -1255,7 +1287,7 @@ class TestEscalateAction:
             app_name="TestApp",
             app_folder_path="TestFolder",
             version=1,
-            assignee="test@example.com",
+            recipient=DEFAULT_RECIPIENT,
         )
         guardrail = MagicMock()
         guardrail.name = "Test Guardrail"
@@ -1487,3 +1519,97 @@ class TestEscalateAction:
         )
         assert excinfo.value.error_info.title == "Invalid state for POST_EXECUTION"
         assert "requires at least 2 messages" in excinfo.value.error_info.detail
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "recipient,expected_value",
+        [
+            (STANDARD_USER_EMAIL_RECIPIENT, "user@example.com"),
+            (STANDARD_GROUP_NAME_RECIPIENT, "AdminGroup"),
+            (ASSET_USER_EMAIL_RECIPIENT, "user@example.com"),
+            (ASSET_GROUP_NAME_RECIPIENT, "AdminGroup"),
+        ],
+    )
+    @patch(
+        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
+    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_node_resolves_recipient_correctly(
+        self, mock_interrupt, mock_resolve_recipient, recipient, expected_value
+    ) -> None:
+        """EscalateAction resolves recipient correctly."""
+        mock_resolve_recipient.return_value = expected_value
+
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            recipient=recipient,
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        # Mock interrupt to return approved escalation
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+        )
+
+        await node(state)
+
+        # Verify resolve_recipient_value was called with the recipient object
+        mock_resolve_recipient.assert_called_once_with(recipient)
+
+        # Verify interrupt was called with the resolved assignee
+        assert mock_interrupt.called
+        call_args = mock_interrupt.call_args[0][0]
+        assert call_args.assignee == expected_value
+
+    @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
+    )
+    async def test_node_with_asset_recipient_resolution_failure(
+        self, mock_resolve_recipient
+    ) -> None:
+        """EscalateAction with AssetRecipient: propagates asset resolution errors."""
+        mock_resolve_recipient.side_effect = ValueError("Asset 'email_asset' not found")
+
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            recipient=ASSET_USER_EMAIL_RECIPIENT,
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+        )
+
+        # Should propagate the ValueError from asset resolution
+        with pytest.raises(ValueError) as excinfo:
+            await node(state)
+
+        assert "Asset 'email_asset' not found" in str(excinfo.value)
