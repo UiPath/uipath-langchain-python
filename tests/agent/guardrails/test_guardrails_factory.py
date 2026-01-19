@@ -178,8 +178,8 @@ class TestGuardrailsFactory:
         """ESCALATE action is mapped to EscalateAction with correct app and recipient."""
         recipient = AssetRecipient(
             type=AgentEscalationRecipientType.ASSET_USER_EMAIL,
-            assetName="email_asset",
-            folderPath="/Shared",
+            asset_name="email_asset",
+            folder_path="/Shared",
         )
 
         app = AgentGuardrailEscalateActionApp(

@@ -43,14 +43,14 @@ STANDARD_GROUP_NAME_RECIPIENT = StandardRecipient(
 
 ASSET_USER_EMAIL_RECIPIENT = AssetRecipient(
     type=AgentEscalationRecipientType.ASSET_USER_EMAIL,
-    assetName="email_asset",
-    folderPath="/Shared",
+    asset_name="email_asset",
+    folder_path="/Shared",
 )
 
 ASSET_GROUP_NAME_RECIPIENT = AssetRecipient(
     type=AgentEscalationRecipientType.ASSET_GROUP_NAME,
-    assetName="group_asset",
-    folderPath="/Shared",
+    asset_name="group_asset",
+    folder_path="/Shared",
 )
 
 
