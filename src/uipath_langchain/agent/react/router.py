@@ -23,6 +23,78 @@ def __filter_control_flow_tool_calls(
     return [tc for tc in tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS]
 
 
+def filter_control_flow_tool_calls_from_state(state: AgentGraphState) -> AgentGraphState:
+    """Remove filtered control flow tool calls from AIMessage to prevent OpenAI API errors.
+
+    When multiple tools are called and one is a control flow tool (end_execution, raise_error),
+    the control flow tools are filtered out for execution. However, the AIMessage still
+    contains these tool calls, causing OpenAI to expect ToolMessages for them.
+
+    This node updates the AIMessage to only include tool calls that will actually be executed.
+    """
+    messages = state.messages
+    if not messages:
+        return state
+
+    last_message = messages[-1]
+    if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
+        return state
+
+    original_tool_calls = list(last_message.tool_calls)
+    if len(original_tool_calls) <= 1:
+        # No filtering needed for single tool calls
+        return state
+
+    # Check if any control flow tools would be filtered
+    has_control_flow = any(
+        tc.get("name") in FLOW_CONTROL_TOOLS for tc in original_tool_calls
+    )
+    if not has_control_flow:
+        # No control flow tools to filter
+        return state
+
+    # Filter out control flow tools
+    filtered_tool_calls = [
+        tc for tc in original_tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS
+    ]
+
+    if len(filtered_tool_calls) == len(original_tool_calls):
+        # No filtering occurred
+        return state
+
+    # Filter content if it's a list of tool call dicts
+    filtered_content = last_message.content
+    if isinstance(last_message.content, list):
+        # Filter out control flow tools from content as well
+        filtered_ids = {tc["id"] for tc in filtered_tool_calls}
+        filtered_content = [
+            item
+            for item in last_message.content
+            if not (
+                isinstance(item, dict)
+                and item.get("type") == "function_call"
+                and item.get("call_id") not in filtered_ids
+            )
+        ]
+
+    # Create new AIMessage with only non-control-flow tool calls
+    updated_message = AIMessage(
+        content=filtered_content,
+        tool_calls=filtered_tool_calls,
+        id=last_message.id,
+        additional_kwargs=last_message.additional_kwargs,
+        response_metadata=last_message.response_metadata,
+        usage_metadata=last_message.usage_metadata,
+    )
+
+    # Return updated state with modified message
+    updated_messages = list(messages[:-1]) + [updated_message]
+    return AgentGraphState(
+        messages=updated_messages,
+        inner_state=state.inner_state,
+    )
+
+
 def __has_control_flow_tool(tool_calls: list[ToolCall]) -> bool:
     """Check if any tool call is of a control flow tool."""
     return any(tc.get("name") in FLOW_CONTROL_TOOLS for tc in tool_calls)
