@@ -1,5 +1,5 @@
 import os
-from typing import Callable, Sequence, Type, TypeVar, cast
+from typing import Callable, Sequence, Type, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -30,21 +30,15 @@ from .terminate_node import (
     create_terminate_node,
 )
 from .tools import create_flow_control_tools
-from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState
+from .types import (
+    AgentGraphConfig,
+    AgentGraphNode,
+    AgentGraphState,
+)
+from .utils import create_state_with_input
 
 InputT = TypeVar("InputT", bound=BaseModel)
 OutputT = TypeVar("OutputT", bound=BaseModel)
-
-
-def create_state_with_input(input_schema: Type[InputT]):
-    CompleteAgentGraphState = type(
-        "CompleteAgentGraphState",
-        (AgentGraphState, input_schema),
-        {},
-    )
-
-    cast(type[BaseModel], CompleteAgentGraphState).model_rebuild()
-    return CompleteAgentGraphState
 
 
 def create_agent(
@@ -84,7 +78,7 @@ def create_agent(
 
     tool_nodes = create_tool_node(agent_tools)
     tool_nodes_with_guardrails = create_tools_guardrails_subgraph(
-        tool_nodes, guardrails
+        tool_nodes, guardrails, input_schema=input_schema
     )
     terminate_node = create_terminate_node(output_schema, config.is_conversational)
 
@@ -98,6 +92,7 @@ def create_agent(
     init_with_guardrails_subgraph = create_agent_init_guardrails_subgraph(
         (AgentGraphNode.GUARDED_INIT, init_node),
         guardrails,
+        input_schema=input_schema,
     )
     builder.add_node(AgentGraphNode.INIT, init_with_guardrails_subgraph)
 
@@ -107,6 +102,7 @@ def create_agent(
     terminate_with_guardrails_subgraph = create_agent_terminate_guardrails_subgraph(
         (AgentGraphNode.GUARDED_TERMINATE, terminate_node),
         guardrails,
+        input_schema=input_schema,
     )
     builder.add_node(AgentGraphNode.TERMINATE, terminate_with_guardrails_subgraph)
 
@@ -116,7 +112,7 @@ def create_agent(
         model, llm_tools, config.thinking_messages_limit, config.is_conversational
     )
     llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
-        (AgentGraphNode.LLM, llm_node), guardrails
+        (AgentGraphNode.LLM, llm_node), guardrails, input_schema=input_schema
     )
     builder.add_node(AgentGraphNode.AGENT, llm_with_guardrails_subgraph)
     builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)

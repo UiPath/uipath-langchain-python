@@ -83,7 +83,7 @@ class EscalateAction(GuardrailAction):
                 "GuardrailDescription": guardrail.description,
                 "Component": scope.name.lower(),
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
-                "GuardrailResult": state.guardrail_validation_result,
+                "GuardrailResult": state.inner_state.guardrail_validation_result,
             }
 
             # Add tenant and trace URL if base_url is configured
@@ -275,7 +275,7 @@ def _process_agent_escalation_response(
             return Command(update={"messages": msgs})
 
         # POST_EXECUTION: update agent_result
-        return Command(update={"agent_result": parsed})
+        return Command(update={"inner_state": {"agent_result": parsed}})
     except Exception as e:
         raise AgentTerminationException(
             code=UiPathErrorCode.EXECUTION_ERROR,
@@ -519,7 +519,7 @@ def _extract_agent_escalation_content(
     if execution_stage == ExecutionStage.PRE_EXECUTION:
         return get_message_content(cast(AnyMessage, message))
 
-    output_content = state.agent_result or ""
+    output_content = state.inner_state.agent_result or ""
     return json.dumps(output_content)
 
 

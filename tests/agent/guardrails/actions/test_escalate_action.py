@@ -16,7 +16,10 @@ from uipath_langchain.agent.guardrails.actions.escalate_action import EscalateAc
 from uipath_langchain.agent.guardrails.types import (
     ExecutionStage,
 )
-from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.react.types import (
+    AgentGuardrailsGraphState,
+    InnerAgentGuardrailsGraphState,
+)
 
 
 class TestEscalateAction:
@@ -123,7 +126,9 @@ class TestEscalateAction:
         if stage == ExecutionStage.PRE_EXECUTION:
             state = AgentGuardrailsGraphState(
                 messages=[HumanMessage(content="Test message")],
-                guardrail_validation_result="Validation failed",
+                inner_state=InnerAgentGuardrailsGraphState(
+                    guardrail_validation_result="Validation failed"
+                ),
             )
         else:
             # For POST_EXECUTION, LLM expects a prior input message + output message.
@@ -132,7 +137,9 @@ class TestEscalateAction:
                     HumanMessage(content="Test message"),
                     HumanMessage(content="Output message"),
                 ],
-                guardrail_validation_result="Validation failed",
+                inner_state=InnerAgentGuardrailsGraphState(
+                    guardrail_validation_result="Validation failed"
+                ),
             )
 
         await node(state)
@@ -193,8 +200,10 @@ class TestEscalateAction:
                 HumanMessage(content="System prompt message"),
                 HumanMessage(content="User prompt message"),
             ],
-            agent_result={"ok": True},
-            guardrail_validation_result="Validation failed",
+            inner_state=InnerAgentGuardrailsGraphState(
+                agent_result={"ok": True},
+                guardrail_validation_result="Validation failed",
+            ),
         )
 
         await node(state)
@@ -680,13 +689,15 @@ class TestEscalateAction:
                 HumanMessage(content="Input message"),
                 HumanMessage(content="Output message"),
             ],
-            agent_result={"final": "original"},
+            inner_state=InnerAgentGuardrailsGraphState(
+                agent_result={"final": "original"}
+            ),
         )
 
         result = await node(state)
         assert isinstance(result, Command)
         assert result.update is not None
-        assert result.update["agent_result"] == reviewed_outputs
+        assert result.update["inner_state"]["agent_result"] == reviewed_outputs
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")

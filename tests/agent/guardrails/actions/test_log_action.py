@@ -11,7 +11,10 @@ from uipath_langchain.agent.guardrails.actions.log_action import LogAction
 from uipath_langchain.agent.guardrails.types import (
     ExecutionStage,
 )
-from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.react.types import (
+    AgentGuardrailsGraphState,
+    InnerAgentGuardrailsGraphState,
+)
 
 
 class TestLogAction:
@@ -83,7 +86,10 @@ class TestLogAction:
         with caplog.at_level(level):
             result = await node(
                 AgentGuardrailsGraphState(
-                    messages=[], guardrail_validation_result="bad input"
+                    messages=[],
+                    inner_state=InnerAgentGuardrailsGraphState(
+                        guardrail_validation_result="bad input"
+                    ),
                 )
             )
 

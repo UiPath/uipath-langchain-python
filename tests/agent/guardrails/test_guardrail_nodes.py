@@ -21,7 +21,10 @@ from uipath_langchain.agent.guardrails.guardrail_nodes import (
 from uipath_langchain.agent.guardrails.types import (
     ExecutionStage,
 )
-from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.react.types import (
+    AgentGuardrailsGraphState,
+    InnerAgentGuardrailsGraphState,
+)
 
 
 class FakeGuardrails:
@@ -100,7 +103,7 @@ class TestLlmGuardrailNodes:
         state = AgentGuardrailsGraphState(messages=[HumanMessage("payload")])
         cmd = await node(state)
         assert cmd.goto == "ok"
-        assert cmd.update == {"guardrail_validation_result": None}
+        assert cmd.update == {"inner_state": {"guardrail_validation_result": None}}
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -134,7 +137,9 @@ class TestLlmGuardrailNodes:
         state = AgentGuardrailsGraphState(messages=[SystemMessage("payload")])
         cmd = await node(state)
         assert cmd.goto == "nope"
-        assert cmd.update == {"guardrail_validation_result": "policy_violation"}
+        assert cmd.update == {
+            "inner_state": {"guardrail_validation_result": "policy_violation"}
+        }
 
 
 class TestAgentInitGuardrailNodes:
@@ -171,7 +176,7 @@ class TestAgentInitGuardrailNodes:
         state = AgentGuardrailsGraphState(messages=[HumanMessage("payload")])
         cmd = await node(state)
         assert cmd.goto == "ok"
-        assert cmd.update == {"guardrail_validation_result": None}
+        assert cmd.update == {"inner_state": {"guardrail_validation_result": None}}
         assert fake.guardrails.last_text == "payload"
 
     @pytest.mark.asyncio
@@ -209,7 +214,9 @@ class TestAgentInitGuardrailNodes:
         state = AgentGuardrailsGraphState(messages=[SystemMessage("payload")])
         cmd = await node(state)
         assert cmd.goto == "nope"
-        assert cmd.update == {"guardrail_validation_result": "policy_violation"}
+        assert cmd.update == {
+            "inner_state": {"guardrail_validation_result": "policy_violation"}
+        }
 
 
 class TestAgentTerminateGuardrailNodes:
@@ -244,10 +251,13 @@ class TestAgentTerminateGuardrailNodes:
         assert node_name == expected_name
 
         agent_result = {"ok": True}
-        state = AgentGuardrailsGraphState(messages=[], agent_result=agent_result)
+        state = AgentGuardrailsGraphState(
+            messages=[],
+            inner_state=InnerAgentGuardrailsGraphState(agent_result=agent_result),
+        )
         cmd = await node(state)
         assert cmd.goto == "ok"
-        assert cmd.update == {"guardrail_validation_result": None}
+        assert cmd.update == {"inner_state": {"guardrail_validation_result": None}}
         assert fake.guardrails.last_text == str(agent_result)
 
     @pytest.mark.asyncio
@@ -282,10 +292,15 @@ class TestAgentTerminateGuardrailNodes:
         )
         assert node_name == expected_name
 
-        state = AgentGuardrailsGraphState(messages=[], agent_result={"ok": False})
+        state = AgentGuardrailsGraphState(
+            messages=[],
+            inner_state=InnerAgentGuardrailsGraphState(agent_result={"ok": False}),
+        )
         cmd = await node(state)
         assert cmd.goto == "nope"
-        assert cmd.update == {"guardrail_validation_result": "policy_violation"}
+        assert cmd.update == {
+            "inner_state": {"guardrail_validation_result": "policy_violation"}
+        }
 
 
 class TestToolGuardrailNodes:
@@ -333,7 +348,7 @@ class TestToolGuardrailNodes:
             )
             cmd = await node(state)
             assert cmd.goto == "ok"
-            assert cmd.update == {"guardrail_validation_result": None}
+            assert cmd.update == {"inner_state": {"guardrail_validation_result": None}}
             assert json.loads(fake.guardrails.last_text or "{}") == {"x": 1}
         else:
             state = AgentGuardrailsGraphState(
@@ -341,7 +356,7 @@ class TestToolGuardrailNodes:
             )
             cmd = await node(state)
             assert cmd.goto == "ok"
-            assert cmd.update == {"guardrail_validation_result": None}
+            assert cmd.update == {"inner_state": {"guardrail_validation_result": None}}
             assert fake.guardrails.last_text == "tool output"
 
     @pytest.mark.asyncio
@@ -395,7 +410,9 @@ class TestToolGuardrailNodes:
 
         cmd = await node(state)
         assert cmd.goto == "nope"
-        assert cmd.update == {"guardrail_validation_result": "policy_violation"}
+        assert cmd.update == {
+            "inner_state": {"guardrail_validation_result": "policy_violation"}
+        }
 
 
 class TestGuardrailHelperFunctions:
@@ -520,7 +537,7 @@ class TestGuardrailHelperFunctions:
         command = _create_validation_command(result, "success_node", "failure_node")
 
         assert command.goto == "success_node"
-        assert command.update == {"guardrail_validation_result": None}
+        assert command.update == {"inner_state": {"guardrail_validation_result": None}}
 
     def test_create_validation_command_failure(self):
         """Test validation command creation for failed validation."""
@@ -535,7 +552,9 @@ class TestGuardrailHelperFunctions:
         command = _create_validation_command(result, "success_node", "failure_node")
 
         assert command.goto == "failure_node"
-        assert command.update == {"guardrail_validation_result": "policy_violation"}
+        assert command.update == {
+            "inner_state": {"guardrail_validation_result": "policy_violation"}
+        }
 
     def test_create_validation_command_feature_disabled_raises_exception(self):
         """Test that FEATURE_DISABLED result raises AgentTerminationException."""
