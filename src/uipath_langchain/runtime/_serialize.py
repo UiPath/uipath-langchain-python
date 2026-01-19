@@ -1,6 +1,8 @@
 from enum import Enum
 from typing import Any
 
+from langgraph.types import Overwrite
+
 
 def serialize_output(output: Any) -> Any:
     """
@@ -14,6 +16,10 @@ def serialize_output(output: Any) -> Any:
     """
     if output is None:
         return {}
+
+    # Handle LangGraph types
+    if isinstance(output, Overwrite):
+        return serialize_output(output.value)
 
     # Handle Pydantic models
     if hasattr(output, "model_dump"):
