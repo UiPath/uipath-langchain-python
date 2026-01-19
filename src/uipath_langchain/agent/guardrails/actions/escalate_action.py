@@ -129,9 +129,6 @@ class EscalateAction(GuardrailAction):
                 data["Inputs"] = input_content
                 data["Outputs"] = output_content
 
-            print(guarded_component_name)
-            print(data)
-
             escalation_result = interrupt(
                 CreateEscalation(
                     app_name=self.app_name,
@@ -334,7 +331,9 @@ def _process_llm_escalation_response(
             if not reviewed_outputs_json:
                 return {}
 
-            reviewed_tool_calls_list = json.loads(reviewed_outputs_json)
+            reviewed_tool_calls_obj = json.loads(reviewed_outputs_json)
+            reviewed_tool_calls_list = reviewed_tool_calls_obj.get("tool_calls")
+
             if not reviewed_tool_calls_list:
                 return {}
 
@@ -575,7 +574,8 @@ def _extract_llm_escalation_content(
                     "args": tool_call.get("args"),
                 }
                 content_list.append(tool_call_data)
-            return json.dumps(content_list)
+            tool_calls_obj = {"tool_calls": content_list}
+            return json.dumps(tool_calls_obj)
 
     # Fallback for other message types
     return json.dumps(get_message_content(cast(AnyMessage, message)))
