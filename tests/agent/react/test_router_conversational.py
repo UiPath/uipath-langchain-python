@@ -86,23 +86,33 @@ class TestCreateRouteAgentConversational:
             ]
         )
 
+    @pytest.fixture
+    def state_with_no_ai_messages(self):
+        """Fixture for state with no AI messages."""
+        return MockAgentGraphState(
+            messages=[
+                HumanMessage(content="query"),
+                HumanMessage(content="follow-up"),
+            ]
+        )
+
     def test_routes_to_single_tool_node(
         self, route_function, state_with_single_tool_call
     ):
-        """Should return list with single tool name when AI message has one tool call."""
+        """Should return single tool name when AI message has one tool call."""
         result = route_function(state_with_single_tool_call)
 
-        assert result == ["search_tool"]
-        assert isinstance(result, list)
+        assert result == "search_tool"
+        assert isinstance(result, str)
 
-    def test_routes_to_multiple_tool_nodes(
+    def test_routes_to_first_tool_node_for_sequential_execution(
         self, route_function, state_with_multiple_tool_calls
     ):
-        """Should return list of tool names for parallel execution."""
+        """Should return first tool name for sequential execution."""
         result = route_function(state_with_multiple_tool_calls)
 
-        assert result == ["search_tool", "calculator_tool", "weather_tool"]
-        assert len(result) == 3
+        assert result == "search_tool"
+        assert isinstance(result, str)
 
     def test_routes_to_terminate_when_no_tool_calls(
         self, route_function, state_with_no_tool_calls
@@ -124,22 +134,29 @@ class TestCreateRouteAgentConversational:
         """Should raise AgentNodeRoutingException for empty messages."""
         with pytest.raises(
             AgentNodeRoutingException,
-            match="No messages in state",
+            match="No AIMessage found in messages for routing",
         ):
             route_function(empty_state)
 
-    def test_non_ai_last_message_raises_exception(
-        self, route_function, state_with_human_last
+    def test_no_ai_message_raises_exception(
+        self, route_function, state_with_no_ai_messages
     ):
-        """Should raise AgentNodeRoutingException when last message is not AIMessage."""
+        """Should raise AgentNodeRoutingException when no AIMessage is found."""
         with pytest.raises(
             AgentNodeRoutingException,
-            match="Last message is not AIMessage",
+            match="No AIMessage found in messages for routing",
         ):
-            route_function(state_with_human_last)
+            route_function(state_with_no_ai_messages)
 
-    def test_preserves_tool_call_order(self, route_function):
-        """Should preserve the order of tool calls in the result."""
+    def test_human_message_after_ai_routes_to_terminate(
+        self, route_function, state_with_human_last
+    ):
+        """Should route to TERMINATE when AI message has no tool calls (ignoring later human messages)."""
+        result = route_function(state_with_human_last)
+        assert result == AgentGraphNode.TERMINATE
+
+    def test_routes_to_first_tool_in_sequence(self, route_function):
+        """Should route to first tool in sequential execution."""
         ai_message = AIMessage(
             content="Using tools in order",
             tool_calls=[
@@ -152,7 +169,7 @@ class TestCreateRouteAgentConversational:
 
         result = route_function(state)
 
-        assert result == ["first_tool", "second_tool", "third_tool"]
+        assert result == "first_tool"
 
 
 class TestRouteAgentConversationalFactory:

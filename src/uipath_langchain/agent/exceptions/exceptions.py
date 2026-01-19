@@ -9,3 +9,7 @@ class AgentNodeRoutingException(Exception):
 
 class AgentTerminationException(UiPathRuntimeError):
     pass
+
+
+class AgentStateException(Exception):
+    pass

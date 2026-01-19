@@ -3,11 +3,11 @@
 from typing import Literal, Sequence
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.messages import AIMessage, AnyMessage, ToolCall
 from langchain_core.tools import BaseTool
 
 from .constants import MAX_CONSECUTIVE_THINKING_MESSAGES
-from .types import AgentGraphState
+from .types import FLOW_CONTROL_TOOLS, AgentGraphState
 from .utils import count_consecutive_thinking_messages
 
 OPENAI_COMPATIBLE_CHAT_MODELS = (
@@ -31,6 +31,16 @@ def _get_required_tool_choice_by_model(
     if model_class_name in OPENAI_COMPATIBLE_CHAT_MODELS:
         return "required"
     return "any"
+
+
+def _filter_control_flow_tool_calls(
+    tool_calls: list[ToolCall],
+) -> list[ToolCall]:
+    """Remove control flow tools when multiple tool calls exist."""
+    if len(tool_calls) <= 1:
+        return tool_calls
+
+    return [tc for tc in tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS]
 
 
 def create_llm_node(
@@ -73,6 +83,13 @@ def create_llm_node(
             raise TypeError(
                 f"LLM returned {type(response).__name__} instead of AIMessage"
             )
+
+        # filter out flow control tools when multiple tool calls exist
+        if response.tool_calls:
+            filtered_tool_calls = _filter_control_flow_tool_calls(response.tool_calls)
+            if len(filtered_tool_calls) != len(response.tool_calls):
+                # todo: this does not actually work, but fixing tool call modifying is a separate task
+                response.tool_calls = filtered_tool_calls
 
         return {"messages": [response]}
 
