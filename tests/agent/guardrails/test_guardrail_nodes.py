@@ -91,7 +91,9 @@ class TestLlmGuardrailNodes:
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
         _patch_uipath(
-            monkeypatch, result=GuardrailValidationResultType.PASSED, reason=""
+            monkeypatch,
+            result=GuardrailValidationResultType.PASSED,
+            reason="validation passed",
         )
         node_name, node = create_llm_guardrail_node(
             guardrail=guardrail,
@@ -103,7 +105,9 @@ class TestLlmGuardrailNodes:
         state = AgentGuardrailsGraphState(messages=[HumanMessage("payload")])
         cmd = await node(state)
         assert cmd.goto == "ok"
-        assert cmd.update == {"inner_state": {"guardrail_validation_result": None}}
+        assert cmd.update == {
+            "inner_state": {"guardrail_validation_result": "validation passed"}
+        }
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -162,7 +166,9 @@ class TestAgentInitGuardrailNodes:
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
         fake = _patch_uipath(
-            monkeypatch, result=GuardrailValidationResultType.PASSED, reason=""
+            monkeypatch,
+            result=GuardrailValidationResultType.PASSED,
+            reason="validation passed",
         )
 
         node_name, node = create_agent_init_guardrail_node(
@@ -176,7 +182,9 @@ class TestAgentInitGuardrailNodes:
         state = AgentGuardrailsGraphState(messages=[HumanMessage("payload")])
         cmd = await node(state)
         assert cmd.goto == "ok"
-        assert cmd.update == {"inner_state": {"guardrail_validation_result": None}}
+        assert cmd.update == {
+            "inner_state": {"guardrail_validation_result": "validation passed"}
+        }
         assert fake.guardrails.last_text == "payload"
 
     @pytest.mark.asyncio
@@ -239,7 +247,9 @@ class TestAgentTerminateGuardrailNodes:
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
         guardrail.name = "Example"
         fake = _patch_uipath(
-            monkeypatch, result=GuardrailValidationResultType.PASSED, reason=""
+            monkeypatch,
+            result=GuardrailValidationResultType.PASSED,
+            reason="validation passed",
         )
 
         node_name, node = create_agent_terminate_guardrail_node(
@@ -257,7 +267,9 @@ class TestAgentTerminateGuardrailNodes:
         )
         cmd = await node(state)
         assert cmd.goto == "ok"
-        assert cmd.update == {"inner_state": {"guardrail_validation_result": None}}
+        assert cmd.update == {
+            "inner_state": {"guardrail_validation_result": "validation passed"}
+        }
         assert fake.guardrails.last_text == str(agent_result)
 
     @pytest.mark.asyncio
@@ -348,7 +360,7 @@ class TestToolGuardrailNodes:
             )
             cmd = await node(state)
             assert cmd.goto == "ok"
-            assert cmd.update == {"inner_state": {"guardrail_validation_result": None}}
+            assert cmd.update == {"inner_state": {"guardrail_validation_result": ""}}
             assert json.loads(fake.guardrails.last_text or "{}") == {"x": 1}
         else:
             state = AgentGuardrailsGraphState(
@@ -356,7 +368,7 @@ class TestToolGuardrailNodes:
             )
             cmd = await node(state)
             assert cmd.goto == "ok"
-            assert cmd.update == {"inner_state": {"guardrail_validation_result": None}}
+            assert cmd.update == {"inner_state": {"guardrail_validation_result": ""}}
             assert fake.guardrails.last_text == "tool output"
 
     @pytest.mark.asyncio
@@ -509,7 +521,9 @@ class TestGuardrailHelperFunctions:
         )
 
         fake = _patch_uipath(
-            monkeypatch, result=GuardrailValidationResultType.PASSED, reason=""
+            monkeypatch,
+            result=GuardrailValidationResultType.PASSED,
+            reason="validation passed",
         )
 
         guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
@@ -532,12 +546,14 @@ class TestGuardrailHelperFunctions:
 
         result = GuardrailValidationResult(
             result=GuardrailValidationResultType.PASSED,
-            reason="",
+            reason="validation passed",
         )
         command = _create_validation_command(result, "success_node", "failure_node")
 
         assert command.goto == "success_node"
-        assert command.update == {"inner_state": {"guardrail_validation_result": None}}
+        assert command.update == {
+            "inner_state": {"guardrail_validation_result": "validation passed"}
+        }
 
     def test_create_validation_command_failure(self):
         """Test validation command creation for failed validation."""
