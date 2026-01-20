@@ -19,11 +19,26 @@ from uipath_langchain.agent.react.utils import (
 
 # the type safety can be improved with generics
 ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
-ToolWrapperType = Callable[[BaseTool, ToolCall, Any], ToolWrapperReturnType]
-AsyncToolWrapperType = Callable[
+
+ToolWrapperWithoutState = Callable[[BaseTool, ToolCall], ToolWrapperReturnType]
+ToolWrapperWithState = Callable[[BaseTool, ToolCall, Any], ToolWrapperReturnType]
+ToolWrapperType = ToolWrapperWithoutState | ToolWrapperWithState
+
+AsyncToolWrapperWithoutState = Callable[
+    [BaseTool, ToolCall], Awaitable[ToolWrapperReturnType]
+]
+AsyncToolWrapperWithState = Callable[
     [BaseTool, ToolCall, Any], Awaitable[ToolWrapperReturnType]
 ]
+AsyncToolWrapperType = AsyncToolWrapperWithoutState | AsyncToolWrapperWithState
+
 OutputType = dict[Literal["messages"], list[ToolMessage]] | Command[Any] | None
+
+
+def _wrapper_needs_state(wrapper: ToolWrapperType | AsyncToolWrapperType) -> bool:
+    """Check if wrapper function expects a state parameter."""
+    params = list(signature(wrapper).parameters.values())
+    return len(params) >= 3
 
 
 class UiPathToolNode(RunnableCallable):
@@ -57,8 +72,8 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
         if self.wrapper:
-            filtered_state = self._filter_state(state, self.wrapper)
-            result = self.wrapper(self.tool, call, filtered_state)
+            inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
+            result = self.wrapper(*inputs)
         else:
             result = self.tool.invoke(call["args"])
         return self._process_result(call, result)
@@ -68,8 +83,8 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
         if self.awrapper:
-            filtered_state = self._filter_state(state, self.awrapper)
-            result = await self.awrapper(self.tool, call, filtered_state)
+            inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
+            result = await self.awrapper(*inputs)
         else:
             result = await self.tool.ainvoke(call["args"])
         return self._process_result(call, result)
@@ -106,6 +121,19 @@ class UiPathToolNode(RunnableCallable):
             )
             return {"messages": [message]}
 
+    def _prepare_wrapper_inputs(
+        self,
+        wrapper: ToolWrapperType | AsyncToolWrapperType,
+        tool: BaseTool,
+        call: ToolCall,
+        state: AgentGraphState,
+    ) -> Sequence[Any]:
+        """Prepare inputs for wrapper invocation based on its signature."""
+        if _wrapper_needs_state(wrapper):
+            filtered_state = self._filter_state(state, wrapper)
+            return tool, call, filtered_state
+        return tool, call
+
     def _filter_state(
         self, state: Any, wrapper: ToolWrapperType | AsyncToolWrapperType
     ) -> BaseModel:
@@ -137,7 +165,6 @@ def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, UiPathToolNode]:
 
     Args:
         tools: Sequence of tools to create nodes for.
-        agentState: The type of the agent state model.
 
     Returns:
         Dict mapping tool.name -> ReactToolNode([tool]).

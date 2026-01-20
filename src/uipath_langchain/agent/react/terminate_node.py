@@ -13,7 +13,7 @@ from ..exceptions import (
     AgentNodeRoutingException,
     AgentTerminationException,
 )
-from .types import AgentGraphState, AgentTermination
+from .types import AgentGraphState
 
 
 def _handle_end_execution(
@@ -36,30 +36,17 @@ def _handle_raise_error(args: dict[str, Any]) -> NoReturn:
     )
 
 
-def _handle_agent_termination(termination: AgentTermination) -> NoReturn:
-    """Handle Command-based termination."""
-    raise AgentTerminationException(
-        code=UiPathErrorCode.EXECUTION_ERROR,
-        title=termination.title,
-        detail=termination.detail,
-    )
-
-
 def create_terminate_node(
     response_schema: type[BaseModel] | None = None, is_conversational: bool = False
 ):
     """Handles Agent Graph termination for multiple sources and output or error propagation to Orchestrator.
 
     Termination scenarios:
-    1. Command based termination with information in state (e.g: escalation)
-    2. LLM-initiated termination (END_EXECUTION_TOOL)
-    3. LLM-initiated error (RAISE_ERROR_TOOL)
+    1. LLM-initiated termination (END_EXECUTION_TOOL)
+    2. LLM-initiated error (RAISE_ERROR_TOOL)
     """
 
     def terminate_node(state: AgentGraphState):
-        if state.inner_state.termination:
-            _handle_agent_termination(state.inner_state.termination)
-
         if not is_conversational:
             last_message = state.messages[-1]
             if not isinstance(last_message, AIMessage):
