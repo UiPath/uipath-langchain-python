@@ -9,6 +9,10 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from uipath._utils import resource_override
 from uipath.utils import EndpointManager
 
+from .._utils._retry_after_strategy import (
+    AsyncRetryAfterHeaderStrategy,
+    RetryAfterHeaderStrategy,
+)
 from .supported_models import BedrockModels
 from .types import APIFlavor, LLMProvider
 
@@ -42,9 +46,17 @@ def _check_bedrock_dependencies() -> None:
 _check_bedrock_dependencies()
 
 import boto3
+import botocore.config
+import botocore.exceptions
 from langchain_aws import (
     ChatBedrock,
     ChatBedrockConverse,
+)
+
+_BEDROCK_RETRY_EXCEPTIONS = (
+    botocore.exceptions.ReadTimeoutError,
+    botocore.exceptions.ConnectTimeoutError,
+    botocore.exceptions.EndpointConnectionError,
 )
 
 
@@ -94,6 +106,11 @@ class AwsBedrockCompletionsPassthroughClient:
             region_name="none",
             aws_access_key_id="none",
             aws_secret_access_key="none",
+            config=botocore.config.Config(
+                retries={
+                    "total_max_attempts": 1,
+                }
+            ),
         )
         client.meta.events.register(
             "before-send.bedrock-runtime.*", self._modify_request
@@ -132,6 +149,7 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
     llm_provider: LLMProvider = LLMProvider.BEDROCK
     api_flavor: APIFlavor = APIFlavor.AWS_BEDROCK_CONVERSE
     model: str = ""  # For tracing serialization
+    max_retries: int = 5
 
     def __init__(
         self,
@@ -174,11 +192,28 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
         super().__init__(**kwargs)
         self.model = model_name
 
+    def invoke(self, *args, **kwargs):
+        retryer = RetryAfterHeaderStrategy(
+            retry_on_exceptions=_BEDROCK_RETRY_EXCEPTIONS,
+            max_retries=self.max_retries,
+            logger=logger,
+        )
+        return retryer(super().invoke, *args, **kwargs)
+
+    async def ainvoke(self, *args, **kwargs):
+        retryer = AsyncRetryAfterHeaderStrategy(
+            retry_on_exceptions=_BEDROCK_RETRY_EXCEPTIONS,
+            max_retries=self.max_retries,
+            logger=logger,
+        )
+        return await retryer(super().ainvoke, *args, **kwargs)
+
 
 class UiPathChatBedrock(ChatBedrock):
     llm_provider: LLMProvider = LLMProvider.BEDROCK
     api_flavor: APIFlavor = APIFlavor.AWS_BEDROCK_INVOKE
     model: str = ""  # For tracing serialization
+    max_retries: int = 5
 
     def __init__(
         self,
@@ -220,6 +255,22 @@ class UiPathChatBedrock(ChatBedrock):
         kwargs["model"] = model_name
         super().__init__(**kwargs)
         self.model = model_name
+
+    def invoke(self, *args, **kwargs):
+        retryer = RetryAfterHeaderStrategy(
+            retry_on_exceptions=_BEDROCK_RETRY_EXCEPTIONS,
+            max_retries=self.max_retries,
+            logger=logger,
+        )
+        return retryer(super().invoke, *args, **kwargs)
+
+    async def ainvoke(self, *args, **kwargs):
+        retryer = AsyncRetryAfterHeaderStrategy(
+            retry_on_exceptions=_BEDROCK_RETRY_EXCEPTIONS,
+            max_retries=self.max_retries,
+            logger=logger,
+        )
+        return await retryer(super().ainvoke, *args, **kwargs)
 
     @staticmethod
     def _convert_file_blocks_to_anthropic_documents(

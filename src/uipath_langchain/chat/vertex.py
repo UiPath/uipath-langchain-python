@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any, Optional
 
@@ -12,8 +13,14 @@ from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
+from .._utils._retry_after_strategy import (
+    AsyncRetryAfterHeaderStrategy,
+    RetryAfterHeaderStrategy,
+)
 from .supported_models import GeminiModels
 from .types import APIFlavor, LLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 def _check_genai_dependencies() -> None:
@@ -46,6 +53,12 @@ import google.genai
 from google.genai import types as genai_types
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import PrivateAttr
+
+_VERTEX_RETRY_EXCEPTIONS = (
+    httpx.TimeoutException,
+    httpx.ConnectError,
+    httpx.RemoteProtocolError,
+)
 
 
 def _rewrite_vertex_url(original_url: str, gateway_url: str) -> httpx.URL | None:
@@ -116,6 +129,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
     _model_name: str = PrivateAttr()
     _uipath_token: str = PrivateAttr()
     _uipath_llmgw_url: Optional[str] = PrivateAttr(default=None)
+    _custom_max_retries: int = PrivateAttr(default=5)
     _agenthub_config: Optional[str] = PrivateAttr(default=None)
     _byo_connection_id: Optional[str] = PrivateAttr(default=None)
 
@@ -129,6 +143,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         token: Optional[str] = None,
         model_name: str = GeminiModels.gemini_2_5_flash,
         temperature: Optional[float] = None,
+        max_retries: int = 5,
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
         **kwargs: Any,
@@ -136,6 +151,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
         tenant_id = tenant_id or os.getenv("UIPATH_TENANT_ID")
         token = token or os.getenv("UIPATH_ACCESS_TOKEN")
+        self._custom_max_retries = max_retries
 
         if not org_id:
             raise ValueError(
@@ -178,6 +194,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
             model=model_name,
             google_api_key="uipath-gateway",
             temperature=temperature,
+            max_retries=1,
             **kwargs,
         )
 
@@ -240,6 +257,22 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
             model=model_name,
         )
         return f"{env_uipath_url.rstrip('/')}/{formatted_endpoint}"
+
+    def invoke(self, *args, **kwargs):
+        retryer = RetryAfterHeaderStrategy(
+            retry_on_exceptions=_VERTEX_RETRY_EXCEPTIONS,
+            max_retries=self._custom_max_retries,
+            logger=logger,
+        )
+        return retryer(super().invoke, *args, **kwargs)
+
+    async def ainvoke(self, *args, **kwargs):
+        retryer = AsyncRetryAfterHeaderStrategy(
+            retry_on_exceptions=_VERTEX_RETRY_EXCEPTIONS,
+            max_retries=self._custom_max_retries,
+            logger=logger,
+        )
+        return await retryer(super().ainvoke, *args, **kwargs)
 
     def _merge_finish_reason_to_response_metadata(
         self, result: ChatResult
