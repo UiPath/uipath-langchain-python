@@ -27,7 +27,7 @@
         "openinference.span.kind": "LLM",
         "llm.provider": "azure",
         "llm.system": "openai",
-        "llm.model_name": "gpt-4o-2024-08-06",
+        "llm.model_name": "*",
         "llm.input_messages.0.message.role": "system",
         "llm.input_messages.1.message.role": "user",
         "llm.input_messages.1.message.content": "How is the weather today in New York?",
@@ -73,9 +73,8 @@
         "openinference.span.kind": "LLM",
         "llm.provider": "azure",
         "llm.system": "openai",
-        "llm.model_name": "gpt-4o-2024-08-06",
+        "llm.model_name": "*",
         "llm.output_messages.0.message.role": "assistant",
-        "llm.output_messages.0.message.content": "The weather in New York today is sunny with a high of 75°F.",
         "session.id": "default"
       }
     }
