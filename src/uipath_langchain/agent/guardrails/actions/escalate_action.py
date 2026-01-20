@@ -82,7 +82,7 @@ class EscalateAction(GuardrailAction):
             data: Dict[str, Any] = {
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
-                "Component": scope.name.lower(),
+                "Component": _build_component_name(scope, guarded_component_name),
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
                 "GuardrailResult": state.inner_state.guardrail_validation_result,
             }
@@ -331,9 +331,15 @@ def _process_llm_escalation_response(
             if not reviewed_outputs_json:
                 return {}
 
-            reviewed_tool_calls_list = json.loads(reviewed_outputs_json)
-            if not reviewed_tool_calls_list:
+            reviewed_tool_calls_obj = json.loads(reviewed_outputs_json)
+            if not reviewed_tool_calls_obj:
                 return {}
+
+            reviewed_tool_calls_list = (
+                reviewed_tool_calls_obj.get("tool_calls")
+                if "tool_calls" in reviewed_tool_calls_obj
+                else None
+            )
 
             # Track if tool calls were successfully processed
             tool_calls_processed = False
@@ -534,7 +540,7 @@ def _extract_agent_escalation_content(
         - POST_EXECUTION: a JSON-serialized representation of `state.agent_result`.
     """
     if execution_stage == ExecutionStage.PRE_EXECUTION:
-        return get_message_content(cast(AnyMessage, message))
+        return json.dumps(get_message_content(cast(AnyMessage, message)))
 
     output_content = state.inner_state.agent_result or ""
     return json.dumps(output_content)
@@ -558,7 +564,7 @@ def _extract_llm_escalation_content(
         if isinstance(message, ToolMessage):
             return message.content
 
-        return get_message_content(cast(AnyMessage, message))
+        return json.dumps(get_message_content(cast(AnyMessage, message)))
 
     # For AI messages, process tool calls if present
     if isinstance(message, AIMessage):
@@ -572,10 +578,11 @@ def _extract_llm_escalation_content(
                     "args": tool_call.get("args"),
                 }
                 content_list.append(tool_call_data)
-            return json.dumps(content_list)
+            tool_calls_obj = {"tool_calls": content_list}
+            return json.dumps(tool_calls_obj)
 
     # Fallback for other message types
-    return get_message_content(cast(AnyMessage, message))
+    return json.dumps(get_message_content(cast(AnyMessage, message)))
 
 
 def _extract_tool_escalation_content(
@@ -632,6 +639,25 @@ def _execution_stage_to_escalation_field(
         "Inputs" for PRE_EXECUTION, "Outputs" for POST_EXECUTION.
     """
     return "Inputs" if execution_stage == ExecutionStage.PRE_EXECUTION else "Outputs"
+
+
+def _build_component_name(scope: GuardrailScope, guarded_component_name: str) -> str:
+    """Build component name based on guardrail scope and guarded component name.
+
+    Args:
+        scope: The guardrail scope (LLM/AGENT/TOOL).
+        guarded_component_name: Name of the guarded component.
+
+    Returns:
+        "Agent" for AGENT scope, "LLM call" for LLM scope, or guarded_component_name for TOOL scope.
+    """
+    match scope:
+        case GuardrailScope.AGENT:
+            return "Agent"
+        case GuardrailScope.LLM:
+            return "LLM call"
+        case GuardrailScope.TOOL:
+            return guarded_component_name
 
 
 def _execution_stage_to_string(
