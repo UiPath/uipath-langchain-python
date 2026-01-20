@@ -261,17 +261,41 @@ class TestEscalationToolMetadata:
         assert tool.metadata["channel_type"] == "actionCenter"
 
     @pytest.mark.asyncio
-    async def test_escalation_tool_metadata_has_assignee(self, escalation_resource):
+    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    async def test_escalation_tool_metadata_has_assignee(
+        self, mock_interrupt, escalation_resource
+    ):
         """Test that metadata contains assignee when recipient is USER_EMAIL."""
+        # Mock interrupt to return a result
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_interrupt.return_value = mock_result
+
         tool = await create_escalation_tool(escalation_resource)
+
+        # Invoke the tool to trigger assignee resolution
+        await tool.ainvoke({})
+
         assert tool.metadata is not None
         assert tool.metadata["assignee"] == "user@example.com"
 
     @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
     async def test_escalation_tool_metadata_assignee_none_when_no_recipients(
-        self, escalation_resource_no_recipient
+        self, mock_interrupt, escalation_resource_no_recipient
     ):
         """Test that assignee is None when no recipients configured."""
+        # Mock interrupt to return a result
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_interrupt.return_value = mock_result
+
         tool = await create_escalation_tool(escalation_resource_no_recipient)
+
+        # Invoke the tool to trigger assignee resolution
+        await tool.ainvoke({})
+
         assert tool.metadata is not None
         assert tool.metadata["assignee"] is None
