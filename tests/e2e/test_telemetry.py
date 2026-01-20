@@ -109,6 +109,14 @@ class TestTelemetryE2E:
         # Set up environment with telemetry enabled
         env = authenticated_session.copy()
         env["UIPATH_TELEMETRY_ENABLED"] = "true"
+
+        import os
+
+        telemetry_conn_str = os.getenv("TELEMETRY_CONNECTION_STRING")
+        if telemetry_conn_str:
+            env["TELEMETRY_CONNECTION_STRING"] = telemetry_conn_str
+            env["APPLICATIONINSIGHTS_CONNECTION_STRING"] = telemetry_conn_str
+
         # Add custom property to identify this test run
         env["UIPATH_TEST_RUN_ID"] = test_run_id
 
@@ -130,7 +138,8 @@ class TestTelemetryE2E:
         query = """
         customEvents
         | where timestamp > ago(15m)
-        | where name in ("AgentRun.Start.URT", "AgentRun.End.URT", "AgentRun.Failed.URT")
+        | where name in ("AgentRun.Start", "AgentRun.End", "AgentRun.Failed")
+        | where customDimensions.Runtime == "URT"
         | project timestamp, name, customDimensions, customMeasurements
         | order by timestamp desc
         """
@@ -160,19 +169,18 @@ class TestTelemetryE2E:
                     test_events.append(event)
 
             if len(test_events) >= 1:
-                # Just verify we have URT events - no need to check properties
                 urt_events = [
                     e
                     for e in test_events
-                    if e["name"] in ["AgentRun.Start.URT", "AgentRun.End.URT"]
+                    if e["name"] in ["AgentRun.Start", "AgentRun.End"]
                 ]
                 assert len(urt_events) >= 1, (
-                    f"No URT events found. Events: {[e['name'] for e in test_events]}"
+                    f"No agent run events found. Events: {[e['name'] for e in test_events]}"
                 )
 
                 print("✅ Successfully found telemetry events in Application Insights")
                 print(f"   Found {len(test_events)} events from this test run")
-                print(f"   URT events: {[e['name'] for e in urt_events]}")
+                print(f"   Agent run events: {[e['name'] for e in urt_events]}")
 
                 return  # Test passes
             else:

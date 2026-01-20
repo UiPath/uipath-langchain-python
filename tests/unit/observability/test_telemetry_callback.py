@@ -95,9 +95,9 @@ class TestTelemetryEventNames:
 
     def test_event_name_constants(self):
         """Test that event name constants are properly defined."""
-        assert AGENTRUN_STARTED == "AgentRun.Start.URT"
-        assert AGENTRUN_COMPLETED == "AgentRun.End.URT"
-        assert AGENTRUN_FAILED == "AgentRun.Failed.URT"
+        assert AGENTRUN_STARTED == "AgentRun.Start"
+        assert AGENTRUN_COMPLETED == "AgentRun.End"
+        assert AGENTRUN_FAILED == "AgentRun.Failed"
 
 
 class TestTelemetryIntegration:

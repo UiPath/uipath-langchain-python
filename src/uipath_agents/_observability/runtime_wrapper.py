@@ -13,7 +13,6 @@ Supports interruptible process trace context preservation:
 """
 
 import logging
-import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -23,7 +22,9 @@ from typing import Any, AsyncGenerator, Dict, Optional
 
 from opentelemetry import trace
 from opentelemetry.trace import Span, SpanContext, TraceFlags
+from uipath._cli._utils._common import get_claim_from_token
 from uipath.agent.models.agent import AgentDefinition
+from uipath.platform.common import UiPathConfig
 from uipath.runtime import (
     UiPathExecuteOptions,
     UiPathRuntimeContext,
@@ -304,6 +305,7 @@ class TelemetryRuntimeWrapper:
 
                         base_properties = {
                             "AgentName": agent_name,
+                            "Status": "Failed",
                             "Timestamp": datetime.now(timezone.utc).isoformat(),
                             "ErrorMessage": str(e)[
                                 :500
@@ -549,15 +551,11 @@ class TelemetryRuntimeWrapper:
         """Get enriched telemetry properties from AgentDefinition and execution context."""
         properties = base_properties.copy()
 
-        # Try to get TraceId from agent span first, fallback to environment variable
         trace_id = None
         if agent_span:
             span_context = agent_span.get_span_context()
             if span_context and span_context.trace_id:
                 trace_id = format(span_context.trace_id, "032x")
-
-        if not trace_id:
-            trace_id = os.environ.get("UIPATH_TRACE_ID")
 
         if trace_id:
             properties["TraceId"] = trace_id
@@ -597,18 +595,41 @@ class TelemetryRuntimeWrapper:
 
         properties["AgentRunSource"] = get_execution_type(self._runtime_context).value
         properties["ApplicationName"] = "UiPath.AgentService"
+        properties["Runtime"] = "URT"
 
         try:
             properties["UiPathAgentsPackageVersion"] = version("uipath-agents")
         except Exception:
             properties["UiPathAgentsPackageVersion"] = "unknown"
 
-        properties["CloudOrganizationId"] = os.getenv(
-            "UIPATH_CLOUD_ORGANIZATION_ID", self._runtime_context.org_id
-        )
-        properties["CloudUserId"] = os.getenv("UIPATH_CLOUD_USER_ID", "")
+        properties["CloudOrganizationId"] = UiPathConfig.organization_id or ""
+
         properties["CloudTenantId"] = self._runtime_context.tenant_id
         properties["JobId"] = self._runtime_context.job_id
+
+        try:
+            cloud_user_id = get_claim_from_token("sub")
+            properties["CloudUserId"] = cloud_user_id if cloud_user_id else ""
+        except Exception:
+            properties["CloudUserId"] = ""
+
+        # Check if delegate has entrypoint (agent.json path)
+        entrypoint = getattr(self._delegate, "entrypoint", None)
+        if entrypoint:
+            properties["Entrypoint"] = str(entrypoint)
+
+        properties["AgentType"] = "LowCode"
+
+        if UiPathConfig.folder_key:
+            properties["FolderKey"] = UiPathConfig.folder_key
+        if UiPathConfig.job_key:
+            properties["JobKey"] = UiPathConfig.job_key
+        if UiPathConfig.project_id:
+            properties["ProjectId"] = UiPathConfig.project_id
+        if UiPathConfig.process_uuid:
+            properties["ProcessUuid"] = UiPathConfig.process_uuid
+        if UiPathConfig.process_version:
+            properties["ProcessVersion"] = UiPathConfig.process_version
 
         return properties
 
@@ -650,6 +671,8 @@ class TelemetryRuntimeWrapper:
 
                 base_properties: Dict[str, Any] = {
                     "AgentName": agent_name,
+                    "Status": "Completed",
+                    "ErrorMessage": "",
                 }
 
                 if agent_id:

@@ -1,6 +1,5 @@
 """Tests for enhanced TelemetryRuntimeWrapper functionality including telemetry callback and property enrichment."""
 
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -283,31 +282,49 @@ class TestPropertyEnrichment:
         # Verify standard properties are still added
         assert enriched["AgentRunSource"] == "playground"
         assert enriched["ApplicationName"] == "UiPath.AgentService"
+        assert enriched["Runtime"] == "URT"
+        assert enriched["AgentType"] == "LowCode"
         assert "AgentRunId" in enriched
 
-    @patch.dict(
-        os.environ,
-        {
-            "UIPATH_CLOUD_ORGANIZATION_ID": "test-org-id",
-            "UIPATH_CLOUD_USER_ID": "test-user-id",
-        },
-    )
-    def test_get_enriched_properties_cloud_context_from_env(
+    def test_get_enriched_properties_cloud_context_from_runtime_context(
         self, mock_delegate, tracer, tracing_callback, agent_info, mock_runtime_context
     ):
-        wrapper = TelemetryRuntimeWrapper(
-            mock_delegate,
-            tracer,
-            tracing_callback,
-            mock_runtime_context,
-            agent_definition=agent_info,
-        )
+        """Test cloud context extraction from UiPathConfig and runtime context."""
+        # Mock UiPathConfig to provide organization_id
+        with patch(
+            "uipath_agents._observability.runtime_wrapper.UiPathConfig"
+        ) as mock_config:
+            mock_config.organization_id = "test-org-id"
+            mock_config.folder_key = None
+            mock_config.job_key = None
+            mock_config.project_id = None
+            mock_config.process_uuid = None
+            mock_config.process_version = None
+            mock_config.is_studio_project = False
 
-        base_properties = {"AgentName": "test-agent"}
-        enriched = wrapper._get_enriched_properties(base_properties)
+            # Mock get_claim_from_token to return None so CloudUserId uses empty string
+            with patch(
+                "uipath_agents._observability.runtime_wrapper.get_claim_from_token",
+                return_value=None,
+            ):
+                wrapper = TelemetryRuntimeWrapper(
+                    mock_delegate,
+                    tracer,
+                    tracing_callback,
+                    mock_runtime_context,
+                    agent_definition=agent_info,
+                )
 
-        assert enriched["CloudOrganizationId"] == "test-org-id"
-        assert enriched["CloudUserId"] == "test-user-id"
+                base_properties = {"AgentName": "test-agent"}
+                enriched = wrapper._get_enriched_properties(base_properties)
+
+                # CloudOrganizationId comes from UiPathConfig
+                assert enriched["CloudOrganizationId"] == "test-org-id"
+                # CloudUserId comes from JWT token
+                assert enriched["CloudUserId"] == ""  # Empty because no JWT token
+                # CloudTenantId and JobId come from runtime_context
+                assert enriched["CloudTenantId"] == "test-tenant-id"
+                assert enriched["JobId"] == "test-job-id"
 
 
 class TestAgentRunIdConsistency:

@@ -19,9 +19,9 @@ logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
 logger = logging.getLogger(__name__)
 
 # Telemetry event names
-AGENTRUN_STARTED = "AgentRun.Start.URT"
-AGENTRUN_COMPLETED = "AgentRun.End.URT"
-AGENTRUN_FAILED = "AgentRun.Failed.URT"
+AGENTRUN_STARTED = "AgentRun.Start"
+AGENTRUN_COMPLETED = "AgentRun.End"
+AGENTRUN_FAILED = "AgentRun.Failed"
 
 
 def track_event(
@@ -37,7 +37,9 @@ def track_event(
         measurements: Numeric measurements for the event (currently ignored,
                      kept for backward compatibility)
     """
+    logger.info(f"track_event called: {name}, properties: {properties}")
     _track_event(name, properties)
+    logger.info(f"_track_event completed for: {name}")
 
 
 class AppInsightsTelemetryCallback(BaseCallbackHandler):
