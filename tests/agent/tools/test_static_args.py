@@ -1,20 +1,28 @@
 """Tests for static_args.py module."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel, Field
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
     AgentIntegrationToolProperties,
     AgentIntegrationToolResourceConfig,
+    AgentToolArgumentProperties,
+    AgentToolStaticArgumentProperties,
     BaseAgentResourceConfig,
 )
 from uipath.platform.connections import Connection
 
 from uipath_langchain.agent.tools.static_args import (
     apply_static_args,
+    apply_static_argument_properties_to_schema,
     resolve_integration_static_args,
     resolve_static_args,
+)
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
 )
 
 
@@ -328,6 +336,16 @@ class TestApplyStaticArgs:
         expected = {"users": [{"status": "active"}, {"status": "active"}]}
         assert result == expected
 
+    def test_apply_static_args_to_empty_array_replaces_with_static_value(self):
+        """Test applying static args to empty array - should replace with single static value."""
+        static_args = {"$['files'][*]": {"id": "uuid-123"}}
+        kwargs: dict[str, Any] = {
+            "files": [],
+        }
+
+        result = apply_static_args(static_args, kwargs)
+        assert result == {"files": [{"id": "uuid-123"}]}
+
     def test_apply_static_args_nested_property_in_array_element(self):
         """Test applying static args to nested property in array element - should replace property on every object."""
         static_args = {"users[*].profile.verified": True}
@@ -414,3 +432,123 @@ class TestApplyStaticArgs:
 
         expected = {"config": {"new_section": {"setting": "value"}}}
         assert result == expected
+
+    def test_apply_static_args_replace_entire_array(self):
+        """Test applying static args to nested array - should replace entire array."""
+        static_args = {"$['config']['allowed_ips']": ["192.168.1.1", "10.0.0.1"]}
+        kwargs = {
+            "config": {
+                "allowed_ips": ["172.16.0.1", "172.16.0.2", "172.16.0.3"],
+                "timeout": 30,
+            },
+            "enabled": True,
+        }
+
+        result = apply_static_args(static_args, kwargs)
+
+        expected = {
+            "config": {
+                "allowed_ips": ["192.168.1.1", "10.0.0.1"],
+                "timeout": 30,
+            },
+            "enabled": True,
+        }
+        assert result == expected
+
+
+class SimpleInput(BaseModel):
+    """Simple input model for testing."""
+
+    host: str
+    port: int = Field(default=8080)
+    api_key: str
+
+
+class TestApplyStaticArgumentPropertiesToSchema:
+    """Test cases for apply_static_argument_properties_to_schema function."""
+
+    def create_test_tool(
+        self, argument_properties: dict[str, AgentToolArgumentProperties]
+    ) -> StructuredToolWithArgumentProperties:
+        """Create a test tool for testing."""
+
+        async def tool_fn(host: str, port: int = 8080, api_key: str = "") -> str:
+            return f"{host}:{port}"
+
+        return StructuredToolWithArgumentProperties(
+            name="test_tool",
+            description="A test tool",
+            args_schema=SimpleInput,
+            coroutine=tool_fn,
+            output_type=None,
+            argument_properties=argument_properties,
+        )
+
+    @pytest.fixture
+    def agent_input(self) -> dict[str, Any]:
+        """Common agent input for tests."""
+        return {"user_id": "user123", "query": "test query"}
+
+    def test_returns_original_tool_when_no_properties(
+        self, agent_input: dict[str, Any]
+    ) -> None:
+        """Test that the original tool is returned when argument_properties is empty."""
+        tool = self.create_test_tool({})
+        result = apply_static_argument_properties_to_schema(tool, agent_input)
+
+        assert result is tool
+
+    def test_returns_modified_tool_with_static_properties(
+        self, agent_input: dict[str, Any]
+    ) -> None:
+        """Test that a modified tool is returned when static properties are provided."""
+        tool = self.create_test_tool(
+            {
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False,
+                    value="api.example.com",
+                ),
+                "$['api_key']": AgentToolStaticArgumentProperties(
+                    is_sensitive=True,
+                    value="secret-key-123",
+                ),
+            }
+        )
+
+        result = apply_static_argument_properties_to_schema(tool, agent_input)
+
+        # Should return a different tool instance
+        assert result is not tool
+        assert result.name == tool.name
+        assert result.description == tool.description
+        assert isinstance(result.args_schema, type(BaseModel))
+        schema = result.args_schema.model_json_schema()
+
+        assert "pre-configured" in schema["properties"]["api_key"]["description"]
+        assert "api_key" not in schema["required"]
+        host_def = schema["$defs"]["Host"]
+        assert host_def["enum"] == ["api.example.com"]
+
+    def test_skips_invalid_argument_properties(
+        self, agent_input: dict[str, Any]
+    ) -> None:
+        tool = self.create_test_tool(
+            {
+                "$['nonexistent_field']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False,
+                    value="test",
+                ),
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False,
+                    value="api.example.com",
+                ),
+            }
+        )
+
+        result = apply_static_argument_properties_to_schema(tool, agent_input)
+
+        assert isinstance(result.args_schema, type(BaseModel))
+        schema = result.args_schema.model_json_schema()
+        host_def = schema["$defs"]["Host"]
+        assert host_def["enum"] == ["api.example.com"]
+        assert "nonexistent_field" not in schema["properties"]

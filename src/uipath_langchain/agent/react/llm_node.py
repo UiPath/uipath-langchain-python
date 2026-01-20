@@ -1,11 +1,19 @@
 """LLM node for ReAct Agent graph."""
 
-from typing import Literal, Sequence
+from typing import Literal, Sequence, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall
 from langchain_core.tools import BaseTool
+from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
+
+from uipath_langchain.agent.tools.static_args import (
+    apply_static_argument_properties_to_schema,
+)
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
+)
 
 from ..exceptions import AgentTerminationException
 from .constants import (
@@ -13,7 +21,7 @@ from .constants import (
     DEFAULT_MAX_LLM_MESSAGES,
 )
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
-from .utils import count_consecutive_thinking_messages
+from .utils import count_consecutive_thinking_messages, extract_input_data_from_state
 
 OPENAI_COMPATIBLE_CHAT_MODELS = (
     "UiPathChatOpenAI",
@@ -48,9 +56,14 @@ def _filter_control_flow_tool_calls(
     return [tc for tc in tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS]
 
 
+StateT = TypeVar("StateT", bound=AgentGraphState)
+InputT = TypeVar("InputT", bound=BaseModel)
+
+
 def create_llm_node(
     model: BaseChatModel,
-    tools: Sequence[BaseTool] | None = None,
+    tools: Sequence[BaseTool],
+    input_schema: type[InputT] | None = None,
     is_conversational: bool = False,
     llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
     thinking_messages_limit: int = DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
@@ -69,12 +82,10 @@ def create_llm_node(
             before enforcing tool usage. 0 = force tools every time.
     """
     bindable_tools = list(tools) if tools else []
-    base_llm = model.bind_tools(bindable_tools) if bindable_tools else model
     tool_choice_required_value = _get_required_tool_choice_by_model(model)
 
-    async def llm_node(state: AgentGraphState):
+    async def llm_node(state: StateT):
         messages: list[AnyMessage] = state.messages
-
         agent_ai_messages = sum(1 for msg in messages if isinstance(msg, AIMessage))
         if agent_ai_messages >= llm_messages_limit:
             raise AgentTerminationException(
@@ -85,6 +96,11 @@ def create_llm_node(
             )
 
         consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
+
+        static_schema_tools = _apply_tool_argument_properties(
+            bindable_tools, state, input_schema
+        )
+        base_llm = model.bind_tools(static_schema_tools)
 
         if (
             not is_conversational
@@ -111,3 +127,19 @@ def create_llm_node(
         return {"messages": [response]}
 
     return llm_node
+
+
+def _apply_tool_argument_properties(
+    tools: list[BaseTool],
+    state: StateT,
+    input_schema: type[InputT] | None = None,
+) -> list[BaseTool]:
+    """Apply dynamic schema modifications to tools based on their argument_properties."""
+
+    agent_input = extract_input_data_from_state(state, input_schema or type(state))
+    return [
+        apply_static_argument_properties_to_schema(tool, agent_input)
+        if isinstance(tool, StructuredToolWithArgumentProperties)
+        else tool
+        for tool in tools
+    ]

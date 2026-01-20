@@ -3,7 +3,8 @@ from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
-from langchain_core.tools import StructuredTool
+from langchain_core.messages.tool import ToolCall
+from langchain_core.tools import BaseTool, StructuredTool
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
 )
@@ -12,11 +13,16 @@ from uipath.platform import UiPath
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.llm_with_files import FileInfo, llm_call_with_files
-from uipath_langchain.agent.tools.structured_tool_with_output_type import (
-    StructuredToolWithOutputType,
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.static_args import handle_static_args
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
 )
-from uipath_langchain.agent.tools.tool_node import ToolWrapperMixin
+from uipath_langchain.agent.tools.tool_node import (
+    ToolWrapperReturnType,
+)
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
+from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 
 ANALYZE_FILES_SYSTEM_MESSAGE = (
     "Process the provided files to complete the given task. "
@@ -25,17 +31,9 @@ ANALYZE_FILES_SYSTEM_MESSAGE = (
 )
 
 
-class AnalyzeFileTool(StructuredToolWithOutputType, ToolWrapperMixin):
-    pass
-
-
 def create_analyze_file_tool(
     resource: AgentInternalToolResourceConfig, llm: BaseChatModel
 ) -> StructuredTool:
-    from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
-        get_job_attachment_wrapper,
-    )
-
     tool_name = sanitize_tool_name(resource.name)
     input_model = create_model(resource.input_schema)
     output_model = create_model(resource.output_schema)
@@ -69,15 +67,25 @@ def create_analyze_file_tool(
         result = await llm_call_with_files(messages, files, llm)
         return result
 
-    wrapper = get_job_attachment_wrapper(output_type=output_model)
-    tool = AnalyzeFileTool(
+    job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
+
+    async def analyze_file_tool_wrapper(
+        tool: BaseTool,
+        call: ToolCall,
+        state: AgentGraphState,
+    ) -> ToolWrapperReturnType:
+        call["args"] = handle_static_args(resource, state, call["args"])
+        return await job_attachment_wrapper(tool, call, state)
+
+    tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
         coroutine=tool_fn,
         output_type=output_model,
+        argument_properties=resource.argument_properties,
     )
-    tool.set_tool_wrappers(awrapper=wrapper)
+    tool.set_tool_wrappers(awrapper=analyze_file_tool_wrapper)
     return tool
 
 

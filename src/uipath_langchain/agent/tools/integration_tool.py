@@ -3,20 +3,27 @@
 import copy
 from typing import Any
 
+from jsonschema_pydantic_converter import transform as create_model
+from langchain.tools import BaseTool
+from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
 
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.tools.tool_node import ToolWrapperMixin
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.static_args import handle_static_args
+from uipath_langchain.agent.tools.tool_node import (
+    ToolWrapperMixin,
+    ToolWrapperReturnType,
+)
 
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_dict_for_serialization, sanitize_tool_name
 
 
-class StructuredToolWithStaticArgs(StructuredToolWithOutputType, ToolWrapperMixin):
+class StructuredToolWithWrapper(StructuredToolWithOutputType, ToolWrapperMixin):
     pass
 
 
@@ -167,13 +174,15 @@ def create_integration_tool(
 
         return result
 
-    from uipath_langchain.agent.wrappers.static_args_wrapper import (
-        get_static_args_wrapper,
-    )
+    async def integration_tool_wrapper(
+        tool: BaseTool,
+        call: ToolCall,
+        state: AgentGraphState,
+    ) -> ToolWrapperReturnType:
+        modified_args = handle_static_args(resource, state, call["args"])
+        return await tool.ainvoke(modified_args)
 
-    wrapper = get_static_args_wrapper(resource)
-
-    tool = StructuredToolWithStaticArgs(
+    tool = StructuredToolWithWrapper(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
@@ -184,6 +193,6 @@ def create_integration_tool(
             "display_name": resource.name,
         },
     )
-    tool.set_tool_wrappers(awrapper=wrapper)
+    tool.set_tool_wrappers(awrapper=integration_tool_wrapper)
 
     return tool
