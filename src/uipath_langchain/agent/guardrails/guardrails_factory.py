@@ -155,6 +155,72 @@ def _create_word_rule_func(
             raise ValueError(f"Unsupported word operator: {operator}")
 
 
+def _build_field_selector_description(field_selector: AgentFieldSelector) -> str:
+    """Build a human-readable selector description for field selector.
+
+    Args:
+        field_selector: The field selector describing which fields this rule applies to.
+
+    Returns:
+        A string describing the selector, using:
+        - \"All\" for `AgentAllFieldsSelector`
+        - Comma-separated field paths for `SpecificFieldsSelector`
+        - ``str(field_selector)`` as a fallback.
+    """
+    if isinstance(field_selector, AgentAllFieldsSelector):
+        return "All fields"
+    if isinstance(field_selector, SpecificFieldsSelector):
+        field_paths = [field.path for field in field_selector.fields]
+        return ", ".join(field_paths)
+    return str(field_selector)
+
+
+def _build_rule_description(
+    operator: AgentWordOperator | AgentNumberOperator | AgentBooleanOperator,
+    value: str | float | bool | None,
+    field_selector: AgentFieldSelector,
+) -> str:
+    """Build the full human-readable description for a word rule.
+
+    Args:
+        operator: The word operator to describe.
+        value: The comparison value, if applicable for the operator.
+        field_selector: The field selector describing which fields this rule applies to.
+
+    Returns:
+        A string describing the rule, combining selector, operator, and value.
+    """
+    selector_description = _build_field_selector_description(field_selector)
+
+    if operator in {
+        AgentWordOperator.CONTAINS,
+        AgentWordOperator.DOES_NOT_CONTAIN,
+        AgentWordOperator.EQUALS,
+        AgentWordOperator.DOES_NOT_EQUAL,
+        AgentWordOperator.STARTS_WITH,
+        AgentWordOperator.DOES_NOT_START_WITH,
+        AgentWordOperator.ENDS_WITH,
+        AgentWordOperator.DOES_NOT_END_WITH,
+        AgentWordOperator.MATCHES_REGEX,
+        AgentNumberOperator.EQUALS,
+        AgentNumberOperator.DOES_NOT_EQUAL,
+        AgentNumberOperator.GREATER_THAN,
+        AgentNumberOperator.GREATER_THAN_OR_EQUAL,
+        AgentNumberOperator.LESS_THAN,
+        AgentNumberOperator.LESS_THAN_OR_EQUAL,
+        AgentBooleanOperator.EQUALS,
+    }:
+        return f"{selector_description} {operator.value} {value!r}"
+
+    if operator in {
+        AgentWordOperator.IS_EMPTY,
+        AgentWordOperator.IS_NOT_EMPTY,
+    }:
+        return f"{selector_description} {operator.value}"
+
+    raise ValueError(f"Unsupported word operator: {operator}")
+
+
 def _create_number_rule_func(
     operator: AgentNumberOperator, value: float
 ) -> Callable[[float], bool]:
@@ -314,6 +380,9 @@ def _convert_agent_rule_to_deterministic(
             detects_violation=_create_word_rule_func(
                 agent_rule.operator, agent_rule.value
             ),
+            rule_description=_build_rule_description(
+                agent_rule.operator, agent_rule.value, agent_rule.field_selector
+            ),
         )
 
     if isinstance(agent_rule, AgentNumberRule):
@@ -325,6 +394,9 @@ def _convert_agent_rule_to_deterministic(
             detects_violation=_create_number_rule_func(
                 agent_rule.operator, agent_rule.value
             ),
+            rule_description=_build_rule_description(
+                agent_rule.operator, agent_rule.value, agent_rule.field_selector
+            ),
         )
 
     if isinstance(agent_rule, AgentBooleanRule):
@@ -335,6 +407,9 @@ def _convert_agent_rule_to_deterministic(
             ),
             detects_violation=_create_boolean_rule_func(
                 agent_rule.operator, agent_rule.value
+            ),
+            rule_description=_build_rule_description(
+                agent_rule.operator, agent_rule.value, agent_rule.field_selector
             ),
         )
 

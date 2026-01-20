@@ -44,6 +44,7 @@ from uipath_langchain.agent.guardrails.actions.escalate_action import EscalateAc
 from uipath_langchain.agent.guardrails.actions.filter_action import FilterAction
 from uipath_langchain.agent.guardrails.actions.log_action import LogAction
 from uipath_langchain.agent.guardrails.guardrails_factory import (
+    _build_rule_description,
     _convert_agent_custom_guardrail_to_deterministic,
     _convert_agent_rule_to_deterministic,
     _create_boolean_rule_func,
@@ -560,6 +561,117 @@ class TestCreateBooleanRuleFunc:
     def test_unsupported_operator_raises_value_error(self) -> None:
         with pytest.raises(ValueError, match="Unsupported boolean operator"):
             _create_boolean_rule_func(cast(AgentBooleanOperator, "INVALID"), True)
+
+
+class TestBuildRuleDescription:
+    """Tests for _build_rule_description."""
+
+    def test_word_rule_with_specific_field_selector(self) -> None:
+        """Description for word rule with specific selector includes field path, operator, and value."""
+        word_rule = AgentWordRule.model_validate(
+            {
+                "$ruleType": "word",
+                "fieldSelector": {
+                    "$selectorType": "specific",
+                    "fields": [{"path": "message.content", "source": "input"}],
+                },
+                "operator": "contains",
+                "value": "forbidden",
+            }
+        )
+
+        description = _build_rule_description(
+            word_rule.operator,
+            word_rule.value,
+            word_rule.field_selector,
+        )
+
+        assert description == "message.content contains 'forbidden'"
+
+    def test_word_rule_with_all_field_selector(self) -> None:
+        """Description for word rule with all selector uses 'All' as selector description."""
+        word_rule = AgentWordRule.model_validate(
+            {
+                "$ruleType": "word",
+                "fieldSelector": {"$selectorType": "all"},
+                "operator": "equals",
+                "value": "test",
+            }
+        )
+
+        description = _build_rule_description(
+            word_rule.operator,
+            word_rule.value,
+            word_rule.field_selector,
+        )
+
+        assert description == "All fields equals 'test'"
+
+    def test_word_rule_without_value_operator(self) -> None:
+        """Description for word rule without value omits the value portion."""
+        word_rule = AgentWordRule.model_validate(
+            {
+                "$ruleType": "word",
+                "fieldSelector": {
+                    "$selectorType": "specific",
+                    "fields": [{"path": "message.content", "source": "input"}],
+                },
+                "operator": "isEmpty",
+                "value": None,
+            }
+        )
+
+        description = _build_rule_description(
+            word_rule.operator,
+            word_rule.value,
+            word_rule.field_selector,
+        )
+
+        assert description == "message.content isEmpty"
+
+    def test_number_rule_description(self) -> None:
+        """Description for number rule includes numeric comparison operator and value."""
+        number_rule = AgentNumberRule.model_validate(
+            {
+                "$ruleType": "number",
+                "fieldSelector": {
+                    "$selectorType": "specific",
+                    "fields": [{"path": "data.count", "source": "input"}],
+                },
+                "operator": "greaterThan",
+                "value": 10.0,
+            }
+        )
+
+        description = _build_rule_description(
+            number_rule.operator,
+            number_rule.value,
+            number_rule.field_selector,
+        )
+
+        assert description == "data.count greaterThan 10.0"
+
+    def test_boolean_rule_description(self) -> None:
+        """Description for boolean rule includes field path, equals operator, and boolean value."""
+        boolean_rule = AgentBooleanRule.model_validate(
+            {
+                "$ruleType": "boolean",
+                "fieldSelector": {
+                    "$selectorType": "specific",
+                    "fields": [{"path": "data.is_active", "source": "input"}],
+                },
+                "operator": "equals",
+                "value": True,
+            }
+        )
+
+        description = _build_rule_description(
+            boolean_rule.operator,
+            boolean_rule.value,
+            boolean_rule.field_selector,
+        )
+
+        assert description == "data.is_active equals True"
 
 
 class TestConvertAgentRuleToDeterministic:

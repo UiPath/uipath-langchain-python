@@ -108,7 +108,7 @@ def _create_validation_command(
     if guardrail_result.result == GuardrailValidationResultType.PASSED:
         return Command(
             goto=success_node,
-            update={"inner_state": {"guardrail_validation_result": None}},
+            update={"inner_state": {"guardrail_validation_result": guardrail_result.reason}},
         )
 
     if guardrail_result.result == GuardrailValidationResultType.VALIDATION_FAILED:
