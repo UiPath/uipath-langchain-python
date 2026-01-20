@@ -140,8 +140,7 @@ def create_agent(
     )
 
     for tool_name in tool_node_names:
-        builder.add_edge(tool_name, AgentGraphNode.AGENT)
-
+        builder.add_conditional_edges(tool_name, route_agent, target_node_names)
     builder.add_edge(AgentGraphNode.TERMINATE, END)
 
     return builder

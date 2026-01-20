@@ -8,8 +8,12 @@ from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
+from uipath_langchain.agent.react.utils import (
+    extract_current_tool_call_index,
+    find_latest_ai_message,
+)
 
-from ...exceptions import AgentTerminationException
+from ...exceptions import AgentStateException, AgentTerminationException
 from ...react.types import AgentGuardrailsGraphState
 from .base_action import GuardrailAction, GuardrailActionNode
 
@@ -149,12 +153,9 @@ def _filter_tool_input_fields(
 
     # Find the AIMessage with tool calls
     # At PRE_EXECUTION, this is always the last message
-    ai_message = None
-    for i in range(len(msgs) - 1, -1, -1):
-        msg = msgs[i]
-        if isinstance(msg, AIMessage) and msg.tool_calls:
-            ai_message = msg
-            break
+    ai_message = find_latest_ai_message(msgs)
+    if ai_message is None or not ai_message.tool_calls:
+        return {}
 
     if ai_message is None:
         return {}
@@ -165,40 +166,47 @@ def _filter_tool_input_fields(
     tool_calls = list(ai_message.tool_calls)
     modified = False
 
-    for tool_call in tool_calls:
-        call_name = (
-            tool_call.get("name")
+    current_tool_call_index = extract_current_tool_call_index(msgs, tool_name)
+    if current_tool_call_index is None:
+        return {}
+
+    tool_call = tool_calls[current_tool_call_index]
+
+    call_name = (
+        tool_call.get("name")
+        if isinstance(tool_call, dict)
+        else getattr(tool_call, "name", None)
+    )
+
+    if call_name == tool_name:
+        # Get the current args
+        args = (
+            tool_call.get("args")
             if isinstance(tool_call, dict)
-            else getattr(tool_call, "name", None)
+            else getattr(tool_call, "args", None)
         )
 
-        if call_name == tool_name:
-            # Get the current args
-            args = (
-                tool_call.get("args")
-                if isinstance(tool_call, dict)
-                else getattr(tool_call, "args", None)
-            )
+        if args and isinstance(args, dict):
+            # Filter out the specified input fields
+            filtered_args = args.copy()
+            for field_ref in fields_to_filter:
+                # Only filter input fields
+                if (
+                    field_ref.source == FieldSource.INPUT
+                    and field_ref.path in filtered_args
+                ):
+                    del filtered_args[field_ref.path]
+                    modified = True
 
-            if args and isinstance(args, dict):
-                # Filter out the specified input fields
-                filtered_args = args.copy()
-                for field_ref in fields_to_filter:
-                    # Only filter input fields
-                    if (
-                        field_ref.source == FieldSource.INPUT
-                        and field_ref.path in filtered_args
-                    ):
-                        del filtered_args[field_ref.path]
-                        modified = True
-
-                # Update the tool call with filtered args
-                if isinstance(tool_call, dict):
-                    tool_call["args"] = filtered_args
-                else:
-                    tool_call.args = filtered_args
-
-            break
+            # Update the tool call with filtered args
+            if isinstance(tool_call, dict):
+                tool_call["args"] = filtered_args
+            else:
+                tool_call.args = filtered_args
+    else:
+        raise AgentStateException(
+            f"Tool call name [{call_name}] does not match expected tool name [{tool_name}]."
+        )
 
     if modified:
         ai_message.tool_calls = tool_calls

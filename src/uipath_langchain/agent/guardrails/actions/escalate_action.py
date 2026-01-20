@@ -15,8 +15,9 @@ from uipath.platform.guardrails import (
 )
 from uipath.runtime.errors import UiPathErrorCode
 
-from ...exceptions import AgentTerminationException
+from ...exceptions import AgentStateException, AgentTerminationException
 from ...react.types import AgentGuardrailsGraphState
+from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNode
@@ -420,9 +421,10 @@ def _process_tool_escalation_response(
         if not msgs or reviewed_field not in escalation_result:
             return {}
 
-        last_message = msgs[-1]
         if execution_stage == ExecutionStage.PRE_EXECUTION:
-            if not isinstance(last_message, AIMessage):
+            # Find the latest AI message instead of assuming last message is AI
+            ai_message = find_latest_ai_message(msgs)
+            if not ai_message:
                 return {}
 
             # Get reviewed tool calls args from escalation result
@@ -434,25 +436,40 @@ def _process_tool_escalation_response(
             if not isinstance(reviewed_tool_calls_args, dict):
                 return {}
 
-            # Find and update only the tool call with matching name
-            if last_message.tool_calls:
-                tool_calls = list(last_message.tool_calls)
-                for tool_call in tool_calls:
+            # Find the current tool call index for the specific tool
+            if ai_message.tool_calls:
+                tool_calls = list(ai_message.tool_calls)
+                current_index = extract_current_tool_call_index(msgs, tool_name)
+
+                # If we found the current index and it's valid
+                if current_index is not None and current_index < len(tool_calls):
+                    tool_call = tool_calls[current_index]
                     call_name = (
                         tool_call.get("name")
                         if isinstance(tool_call, dict)
                         else getattr(tool_call, "name", None)
                     )
+
+                    # Verify this is the correct tool by name
                     if call_name == tool_name:
-                        # Update args for the matching tool call
+                        # Update args for the specific tool call at current index
                         if isinstance(reviewed_tool_calls_args, dict):
                             if isinstance(tool_call, dict):
                                 tool_call["args"] = reviewed_tool_calls_args
                             else:
                                 tool_call.args = reviewed_tool_calls_args
-                        break
-                last_message.tool_calls = tool_calls
+
+                        ai_message.tool_calls = tool_calls
+                    else:
+                        raise AgentStateException(
+                            f"Tool call name [{call_name}] does not match expected tool name [{tool_name}]."
+                        )
+                else:
+                    return {}
+
         else:
+            # POST_EXECUTION: last message should be ToolMessage for tool escalation
+            last_message = msgs[-1]
             if not isinstance(last_message, ToolMessage):
                 return {}
 

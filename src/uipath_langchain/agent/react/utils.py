@@ -2,10 +2,11 @@
 
 from typing import Any, Sequence, TypeVar, cast
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL
 
+from uipath_langchain.agent.exceptions import AgentStateException
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import (
     AgentGraphState,
@@ -89,4 +90,64 @@ def create_guardrails_state_with_input(
         AgentGuardrailsGraphState,
         input_schema,
         model_name="CompleteAgentGuardrailsGraphState",
+    )
+
+
+def find_latest_ai_message(messages: list[AnyMessage]) -> AIMessage | None:
+    """Find and return the latest AIMessage from a list of messages.
+
+    Args:
+        messages: List of messages to search through
+
+    Returns:
+        The latest AIMessage found, or None if no AIMessage exists
+    """
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            return message
+    return None
+
+
+def extract_current_tool_call_index(
+    messages: list[AnyMessage], tool_name: str | None = None
+) -> int | None:
+    """Extract the current tool_call_index from messages list.
+
+    Iterates messages in reverse to find tool calls that already received responses,
+    then looks at the last AIMessage to determine the next tool call index.
+
+    Args:
+        messages: List of messages to analyze
+        tool_name: If provided, only consider tool calls for this specific tool
+
+    Returns:
+        int: The index of the next tool call to execute (0-based)
+        None: If all tool calls have been completed
+    """
+    completed_tool_call_ids = set()
+
+    for message in reversed(messages):
+        if isinstance(message, ToolMessage):
+            completed_tool_call_ids.add(message.tool_call_id)
+        elif isinstance(message, AIMessage):
+            if not message.tool_calls:
+                raise AgentStateException(
+                    "No tool calls found in latest AIMessage while extracting tool call index."
+                )
+
+            # find the first tool call that hasn't been completed
+            for i, tool_call in enumerate(message.tool_calls):
+                if tool_name is None or tool_call["name"] == tool_name:
+                    if tool_call["id"] not in completed_tool_call_ids:
+                        return i
+
+            # all tool calls completed
+            return None
+        else:
+            raise AgentStateException(
+                f"Unexpected message type {type(message)} encountered while extracting tool call index. Expected AIMessage or ToolMessage."
+            )
+
+    raise AgentStateException(
+        "No AIMessage found in messages - cannot extract current tool call index"
     )

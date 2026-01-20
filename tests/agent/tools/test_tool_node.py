@@ -115,6 +115,20 @@ class TestUiPathToolNode:
         human_message = HumanMessage(content="Hello")
         return MockState(messages=[human_message])
 
+    @pytest.fixture
+    def sequential_execution_state(self):
+        """Fixture for state with multiple tool calls in sequential execution."""
+        tool_calls = [
+            {"name": "first_tool", "args": {"input": "first"}, "id": "call_1"},
+            {"name": "mock_tool", "args": {"input_text": "test input"}, "id": "call_2"},
+        ]
+        ai_message = AIMessage(content="Using tools", tool_calls=tool_calls)
+        # Add a ToolMessage for the first tool call (already executed)
+        first_tool_message = ToolMessage(
+            content="First tool result", name="first_tool", tool_call_id="call_1"
+        )
+        return MockState(messages=[ai_message, first_tool_message])
+
     def test_basic_tool_execution(self, mock_tool, mock_state):
         """Test basic tool execution without wrappers."""
         node = UiPathToolNode(mock_tool)
@@ -200,14 +214,13 @@ class TestUiPathToolNode:
 
         assert result is None
 
-    def test_non_ai_message_raises_error(self, mock_tool, non_ai_state):
-        """Test that non-AI messages raise ValueError."""
+    def test_no_ai_message_returns_none(self, mock_tool, non_ai_state):
+        """Test that missing AI messages return None."""
         node = UiPathToolNode(mock_tool)
 
-        with pytest.raises(
-            ValueError, match="Last message in message stack is not an AIMessage"
-        ):
-            node._func(non_ai_state)
+        result = node._func(non_ai_state)
+
+        assert result is None
 
     def test_mismatched_tool_name_returns_none(self, mock_tool, mock_state):
         """Test that mismatched tool names return None."""
@@ -219,6 +232,25 @@ class TestUiPathToolNode:
         result = node._func(mock_state)
 
         assert result is None
+
+    def test_sequential_execution_finds_correct_tool_call(
+        self, mock_tool, sequential_execution_state
+    ):
+        """Test that sequential execution finds the correct tool call to execute."""
+        node = UiPathToolNode(mock_tool)
+
+        result = node._func(sequential_execution_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+
+        tool_message = result["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        assert tool_message.name == "mock_tool"
+        assert tool_message.tool_call_id == "call_2"
+        assert "Mock result: test input" in tool_message.content
 
     def test_state_filtering(self, mock_tool, mock_state):
         """Test that state is properly filtered for wrapper functions."""
