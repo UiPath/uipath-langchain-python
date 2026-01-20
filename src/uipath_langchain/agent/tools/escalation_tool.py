@@ -92,8 +92,9 @@ async def create_escalation_tool(
             else None
         )
 
-        # assignee resolution available only at runtime
-        tool.metadata["assignee"] = assignee
+        # Assignee requires runtime resolution, store in metadata after resolving
+        if tool.metadata is not None:
+            tool.metadata["assignee"] = assignee
 
         result = interrupt(
             CreateEscalation(
