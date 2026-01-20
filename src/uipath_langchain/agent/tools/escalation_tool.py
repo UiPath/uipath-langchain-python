@@ -76,12 +76,6 @@ async def create_escalation_tool(
     input_model: Any = create_model(channel.input_schema)
     output_model: Any = create_model(channel.output_schema)
 
-    assignee: str | None = (
-        await resolve_recipient_value(channel.recipients[0])
-        if channel.recipients
-        else None
-    )
-
     @mockable(
         name=resource.name,
         description=resource.description,
@@ -91,6 +85,16 @@ async def create_escalation_tool(
     )
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
         task_title = channel.task_title or "Escalation Task"
+
+        assignee: str | None = (
+            await resolve_recipient_value(channel.recipients[0])
+            if channel.recipients
+            else None
+        )
+
+        # Assignee requires runtime resolution, store in metadata after resolving
+        if tool.metadata is not None:
+            tool.metadata["assignee"] = assignee
 
         result = interrupt(
             CreateEscalation(
@@ -169,7 +173,7 @@ async def create_escalation_tool(
             "tool_type": "escalation",
             "display_name": channel.properties.app_name,
             "channel_type": channel.type,
-            "assignee": assignee,
+            "assignee": None,
         },
     )
     tool.set_tool_wrappers(awrapper=escalation_wrapper)
