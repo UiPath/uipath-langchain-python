@@ -24,9 +24,9 @@ class TestTelemetryE2E:
         """Get Application Insights API URL from connection string."""
         import os
 
-        conn_str = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+        conn_str = os.getenv("TELEMETRY_CONNECTION_STRING")
         if not conn_str:
-            pytest.skip("APPLICATIONINSIGHTS_CONNECTION_STRING not configured")
+            pytest.skip("TELEMETRY_CONNECTION_STRING not configured")
 
         # Parse connection string to get Application ID
         parts = {}
@@ -181,7 +181,7 @@ class TestTelemetryE2E:
         # If we get here, check if telemetry is enabled but instrumentation key is invalid
         import os
 
-        conn_str = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING", "")
+        conn_str = os.getenv("TELEMETRY_CONNECTION_STRING", "")
         if "your-key-here" in conn_str:
             pytest.skip(
                 "Telemetry test requires valid Application Insights instrumentation key"

@@ -117,7 +117,7 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
 
 def _get_azure_exporter() -> AzureMonitorTraceExporter | None:
     """Get Azure Monitor trace exporter if connection string is configured."""
-    connection_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+    connection_string = os.getenv("TELEMETRY_CONNECTION_STRING")
     if not connection_string:
         logger.debug("Azure Monitor exporter not configured - no connection string")
         return None

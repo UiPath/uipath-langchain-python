@@ -106,7 +106,7 @@ class TestGetAzureExporter:
         with (
             patch.dict(
                 os.environ,
-                {"APPLICATIONINSIGHTS_CONNECTION_STRING": conn_str},
+                {"TELEMETRY_CONNECTION_STRING": conn_str},
                 clear=True,
             ),
             patch.object(tracing, "AzureMonitorTraceExporter") as mock_exporter,
