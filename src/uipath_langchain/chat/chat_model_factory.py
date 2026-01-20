@@ -30,7 +30,7 @@ def _create_openai_llm(
     agenthub_config: str,
     byo_connection_id: str | None = None,
 ) -> BaseChatModel:
-    """Create UiPathChatOpenAI for OpenAI models via passthrough."""
+    """Create UiPathChatOpenAI for OpenAI models via LLMGateway."""
     from uipath_langchain.chat.openai import UiPathChatOpenAI
 
     azure_open_ai_latest_api_version = "2025-04-01-preview"
@@ -70,7 +70,7 @@ def _create_bedrock_llm(
     agenthub_config: str,
     byo_connection_id: str | None = None,
 ) -> BaseChatModel:
-    """Create UiPathChatBedrockConverse for Claude models via passthrough."""
+    """Create UiPathChatBedrockConverse for Claude models via LLMGateway."""
     from uipath_langchain.chat.bedrock import (
         UiPathChatBedrock,
         UiPathChatBedrockConverse,
@@ -107,7 +107,7 @@ def _create_vertex_llm(
     agenthub_config: str,
     byo_connection_id: str | None = None,
 ) -> BaseChatModel:
-    """Create UiPathChatVertex for Gemini models via passthrough."""
+    """Create UiPathChatVertex for Gemini models via LLMGateway."""
     from uipath_langchain.chat.vertex import UiPathChatVertex
 
     match api_flavor:
@@ -185,7 +185,7 @@ def get_chat_model(
     agenthub_config: str,
     byo_connection_id: str | None = None,
 ) -> BaseChatModel:
-    """Create and configure LLM instance using passthrough API.
+    """Create and configure LLM instance using LLMGateway API.
 
     Fetches available models from the discovery API and selects the appropriate
     LLM class based on the apiFlavor field from the matching model configuration.

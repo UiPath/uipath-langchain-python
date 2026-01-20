@@ -4,7 +4,7 @@ import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel, ConfigDict, Field
 from uipath.agent.models.agent import (
     AgentInternalToolProperties,
@@ -12,7 +12,7 @@ from uipath.agent.models.agent import (
     AgentInternalToolType,
 )
 
-from uipath_langchain.agent.react.multimodal import FileInfo
+from uipath_langchain.agent.multimodal import FileInfo
 from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
     _resolve_job_attachment_arguments,
@@ -76,7 +76,7 @@ class TestCreateAnalyzeFileTool:
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.llm_call_with_files"
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
     )
     @patch(
         "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
@@ -84,7 +84,7 @@ class TestCreateAnalyzeFileTool:
     async def test_create_analyze_file_tool_success(
         self,
         mock_resolve_attachments,
-        mock_llm_call,
+        mock_add_files,
         mock_get_wrapper,
         resource_config,
         mock_llm,
@@ -98,7 +98,16 @@ class TestCreateAnalyzeFileTool:
                 mime_type="application/pdf",
             )
         ]
-        mock_llm_call.return_value = "Analysis complete"
+
+        # mock add_files_to_message to return a message with files added
+        mock_message_with_files = HumanMessage(
+            content=[
+                {"type": "text", "text": "Summarize the document"},
+                {"type": "file", "url": "https://example.com/file.pdf"},
+            ]
+        )
+        mock_add_files.return_value = mock_message_with_files
+
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
 
@@ -121,18 +130,27 @@ class TestCreateAnalyzeFileTool:
         )
 
         # Verify calls
-        assert result == "Analysis complete"
+        assert result == "Analyzed result"
         mock_resolve_attachments.assert_called_once()
-        mock_llm_call.assert_called_once()
+        mock_add_files.assert_called_once()
+        mock_llm.ainvoke.assert_called_once()
 
-        # Verify LLM call arguments
-        call_args = mock_llm_call.call_args
-        messages, files, llm = call_args[0]
-        assert len(messages) == 2
-        assert messages[0].content == ANALYZE_FILES_SYSTEM_MESSAGE
-        assert messages[1].content == "Summarize the document"
-        assert len(files) == 1
-        assert files[0].url == "https://example.com/file.pdf"
+        # Verify add_files_to_message was called correctly
+        add_files_call_args = mock_add_files.call_args
+        message_arg = add_files_call_args[0][0]
+        files_arg = add_files_call_args[0][1]
+
+        assert isinstance(message_arg, HumanMessage)
+        assert message_arg.content == "Summarize the document"
+        assert len(files_arg) == 1
+        assert files_arg[0].url == "https://example.com/file.pdf"
+
+        # Verify llm.ainvoke was called with correct messages
+        ainvoke_call_args = mock_llm.ainvoke.call_args
+        messages_arg = ainvoke_call_args[0][0]
+        assert len(messages_arg) == 2
+        assert messages_arg[0].content == ANALYZE_FILES_SYSTEM_MESSAGE
+        assert messages_arg[1] == mock_message_with_files
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -176,7 +194,7 @@ class TestCreateAnalyzeFileTool:
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.llm_call_with_files"
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
     )
     @patch(
         "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
@@ -184,7 +202,7 @@ class TestCreateAnalyzeFileTool:
     async def test_create_analyze_file_tool_with_multiple_attachments(
         self,
         mock_resolve_attachments,
-        mock_llm_call,
+        mock_add_files,
         mock_get_wrapper,
         resource_config,
         mock_llm,
@@ -202,9 +220,24 @@ class TestCreateAnalyzeFileTool:
                 mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ),
         ]
-        mock_llm_call.return_value = "Multiple files analyzed"
+
+        # mock add_files_to_message to return a message with multiple files
+        mock_message_with_files = HumanMessage(
+            content=[
+                {"type": "text", "text": "Compare these documents"},
+                {"type": "file", "url": "https://example.com/file1.pdf"},
+                {"type": "file", "url": "https://example.com/file2.docx"},
+            ]
+        )
+        mock_add_files.return_value = mock_message_with_files
+
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
+
+        # setup llm to return analyzed result
+        mock_llm.ainvoke = AsyncMock(
+            return_value=AIMessage(content="Multiple files analyzed")
+        )
 
         tool = create_analyze_file_tool(resource_config, mock_llm)
 
@@ -227,8 +260,8 @@ class TestCreateAnalyzeFileTool:
         assert result == "Multiple files analyzed"
         mock_resolve_attachments.assert_called_once()
 
-        # Verify LLM received both files
-        call_args = mock_llm_call.call_args
+        # Verify add_files_to_message received both files
+        call_args = mock_add_files.call_args
         files = call_args[0][1]
         assert len(files) == 2
 

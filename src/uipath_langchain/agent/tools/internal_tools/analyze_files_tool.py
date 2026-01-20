@@ -1,8 +1,16 @@
+import asyncio
 import uuid
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AnyMessage,
+    BaseMessage,
+    ContentBlock,
+    DataContentBlock,
+    HumanMessage,
+    SystemMessage,
+)
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from uipath.agent.models.agent import (
@@ -11,18 +19,20 @@ from uipath.agent.models.agent import (
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 
+from uipath_langchain.agent.multimodal import FileInfo, build_file_content_block
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.multimodal import FileInfo, llm_call_with_files
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
-from uipath_langchain.agent.tools.tool_node import (
-    ToolWrapperReturnType,
-)
+from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
+from uipath_langchain.chat.helpers import (
+    append_content_blocks_to_message,
+    extract_text_content,
+)
 
 ANALYZE_FILES_SYSTEM_MESSAGE = (
     "Process the provided files to complete the given task. "
@@ -50,8 +60,8 @@ def create_analyze_file_tool(
         if "attachments" not in kwargs:
             raise ValueError("Argument 'attachments' is not available")
 
-        analysisTask = kwargs["analysisTask"]
-        if not analysisTask:
+        analysis_task = kwargs["analysisTask"]
+        if not analysis_task:
             raise ValueError("Argument 'analysisTask' is not available")
 
         attachments = kwargs["attachments"]
@@ -60,12 +70,17 @@ def create_analyze_file_tool(
         if not files:
             return {"analysisResult": "No attachments provided to analyze."}
 
+        human_message = HumanMessage(content=analysis_task)
+        human_message_with_files = await add_files_to_message(human_message, files)
+
         messages: list[AnyMessage] = [
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),
-            HumanMessage(content=analysisTask),
+            cast(AnyMessage, human_message_with_files),
         ]
-        result = await llm_call_with_files(messages, files, llm)
-        return result
+        result = await llm.ainvoke(messages)
+
+        analysis_result = extract_text_content(result)
+        return analysis_result
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 
@@ -125,3 +140,27 @@ async def _resolve_job_attachment_arguments(
         file_infos.append(file_info)
 
     return file_infos
+
+
+async def add_files_to_message(
+    message: BaseMessage,
+    files: list[FileInfo],
+) -> BaseMessage:
+    """Add file attachments to a message.
+
+    Args:
+        message: The message to add files to (any BaseMessage subclass)
+        files: List of file attachments to add
+
+    Returns:
+        New message of the same type with file content blocks appended
+    """
+    if not files:
+        return message
+
+    file_content_blocks: list[DataContentBlock] = await asyncio.gather(
+        *[build_file_content_block(file) for file in files]
+    )
+    return append_content_blocks_to_message(
+        message, cast(list[ContentBlock], file_content_blocks)
+    )

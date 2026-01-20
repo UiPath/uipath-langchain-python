@@ -8,14 +8,12 @@ from uipath_langchain.chat.types import (
     UiPathPassthroughChatModel,
 )
 
-from .handlers import (
-    BedrockConversePayloadHandler,
-    BedrockInvokePayloadHandler,
-    ModelPayloadHandler,
-    OpenAICompletionsPayloadHandler,
-    OpenAIResponsesPayloadHandler,
-    VertexGeminiPayloadHandler,
-)
+from .base import ModelPayloadHandler
+from .bedrock_converse import BedrockConversePayloadHandler
+from .bedrock_invoke import BedrockInvokePayloadHandler
+from .openai_completions import OpenAICompletionsPayloadHandler
+from .openai_responses import OpenAIResponsesPayloadHandler
+from .vertex_gemini import VertexGeminiPayloadHandler
 
 _HANDLER_REGISTRY: dict[tuple[LLMProvider, APIFlavor], type[ModelPayloadHandler]] = {
     (LLMProvider.OPENAI, APIFlavor.OPENAI_COMPLETIONS): OpenAICompletionsPayloadHandler,
