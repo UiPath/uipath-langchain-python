@@ -115,7 +115,7 @@ jobs:
           UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
           UIPATH_URL: ${{ secrets.UIPATH_URL }}
           UIPATH_PROJECT_ID: ${{ secrets.UIPATH_PROJECT_ID }}
-          APPLICATIONINSIGHTS_CONNECTION_STRING: ${{ secrets.APPLICATIONINSIGHTS_CONNECTION_STRING }}
+          TELEMETRY_CONNECTION_STRING: ${{ secrets.APPLICATIONINSIGHTS_CONNECTION_STRING }}
           APPLICATIONINSIGHTS_API_KEY: ${{ secrets.APPLICATIONINSIGHTS_API_KEY }}
         run: |
           echo "=== Running e2e tests for telemetry functionality ==="

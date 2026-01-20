@@ -5,6 +5,7 @@ import logging
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
+from uipath.runtime import UiPathRuntimeContext
 
 from .._config import get_flags
 
@@ -20,6 +21,27 @@ class AgentExecutionType(StrEnum):
     PLAYGROUND = "playground"
     RUNTIME = "runtime"
     EVAL = "eval"
+    UNKNOWN = "unknown"
+
+
+def get_execution_type(context: UiPathRuntimeContext) -> AgentExecutionType:
+    """Get execution type from runtime context command.
+
+    Args:
+        context: Runtime context containing the command
+
+    Returns:
+        AgentExecutionType corresponding to the command
+    """
+    match context.command:
+        case "run":
+            return AgentExecutionType.RUNTIME
+        case "debug":
+            return AgentExecutionType.PLAYGROUND
+        case "eval":
+            return AgentExecutionType.EVAL
+        case _:
+            return AgentExecutionType.UNKNOWN
 
 
 class _ModelConfig(BaseModel):

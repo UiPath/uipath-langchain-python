@@ -9,6 +9,8 @@ dependencies = [
   "uipath-langchain[vertex,bedrock]==0.4.14",
   "langgraph>=1.0.0,<2.0.0",
   "azure-monitor-opentelemetry>=1.7.0,<2.0.0",
+  "opentelemetry-instrumentation-httpx>=0.60b0",
+  "opentelemetry-instrumentation-aiohttp-client>=0.60b0",
 ]
 maintainers = [
   { name = "Silviu Georgescu", email = "silviu.georgescu@uipath.com" },
@@ -65,7 +67,7 @@ exclude = [
   "pytest.ini",
   "pyproject.local.toml",
   ".*",
-  "!.gitignore", # Except this one
+  "!.gitignore",          # Except this one
   ".pycharm/",
   ".claude/",
 ]
@@ -123,12 +125,7 @@ markers = [
 [tool.coverage.run]
 source = ["src/uipath_agents"]
 relative_files = true
-omit = [
-  "*/tests/*",
-  "*/__pycache__/*",
-  "*/site-packages/*",
-  "*/conftest.py",
-]
+omit = ["*/tests/*", "*/__pycache__/*", "*/site-packages/*", "*/conftest.py"]
 
 [tool.coverage.report]
 precision = 2

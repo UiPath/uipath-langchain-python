@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
 from uipath.agent.models.agent import AgentDefinition, AgentMetadata, AgentSettings
+from uipath.runtime import UiPathRuntimeContext
 
 from uipath_agents._observability.callback import UiPathTracingCallback
 from uipath_agents._observability.runtime_wrapper import TelemetryRuntimeWrapper
@@ -46,9 +47,23 @@ def telemetry_callback():
 
 
 @pytest.fixture
+def mock_runtime_context():
+    """Create a mock runtime context."""
+    from unittest.mock import MagicMock
+
+    context = MagicMock(spec=UiPathRuntimeContext)
+    context.command = "debug"
+    context.org_id = "test-org-id"
+    context.tenant_id = "test-tenant-id"
+    context.job_id = "test-job-id"
+    return context
+
+
+@pytest.fixture
 def agent_info():
     """Create agent span info with telemetry properties."""
     return AgentDefinition(
+        id="test-agent-id",
         name="test-agent",
         input_schema={"type": "object"},
         output_schema={"type": "string"},
@@ -71,13 +86,19 @@ class TestTelemetryCallbackIntegration:
     """Test integration of telemetry callback with runtime wrapper."""
 
     def test_init_with_telemetry_callback(
-        self, mock_delegate, tracer, tracing_callback, telemetry_callback, agent_info
+        self,
+        mock_delegate,
+        tracer,
+        tracing_callback,
+        telemetry_callback,
+        agent_info,
+        mock_runtime_context,
     ):
-        """Test initialization with telemetry callback."""
         wrapper = TelemetryRuntimeWrapper(
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
             telemetry_callback=telemetry_callback,
             agent_definition=agent_info,
         )
@@ -87,7 +108,13 @@ class TestTelemetryCallbackIntegration:
 
     @pytest.mark.asyncio
     async def test_execute_calls_telemetry_callback(
-        self, mock_delegate, tracer, tracing_callback, telemetry_callback, agent_info
+        self,
+        mock_delegate,
+        tracer,
+        tracing_callback,
+        telemetry_callback,
+        agent_info,
+        mock_runtime_context,
     ):
         """Test that execute calls telemetry callback for started and completed events."""
         from uipath.runtime import UiPathRuntimeStatus
@@ -104,6 +131,7 @@ class TestTelemetryCallbackIntegration:
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
             telemetry_callback=telemetry_callback,
             agent_definition=agent_info,
         )
@@ -112,7 +140,7 @@ class TestTelemetryCallbackIntegration:
 
         # Verify telemetry callback was called
         telemetry_callback.set_agent_info.assert_called_with(
-            "test-agent", "test-runtime-id"
+            "test-agent", "test-agent-id"
         )
 
         # Should be called twice: once for STARTED, once for COMPLETED
@@ -125,7 +153,13 @@ class TestTelemetryCallbackIntegration:
 
     @pytest.mark.asyncio
     async def test_execute_calls_telemetry_callback_on_failure(
-        self, mock_delegate, tracer, tracing_callback, telemetry_callback, agent_info
+        self,
+        mock_delegate,
+        tracer,
+        tracing_callback,
+        telemetry_callback,
+        agent_info,
+        mock_runtime_context,
     ):
         """Test that execute calls telemetry callback for failed events."""
         telemetry_callback.track_event = MagicMock()
@@ -137,6 +171,7 @@ class TestTelemetryCallbackIntegration:
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
             telemetry_callback=telemetry_callback,
             agent_definition=agent_info,
         )
@@ -153,13 +188,13 @@ class TestTelemetryCallbackIntegration:
         assert calls[1][0][0] == AGENTRUN_FAILED
 
     def test_without_telemetry_callback(
-        self, mock_delegate, tracer, tracing_callback, agent_info
+        self, mock_delegate, tracer, tracing_callback, agent_info, mock_runtime_context
     ):
-        """Test that wrapper works without telemetry callback."""
         wrapper = TelemetryRuntimeWrapper(
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
             agent_definition=agent_info,
         )
 
@@ -170,13 +205,13 @@ class TestPropertyEnrichment:
     """Test telemetry property enrichment functionality."""
 
     def test_get_enriched_properties_basic(
-        self, mock_delegate, tracer, tracing_callback, agent_info
+        self, mock_delegate, tracer, tracing_callback, agent_info, mock_runtime_context
     ):
-        """Test basic property enrichment from AgentDefinition."""
         wrapper = TelemetryRuntimeWrapper(
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
             agent_definition=agent_info,
         )
 
@@ -200,13 +235,13 @@ class TestPropertyEnrichment:
         assert "AgentRunId" in enriched
 
     def test_get_enriched_properties_with_trace_id(
-        self, mock_delegate, tracer, tracing_callback, agent_info
+        self, mock_delegate, tracer, tracing_callback, agent_info, mock_runtime_context
     ):
-        """Test property enrichment with trace ID from span."""
         wrapper = TelemetryRuntimeWrapper(
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
             agent_definition=agent_info,
         )
 
@@ -226,13 +261,13 @@ class TestPropertyEnrichment:
         assert enriched["TraceId"] == "12345678901234567890123456789012"
 
     def test_get_enriched_properties_without_agent_info(
-        self, mock_delegate, tracer, tracing_callback
+        self, mock_delegate, tracer, tracing_callback, mock_runtime_context
     ):
-        """Test property enrichment without AgentDefinition."""
         wrapper = TelemetryRuntimeWrapper(
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
         )
 
         base_properties = {"AgentName": "test-agent"}
@@ -258,13 +293,13 @@ class TestPropertyEnrichment:
         },
     )
     def test_get_enriched_properties_cloud_context_from_env(
-        self, mock_delegate, tracer, tracing_callback, agent_info
+        self, mock_delegate, tracer, tracing_callback, agent_info, mock_runtime_context
     ):
-        """Test cloud context extraction from environment variables."""
         wrapper = TelemetryRuntimeWrapper(
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
             agent_definition=agent_info,
         )
 
@@ -280,7 +315,13 @@ class TestAgentRunIdConsistency:
 
     @pytest.mark.asyncio
     async def test_agent_run_id_consistent_across_events(
-        self, mock_delegate, tracer, tracing_callback, telemetry_callback, agent_info
+        self,
+        mock_delegate,
+        tracer,
+        tracing_callback,
+        telemetry_callback,
+        agent_info,
+        mock_runtime_context,
     ):
         """Test that AgentRunId is consistent across all telemetry events."""
         from uipath.runtime import UiPathRuntimeStatus
@@ -296,6 +337,7 @@ class TestAgentRunIdConsistency:
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
             telemetry_callback=telemetry_callback,
             agent_definition=agent_info,
         )
@@ -319,13 +361,20 @@ class TestAgentRunIdConsistency:
 
     @pytest.mark.asyncio
     async def test_different_wrapper_instances_have_different_run_ids(
-        self, mock_delegate, tracer, tracing_callback, telemetry_callback, agent_info
+        self,
+        mock_delegate,
+        tracer,
+        tracing_callback,
+        telemetry_callback,
+        agent_info,
+        mock_runtime_context,
     ):
         """Test that different wrapper instances have different AgentRunIds."""
         wrapper1 = TelemetryRuntimeWrapper(
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
             telemetry_callback=telemetry_callback,
             agent_definition=agent_info,
         )
@@ -334,6 +383,7 @@ class TestAgentRunIdConsistency:
             mock_delegate,
             tracer,
             tracing_callback,
+            mock_runtime_context,
             telemetry_callback=telemetry_callback,
             agent_definition=agent_info,
         )

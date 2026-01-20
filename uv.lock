@@ -2320,6 +2320,22 @@ wheels = [
 ]
 
 [[package]]
+name = "opentelemetry-instrumentation-aiohttp-client"
+version = "0.60b0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "opentelemetry-util-http" },
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/fc/b1/97b2c06107b496a93f748c3d12ad439604bdccccdd2be05fe1ad63faa7df/opentelemetry_instrumentation_aiohttp_client-0.60b0.tar.gz", hash = "sha256:22ff1db43404bb67572628b45d99d284251621bfc80f772d05919e6233a88bf4", size = 15906, upload-time = "2025-12-03T13:22:02.415Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/de/f2/a53315a6278a25373de004fbf95a20dd5f20e1e4b98f5daf431367bb518c/opentelemetry_instrumentation_aiohttp_client-0.60b0-py3-none-any.whl", hash = "sha256:d1a0b2cf1696c52b3b3dc019c714d44e358efbad226cc70cb51f444d7ee36c93", size = 12697, upload-time = "2025-12-03T13:20:53.805Z" },
+]
+
+[[package]]
 name = "opentelemetry-instrumentation-asgi"
 version = "0.60b0"
 source = { registry = "https://pypi.org/simple" }
@@ -2397,6 +2413,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/30/cc/e0758c23d66fd49956169cb24b5b06130373da2ce8d49945abce82003518/opentelemetry_instrumentation_flask-0.60b0.tar.gz", hash = "sha256:560f08598ef40cdcf7ca05bfb2e3ea74fab076e676f4c18bb36bb379bf5c4a1b", size = 20336, upload-time = "2025-12-03T13:22:19.162Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9b/b5/387ce11f59e5ce65b890adc3f9c457877143b8a6d107a3a0b305397933a1/opentelemetry_instrumentation_flask-0.60b0-py3-none-any.whl", hash = "sha256:106e5774f79ac9b86dd0d949c1b8f46c807a8af16184301e10d24fc94e680d04", size = 15189, upload-time = "2025-12-03T13:21:18.672Z" },
+]
+
+[[package]]
+name = "opentelemetry-instrumentation-httpx"
+version = "0.60b0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "opentelemetry-util-http" },
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/71/9dc0bc5ab14122251f520ffe9fc8dd892ca688d7d591482b5b1843d685d2/opentelemetry_instrumentation_httpx-0.60b0.tar.gz", hash = "sha256:fcf349a92fb0b941a2a18bec65141f4ba62cbf7a457a1aa580794bad44dc477c", size = 20612, upload-time = "2025-12-03T13:22:20.5Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3a/22/a340c8bfad6f31bfd6a15b0b24d5e68e05e3975e4dbdc3cea6ec4f96e060/opentelemetry_instrumentation_httpx-0.60b0-py3-none-any.whl", hash = "sha256:3f5e6fc4ddf1d9de2aaddb5255110827154dbd4de9187da906c8c2a3cc2219e9", size = 15702, upload-time = "2025-12-03T13:21:20.667Z" },
 ]
 
 [[package]]
@@ -3963,6 +3995,8 @@ source = { editable = "." }
 dependencies = [
     { name = "azure-monitor-opentelemetry" },
     { name = "langgraph" },
+    { name = "opentelemetry-instrumentation-aiohttp-client" },
+    { name = "opentelemetry-instrumentation-httpx" },
     { name = "uipath" },
     { name = "uipath-langchain", extra = ["bedrock", "vertex"] },
 ]
@@ -3987,6 +4021,8 @@ dev = [
 requires-dist = [
     { name = "azure-monitor-opentelemetry", specifier = ">=1.7.0,<2.0.0" },
     { name = "langgraph", specifier = ">=1.0.0,<2.0.0" },
+    { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.60b0" },
+    { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.60b0" },
     { name = "uipath", specifier = "==2.5.19" },
     { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.4.14" },
 ]

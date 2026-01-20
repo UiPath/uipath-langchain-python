@@ -43,6 +43,8 @@ def _get_agenthub_config(execution_type: AgentExecutionType) -> str:
             return "agentsruntime"
         case AgentExecutionType.EVAL:
             return "agentsevals"
+        case AgentExecutionType.UNKNOWN:
+            return "unknown"
 
 
 def _create_openai_llm(

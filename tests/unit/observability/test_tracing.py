@@ -49,6 +49,10 @@ class TestConfigureTelemetry:
 
     def test_adds_filtered_azure_exporter_when_trace_manager_provided(self):
         """Test that filtered Azure exporter is added when trace_manager is provided."""
+        from uipath_agents._observability.pii_filtering_exporter import (
+            PIIFilteringExporter,
+        )
+
         mock_trace_manager = MagicMock()
         mock_exporter = MagicMock()
 
@@ -58,7 +62,28 @@ class TestConfigureTelemetry:
         ):
             tracing.configure_telemetry(trace_manager=mock_trace_manager)
 
-            # Should wrap Azure exporter with FilteringSpanExporter
+            # Should wrap Azure exporter with FilteringSpanExporter and PIIFilteringExporter
+            # Wrapping order: FilteringSpanExporter <- PIIFilteringExporter <- Azure
+            mock_trace_manager.add_span_exporter.assert_called_once()
+            added_exporter = mock_trace_manager.add_span_exporter.call_args[0][0]
+            assert isinstance(added_exporter, tracing.FilteringSpanExporter)
+            assert isinstance(added_exporter._delegate, PIIFilteringExporter)
+            assert added_exporter._delegate._delegate is mock_exporter
+            assert added_exporter._filter_fn is tracing.is_openinference_span
+
+    def test_adds_azure_exporter_without_pii_redaction_when_disabled(self):
+        """Test that Azure exporter is added without PII filtering when redaction disabled."""
+        mock_trace_manager = MagicMock()
+        mock_exporter = MagicMock()
+
+        with (
+            patch.object(tracing, "setup_otel_env"),
+            patch.object(tracing, "_get_azure_exporter", return_value=mock_exporter),
+            patch.dict(os.environ, {"DISABLE_OTEL_MASKING": "true"}),
+        ):
+            tracing.configure_telemetry(trace_manager=mock_trace_manager)
+
+            # Should wrap Azure exporter with FilteringSpanExporter only (no PII filtering)
             mock_trace_manager.add_span_exporter.assert_called_once()
             added_exporter = mock_trace_manager.add_span_exporter.call_args[0][0]
             assert isinstance(added_exporter, tracing.FilteringSpanExporter)

@@ -18,6 +18,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from importlib.metadata import version
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from opentelemetry import trace
@@ -25,6 +26,7 @@ from opentelemetry.trace import Span, SpanContext, TraceFlags
 from uipath.agent.models.agent import AgentDefinition
 from uipath.runtime import (
     UiPathExecuteOptions,
+    UiPathRuntimeContext,
     UiPathRuntimeProtocol,
     UiPathRuntimeResult,
     UiPathRuntimeStatus,
@@ -33,6 +35,7 @@ from uipath.runtime import (
 from uipath.runtime.events import UiPathRuntimeEvent
 from uipath.runtime.schema import UiPathRuntimeSchema
 
+from ..agent_graph_builder.config import get_execution_type
 from .callback import UiPathTracingCallback
 from .telemetry_callback import (
     AGENTRUN_COMPLETED,
@@ -80,6 +83,7 @@ class TelemetryRuntimeWrapper:
         delegate: UiPathRuntimeProtocol,
         tracer: UiPathTracer,
         callback: UiPathTracingCallback,
+        runtime_context: UiPathRuntimeContext,
         telemetry_callback: AppInsightsTelemetryCallback | None = None,
         agent_definition: AgentDefinition | None = None,
         trace_context_storage: TraceContextStorage | None = None,
@@ -90,6 +94,7 @@ class TelemetryRuntimeWrapper:
             delegate: The runtime to wrap with telemetry
             tracer: UiPathTracer for creating spans
             callback: Callback for LangChain event instrumentation
+            runtime_context: Runtime context containing command and environment info
             telemetry_callback: Optional callback for Application Insights telemetry
             agent_definition: Optional agent metadata for span attributes and telemetry enrichment
             trace_context_storage: Optional storage for trace context preservation
@@ -102,6 +107,7 @@ class TelemetryRuntimeWrapper:
         self._agent_definition = agent_definition
         self._trace_context_storage = trace_context_storage
         self._agent_run_id = str(uuid.uuid4())
+        self._runtime_context = runtime_context
 
     @property
     def delegate(self) -> UiPathRuntimeProtocol:
@@ -543,10 +549,18 @@ class TelemetryRuntimeWrapper:
         """Get enriched telemetry properties from AgentDefinition and execution context."""
         properties = base_properties.copy()
 
+        # Try to get TraceId from agent span first, fallback to environment variable
+        trace_id = None
         if agent_span:
             span_context = agent_span.get_span_context()
             if span_context and span_context.trace_id:
-                properties["TraceId"] = format(span_context.trace_id, "032x")
+                trace_id = format(span_context.trace_id, "032x")
+
+        if not trace_id:
+            trace_id = os.environ.get("UIPATH_TRACE_ID")
+
+        if trace_id:
+            properties["TraceId"] = trace_id
 
         properties["AgentRunId"] = self._agent_run_id
 
@@ -578,20 +592,29 @@ class TelemetryRuntimeWrapper:
                 properties["IsConversational"] = str(
                     self._agent_definition.is_conversational
                 )
+            if self._agent_definition.version is not None:
+                properties["AgentVersion"] = str(self._agent_definition.version)
 
-        properties["AgentRunSource"] = "playground"
+        properties["AgentRunSource"] = get_execution_type(self._runtime_context).value
         properties["ApplicationName"] = "UiPath.AgentService"
 
+        try:
+            properties["UiPathAgentsPackageVersion"] = version("uipath-agents")
+        except Exception:
+            properties["UiPathAgentsPackageVersion"] = "unknown"
+
         properties["CloudOrganizationId"] = os.getenv(
-            "UIPATH_CLOUD_ORGANIZATION_ID", ""
+            "UIPATH_CLOUD_ORGANIZATION_ID", self._runtime_context.org_id
         )
         properties["CloudUserId"] = os.getenv("UIPATH_CLOUD_USER_ID", "")
+        properties["CloudTenantId"] = self._runtime_context.tenant_id
+        properties["JobId"] = self._runtime_context.job_id
 
         return properties
 
     def _get_agent_id(self) -> Optional[str]:
-        if hasattr(self._delegate, "runtime_id"):
-            return self._delegate.runtime_id
+        if self._agent_definition is not None:
+            return self._agent_definition.id
         return None
 
     def _get_schemas(self) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:

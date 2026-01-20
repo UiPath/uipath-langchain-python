@@ -25,7 +25,7 @@ from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
 from uipath_langchain.runtime.storage import SqliteResumableStorage
 
 from uipath_agents.agent_graph_builder import build_agent_graph
-from uipath_agents.agent_graph_builder.config import AgentExecutionType
+from uipath_agents.agent_graph_builder.config import get_execution_type
 
 from ..._observability import configure_telemetry, shutdown_telemetry
 from ..._observability.callback import UiPathTracingCallback
@@ -178,7 +178,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         agent_definition = cast(AgentDefinition, kwargs.get("agent_definition"))
         try:
             return await build_agent_graph(
-                agent_definition, execution_type=self._get_execution_type()
+                agent_definition, execution_type=get_execution_type(self.context)
             )
         except Exception as e:
             raise LangGraphRuntimeError(
@@ -250,6 +250,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             base_runtime,
             tracer,
             tracing_callback,
+            self.context,
             telemetry_callback=telemetry_callback,
             agent_definition=agent_definition,
             trace_context_storage=trace_context_storage,
@@ -282,17 +283,6 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             trigger_manager=trigger_manager,
             runtime_id=runtime_id,
         )
-
-    def _get_execution_type(self) -> AgentExecutionType:
-        match self.context.command:
-            case "run":
-                return AgentExecutionType.RUNTIME
-            case "debug":
-                return AgentExecutionType.PLAYGROUND
-            case "eval":
-                return AgentExecutionType.EVAL
-            case _:
-                return AgentExecutionType.RUNTIME
 
     def _get_conversational_agent_input_schema(self) -> dict[str, Any]:
         """Gets conversational agent input schema."""

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec
 import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from uipath.agent.models.agent import AgentDefinition, AgentSettings
-from uipath.runtime import UiPathRuntimeStatus
+from uipath.runtime import UiPathRuntimeContext, UiPathRuntimeStatus
 
 from uipath_agents._observability.callback import UiPathTracingCallback
 from uipath_agents._observability.runtime_wrapper import TelemetryRuntimeWrapper
@@ -58,21 +58,36 @@ def callback_with_exporter(tracer_with_exporter):
     return UiPathTracingCallback(tracer_with_exporter)
 
 
+@pytest.fixture
+def mock_runtime_context():
+    """Create a mock runtime context."""
+    context = MagicMock(spec=UiPathRuntimeContext)
+    context.command = "debug"
+    context.org_id = "test-org-id"
+    context.tenant_id = "test-tenant-id"
+    context.job_id = "test-job-id"
+    return context
+
+
 class TestTelemetryRuntimeWrapper:
     """Test TelemetryRuntimeWrapper core functionality."""
 
     def test_init_stores_delegate_tracer_callback(
-        self, mock_delegate, tracer, callback
+        self, mock_delegate, tracer, callback, mock_runtime_context
     ):
         """Test initialization stores all dependencies."""
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
 
         assert wrapper.delegate is mock_delegate
         assert wrapper._tracer is tracer
         assert wrapper._callback is callback
 
     @pytest.mark.asyncio
-    async def test_execute_calls_set_agent_span(self, mock_delegate, tracer, callback):
+    async def test_execute_calls_set_agent_span(
+        self, mock_delegate, tracer, callback, mock_runtime_context
+    ):
         """Test execute calls set_agent_span on callback before execution."""
         mock_result = MagicMock()
         mock_result.status = UiPathRuntimeStatus.FAULTED
@@ -86,7 +101,9 @@ class TestTelemetryRuntimeWrapper:
 
         callback.set_agent_span = MagicMock(side_effect=capture_agent_span)
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
         await wrapper.execute({"input": "test"}, None)
 
         # set_agent_span should have been called with a span
@@ -94,7 +111,9 @@ class TestTelemetryRuntimeWrapper:
         assert agent_span_set is not None
 
     @pytest.mark.asyncio
-    async def test_stream_calls_set_agent_span(self, mock_delegate, tracer, callback):
+    async def test_stream_calls_set_agent_span(
+        self, mock_delegate, tracer, callback, mock_runtime_context
+    ):
         """Test stream calls set_agent_span on callback."""
         agent_span_set = None
 
@@ -109,7 +128,9 @@ class TestTelemetryRuntimeWrapper:
 
         mock_delegate.stream = mock_stream
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
         events = [e async for e in wrapper.stream({"input": "test"}, None)]
 
         assert events == ["event1"]
@@ -118,19 +139,21 @@ class TestTelemetryRuntimeWrapper:
 
     @pytest.mark.asyncio
     async def test_get_schema_and_dispose_delegate(
-        self, mock_delegate, tracer, callback
+        self, mock_delegate, tracer, callback, mock_runtime_context
     ):
         """Test get_schema and dispose pass through to delegate."""
         mock_schema = MagicMock()
         mock_delegate.get_schema.return_value = mock_schema
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
 
         assert await wrapper.get_schema() is mock_schema
         await wrapper.dispose()
         mock_delegate.dispose.assert_called_once()
 
-    def test_metadata_extraction(self, tracer, callback):
+    def test_metadata_extraction(self, tracer, callback, mock_runtime_context):
         """Test agent name and prompts extraction from delegate."""
         # With agent_info provided
         mock_delegate = MagicMock()
@@ -146,7 +169,11 @@ class TestTelemetryRuntimeWrapper:
             output_schema={"type": "string"},
         )
         wrapper = TelemetryRuntimeWrapper(
-            mock_delegate, tracer, callback, agent_definition=agent_info
+            mock_delegate,
+            tracer,
+            callback,
+            mock_runtime_context,
+            agent_definition=agent_info,
         )
         assert wrapper._get_agent_name() == "my-agent"
         assert wrapper._get_prompts() == ("system", "user")
@@ -156,20 +183,22 @@ class TestTelemetryRuntimeWrapper:
         mock_delegate_with_id = MagicMock()
         mock_delegate_with_id.runtime_id = "test-runtime-id"
         wrapper_fallback = TelemetryRuntimeWrapper(
-            mock_delegate_with_id, tracer, callback
+            mock_delegate_with_id, tracer, callback, mock_runtime_context
         )
         assert wrapper_fallback._get_agent_name() == "test-runtime-id"
         assert wrapper_fallback._get_schemas() == (None, None)
 
         # Without agent_info or runtime_id - falls back to unknown
         mock_delegate_empty = MagicMock(spec=[])
-        wrapper_empty = TelemetryRuntimeWrapper(mock_delegate_empty, tracer, callback)
+        wrapper_empty = TelemetryRuntimeWrapper(
+            mock_delegate_empty, tracer, callback, mock_runtime_context
+        )
         assert wrapper_empty._get_agent_name() == "unknown"
         assert wrapper_empty._get_prompts() == (None, None)
 
     @pytest.mark.asyncio
     async def test_same_callback_used_across_executions(
-        self, mock_delegate, tracer, callback
+        self, mock_delegate, tracer, callback, mock_runtime_context
     ):
         """Same callback instance is used across multiple executions (debug/chat scenario)."""
         mock_result = MagicMock()
@@ -178,7 +207,9 @@ class TestTelemetryRuntimeWrapper:
 
         callback.set_agent_span = MagicMock()
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
 
         # Multiple executions (simulating debug/chat re-execution)
         await wrapper.execute({"input": "1"}, None)
@@ -190,7 +221,7 @@ class TestTelemetryRuntimeWrapper:
 
     @pytest.mark.asyncio
     async def test_cleanup_called_after_execution(
-        self, mock_delegate, tracer, callback
+        self, mock_delegate, tracer, callback, mock_runtime_context
     ):
         """Callback cleanup is called after each execution."""
         mock_result = MagicMock()
@@ -199,21 +230,25 @@ class TestTelemetryRuntimeWrapper:
 
         callback.cleanup = MagicMock()
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
         await wrapper.execute({"input": "test"}, None)
 
         callback.cleanup.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_cleanup_called_after_exception(
-        self, mock_delegate, tracer, callback
+        self, mock_delegate, tracer, callback, mock_runtime_context
     ):
         """Cleanup is called even when execution raises exception."""
         mock_delegate.execute.side_effect = RuntimeError("Test error")
 
         callback.cleanup = MagicMock()
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
 
         with pytest.raises(RuntimeError):
             await wrapper.execute({"input": "test"}, None)
@@ -223,7 +258,7 @@ class TestTelemetryRuntimeWrapper:
 
     @pytest.mark.asyncio
     async def test_concurrent_executions_share_callback(
-        self, mock_delegate, tracer, callback
+        self, mock_delegate, tracer, callback, mock_runtime_context
     ):
         """Concurrent executions use the same callback instance."""
         mock_result = MagicMock()
@@ -240,7 +275,9 @@ class TestTelemetryRuntimeWrapper:
         mock_delegate.execute.side_effect = delayed_execute
         callback.set_agent_span = MagicMock()
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
 
         # Run concurrent executions
         await asyncio.gather(
@@ -259,14 +296,16 @@ class TestCallbackPersistence:
 
     @pytest.mark.asyncio
     async def test_callback_persists_for_debug_reexecution(
-        self, mock_delegate, tracer, callback
+        self, mock_delegate, tracer, callback, mock_runtime_context
     ):
         """Simulate debug scenario: same runtime re-executed at breakpoints."""
         mock_result = MagicMock()
         mock_result.status = UiPathRuntimeStatus.FAULTED
         mock_delegate.execute.return_value = mock_result
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
 
         # Simulate debug: pause at breakpoint, resume, pause again
         spans_per_execution = []
@@ -292,7 +331,7 @@ class TestCallbackPersistence:
 
     @pytest.mark.asyncio
     async def test_callback_persists_for_hitl_chat(
-        self, mock_delegate, tracer, callback
+        self, mock_delegate, tracer, callback, mock_runtime_context
     ):
         """Simulate chat HITL: tool needs approval, runtime re-executed after approval."""
         suspended_result = MagicMock()
@@ -305,7 +344,9 @@ class TestCallbackPersistence:
         # First call suspends (needs HITL approval), second succeeds
         mock_delegate.execute.side_effect = [suspended_result, success_result]
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
 
         # Initial execution - suspends for HITL
         result1 = await wrapper.execute({"input": "initial"}, None)
@@ -334,22 +375,32 @@ class TestInterruptibleTraceContext:
 
     @pytest.mark.asyncio
     async def test_init_accepts_trace_context_storage(
-        self, mock_delegate, tracer, callback, mock_trace_context_storage
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_trace_context_storage,
+        mock_runtime_context,
     ):
         """Test wrapper accepts optional trace_context_storage parameter."""
         wrapper = TelemetryRuntimeWrapper(
             mock_delegate,
             tracer,
             callback,
+            mock_runtime_context,
             trace_context_storage=mock_trace_context_storage,
         )
 
         assert wrapper._trace_context_storage is mock_trace_context_storage
 
     @pytest.mark.asyncio
-    async def test_init_without_storage_works(self, mock_delegate, tracer, callback):
+    async def test_init_without_storage_works(
+        self, mock_delegate, tracer, callback, mock_runtime_context
+    ):
         """Test wrapper works without trace context storage (backward compatibility)."""
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
 
         assert wrapper._trace_context_storage is None
 
@@ -360,6 +411,7 @@ class TestInterruptibleTraceContext:
         tracer,
         callback,
         mock_trace_context_storage,
+        mock_runtime_context,
     ):
         """Test SUSPENDED result saves trace context for re-parenting."""
         mock_result = MagicMock()
@@ -370,6 +422,7 @@ class TestInterruptibleTraceContext:
             mock_delegate,
             tracer,
             callback,
+            mock_runtime_context,
             trace_context_storage=mock_trace_context_storage,
         )
 
@@ -385,7 +438,12 @@ class TestInterruptibleTraceContext:
 
     @pytest.mark.asyncio
     async def test_successful_clears_trace_context(
-        self, mock_delegate, tracer, callback, mock_trace_context_storage
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_trace_context_storage,
+        mock_runtime_context,
     ):
         """Test SUCCESSFUL result clears saved trace context."""
         mock_result = MagicMock()
@@ -397,6 +455,7 @@ class TestInterruptibleTraceContext:
             mock_delegate,
             tracer,
             callback,
+            mock_runtime_context,
             trace_context_storage=mock_trace_context_storage,
         )
 
@@ -408,7 +467,12 @@ class TestInterruptibleTraceContext:
 
     @pytest.mark.asyncio
     async def test_faulted_clears_trace_context(
-        self, mock_delegate, tracer, callback, mock_trace_context_storage
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_trace_context_storage,
+        mock_runtime_context,
     ):
         """Test FAULTED result clears saved trace context."""
         mock_result = MagicMock()
@@ -419,6 +483,7 @@ class TestInterruptibleTraceContext:
             mock_delegate,
             tracer,
             callback,
+            mock_runtime_context,
             trace_context_storage=mock_trace_context_storage,
         )
 
@@ -430,7 +495,12 @@ class TestInterruptibleTraceContext:
 
     @pytest.mark.asyncio
     async def test_resume_loads_saved_context(
-        self, mock_delegate, tracer, callback, mock_trace_context_storage
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_trace_context_storage,
+        mock_runtime_context,
     ):
         """Test resume execution loads saved trace context."""
         saved_context = TraceContextData(
@@ -459,6 +529,7 @@ class TestInterruptibleTraceContext:
             mock_delegate,
             tracer,
             callback,
+            mock_runtime_context,
             trace_context_storage=mock_trace_context_storage,
         )
 
@@ -469,10 +540,7 @@ class TestInterruptibleTraceContext:
 
     @pytest.mark.asyncio
     async def test_full_suspend_resume_flow(
-        self,
-        mock_delegate,
-        tracer,
-        callback,
+        self, mock_delegate, tracer, callback, mock_runtime_context
     ):
         """Test complete suspend → resume → complete flow with re-parenting."""
         # Simulate storage behavior
@@ -509,6 +577,7 @@ class TestInterruptibleTraceContext:
             mock_delegate,
             tracer,
             callback,
+            mock_runtime_context,
             trace_context_storage=storage,
         )
 
@@ -528,14 +597,18 @@ class TestInterruptibleTraceContext:
         assert stored_context is None
 
     @pytest.mark.asyncio
-    async def test_no_storage_still_works(self, mock_delegate, tracer, callback):
+    async def test_no_storage_still_works(
+        self, mock_delegate, tracer, callback, mock_runtime_context
+    ):
         """Test wrapper works without storage (no upsert/save, just normal execution)."""
         mock_result = MagicMock()
         mock_result.status = UiPathRuntimeStatus.SUSPENDED
         mock_delegate.execute.return_value = mock_result
 
         # No storage provided
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
 
         # Should not raise
         result = await wrapper.execute({"input": "test"}, None)
@@ -548,6 +621,7 @@ class TestInterruptibleTraceContext:
         tracer,
         callback,
         mock_trace_context_storage,
+        mock_runtime_context,
     ):
         """Test stream with SUSPENDED result saves trace context."""
         from uipath.runtime import UiPathRuntimeResult
@@ -565,6 +639,7 @@ class TestInterruptibleTraceContext:
             mock_delegate,
             tracer,
             callback,
+            mock_runtime_context,
             trace_context_storage=mock_trace_context_storage,
         )
 
@@ -585,6 +660,7 @@ class TestUpsertSpanOnSuspend:
         callback_with_exporter,
         mock_exporter,
         mock_trace_context_storage,
+        mock_runtime_context,
     ):
         """Test _handle_suspended calls upsert for pending tool and process spans."""
         mock_result = MagicMock()
@@ -613,6 +689,7 @@ class TestUpsertSpanOnSuspend:
             mock_delegate,
             tracer_with_exporter,
             callback_with_exporter,
+            mock_runtime_context,
             trace_context_storage=mock_trace_context_storage,
         )
 
@@ -636,6 +713,7 @@ class TestUpsertSpanOnSuspend:
         callback_with_exporter,
         mock_exporter,
         mock_trace_context_storage,
+        mock_runtime_context,
     ):
         """Test _handle_suspended doesn't call upsert when no pending spans."""
         mock_result = MagicMock()
@@ -651,6 +729,7 @@ class TestUpsertSpanOnSuspend:
             mock_delegate,
             tracer_with_exporter,
             callback_with_exporter,
+            mock_runtime_context,
             trace_context_storage=mock_trace_context_storage,
         )
 
@@ -668,6 +747,7 @@ class TestUpsertSpanOnSuspend:
         callback_with_exporter,
         mock_exporter,
         mock_trace_context_storage,
+        mock_runtime_context,
     ):
         """Test _handle_suspended calls upsert only for tool span if no process span."""
         mock_result = MagicMock()
@@ -690,6 +770,7 @@ class TestUpsertSpanOnSuspend:
             mock_delegate,
             tracer_with_exporter,
             callback_with_exporter,
+            mock_runtime_context,
             trace_context_storage=mock_trace_context_storage,
         )
 
@@ -708,36 +789,44 @@ class TestUpsertSpanOnSuspend:
 class TestGetAgentModel:
     """Tests for get_agent_model delegation."""
 
-    def test_get_agent_model_delegates_to_runtime(self, tracer, callback):
+    def test_get_agent_model_delegates_to_runtime(
+        self, tracer, callback, mock_runtime_context
+    ):
         """Test get_agent_model delegates to the wrapped runtime."""
         mock_delegate = MagicMock()
         mock_delegate.get_agent_model.return_value = "gpt-4o-2024-11-20"
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
         model = wrapper.get_agent_model()
 
         assert model == "gpt-4o-2024-11-20"
         mock_delegate.get_agent_model.assert_called_once()
 
     def test_get_agent_model_returns_none_when_delegate_lacks_method(
-        self, tracer, callback
+        self, tracer, callback, mock_runtime_context
     ):
         """Test get_agent_model returns None when delegate doesn't have the method."""
         mock_delegate = MagicMock(spec=[])  # Empty spec, no get_agent_model
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
         model = wrapper.get_agent_model()
 
         assert model is None
 
     def test_get_agent_model_returns_none_when_delegate_returns_none(
-        self, tracer, callback
+        self, tracer, callback, mock_runtime_context
     ):
         """Test get_agent_model returns None when delegate returns None."""
         mock_delegate = MagicMock()
         mock_delegate.get_agent_model.return_value = None
 
-        wrapper = TelemetryRuntimeWrapper(mock_delegate, tracer, callback)
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
         model = wrapper.get_agent_model()
 
         assert model is None

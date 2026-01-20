@@ -3,6 +3,8 @@ import os
 from typing import Any, Callable, ClassVar, Sequence
 
 from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
+from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from uipath.core import UiPathTraceManager
@@ -76,6 +78,8 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
     - Manual spans → LLMOps HTTP (production)
     - Manual spans → LLMOps file (local only, if LLMOPS_TRACE_FILE is set)
 
+    Applies PII redaction to all spans before export to protect sensitive data.
+
     Args:
         trace_manager: Optional UiPathTraceManager to add exporters to.
                        If not provided, exporters will be skipped.
@@ -90,11 +94,31 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
         # Azure Monitor exporter (OpenInference spans only)
         azure_exporter = _get_azure_exporter()
         if azure_exporter:
-            # Wrap Azure exporter to only receive OpenInference spans
-            # Manual instrumentation spans go to LLMOps instead
-            filtered_exporter = FilteringSpanExporter(
-                azure_exporter, filter_fn=is_openinference_span
-            )
+            # Wrap Azure exporter to:
+            # 1. Filter to only OpenInference spans (LangGraph telemetry)
+            # 2. Redact PII from attributes before export
+            disable_otel_masking = os.getenv("DISABLE_OTEL_MASKING", "false").lower()
+
+            if disable_otel_masking == "true":
+                # No PII redaction - just filter spans
+                filtered_exporter = FilteringSpanExporter(
+                    azure_exporter, filter_fn=is_openinference_span
+                )
+                logger.warning(
+                    "PII redaction is DISABLED - sensitive data may be exported"
+                )
+            else:
+                from uipath_agents._observability.pii_filtering_exporter import (
+                    PIIFilteringExporter,
+                )
+
+                # Wrap: Azure <- PII Filter <- Span Filter <- Trace Manager
+                pii_filtered_exporter = PIIFilteringExporter(azure_exporter)
+                filtered_exporter = FilteringSpanExporter(
+                    pii_filtered_exporter, filter_fn=is_openinference_span
+                )
+                logger.debug("Added PII redaction to Azure Monitor exporter")
+
             trace_manager.add_span_exporter(filtered_exporter)
 
         # LlmOps file exporter (local execution only)
@@ -102,14 +126,12 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
         if llmops_file_exporter:
             trace_manager.add_span_exporter(llmops_file_exporter)
 
-    # _TelemetryState.instrumentors = [
-    #     AsyncioInstrumentor(),
-    #     HTTPXClientInstrumentor(),
-    #     AioHttpClientInstrumentor(),
-    #     SQLite3Instrumentor(),
-    # ]
-    # for instrumentor in _TelemetryState.instrumentors:
-    #     instrumentor.instrument()
+    _TelemetryState.instrumentors = [
+        HTTPXClientInstrumentor(),
+        AioHttpClientInstrumentor(),
+    ]
+    for instrumentor in _TelemetryState.instrumentors:
+        instrumentor.instrument()
 
     _TelemetryState.configured = True
     logger.debug("Telemetry configured successfully")
