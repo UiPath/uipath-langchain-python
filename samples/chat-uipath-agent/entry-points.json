@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "52e38a7f-f328-44a5-ad23-6982482d1ecf",
+            "uniqueId": "52ffde91-f018-458d-b5a8-78d62a513df1",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -1074,7 +1074,6 @@
                 "type": "object",
                 "properties": {
                     "messages": {
-                        "default": null,
                         "items": {
                             "oneOf": [
                                 {
@@ -2131,11 +2130,12 @@
                         "type": "array"
                     },
                     "structured_response": {
-                        "default": null,
                         "title": "Structured Response"
                     }
                 },
-                "required": []
+                "required": [
+                    "messages"
+                ]
             },
             "graph": {
                 "nodes": [
@@ -2152,9 +2152,7 @@
                         "type": "model",
                         "subgraph": null,
                         "metadata": {
-                            "model_name": "gpt-4o-mini-2024-07-18",
-                            "temperature": 0.0,
-                            "max_tokens": 1000
+                            "model_name": "gpt-4o-mini-2024-07-18"
                         }
                     },
                     {

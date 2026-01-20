@@ -1,5 +1,5 @@
 from langchain.agents import create_agent
-from uipath_langchain.chat import UiPathChat
+from uipath_langchain.chat import UiPathChatOpenAI
 from langchain_community.tools import DuckDuckGoSearchResults
 
 search_tool = DuckDuckGoSearchResults()
@@ -27,5 +27,5 @@ Always maintain an enthusiastic and knowledgeable tone about cinema. Provide acc
 DO NOT do any math calculations unless specifically related to movie statistics or box office figures.
 """
 
-llm = UiPathChat(model="gpt-4o-mini-2024-07-18")
+llm = UiPathChatOpenAI(model="gpt-4o-mini-2024-07-18")
 graph = create_agent(llm, tools=[search_tool], system_prompt=movie_system_prompt)

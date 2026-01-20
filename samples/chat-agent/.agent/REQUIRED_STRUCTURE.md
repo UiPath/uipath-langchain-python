@@ -32,7 +32,7 @@ Unless the user explicitly requests a different LLM provider, always use `UiPath
 ```python
 from uipath_langchain.chat import UiPathChat
 
-llm = UiPathChat(model="gpt-4o-2024-08-06", temperature=0.7)
+llm = UiPathChat(model="gpt-4.1-mini-2025-04-14", temperature=0.7)
 ```
 
 **Alternative LLMs** (only use if explicitly requested):
@@ -62,7 +62,7 @@ class Output(BaseModel):
     result: str
 
 # 2. Initialize UiPathChat LLM
-llm = UiPathChat(model="gpt-4o-2024-08-06", temperature=0.7)
+llm = UiPathChat(model="gpt-4.1-mini-2025-04-14", temperature=0.7)
 
 # 3. Define agent nodes (async functions)
 async def process_node(state: State) -> State:

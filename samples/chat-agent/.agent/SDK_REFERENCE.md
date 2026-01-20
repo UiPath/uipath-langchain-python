@@ -16,6 +16,25 @@ sdk = UiPath()
 sdk = UiPath(base_url="https://cloud.uipath.com/...", secret="your_token")
 ```
 
+### Agenthub
+
+Agenthub service
+
+```python
+# Fetch available models from LLM Gateway discovery endpoint.
+sdk.agenthub.get_available_llm_models(headers: dict[str, Any] | None=None) -> list[uipath.platform.agenthub.agenthub.LlmModel]
+
+# Asynchronously fetch available models from LLM Gateway discovery endpoint.
+sdk.agenthub.get_available_llm_models_async(headers: dict[str, Any] | None=None) -> list[uipath.platform.agenthub.agenthub.LlmModel]
+
+# Start a system agent job.
+sdk.agenthub.invoke_system_agent(agent_name: str, entrypoint: str, input_arguments: dict[str, Any] | None=None, folder_key: str | None=None, folder_path: str | None=None, headers: dict[str, Any] | None=None) -> str
+
+# Asynchronously start a system agent and return the job.
+sdk.agenthub.invoke_system_agent_async(agent_name: str, entrypoint: str, input_arguments: dict[str, Any] | None=None, folder_key: str | None=None, folder_path: str | None=None, headers: dict[str, Any] | None=None) -> str
+
+```
+
 ### Api Client
 
 Api Client service
@@ -31,6 +50,12 @@ service = sdk.api_client
 Assets service
 
 ```python
+# List assets using OData API with offset-based pagination.
+sdk.assets.list(folder_path: Optional[str]=None, folder_key: Optional[str]=None, filter: Optional[str]=None, orderby: Optional[str]=None, skip: int=0, top: int=100) -> uipath.platform.common.paging.PagedResult[uipath.platform.orchestrator.assets.Asset]
+
+# Asynchronously list assets using OData API with offset-based pagination.
+sdk.assets.list_async(folder_path: Optional[str]=None, folder_key: Optional[str]=None, filter: Optional[str]=None, orderby: Optional[str]=None, skip: int=0, top: int=100) -> uipath.platform.common.paging.PagedResult[uipath.platform.orchestrator.assets.Asset]
+
 # Retrieve an asset by its name.
 sdk.assets.retrieve(name: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> uipath.platform.orchestrator.assets.UserAsset | uipath.platform.orchestrator.assets.Asset
 
@@ -67,6 +92,12 @@ sdk.attachments.download(key: uuid.UUID, destination_path: str, folder_key: str 
 
 # Download an attachment asynchronously.
 sdk.attachments.download_async(key: uuid.UUID, destination_path: str, folder_key: str | None=None, folder_path: str | None=None) -> str
+
+# Get the BlobFileAccess information for an attachment.
+sdk.attachments.get_blob_file_access_uri(key: uuid.UUID, folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.attachments.attachments.BlobFileAccessInfo
+
+# Get the BlobFileAccess information for an attachment asynchronously.
+sdk.attachments.get_blob_file_access_uri_async(key: uuid.UUID, folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.attachments.attachments.BlobFileAccessInfo
 
 # Open an attachment.
 sdk.attachments.open(attachment: uipath.platform.attachments.attachments.Attachment, mode: <enum 'AttachmentMode="AttachmentMode.READ", content: Union[str, bytes, Iterable[bytes], AsyncIterable[bytes], NoneType]=None, folder_key: str | None=None, folder_path: str | None=None) -> typing.Iterator[typing.Tuple[uipath.platform.attachments.attachments.Attachment, httpx.Response]]
@@ -221,6 +252,12 @@ sdk.context_grounding.delete_index(index: uipath.platform.context_grounding.cont
 # Asynchronously delete a context grounding index.
 sdk.context_grounding.delete_index_async(index: uipath.platform.context_grounding.context_grounding_index.ContextGroundingIndex, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> None
 
+# Downloads the Batch Transform result file to the specified path.
+sdk.context_grounding.download_batch_transform_result(id: str, destination_path: str, validate_status: bool=True, index_name: str | None=None) -> None
+
+# Asynchronously downloads the Batch Transform result file to the specified path.
+sdk.context_grounding.download_batch_transform_result_async(id: str, destination_path: str, validate_status: bool=True, index_name: str | None=None) -> None
+
 # Ingest data into the context grounding index.
 sdk.context_grounding.ingest_data(index: uipath.platform.context_grounding.context_grounding_index.ContextGroundingIndex, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> None
 
@@ -233,17 +270,41 @@ sdk.context_grounding.retrieve(name: str, folder_key: Optional[str]=None, folder
 # Asynchronously retrieve context grounding index information by its name.
 sdk.context_grounding.retrieve_async(name: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> uipath.platform.context_grounding.context_grounding_index.ContextGroundingIndex
 
+# Retrieves a Batch Transform task status.
+sdk.context_grounding.retrieve_batch_transform(id: str, index_name: str | None=None) -> uipath.platform.context_grounding.context_grounding.BatchTransformResponse
+
+# Asynchronously retrieves a Batch Transform task status.
+sdk.context_grounding.retrieve_batch_transform_async(id: str, index_name: str | None=None) -> uipath.platform.context_grounding.context_grounding.BatchTransformResponse
+
 # Retrieve context grounding index information by its ID.
 sdk.context_grounding.retrieve_by_id(id: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> typing.Any
 
 # Retrieve asynchronously context grounding index information by its ID.
 sdk.context_grounding.retrieve_by_id_async(id: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> typing.Any
 
+# Retrieves a Deep RAG task.
+sdk.context_grounding.retrieve_deep_rag(id: str, index_name: str | None=None) -> uipath.platform.context_grounding.context_grounding.DeepRagResponse
+
+# Asynchronously retrieves a Deep RAG task.
+sdk.context_grounding.retrieve_deep_rag_async(id: str, index_name: str | None=None) -> uipath.platform.context_grounding.context_grounding.DeepRagResponse
+
 # Search for contextual information within a specific index.
 sdk.context_grounding.search(name: str, query: str, number_of_results: int=10, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> typing.List[uipath.platform.context_grounding.context_grounding.ContextGroundingQueryResponse]
 
 # Search asynchronously for contextual information within a specific index.
 sdk.context_grounding.search_async(name: str, query: str, number_of_results: int=10, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> typing.List[uipath.platform.context_grounding.context_grounding.ContextGroundingQueryResponse]
+
+# Starts a Batch Transform, task on the targeted index.
+sdk.context_grounding.start_batch_transform(name: str, index_name: str, prompt: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=250000)])], output_columns: list[uipath.platform.context_grounding.context_grounding.BatchTransformOutputColumn], storage_bucket_folder_path_prefix: Annotated[str | None, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=512)])]=None, enable_web_search_grounding: bool=False, folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.context_grounding.context_grounding.BatchTransformCreationResponse
+
+# Asynchronously starts a Batch Transform, task on the targeted index.
+sdk.context_grounding.start_batch_transform_async(name: str, index_name: str, prompt: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=250000)])], output_columns: list[uipath.platform.context_grounding.context_grounding.BatchTransformOutputColumn], storage_bucket_folder_path_prefix: Annotated[str | None, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=512)])]=None, enable_web_search_grounding: bool=False, folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.context_grounding.context_grounding.BatchTransformCreationResponse
+
+# Starts a Deep RAG task on the targeted index.
+sdk.context_grounding.start_deep_rag(name: str, index_name: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=512)])], prompt: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=250000)])], glob_pattern: Annotated[str, FieldInfo(annotation=NoneType, required=False, default='*', metadata=[MaxLen(max_length=512)])]="**", citation_mode: <enum 'CitationMode="CitationMode.SKIP", folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.context_grounding.context_grounding.DeepRagCreationResponse
+
+# Asynchronously starts a Deep RAG task on the targeted index.
+sdk.context_grounding.start_deep_rag_async(name: str, index_name: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=512)])], prompt: Annotated[str, FieldInfo(annotation=NoneType, required=True, metadata=[MaxLen(max_length=250000)])], glob_pattern: Annotated[str, FieldInfo(annotation=NoneType, required=False, default='*', metadata=[MaxLen(max_length=512)])]="**", citation_mode: <enum 'CitationMode="CitationMode.SKIP", folder_key: str | None=None, folder_path: str | None=None) -> uipath.platform.context_grounding.context_grounding.DeepRagCreationResponse
 
 ```
 
@@ -298,6 +359,18 @@ sdk.documents.get_validate_extraction_result(validation_action: uipath.platform.
 # Asynchronous version of the [`get_validation_result`][uipath.platform.documents._documents_service.DocumentsService.get_validate_extraction_result] method.
 sdk.documents.get_validate_extraction_result_async(validation_action: uipath.platform.documents.documents.ValidateExtractionAction) -> typing.Union[uipath.platform.documents.documents.ExtractionResponse, uipath.platform.documents.documents.ExtractionResponseIXP]
 
+# Retrieve the result of an IXP extraction operation (single-shot, non-blocking).
+sdk.documents.retrieve_ixp_extraction_result(project_id: str, tag: str, operation_id: str) -> uipath.platform.documents.documents.ExtractionResponseIXP
+
+# Asynchronous version of the [`retrieve_ixp_extraction_result`][uipath.platform.documents._documents_service.DocumentsService.retrieve_ixp_extraction_result] method.
+sdk.documents.retrieve_ixp_extraction_result_async(project_id: str, tag: str, operation_id: str) -> uipath.platform.documents.documents.ExtractionResponseIXP
+
+# Start an IXP extraction process without waiting for results (non-blocking).
+sdk.documents.start_ixp_extraction(project_name: str, tag: str, file: Union[IO[bytes], bytes, str, NoneType]=None, file_path: Optional[str]=None) -> uipath.platform.documents.documents.StartExtractionResponse
+
+# Asynchronous version of the [`start_ixp_extraction`][uipath.platform.documents._documents_service.DocumentsService.start_ixp_extraction] method.
+sdk.documents.start_ixp_extraction_async(project_name: str, tag: str, file: Union[IO[bytes], bytes, str, NoneType]=None, file_path: Optional[str]=None) -> uipath.platform.documents.documents.StartExtractionResponse
+
 ```
 
 ### Entities
@@ -317,7 +390,7 @@ sdk.entities.insert_records(entity_key: str, records: List[Any], schema: Optiona
 # Asynchronously insert multiple records into an entity in a single batch operation.
 sdk.entities.insert_records_async(entity_key: str, records: List[Any], schema: Optional[Type[Any]]=None) -> uipath.platform.entities.entities.EntityRecordsBatchResponse
 
-# List all entities in the Data Service.
+# List all entities in Data Service.
 sdk.entities.list_entities() -> typing.List[uipath.platform.entities.entities.Entity]
 
 # Asynchronously list all entities in the Data Service.
@@ -348,6 +421,12 @@ sdk.entities.update_records_async(entity_key: str, records: List[Any], schema: O
 Folders service
 
 ```python
+# Retrieve the personal workspace folder for the current user.
+sdk.folders.get_personal_workspace() -> uipath.platform.orchestrator.folder.PersonalWorkspace
+
+# Asynchronously retrieve the personal workspace folder for the current user.
+sdk.folders.get_personal_workspace_async() -> uipath.platform.orchestrator.folder.PersonalWorkspace
+
 # Resolve a folder path to its corresponding folder key.
 sdk.folders.retrieve_folder_key(folder_path: str | None) -> str | None
 
@@ -368,7 +447,7 @@ Guardrails service
 
 ```python
 # Validate input text using the provided guardrail.
-sdk.guardrails.evaluate_guardrail(input_data: str | dict[str, Any], guardrail: Annotated[Union[uipath.platform.guardrails.guardrails.DeterministicGuardrail, uipath.platform.guardrails.guardrails.BuiltInValidatorGuardrail], FieldInfo(annotation=NoneType, required=True, discriminator='guardrail_type')]) -> uipath.platform.guardrails.guardrails.GuardrailValidationResult
+sdk.guardrails.evaluate_guardrail(input_data: str | dict[str, Any], guardrail: uipath.platform.guardrails.guardrails.BuiltInValidatorGuardrail) -> uipath.core.guardrails.guardrails.GuardrailValidationResult
 
 ```
 
@@ -383,6 +462,12 @@ sdk.jobs.create_attachment(name: str, content: Union[str, bytes, NoneType]=None,
 # Create and upload an attachment asynchronously, optionally linking it to a job.
 sdk.jobs.create_attachment_async(name: str, content: Union[str, bytes, NoneType]=None, source_path: Union[str, pathlib.Path, NoneType]=None, job_key: Union[str, uuid.UUID, NoneType]=None, category: Optional[str]=None, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> uuid.UUID
 
+# Check if job exists.
+sdk.jobs.exists(job_key: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> bool
+
+# Async version of exists().
+sdk.jobs.exists_async(job_key: str, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> bool
+
 # Get the actual output data, downloading from attachment if necessary.
 sdk.jobs.extract_output(job: uipath.platform.orchestrator.job.Job) -> typing.Optional[str]
 
@@ -395,11 +480,23 @@ sdk.jobs.link_attachment(attachment_key: uuid.UUID, job_key: uuid.UUID, category
 # Link an attachment to a job asynchronously.
 sdk.jobs.link_attachment_async(attachment_key: uuid.UUID, job_key: uuid.UUID, category: Optional[str]=None, folder_key: Optional[str]=None, folder_path: Optional[str]=None)
 
+# List jobs using OData API with offset-based pagination.
+sdk.jobs.list(folder_path: Optional[str]=None, folder_key: Optional[str]=None, filter: Optional[str]=None, orderby: Optional[str]=None, skip: int=0, top: int=100) -> uipath.platform.common.paging.PagedResult[uipath.platform.orchestrator.job.Job]
+
+# Async version of list() with offset-based pagination.
+sdk.jobs.list_async(folder_path: Optional[str]=None, folder_key: Optional[str]=None, filter: Optional[str]=None, orderby: Optional[str]=None, skip: int=0, top: int=100) -> uipath.platform.common.paging.PagedResult[uipath.platform.orchestrator.job.Job]
+
 # List attachments associated with a specific job.
 sdk.jobs.list_attachments(job_key: uuid.UUID, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> typing.List[str]
 
 # List attachments associated with a specific job asynchronously.
 sdk.jobs.list_attachments_async(job_key: uuid.UUID, folder_key: Optional[str]=None, folder_path: Optional[str]=None) -> typing.List[str]
+
+# Restart a completed or failed job.
+sdk.jobs.restart(job_key: str, folder_path: Optional[str]=None, folder_key: Optional[str]=None) -> uipath.platform.orchestrator.job.Job
+
+# Async version of restart().
+sdk.jobs.restart_async(job_key: str, folder_path: Optional[str]=None, folder_key: Optional[str]=None) -> uipath.platform.orchestrator.job.Job
 
 # Sends a payload to resume a paused job waiting for input, identified by its inbox ID.
 sdk.jobs.resume(inbox_id: Optional[str]=None, job_id: Optional[str]=None, folder_key: Optional[str]=None, folder_path: Optional[str]=None, payload: Any) -> None
@@ -419,6 +516,12 @@ sdk.jobs.retrieve_api_payload_async(inbox_id: str) -> typing.Any
 # Asynchronously retrieve a job identified by its key.
 sdk.jobs.retrieve_async(job_key: str, folder_key: str | None=None, folder_path: str | None=None, process_name: str | None=None) -> uipath.platform.orchestrator.job.Job
 
+# Stop one or more jobs with specified strategy.
+sdk.jobs.stop(job_keys: List[str], strategy: str="SoftStop", folder_path: Optional[str]=None, folder_key: Optional[str]=None) -> None
+
+# Async version of stop().
+sdk.jobs.stop_async(job_keys: List[str], strategy: str="SoftStop", folder_path: Optional[str]=None, folder_key: Optional[str]=None) -> None
+
 ```
 
 ### Llm
@@ -427,7 +530,7 @@ Llm service
 
 ```python
 # Generate chat completions using UiPath's normalized LLM Gateway API.
-sdk.llm.chat_completions(messages: list[dict[str, str]] | list[tuple[str, str]], model: str="gpt-4o-mini-2024-07-18", max_tokens: int=4096, temperature: float=0, n: int=1, frequency_penalty: float=0, presence_penalty: float=0, top_p: float | None=1, top_k: int | None=None, tools: list[uipath.platform.llm_gateway.llm_gateway.ToolDefinition] | None=None, tool_choice: Union[uipath.platform.llm_gateway.llm_gateway.AutoToolChoice, uipath.platform.llm_gateway.llm_gateway.RequiredToolChoice, uipath.platform.llm_gateway.llm_gateway.SpecificToolChoice, Literal['auto', 'none'], NoneType]=None, response_format: dict[str, Any] | type[pydantic.main.BaseModel] | None=None, api_version: str="2024-08-01-preview")
+sdk.llm.chat_completions(messages: list[dict[str, str]] | list[tuple[str, str]], model: str="gpt-4.1-mini-2025-04-14", max_tokens: int=4096, temperature: float=0, n: int=1, frequency_penalty: float=0, presence_penalty: float=0, top_p: float | None=1, top_k: int | None=None, tools: list[uipath.platform.chat.llm_gateway.ToolDefinition] | None=None, tool_choice: Union[uipath.platform.chat.llm_gateway.AutoToolChoice, uipath.platform.chat.llm_gateway.RequiredToolChoice, uipath.platform.chat.llm_gateway.SpecificToolChoice, Literal['auto', 'none'], NoneType]=None, response_format: dict[str, Any] | type[pydantic.main.BaseModel] | None=None, api_version: str="2024-08-01-preview")
 
 ```
 
@@ -437,7 +540,7 @@ Llm Openai service
 
 ```python
 # Generate chat completions using UiPath's LLM Gateway service.
-sdk.llm_openai.chat_completions(messages: list[dict[str, str]], model: str="gpt-4o-mini-2024-07-18", max_tokens: int=4096, temperature: float=0, response_format: dict[str, Any] | type[pydantic.main.BaseModel] | None=None, api_version: str="2024-10-21")
+sdk.llm_openai.chat_completions(messages: list[dict[str, str]], model: str="gpt-4.1-mini-2025-04-14", max_tokens: int=4096, temperature: float=0, response_format: dict[str, Any] | type[pydantic.main.BaseModel] | None=None, api_version: str="2024-10-21")
 
 # Generate text embeddings using UiPath's LLM Gateway service.
 sdk.llm_openai.embeddings(input: str, embedding_model: str="text-embedding-ada-002", openai_api_version: str="2024-10-21")
