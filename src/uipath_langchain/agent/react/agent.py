@@ -1,4 +1,3 @@
-import os
 from typing import Callable, Sequence, Type, TypeVar
 
 from langchain_core.language_models import BaseChatModel
@@ -66,8 +65,6 @@ def create_agent(
     if config is None:
         config = AgentGraphConfig()
 
-    os.environ["LANGCHAIN_RECURSION_LIMIT"] = str(config.recursion_limit)
-
     agent_tools = list(tools)
     flow_control_tools: list[BaseTool] = (
         [] if config.is_conversational else create_flow_control_tools(output_schema)
@@ -109,7 +106,11 @@ def create_agent(
     builder.add_edge(START, AgentGraphNode.INIT)
 
     llm_node = create_llm_node(
-        model, llm_tools, config.thinking_messages_limit, config.is_conversational
+        model,
+        llm_tools,
+        config.is_conversational,
+        config.llm_messages_limit,
+        config.thinking_messages_limit,
     )
     llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
         (AgentGraphNode.LLM, llm_node), guardrails, input_schema=input_schema
