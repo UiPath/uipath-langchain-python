@@ -2,6 +2,7 @@ import logging
 import os
 from typing import Optional
 
+from uipath._utils import resource_override
 from uipath.utils import EndpointManager
 
 from .supported_models import BedrockModels
@@ -44,6 +45,9 @@ from langchain_aws import (
 
 
 class AwsBedrockCompletionsPassthroughClient:
+    @resource_override(
+        resource_identifier="byo_connection_id", resource_type="connection"
+    )
     def __init__(
         self,
         model: str,

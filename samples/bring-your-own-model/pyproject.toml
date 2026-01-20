@@ -1,0 +1,9 @@
+[project]
+name = "bring-your-own-model"
+version = "0.0.1"
+description = "bring-your-own-model"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+dependencies = [
+    "uipath-langchain>=0.4.24",
+]
+requires-python = ">=3.11"
