@@ -2,7 +2,7 @@
 
 import copy
 import json
-from typing import Any, MutableMapping, MutableSequence, Union
+from typing import Any
 
 from uipath_langchain._utils._jsonpath import parse_jsonpath_segments
 
@@ -178,13 +178,13 @@ def _resolve_definition(schema: dict[str, Any], ref_path: str) -> dict[str, Any]
 
 def _inline_ref_if_present(
     schema: dict[str, Any],
-    container: Union[MutableMapping[Any, Any], MutableSequence[Any]],
+    container: dict[Any, Any] | list[Any],
     key: Any,
 ) -> None:
     """Inlines a $ref if present in container[key]."""
     try:
         candidate = container[key]
-        if isinstance(candidate, MutableMapping) and "$ref" in candidate:
+        if isinstance(candidate, dict) and "$ref" in candidate:
             resolved = _resolve_definition(schema, candidate["$ref"])
             container[key] = resolved
     except (KeyError, IndexError, TypeError) as e:

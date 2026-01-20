@@ -251,6 +251,6 @@ def handle_static_args(
     """
 
     static_args = resolve_static_args(resource, dict(state))
-    merged_args = apply_static_args(static_args, input_args)
-    sanitized_merged_args = sanitize_dict_for_serialization(merged_args)
-    return sanitized_merged_args
+    sanitized_static_args = sanitize_dict_for_serialization(static_args)
+    merged_args = apply_static_args(sanitized_static_args, input_args)
+    return merged_args
