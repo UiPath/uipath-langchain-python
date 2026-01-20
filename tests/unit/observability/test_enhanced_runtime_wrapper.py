@@ -58,7 +58,7 @@ def agent_info():
             max_tokens=1000,
             temperature=0.7,
             engine="openai",
-            max_iterations=5,  # type: ignore [call-arg]
+            max_iterations=5,
         ),
         metadata=AgentMetadata(
             is_conversational=True,

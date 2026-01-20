@@ -16,7 +16,7 @@ from .config import AgentExecutionType, get_thinking_messages_limit
 from .llm_utils import create_llm
 from .message_utils import create_message_factory
 
-AGENT_LOOP_RECURSION_LIMIT = 50
+AGENT_MAX_ITERATIONS_DEFAULT = 25
 
 
 async def build_agent_graph(
@@ -27,6 +27,7 @@ async def build_agent_graph(
 
     Args:
         agent_definition: Agent definition model
+        execution_type: Execution mode of the agent: playground | runtime | eval
 
     Returns:
         StateGraph configured with the agent definition and feature flags.
@@ -53,7 +54,8 @@ async def build_agent_graph(
     guardrails = build_guardrails_with_actions(agent_definition.guardrails, tools)
 
     agent_config = AgentGraphConfig(
-        recursion_limit=AGENT_LOOP_RECURSION_LIMIT,
+        llm_messages_limit=agent_definition.settings.max_iterations
+        or AGENT_MAX_ITERATIONS_DEFAULT,
         thinking_messages_limit=get_thinking_messages_limit(
             agent_definition.settings.model
         ),
