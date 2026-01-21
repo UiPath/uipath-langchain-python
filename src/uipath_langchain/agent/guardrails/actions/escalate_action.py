@@ -5,7 +5,12 @@ import json
 import re
 from typing import Any, Dict, Literal, cast
 
-from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    BaseMessage,
+    ToolMessage,
+)
 from langgraph.types import Command, interrupt
 from uipath._utils import UiPathUrl
 from uipath.agent.models.agent import AgentEscalationRecipient
@@ -17,6 +22,7 @@ from uipath.platform.guardrails import (
 from uipath.runtime.errors import UiPathErrorCode
 
 from ...exceptions import AgentStateException, AgentTerminationException
+from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
 from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
 from ...tools.escalation_tool import resolve_recipient_value
@@ -384,7 +390,8 @@ def _process_llm_escalation_response(
                                 else:
                                     tool_call.args = reviewed_tool_calls_map[tool_name]
 
-                        ai_message.tool_calls = tool_calls
+                        ai_message = replace_tool_calls(ai_message, tool_calls)
+                        msgs[-1] = ai_message
                         tool_calls_processed = True
 
             # Fallback: update message content if tool_calls weren't processed
@@ -435,7 +442,7 @@ def _process_tool_escalation_response(
         if execution_stage == ExecutionStage.PRE_EXECUTION:
             # Find the latest AI message instead of assuming last message is AI
             ai_message = find_latest_ai_message(msgs)
-            if not ai_message:
+            if ai_message is None:
                 return {}
 
             # Get reviewed tool calls args from escalation result
@@ -470,7 +477,8 @@ def _process_tool_escalation_response(
                             else:
                                 tool_call.args = reviewed_tool_calls_args
 
-                        ai_message.tool_calls = tool_calls
+                        ai_message = replace_tool_calls(ai_message, tool_calls)
+                        return Command(update={"messages": [ai_message]})
                     else:
                         raise AgentStateException(
                             f"Tool call name [{call_name}] does not match expected tool name [{tool_name}]."
