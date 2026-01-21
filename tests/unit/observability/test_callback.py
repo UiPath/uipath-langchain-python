@@ -8,6 +8,7 @@ import pytest
 from uipath_agents._observability.callback import UiPathTracingCallback
 from uipath_agents._observability.schema import (
     GUARDRAIL_VALIDATION_RESULT_KEY,
+    INNER_STATE_KEY,
     SpanType,
 )
 from uipath_agents._observability.tracer import UiPathTracer
@@ -559,7 +560,8 @@ class TestGuardrailActionDetection:
             )
             # End with validation_result (failed)
             callback.on_chain_end(
-                {GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected"}, run_id=run_id
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected"}},
+                run_id=run_id,
             )
 
             # Span should be pending action
@@ -603,7 +605,12 @@ class TestGuardrailActionDetection:
                 metadata={"langgraph_node": "llm_pre_execution_prompt_injection"},
             )
             callback.on_chain_end(
-                {GUARDRAIL_VALIDATION_RESULT_KEY: "Injection detected"}, run_id=run_id
+                {
+                    INNER_STATE_KEY: {
+                        GUARDRAIL_VALIDATION_RESULT_KEY: "Injection detected"
+                    }
+                },
+                run_id=run_id,
             )
 
             # Action node fires with _log suffix
@@ -636,7 +643,8 @@ class TestGuardrailActionDetection:
                 metadata={"langgraph_node": "llm_post_execution_review_guard"},
             )
             callback.on_chain_end(
-                {GUARDRAIL_VALIDATION_RESULT_KEY: "Review needed"}, run_id=run_id
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: "Review needed"}},
+                run_id=run_id,
             )
 
             callback.on_chain_start(
@@ -676,7 +684,11 @@ class TestGuardrailActionDetection:
             )
             # End with Command object containing validation failure
             command = MockCommand(
-                update={GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected in input"}
+                update={
+                    INNER_STATE_KEY: {
+                        GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected in input"
+                    }
+                }
             )
             callback.on_chain_end(command, run_id=run_id)
 
@@ -721,7 +733,9 @@ class TestGuardrailActionDetection:
                 metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
             )
             # Command with None validation result = passed
-            command = MockCommand(update={GUARDRAIL_VALIDATION_RESULT_KEY: None})
+            command = MockCommand(
+                update={INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: None}}
+            )
             callback.on_chain_end(command, run_id=run_id)
 
         spans = span_exporter.get_finished_spans()
@@ -980,7 +994,7 @@ class TestToolGuardrailRealExecutionOrder:
 
             # Guardrail fails
             callback.on_chain_end(
-                {GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected"},
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected"}},
                 run_id=guard_run_id,
             )
 

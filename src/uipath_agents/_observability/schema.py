@@ -6,6 +6,7 @@ span structure across all UiPath agent implementations.
 
 from enum import Enum
 
+INNER_STATE_KEY = "inner_state"
 GUARDRAIL_VALIDATION_RESULT_KEY = "guardrail_validation_result"
 
 

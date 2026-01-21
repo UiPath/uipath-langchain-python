@@ -20,7 +20,7 @@ from opentelemetry import context, trace
 from opentelemetry.context import Context
 from opentelemetry.trace import Span
 
-from .schema import GUARDRAIL_VALIDATION_RESULT_KEY
+from .schema import GUARDRAIL_VALIDATION_RESULT_KEY, INNER_STATE_KEY
 from .tracer import UiPathTracer
 
 logger = logging.getLogger(__name__)
@@ -808,10 +808,18 @@ class UiPathTracingCallback(BaseCallbackHandler):
             info = self._guardrail_info.pop(run_id, None)
 
             validation_result = None
-            if isinstance(outputs, dict):
-                validation_result = outputs.get(GUARDRAIL_VALIDATION_RESULT_KEY)
-            elif hasattr(outputs, "update") and isinstance(outputs.update, dict):
-                validation_result = outputs.update.get(GUARDRAIL_VALIDATION_RESULT_KEY)
+            if isinstance(outputs, dict) and INNER_STATE_KEY in outputs:
+                validation_result = outputs[INNER_STATE_KEY].get(
+                    GUARDRAIL_VALIDATION_RESULT_KEY
+                )
+            elif (
+                hasattr(outputs, "update")
+                and isinstance(outputs.update, dict)
+                and INNER_STATE_KEY in outputs.update
+            ):
+                validation_result = outputs.update[INNER_STATE_KEY].get(
+                    GUARDRAIL_VALIDATION_RESULT_KEY
+                )
 
             validation_passed = validation_result is None
 
