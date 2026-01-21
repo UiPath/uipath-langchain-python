@@ -55,7 +55,10 @@ def _rewrite_vertex_url(original_url: str, gateway_url: str) -> httpx.URL | None
     Returns the gateway URL, or None if no rewrite needed.
     """
     if "generateContent" in original_url or "streamGenerateContent" in original_url:
-        return httpx.URL(gateway_url)
+        url = httpx.URL(gateway_url)
+        if "alt=sse" in original_url:
+            url = url.copy_with(params={"alt": "sse"})
+        return url
     return None
 
 
@@ -286,49 +289,3 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
             messages, stop=stop, run_manager=run_manager, **kwargs
         )
         return self._merge_finish_reason_to_response_metadata(result)
-
-    def _stream(self, messages, stop=None, run_manager=None, **kwargs):
-        """Streaming fallback - calls _generate and yields single response."""
-        from langchain_core.messages import AIMessageChunk
-        from langchain_core.outputs import ChatGenerationChunk
-
-        result = self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
-
-        if result.generations:
-            message = result.generations[0].message
-            chunk = AIMessageChunk(
-                content=message.content,
-                additional_kwargs=message.additional_kwargs,
-                response_metadata=getattr(message, "response_metadata", {}),
-                id=message.id,
-                tool_calls=getattr(message, "tool_calls", []),
-                tool_call_chunks=getattr(message, "tool_call_chunks", []),
-            )
-            if hasattr(message, "usage_metadata") and message.usage_metadata:
-                chunk.usage_metadata = message.usage_metadata
-
-            yield ChatGenerationChunk(message=chunk)
-
-    async def _astream(self, messages, stop=None, run_manager=None, **kwargs):
-        """Async streaming fallback - calls _agenerate and yields single response."""
-        from langchain_core.messages import AIMessageChunk
-        from langchain_core.outputs import ChatGenerationChunk
-
-        result = await self._agenerate(
-            messages, stop=stop, run_manager=run_manager, **kwargs
-        )
-
-        if result.generations:
-            message = result.generations[0].message
-            chunk = AIMessageChunk(
-                content=message.content,
-                additional_kwargs=message.additional_kwargs,
-                response_metadata=getattr(message, "response_metadata", {}),
-                id=message.id,
-                tool_calls=getattr(message, "tool_calls", []),
-                tool_call_chunks=getattr(message, "tool_call_chunks", []),
-            )
-            if hasattr(message, "usage_metadata") and message.usage_metadata:
-                chunk.usage_metadata = message.usage_metadata
-
-            yield ChatGenerationChunk(message=chunk)
