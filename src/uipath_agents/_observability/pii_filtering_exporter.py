@@ -44,7 +44,7 @@ def _get_preserve_fields() -> frozenset[str]:
     """Get the set of JSON fields to preserve."""
     # Default fields to preserve (commonly non-PII)
     return frozenset(
-        {"inner_state", "job_attachments", "graph", "update", "resume", "goto", "type"}
+        {"inner_state", "job_attachments", "graph", "resume", "goto", "type"}
     )
 
 

@@ -118,7 +118,7 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
     setup_otel_env()
 
     if trace_manager:
-        patch_trace_manager_with_filter(trace_manager)
+        # patch_trace_manager_with_filter(trace_manager) - This breaks App Insights telemetry.
 
         # Azure Monitor exporter (OpenInference spans only)
         azure_exporter = _get_azure_exporter()
