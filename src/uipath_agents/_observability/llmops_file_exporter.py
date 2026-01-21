@@ -119,18 +119,9 @@ class LlmOpsFileExporter(SpanExporter):
         logger.info(f"LlmOps file exporter shutdown: {self.file_path}")
 
     def _should_drop_span(self, span: ReadableSpan) -> bool:
-        """Check if span is marked for dropping.
-
-        Spans with telemetry.filter="drop" are skipped.
-
-        Args:
-            span: The span to check
-
-        Returns:
-            True if span should be dropped, False otherwise
-        """
+        """Drop spans without uipath.custom_instrumentation=True marker."""
         attrs = span.attributes or {}
-        return attrs.get("telemetry.filter") == "drop"
+        return attrs.get("uipath.custom_instrumentation") is not True
 
     def _process_span_attributes(self, span_data: dict[str, Any]) -> None:
         """Process span attributes using LlmOpsHttpExporter logic.

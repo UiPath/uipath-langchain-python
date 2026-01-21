@@ -31,10 +31,13 @@ from uipath_agents.agent_graph_builder.config import get_execution_type
 from ..._observability import configure_telemetry, shutdown_telemetry
 from ..._observability.callback import UiPathTracingCallback
 from ..._observability.runtime_wrapper import TelemetryRuntimeWrapper
-from ..._observability.span_processor import SourceMarkerProcessor
 from ..._observability.sqlite_trace_context_storage import SqliteTraceContextStorage
 from ..._observability.telemetry_callback import AppInsightsTelemetryCallback
 from ..._observability.tracer import UiPathTracer
+from ..._observability.tracing import (
+    FilteringSpanExporter,
+    is_custom_instrumentation_span,
+)
 from ..constants import AGENT_ENTRYPOINT
 from ..utils import _prepare_agent_execution_contract, load_agent_configuration
 from .runtime import AgentsLangGraphRuntime
@@ -104,9 +107,6 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
         """Setup tracing and instrumentation."""
         super()._setup_instrumentation(trace_manager)
-        if trace_manager:
-            trace_manager.tracer_provider.add_span_processor(SourceMarkerProcessor())
-
         configure_telemetry(trace_manager)
 
     def _load_agent_definition(
@@ -239,7 +239,10 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
                 pass  # Folder key fetch failed, LlmOps tracing may fail
 
         llmops_exporter = LlmOpsHttpExporter()
-        tracer = UiPathTracer(exporter=llmops_exporter)
+        filtered_exporter = FilteringSpanExporter(
+            llmops_exporter, filter_fn=is_custom_instrumentation_span
+        )
+        tracer = UiPathTracer(exporter=filtered_exporter)
         tracing_callback = UiPathTracingCallback(tracer)
         telemetry_callback = AppInsightsTelemetryCallback()
 

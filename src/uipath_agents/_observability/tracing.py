@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any, Callable, ClassVar, Sequence
+from typing import Any, Callable, ClassVar, Optional, Sequence
 
 from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
 from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
@@ -16,11 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class FilteringSpanExporter(SpanExporter):
-    """Wraps a SpanExporter to filter spans before export.
-
-    Used to route specific spans to specific exporters. For example,
-    routing only OpenInference spans to Azure Monitor for debugging.
-    """
+    """Wraps a SpanExporter to filter spans before export."""
 
     def __init__(
         self,
@@ -43,6 +39,16 @@ class FilteringSpanExporter(SpanExporter):
             return SpanExportResult.SUCCESS
         return self._delegate.export(filtered)
 
+    def upsert_span(
+        self,
+        span: ReadableSpan,
+        status_override: Optional[int] = None,
+    ) -> SpanExportResult:
+        """Upsert a single span, applying filter first."""
+        if not self._filter_fn(span):
+            return SpanExportResult.SUCCESS
+        return self._delegate.upsert_span(span, status_override)  # type: ignore[attr-defined]
+
     def shutdown(self) -> None:
         """Shutdown the delegate exporter."""
         self._delegate.shutdown()
@@ -61,6 +67,27 @@ def is_openinference_span(span: ReadableSpan) -> bool:
     """
     scope = span.instrumentation_scope
     return scope is not None and scope.name.startswith("openinference.")
+
+
+def is_custom_instrumentation_span(span: ReadableSpan) -> bool:
+    """Check if span has uipath.custom_instrumentation=True marker."""
+    return (span.attributes or {}).get("uipath.custom_instrumentation") is True
+
+
+def patch_trace_manager_with_filter(trace_manager: UiPathTraceManager) -> None:
+    """Intercept add_span_exporter to wrap exporters with whitelist filter.
+
+    Needed because cli_run.py (uipath-python) adds exporters we can't modify.
+    """
+    original = trace_manager.add_span_exporter
+
+    def filtered_add(exporter: SpanExporter) -> None:
+        wrapped = FilteringSpanExporter(
+            exporter, filter_fn=is_custom_instrumentation_span
+        )
+        original(wrapped)
+
+    trace_manager.add_span_exporter = filtered_add  # type: ignore[assignment]
 
 
 class _TelemetryState:
@@ -91,6 +118,8 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
     setup_otel_env()
 
     if trace_manager:
+        patch_trace_manager_with_filter(trace_manager)
+
         # Azure Monitor exporter (OpenInference spans only)
         azure_exporter = _get_azure_exporter()
         if azure_exporter:

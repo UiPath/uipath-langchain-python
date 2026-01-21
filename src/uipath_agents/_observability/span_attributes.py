@@ -142,8 +142,12 @@ class BaseSpanAttributes(BaseModel, ABC):
         Returns dict with both 'type' and 'span_type' (for backend compatibility).
         None values excluded. Complex objects kept as-is for span processor.
         """
-        # Include both 'type' (Temporal schema) and 'span_type' (backend extraction)
-        attrs: Dict[str, Any] = {"type": self.type, "span_type": self.type}
+        # 'type' for Temporal schema, 'span_type' for backend extraction
+        attrs: Dict[str, Any] = {
+            "type": self.type,
+            "span_type": self.type,
+            "uipath.custom_instrumentation": True,
+        }
         data = self.model_dump(by_alias=True, exclude_none=True, exclude={"error"})
         attrs.update(data)
 
