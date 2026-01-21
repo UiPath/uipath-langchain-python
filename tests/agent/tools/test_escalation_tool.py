@@ -38,9 +38,7 @@ class TestResolveAsset:
         result = await resolve_asset("email_asset", "/Test/Folder")
 
         # Assert
-        assert result == TaskRecipient(
-            value="test@example.com", type=TaskRecipientType.EMAIL
-        )
+        assert result == "test@example.com"
         mock_client.assets.retrieve_async.assert_called_once_with(
             name="email_asset", folder_path="/Test/Folder"
         )
