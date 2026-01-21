@@ -19,7 +19,7 @@
         "openinference.span.kind": "LLM",
         "llm.provider": "azure",
         "llm.system": "openai",
-        "llm.model_name": "gpt-4o-mini-2024-07-18"
+        "llm.model_name": "*"
       }
     }
   ]
