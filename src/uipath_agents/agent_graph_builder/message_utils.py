@@ -26,7 +26,7 @@ from uipath.agent.utils.text_tokens import (
     safe_get_nested,
     serialize_argument,
 )
-from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.react.utils import extract_input_data_from_state
 
 logger = logging.getLogger(__name__)
 
@@ -81,32 +81,6 @@ def build_agent_messages(
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_prompt),
     ]
-
-
-def extract_input_data_from_state(
-    state: BaseModel | dict[str, Any],
-    input_model: type[BaseModel],
-) -> dict[str, Any]:
-    """Extract only input schema fields from graph state, filtering out internal fields.
-
-    This prevents internal LangGraph state fields (messages, termination, agent_outcome, etc.)
-    from leaking into template interpolation.
-
-    Args:
-        state: The combined agent graph state (InnerAgentGraphState = AgentGraphState + input_schema).
-               At runtime, this is a dynamically created class that inherits from both.
-        input_model: The input schema model defining allowed fields
-
-    Returns:
-        Dictionary containing only graph input arguments defined in the agent's input_schema
-    """
-    if isinstance(state, BaseModel):
-        graph_state = state.model_dump()
-    else:
-        graph_state = state
-    internal_fields = set(AgentGraphState.model_fields.keys())
-    filtered_state = {k: v for k, v in graph_state.items() if k not in internal_fields}
-    return input_model.model_validate(filtered_state, from_attributes=True).model_dump()
 
 
 def create_message_factory(

@@ -4024,7 +4024,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.60b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.60b0" },
     { name = "uipath", specifier = "==2.5.24" },
-    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.4.19" },
+    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.4.20" },
 ]
 
 [package.metadata.requires-dev]
@@ -4073,7 +4073,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.4.19"
+version = "0.4.20"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
@@ -4093,9 +4093,9 @@ dependencies = [
     { name = "uipath" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d4/38/1c8aa70343bb5ead6b2dbba52f0151595edc4ae7f801c804e0362afe0aae/uipath_langchain-0.4.19.tar.gz", hash = "sha256:d1316573a51230d6566ec32ee96dc79697cf96fa3ef4f76cea8fcd99b918a6cd", size = 8123318, upload-time = "2026-01-21T12:07:23.241Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/91/d0/44d0defcc72faaff9af3becc3fe4aae6877b177dd034e0ed6cd00cc15987/uipath_langchain-0.4.20.tar.gz", hash = "sha256:922ea9ca2a303585edef41b9f6239c4ee481c566fa3cc7edc61678af5b9e407c", size = 8123260, upload-time = "2026-01-21T15:28:01.754Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c9/f9/9925f6de738d5f950e9099cb42c46561373e5accb83228af6be6c891e1a2/uipath_langchain-0.4.19-py3-none-any.whl", hash = "sha256:caaa578ec6739361a82c3f09fc5afc5b2941fa075078e285b7c56bae33acc64f", size = 136833, upload-time = "2026-01-21T12:07:21.796Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/fd/194c222ad206ab86a7d4e851c4a8d3c36a63bacd1104a78020ddfff74cd2/uipath_langchain-0.4.20-py3-none-any.whl", hash = "sha256:601503f57450c4c4ff23be4b42bff871342076b0a227582f9fc5f2e5dc11ce50", size = 136888, upload-time = "2026-01-21T15:27:59.902Z" },
 ]
 
 [package.optional-dependencies]
