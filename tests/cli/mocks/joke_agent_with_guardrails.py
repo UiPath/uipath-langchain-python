@@ -23,7 +23,7 @@ from uipath.agent.models.agent import (
 from uipath.core.guardrails.guardrails import FieldReference, FieldSource
 from uipath.platform.guardrails.guardrails import NumberParameterValue
 
-from uipath_langchain.chat.models import UiPathChat
+from uipath_langchain.chat.openai import UiPathChatOpenAI
 
 
 # Mock Sentence Analyzer Tool
@@ -75,9 +75,10 @@ sentence_analyzer_tool = SentenceAnalyzerTool()
 all_tools = [sentence_analyzer_tool]
 
 # Create LLM (will be mocked in tests)
-llm = UiPathChat(
+llm = UiPathChatOpenAI(
     temperature=0.0,
     max_tokens=500,
+    use_responses_api=True,
 )
 
 

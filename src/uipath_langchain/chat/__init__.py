@@ -29,6 +29,10 @@ def __getattr__(name):
         from . import supported_models
 
         return getattr(supported_models, name)
+    if name in ("LLMProvider", "APIFlavor", "UiPathPassthroughChatModel"):
+        from . import types
+
+        return getattr(types, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -36,7 +40,10 @@ __all__ = [
     "UiPathChat",
     "UiPathAzureChatOpenAI",
     "UiPathChatOpenAI",
+    "UiPathPassthroughChatModel",
     "OpenAIModels",
     "BedrockModels",
     "GeminiModels",
+    "LLMProvider",
+    "APIFlavor",
 ]

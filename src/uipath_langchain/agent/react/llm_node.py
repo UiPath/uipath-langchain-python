@@ -1,6 +1,6 @@
 """LLM node for ReAct Agent graph."""
 
-from typing import Literal, Sequence, TypeVar
+from typing import Sequence, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall
@@ -14,6 +14,7 @@ from uipath_langchain.agent.tools.static_args import (
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
+from uipath_langchain.llm import get_payload_handler
 
 from ..exceptions import AgentTerminationException
 from .constants import (
@@ -22,28 +23,6 @@ from .constants import (
 )
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
 from .utils import count_consecutive_thinking_messages, extract_input_data_from_state
-
-OPENAI_COMPATIBLE_CHAT_MODELS = (
-    "UiPathChatOpenAI",
-    "AzureChatOpenAI",
-    "ChatOpenAI",
-    "UiPathChat",
-    "UiPathAzureChatOpenAI",
-)
-
-
-def _get_required_tool_choice_by_model(
-    model: BaseChatModel,
-) -> Literal["required", "any"]:
-    """Get the appropriate tool_choice value to enforce tool usage based on model type.
-
-    "required" - OpenAI compatible required tool_choice value
-    "any" - Vertex and Bedrock parameter for required tool_choice value
-    """
-    model_class_name = model.__class__.__name__
-    if model_class_name in OPENAI_COMPATIBLE_CHAT_MODELS:
-        return "required"
-    return "any"
 
 
 def _filter_control_flow_tool_calls(
@@ -82,7 +61,8 @@ def create_llm_node(
             before enforcing tool usage. 0 = force tools every time.
     """
     bindable_tools = list(tools) if tools else []
-    tool_choice_required_value = _get_required_tool_choice_by_model(model)
+    payload_handler = get_payload_handler(model)
+    tool_choice_required_value = payload_handler.get_required_tool_choice()
 
     async def llm_node(state: StateT):
         messages: list[AnyMessage] = state.messages

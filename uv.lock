@@ -3297,7 +3297,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.4.17"
+version = "0.4.18"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

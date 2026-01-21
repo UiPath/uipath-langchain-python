@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 def create_test_models(max_tokens: int = 100) -> list[tuple[str, Any]]:
     """Create all test chat models with the specified max_tokens."""
     return [
-        ("UiPathChatOpenAI", UiPathChatOpenAI()),
+        ("UiPathChatOpenAI", UiPathChatOpenAI(use_responses_api=True)),
         ("UiPathChatVertex", UiPathChatVertex()),
         ("UiPathChatBedrockConverse", UiPathChatBedrockConverse()),
         ("UiPathChatBedrock", UiPathChatBedrock()),
