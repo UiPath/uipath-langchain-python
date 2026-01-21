@@ -81,11 +81,11 @@ def patch_trace_manager_with_filter(trace_manager: UiPathTraceManager) -> None:
     """
     original = trace_manager.add_span_exporter
 
-    def filtered_add(exporter: SpanExporter) -> None:
+    def filtered_add(exporter: SpanExporter, **kwargs: Any) -> None:
         wrapped = FilteringSpanExporter(
             exporter, filter_fn=is_custom_instrumentation_span
         )
-        original(wrapped)
+        original(wrapped, **kwargs)
 
     trace_manager.add_span_exporter = filtered_add  # type: ignore[assignment]
 
