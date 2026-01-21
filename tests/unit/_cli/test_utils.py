@@ -216,3 +216,39 @@ class TestLoadAgentConfiguration:
 
         assert "query" in result.input_schema["properties"]
         assert "results" in result.output_schema["properties"]
+
+    def test_normalizes_content_token_types_case_insensitive(
+        self, tmp_path, valid_agent_config
+    ):
+        """Test that content token types are normalized by decapitalizing first letter."""
+        valid_agent_config["messages"] = [
+            {
+                "role": "system",
+                "content": "Hello World",
+                "contentTokens": [
+                    {"type": "SimpleText", "rawString": "Hello "},
+                    {"type": "Variable", "rawString": "{{name}}"},
+                    {"type": "simpleText", "rawString": " World"},
+                ],
+            },
+            {
+                "role": "user",
+                "content": "Input",
+                "contentTokens": [
+                    {"type": "Expression", "rawString": "{{input}}"},
+                ],
+            },
+        ]
+        agent_file = tmp_path / "agent.json"
+        agent_file.write_text(json.dumps(valid_agent_config))
+
+        result = load_agent_configuration(agent_file)
+
+        assert len(result.messages) == 2
+        assert result.messages[0].content_tokens is not None
+        assert len(result.messages[0].content_tokens) == 3
+        assert result.messages[0].content_tokens[0].type.value == "simpleText"
+        assert result.messages[0].content_tokens[1].type.value == "variable"
+        assert result.messages[0].content_tokens[2].type.value == "simpleText"
+        assert result.messages[1].content_tokens is not None
+        assert result.messages[1].content_tokens[0].type.value == "expression"
