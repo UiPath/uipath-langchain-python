@@ -53,6 +53,7 @@ class TestBuildAgentGraph:
                 new_callable=AsyncMock,
                 return_value=[],
             ),
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
             patch(
                 "uipath_agents.agent_graph_builder.graph.create_agent"
             ) as mock_create,
@@ -61,6 +62,7 @@ class TestBuildAgentGraph:
                 return_value=0,
             ),
         ):
+            mock_llm.return_value = MagicMock()
             mock_create.return_value = MagicMock()
 
             graph = await build_agent_graph(agent_def)
