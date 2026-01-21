@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMess
 from langgraph.types import Command, interrupt
 from uipath._utils import UiPathUrl
 from uipath.agent.models.agent import AgentEscalationRecipient
+from uipath.platform.action_center.tasks import TaskRecipient
 from uipath.platform.common import CreateEscalation, UiPathConfig
 from uipath.platform.guardrails import (
     BaseGuardrail,
@@ -140,7 +141,7 @@ class EscalateAction(GuardrailAction):
                     app_folder_path=self.app_folder_path,
                     title="Agents Guardrail Task",
                     data=data,
-                    assignee=assignee,
+                    recipient=self.recipient,
                 )
             )
 
