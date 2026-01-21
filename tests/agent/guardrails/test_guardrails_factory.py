@@ -23,6 +23,7 @@ from uipath.agent.models.agent import (  # type: ignore[attr-defined]
     AgentNumberRule,
     AgentWordOperator,
     AgentWordRule,
+    AssetRecipient,
     FieldReference,
     StandardRecipient,
 )
@@ -136,16 +137,16 @@ class TestGuardrailsFactory:
         assert gr is block_guardrail
         assert isinstance(action, BlockAction)
 
-    def test_escalate_action_is_mapped_with_app_and_recipient(self) -> None:
+    def test_escalate_action_is_mapped_with_app_and_standard_recipient(self) -> None:
         """ESCALATE action is mapped to EscalateAction with correct app and recipient."""
+        recipient = StandardRecipient(
+            type=AgentEscalationRecipientType.USER_EMAIL,
+            value="admin@example.com",
+        )
         app = AgentGuardrailEscalateActionApp(
             name="EscalationApp",
             folder_name="/TestFolder",
             version=2,
-        )
-        recipient = StandardRecipient(
-            type=AgentEscalationRecipientType.USER_EMAIL,
-            value="admin@example.com",
         )
         guardrail = cast(
             AgentGuardrailModel,
@@ -169,7 +170,49 @@ class TestGuardrailsFactory:
         assert action.app_name == "EscalationApp"
         assert action.app_folder_path == "/TestFolder"
         assert action.version == 2
-        assert action.assignee == "admin@example.com"
+
+        assert isinstance(action.recipient, StandardRecipient)
+        assert action.recipient.value == "admin@example.com"
+
+    def test_escalate_action_is_mapped_with_app_and_asset_recipient(self) -> None:
+        """ESCALATE action is mapped to EscalateAction with correct app and recipient."""
+        recipient = AssetRecipient(
+            type=AgentEscalationRecipientType.ASSET_USER_EMAIL,
+            asset_name="email_asset",
+            folder_path="/Shared",
+        )
+
+        app = AgentGuardrailEscalateActionApp(
+            name="EscalationApp",
+            folder_name="/TestFolder",
+            version=2,
+        )
+        guardrail = cast(
+            AgentGuardrailModel,
+            types.SimpleNamespace(
+                name="guardrail_escalate",
+                selector=GuardrailSelector(),
+                action=AgentGuardrailEscalateAction(
+                    action_type=AgentGuardrailActionType.ESCALATE,
+                    app=app,
+                    recipient=recipient,
+                ),
+            ),
+        )
+
+        result = build_guardrails_with_actions([guardrail], [])
+
+        assert len(result) == 1
+        gr, action = result[0]
+        assert gr is guardrail
+        assert isinstance(action, EscalateAction)
+        assert action.app_name == "EscalationApp"
+        assert action.app_folder_path == "/TestFolder"
+        assert action.version == 2
+
+        assert isinstance(action.recipient, AssetRecipient)
+        assert action.recipient.asset_name == "email_asset"
+        assert action.recipient.folder_path == "/Shared"
 
     @pytest.mark.parametrize(
         "scope,scope_lower",

@@ -8,6 +8,7 @@ from typing import Any, Dict, Literal, cast
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
 from langgraph.types import Command, interrupt
 from uipath._utils import UiPathUrl
+from uipath.agent.models.agent import AgentEscalationRecipient
 from uipath.platform.common import CreateEscalation, UiPathConfig
 from uipath.platform.guardrails import (
     BaseGuardrail,
@@ -18,6 +19,7 @@ from uipath.runtime.errors import UiPathErrorCode
 from ...exceptions import AgentStateException, AgentTerminationException
 from ...react.types import AgentGuardrailsGraphState
 from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
+from ...tools.escalation_tool import resolve_recipient_value
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNode
@@ -36,7 +38,7 @@ class EscalateAction(GuardrailAction):
         app_name: str,
         app_folder_path: str,
         version: int,
-        assignee: str,
+        recipient: AgentEscalationRecipient,
     ):
         """Initialize EscalateAction with escalation app configuration.
 
@@ -44,12 +46,12 @@ class EscalateAction(GuardrailAction):
             app_name: Name of the escalation app.
             app_folder_path: Folder path where the escalation app is located.
             version: Version of the escalation app.
-            assignee: User or role assigned to handle the escalation.
+            recipient: Recipient object (StandardRecipient or AssetRecipient).
         """
         self.app_name = app_name
         self.app_folder_path = app_folder_path
         self.version = version
-        self.assignee = assignee
+        self.recipient = recipient
 
     def action_node(
         self,
@@ -75,6 +77,9 @@ class EscalateAction(GuardrailAction):
         async def _node(
             state: AgentGuardrailsGraphState,
         ) -> Dict[str, Any] | Command[Any]:
+            # Resolve recipient value (handles both StandardRecipient and AssetRecipient)
+            assignee = await resolve_recipient_value(self.recipient)
+
             # Validate message count based on execution stage
             _validate_message_count(state, execution_stage)
 
@@ -135,7 +140,7 @@ class EscalateAction(GuardrailAction):
                     app_folder_path=self.app_folder_path,
                     title="Agents Guardrail Task",
                     data=data,
-                    assignee=self.assignee,
+                    assignee=assignee,
                 )
             )
 
