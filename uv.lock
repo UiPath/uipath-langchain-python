@@ -4024,7 +4024,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.60b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.60b0" },
     { name = "uipath", specifier = "==2.5.22" },
-    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.4.16" },
+    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.4.17" },
 ]
 
 [package.metadata.requires-dev]
@@ -4073,7 +4073,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.4.16"
+version = "0.4.17"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
@@ -4093,9 +4093,9 @@ dependencies = [
     { name = "uipath" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e5/5e/ff8b86ef8db51bb66639e501bd588cf2120e27f997fa3477380c8a360b6e/uipath_langchain-0.4.16.tar.gz", hash = "sha256:0de38a56c45333b779c9ce7a77889c1c1a2f4b1e314d9889f95c2e60113e0943", size = 8119304, upload-time = "2026-01-21T09:44:31.664Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/79/ea/5858b235f1f752748f59a516cc09a942f6f7ceab6391b8659992ce4b9fc5/uipath_langchain-0.4.17.tar.gz", hash = "sha256:309add040689f562c499bb99c5c9dbbae979fadf5bc2583d0ebe16c1bfb064bf", size = 8120087, upload-time = "2026-01-21T10:12:46.667Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/8a/7c107d121e5169890e5bab94ea02616734543b30a716326527e21ee2a9a2/uipath_langchain-0.4.16-py3-none-any.whl", hash = "sha256:fcc2a4199dfd765b41f77671d4a652dfd5c7dced4188609d16ceef03a473c4cb", size = 128884, upload-time = "2026-01-21T09:44:30.29Z" },
+    { url = "https://files.pythonhosted.org/packages/62/03/4604b4f5cf08cdca6fdbecebbe06371c59b6b9ae7b497e90c57d28f96970/uipath_langchain-0.4.17-py3-none-any.whl", hash = "sha256:192bb73a900123f19a5db4594e991a35ac4180f642ef9655cbb8775446dd97da", size = 128938, upload-time = "2026-01-21T10:12:44.87Z" },
 ]
 
 [package.optional-dependencies]
