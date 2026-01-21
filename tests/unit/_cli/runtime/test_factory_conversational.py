@@ -90,7 +90,11 @@ class TestLoadAgentDefinition:
         mock_context = MagicMock()
         mock_context.resume = False
         mock_context.trace_manager = None
-        return AgentsRuntimeFactory(mock_context)
+        # Patch _prepare_agent_execution_contract since it's called in __init__
+        with patch(
+            "uipath_agents._cli.runtime.factory._prepare_agent_execution_contract"
+        ):
+            return AgentsRuntimeFactory(mock_context)
 
     def test_sets_input_schema_for_conversational_agent(self, factory, tmp_path):
         """Should set the conversational input schema on the agent definition."""
@@ -100,7 +104,6 @@ class TestLoadAgentDefinition:
 
         with (
             patch("uipath_agents._cli.runtime.factory.Path.cwd", return_value=tmp_path),
-            patch("uipath_agents._cli.runtime.factory._prepare_agent_run_files"),
             patch(
                 "uipath_agents._cli.runtime.factory.load_agent_configuration",
                 return_value=mock_agent_def,
@@ -124,7 +127,6 @@ class TestLoadAgentDefinition:
 
         with (
             patch("uipath_agents._cli.runtime.factory.Path.cwd", return_value=tmp_path),
-            patch("uipath_agents._cli.runtime.factory._prepare_agent_run_files"),
             patch(
                 "uipath_agents._cli.runtime.factory.load_agent_configuration",
                 return_value=mock_agent_def,
@@ -146,7 +148,6 @@ class TestLoadAgentDefinition:
 
         with (
             patch("uipath_agents._cli.runtime.factory.Path.cwd", return_value=tmp_path),
-            patch("uipath_agents._cli.runtime.factory._prepare_agent_run_files"),
             patch(
                 "uipath_agents._cli.runtime.factory.load_agent_configuration",
                 return_value=mock_agent_def,

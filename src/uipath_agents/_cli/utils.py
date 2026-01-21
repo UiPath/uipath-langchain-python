@@ -18,12 +18,12 @@ from .exceptions import (
 logger = logging.getLogger(__name__)
 
 
-def _prepare_agent_run_files() -> None:
+def _prepare_agent_execution_contract() -> None:
     """Copy all files from .agent-builder to root directory."""
     agent_builder_dir = Path(AGENT_BUILDER_FILENAME)
 
     if not agent_builder_dir.exists() or not agent_builder_dir.is_dir():
-        logger.debug(f"Agent builder directory not found at {agent_builder_dir}")
+        logger.info(f"Agent builder directory not found at {agent_builder_dir}")
         return
 
     try:

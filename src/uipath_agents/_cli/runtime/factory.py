@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 from typing import Any, cast
@@ -35,10 +36,12 @@ from ..._observability.sqlite_trace_context_storage import SqliteTraceContextSto
 from ..._observability.telemetry_callback import AppInsightsTelemetryCallback
 from ..._observability.tracer import UiPathTracer
 from ..constants import AGENT_ENTRYPOINT
-from ..utils import _prepare_agent_run_files, load_agent_configuration
+from ..utils import _prepare_agent_execution_contract, load_agent_configuration
 from .runtime import AgentsLangGraphRuntime
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
@@ -50,6 +53,9 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         Args:
             context: UiPathRuntimeContext to use for runtime creation
         """
+        logger.info(f"Initializing AgentsRuntimeFactory for command {context.command}")
+        _prepare_agent_execution_contract()
+
         super().__init__(context)
 
     def discover_entrypoints(self) -> list[str]:
@@ -118,8 +124,6 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             LangGraphRuntimeError: If definition cannot be loaded
         """
         try:
-            _prepare_agent_run_files()
-
             agent_json_path = Path.cwd() / entrypoint
             agent_definition = load_agent_configuration(agent_json_path)
 
