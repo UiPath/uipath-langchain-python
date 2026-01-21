@@ -5,7 +5,6 @@ import logging
 from typing import Any, Iterator, Mapping
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
-from jsonschema_pydantic_converter import transform as create_model
 from pydantic import BaseModel
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
@@ -18,6 +17,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.agent.utils.text_tokens import build_string_from_tokens
 
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.schema_editing import (
     SchemaModificationError,
     apply_static_value_to_schema,
