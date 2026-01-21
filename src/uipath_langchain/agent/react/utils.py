@@ -55,7 +55,9 @@ def extract_input_data_from_state(
         graph_state = state.model_dump()
     else:
         graph_state = state
-    return input_model.model_validate(graph_state, from_attributes=True).model_dump()
+    internal_fields = set(AgentGraphState.model_fields.keys())
+    filtered_state = {k: v for k, v in graph_state.items() if k not in internal_fields}
+    return input_model.model_validate(filtered_state, from_attributes=True).model_dump()
 
 
 def count_consecutive_thinking_messages(messages: Sequence[BaseMessage]) -> int:
