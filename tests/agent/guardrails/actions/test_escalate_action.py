@@ -186,7 +186,9 @@ class TestEscalateAction:
         assert call_args.app_folder_path == "TestFolder"
         assert call_args.title == "Agents Guardrail Task"
         assert call_args.assignee == ""
-        assert call_args.recipient == TaskRecipient(value="test@example.com", type=TaskRecipientType.EMAIL)
+        assert call_args.recipient == TaskRecipient(
+            value="test@example.com", type=TaskRecipientType.EMAIL
+        )
         assert call_args.data["GuardrailName"] == "Test Guardrail"
         assert call_args.data["GuardrailDescription"] == "Test description"
         assert call_args.data["ExecutionStage"] == expected_stage
@@ -251,7 +253,9 @@ class TestEscalateAction:
         assert call_args.app_folder_path == "TestFolder"
         assert call_args.title == "Agents Guardrail Task"
         assert call_args.assignee == ""
-        assert call_args.recipient == TaskRecipient(value="test@example.com", type=TaskRecipientType.EMAIL)
+        assert call_args.recipient == TaskRecipient(
+            value="test@example.com", type=TaskRecipientType.EMAIL
+        )
         assert call_args.data["GuardrailName"] == "Test Guardrail"
         assert call_args.data["GuardrailDescription"] == "Test description"
         assert call_args.data["ExecutionStage"] == "PostExecution"
@@ -1527,10 +1531,22 @@ class TestEscalateAction:
     @pytest.mark.parametrize(
         "recipient,expected_value",
         [
-            (STANDARD_USER_EMAIL_RECIPIENT, TaskRecipient(value="user@example.com", type=TaskRecipientType.EMAIL)),
-            (STANDARD_GROUP_NAME_RECIPIENT, TaskRecipient(value="AdminGroup", type=TaskRecipientType.GROUP_NAME)),
-            (ASSET_USER_EMAIL_RECIPIENT, TaskRecipient(value="user@example.com", type=TaskRecipientType.EMAIL)),
-            (ASSET_GROUP_NAME_RECIPIENT, TaskRecipient(value="AdminGroup", type=TaskRecipientType.GROUP_NAME)),
+            (
+                STANDARD_USER_EMAIL_RECIPIENT,
+                TaskRecipient(value="user@example.com", type=TaskRecipientType.EMAIL),
+            ),
+            (
+                STANDARD_GROUP_NAME_RECIPIENT,
+                TaskRecipient(value="AdminGroup", type=TaskRecipientType.GROUP_NAME),
+            ),
+            (
+                ASSET_USER_EMAIL_RECIPIENT,
+                TaskRecipient(value="user@example.com", type=TaskRecipientType.EMAIL),
+            ),
+            (
+                ASSET_GROUP_NAME_RECIPIENT,
+                TaskRecipient(value="AdminGroup", type=TaskRecipientType.GROUP_NAME),
+            ),
         ],
     )
     @patch(

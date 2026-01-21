@@ -11,6 +11,7 @@ from uipath.agent.models.agent import (
     AssetRecipient,
     StandardRecipient,
 )
+from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 
 from uipath_langchain.agent.tools.escalation_tool import (
     create_escalation_tool,
@@ -37,7 +38,9 @@ class TestResolveAsset:
         result = await resolve_asset("email_asset", "/Test/Folder")
 
         # Assert
-        assert result == "test@example.com"
+        assert result == TaskRecipient(
+            value="test@example.com", type=TaskRecipientType.EMAIL
+        )
         mock_client.assets.retrieve_async.assert_called_once_with(
             name="email_asset", folder_path="/Test/Folder"
         )
@@ -113,7 +116,9 @@ class TestResolveRecipientValue:
 
         result = await resolve_recipient_value(recipient)
 
-        assert result == "resolved@example.com"
+        assert result == TaskRecipient(
+            value="resolved@example.com", type=TaskRecipientType.EMAIL
+        )
         mock_resolve_asset.assert_called_once_with("email_asset", "/Test/Folder")
 
     @pytest.mark.asyncio
@@ -130,7 +135,9 @@ class TestResolveRecipientValue:
 
         result = await resolve_recipient_value(recipient)
 
-        assert result == "ResolvedGroup"
+        assert result == TaskRecipient(
+            value="ResolvedGroup", type=TaskRecipientType.GROUP_NAME
+        )
         mock_resolve_asset.assert_called_once_with("group_asset", "/Test/Folder")
 
     @pytest.mark.asyncio
@@ -143,7 +150,9 @@ class TestResolveRecipientValue:
 
         result = await resolve_recipient_value(recipient)
 
-        assert result == "direct@example.com"
+        assert result == TaskRecipient(
+            value="direct@example.com", type=TaskRecipientType.EMAIL
+        )
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.resolve_asset")
@@ -262,10 +271,10 @@ class TestEscalationToolMetadata:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
-    async def test_escalation_tool_metadata_has_assignee(
+    async def test_escalation_tool_metadata_has_recipient(
         self, mock_interrupt, escalation_resource
     ):
-        """Test that metadata contains assignee when recipient is USER_EMAIL."""
+        """Test that metadata contains recipient when recipient is USER_EMAIL."""
         # Mock interrupt to return a result
         mock_result = MagicMock()
         mock_result.action = None
@@ -278,14 +287,16 @@ class TestEscalationToolMetadata:
         await tool.ainvoke({})
 
         assert tool.metadata is not None
-        assert tool.metadata["assignee"] == "user@example.com"
+        assert tool.metadata["recipient"] == TaskRecipient(
+            value="user@example.com", type=TaskRecipientType.EMAIL
+        )
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
-    async def test_escalation_tool_metadata_assignee_none_when_no_recipients(
+    async def test_escalation_tool_metadata_recipient_none_when_no_recipients(
         self, mock_interrupt, escalation_resource_no_recipient
     ):
-        """Test that assignee is None when no recipients configured."""
+        """Test that recipient is None when no recipients configured."""
         # Mock interrupt to return a result
         mock_result = MagicMock()
         mock_result.action = None
@@ -298,4 +309,4 @@ class TestEscalationToolMetadata:
         await tool.ainvoke({})
 
         assert tool.metadata is not None
-        assert tool.metadata["assignee"] is None
+        assert tool.metadata["recipient"] is None
