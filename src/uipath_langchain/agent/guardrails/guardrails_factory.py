@@ -32,8 +32,6 @@ from uipath.core.guardrails import (
     UniversalRule,
     WordRule,
 )
-
-from uipath.platform.action_center.tasks import TaskRecipient
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 
 from uipath_langchain.agent.guardrails.actions import (

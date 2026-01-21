@@ -9,7 +9,6 @@ from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMess
 from langgraph.types import Command, interrupt
 from uipath._utils import UiPathUrl
 from uipath.agent.models.agent import AgentEscalationRecipient
-from uipath.platform.action_center.tasks import TaskRecipient
 from uipath.platform.common import CreateEscalation, UiPathConfig
 from uipath.platform.guardrails import (
     BaseGuardrail,
@@ -79,7 +78,7 @@ class EscalateAction(GuardrailAction):
             state: AgentGuardrailsGraphState,
         ) -> Dict[str, Any] | Command[Any]:
             # Resolve recipient value (handles both StandardRecipient and AssetRecipient)
-            assignee = await resolve_recipient_value(self.recipient)
+            task_recipient = await resolve_recipient_value(self.recipient)
 
             # Validate message count based on execution stage
             _validate_message_count(state, execution_stage)
@@ -141,7 +140,7 @@ class EscalateAction(GuardrailAction):
                     app_folder_path=self.app_folder_path,
                     title="Agents Guardrail Task",
                     data=data,
-                    recipient=self.recipient,
+                    recipient=task_recipient,
                 )
             )
 
