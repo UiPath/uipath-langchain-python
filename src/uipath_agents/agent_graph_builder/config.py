@@ -38,6 +38,8 @@ def get_execution_type(context: UiPathRuntimeContext) -> AgentExecutionType:
             return AgentExecutionType.RUNTIME
         case "debug":
             return AgentExecutionType.PLAYGROUND
+        case "dev":
+            return AgentExecutionType.PLAYGROUND
         case "eval":
             return AgentExecutionType.EVAL
         case _:
