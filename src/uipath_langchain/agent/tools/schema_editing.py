@@ -4,7 +4,14 @@ import copy
 import json
 from typing import Any
 
-from uipath_langchain._utils._jsonpath import parse_jsonpath_segments
+from jsonpath_ng import (  # type: ignore[import-untyped]
+    Child,
+    Fields,
+    JSONPath,
+    Root,
+    Slice,
+    parse,
+)
 
 STATIC_ARGUMENT_DESCRIPTION = (
     "This argument is pre-configured and will be overwritten. Leave it empty"
@@ -15,6 +22,36 @@ class SchemaModificationError(ValueError):
     """Raised when a schema modification fails."""
 
     pass
+
+
+def parse_jsonpath_segments(json_path: str) -> list[str]:
+    """Parse JSON path $['a']['b'] into list of segments ['a', 'b']."""
+    jsonpath_expr = parse(json_path)
+    return _extract_segments(jsonpath_expr)
+
+
+def _extract_segments(expr: JSONPath) -> list[str]:
+    """Recursively extract segments from a JSONPath expression tree.
+
+    Args:
+        expr: The JSONPath expression node (Root, Child, Fields, etc.)
+    """
+    parts: list[str] = []
+
+    match expr:
+        case Root():
+            pass
+        case Fields():
+            # Leaf node, add it to the path
+            parts.extend(expr.fields)
+        case Child():
+            # Child node, walk left then right to maintain order
+            parts.extend(_extract_segments(expr.left))
+            parts.extend(_extract_segments(expr.right))
+        case Slice(start=None, end=None, step=None):
+            parts.append("*")
+
+    return parts
 
 
 def apply_static_value_to_schema(

@@ -1,6 +1,6 @@
 import pytest
 
-from uipath_langchain._utils._jsonpath import (
+from uipath_langchain.agent.tools.schema_editing import (
     parse_jsonpath_segments,
 )
 
