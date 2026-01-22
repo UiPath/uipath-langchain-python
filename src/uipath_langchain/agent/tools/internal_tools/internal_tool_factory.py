@@ -24,12 +24,14 @@ from uipath.agent.models.agent import (
 )
 
 from .analyze_files_tool import create_analyze_file_tool
+from .deeprag_tool import create_deeprag_tool
 
 _INTERNAL_TOOL_HANDLERS: dict[
     AgentInternalToolType,
     Callable[[AgentInternalToolResourceConfig, BaseChatModel], StructuredTool],
 ] = {
     AgentInternalToolType.ANALYZE_FILES: create_analyze_file_tool,
+    AgentInternalToolType.DEEP_RAG: create_deeprag_tool,
 }
 
 
