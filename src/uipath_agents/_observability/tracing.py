@@ -69,23 +69,50 @@ def is_openinference_span(span: ReadableSpan) -> bool:
     return scope is not None and scope.name.startswith("openinference.")
 
 
+def is_http_instrumentation_span(span: ReadableSpan) -> bool:
+    """Check if span is from HTTP client instrumentation (httpx, aiohttp)."""
+    scope = span.instrumentation_scope
+    if scope is None:
+        return False
+    return scope.name in (
+        "opentelemetry.instrumentation.httpx",
+        "opentelemetry.instrumentation.aiohttp_client",
+    )
+
+
+def is_azure_monitor_span(span: ReadableSpan) -> bool:
+    """Check if span should be exported to Azure Monitor.
+
+    Includes:
+    - OpenInference spans (LangGraph/LangChain telemetry)
+    - HTTP client spans (httpx, aiohttp for debugging)
+    """
+    return is_openinference_span(span) or is_http_instrumentation_span(span)
+
+
 def is_custom_instrumentation_span(span: ReadableSpan) -> bool:
     """Check if span has uipath.custom_instrumentation=True marker."""
     return (span.attributes or {}).get("uipath.custom_instrumentation") is True
 
 
 def patch_trace_manager_with_filter(trace_manager: UiPathTraceManager) -> None:
-    """Intercept add_span_exporter to wrap exporters with whitelist filter.
+    """Intercept add_span_exporter to wrap raw exporters with whitelist filter.
 
     Needed because cli_run.py (uipath-python) adds exporters we can't modify.
+    Exporters already wrapped with FilteringSpanExporter pass through unchanged.
     """
     original = trace_manager.add_span_exporter
 
     def filtered_add(exporter: SpanExporter, **kwargs: Any) -> None:
-        wrapped = FilteringSpanExporter(
-            exporter, filter_fn=is_custom_instrumentation_span
-        )
-        original(wrapped, **kwargs)
+        if isinstance(exporter, FilteringSpanExporter):
+            # Already has filter - pass through unchanged
+            original(exporter, **kwargs)
+        else:
+            # Raw exporter - add whitelist filter
+            wrapped = FilteringSpanExporter(
+                exporter, filter_fn=is_custom_instrumentation_span
+            )
+            original(wrapped, **kwargs)
 
     trace_manager.add_span_exporter = filtered_add  # type: ignore[assignment]
 
@@ -118,7 +145,7 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
     setup_otel_env()
 
     if trace_manager:
-        # patch_trace_manager_with_filter(trace_manager) - This breaks App Insights telemetry.
+        patch_trace_manager_with_filter(trace_manager)
 
         # Azure Monitor exporter (OpenInference spans only)
         azure_exporter = _get_azure_exporter()
@@ -131,7 +158,7 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
             if disable_otel_masking == "true":
                 # No PII redaction - just filter spans
                 filtered_exporter = FilteringSpanExporter(
-                    azure_exporter, filter_fn=is_openinference_span
+                    azure_exporter, filter_fn=is_azure_monitor_span
                 )
                 logger.warning(
                     "PII redaction is DISABLED - sensitive data may be exported"
@@ -144,7 +171,7 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
                 # Wrap: Azure <- PII Filter <- Span Filter <- Trace Manager
                 pii_filtered_exporter = PIIFilteringExporter(azure_exporter)
                 filtered_exporter = FilteringSpanExporter(
-                    pii_filtered_exporter, filter_fn=is_openinference_span
+                    pii_filtered_exporter, filter_fn=is_azure_monitor_span
                 )
                 logger.debug("Added PII redaction to Azure Monitor exporter")
 

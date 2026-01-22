@@ -1,6 +1,7 @@
 """Tests for OpenTelemetry tracing configuration."""
 
 import os
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -47,9 +48,12 @@ class TestConfigureTelemetry:
 
             mock_setup.assert_called_once()
 
-    @pytest.mark.skip()
     def test_adds_filtered_azure_exporter_when_trace_manager_provided(self):
-        """Test that filtered Azure exporter is added when trace_manager is provided."""
+        """Test that filtered Azure exporter passes through unchanged.
+
+        Azure exporter is already wrapped with FilteringSpanExporter by configure_telemetry,
+        so patch_trace_manager_with_filter should not double-wrap it.
+        """
         from uipath_agents._observability.pii_filtering_exporter import (
             PIIFilteringExporter,
         )
@@ -58,7 +62,7 @@ class TestConfigureTelemetry:
         mock_exporter = MagicMock()
         added_exporters: list[tracing.FilteringSpanExporter] = []
 
-        def capture_add(exporter: tracing.FilteringSpanExporter) -> None:
+        def capture_add(exporter: tracing.FilteringSpanExporter, **kwargs: Any) -> None:
             added_exporters.append(exporter)
 
         mock_trace_manager.add_span_exporter = capture_add
@@ -69,29 +73,22 @@ class TestConfigureTelemetry:
         ):
             tracing.configure_telemetry(trace_manager=mock_trace_manager)
 
-            # Should have 1 exporter (Azure) - wrapped twice:
-            # 1. By patch_trace_manager_with_filter (custom instrumentation filter)
-            # 2. By configure_telemetry (OpenInference filter + PII)
+            # Should have 1 exporter (Azure) - NOT double-wrapped
+            # Already has FilteringSpanExporter, so passes through unchanged
             assert len(added_exporters) == 1
-            outer_wrapper = added_exporters[0]
-            # Outer: custom instrumentation filter (from patch_trace_manager_with_filter)
-            assert isinstance(outer_wrapper, tracing.FilteringSpanExporter)
-            assert outer_wrapper._filter_fn is tracing.is_custom_instrumentation_span
-            # Inner: OpenInference filter wrapping PII filter wrapping Azure
-            inner_wrapper = outer_wrapper._delegate
-            assert isinstance(inner_wrapper, tracing.FilteringSpanExporter)
-            assert inner_wrapper._filter_fn is tracing.is_openinference_span
-            assert isinstance(inner_wrapper._delegate, PIIFilteringExporter)
-            assert inner_wrapper._delegate._delegate is mock_exporter
+            wrapper = added_exporters[0]
+            assert isinstance(wrapper, tracing.FilteringSpanExporter)
+            assert wrapper._filter_fn is tracing.is_azure_monitor_span
+            assert isinstance(wrapper._delegate, PIIFilteringExporter)
+            assert wrapper._delegate._delegate is mock_exporter
 
-    @pytest.mark.skip()
     def test_adds_azure_exporter_without_pii_redaction_when_disabled(self):
-        """Test that Azure exporter is added without PII filtering when redaction disabled."""
+        """Test that Azure exporter passes through without double-wrapping when PII disabled."""
         mock_trace_manager = MagicMock()
         mock_exporter = MagicMock()
         added_exporters: list[tracing.FilteringSpanExporter] = []
 
-        def capture_add(exporter: tracing.FilteringSpanExporter) -> None:
+        def capture_add(exporter: tracing.FilteringSpanExporter, **kwargs: Any) -> None:
             added_exporters.append(exporter)
 
         mock_trace_manager.add_span_exporter = capture_add
@@ -103,17 +100,12 @@ class TestConfigureTelemetry:
         ):
             tracing.configure_telemetry(trace_manager=mock_trace_manager)
 
-            # Should have 1 exporter wrapped twice (no PII filtering)
+            # Should have 1 exporter - NOT double-wrapped (no PII filtering)
             assert len(added_exporters) == 1
-            outer_wrapper = added_exporters[0]
-            # Outer: custom instrumentation filter
-            assert isinstance(outer_wrapper, tracing.FilteringSpanExporter)
-            assert outer_wrapper._filter_fn is tracing.is_custom_instrumentation_span
-            # Inner: OpenInference filter directly wrapping Azure (no PII)
-            inner_wrapper = outer_wrapper._delegate
-            assert isinstance(inner_wrapper, tracing.FilteringSpanExporter)
-            assert inner_wrapper._delegate is mock_exporter
-            assert inner_wrapper._filter_fn is tracing.is_openinference_span
+            wrapper = added_exporters[0]
+            assert isinstance(wrapper, tracing.FilteringSpanExporter)
+            assert wrapper._filter_fn is tracing.is_azure_monitor_span
+            assert wrapper._delegate is mock_exporter
 
     def test_skips_azure_exporter_when_no_trace_manager(self):
         """Test that Azure exporter is skipped when no trace_manager."""
@@ -130,7 +122,7 @@ class TestConfigureTelemetry:
         mock_trace_manager = MagicMock()
         added_exporters: list[tracing.FilteringSpanExporter] = []
 
-        def capture_add(exporter: tracing.FilteringSpanExporter) -> None:
+        def capture_add(exporter: tracing.FilteringSpanExporter, **kwargs: Any) -> None:
             added_exporters.append(exporter)
 
         mock_trace_manager.add_span_exporter = capture_add
@@ -255,6 +247,111 @@ class TestIsOpeninferenceSpan:
         span.instrumentation_scope = None
 
         assert tracing.is_openinference_span(span) is False
+
+
+class TestIsHttpInstrumentationSpan:
+    """Test is_http_instrumentation_span function."""
+
+    def test_returns_true_for_httpx_scope(self):
+        """Test returns True for httpx instrumentation scope."""
+        span = MagicMock()
+        span.instrumentation_scope.name = "opentelemetry.instrumentation.httpx"
+
+        assert tracing.is_http_instrumentation_span(span) is True
+
+    def test_returns_true_for_aiohttp_scope(self):
+        """Test returns True for aiohttp_client instrumentation scope."""
+        span = MagicMock()
+        span.instrumentation_scope.name = "opentelemetry.instrumentation.aiohttp_client"
+
+        assert tracing.is_http_instrumentation_span(span) is True
+
+    def test_returns_false_for_other_scope(self):
+        """Test returns False for non-HTTP instrumentation scopes."""
+        span = MagicMock()
+        span.instrumentation_scope.name = "opentelemetry.instrumentation.requests"
+
+        assert tracing.is_http_instrumentation_span(span) is False
+
+    def test_returns_false_when_no_scope(self):
+        """Test returns False when instrumentation_scope is None."""
+        span = MagicMock()
+        span.instrumentation_scope = None
+
+        assert tracing.is_http_instrumentation_span(span) is False
+
+
+class TestIsAzureMonitorSpan:
+    """Test is_azure_monitor_span function."""
+
+    def test_returns_true_for_openinference_span(self):
+        """Test returns True for OpenInference spans."""
+        span = MagicMock()
+        span.instrumentation_scope.name = "openinference.instrumentation.langchain"
+
+        assert tracing.is_azure_monitor_span(span) is True
+
+    def test_returns_true_for_http_span(self):
+        """Test returns True for HTTP instrumentation spans."""
+        span = MagicMock()
+        span.instrumentation_scope.name = "opentelemetry.instrumentation.httpx"
+
+        assert tracing.is_azure_monitor_span(span) is True
+
+    def test_returns_false_for_other_span(self):
+        """Test returns False for other spans."""
+        span = MagicMock()
+        span.instrumentation_scope.name = "some.other.instrumentation"
+
+        assert tracing.is_azure_monitor_span(span) is False
+
+
+class TestPatchTraceManagerWithFilter:
+    """Test patch_trace_manager_with_filter function."""
+
+    def test_bypasses_already_wrapped_exporter(self):
+        """Test that already-wrapped FilteringSpanExporter passes through unchanged."""
+        mock_trace_manager = MagicMock()
+        captured_exporters: list[Any] = []
+
+        def capture_add(exporter: Any, **kwargs: Any) -> None:
+            captured_exporters.append(exporter)
+
+        mock_trace_manager.add_span_exporter = capture_add
+
+        tracing.patch_trace_manager_with_filter(mock_trace_manager)
+
+        # Add an already-wrapped exporter
+        inner_delegate = MagicMock()
+        pre_wrapped = tracing.FilteringSpanExporter(inner_delegate, lambda s: True)
+        mock_trace_manager.add_span_exporter(pre_wrapped)
+
+        # Should pass through unchanged (not double-wrapped)
+        assert len(captured_exporters) == 1
+        assert captured_exporters[0] is pre_wrapped
+
+    def test_wraps_raw_exporter_with_filter(self):
+        """Test that raw exporters get wrapped with custom instrumentation filter."""
+        mock_trace_manager = MagicMock()
+        captured_exporters: list[Any] = []
+
+        def capture_add(exporter: Any, **kwargs: Any) -> None:
+            captured_exporters.append(exporter)
+
+        mock_trace_manager.add_span_exporter = capture_add
+
+        tracing.patch_trace_manager_with_filter(mock_trace_manager)
+
+        # Add a raw exporter
+        raw_exporter = MagicMock()
+        mock_trace_manager.add_span_exporter(raw_exporter)
+
+        # Should be wrapped with FilteringSpanExporter
+        assert len(captured_exporters) == 1
+        wrapper = captured_exporters[0]
+        assert isinstance(wrapper, tracing.FilteringSpanExporter)
+        assert wrapper._delegate is raw_exporter
+        assert wrapper._filter_fn is tracing.is_custom_instrumentation_span
 
 
 class TestShutdownTelemetry:
