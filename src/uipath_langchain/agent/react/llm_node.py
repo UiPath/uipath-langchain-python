@@ -17,6 +17,7 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 from uipath_langchain.chat.handlers import get_payload_handler
 
 from ..exceptions import AgentTerminationException
+from ..messages.message_utils import replace_tool_calls
 from .constants import (
     DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
     DEFAULT_MAX_LLM_MESSAGES,
@@ -101,8 +102,7 @@ def create_llm_node(
         if response.tool_calls:
             filtered_tool_calls = _filter_control_flow_tool_calls(response.tool_calls)
             if len(filtered_tool_calls) != len(response.tool_calls):
-                # todo: this does not actually work, but fixing tool call modifying is a separate task
-                response.tool_calls = filtered_tool_calls
+                response = replace_tool_calls(response, filtered_tool_calls)
 
         return {"messages": [response]}
 

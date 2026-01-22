@@ -14,6 +14,7 @@ from uipath_langchain.agent.react.utils import (
 )
 
 from ...exceptions import AgentStateException, AgentTerminationException
+from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
 from .base_action import GuardrailAction, GuardrailActionNode
 
@@ -157,9 +158,6 @@ def _filter_tool_input_fields(
     if ai_message is None or not ai_message.tool_calls:
         return {}
 
-    if ai_message is None:
-        return {}
-
     # Find and filter the tool call with matching name
     # Type assertion: we know ai_message is AIMessage from the check above
     assert isinstance(ai_message, AIMessage)
@@ -209,8 +207,8 @@ def _filter_tool_input_fields(
         )
 
     if modified:
-        ai_message.tool_calls = tool_calls
-        return Command(update={"messages": msgs})
+        ai_message = replace_tool_calls(ai_message, tool_calls)
+        return Command(update={"messages": [ai_message]})
 
     return {}
 
