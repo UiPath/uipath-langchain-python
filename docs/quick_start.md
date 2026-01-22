@@ -171,26 +171,6 @@ This command creates the following files:
 | `bindings.json`     | Allows you to configure overridable resource bindings                        |
 | `agent.mermaid`     | Graph visual representation                                                  |
 
-## Set Up Environment Variables
-
-Before running the agent, configure either `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the `.env` file:
-
-//// tab | Open AI
-
-```
-OPENAI_API_KEY=sk-proj-......
-```
-
-////
-
-//// tab | ANTHROPIC_API_KEY
-
-```
-ANTHROPIC_API_KEY=sk-ant-a.....
-```
-
-////
-
 ## Run The Agent Locally
 
 Execute the agent with a sample input:
