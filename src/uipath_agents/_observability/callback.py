@@ -17,7 +17,11 @@ from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 from opentelemetry.trace import Span
 
-from .schema import GUARDRAIL_VALIDATION_RESULT_KEY, INNER_STATE_KEY
+from .schema import (
+    GUARDRAIL_VALIDATION_DETAILS_KEY,
+    GUARDRAIL_VALIDATION_RESULT_KEY,
+    INNER_STATE_KEY,
+)
 from .tracer import UiPathTracer
 
 logger = logging.getLogger(__name__)
@@ -97,7 +101,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._tool_span_from_guardrail: bool = False
         # Track when tool ended but waiting for post guardrails
         self._tool_ended_pending_post: bool = False
-        # Pending guardrail actions: node_name -> (span, validation_result)
+        # Pending guardrail actions: node_name -> (span, validation_details)
         # When validation fails, we defer span ending until action node fires
         self._pending_guardrail_actions: Dict[str, Tuple[Span, Optional[str]]] = {}
 
@@ -675,13 +679,13 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 # Extract evaluation node name by removing the action suffix
                 eval_node_name = node_name[: -len(suffix)]
                 if eval_node_name in self._pending_guardrail_actions:
-                    span, validation_result = self._pending_guardrail_actions.pop(
+                    span, validation_details = self._pending_guardrail_actions.pop(
                         eval_node_name
                     )
                     self._tracer.end_guardrail_evaluation(
                         span,
                         validation_passed=False,
-                        validation_result=validation_result,
+                        validation_result=validation_details,
                         action=action,
                     )
 
@@ -786,9 +790,13 @@ class UiPathTracingCallback(BaseCallbackHandler):
             info = self._guardrail_info.pop(run_id, None)
 
             validation_result = None
+            validation_details = None
             if isinstance(outputs, dict) and INNER_STATE_KEY in outputs:
                 validation_result = outputs[INNER_STATE_KEY].get(
                     GUARDRAIL_VALIDATION_RESULT_KEY
+                )
+                validation_details = outputs[INNER_STATE_KEY].get(
+                    GUARDRAIL_VALIDATION_DETAILS_KEY
                 )
             elif (
                 hasattr(outputs, "update")
@@ -798,15 +806,18 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 validation_result = outputs.update[INNER_STATE_KEY].get(
                     GUARDRAIL_VALIDATION_RESULT_KEY
                 )
+                validation_details = outputs.update[INNER_STATE_KEY].get(
+                    GUARDRAIL_VALIDATION_DETAILS_KEY
+                )
 
-            validation_passed = validation_result is None
+            validation_passed = validation_result is True
 
             if validation_passed:
                 # Validation passed - end span immediately with "skip"
                 self._tracer.end_guardrail_evaluation(
                     span,
                     validation_passed=True,
-                    validation_result=None,
+                    validation_result=validation_details,
                     action=GuardrailAction.SKIP,
                 )
             else:
@@ -817,14 +828,14 @@ class UiPathTracingCallback(BaseCallbackHandler):
                     eval_node_name = f"{scope}_{stage}_execution_{guardrail_name}"
                     self._pending_guardrail_actions[eval_node_name] = (
                         span,
-                        validation_result,
+                        validation_details,
                     )
                 else:
                     # Fallback: end with "log" if we can't track the action
                     self._tracer.end_guardrail_evaluation(
                         span,
                         validation_passed=False,
-                        validation_result=validation_result,
+                        validation_result=validation_details,
                         action=GuardrailAction.LOG,
                     )
             # Container closing handled by phase transitions

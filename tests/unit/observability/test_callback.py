@@ -7,6 +7,7 @@ import pytest
 
 from uipath_agents._observability.callback import UiPathTracingCallback
 from uipath_agents._observability.schema import (
+    GUARDRAIL_VALIDATION_DETAILS_KEY,
     GUARDRAIL_VALIDATION_RESULT_KEY,
     INNER_STATE_KEY,
     SpanType,
@@ -471,8 +472,11 @@ class TestGuardrailActionDetection:
                 run_id=run_id,
                 metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
             )
-            # End with no validation_result (passed)
-            callback.on_chain_end({}, run_id=run_id)
+            # End with passed validation_result
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=run_id,
+            )
 
         spans = span_exporter.get_finished_spans()
         eval_spans = [
@@ -498,7 +502,12 @@ class TestGuardrailActionDetection:
             )
             # End with validation_result (failed)
             callback.on_chain_end(
-                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected"}},
+                {
+                    INNER_STATE_KEY: {
+                        GUARDRAIL_VALIDATION_RESULT_KEY: False,
+                        GUARDRAIL_VALIDATION_DETAILS_KEY: "PII detected",
+                    }
+                },
                 run_id=run_id,
             )
 
@@ -624,7 +633,8 @@ class TestGuardrailActionDetection:
             command = MockCommand(
                 update={
                     INNER_STATE_KEY: {
-                        GUARDRAIL_VALIDATION_RESULT_KEY: "PII detected in input"
+                        GUARDRAIL_VALIDATION_RESULT_KEY: False,
+                        GUARDRAIL_VALIDATION_DETAILS_KEY: "PII detected in input",
                     }
                 }
             )
@@ -670,9 +680,9 @@ class TestGuardrailActionDetection:
                 run_id=run_id,
                 metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
             )
-            # Command with None validation result = passed
+            # Command with validation result = passed
             command = MockCommand(
-                update={INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: None}}
+                update={INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}}
             )
             callback.on_chain_end(command, run_id=run_id)
 
