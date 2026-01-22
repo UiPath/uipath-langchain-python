@@ -4024,7 +4024,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.60b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.60b0" },
     { name = "uipath", specifier = "==2.5.30" },
-    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.4.27" },
+    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.4.28" },
 ]
 
 [package.metadata.requires-dev]
@@ -4073,7 +4073,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.4.27"
+version = "0.4.28"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
@@ -4093,9 +4093,9 @@ dependencies = [
     { name = "uipath" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/ce/acfdcc2ca8ce1ed55c516d9d1a1d9a22206f67cd3308af59286c3991c46d/uipath_langchain-0.4.27.tar.gz", hash = "sha256:5d29fe81d2f12dd96ee9a63d226167700ec7a7eef7afd18ae2abb05e0542f92a", size = 8321707, upload-time = "2026-01-22T16:47:35.329Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/71/fa/c72c736db0c8f65c849f57f010fcf7e6221c7e8dac470541a6584245602b/uipath_langchain-0.4.28.tar.gz", hash = "sha256:4514ed71afbe9e075c985aebe352cbec84a5f9204160aa25edcb09f9139ab221", size = 8322507, upload-time = "2026-01-22T18:07:47.96Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/16/2c/90bc1fac2833402dfb090e23f7c6bb4720ef0a107527a3c505fc63d2b40a/uipath_langchain-0.4.27-py3-none-any.whl", hash = "sha256:bfde2624a3b9252fc8f965e01b7f9e1b7a71f54085eacebb0eadbaf363e53cc9", size = 138548, upload-time = "2026-01-22T16:47:33.399Z" },
+    { url = "https://files.pythonhosted.org/packages/16/b4/8da3bdccd9078fb23507027c697e264f3f89ca34395e265a5d6267e51de7/uipath_langchain-0.4.28-py3-none-any.whl", hash = "sha256:29d7ccdb1e3211e963ebcc141c969191615c1017edb2ca7a537c8ae4a047d420", size = 139530, upload-time = "2026-01-22T18:07:45.615Z" },
 ]
 
 [package.optional-dependencies]
