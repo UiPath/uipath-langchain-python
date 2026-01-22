@@ -8,19 +8,16 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
-    AgentEscalationRecipient,
     AgentEscalationResourceConfig,
-    AssetRecipient,
-    StandardRecipient,
 )
 from uipath.eval.mocks import mockable
-from uipath.platform import UiPath
 from uipath.platform.common import CreateEscalation
 from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
 from ..exceptions import AgentTerminationException
+from .escalation_utils import resolve_recipient_value
 from .tool_node import ToolWrapperMixin
 from .utils import sanitize_tool_name
 
@@ -30,35 +27,6 @@ class EscalationAction(str, Enum):
 
     CONTINUE = "continue"
     END = "end"
-
-
-async def resolve_recipient_value(recipient: AgentEscalationRecipient) -> str | None:
-    """Resolve recipient value based on recipient type."""
-    if isinstance(recipient, AssetRecipient):
-        return await resolve_asset(recipient.asset_name, recipient.folder_path)
-
-    if isinstance(recipient, StandardRecipient):
-        return recipient.value
-
-    return None
-
-
-async def resolve_asset(asset_name: str, folder_path: str) -> str | None:
-    """Retrieve asset value."""
-    try:
-        client = UiPath()
-        result = await client.assets.retrieve_async(
-            name=asset_name, folder_path=folder_path
-        )
-
-        if not result or not result.value:
-            raise ValueError(f"Asset '{asset_name}' has no value configured.")
-
-        return result.value
-    except Exception as e:
-        raise ValueError(
-            f"Failed to resolve asset '{asset_name}' in folder '{folder_path}': {str(e)}"
-        ) from e
 
 
 class StructuredToolWithWrapper(StructuredTool, ToolWrapperMixin):

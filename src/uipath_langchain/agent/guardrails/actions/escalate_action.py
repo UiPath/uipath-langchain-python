@@ -19,7 +19,7 @@ from uipath.runtime.errors import UiPathErrorCode
 from ...exceptions import AgentStateException, AgentTerminationException
 from ...react.types import AgentGuardrailsGraphState
 from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
-from ...tools.escalation_tool import resolve_recipient_value
+from ...tools.escalation_utils import resolve_recipient_value
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNode
