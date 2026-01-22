@@ -63,12 +63,30 @@ async def create_mcp_tools(
     base_url = base_url.rstrip("/")
     semaphore = asyncio.Semaphore(max_concurrency)
 
+    # Set up OpenTelemetry-instrumented transport for proper trace context propagation
+    try:
+        from opentelemetry.instrumentation.httpx import AsyncOpenTelemetryTransport
+
+        # Create base transport
+        base_transport = httpx.AsyncHTTPTransport()
+        # Wrap with OpenTelemetry for automatic span creation and context propagation
+        telemetry_transport = AsyncOpenTelemetryTransport(base_transport)
+        print("✅ Using AsyncOpenTelemetryTransport for trace propagation")
+    except ImportError:
+        # Fallback if OpenTelemetry instrumentation not available
+        telemetry_transport = None
+        print("⚠️  AsyncOpenTelemetryTransport not available, traces may not propagate")
+
     default_client_kwargs = get_httpx_client_kwargs()
     client_kwargs = {
         **default_client_kwargs,
         "headers": {"Authorization": f"Bearer {access_token}"},
         "timeout": httpx.Timeout(60),
     }
+
+    # Add instrumented transport if available
+    if telemetry_transport:
+        client_kwargs["transport"] = telemetry_transport
 
     async def init_session(
         session: ClientSession, cfg: AgentMcpResourceConfig
@@ -83,6 +101,18 @@ async def create_mcp_tools(
     async def create_session(
         stack: AsyncExitStack, cfg: AgentMcpResourceConfig
     ) -> ClientSession:
+        from opentelemetry import trace
+
+        # Don't create a span here - let HTTPXClientInstrumentor/AsyncOpenTelemetryTransport handle it
+        # This ensures HTTP spans are properly nested under LangGraph tool spans
+        from opentelemetry import trace
+
+        current_span = trace.get_current_span()
+        if current_span and current_span.is_recording():
+            print(f"ℹ️  Creating MCP session for {cfg.slug} (will nest under current span)")
+        else:
+            print(f"ℹ️  Creating MCP session for {cfg.slug} (initialization phase)")
+
         url = f"{base_url}/agenthub_/mcp/{cfg.folder_path}/{cfg.slug}"
         http_client = await stack.enter_async_context(
             httpx.AsyncClient(**client_kwargs)

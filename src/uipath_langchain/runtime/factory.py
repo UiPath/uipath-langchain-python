@@ -66,15 +66,26 @@ class UiPathLangGraphRuntimeFactory:
                 from opentelemetry import trace
                 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-                # Set the global tracer provider to the UiPath one for proper context propagation
-                # This ensures httpx instrumentation uses the same TracerProvider and inherits trace context
-                trace.set_tracer_provider(trace_manager.tracer_provider)
+                # Check if a TracerProvider is already set
+                current_provider = trace.get_tracer_provider()
+                if current_provider != trace._DefaultTracerProvider():  # type: ignore
+                    print(f"ℹ️  TracerProvider already set: {type(current_provider).__name__}")
+                else:
+                    # Set the global tracer provider to the UiPath one for proper context propagation
+                    # This ensures httpx instrumentation uses the same TracerProvider and inherits trace context
+                    trace.set_tracer_provider(trace_manager.tracer_provider)
+                    print(f"🔧 Set global TracerProvider: {trace_manager.tracer_provider}")
 
                 # Instrument httpx - it will now use the global (UiPath) tracer provider
+                # This automatically injects trace context headers (traceparent) into all httpx requests
                 HTTPXClientInstrumentor().instrument()
                 print("✅ Instrumented httpx for MCP and AgentHub tracing")
-            except ImportError:
-                print("⚠️  httpx instrumentation not available - install opentelemetry-instrumentation-httpx")
+                print("✅ HTTP calls will now propagate trace context automatically")
+            except ImportError as e:
+                print(f"⚠️  httpx instrumentation not available: {e}")
+                print("   Install: pip install opentelemetry-instrumentation-httpx")
+            except Exception as e:
+                print(f"❌ Failed to instrument httpx: {e}")
 
         # Add OTLP exporter for Aspire if configured
         otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
