@@ -166,7 +166,7 @@ def _get_model_info(
             == byo_connection_id.lower()
         ]
 
-    if not byo_connection_id:
+    if not byo_connection_id and len(matching_models) > 1:
         matching_models = [m for m in matching_models if m.get("byomDetails") is None]
 
     if not matching_models:
