@@ -2,6 +2,7 @@ import os
 from typing import Any, Optional
 
 import httpx
+from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
@@ -109,6 +110,9 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
     _agenthub_config: Optional[str] = PrivateAttr(default=None)
     _byo_connection_id: Optional[str] = PrivateAttr(default=None)
 
+    @resource_override(
+        resource_identifier="byo_connection_id", resource_type="connection"
+    )
     def __init__(
         self,
         org_id: Optional[str] = None,
