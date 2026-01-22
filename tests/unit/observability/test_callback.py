@@ -453,68 +453,6 @@ class TestIntegrationToolCallback:
         assert child_span.attributes["span_type"] == SpanType.INTEGRATION_TOOL.value
 
 
-class TestContextAttachDetach:
-    """Tests for OTEL context attach/detach on tool spans."""
-
-    def test_tool_span_attaches_context_on_start(
-        self, callback: UiPathTracingCallback, span_exporter
-    ) -> None:
-        """Test that on_tool_start attaches span to context."""
-        run_id = uuid4()
-        serialized = {"name": "test_tool"}
-
-        callback.on_tool_start(serialized, "input", run_id=run_id)
-
-        # Context token should be stored
-        assert run_id in callback._span_context_tokens
-
-    def test_tool_span_detaches_context_on_end(
-        self, callback: UiPathTracingCallback, span_exporter
-    ) -> None:
-        """Test that on_tool_end detaches context token."""
-        run_id = uuid4()
-        serialized = {"name": "test_tool"}
-
-        callback.on_tool_start(serialized, "input", run_id=run_id)
-        assert run_id in callback._span_context_tokens
-
-        callback.on_tool_end("result", run_id=run_id)
-
-        # Context token should be removed
-        assert run_id not in callback._span_context_tokens
-
-    def test_tool_span_detaches_context_on_error(
-        self, callback: UiPathTracingCallback, span_exporter
-    ) -> None:
-        """Test that on_tool_error detaches context token."""
-        run_id = uuid4()
-        serialized = {"name": "test_tool"}
-
-        callback.on_tool_start(serialized, "input", run_id=run_id)
-        assert run_id in callback._span_context_tokens
-
-        callback.on_tool_error(RuntimeError("fail"), run_id=run_id)
-
-        # Context token should be removed
-        assert run_id not in callback._span_context_tokens
-
-    def test_cleanup_detaches_all_context_tokens(
-        self, callback: UiPathTracingCallback, span_exporter
-    ) -> None:
-        """Test that cleanup detaches all remaining context tokens."""
-        run_id1 = uuid4()
-        run_id2 = uuid4()
-
-        callback.on_tool_start({"name": "tool1"}, "input", run_id=run_id1)
-        callback.on_tool_start({"name": "tool2"}, "input", run_id=run_id2)
-
-        assert len(callback._span_context_tokens) == 2
-
-        callback.cleanup()
-
-        assert len(callback._span_context_tokens) == 0
-
-
 class TestGuardrailActionDetection:
     """Tests for guardrail action detection from action nodes."""
 

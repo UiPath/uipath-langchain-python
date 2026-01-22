@@ -9,15 +9,12 @@ Key feature: Spans are created on START (not just end) for real-time visibility.
 import json
 import logging
 import re
-from contextvars import Token
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
-from opentelemetry import context, trace
-from opentelemetry.context import Context
 from opentelemetry.trace import Span
 
 from .schema import GUARDRAIL_VALIDATION_RESULT_KEY, INNER_STATE_KEY
@@ -80,7 +77,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._agent_span: Optional[Span] = None
         # LLM spans stored at run_id, model spans at run_id ^ 1 (XOR with 1)
         self._spans: Dict[UUID, Span] = {}
-        self._span_context_tokens: Dict[UUID, Token[Context]] = {}
         self._prompts_captured: bool = False
         # Pending interruptible tool spans (for suspend/resume)
         self._pending_tool_name: Optional[str] = None
@@ -108,7 +104,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
     def set_agent_span(self, agent_span: Span) -> None:
         self._agent_span = agent_span
         self._spans.clear()
-        self._span_context_tokens.clear()
         self._prompts_captured = False
         self._pending_tool_name = None
         self._pending_tool_span = None
@@ -356,9 +351,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 self._spans[run_id] = span
                 self._current_tool_span = span
 
-            span_context_token = context.attach(trace.set_span_in_context(span))
-            self._span_context_tokens[run_id] = span_context_token
-
             call_id = kwargs.get("tool_call_id")
             if call_id:
                 span.set_attribute("callId", call_id)
@@ -416,13 +408,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 if child_span == self._pending_process_span:
                     self._pending_process_span = None
 
-            span_context_token = self._span_context_tokens.pop(run_id, None)
-            if span_context_token:
-                try:
-                    context.detach(span_context_token)
-                except ValueError:
-                    pass
-
             span = self._spans.pop(run_id, None)
             if span:
                 self._set_tool_result(span, output)
@@ -475,13 +460,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
             child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
             if child_span:
                 self._tracer.end_span_error(child_span, exc)
-
-            span_context_token = self._span_context_tokens.pop(run_id, None)
-            if span_context_token:
-                try:
-                    context.detach(span_context_token)
-                except ValueError:
-                    pass
 
             span = self._spans.pop(run_id, None)
             if span:
@@ -877,13 +855,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
             logger.exception("Error in on_chain_error callback (guardrail)")
 
     def cleanup(self) -> None:
-        for span_context_token in self._span_context_tokens.values():
-            try:
-                context.detach(span_context_token)
-            except Exception:
-                pass
-        self._span_context_tokens.clear()
-
         for span in self._spans.values():
             # Skip pending interruptible spans - upserted with RUNNING, completed on resume
             if span is self._pending_tool_span or span is self._pending_process_span:
