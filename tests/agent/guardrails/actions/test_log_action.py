@@ -39,7 +39,10 @@ class TestLogAction:
         with caplog.at_level(logging.ERROR):
             result = await node(
                 AgentGuardrailsGraphState(
-                    messages=[], guardrail_validation_result="ignored"
+                    messages=[],
+                    inner_state=InnerAgentGuardrailsGraphState(
+                        guardrail_validation_details="ignored"
+                    ),
                 )
             )
 
@@ -88,7 +91,8 @@ class TestLogAction:
                 AgentGuardrailsGraphState(
                     messages=[],
                     inner_state=InnerAgentGuardrailsGraphState(
-                        guardrail_validation_result="bad input"
+                        guardrail_validation_result=False,
+                        guardrail_validation_details="bad input",
                     ),
                 )
             )

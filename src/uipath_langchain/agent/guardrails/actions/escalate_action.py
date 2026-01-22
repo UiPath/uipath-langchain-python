@@ -89,7 +89,7 @@ class EscalateAction(GuardrailAction):
                 "GuardrailDescription": guardrail.description,
                 "Component": _build_component_name(scope, guarded_component_name),
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
-                "GuardrailResult": state.inner_state.guardrail_validation_result,
+                "GuardrailResult": state.inner_state.guardrail_validation_details,
             }
 
             # Add tenant and trace URL if base_url is configured
