@@ -88,7 +88,7 @@ async def create_mcp_tools(
             httpx.AsyncClient(**client_kwargs)
         )
         read, write, _ = await stack.enter_async_context(
-            streamable_http_client(url=url, http_client=http_client)
+            streamable_http_client(url=url, http_client=http_client, terminate_on_close=False)
         )
         return await stack.enter_async_context(ClientSession(read, write))
 
