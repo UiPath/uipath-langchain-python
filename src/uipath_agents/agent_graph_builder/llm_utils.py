@@ -1,5 +1,5 @@
 from langchain_core.language_models import BaseChatModel
-from uipath_langchain.llm.passthrough_factory import get_chat_model
+from uipath_langchain.chat.chat_model_factory import get_chat_model
 
 from uipath_agents.agent_graph_builder.config import AgentExecutionType
 

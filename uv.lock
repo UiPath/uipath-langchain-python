@@ -332,56 +332,56 @@ wheels = [
 
 [[package]]
 name = "boto3"
-version = "1.42.31"
+version = "1.42.32"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore" },
     { name = "jmespath" },
     { name = "s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a4/da/d81abc51bd35c2d2154f1caa0040843ada7df1689ea17d51c116c793b8f0/boto3-1.42.31.tar.gz", hash = "sha256:b2038fc5dbcd6746a16ada8d55fe73659b8cf95c7b6aeb63fe782e831485edaa", size = 112803, upload-time = "2026-01-20T21:04:45.292Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/68/73/2a8065918dcc9f07046f7e87e17f54a62914a8b7f1f9e506799ec533d2e9/boto3-1.42.32.tar.gz", hash = "sha256:0ba535985f139cf38455efd91f3801fe72e5cce6ded2df5aadfd63177d509675", size = 112830, upload-time = "2026-01-21T20:40:10.891Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fd/4d/2a2830424f11d575f7ca2abdff889138f212c7dd3f1dde2b2994a779a5ab/boto3-1.42.31-py3-none-any.whl", hash = "sha256:7f04b4cd7c375e4d88cc2cba3022c40805012ce8f57468b82cedb1bcd6b3a58a", size = 140572, upload-time = "2026-01-20T21:04:43.112Z" },
+    { url = "https://files.pythonhosted.org/packages/60/e3/c86658f1fd0191aa8131cb1baacd337b037546d902980ea5a9c8f0c5cd9b/boto3-1.42.32-py3-none-any.whl", hash = "sha256:695ac7e62dfde28cc1d3b28a581cce37c53c729d48ea0f4cd0dbf599856850cf", size = 140573, upload-time = "2026-01-21T20:40:09.1Z" },
 ]
 
 [[package]]
 name = "boto3-stubs"
-version = "1.42.31"
+version = "1.42.32"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore-stubs" },
     { name = "types-s3transfer" },
     { name = "typing-extensions", marker = "python_full_version < '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/ec/c316ec393455daeaa543f4d44779157d2e65cb340c07cd1efbf33cff414e/boto3_stubs-1.42.31.tar.gz", hash = "sha256:bb0d8c936e29381d38cb724bf52197b1fdb63811707e052e842c1223545a0df7", size = 100901, upload-time = "2026-01-20T21:24:04.797Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/16/79/f7e536663d0136dc2771467307d866132e6c240f3a4291b02f7d6cfbfb6f/boto3_stubs-1.42.32.tar.gz", hash = "sha256:6fe9c8fd16aec68e4693d53b2155ad5c11d0a1984610622bcd3a6eb003787648", size = 100901, upload-time = "2026-01-21T20:59:18.275Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/25/ec/2ee40e05209758b91ef665b014479becbe2af77ca9ea814447a70e84d9a9/boto3_stubs-1.42.31-py3-none-any.whl", hash = "sha256:5abda7807fb0a04ea87309d7a5ab983c856a1d339a911b92d0edcfbce91834be", size = 69781, upload-time = "2026-01-20T21:24:01.46Z" },
+    { url = "https://files.pythonhosted.org/packages/17/3a/ede6bbb4cd40eb18086d4ad180176cc07666de88a0bc868392012e4c5bb9/boto3_stubs-1.42.32-py3-none-any.whl", hash = "sha256:722629d882efacc9a7c4744748493c8bec1d0441ce81b1537f4238c293202082", size = 69784, upload-time = "2026-01-21T20:59:14.456Z" },
 ]
 
 [[package]]
 name = "botocore"
-version = "1.42.31"
+version = "1.42.32"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jmespath" },
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ab/78/4fd91ed2f9d4b500680f33c714b7716fc37690083a8c8d3e94177cbc811e/botocore-1.42.31.tar.gz", hash = "sha256:62f2c31e229df625612dd4d7c72618948e4064436d71a647102f36fcddfa0f4d", size = 14895682, upload-time = "2026-01-20T21:04:32.999Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/21/5e/84404e094be8e2145c7f6bb8b3709193bc4488c385edffc6cc6890b5c88b/botocore-1.42.32.tar.gz", hash = "sha256:4c0a9fe23e060c019e327cd5e4ea1976a1343faba74e5301ebfc9549cc584ccb", size = 14898756, upload-time = "2026-01-21T20:39:59.698Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/c3/6898ecbfc140754fc90702c43e63c2b13017cac345cd3015df404cfeb3e9/botocore-1.42.31-py3-none-any.whl", hash = "sha256:021346ad57cc3018acf4a46edc1f649b9818b33c07a08674ce1c36e9edbb5859", size = 14569714, upload-time = "2026-01-20T21:04:29.495Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/ab/55062f6eaf9fc537b62b7425ab53ef4366032256e1dda8ef52a9a31f7a6e/botocore-1.42.32-py3-none-any.whl", hash = "sha256:9c1ce43687cc4c0bba12054b229b3464265c699e2de4723998d86791254a5a37", size = 14573367, upload-time = "2026-01-21T20:39:56.65Z" },
 ]
 
 [[package]]
 name = "botocore-stubs"
-version = "1.42.31"
+version = "1.42.32"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "types-awscrt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/82/1d/5be12f86e2095b0318f95d32c724acdb6f275e59a1052b7180e58c8e52c3/botocore_stubs-1.42.31.tar.gz", hash = "sha256:e7e762e37b205c7ba79782c67cc5c35151748ce267470a70ac9c026083655d9f", size = 42413, upload-time = "2026-01-20T21:28:08.37Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c6/e8/eecc32d793c72253c39a342b3a2b91dfdf62fffc4294b2247275c3feac72/botocore_stubs-1.42.32.tar.gz", hash = "sha256:53027f37ffd7d440d9a2d8dd84571717e11d8404f1e8dbbe75119640ad3fc8f9", size = 42402, upload-time = "2026-01-21T21:34:03.361Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/40/c9/724dfd7cb610d93899df71e70faf5626ee82c86f139b90ae70c2dab22ce3/botocore_stubs-1.42.31-py3-none-any.whl", hash = "sha256:b6ae47a39a6c185e610b7bbf087923dc83e54a52378ad74aff76a6708850d38d", size = 66760, upload-time = "2026-01-20T21:28:06.697Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/5d/87bce4077f260d0c91b65ff60c2007cb016faa99ec8028400a4e35d84d80/botocore_stubs-1.42.32-py3-none-any.whl", hash = "sha256:b11fd20ee281283b84857eac7a1a75e25dc16f0fa611f36c2970a7e9498a7848", size = 66761, upload-time = "2026-01-21T21:34:01.635Z" },
 ]
 
 [[package]]
@@ -1034,7 +1034,7 @@ wheels = [
 
 [[package]]
 name = "google-genai"
-version = "1.59.0"
+version = "1.60.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1048,9 +1048,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/40/34/c03bcbc759d67ac3d96077838cdc1eac85417de6ea3b65b313fe53043eee/google_genai-1.59.0.tar.gz", hash = "sha256:0b7a2dc24582850ae57294209d8dfc2c4f5fcfde0a3f11d81dc5aca75fb619e2", size = 487374, upload-time = "2026-01-15T20:29:46.619Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0a/3f/a753be0dcee352b7d63bc6d1ba14a72591d63b6391dac0cdff7ac168c530/google_genai-1.60.0.tar.gz", hash = "sha256:9768061775fddfaecfefb0d6d7a6cabefb3952ebd246cd5f65247151c07d33d1", size = 487721, upload-time = "2026-01-21T22:17:30.398Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/aa/53/6d00692fe50d73409b3406ae90c71bc4499c8ae7fac377ba16e283da917c/google_genai-1.59.0-py3-none-any.whl", hash = "sha256:59fc01a225d074fe9d1e626c3433da292f33249dadce4deb34edea698305a6df", size = 719099, upload-time = "2026-01-15T20:29:44.604Z" },
+    { url = "https://files.pythonhosted.org/packages/31/e5/384b1f383917b5f0ae92e28f47bc27b16e3d26cd9bacb25e9f8ecab3c8fe/google_genai-1.60.0-py3-none-any.whl", hash = "sha256:967338378ffecebec19a8ed90cf8797b26818bacbefd7846a9280beb1099f7f3", size = 719431, upload-time = "2026-01-21T22:17:28.086Z" },
 ]
 
 [[package]]
@@ -3962,7 +3962,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.5.26"
+version = "2.5.28"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -3983,9 +3983,9 @@ dependencies = [
     { name = "uipath-core" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4b/f8/0b86d70dec5392b969d20840c14843ac536cdb0a1d259510fa0a195d466e/uipath-2.5.26.tar.gz", hash = "sha256:1855fa224484c60869dd764df2ab840000dd148b97957a995099bcc85d3915c3", size = 3899269, upload-time = "2026-01-21T16:32:08.143Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/87/6cd1568a8c617fda495ef3bf4bb6d76294f08fec4122dd5499343e92fdba/uipath-2.5.28.tar.gz", hash = "sha256:3ed84af2a4f38b05cd01710dc35d452a7590ceff1fed5f0573b0fa4c799aebc5", size = 3900594, upload-time = "2026-01-22T14:51:30.105Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/3f/b9ec248bd1f53892c2e94679097da0acb7f0cc00cbf62e73dcca6f79f919/uipath-2.5.26-py3-none-any.whl", hash = "sha256:e974e61aeef838fb2982fc186ae51a81e8fe3fced9695356d1aa0aed9fea0aff", size = 449620, upload-time = "2026-01-21T16:32:06.718Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/69/d913a963079dd6a55973b69135ce9854b48f315f5a7db0595425d31c46d0/uipath-2.5.28-py3-none-any.whl", hash = "sha256:5bfb80b3f055b6047e08bac6c9f2d0437e4c0d2e88a34b654a3436b3fedd6391", size = 451479, upload-time = "2026-01-22T14:51:27.369Z" },
 ]
 
 [[package]]
@@ -4023,8 +4023,8 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.0.0,<2.0.0" },
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.60b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.60b0" },
-    { name = "uipath", specifier = "==2.5.26" },
-    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.4.24" },
+    { name = "uipath", specifier = "==2.5.28" },
+    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.4.26" },
 ]
 
 [package.metadata.requires-dev]
@@ -4073,7 +4073,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.4.24"
+version = "0.4.26"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
@@ -4093,9 +4093,9 @@ dependencies = [
     { name = "uipath" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/43/a7/e0254ec9e0b25b2ab5223a74ca40df673448ebd9c460f6a420b044f83cc8/uipath_langchain-0.4.24.tar.gz", hash = "sha256:d2557a6296d98d8ec9bad5743eaac4729684a2af85cdd1ab742a45f19a5ad2fe", size = 8123542, upload-time = "2026-01-22T14:10:43.256Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/47/16/ecaa93607c47023d231d5c19e835677bf522ce2d415dc4cc812687a0e7c0/uipath_langchain-0.4.26.tar.gz", hash = "sha256:4cc56dedd5131c29fdfbea3736f453fe7529d68108c43f92a261823f6a6456e8", size = 8319258, upload-time = "2026-01-22T15:08:34.014Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ee/d3/d5950b6dfbd272c665dc32805d7926ff74d7710afb65bb058b3811ee53ad/uipath_langchain-0.4.24-py3-none-any.whl", hash = "sha256:b834d2a8f54c3aa66d94b8c0bfe6e09d9b9e644be40c03078f790f3d1427fe6e", size = 136775, upload-time = "2026-01-22T14:10:41.52Z" },
+    { url = "https://files.pythonhosted.org/packages/95/72/480d54fd39ac53ce09f057ed059e41b7b94f9c86b3a26e9a53c87dee2568/uipath_langchain-0.4.26-py3-none-any.whl", hash = "sha256:e1add2a270bec764c7957797c3ec13524c91059407e1709b2f5ba44be82a7d7a", size = 137700, upload-time = "2026-01-22T15:08:32.26Z" },
 ]
 
 [package.optional-dependencies]
