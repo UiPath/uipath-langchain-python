@@ -109,7 +109,10 @@ def _create_validation_command(
         return Command(
             goto=success_node,
             update={
-                "inner_state": {"guardrail_validation_result": guardrail_result.reason}
+                "inner_state": {
+                    "guardrail_validation_result": True,
+                    "guardrail_validation_details": guardrail_result.reason,
+                }
             },
         )
 
@@ -117,7 +120,10 @@ def _create_validation_command(
         return Command(
             goto=failure_node,
             update={
-                "inner_state": {"guardrail_validation_result": guardrail_result.reason}
+                "inner_state": {
+                    "guardrail_validation_result": False,
+                    "guardrail_validation_details": guardrail_result.reason,
+                }
             },
         )
 

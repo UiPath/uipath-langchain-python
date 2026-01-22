@@ -28,7 +28,8 @@ class InnerAgentGraphState(BaseModel):
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
     """Extended inner state for guardrails subgraph."""
 
-    guardrail_validation_result: Optional[str] = None
+    guardrail_validation_result: Optional[bool] = None
+    guardrail_validation_details: Optional[str] = None
     agent_result: Optional[dict[str, Any]] = None
 
 

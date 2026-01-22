@@ -49,7 +49,7 @@ class LogAction(GuardrailAction):
         async def _node(_state: AgentGuardrailsGraphState) -> dict[str, Any]:
             message = (
                 self.message
-                or f"Guardrail [{guardrail.name}] validation failed for [{scope.name}] [{execution_stage.name}] with the following reason: {_state.inner_state.guardrail_validation_result}"
+                or f"Guardrail [{guardrail.name}] validation failed for [{scope.name}] [{execution_stage.name}] with the following reason: {_state.inner_state.guardrail_validation_details}"
             )
 
             logger.log(self.level, message)

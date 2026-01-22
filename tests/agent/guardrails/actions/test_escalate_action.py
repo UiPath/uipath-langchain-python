@@ -160,7 +160,7 @@ class TestEscalateAction:
             state = AgentGuardrailsGraphState(
                 messages=[HumanMessage(content="Test message")],
                 inner_state=InnerAgentGuardrailsGraphState(
-                    guardrail_validation_result="Validation failed"
+                    guardrail_validation_details="Validation failed"
                 ),
             )
         else:
@@ -171,7 +171,7 @@ class TestEscalateAction:
                     HumanMessage(content="Output message"),
                 ],
                 inner_state=InnerAgentGuardrailsGraphState(
-                    guardrail_validation_result="Validation failed"
+                    guardrail_validation_details="Validation failed"
                 ),
             )
 
@@ -238,7 +238,7 @@ class TestEscalateAction:
             ],
             inner_state=InnerAgentGuardrailsGraphState(
                 agent_result={"ok": True},
-                guardrail_validation_result="Validation failed",
+                guardrail_validation_details="Validation failed",
             ),
         )
 
@@ -855,7 +855,7 @@ class TestEscalateAction:
         )
         state = AgentGuardrailsGraphState(
             messages=[ai_message],
-            guardrail_validation_result="Validation failed",
+            guardrail_validation_details="Validation failed",
         )
 
         await node(state)

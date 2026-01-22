@@ -106,7 +106,10 @@ class TestLlmGuardrailNodes:
         cmd = await node(state)
         assert cmd.goto == "ok"
         assert cmd.update == {
-            "inner_state": {"guardrail_validation_result": "validation passed"}
+            "inner_state": {
+                "guardrail_validation_result": True,
+                "guardrail_validation_details": "validation passed",
+            }
         }
 
     @pytest.mark.asyncio
@@ -142,7 +145,10 @@ class TestLlmGuardrailNodes:
         cmd = await node(state)
         assert cmd.goto == "nope"
         assert cmd.update == {
-            "inner_state": {"guardrail_validation_result": "policy_violation"}
+            "inner_state": {
+                "guardrail_validation_result": False,
+                "guardrail_validation_details": "policy_violation",
+            }
         }
 
 
@@ -183,7 +189,10 @@ class TestAgentInitGuardrailNodes:
         cmd = await node(state)
         assert cmd.goto == "ok"
         assert cmd.update == {
-            "inner_state": {"guardrail_validation_result": "validation passed"}
+            "inner_state": {
+                "guardrail_validation_result": True,
+                "guardrail_validation_details": "validation passed",
+            }
         }
         assert fake.guardrails.last_text == "payload"
 
@@ -223,7 +232,10 @@ class TestAgentInitGuardrailNodes:
         cmd = await node(state)
         assert cmd.goto == "nope"
         assert cmd.update == {
-            "inner_state": {"guardrail_validation_result": "policy_violation"}
+            "inner_state": {
+                "guardrail_validation_result": False,
+                "guardrail_validation_details": "policy_violation",
+            }
         }
 
 
@@ -268,7 +280,10 @@ class TestAgentTerminateGuardrailNodes:
         cmd = await node(state)
         assert cmd.goto == "ok"
         assert cmd.update == {
-            "inner_state": {"guardrail_validation_result": "validation passed"}
+            "inner_state": {
+                "guardrail_validation_result": True,
+                "guardrail_validation_details": "validation passed",
+            }
         }
         assert fake.guardrails.last_text == str(agent_result)
 
@@ -311,7 +326,10 @@ class TestAgentTerminateGuardrailNodes:
         cmd = await node(state)
         assert cmd.goto == "nope"
         assert cmd.update == {
-            "inner_state": {"guardrail_validation_result": "policy_violation"}
+            "inner_state": {
+                "guardrail_validation_result": False,
+                "guardrail_validation_details": "policy_violation",
+            }
         }
 
 
@@ -360,7 +378,12 @@ class TestToolGuardrailNodes:
             )
             cmd = await node(state)
             assert cmd.goto == "ok"
-            assert cmd.update == {"inner_state": {"guardrail_validation_result": ""}}
+            assert cmd.update == {
+                "inner_state": {
+                    "guardrail_validation_result": True,
+                    "guardrail_validation_details": "",
+                }
+            }
             assert json.loads(fake.guardrails.last_text or "{}") == {"x": 1}
         else:
             state = AgentGuardrailsGraphState(
@@ -368,7 +391,12 @@ class TestToolGuardrailNodes:
             )
             cmd = await node(state)
             assert cmd.goto == "ok"
-            assert cmd.update == {"inner_state": {"guardrail_validation_result": ""}}
+            assert cmd.update == {
+                "inner_state": {
+                    "guardrail_validation_result": True,
+                    "guardrail_validation_details": "",
+                }
+            }
             assert fake.guardrails.last_text == "tool output"
 
     @pytest.mark.asyncio
@@ -423,7 +451,10 @@ class TestToolGuardrailNodes:
         cmd = await node(state)
         assert cmd.goto == "nope"
         assert cmd.update == {
-            "inner_state": {"guardrail_validation_result": "policy_violation"}
+            "inner_state": {
+                "guardrail_validation_result": False,
+                "guardrail_validation_details": "policy_violation",
+            }
         }
 
 
@@ -552,7 +583,10 @@ class TestGuardrailHelperFunctions:
 
         assert command.goto == "success_node"
         assert command.update == {
-            "inner_state": {"guardrail_validation_result": "validation passed"}
+            "inner_state": {
+                "guardrail_validation_result": True,
+                "guardrail_validation_details": "validation passed",
+            }
         }
 
     def test_create_validation_command_failure(self):
@@ -569,7 +603,10 @@ class TestGuardrailHelperFunctions:
 
         assert command.goto == "failure_node"
         assert command.update == {
-            "inner_state": {"guardrail_validation_result": "policy_violation"}
+            "inner_state": {
+                "guardrail_validation_result": False,
+                "guardrail_validation_details": "policy_violation",
+            }
         }
 
     def test_create_validation_command_feature_disabled_raises_exception(self):
