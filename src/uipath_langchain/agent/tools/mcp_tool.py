@@ -38,9 +38,19 @@ async def create_mcp_tools(
     max_concurrency: int = 5,
 ):
     """Connect to UiPath MCP server(s) and yield LangChain-compatible tools."""
-    if not (base_url := os.getenv("UIPATH_URL")):
+    # Use AGENTHUB_URL if set (for local development with local AgentHub),
+    # otherwise fall back to UIPATH_URL (for cloud or local-only setup)
+    base_url = os.getenv("AGENTHUB_URL") or os.getenv("UIPATH_URL")
+    if not base_url:
         raise ValueError("UIPATH_URL environment variable is not set")
-    if not (access_token := os.getenv("UIPATH_ACCESS_TOKEN")):
+
+    # HYBRID MODE: Use AGENTHUB_ACCESS_TOKEN if set (for local AgentHub in hybrid mode),
+    # otherwise use UIPATH_ACCESS_TOKEN (for cloud or local-only mode)
+    # This allows hybrid setup where:
+    # - UIPATH_URL + UIPATH_ACCESS_TOKEN → cloud Platform (LLM, Assets, etc.)
+    # - AGENTHUB_URL + AGENTHUB_ACCESS_TOKEN → local AgentHub (MCP tools)
+    access_token = os.getenv("AGENTHUB_ACCESS_TOKEN") or os.getenv("UIPATH_ACCESS_TOKEN")
+    if not access_token:
         raise ValueError("UIPATH_ACCESS_TOKEN environment variable is not set")
 
     configs = config if isinstance(config, list) else [config]
