@@ -127,6 +127,7 @@ class AwsBedrockCompletionsPassthroughClient:
 class UiPathChatBedrockConverse(ChatBedrockConverse):
     llm_provider: LLMProvider = LLMProvider.BEDROCK
     api_flavor: APIFlavor = APIFlavor.AWS_BEDROCK_CONVERSE
+    model: str = ""  # For tracing serialization
 
     def __init__(
         self,
@@ -167,11 +168,13 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
         kwargs["client"] = client
         kwargs["model"] = model_name
         super().__init__(**kwargs)
+        self.model = model_name
 
 
 class UiPathChatBedrock(ChatBedrock):
     llm_provider: LLMProvider = LLMProvider.BEDROCK
     api_flavor: APIFlavor = APIFlavor.AWS_BEDROCK_INVOKE
+    model: str = ""  # For tracing serialization
 
     def __init__(
         self,
@@ -212,3 +215,4 @@ class UiPathChatBedrock(ChatBedrock):
         kwargs["client"] = client
         kwargs["model"] = model_name
         super().__init__(**kwargs)
+        self.model = model_name
