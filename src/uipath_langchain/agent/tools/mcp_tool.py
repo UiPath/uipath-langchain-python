@@ -6,9 +6,6 @@ from itertools import chain
 
 import httpx
 from langchain_core.tools import BaseTool
-from langchain_mcp_adapters.tools import load_mcp_tools
-from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import AgentMcpResourceConfig
 
@@ -59,6 +56,11 @@ async def create_mcp_tools(
         "headers": {"Authorization": f"Bearer {access_token}"},
         "timeout": httpx.Timeout(60),
     }
+
+    # Lazy import to improve cold start time
+    from langchain_mcp_adapters.tools import load_mcp_tools
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
 
     async def init_session(
         session: ClientSession, cfg: AgentMcpResourceConfig
