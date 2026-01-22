@@ -1,8 +1,10 @@
+import json
 import logging
 import os
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
+from langchain_core.language_models import LanguageModelInput
 from langchain_openai import AzureChatOpenAI
 from pydantic import PrivateAttr
 from uipath._utils._ssl_context import get_httpx_client_kwargs
@@ -180,3 +182,47 @@ class UiPathChatOpenAI(AzureChatOpenAI):
                 raise ValueError("UIPATH_URL environment variable is required")
 
         return self._url
+
+    def _get_request_payload(
+        self,
+        input_: LanguageModelInput,
+        *,
+        stop: list[str] | None = None,
+        **kwargs: Any,
+    ) -> dict[Any, Any]:
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+
+        # Handle both Responses API (input array) and Chat Completions API (messages array)
+        if "input" in payload:
+            # Responses API format - arguments should remain as JSON strings
+            for item in payload["input"]:
+                if item.get("type") == "function_call":
+                    # Ensure arguments exists and is a valid JSON string
+                    if "arguments" not in item or not item["arguments"]:
+                        item["arguments"] = "{}"
+                    elif not isinstance(item["arguments"], str):
+                        # If it's already a dict/object, convert back to JSON string
+                        item["arguments"] = json.dumps(item["arguments"])
+                elif item.get("type") == "function_call_output":
+                    # Ensure output exists
+                    if "output" not in item:
+                        item["output"] = ""
+        elif "messages" in payload:
+            # Chat Completions API format - transform messages array
+            for message in payload["messages"]:
+                if message.get("content") is None:
+                    message["content"] = ""
+                if "tool_calls" in message:
+                    for tool_call in message["tool_calls"]:
+                        tool_call["name"] = tool_call["function"]["name"]
+                        arguments_str = tool_call["function"].get("arguments", "{}")
+                        try:
+                            tool_call["arguments"] = json.loads(arguments_str) if arguments_str else {}
+                        except (json.JSONDecodeError, ValueError):
+                            tool_call["arguments"] = {}
+                if message.get("role") == "tool":
+                    message["content"] = {
+                        "result": message["content"],
+                        "call_id": message["tool_call_id"],
+                    }
+        return payload
