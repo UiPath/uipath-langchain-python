@@ -77,9 +77,10 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         Returns:
             Configured runtime instance with compiled graph
         """
-        agent_definition = self._load_agent_definition(
-            entrypoint, kwargs.get("settings")
-        )
+        # Extract settings override from kwargs to pass through method chain
+        settings = kwargs.get("settings")
+
+        agent_definition = self._load_agent_definition(entrypoint, settings)
 
         # Get shared memory instance
         memory = await self._get_memory()
@@ -116,7 +117,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
 
         Args:
             entrypoint: Agent file path (agent.json)
-            settings: Optional settings to apply to the agent definition
+            settings: Optional settings override to apply to agent definition
         Returns:
             Prepared AgentDefinition
 
@@ -127,26 +128,16 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             agent_json_path = Path.cwd() / entrypoint
             agent_definition = load_agent_configuration(agent_json_path)
 
+            # Apply settings override if provided
+            if settings:
+                agent_definition = self._apply_settings_override(
+                    agent_definition, settings
+                )
+
             if agent_definition.is_conversational:
                 agent_definition.input_schema = (
                     self._get_conversational_agent_input_schema()
                 )
-
-            if settings:
-                # Use case is evaluation runs where we want to
-                # override the agent's default model settings
-                model_name = str(settings.get("model_name"))
-                if model_name != "same-as-agent":
-                    agent_definition.settings.model = model_name
-                temperature = settings.get("temperature")
-                if temperature not in ["same-as-agent", None]:
-                    if isinstance(temperature, (int, float)):
-                        agent_definition.settings.temperature = float(temperature)
-                    elif isinstance(temperature, str):
-                        try:
-                            agent_definition.settings.temperature = float(temperature)
-                        except ValueError:
-                            pass  # Ignore invalid temperature strings
 
             return agent_definition
 
@@ -164,6 +155,44 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
                 f"Unexpected error loading agent '{entrypoint}': {str(e)}",
                 UiPathErrorCategory.USER,
             ) from e
+
+    def _apply_settings_override(
+        self, agent_definition: Any, settings: dict[str, Any]
+    ) -> Any:
+        """Apply settings override to agent definition.
+
+        Args:
+            agent_definition: The loaded agent definition from agent.json
+            settings: Settings override dict with keys like 'model', 'temperature', etc.
+
+        Returns:
+            Agent definition with settings overridden
+        """
+        # Get current settings and apply overrides
+        current_settings = agent_definition.settings
+        override = settings
+
+        # Create updated settings dict
+        updated_settings = {
+            "engine": override.get("engine", current_settings.engine),
+            "model": override.get("model", current_settings.model),
+            "maxTokens": override.get("max_tokens", current_settings.max_tokens),
+            "temperature": override.get("temperature", current_settings.temperature),
+        }
+
+        logger.info(
+            f"Applying settings override: model='{updated_settings['model']}', "
+            f"temperature={updated_settings['temperature']}"
+        )
+
+        # Create a copy of agent_definition with updated settings
+        agent_dict = agent_definition.model_dump(by_alias=True)
+        agent_dict["settings"] = updated_settings
+
+        # Reconstruct the agent definition
+        from uipath.agent.models.agent import LowCodeAgentDefinition
+
+        return LowCodeAgentDefinition.model_validate(agent_dict)
 
     async def _load_graph(
         self, entrypoint: str, **kwargs: Any

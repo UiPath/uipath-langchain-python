@@ -82,9 +82,22 @@ class AgentsLangGraphRuntime(UiPathLangGraphRuntime):
         return None
 
     async def get_schema(self) -> UiPathRuntimeSchema:
-        """Return the runtime schema from the pre-loaded agent definition."""
+        """Return the runtime schema from the pre-loaded agent definition.
+
+        The schema includes agent settings (model, temperature, etc.) in the
+        metadata field, allowing evaluation tools to read and override them.
+        """
         if self.entrypoint is None:
             raise ValueError("Agent runtime requires an entrypoint to be set")
+
+        # Include agent settings in metadata for eval tools to access/override
+        metadata = None
+        if self._agent_definition.settings:
+            metadata = {
+                "settings": self._agent_definition.settings.model_dump(
+                    exclude_none=True
+                )
+            }
 
         return UiPathRuntimeSchema(
             filePath=self.entrypoint,
@@ -92,7 +105,5 @@ class AgentsLangGraphRuntime(UiPathLangGraphRuntime):
             type="agent",
             input=self._agent_definition.input_schema or {},
             output=self._agent_definition.output_schema or {},
-            metadata={
-                "model": self.get_agent_model()
-            },  # include model in metadata for same-as-agent resolution
+            metadata=metadata,
         )
