@@ -14,7 +14,7 @@ from uipath_langchain.agent.tools.static_args import (
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
-from uipath_langchain.llm import get_payload_handler
+from uipath_langchain.chat.handlers import get_payload_handler
 
 from ..exceptions import AgentTerminationException
 from .constants import (
