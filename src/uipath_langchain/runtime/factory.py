@@ -60,6 +60,35 @@ class UiPathLangGraphRuntimeFactory:
         UiPathSpanUtils.register_current_span_provider(get_current_span)
         UiPathSpanUtils.register_current_span_ancestors_provider(get_ancestor_spans)
 
+        # Instrument httpx to capture MCP and AgentHub HTTP calls
+        if trace_manager:
+            try:
+                from opentelemetry import trace
+                from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+                # Set the global tracer provider to the UiPath one for proper context propagation
+                # This ensures httpx instrumentation uses the same TracerProvider and inherits trace context
+                trace.set_tracer_provider(trace_manager.tracer_provider)
+
+                # Instrument httpx - it will now use the global (UiPath) tracer provider
+                HTTPXClientInstrumentor().instrument()
+                print("✅ Instrumented httpx for MCP and AgentHub tracing")
+            except ImportError:
+                print("⚠️  httpx instrumentation not available - install opentelemetry-instrumentation-httpx")
+
+        # Add OTLP exporter for Aspire if configured
+        otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if otlp_endpoint and trace_manager:
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+            # Use GRPC exporter for Aspire (port 18889)
+            otlp_exporter = OTLPSpanExporter(
+                endpoint=otlp_endpoint,
+                insecure=True  # Local Aspire doesn't use TLS
+            )
+            trace_manager.add_span_exporter(otlp_exporter, batch=True)
+            print(f"✅ Added OTLP GRPC exporter: {otlp_endpoint}")
+
     def _get_connection_string(self) -> str:
         """Get the database connection string."""
         if self.context.state_file_path is not None:
