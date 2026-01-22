@@ -14,7 +14,7 @@ from uipath.agent.models.agent import (
     AgentEscalationResourceConfig,
     AgentIntegrationToolProperties,
     AgentIntegrationToolResourceConfig,
-    AgentInternalToolProperties,
+    AgentInternalAnalyzeFilesToolProperties,
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
     AgentIxpExtractionResourceConfig,
@@ -154,7 +154,7 @@ def internal_resource() -> AgentInternalToolResourceConfig:
             },
         },
         output_schema=EMPTY_SCHEMA,
-        properties=AgentInternalToolProperties(
+        properties=AgentInternalAnalyzeFilesToolProperties(
             tool_type=AgentInternalToolType.ANALYZE_FILES,
         ),
     )
