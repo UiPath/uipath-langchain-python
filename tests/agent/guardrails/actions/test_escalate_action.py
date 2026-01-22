@@ -13,6 +13,7 @@ from uipath.agent.models.agent import (
     AssetRecipient,
     StandardRecipient,
 )
+from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 from uipath.platform.guardrails import GuardrailScope
 from uipath.runtime.errors import UiPathErrorCode
 
@@ -184,7 +185,10 @@ class TestEscalateAction:
         assert call_args.app_name == "TestApp"
         assert call_args.app_folder_path == "TestFolder"
         assert call_args.title == "Agents Guardrail Task"
-        assert call_args.assignee == "test@example.com"
+        assert call_args.assignee == ""
+        assert call_args.recipient == TaskRecipient(
+            value="test@example.com", type=TaskRecipientType.EMAIL
+        )
         assert call_args.data["GuardrailName"] == "Test Guardrail"
         assert call_args.data["GuardrailDescription"] == "Test description"
         assert call_args.data["ExecutionStage"] == expected_stage
@@ -248,7 +252,10 @@ class TestEscalateAction:
         assert call_args.app_name == "TestApp"
         assert call_args.app_folder_path == "TestFolder"
         assert call_args.title == "Agents Guardrail Task"
-        assert call_args.assignee == "test@example.com"
+        assert call_args.assignee == ""
+        assert call_args.recipient == TaskRecipient(
+            value="test@example.com", type=TaskRecipientType.EMAIL
+        )
         assert call_args.data["GuardrailName"] == "Test Guardrail"
         assert call_args.data["GuardrailDescription"] == "Test description"
         assert call_args.data["ExecutionStage"] == "PostExecution"
@@ -1524,10 +1531,22 @@ class TestEscalateAction:
     @pytest.mark.parametrize(
         "recipient,expected_value",
         [
-            (STANDARD_USER_EMAIL_RECIPIENT, "user@example.com"),
-            (STANDARD_GROUP_NAME_RECIPIENT, "AdminGroup"),
-            (ASSET_USER_EMAIL_RECIPIENT, "user@example.com"),
-            (ASSET_GROUP_NAME_RECIPIENT, "AdminGroup"),
+            (
+                STANDARD_USER_EMAIL_RECIPIENT,
+                TaskRecipient(value="user@example.com", type=TaskRecipientType.EMAIL),
+            ),
+            (
+                STANDARD_GROUP_NAME_RECIPIENT,
+                TaskRecipient(value="AdminGroup", type=TaskRecipientType.GROUP_NAME),
+            ),
+            (
+                ASSET_USER_EMAIL_RECIPIENT,
+                TaskRecipient(value="user@example.com", type=TaskRecipientType.EMAIL),
+            ),
+            (
+                ASSET_GROUP_NAME_RECIPIENT,
+                TaskRecipient(value="AdminGroup", type=TaskRecipientType.GROUP_NAME),
+            ),
         ],
     )
     @patch(
@@ -1575,7 +1594,7 @@ class TestEscalateAction:
         # Verify interrupt was called with the resolved assignee
         assert mock_interrupt.called
         call_args = mock_interrupt.call_args[0][0]
-        assert call_args.assignee == expected_value
+        assert call_args.recipient == expected_value
 
     @pytest.mark.asyncio
     @patch(

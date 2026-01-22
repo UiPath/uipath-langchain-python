@@ -9,12 +9,14 @@ from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipient,
+    AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
     AssetRecipient,
     StandardRecipient,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
+from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 from uipath.platform.common import CreateEscalation
 from uipath.runtime.errors import UiPathErrorCode
 
@@ -32,13 +34,24 @@ class EscalationAction(str, Enum):
     END = "end"
 
 
-async def resolve_recipient_value(recipient: AgentEscalationRecipient) -> str | None:
+async def resolve_recipient_value(
+    recipient: AgentEscalationRecipient,
+) -> TaskRecipient | None:
     """Resolve recipient value based on recipient type."""
     if isinstance(recipient, AssetRecipient):
-        return await resolve_asset(recipient.asset_name, recipient.folder_path)
+        value = await resolve_asset(recipient.asset_name, recipient.folder_path)
+        type = None
+        if recipient.type == AgentEscalationRecipientType.ASSET_USER_EMAIL:
+            type = TaskRecipientType.EMAIL
+        elif recipient.type == AgentEscalationRecipientType.ASSET_GROUP_NAME:
+            type = TaskRecipientType.GROUP_NAME
+        return TaskRecipient(value=value, type=type)
 
     if isinstance(recipient, StandardRecipient):
-        return recipient.value
+        type = TaskRecipientType(recipient.type)
+        if recipient.type == AgentEscalationRecipientType.USER_EMAIL:
+            type = TaskRecipientType.EMAIL
+        return TaskRecipient(value=recipient.value, type=type)
 
     return None
 
@@ -86,21 +99,21 @@ async def create_escalation_tool(
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
         task_title = channel.task_title or "Escalation Task"
 
-        assignee: str | None = (
+        recipient: TaskRecipient | None = (
             await resolve_recipient_value(channel.recipients[0])
             if channel.recipients
             else None
         )
 
-        # Assignee requires runtime resolution, store in metadata after resolving
+        # Recipient requires runtime resolution, store in metadata after resolving
         if tool.metadata is not None:
-            tool.metadata["assignee"] = assignee
+            tool.metadata["recipient"] = recipient
 
         result = interrupt(
             CreateEscalation(
                 title=task_title,
                 data=kwargs,
-                assignee=assignee,
+                recipient=recipient,
                 app_name=channel.properties.app_name,
                 app_folder_path=channel.properties.folder_name,
                 app_version=channel.properties.app_version,
