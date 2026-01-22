@@ -1,4 +1,5 @@
 from langchain.messages import AIMessage, ToolCall
+from langchain_core.messages.content import ContentBlock, create_tool_call
 
 
 def replace_tool_calls(message: AIMessage, tool_calls: list[ToolCall]) -> AIMessage:
@@ -17,11 +18,20 @@ def replace_tool_calls(message: AIMessage, tool_calls: list[ToolCall]) -> AIMess
         "output_version": "v1",  # we have to set this otherwise anthropic clients do not denormalize
     }
 
-    content_blocks = [
+    # ToolCall from langchain.messages is not the same type as ToolCall from langchain_core.messages.content
+    # they are both TypedDicts with the same fields, so it would be possible to just cast, but it's safer to map
+    tool_call_blocks = [
+        create_tool_call(
+            name=tool_call["name"], args=tool_call["args"], id=tool_call["id"]
+        )
+        for tool_call in tool_calls
+    ]
+
+    content_blocks: list[ContentBlock] = [
         block for block in message.content_blocks if block["type"] != "tool_call"
     ]
 
-    content_blocks.extend(tool_calls)
+    content_blocks.extend(tool_call_blocks)
 
     return AIMessage(
         content_blocks=content_blocks,
