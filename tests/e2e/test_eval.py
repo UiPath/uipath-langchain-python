@@ -332,6 +332,113 @@ class TestEvalExecution:
         assert_eval_success(returncode, eval_results, output)
 
     @pytest.mark.e2e
+    def test_calculator_same_as_agent_model_settings_override(
+        self, authenticated_session: dict[str, str], project_id: str
+    ):
+        """Test model settings override functionality with calculator_same_as_agent.
+
+        This test validates that:
+        1. --model-settings-id "default" works (uses same-as-agent, no override)
+        2. --model-settings-id with specific ID works (overrides agent model)
+        3. Evaluators with "same-as-agent" adapt to the overridden agent model
+        """
+        if not project_id:
+            pytest.skip("UIPATH_PROJECT_ID not set")
+
+        example_dir = EXAMPLES_DIR / "calculator_same_as_agent"
+        if not example_dir.exists():
+            pytest.skip("calculator_same_as_agent example not found")
+
+        # Test 1: Model settings ID "default" (same-as-agent)
+        command_default = [
+            "eval",
+            "agent.json",
+            "--model-settings-id",
+            "default",
+            "--no-report",
+        ]
+        result_default = run_uipath_command(
+            command=command_default,
+            cwd=example_dir,
+            env=authenticated_session,
+            timeout=300,
+        )
+
+        output_default = result_default.stdout + result_default.stderr
+        eval_results_default = parse_eval_output(output_default)
+
+        # Verify default works and uses original agent model
+        assert result_default.returncode == 0, (
+            f"Eval with --model-settings-id default failed:\n{output_default[:1000]}"
+        )
+        assert eval_results_default, (
+            f"No results with default settings:\n{output_default[:500]}"
+        )
+
+        # Test 2: Model settings ID with override (gpt-5-2025-08-07)
+        command_override = [
+            "eval",
+            "agent.json",
+            "--model-settings-id",
+            "604d96fd-5e89-484b-b750-ccf3f516e2e1",
+            "--no-report",
+        ]
+        result_override = run_uipath_command(
+            command=command_override,
+            cwd=example_dir,
+            env=authenticated_session,
+            timeout=300,
+        )
+
+        output_override = result_override.stdout + result_override.stderr
+        eval_results_override = parse_eval_output(output_override)
+
+        # Verify override works
+        assert result_override.returncode == 0, (
+            f"Eval with model override failed:\n{output_override[:1000]}"
+        )
+        assert eval_results_override, (
+            f"No results with override:\n{output_override[:500]}"
+        )
+
+        # Verify logs show the override is happening
+        assert "Applying model settings override" in output_override, (
+            "Expected log message about model settings override not found"
+        )
+        assert "gpt-5-2025-08-07" in output_override, (
+            "Expected overridden model name not found in logs"
+        )
+
+        # Verify evaluators resolve to the overridden model
+        assert (
+            "Resolving 'same-as-agent' to agent model: gpt-5-2025-08-07"
+            in output_override
+        ), "Evaluators should resolve 'same-as-agent' to the overridden agent model"
+
+        # Generate summaries for both runs
+        summary_default, _ = build_results_summary(
+            "🧮 Calculator Model Settings - Default (same-as-agent)",
+            eval_results_default,
+        )
+        summary_override, _ = build_results_summary(
+            "🧮 Calculator Model Settings - Override (gpt-5-2025-08-07)",
+            eval_results_override,
+        )
+
+        write_github_summary(summary_default)
+        write_github_summary(summary_override)
+        write_eval_results_file(summary_default)
+        write_eval_results_file(summary_override)
+
+        # Assert both runs succeeded
+        assert_eval_success(
+            result_default.returncode, eval_results_default, output_default
+        )
+        assert_eval_success(
+            result_override.returncode, eval_results_override, output_override
+        )
+
+    @pytest.mark.e2e
     def test_calculator_with_specific_eval_set(
         self, authenticated_session: dict[str, str], project_id: str
     ):

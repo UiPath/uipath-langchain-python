@@ -110,7 +110,18 @@
             "source": "manual"
         }
     ],
-    "modelSettings": [],
+    "modelSettings": [
+        {
+            "id": "default",
+            "modelName": "same-as-agent",
+            "temperature": "same-as-agent"
+        },
+        {
+            "id": "604d96fd-5e89-484b-b750-ccf3f516e2e1",
+            "modelName": "gpt-5-2025-08-07",
+            "temperature": 0.1
+        }
+    ],
     "agentMemoryEnabled": false,
     "agentMemorySettings": [],
     "lineByLineEvaluation": false,
