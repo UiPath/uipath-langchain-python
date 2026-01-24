@@ -18,6 +18,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 from opentelemetry.trace import Span
+from uipath.eval.mocks.mockable import MOCKED_ANNOTATION_KEY
 
 from .schema import (
     GUARDRAIL_VALIDATION_DETAILS_KEY,
@@ -479,6 +480,11 @@ class UiPathTracingCallback(BaseCallbackHandler):
             # Close child span first (inner), then tool span (outer)
             child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
             if child_span:
+                if hasattr(child_span, "attributes"):
+                    if child_span.attributes.get(MOCKED_ANNOTATION_KEY) and hasattr(
+                        child_span, "name"
+                    ):
+                        child_span.update_name(f"Simulated result: {child_span.name}")
                 self._pop_span(run_id)  # Pop child
                 self._set_tool_result(child_span, output)
                 self._tracer.end_span_ok(child_span)
