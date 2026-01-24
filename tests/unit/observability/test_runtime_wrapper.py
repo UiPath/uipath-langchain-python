@@ -95,7 +95,7 @@ class TestTelemetryRuntimeWrapper:
 
         agent_span_set = None
 
-        def capture_agent_span(span):
+        def capture_agent_span(span, run_id):
             nonlocal agent_span_set
             agent_span_set = span
 
@@ -106,7 +106,7 @@ class TestTelemetryRuntimeWrapper:
         )
         await wrapper.execute({"input": "test"}, None)
 
-        # set_agent_span should have been called with a span
+        # set_agent_span should have been called with a span and run_id
         callback.set_agent_span.assert_called_once()
         assert agent_span_set is not None
 
@@ -117,7 +117,7 @@ class TestTelemetryRuntimeWrapper:
         """Test stream calls set_agent_span on callback."""
         agent_span_set = None
 
-        def capture_agent_span(span):
+        def capture_agent_span(span, run_id):
             nonlocal agent_span_set
             agent_span_set = span
 
@@ -312,8 +312,8 @@ class TestCallbackPersistence:
 
         original_set_agent_span = callback.set_agent_span
 
-        def track_spans(span):
-            original_set_agent_span(span)
+        def track_spans(span, run_id):
+            original_set_agent_span(span, run_id)
             spans_per_execution.append(span)
 
         callback.set_agent_span = track_spans

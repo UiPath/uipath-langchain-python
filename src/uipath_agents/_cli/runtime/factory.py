@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from uipath._cli._utils._folders import get_personal_workspace_key_async
 from uipath.agent.models.agent import AgentDefinition
 from uipath.agent.react.conversational_prompts import PromptUserSettings
-from uipath.core import UiPathTraceManager
+from uipath.core import UiPathSpanUtils, UiPathTraceManager
 from uipath.core.chat import UiPathConversationMessage
 from uipath.platform.common import UiPathConfig
 from uipath.platform.resume_triggers import UiPathResumeTriggerHandler
@@ -29,7 +29,11 @@ from uipath_agents.agent_graph_builder import build_agent_graph
 from uipath_agents.agent_graph_builder.config import get_execution_type
 
 from ..._observability import configure_telemetry, shutdown_telemetry
-from ..._observability.callback import UiPathTracingCallback
+from ..._observability.callback import (
+    UiPathTracingCallback,
+    _get_ancestor_spans,
+    _get_current_span,
+)
 from ..._observability.runtime_wrapper import TelemetryRuntimeWrapper
 from ..._observability.sqlite_trace_context_storage import SqliteTraceContextStorage
 from ..._observability.telemetry_callback import AppInsightsTelemetryCallback
@@ -109,6 +113,8 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         """Setup tracing and instrumentation."""
         super()._setup_instrumentation(trace_manager)
         configure_telemetry(trace_manager)
+        UiPathSpanUtils.register_current_span_provider(_get_current_span)
+        UiPathSpanUtils.register_current_span_ancestors_provider(_get_ancestor_spans)
 
     def _load_agent_definition(
         self, entrypoint: str, settings: dict[str, Any] | None = None

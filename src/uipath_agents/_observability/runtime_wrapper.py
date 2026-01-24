@@ -248,7 +248,7 @@ class TelemetryRuntimeWrapper:
         if saved_context:
             # Resume: restore original trace context
             async with self._restore_trace_context(saved_context) as agent_span:
-                self._callback.set_agent_span(agent_span)
+                self._callback.set_agent_span(agent_span, uuid.UUID(self._agent_run_id))
                 # Tell callback to skip span creation for the pending tool
                 pending_tool = saved_context.get("pending_tool_name")
                 if pending_tool:
@@ -275,7 +275,7 @@ class TelemetryRuntimeWrapper:
                 input_schema=input_schema,
                 output_schema=output_schema,
             ) as agent_span:
-                self._callback.set_agent_span(agent_span)
+                self._callback.set_agent_span(agent_span, uuid.UUID(self._agent_run_id))
 
                 if self._telemetry_callback:
                     self._telemetry_callback.set_agent_info(agent_name, agent_id)

@@ -12,6 +12,8 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
+import langchain_core.callbacks
+import langchain_core.runnables.config
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
@@ -25,6 +27,43 @@ from .schema import (
 from .tracer import UiPathTracer
 
 logger = logging.getLogger(__name__)
+
+# --- Global Span Stack Registry ---
+# Per run_id stacks for parallel-safe nested span tracking
+_span_stacks: Dict[UUID, List[Span]] = {}
+
+
+def get_current_run_id() -> Optional[UUID]:
+    """Get current run_id from langchain's internal runnable config.
+
+    Reads directly from langchain's context instead of maintaining our own,
+    ensuring we're always in sync with the actual execution context.
+    """
+    config = langchain_core.runnables.config.var_child_runnable_config.get()
+    if not isinstance(config, dict):
+        return None
+    for v in config.values():
+        if not isinstance(v, langchain_core.callbacks.BaseCallbackManager):
+            continue
+        if run_id := v.parent_run_id:
+            return run_id
+    return None
+
+
+def _get_current_span() -> Optional[Span]:
+    run_id = get_current_run_id()
+    if run_id and run_id in _span_stacks:
+        stack = _span_stacks[run_id]
+        return stack[-1] if stack else None
+    return None
+
+
+def _get_ancestor_spans() -> List[Span]:
+    run_id = get_current_run_id()
+    if run_id and run_id in _span_stacks:
+        return list(_span_stacks[run_id])
+    return []
+
 
 # --- Guardrail Constants ---
 
@@ -105,8 +144,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
         # When validation fails, we defer span ending until action node fires
         self._pending_guardrail_actions: Dict[str, Tuple[Span, Optional[str]]] = {}
 
-    def set_agent_span(self, agent_span: Span) -> None:
+    def set_agent_span(self, agent_span: Span, run_id: UUID) -> None:
         self._agent_span = agent_span
+        self._agent_run_id = run_id
         self._spans.clear()
         self._prompts_captured = False
         self._pending_tool_name = None
@@ -121,6 +161,27 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._tool_span_from_guardrail = False
         self._tool_ended_pending_post = False
         self._pending_guardrail_actions.clear()
+
+        # Clear only this run_id's stack (not all stacks) for parallel agent support
+        if run_id in _span_stacks:
+            _span_stacks[run_id].clear()
+        else:
+            _span_stacks[run_id] = []
+
+        # Push agent_span as first span in this run_id's stack
+        _span_stacks[run_id].append(agent_span)
+
+    # --- Span Stack Methods ---
+
+    def _push_span(self, run_id: UUID, span: Span) -> None:
+        if run_id not in _span_stacks:
+            _span_stacks[run_id] = []
+        _span_stacks[run_id].append(span)
+
+    def _pop_span(self, run_id: UUID) -> Optional[Span]:
+        if run_id in _span_stacks and _span_stacks[run_id]:
+            return _span_stacks[run_id].pop()
+        return None
 
     def cleanup_containers(self) -> None:
         """Close all remaining open guardrail container spans.
@@ -201,6 +262,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
             parent_span=llm_span,
         )
         self._spans[self._model_span_key(run_id)] = model_span
+        self._push_span(run_id, model_span)
 
     # -------------------------------------------------------------------------
     # LLM Events
@@ -269,6 +331,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
+            # Pop from stack first
+            self._pop_span(run_id)
+
             # Close inner span first, then outer
             model_span = self._spans.pop(self._model_span_key(run_id), None)
             if model_span:
@@ -293,6 +358,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
+            # Pop from stack first
+            self._pop_span(run_id)
+
             exc = error if isinstance(error, Exception) else Exception(str(error))
             model_span = self._spans.pop(self._model_span_key(run_id), None)
             if model_span:
@@ -355,6 +423,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 self._spans[run_id] = span
                 self._current_tool_span = span
 
+            self._push_span(run_id, span)
+
             call_id = kwargs.get("tool_call_id")
             if call_id:
                 span.set_attribute("callId", call_id)
@@ -381,6 +451,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
                 if child_span:
                     self._spans[self._interruptible_span_key(run_id)] = child_span
+                    # Push child span to same run_id stack
+                    self._push_span(run_id, child_span)
                     # Track as pending for suspend scenario (escalation/process only)
                     if tool_type in ("escalation", "process"):
                         self._pending_tool_name = tool_name
@@ -407,6 +479,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
             # Close child span first (inner), then tool span (outer)
             child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
             if child_span:
+                self._pop_span(run_id)  # Pop child
                 self._set_tool_result(child_span, output)
                 self._tracer.end_span_ok(child_span)
                 if child_span == self._pending_process_span:
@@ -414,6 +487,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
             span = self._spans.pop(run_id, None)
             if span:
+                self._pop_span(run_id)  # Pop tool
                 self._set_tool_result(span, output)
                 self._tracer.end_span_ok(span)
                 if span == self._pending_tool_span:
@@ -463,10 +537,12 @@ class UiPathTracingCallback(BaseCallbackHandler):
             # Close child span first (inner), then tool span (outer)
             child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
             if child_span:
+                self._pop_span(run_id)  # Pop child
                 self._tracer.end_span_error(child_span, exc)
 
             span = self._spans.pop(run_id, None)
             if span:
+                self._pop_span(run_id)  # Pop tool
                 self._tracer.end_span_error(span, exc)
 
         except Exception:
@@ -769,6 +845,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
             )
             self._guardrail_spans[run_id] = eval_span
             self._guardrail_info[run_id] = (scope, stage, guardrail_name)
+            self._push_span(run_id, eval_span)
 
         except Exception:
             logger.exception("Error in on_chain_start callback (guardrail)")
@@ -786,6 +863,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
             if run_id not in self._guardrail_spans:
                 return
 
+            self._pop_span(run_id)
             span = self._guardrail_spans.pop(run_id)
             info = self._guardrail_info.pop(run_id, None)
 
@@ -856,6 +934,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
             if run_id not in self._guardrail_spans:
                 return
 
+            self._pop_span(run_id)
             span = self._guardrail_spans.pop(run_id)
             self._guardrail_info.pop(run_id, None)
 

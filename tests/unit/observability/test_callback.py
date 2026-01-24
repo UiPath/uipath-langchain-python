@@ -275,9 +275,10 @@ class TestAgentSpanParenting:
     def test_callback_with_agent_span_parents_correctly(self, tracer, span_exporter):
         """Test that set_agent_span makes all spans children of it."""
         callback = UiPathTracingCallback(tracer)
+        agent_run_id = uuid4()
 
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             run_id = uuid4()
             callback.on_llm_start(
@@ -301,9 +302,10 @@ class TestAgentSpanParenting:
     def test_tool_span_parents_to_agent(self, tracer, span_exporter):
         """Test tool spans parent to agent_span."""
         callback = UiPathTracingCallback(tracer)
+        agent_run_id = uuid4()
 
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             run_id = uuid4()
             callback.on_tool_start({"name": "calc"}, "input", run_id=run_id)
@@ -320,10 +322,12 @@ class TestAgentSpanParenting:
     def test_set_agent_span_clears_previous_state(self, tracer, span_exporter):
         """Test that set_agent_span clears spans from previous execution."""
         callback = UiPathTracingCallback(tracer)
+        agent_run_id_1 = uuid4()
+        agent_run_id_2 = uuid4()
 
         # First execution - start LLM but don't end it
         with tracer.start_agent_run("TestAgent1") as agent_span1:
-            callback.set_agent_span(agent_span1)
+            callback.set_agent_span(agent_span1, agent_run_id_1)
             run_id1 = uuid4()
             callback.on_llm_start(
                 {"kwargs": {"model_name": "gpt-4"}}, ["prompt"], run_id=run_id1
@@ -332,7 +336,7 @@ class TestAgentSpanParenting:
 
         # Second execution - set_agent_span should clear previous state
         with tracer.start_agent_run("TestAgent2") as agent_span2:
-            callback.set_agent_span(agent_span2)
+            callback.set_agent_span(agent_span2, agent_run_id_2)
             # Previous spans should be cleared
             assert len(callback._spans) == 0
             assert callback._prompts_captured is False
@@ -461,8 +465,9 @@ class TestGuardrailActionDetection:
         self, callback, tracer, span_exporter
     ):
         """When validation passes, span ends immediately with action=Skip."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             run_id = uuid4()
             # Start guardrail evaluation
@@ -489,8 +494,9 @@ class TestGuardrailActionDetection:
         self, callback, tracer, span_exporter
     ):
         """When validation fails, span ending is deferred until action node fires."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             run_id = uuid4()
             # Start guardrail evaluation
@@ -541,8 +547,9 @@ class TestGuardrailActionDetection:
 
     def test_action_node_log_sets_correct_action(self, callback, tracer, span_exporter):
         """Test action node with _log suffix sets action=log."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             run_id = uuid4()
             callback.on_chain_start(
@@ -579,8 +586,9 @@ class TestGuardrailActionDetection:
         self, callback, tracer, span_exporter
     ):
         """Test action node with _hitl suffix sets action=Escalate."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             run_id = uuid4()
             callback.on_chain_start(
@@ -619,8 +627,9 @@ class TestGuardrailActionDetection:
             def __init__(self, update: dict[str, Any]) -> None:
                 self.update = update
 
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             run_id = uuid4()
             callback.on_chain_start(
@@ -670,8 +679,9 @@ class TestGuardrailActionDetection:
             def __init__(self, update: dict[str, Any]) -> None:
                 self.update = update
 
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             run_id = uuid4()
             callback.on_chain_start(
@@ -701,8 +711,9 @@ class TestToolGuardrailParenting:
         self, callback, tracer, span_exporter
     ):
         """Tool pre guardrails should be children of the current tool span."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             tool_run_id = uuid4()
             callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
@@ -741,8 +752,9 @@ class TestToolGuardrailParenting:
         In actual LangGraph execution, tool_post guardrails fire AFTER on_tool_end.
         The callback keeps _current_tool_span until post guardrails complete.
         """
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             tool_run_id = uuid4()
             callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
@@ -779,8 +791,9 @@ class TestPhaseTransitions:
 
     def test_tool_pre_closes_llm_post(self, callback, tracer, span_exporter):
         """Transitioning to tool_pre should close llm_post container."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             # LLM post guardrail creates llm_post container
             run_id1 = uuid4()
@@ -816,8 +829,9 @@ class TestPhaseTransitions:
 
     def test_tool_post_closes_tool_pre(self, callback, tracer, span_exporter):
         """Transitioning to tool_post should close tool_pre container."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             tool_run_id = uuid4()
             callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
@@ -850,8 +864,9 @@ class TestPhaseTransitions:
 
     def test_agent_post_closes_tool_post(self, callback, tracer, span_exporter):
         """Transitioning to agent_post should close tool_post container."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             tool_run_id = uuid4()
             callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
@@ -892,8 +907,9 @@ class TestToolGuardrailRealExecutionOrder:
         self, callback, tracer, span_exporter
     ):
         """Tool pre guardrail fires BEFORE on_tool_start - should still parent correctly."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             # Real order: guardrail FIRST (before tool starts)
             guard_run_id = uuid4()
@@ -925,8 +941,9 @@ class TestToolGuardrailRealExecutionOrder:
 
     def test_tool_blocked_by_guardrail_no_orphan(self, callback, tracer, span_exporter):
         """When guardrail blocks, placeholder tool span should end cleanly."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             # Guardrail fires (creates placeholder tool span)
             guard_run_id = uuid4()
@@ -967,8 +984,9 @@ class TestToolGuardrailRealExecutionOrder:
         self, callback, tracer, span_exporter
     ):
         """Multiple tool_pre guardrails fire before tool - all parent to same tool span."""
+        agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
-            callback.set_agent_span(agent_span)
+            callback.set_agent_span(agent_span, agent_run_id)
 
             # First guardrail fires (creates placeholder)
             guard1_id = uuid4()
@@ -1017,3 +1035,437 @@ class TestToolGuardrailRealExecutionOrder:
         assert container.parent.span_id == tool_span.context.span_id
         # Tool should have correct name after enrichment
         assert tool_span.name == "Tool call - my_tool"
+
+
+class TestSpanStackUnit:
+    """Unit tests for span stack functionality."""
+
+    def test_push_span_creates_stack(self, callback: UiPathTracingCallback) -> None:
+        """Pushing a span creates a stack entry for the run_id."""
+        from uipath_agents._observability.callback import _span_stacks
+
+        run_id = uuid4()
+        # Create a mock span
+        from unittest.mock import MagicMock
+
+        span = MagicMock()
+
+        _span_stacks.clear()
+        callback._push_span(run_id, span)
+
+        assert run_id in _span_stacks
+        assert len(_span_stacks[run_id]) == 1
+        assert _span_stacks[run_id][0] is span
+
+    def test_push_multiple_spans_stacks(self, callback: UiPathTracingCallback) -> None:
+        """Multiple pushes create a proper stack (LIFO)."""
+        from unittest.mock import MagicMock
+
+        from uipath_agents._observability.callback import _span_stacks
+
+        run_id = uuid4()
+        span1 = MagicMock(name="span1")
+        span2 = MagicMock(name="span2")
+
+        _span_stacks.clear()
+        callback._push_span(run_id, span1)
+        callback._push_span(run_id, span2)
+
+        assert len(_span_stacks[run_id]) == 2
+        assert _span_stacks[run_id][0] is span1
+        assert _span_stacks[run_id][1] is span2
+
+    def test_pop_span_returns_lifo(self, callback: UiPathTracingCallback) -> None:
+        """Pop returns spans in LIFO order."""
+        from unittest.mock import MagicMock
+
+        from uipath_agents._observability.callback import _span_stacks
+
+        run_id = uuid4()
+        span1 = MagicMock(name="span1")
+        span2 = MagicMock(name="span2")
+
+        _span_stacks.clear()
+        callback._push_span(run_id, span1)
+        callback._push_span(run_id, span2)
+
+        popped = callback._pop_span(run_id)
+        assert popped is span2
+
+        popped = callback._pop_span(run_id)
+        assert popped is span1
+
+    def test_pop_empty_returns_none(self, callback: UiPathTracingCallback) -> None:
+        """Pop on empty stack returns None."""
+        from uipath_agents._observability.callback import _span_stacks
+
+        run_id = uuid4()
+        _span_stacks.clear()
+
+        result = callback._pop_span(run_id)
+        assert result is None
+
+    def test_get_current_span_returns_top(
+        self, callback: UiPathTracingCallback
+    ) -> None:
+        """_get_current_span returns top of stack when run_id is available."""
+        from unittest.mock import MagicMock, patch
+
+        from uipath_agents._observability.callback import (
+            _get_current_span,
+            _span_stacks,
+        )
+
+        run_id = uuid4()
+        span1 = MagicMock(name="span1")
+        span2 = MagicMock(name="span2")
+
+        _span_stacks.clear()
+        callback._push_span(run_id, span1)
+        callback._push_span(run_id, span2)
+
+        # Mock get_current_run_id to return our run_id
+        with patch(
+            "uipath_agents._observability.callback.get_current_run_id",
+            return_value=run_id,
+        ):
+            result = _get_current_span()
+            assert result is span2
+
+    def test_get_ancestor_spans_returns_copy(
+        self, callback: UiPathTracingCallback
+    ) -> None:
+        """_get_ancestor_spans returns a copy of the stack."""
+        from unittest.mock import MagicMock, patch
+
+        from uipath_agents._observability.callback import (
+            _get_ancestor_spans,
+            _span_stacks,
+        )
+
+        run_id = uuid4()
+        span1 = MagicMock(name="span1")
+        span2 = MagicMock(name="span2")
+
+        _span_stacks.clear()
+        callback._push_span(run_id, span1)
+        callback._push_span(run_id, span2)
+
+        # Mock get_current_run_id to return our run_id
+        with patch(
+            "uipath_agents._observability.callback.get_current_run_id",
+            return_value=run_id,
+        ):
+            ancestors = _get_ancestor_spans()
+            assert len(ancestors) == 2
+            assert ancestors[0] is span1
+            assert ancestors[1] is span2
+
+            # Should be a copy, not the original
+            ancestors.pop()
+            assert len(_span_stacks[run_id]) == 2
+
+    def test_set_agent_span_clears_only_specified_run_id_stack(
+        self, callback: UiPathTracingCallback, tracer
+    ) -> None:
+        """set_agent_span clears only the specified run_id's stack, not others."""
+        from unittest.mock import MagicMock
+
+        from uipath_agents._observability.callback import _span_stacks
+
+        run_id_1 = uuid4()
+        run_id_2 = uuid4()
+        span1 = MagicMock(name="span1")
+        span2 = MagicMock(name="span2")
+
+        _span_stacks.clear()
+        callback._push_span(run_id_1, span1)
+        callback._push_span(run_id_2, span2)
+        assert run_id_1 in _span_stacks
+        assert run_id_2 in _span_stacks
+
+        # set_agent_span for run_id_1 should only clear run_id_1's stack
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, run_id_1)
+
+        # run_id_1 stack should have agent_span as first element
+        assert run_id_1 in _span_stacks
+        assert len(_span_stacks[run_id_1]) == 1
+        assert _span_stacks[run_id_1][0] is agent_span
+
+        # run_id_2 stack should remain untouched
+        assert run_id_2 in _span_stacks
+        assert len(_span_stacks[run_id_2]) == 1
+        assert _span_stacks[run_id_2][0] is span2
+
+    def test_set_agent_span_pushes_agent_as_first_span(
+        self, callback: UiPathTracingCallback, tracer
+    ) -> None:
+        """set_agent_span pushes agent_span as the first span in the run_id's stack."""
+        from uipath_agents._observability.callback import _span_stacks
+
+        _span_stacks.clear()
+        run_id = uuid4()
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, run_id)
+
+        # Verify agent_span is in stack
+        assert run_id in _span_stacks
+        assert len(_span_stacks[run_id]) == 1
+        assert _span_stacks[run_id][0] is agent_span
+
+
+class TestSpanStackIntegration:
+    """Integration tests for span stack across event types."""
+
+    def test_llm_span_in_stack_during_execution(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Model span should be in stack during LLM execution."""
+        from unittest.mock import patch
+
+        from uipath_agents._observability.callback import _get_current_span
+
+        run_id = uuid4()
+        serialized = {"kwargs": {"model_name": "gpt-4"}}
+
+        callback.on_llm_start(serialized, ["prompt"], run_id=run_id)
+
+        # Mock get_current_run_id to simulate being in langchain context
+        with patch(
+            "uipath_agents._observability.callback.get_current_run_id",
+            return_value=run_id,
+        ):
+            current = _get_current_span()
+            assert current is not None
+            model_span = callback._spans.get(_model_key(run_id))
+            assert current is model_span
+
+        callback.on_llm_end(None, run_id=run_id)  # type: ignore[arg-type]
+
+    def test_llm_span_popped_on_end(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Stack should be empty after LLM completes."""
+        from uipath_agents._observability.callback import _span_stacks
+
+        run_id = uuid4()
+        serialized = {"kwargs": {"model_name": "gpt-4"}}
+
+        callback.on_llm_start(serialized, ["prompt"], run_id=run_id)
+        callback.on_llm_end(None, run_id=run_id)  # type: ignore[arg-type]
+
+        # Stack for this run_id should be empty
+        assert run_id not in _span_stacks or len(_span_stacks.get(run_id, [])) == 0
+
+    def test_tool_span_in_stack_during_execution(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Tool span should be in stack during tool execution."""
+        from unittest.mock import patch
+
+        from uipath_agents._observability.callback import _get_current_span
+
+        run_id = uuid4()
+        serialized = {"name": "my_tool"}
+
+        callback.on_tool_start(serialized, "input", run_id=run_id)
+
+        with patch(
+            "uipath_agents._observability.callback.get_current_run_id",
+            return_value=run_id,
+        ):
+            current = _get_current_span()
+            assert current is not None
+            tool_span = callback._spans.get(run_id)
+            assert current is tool_span
+
+        callback.on_tool_end("result", run_id=run_id)
+
+    def test_nested_tool_child_on_top(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Tool with child span should have child on top of stack."""
+        from unittest.mock import patch
+
+        from uipath_agents._observability.callback import (
+            _get_ancestor_spans,
+            _get_current_span,
+        )
+
+        run_id = uuid4()
+        serialized = {"name": "escalate_tool"}
+        metadata = {"tool_type": "escalation", "display_name": "Escalate App"}
+
+        callback.on_tool_start(serialized, "input", run_id=run_id, metadata=metadata)
+
+        with patch(
+            "uipath_agents._observability.callback.get_current_run_id",
+            return_value=run_id,
+        ):
+            # Child span should be on top
+            current = _get_current_span()
+            child_key = UUID(int=run_id.int ^ 2)
+            child_span = callback._spans.get(child_key)
+            assert current is child_span
+
+            # Ancestors should include both
+            ancestors = _get_ancestor_spans()
+            assert len(ancestors) == 2
+
+        callback.on_tool_end("result", run_id=run_id)
+
+    def test_guardrail_span_in_stack(
+        self, callback: UiPathTracingCallback, tracer, span_exporter
+    ) -> None:
+        """Guardrail span should be in stack during evaluation."""
+        from unittest.mock import patch
+
+        from uipath_agents._observability.callback import _get_current_span
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+            )
+
+            with patch(
+                "uipath_agents._observability.callback.get_current_run_id",
+                return_value=run_id,
+            ):
+                current = _get_current_span()
+                assert current is not None
+                eval_span = callback._guardrail_spans.get(run_id)
+                assert current is eval_span
+
+            callback.on_chain_end({}, run_id=run_id)
+
+    def test_guardrail_span_popped_on_end(
+        self, callback: UiPathTracingCallback, tracer, span_exporter
+    ) -> None:
+        """Guardrail span should be popped after chain end."""
+        from uipath_agents._observability.callback import _span_stacks
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+            )
+            callback.on_chain_end({}, run_id=run_id)
+
+            # Stack should be empty for this run_id
+            assert run_id not in _span_stacks or len(_span_stacks.get(run_id, [])) == 0
+
+
+class TestSpanStackParallelExecution:
+    """Tests for parallel execution with stack isolation."""
+
+    @pytest.mark.asyncio
+    async def test_parallel_tools_isolated_stacks(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Two concurrent tools should have independent stacks."""
+        import asyncio
+        from unittest.mock import patch
+
+        from uipath_agents._observability.callback import _get_current_span
+
+        run_id_1 = uuid4()
+        run_id_2 = uuid4()
+        results: dict[str, Any] = {}
+
+        async def tool_1() -> None:
+            callback.on_tool_start({"name": "tool_1"}, "input", run_id=run_id_1)
+            await asyncio.sleep(0.01)  # Simulate async work
+            # Mock get_current_run_id to return this tool's run_id
+            with patch(
+                "uipath_agents._observability.callback.get_current_run_id",
+                return_value=run_id_1,
+            ):
+                current = _get_current_span()
+                results["tool_1_span"] = current
+                results["tool_1_expected"] = callback._spans.get(run_id_1)
+            callback.on_tool_end("result", run_id=run_id_1)
+
+        async def tool_2() -> None:
+            callback.on_tool_start({"name": "tool_2"}, "input", run_id=run_id_2)
+            await asyncio.sleep(0.01)
+            with patch(
+                "uipath_agents._observability.callback.get_current_run_id",
+                return_value=run_id_2,
+            ):
+                current = _get_current_span()
+                results["tool_2_span"] = current
+                results["tool_2_expected"] = callback._spans.get(run_id_2)
+            callback.on_tool_end("result", run_id=run_id_2)
+
+        await asyncio.gather(tool_1(), tool_2())
+
+        # Each tool should see its own span as current
+        assert results["tool_1_span"] is results["tool_1_expected"]
+        assert results["tool_2_span"] is results["tool_2_expected"]
+        assert results["tool_1_span"] is not results["tool_2_span"]
+
+
+class TestLangchainConfigStructure:
+    """Integration tests verifying langchain internal config structure.
+
+    These tests detect if langchain changes their internal API that we depend on
+    for get_current_run_id(). If these fail after a langchain upgrade, the
+    get_current_run_id implementation needs updating.
+    """
+
+    def test_var_child_runnable_config_exists(self) -> None:
+        """Verify langchain's var_child_runnable_config ContextVar exists."""
+        import langchain_core.runnables.config
+
+        assert hasattr(langchain_core.runnables.config, "var_child_runnable_config")
+
+    def test_base_callback_manager_has_parent_run_id(self) -> None:
+        """Verify BaseCallbackManager has parent_run_id attribute."""
+        from langchain_core.callbacks import BaseCallbackManager
+
+        # Check the class has the attribute (may be None on instance)
+        manager = BaseCallbackManager(handlers=[])
+        assert hasattr(manager, "parent_run_id")
+
+    def test_get_current_run_id_returns_none_outside_context(self) -> None:
+        """get_current_run_id returns None when not in a langchain runnable context."""
+        from uipath_agents._observability.callback import get_current_run_id
+
+        # Outside of a langchain runnable, should return None
+        result = get_current_run_id()
+        assert result is None
+
+    def test_get_current_run_id_in_runnable_context(self) -> None:
+        """get_current_run_id returns run_id when inside a langchain runnable."""
+        from langchain_core.runnables import RunnableLambda
+
+        from uipath_agents._observability.callback import get_current_run_id
+
+        captured_run_id = None
+
+        def capture_run_id(x: str) -> str:
+            nonlocal captured_run_id
+            captured_run_id = get_current_run_id()
+            return x
+
+        runnable = RunnableLambda(capture_run_id)
+        runnable.invoke("test")
+
+        # Should have captured a run_id
+        assert captured_run_id is not None
+        assert isinstance(captured_run_id, UUID)
