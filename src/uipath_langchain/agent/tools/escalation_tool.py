@@ -12,8 +12,9 @@ from uipath.agent.models.agent import (
     AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
     AssetRecipient,
-    StandardRecipient,
+    StandardRecipient, TaskTitleType,
 )
+from uipath.agent.utils.text_tokens import build_string_from_tokens
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
@@ -21,7 +22,6 @@ from uipath.platform.common import CreateEscalation
 from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.static_args import (
     handle_static_args,
 )
@@ -29,9 +29,10 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 
+from ..react.types import AgentGraphState
 from ..exceptions import AgentTerminationException
+from .utils import sanitize_tool_name, sanitize_dict_for_serialization
 from .tool_node import ToolWrapperReturnType
-from .utils import sanitize_tool_name
 
 
 class EscalationAction(str, Enum):
@@ -100,7 +101,18 @@ def create_escalation_tool(
         example_calls=channel.properties.example_calls,
     )
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
-        task_title = channel.task_title or "Escalation Task"
+        #task_title = channel.task_title or "Escalation Task"
+        if channel.task_title_v2:
+            if channel.task_title_v2.type == TaskTitleType.TEXT_BUILDER:
+                task_title = tool.metadata["taskTitleV2"]
+            else:
+                raise NotImplementedError(
+                    f"TaskTitle type '{channel.task_title_v2.type}' not implemented"
+                )
+        elif channel.task_title:
+            task_title = channel.task_title  # Legacy fallback
+        else:
+            task_title = "Escalation Task"  # Default
 
         recipient: TaskRecipient | None = (
             await resolve_recipient_value(channel.recipients[0])
@@ -150,6 +162,8 @@ def create_escalation_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
+        tool.metadata["taskTitleV2"] = build_string_from_tokens(channel.task_title_v2.tokens, sanitize_dict_for_serialization(
+            dict(state)))
         call["args"] = handle_static_args(resource, state, call["args"])
         result = await tool.ainvoke(call["args"])
 
