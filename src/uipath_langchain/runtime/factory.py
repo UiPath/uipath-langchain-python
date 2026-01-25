@@ -16,7 +16,9 @@ from uipath.platform.resume_triggers import (
 from uipath.runtime import (
     UiPathResumableRuntime,
     UiPathRuntimeContext,
+    UiPathRuntimeFactorySettings,
     UiPathRuntimeProtocol,
+    UiPathRuntimeStorageProtocol,
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -228,28 +230,21 @@ class UiPathLangGraphRuntimeFactory:
             return []
         return config.entrypoints
 
-    async def discover_runtimes(self) -> list[UiPathRuntimeProtocol]:
+    async def get_settings(self) -> UiPathRuntimeFactorySettings | None:
         """
-        Discover runtime instances for all entrypoints.
+        Get the factory settings.
+        """
+        return None
+
+    async def get_storage(self) -> UiPathRuntimeStorageProtocol | None:
+        """
+        Get the runtime storage protocol instance.
 
         Returns:
-            List of LangGraphRuntime instances, one per entrypoint
+            The storage protocol instance
         """
-        entrypoints = self.discover_entrypoints()
         memory = await self._get_memory()
-
-        runtimes: list[UiPathRuntimeProtocol] = []
-        for entrypoint in entrypoints:
-            compiled_graph = await self._resolve_and_compile_graph(entrypoint, memory)
-
-            runtime = await self._create_runtime_instance(
-                compiled_graph=compiled_graph,
-                runtime_id=entrypoint,
-                entrypoint=entrypoint,
-            )
-            runtimes.append(runtime)
-
-        return runtimes
+        return SqliteResumableStorage(memory)
 
     async def _create_runtime_instance(
         self,
