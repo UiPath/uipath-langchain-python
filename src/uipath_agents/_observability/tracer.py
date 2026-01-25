@@ -191,7 +191,7 @@ class UiPathTracer:
         attrs = AgentRunSpanAttributes(
             agent_name=agent_name,
             agent_id=agent_id,
-            is_conversational=is_conversational if is_conversational else None,
+            is_conversational=is_conversational,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             input=input_data,
@@ -199,6 +199,7 @@ class UiPathTracer:
             output_schema=output_schema,
             execution_type=get_execution_type(),
             agent_version=get_agent_version(),
+            reference_id=agent_id,
         )
 
         with self._tracer.start_as_current_span(
@@ -223,6 +224,7 @@ class UiPathTracer:
         self,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
+        input: Optional[str] = None,
         parent_span: Optional[Span] = None,
     ) -> Span:
         """Start an LLM call span (outer wrapper for LLM iteration).
@@ -233,6 +235,7 @@ class UiPathTracer:
         Args:
             max_tokens: Maximum tokens for generation
             temperature: Temperature for generation
+            input: The user input/prompt for this LLM call
             parent_span: Optional parent span. If None, uses current span.
 
         Returns:
@@ -250,7 +253,7 @@ class UiPathTracer:
         settings = None
         if max_tokens is not None or temperature is not None:
             settings = ModelSettings(max_tokens=max_tokens, temperature=temperature)
-        attrs = LlmCallSpanAttributes(settings=settings)
+        attrs = LlmCallSpanAttributes(settings=settings, input=input)
         self._apply_attributes(span, attrs)
         self.upsert_span_started(span)
         return span

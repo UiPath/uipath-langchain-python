@@ -78,11 +78,11 @@ class TestLlmCallbackEvents:
         span_names = {s.name for s in spans}
         assert "LLM call" in span_names
         assert "Model run" in span_names
-        # LLM call has type "llmCall", Model run has type "completion"
+        # Both LLM call and Model run have type "completion" (matches C# Temporal)
         llm_span = next(s for s in spans if s.name == "LLM call")
         model_span = next(s for s in spans if s.name == "Model run")
-        assert llm_span.attributes["span_type"] == SpanType.LLM_CALL.value
-        assert model_span.attributes["span_type"] == SpanType.COMPLETION.value
+        assert llm_span.attributes["type"] == SpanType.COMPLETION.value
+        assert model_span.attributes["type"] == SpanType.COMPLETION.value
 
     def test_on_llm_error_closes_spans_with_error(self, callback, span_exporter):
         """Test that on_llm_error closes spans with error status."""
@@ -140,7 +140,7 @@ class TestToolCallbackEvents:
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
-        assert spans[0].attributes["span_type"] == SpanType.TOOL_CALL.value
+        assert spans[0].attributes["type"] == SpanType.TOOL_CALL.value
         assert spans[0].attributes["toolName"] == "calculator"
         assert spans[0].name == "Tool call - calculator"
 
@@ -314,8 +314,8 @@ class TestAgentSpanParenting:
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 2
 
-        agent = next(s for s in spans if s.attributes["span_type"] == "agentRun")
-        tool = next(s for s in spans if s.attributes["span_type"] == "toolCall")
+        agent = next(s for s in spans if s.attributes["type"] == "agentRun")
+        tool = next(s for s in spans if s.attributes["type"] == "toolCall")
 
         assert tool.parent.span_id == agent.context.span_id
 
@@ -455,7 +455,7 @@ class TestIntegrationToolCallback:
 
         # Child should be parented to tool span
         assert child_span.parent.span_id == tool_span.context.span_id
-        assert child_span.attributes["span_type"] == SpanType.INTEGRATION_TOOL.value
+        assert child_span.attributes["type"] == SpanType.INTEGRATION_TOOL.value
 
 
 class TestGuardrailActionDetection:
@@ -485,7 +485,7 @@ class TestGuardrailActionDetection:
 
         spans = span_exporter.get_finished_spans()
         eval_spans = [
-            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+            s for s in spans if s.attributes.get("type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
         assert eval_spans[0].attributes.get("action") == "Skip"
@@ -539,7 +539,7 @@ class TestGuardrailActionDetection:
 
         spans = span_exporter.get_finished_spans()
         eval_spans = [
-            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+            s for s in spans if s.attributes.get("type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
         assert eval_spans[0].attributes.get("action") == "Block"
@@ -577,7 +577,7 @@ class TestGuardrailActionDetection:
 
         spans = span_exporter.get_finished_spans()
         eval_spans = [
-            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+            s for s in spans if s.attributes.get("type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
         assert eval_spans[0].attributes.get("action") == "Log"
@@ -611,7 +611,7 @@ class TestGuardrailActionDetection:
 
         spans = span_exporter.get_finished_spans()
         eval_spans = [
-            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+            s for s in spans if s.attributes.get("type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
         assert eval_spans[0].attributes.get("action") == "Escalate"
@@ -664,7 +664,7 @@ class TestGuardrailActionDetection:
 
         spans = span_exporter.get_finished_spans()
         eval_spans = [
-            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+            s for s in spans if s.attributes.get("type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
         assert eval_spans[0].attributes.get("action") == "Block"
@@ -698,7 +698,7 @@ class TestGuardrailActionDetection:
 
         spans = span_exporter.get_finished_spans()
         eval_spans = [
-            s for s in spans if s.attributes.get("span_type") == "guardrailEvaluation"
+            s for s in spans if s.attributes.get("type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
         assert eval_spans[0].attributes.get("action") == "Skip"
@@ -734,11 +734,9 @@ class TestToolGuardrailParenting:
             callback.on_tool_end("result", run_id=tool_run_id)
 
         spans = span_exporter.get_finished_spans()
-        tool_span = next(
-            s for s in spans if s.attributes.get("span_type") == "toolCall"
-        )
+        tool_span = next(s for s in spans if s.attributes.get("type") == "toolCall")
         container_span = next(
-            s for s in spans if s.attributes.get("span_type") == "toolPreGuardrails"
+            s for s in spans if s.attributes.get("type") == "toolPreGuardrails"
         )
 
         # Container should be child of tool span
@@ -776,11 +774,9 @@ class TestToolGuardrailParenting:
             callback.cleanup_containers()
 
         spans = span_exporter.get_finished_spans()
-        tool_span = next(
-            s for s in spans if s.attributes.get("span_type") == "toolCall"
-        )
+        tool_span = next(s for s in spans if s.attributes.get("type") == "toolCall")
         container_span = next(
-            s for s in spans if s.attributes.get("span_type") == "toolPostGuardrails"
+            s for s in spans if s.attributes.get("type") == "toolPostGuardrails"
         )
 
         assert container_span.parent.span_id == tool_span.context.span_id
@@ -927,11 +923,9 @@ class TestToolGuardrailRealExecutionOrder:
             callback.on_tool_end("result", run_id=tool_run_id)
 
         spans = span_exporter.get_finished_spans()
-        tool_span = next(
-            s for s in spans if s.attributes.get("span_type") == "toolCall"
-        )
+        tool_span = next(s for s in spans if s.attributes.get("type") == "toolCall")
         container = next(
-            s for s in spans if s.attributes.get("span_type") == "toolPreGuardrails"
+            s for s in spans if s.attributes.get("type") == "toolPreGuardrails"
         )
 
         # Container should be child of tool span
@@ -976,7 +970,7 @@ class TestToolGuardrailRealExecutionOrder:
             assert callback._tool_span_from_guardrail is False
 
         spans = span_exporter.get_finished_spans()
-        tool_spans = [s for s in spans if s.attributes.get("span_type") == "toolCall"]
+        tool_spans = [s for s in spans if s.attributes.get("type") == "toolCall"]
         # Placeholder was created and properly ended
         assert len(tool_spans) == 1
 
@@ -1023,12 +1017,12 @@ class TestToolGuardrailRealExecutionOrder:
         spans = span_exporter.get_finished_spans()
 
         # Only one tool span should exist (the placeholder was reused)
-        tool_spans = [s for s in spans if s.attributes.get("span_type") == "toolCall"]
+        tool_spans = [s for s in spans if s.attributes.get("type") == "toolCall"]
         assert len(tool_spans) == 1
 
         tool_span = tool_spans[0]
         container = next(
-            s for s in spans if s.attributes.get("span_type") == "toolPreGuardrails"
+            s for s in spans if s.attributes.get("type") == "toolPreGuardrails"
         )
 
         # Container should be child of tool span

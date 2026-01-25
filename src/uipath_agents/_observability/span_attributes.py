@@ -6,6 +6,7 @@ the Temporal implementation in agents/backend/Execution.Shared/Traces/.
 
 import os
 from abc import ABC, abstractmethod
+from datetime import datetime
 from enum import IntEnum
 from typing import Any, Dict, List, Optional, Union
 
@@ -80,6 +81,8 @@ class SpanType:
     AGENT_POST_GUARDRAILS = "agentPostGuardrails"
     GUARDRAIL_EVALUATION = "guardrailEvaluation"
     GUARDRAIL_ESCALATION = "guardrailEscalation"
+    TOOL_GUARDRAIL_EVALUATION = "toolGuardrailEvaluation"
+    TOOL_GUARDRAIL_ESCALATION = "toolGuardrailEscalation"
 
     # Governance types
     TOOL_PRE_GOVERNANCE = "toolPreGovernance"
@@ -131,6 +134,7 @@ class BaseSpanAttributes(BaseModel, ABC):
     )
 
     error: Optional[ErrorDetails] = Field(None, alias="error")
+    license_ref_id: Optional[str] = Field(None, alias="licenseRefId")
 
     @property
     @abstractmethod
@@ -139,13 +143,10 @@ class BaseSpanAttributes(BaseModel, ABC):
     def to_otel_attributes(self) -> Dict[str, Any]:
         """Convert to OpenTelemetry attribute dict.
 
-        Returns dict with both 'type' and 'span_type' (for backend compatibility).
         None values excluded. Complex objects kept as-is for span processor.
         """
-        # 'type' for Temporal schema, 'span_type' for backend extraction
         attrs: Dict[str, Any] = {
             "type": self.type,
-            "span_type": self.type,
             "uipath.custom_instrumentation": True,
         }
         data = self.model_dump(by_alias=True, exclude_none=True, exclude={"error"})
@@ -166,7 +167,7 @@ class AgentRunSpanAttributes(BaseSpanAttributes):
 
     agent_id: Optional[str] = Field(None, alias="agentId")
     agent_name: str = Field(..., alias="agentName")
-    source: str = Field(default="langchain", alias="source")
+    source: int = Field(default=1, alias="source")
     is_conversational: Optional[bool] = Field(None, alias="isConversational")
     system_prompt: Optional[str] = Field(None, alias="systemPrompt")
     user_prompt: Optional[str] = Field(None, alias="userPrompt")
@@ -175,9 +176,10 @@ class AgentRunSpanAttributes(BaseSpanAttributes):
     input: Optional[Dict[str, Any]] = Field(None, alias="input")
     output: Optional[Any] = Field(None, alias="output")
 
-    # Execution context fields
+    # Execution context fields (extracted to top-level by uipath.tracing)
     execution_type: Optional[int] = Field(None, alias="executionType")
     agent_version: Optional[str] = Field(None, alias="agentVersion")
+    reference_id: Optional[str] = Field(None, alias="referenceId")
 
     @property
     def type(self) -> str:
@@ -219,6 +221,15 @@ class ToolCall(BaseModel):
     arguments: Dict[str, Any] = Field(..., alias="arguments")
 
 
+class ModelSpanAttributes(BaseModel):
+    """Model metadata attributes for deprecation tracking."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    is_deprecated: bool = Field(False, alias="isDeprecated")
+    retire_date: Optional[datetime] = Field(None, alias="retireDate")
+
+
 class CompletionSpanAttributes(BaseSpanAttributes):
     """Attributes for Model run spans.
 
@@ -232,6 +243,9 @@ class CompletionSpanAttributes(BaseSpanAttributes):
     settings: Optional["ModelSettings"] = Field(None, alias="settings")
     tool_calls: Optional[List["ToolCall"]] = Field(None, alias="toolCalls")
     usage: Optional["Usage"] = Field(None, alias="usage")
+    content: Optional[str] = Field(None, alias="content")
+    explanation: Optional[str] = Field(None, alias="explanation")
+    attributes: Optional["ModelSpanAttributes"] = Field(None, alias="attributes")
 
     @property
     def type(self) -> str:
@@ -245,10 +259,13 @@ class LlmCallSpanAttributes(BaseSpanAttributes):
 
     # Settings as nested object (matches Temporal)
     settings: Optional["ModelSettings"] = Field(None, alias="settings")
+    input: Optional[str] = Field(None, alias="input")
+    content: Optional[str] = Field(None, alias="content")
+    explanation: Optional[str] = Field(None, alias="explanation")
 
     @property
     def type(self) -> str:
-        return SpanType.LLM_CALL
+        return SpanType.COMPLETION
 
 
 class ToolCallSpanAttributes(BaseSpanAttributes):
@@ -288,6 +305,9 @@ class ToolExecutionSpanAttributes(BaseSpanAttributes):
 class ProcessToolSpanAttributes(ToolCallSpanAttributes):
     """Attributes for UiPath process tool calls."""
 
+    job_id: Optional[str] = Field(None, alias="jobId")
+    job_details_uri: Optional[str] = Field(None, alias="jobDetailsUri")
+
     @property
     def type(self) -> str:
         return SpanType.PROCESS_TOOL
@@ -299,6 +319,39 @@ class ActionCenterToolSpanAttributes(ToolCallSpanAttributes):
     @property
     def type(self) -> str:
         return SpanType.ACTION_CENTER_TOOL
+
+
+class AgentToolSpanAttributes(ToolCallSpanAttributes):
+    """Attributes for agent-as-tool spans."""
+
+    job_id: Optional[str] = Field(None, alias="jobId")
+    job_details_uri: Optional[str] = Field(None, alias="jobDetailsUri")
+
+    @property
+    def type(self) -> str:
+        return SpanType.AGENT_TOOL
+
+
+class ApiWorkflowToolSpanAttributes(ToolCallSpanAttributes):
+    """Attributes for API workflow tool spans."""
+
+    job_id: Optional[str] = Field(None, alias="jobId")
+    job_details_uri: Optional[str] = Field(None, alias="jobDetailsUri")
+
+    @property
+    def type(self) -> str:
+        return SpanType.API_WORKFLOW_TOOL
+
+
+class AgenticProcessToolSpanAttributes(ToolCallSpanAttributes):
+    """Attributes for agentic process tool spans."""
+
+    job_id: Optional[str] = Field(None, alias="jobId")
+    job_details_uri: Optional[str] = Field(None, alias="jobDetailsUri")
+
+    @property
+    def type(self) -> str:
+        return SpanType.AGENTIC_PROCESS_TOOL
 
 
 class AgentOutputSpanAttributes(BaseSpanAttributes):
@@ -460,6 +513,8 @@ class EscalationToolSpanAttributes(BaseSpanAttributes):
     task_id: Optional[str] = Field(None, alias="taskId")
     task_url: Optional[str] = Field(None, alias="taskUrl")
     result: Optional[Any] = Field(None, alias="result")
+    from_memory: Optional[bool] = Field(None, alias="fromMemory")
+    saved_to_memory: Optional[bool] = Field(None, alias="savedToMemory")
 
     @property
     def type(self) -> str:
@@ -476,11 +531,219 @@ class IntegrationToolSpanAttributes(BaseSpanAttributes):
     model_config = ConfigDict(populate_by_name=True)
 
     tool_name: str = Field(..., alias="toolName")
+    arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
     result: Optional[Any] = Field(None, alias="result")
 
     @property
     def type(self) -> str:
         return SpanType.INTEGRATION_TOOL
+
+
+# ---------------------------------------------------------------------------
+# MCP Span Attributes
+# ---------------------------------------------------------------------------
+
+
+class McpToolSpanAttributes(BaseSpanAttributes):
+    """Attributes for MCP tool spans."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    arguments: Dict[str, Any] = Field(..., alias="arguments")
+    result: Optional[Any] = Field(None, alias="result")
+
+    @property
+    def type(self) -> str:
+        return SpanType.MCP_TOOL
+
+
+class McpSessionStartSpanAttributes(BaseSpanAttributes):
+    """Attributes for MCP session start spans."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    mcp_servers: List[str] = Field(..., alias="mcpServers")
+
+    @property
+    def type(self) -> str:
+        return SpanType.MCP_SESSION_START
+
+
+class McpSessionStopSpanAttributes(BaseSpanAttributes):
+    """Attributes for MCP session stop spans."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    mcp_servers: List[str] = Field(..., alias="mcpServers")
+
+    @property
+    def type(self) -> str:
+        return SpanType.MCP_SESSION_STOP
+
+
+# ---------------------------------------------------------------------------
+# Context Grounding Span Attributes
+# ---------------------------------------------------------------------------
+
+
+class ContextGroundingToolSpanAttributes(BaseSpanAttributes):
+    """Attributes for context grounding tool spans."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    retrieval_mode: str = Field(..., alias="retrieval_mode")
+    query: str = Field(..., alias="query")
+    threshold: Optional[float] = Field(None, alias="threshold")
+    number_of_results: Optional[int] = Field(None, alias="number_of_results")
+    filter: Optional[str] = Field(None, alias="filter")
+    folder_path_prefix: Optional[str] = Field(None, alias="folder_path_prefix")
+    file_extension: Optional[str] = Field(None, alias="file_extension")
+    is_system_index: Optional[bool] = Field(None, alias="system_index")
+    results: Optional[Any] = Field(None, alias="results")
+    output_columns: Optional[Any] = Field(None, alias="output_columns")
+    web_search_grounding: Optional[bool] = Field(None, alias="web_search_grounding")
+    citation_mode: Optional[str] = Field(None, alias="citation_mode")
+    index_id: Optional[str] = Field(None, alias="index_id")
+
+    @property
+    def type(self) -> str:
+        return SpanType.CONTEXT_GROUNDING_TOOL
+
+
+# ---------------------------------------------------------------------------
+# Governance Span Attributes
+# ---------------------------------------------------------------------------
+
+
+class GovernanceSpanAttributes(BaseSpanAttributes, ABC):
+    """Abstract base for governance spans."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    policy_name: Optional[str] = Field(None, alias="policyName")
+    action: Optional[str] = Field(None, alias="action")
+    assigned_to: Optional[str] = Field(None, alias="assignedTo")
+    reason: Optional[str] = Field(None, alias="reason")
+
+
+class PreGovernanceSpanAttributes(GovernanceSpanAttributes):
+    """Attributes for pre-governance spans."""
+
+    @property
+    def type(self) -> str:
+        return SpanType.PRE_GOVERNANCE
+
+
+class PostGovernanceSpanAttributes(GovernanceSpanAttributes):
+    """Attributes for post-governance spans."""
+
+    @property
+    def type(self) -> str:
+        return SpanType.POST_GOVERNANCE
+
+
+class ToolPreGovernanceSpanAttributes(BaseSpanAttributes):
+    """Attributes for tool pre-governance spans."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    policy_name: Optional[str] = Field(None, alias="policyName")
+    action: Optional[str] = Field(None, alias="action")
+    assigned_to: Optional[str] = Field(None, alias="assignedTo")
+    reason: Optional[str] = Field(None, alias="reason")
+
+    @property
+    def type(self) -> str:
+        return SpanType.TOOL_PRE_GOVERNANCE
+
+
+class ToolPostGovernanceSpanAttributes(BaseSpanAttributes):
+    """Attributes for tool post-governance spans."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    policy_name: Optional[str] = Field(None, alias="policyName")
+    action: Optional[str] = Field(None, alias="action")
+    reason: Optional[str] = Field(None, alias="reason")
+
+    @property
+    def type(self) -> str:
+        return SpanType.TOOL_POST_GOVERNANCE
+
+
+# ---------------------------------------------------------------------------
+# Guardrail Escalation Span Attributes
+# ---------------------------------------------------------------------------
+
+
+class GuardrailEscalationSpanAttributes(BaseSpanAttributes):
+    """Attributes for guardrail escalation spans."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    guardrail_name: str = Field(..., alias="guardrailName")
+    guardrail_description: Optional[str] = Field(None, alias="guardrailDescription")
+    guardrail_action: Optional[str] = Field(None, alias="guardrailAction")
+    details: Optional[Any] = Field(None, alias="details")
+    action: Optional[str] = Field(None, alias="action")
+    reason: Optional[str] = Field(None, alias="reason")
+    severity_level: Optional[str] = Field(None, alias="severityLevel")
+    arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
+    task_arguments: Optional[Any] = Field(None, alias="taskArguments")
+    assigned_to: Optional[str] = Field(None, alias="assignedTo")
+    updated_arguments: Optional[Any] = Field(None, alias="updatedArguments")
+    task_url: Optional[str] = Field(None, alias="taskUrl")
+    review_status: Optional[str] = Field(None, alias="reviewStatus")
+    reviewed_by: Optional[str] = Field(None, alias="reviewedBy")
+    review_outcome: Optional[str] = Field(None, alias="reviewOutcome")
+    review_reason: Optional[Any] = Field(None, alias="reviewReason")
+    reviewed_inputs: Optional[Any] = Field(None, alias="reviewedInputs")
+    reviewed_outputs: Optional[Any] = Field(None, alias="reviewedOutputs")
+
+    @property
+    def type(self) -> str:
+        return SpanType.GUARDRAIL_ESCALATION
+
+
+class ToolGuardrailEvaluationSpanAttributes(BaseSpanAttributes):
+    """Attributes for tool guardrail evaluation spans."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    guardrail_name: str = Field(..., alias="guardrailName")
+    guardrail_description: Optional[str] = Field(None, alias="guardrailDescription")
+    guardrail_action: Optional[str] = Field(None, alias="guardrailAction")
+    details: Optional[Any] = Field(None, alias="details")
+    action: Optional[str] = Field(None, alias="action")
+    arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
+    result: Optional[Any] = Field(None, alias="result")
+    assigned_to: Optional[str] = Field(None, alias="assignedTo")
+    updated_arguments: Optional[Any] = Field(None, alias="updatedArguments")
+    updated_result: Optional[Any] = Field(None, alias="updatedResult")
+    excluded_fields: Optional[List[str]] = Field(None, alias="excludedFields")
+    severity_level: Optional[str] = Field(None, alias="severityLevel")
+    reason: Optional[str] = Field(None, alias="reason")
+
+    @property
+    def type(self) -> str:
+        return SpanType.TOOL_GUARDRAIL_EVALUATION
+
+
+class ToolGuardrailEscalationSpanAttributes(ToolGuardrailEvaluationSpanAttributes):
+    """Attributes for tool guardrail escalation spans."""
+
+    task_arguments: Optional[Any] = Field(None, alias="taskArguments")
+    task_url: Optional[str] = Field(None, alias="taskUrl")
+    review_status: Optional[str] = Field(None, alias="reviewStatus")
+    reviewed_by: Optional[str] = Field(None, alias="reviewedBy")
+    review_outcome: Optional[str] = Field(None, alias="reviewOutcome")
+    review_reason: Optional[Any] = Field(None, alias="reviewReason")
+    reviewed_inputs: Optional[Any] = Field(None, alias="reviewedInputs")
+    reviewed_outputs: Optional[Any] = Field(None, alias="reviewedOutputs")
+
+    @property
+    def type(self) -> str:
+        return SpanType.TOOL_GUARDRAIL_ESCALATION
 
 
 # Type alias for all span attribute types
@@ -500,4 +763,15 @@ SpanAttributes = Union[
     ToolPostGuardrailsSpanAttributes,
     AgentPreGuardrailsSpanAttributes,
     AgentPostGuardrailsSpanAttributes,
+    McpToolSpanAttributes,
+    McpSessionStartSpanAttributes,
+    McpSessionStopSpanAttributes,
+    ContextGroundingToolSpanAttributes,
+    PreGovernanceSpanAttributes,
+    PostGovernanceSpanAttributes,
+    ToolPreGovernanceSpanAttributes,
+    ToolPostGovernanceSpanAttributes,
+    GuardrailEscalationSpanAttributes,
+    ToolGuardrailEvaluationSpanAttributes,
+    ToolGuardrailEscalationSpanAttributes,
 ]

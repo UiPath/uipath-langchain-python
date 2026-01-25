@@ -30,7 +30,6 @@ from .tracer import UiPathTracer
 logger = logging.getLogger(__name__)
 
 # --- Global Span Stack Registry ---
-# Per run_id stacks for parallel-safe nested span tracking
 _span_stacks: Dict[UUID, List[Span]] = {}
 
 
@@ -130,6 +129,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._resume_tool_name: Optional[str] = None
         # Run IDs for re-invoked tools after resume (no spans created, originals upserted)
         self._reinvoked_tool_run_ids: set[UUID] = set()
+        self._escalation_run_ids: set[UUID] = set()
+        self._process_run_ids: set[UUID] = set()
         # Guardrail tracking
         self._guardrail_containers: Dict[Tuple[str, str], Span] = {}
         self._guardrail_spans: Dict[UUID, Span] = {}
@@ -162,6 +163,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._tool_span_from_guardrail = False
         self._tool_ended_pending_post = False
         self._pending_guardrail_actions.clear()
+        self._escalation_run_ids.clear()
+        self._process_run_ids.clear()
 
         # Clear only this run_id's stack (not all stacks) for parallel agent support
         if run_id in _span_stacks:
@@ -169,7 +172,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
         else:
             _span_stacks[run_id] = []
 
-        # Push agent_span as first span in this run_id's stack
         _span_stacks[run_id].append(agent_span)
 
     # --- Span Stack Methods ---
@@ -226,6 +228,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
         run_id: UUID,
         parent_run_id: Optional[UUID],
         serialized: Dict[str, Any],
+        input: Optional[str] = None,
     ) -> None:
         """Create nested LLM call + model run spans and store in _spans.
 
@@ -244,11 +247,16 @@ class UiPathTracingCallback(BaseCallbackHandler):
             llm_span = self._current_llm_span
             settings = {"maxTokens": max_tokens, "temperature": temperature}
             llm_span.set_attribute("settings", json.dumps(settings))
+            if input:
+                llm_span.set_attribute("input", input)
             self._llm_span_from_guardrail = False
         else:
             parent = self._get_span_or_root(parent_run_id)
             llm_span = self._tracer.start_llm_call(
-                max_tokens=max_tokens, temperature=temperature, parent_span=parent
+                max_tokens=max_tokens,
+                temperature=temperature,
+                input=input,
+                parent_span=parent,
             )
 
         self._current_llm_span = llm_span
@@ -281,7 +289,10 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
-            self._start_llm_and_model_spans(run_id, parent_run_id, serialized)
+            input_text = prompts[0] if prompts else None
+            self._start_llm_and_model_spans(
+                run_id, parent_run_id, serialized, input=input_text
+            )
         except Exception:
             logger.exception("Error in on_llm_start callback")
 
@@ -298,7 +309,16 @@ class UiPathTracingCallback(BaseCallbackHandler):
     ) -> None:
         """Also captures interpolated prompts on first LLM call."""
         try:
-            self._start_llm_and_model_spans(run_id, parent_run_id, serialized)
+            # Extract last message as input (matches C# LastOrDefault()?.Text)
+            input_text = None
+            if messages and messages[0]:
+                last_msg = messages[0][-1]
+                content = last_msg.content
+                input_text = content if isinstance(content, str) else str(content)
+
+            self._start_llm_and_model_spans(
+                run_id, parent_run_id, serialized, input=input_text
+            )
 
             if self._agent_span and not self._prompts_captured:
                 self._capture_interpolated_prompts(messages)
@@ -332,7 +352,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
-            # Pop from stack first
             self._pop_span(run_id)
 
             # Close inner span first, then outer
@@ -359,7 +378,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
-            # Pop from stack first
             self._pop_span(run_id)
 
             exc = error if isinstance(error, Exception) else Exception(str(error))
@@ -415,12 +433,14 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 span = self._current_tool_span
                 span.update_name(f"Tool call - {tool_name}")
                 span.set_attribute("toolName", tool_name)
+                span.set_attribute("tool.name", tool_name)
                 self._spans[run_id] = span
                 self._tool_span_from_guardrail = False
                 self._close_container(GuardrailScope.TOOL, GuardrailStage.PRE)
             else:
                 parent = self._get_span_or_root(parent_run_id)
                 span = self._tracer.start_tool_call(tool_name, parent_span=parent)
+                span.set_attribute("tool.name", tool_name)
                 self._spans[run_id] = span
                 self._current_tool_span = span
 
@@ -439,11 +459,13 @@ class UiPathTracingCallback(BaseCallbackHandler):
                         app_name=tool_display_name,
                         parent_span=span,
                     )
+                    self._escalation_run_ids.add(run_id)
                 elif tool_type == "process" and tool_display_name:
                     child_span = self._tracer.start_process_tool(
                         process_name=tool_display_name,
                         parent_span=span,
                     )
+                    self._process_run_ids.add(run_id)
                 elif tool_type == "integration":
                     child_span = self._tracer.start_integration_tool(
                         tool_name=tool_display_name or tool_name,
@@ -452,7 +474,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
                 if child_span:
                     self._spans[self._interruptible_span_key(run_id)] = child_span
-                    # Push child span to same run_id stack
                     self._push_span(run_id, child_span)
                     # Track as pending for suspend scenario (escalation/process only)
                     if tool_type in ("escalation", "process"):
@@ -487,6 +508,12 @@ class UiPathTracingCallback(BaseCallbackHandler):
                         child_span.update_name(f"Simulated result: {child_span.name}")
                 self._pop_span(run_id)  # Pop child
                 self._set_tool_result(child_span, output)
+                if run_id in self._escalation_run_ids:
+                    self._set_escalation_task_info(child_span, output)
+                    self._escalation_run_ids.discard(run_id)
+                if run_id in self._process_run_ids:
+                    self._set_process_job_info(child_span, output)
+                    self._process_run_ids.discard(run_id)
                 self._tracer.end_span_ok(child_span)
                 if child_span == self._pending_process_span:
                     self._pending_process_span = None
@@ -593,12 +620,50 @@ class UiPathTracingCallback(BaseCallbackHandler):
         return obj
 
     def _extract_model_name(self, serialized: Dict[str, Any]) -> str:
+        """Extract actual model name from LLM serialized data.
+
+        Checks multiple locations where LangChain stores model info:
+        - kwargs.model_name, kwargs.model (most common)
+        - kwargs.model_id (some providers)
+        - kwargs.deployment_name, kwargs.azure_deployment (Azure OpenAI)
+        - serialized.id[-1] only if it looks like a model name (not a class)
+        """
         kwargs = serialized.get("kwargs", {})
-        return (
+
+        model = (
             kwargs.get("model_name")
             or kwargs.get("model")
-            or serialized.get("name", "unknown")
+            or kwargs.get("model_id")
+            # Azure OpenAI specific
+            or kwargs.get("deployment_name")
+            or kwargs.get("azure_deployment")
         )
+        if model:
+            return model
+
+        # Check serialized.id - but only use if it looks like a model name
+        # (contains version number, slash, or known model prefix)
+        id_list = serialized.get("id", [])
+        if id_list:
+            last_id = id_list[-1] if isinstance(id_list, list) else str(id_list)
+            # Model names typically contain version numbers, slashes, or known prefixes
+            if any(
+                indicator in str(last_id).lower()
+                for indicator in [
+                    "gpt",
+                    "claude",
+                    "gemini",
+                    "llama",
+                    "mistral",
+                    "4o",
+                    "3.5",
+                    "4-",
+                    "/",
+                ]
+            ):
+                return str(last_id)
+
+        return serialized.get("name", "unknown")
 
     def _extract_settings(
         self, serialized: Dict[str, Any]
@@ -615,12 +680,29 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
     def _set_usage_attributes(self, span: Span, response: Optional[LLMResult]) -> None:
         """Extract and set token usage on span."""
-        if not response or not response.llm_output:
+        if not response:
             return
 
-        token_usage = response.llm_output.get("token_usage") or response.llm_output.get(
-            "usage"
-        )
+        token_usage = None
+
+        # Modern path: message.usage_metadata (LangChain 0.2+, always a TypedDict)
+        if response.generations and response.generations[0]:
+            gen = response.generations[0][0]
+            msg = getattr(gen, "message", None)
+            if msg and hasattr(msg, "usage_metadata") and msg.usage_metadata:
+                um = msg.usage_metadata
+                token_usage = {
+                    "prompt_tokens": um.get("input_tokens", 0),
+                    "completion_tokens": um.get("output_tokens", 0),
+                    "total_tokens": um.get("total_tokens", 0),
+                }
+
+        # Legacy fallback: llm_output
+        if not token_usage and response.llm_output:
+            token_usage = response.llm_output.get(
+                "token_usage"
+            ) or response.llm_output.get("usage")
+
         if not token_usage:
             return
 
@@ -629,6 +711,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
             "promptTokens": token_usage.get("prompt_tokens", 0),
             "totalTokens": token_usage.get("total_tokens", 0),
             "isByoExecution": False,
+            # TODO: Placeholder - get from gateway headers via uipath-langchain when available
+            "executionDeploymentType": None,
+            "isPiiMasked": False,
             "llmCalls": 1,
         }
         span.set_attribute("usage", json.dumps(usage))
@@ -648,6 +733,10 @@ class UiPathTracingCallback(BaseCallbackHandler):
         tool_calls = getattr(message, "tool_calls", None)
         if not tool_calls:
             return
+
+        content = getattr(message, "content", None)
+        if content and isinstance(content, str) and content.strip():
+            span.set_attribute("explanation", content)
 
         formatted_calls = []
         for tc in tool_calls:
@@ -676,6 +765,34 @@ class UiPathTracingCallback(BaseCallbackHandler):
             span.set_attribute("result", json.dumps(output))
         else:
             span.set_attribute("result", str(output))
+
+    def _set_escalation_task_info(self, span: Span, output: Any) -> None:
+        """Extract and set task_id/task_url from escalation output."""
+        if not isinstance(output, dict):
+            return
+        task_id = output.get("task_id") or output.get("taskId") or output.get("id")
+        if task_id:
+            span.set_attribute("taskId", str(task_id))
+        task_url = output.get("task_url") or output.get("taskUrl") or output.get("url")
+        if task_url:
+            span.set_attribute("taskUrl", str(task_url))
+
+    def _set_process_job_info(self, span: Span, output: Any) -> None:
+        """Extract and set job_id/job_details_uri from process tool output."""
+        if not isinstance(output, dict):
+            return
+        job_id = output.get("job_id") or output.get("jobId") or output.get("JobId")
+        if job_id:
+            span.set_attribute("jobId", str(job_id))
+        job_uri = (
+            output.get("job_details_uri")
+            or output.get("jobDetailsUri")
+            or output.get("JobDetailsUri")
+            or output.get("job_url")
+            or output.get("jobUrl")
+        )
+        if job_uri:
+            span.set_attribute("jobDetailsUri", str(job_uri))
 
     # -------------------------------------------------------------------------
     # Chain Events (for Guardrail Nodes)

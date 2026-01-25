@@ -12,6 +12,7 @@ Supports interruptible process trace context preservation:
 - On resume: restores trace context, continues same trace
 """
 
+import json
 import logging
 import time
 import uuid
@@ -266,9 +267,16 @@ class TelemetryRuntimeWrapper:
             system_prompt, user_prompt = self._get_prompts()
             input_schema, output_schema = self._get_schemas()
 
+            is_conversational = (
+                self._agent_definition.is_conversational
+                if self._agent_definition
+                else False
+            )
+
             with self._tracer.start_agent_run(
                 agent_name=agent_name,
                 agent_id=agent_id,
+                is_conversational=is_conversational or False,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 input_data=self._normalize_input(input_data),
@@ -663,6 +671,15 @@ class TelemetryRuntimeWrapper:
         agent_span: Optional[Span] = None,
     ) -> None:
         if result.status == UiPathRuntimeStatus.SUCCESSFUL:
+            # Set output on parent agentRun span (matches C# schema)
+            if agent_span:
+                output = result.output
+                if isinstance(output, (dict, list)):
+                    output_str = json.dumps(output)
+                else:
+                    output_str = str(output) if output is not None else ""
+                agent_span.set_attribute("output", output_str)
+
             self._tracer.emit_agent_output(result.output)
 
             if self._telemetry_callback:

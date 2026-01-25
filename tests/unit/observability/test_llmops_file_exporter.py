@@ -22,7 +22,7 @@ class TestLlmOpsFileExporterWhitelist:
         span = MagicMock()
         span.attributes = {
             "uipath.custom_instrumentation": True,
-            "span_type": "agentRun",
+            "type": "agentRun",
         }
 
         assert exporter._should_drop_span(span) is False
@@ -48,7 +48,7 @@ class TestLlmOpsFileExporterWhitelist:
         span = MagicMock()
         span.attributes = {
             "uipath.custom_instrumentation": True,
-            "span_type": span_type,
+            "type": span_type,
         }
 
         assert exporter._should_drop_span(span) is False
@@ -105,7 +105,7 @@ class TestLlmOpsFileExporterWhitelist:
         span = MagicMock()
         span.attributes = {
             "uipath.custom_instrumentation": False,
-            "span_type": "agentRun",
+            "type": "agentRun",
         }
 
         assert exporter._should_drop_span(span) is True
