@@ -1,6 +1,7 @@
 from functools import partial
 from typing import Any, Callable, Mapping, Sequence, TypeVar
 
+from langchain_core.runnables import RunnableLambda
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
@@ -184,9 +185,30 @@ def _build_guardrail_node_chain(
         guardrail, execution_stage, next_node, fail_node_name
     )
 
-    # Add both nodes to the subgraph
-    subgraph.add_node(guardrail_node_name, guardrail_node)
-    subgraph.add_node(fail_node_name, fail_node)
+    # Add both nodes to the subgraph.
+    #
+    # NOTE: LangGraph does not automatically forward function attributes like
+    # `node.__metadata__` into the LangChain callback `metadata` argument.
+    # Wrap with RunnableCallable so provided metadata becomes visible to callbacks.
+    guardrail_node_metadata = getattr(guardrail_node, "__metadata__", None) or {}
+    fail_node_metadata = getattr(fail_node, "__metadata__", None) or {}
+
+    # Important: guardrail nodes are async (`async def`).
+    # Use RunnableLambda which properly handles async functions and metadata propagation.
+    # We add a specific tag to identify this as the action node wrapper, allowing
+    # callbacks to distinguish it from the outer LangGraph step execution.
+    guardrail_node_runnable = RunnableLambda(
+        guardrail_node,
+        name=guardrail_node_name,
+    ).with_config(metadata=guardrail_node_metadata, tags=["guardrail_evaluation"])
+
+    fail_node_runnable = RunnableLambda(
+        fail_node,
+        name=fail_node_name,
+    ).with_config(metadata=fail_node_metadata, tags=["guardrail_action"])
+
+    subgraph.add_node(guardrail_node_name, guardrail_node_runnable)
+    subgraph.add_node(fail_node_name, fail_node_runnable)
 
     # Failure path route to the next node
     subgraph.add_edge(fail_node_name, next_node)
