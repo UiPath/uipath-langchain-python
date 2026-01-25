@@ -30,6 +30,7 @@ from .span_attributes import (
     AgentPostGuardrailsSpanAttributes,
     AgentPreGuardrailsSpanAttributes,
     AgentRunSpanAttributes,
+    AgentToolSpanAttributes,
     BaseSpanAttributes,
     CompletionSpanAttributes,
     EscalationToolSpanAttributes,
@@ -302,6 +303,9 @@ class UiPathTracer:
         self,
         tool_name: str,
         tool_type: SpanTypeEnum = SpanTypeEnum.TOOL_CALL,
+        tool_type_value: Optional[str] = None,
+        arguments: Optional[Dict[str, Any]] = None,
+        call_id: Optional[str] = None,
         parent_span: Optional[Span] = None,
     ) -> Span:
         """Start a tool call span.
@@ -309,6 +313,9 @@ class UiPathTracer:
         Args:
             tool_name: Name of the tool being called
             tool_type: Type of tool (TOOL_CALL, PROCESS_TOOL, etc.)
+            tool_type_value: Tool type string (Agent, Process, Integration)
+            arguments: Arguments passed to the tool
+            call_id: LLM tool call ID
             parent_span: Optional parent span. If None, uses current span.
 
         Returns:
@@ -322,8 +329,13 @@ class UiPathTracer:
             kind=SpanKind.INTERNAL,
             context=context,
         )
-        # Use typed attributes - pass span_type to override the type field
-        attrs = ToolCallSpanAttributes(tool_name=tool_name, span_type=tool_type.value)
+        attrs = ToolCallSpanAttributes(
+            tool_name=tool_name,
+            span_type=tool_type.value,
+            tool_type=tool_type_value or "Integration",
+            arguments=arguments,
+            call_id=call_id,
+        )
         self._apply_attributes(span, attrs)
         self.upsert_span_started(span)
         return span
@@ -409,6 +421,44 @@ class UiPathTracer:
         self.upsert_span_started(span)
         return span
 
+    def start_agent_tool(
+        self,
+        agent_name: str,
+        *,
+        arguments: Optional[Dict[str, Any]] = None,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start an agent tool span (child of tool call for agent-as-tool).
+
+        Creates a span named after the agent for agent tool calls.
+        This matches the Temporal pattern where tool call spans have
+        a child span named after the agent (e.g., "A_plus_B").
+
+        Args:
+            agent_name: Name of the agent (used as span name)
+            arguments: Arguments passed to the agent
+            parent_span: Optional parent span. If None, uses current span.
+
+        Returns:
+            The started Span (caller must call span.end())
+        """
+        parent = parent_span or trace.get_current_span()
+        context = trace.set_span_in_context(parent) if parent else None
+
+        span = self._tracer.start_span(
+            agent_name,
+            kind=SpanKind.INTERNAL,
+            context=context,
+        )
+
+        attrs = AgentToolSpanAttributes(
+            tool_name=agent_name,
+            arguments=arguments,
+        )
+        self._apply_attributes(span, attrs)
+        self.upsert_span_started(span)
+        return span
+
     def start_integration_tool(
         self,
         tool_name: str,
@@ -461,21 +511,21 @@ class UiPathTracer:
             self._apply_attributes(span, attrs)
             span.set_status(Status(StatusCode.OK))
 
-    @staticmethod
-    def end_span_ok(span: Span) -> None:
-        """End a span with OK status."""
+    def end_span_ok(self, span: Span) -> None:
+        """End a span with OK status and upsert final state."""
         span.set_status(Status(StatusCode.OK))
         span.end()
+        self.upsert_span_complete(span, status=SpanStatus.OK)
 
-    @staticmethod
-    def end_span_error(span: Span, error: Exception) -> None:
-        """End a span with ERROR status."""
+    def end_span_error(self, span: Span, error: Exception) -> None:
+        """End a span with ERROR status and upsert final state."""
         span.set_attribute(
             "error",
             json.dumps({"message": str(error), "type": type(error).__name__}),
         )
         span.set_status(Status(StatusCode.ERROR, str(error)))
         span.end()
+        self.upsert_span_complete(span, status=SpanStatus.ERROR)
 
     # -------------------------------------------------------------------------
     # UpsertSpan methods for interruptible spans
@@ -495,11 +545,12 @@ class UiPathTracer:
         """
         return self.upsert_span_complete(span, status=SpanStatus.UNSET)
 
-    def upsert_span_running(self, span: Span) -> bool:
-        """Upsert span to backend with RUNNING status.
+    def upsert_span_suspended(self, span: Span) -> bool:
+        """Upsert span to backend with UNSET status (no end time).
 
         Used when suspending interruptible tools. Sends span state to backend
-        so it survives process restart.
+        so it survives process restart. Matches C# pattern: Status=Unset with
+        EndTime=null indicates span is in-progress/waiting.
 
         Args:
             span: The span to upsert
@@ -512,22 +563,22 @@ class UiPathTracer:
             return False
 
         try:
-            # Span must be ReadableSpan for exporter
             if not isinstance(span, ReadableSpan):
                 logger.warning("Span is not ReadableSpan, cannot upsert")
                 return False
 
-            result = self._exporter.upsert_span(
-                span, status_override=SpanStatus.RUNNING
-            )
+            result = self._exporter.upsert_span(span, status_override=SpanStatus.UNSET)
             success = result == SpanExportResult.SUCCESS
             if success:
-                logger.debug("Upserted span %s with RUNNING status", span.name)
+                logger.debug(
+                    "Upserted span %s with UNSET status (suspended)",
+                    span.name,
+                )
             else:
                 logger.warning("Failed to upsert span %s", span.name)
             return success
         except Exception:
-            logger.exception("Error upserting span with RUNNING status")
+            logger.exception("Error upserting span with UNSET status")
             return False
 
     def upsert_span_complete(self, span: Span, status: int = SpanStatus.OK) -> bool:

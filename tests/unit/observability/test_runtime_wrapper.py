@@ -695,15 +695,15 @@ class TestUpsertSpanOnSuspend:
 
         await wrapper.execute({"input": "test"}, None)
 
-        # 3 upserts = 1 agent start (UNSET) + 2 pending spans (RUNNING)
+        # 3 upserts = 1 agent start (UNSET) + 2 pending spans (UNSET)
         assert mock_exporter.upsert_span.call_count == 3
 
         # First call is agent span with UNSET status
         assert mock_exporter.upsert_span.call_args_list[0][1]["status_override"] == 0
 
-        # Remaining calls are pending spans with RUNNING status
+        # Remaining calls are pending spans with UNSET status (matches C# pattern)
         for call in mock_exporter.upsert_span.call_args_list[1:]:
-            assert call[1]["status_override"] == 3
+            assert call[1]["status_override"] == 0
 
     @pytest.mark.asyncio
     async def test_handle_suspended_without_pending_spans_no_upsert(
@@ -776,14 +776,14 @@ class TestUpsertSpanOnSuspend:
 
         await wrapper.execute({"input": "test"}, None)
 
-        # 2 upserts = 1 agent start (UNSET) + 1 tool span (RUNNING)
+        # 2 upserts = 1 agent start (UNSET) + 1 tool span (UNSET)
         assert mock_exporter.upsert_span.call_count == 2
         assert (
             mock_exporter.upsert_span.call_args_list[0][1]["status_override"] == 0
         )  # UNSET
         assert (
-            mock_exporter.upsert_span.call_args_list[1][1]["status_override"] == 3
-        )  # RUNNING
+            mock_exporter.upsert_span.call_args_list[1][1]["status_override"] == 0
+        )  # UNSET (matches C# pattern)
 
 
 class TestGetAgentModel:

@@ -223,6 +223,86 @@ class TestIntegrationToolSpan:
         assert child_span.parent.span_id == parent_span.context.span_id
 
 
+class TestAgentToolSpan:
+    """Tests for agent tool span creation."""
+
+    def test_creates_span_with_correct_type(
+        self, tracer: UiPathTracer, span_exporter
+    ) -> None:
+        """Test agent tool span has correct type attribute."""
+        span = tracer.start_agent_tool(agent_name="A_plus_B")
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert spans[0].attributes["type"] == SpanType.AGENT_TOOL.value
+
+    def test_uses_agent_name_as_span_name(
+        self, tracer: UiPathTracer, span_exporter
+    ) -> None:
+        """Test agent tool span uses agent_name as span name."""
+        span = tracer.start_agent_tool(agent_name="Calculator_Agent")
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        assert spans[0].name == "Calculator_Agent"
+        assert spans[0].attributes["toolName"] == "Calculator_Agent"
+
+    def test_includes_arguments(self, tracer: UiPathTracer, span_exporter) -> None:
+        """Test agent tool span includes arguments."""
+        span = tracer.start_agent_tool(
+            agent_name="A_plus_B", arguments={"a": 1, "b": 2}
+        )
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        assert '"a": 1' in spans[0].attributes["arguments"]
+        assert '"b": 2' in spans[0].attributes["arguments"]
+
+
+class TestToolCallWithArguments:
+    """Tests for tool call span with arguments and call_id."""
+
+    def test_tool_call_includes_arguments(
+        self, tracer: UiPathTracer, span_exporter
+    ) -> None:
+        """Test tool call span includes arguments when provided."""
+        span = tracer.start_tool_call(
+            tool_name="calculator",
+            arguments={"x": 10, "y": 20},
+        )
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        assert '"x": 10' in spans[0].attributes["arguments"]
+
+    def test_tool_call_includes_call_id(
+        self, tracer: UiPathTracer, span_exporter
+    ) -> None:
+        """Test tool call span includes call_id when provided."""
+        span = tracer.start_tool_call(
+            tool_name="calculator",
+            call_id="call_abc123",
+        )
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        assert spans[0].attributes["callId"] == "call_abc123"
+
+    def test_tool_call_includes_tool_type_value(
+        self, tracer: UiPathTracer, span_exporter
+    ) -> None:
+        """Test tool call span includes toolType value."""
+        span = tracer.start_tool_call(
+            tool_name="my_agent",
+            tool_type_value="Agent",
+        )
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        assert spans[0].attributes["toolType"] == "Agent"
+
+
 class TestAgentOutputSpan:
     """Tests for agent output span creation."""
 
@@ -280,27 +360,27 @@ class TestSpanHierarchy:
 class TestUpsertSpanMethods:
     """Tests for upsert span methods used in interruptible tools."""
 
-    def test_upsert_span_running_without_exporter_returns_false(
+    def test_upsert_span_suspended_without_exporter_returns_false(
         self, tracer, span_exporter
     ):
-        """Test upsert_span_running returns False when no exporter configured."""
+        """Test upsert_span_suspended returns False when no exporter configured."""
         span = tracer.start_tool_call("test_tool")
-        result = tracer.upsert_span_running(span)
+        result = tracer.upsert_span_suspended(span)
         assert result is False
         tracer.end_span_ok(span)
 
-    def test_upsert_span_running_with_exporter_calls_upsert(
+    def test_upsert_span_suspended_with_exporter_calls_upsert(
         self, tracer_with_exporter, mock_exporter, span_exporter
     ):
-        """Test upsert_span_running calls exporter with RUNNING status."""
+        """Test upsert_span_suspended calls exporter with UNSET status."""
         span = tracer_with_exporter.start_tool_call("test_tool")
         mock_exporter.reset_mock()  # Reset after start_tool_call's upsert
-        result = tracer_with_exporter.upsert_span_running(span)
+        result = tracer_with_exporter.upsert_span_suspended(span)
 
         assert result is True
         mock_exporter.upsert_span.assert_called_once()
         call_args = mock_exporter.upsert_span.call_args
-        assert call_args[1]["status_override"] == SpanStatus.RUNNING
+        assert call_args[1]["status_override"] == SpanStatus.UNSET
         tracer_with_exporter.end_span_ok(span)
 
     def test_upsert_span_complete_without_exporter_returns_false(
@@ -326,26 +406,26 @@ class TestUpsertSpanMethods:
         assert call_args[1]["status_override"] == SpanStatus.OK
         tracer_with_exporter.end_span_ok(span)
 
-    def test_upsert_span_running_handles_exporter_failure(
+    def test_upsert_span_suspended_handles_exporter_failure(
         self, tracer_with_exporter, mock_exporter, span_exporter
     ):
-        """Test upsert_span_running handles exporter failure gracefully."""
+        """Test upsert_span_suspended handles exporter failure gracefully."""
         mock_exporter.upsert_span.return_value = SpanExportResult.FAILURE
 
         span = tracer_with_exporter.start_tool_call("test_tool")
-        result = tracer_with_exporter.upsert_span_running(span)
+        result = tracer_with_exporter.upsert_span_suspended(span)
 
         assert result is False
         tracer_with_exporter.end_span_ok(span)
 
-    def test_upsert_span_running_handles_exception(
+    def test_upsert_span_suspended_handles_exception(
         self, tracer_with_exporter, mock_exporter, span_exporter
     ):
-        """Test upsert_span_running handles exceptions gracefully."""
+        """Test upsert_span_suspended handles exceptions gracefully."""
         mock_exporter.upsert_span.side_effect = RuntimeError("Network error")
 
         span = tracer_with_exporter.start_tool_call("test_tool")
-        result = tracer_with_exporter.upsert_span_running(span)
+        result = tracer_with_exporter.upsert_span_suspended(span)
 
         assert result is False
         tracer_with_exporter.end_span_ok(span)

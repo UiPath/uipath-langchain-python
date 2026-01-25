@@ -129,8 +129,13 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._resume_tool_name: Optional[str] = None
         # Run IDs for re-invoked tools after resume (no spans created, originals upserted)
         self._reinvoked_tool_run_ids: set[UUID] = set()
+        # Saved span data for resumed tools (to upsert immediately on tool end)
+        self._resumed_tool_span_data: Optional[Dict[str, Any]] = None
+        self._resumed_process_span_data: Optional[Dict[str, Any]] = None
+        self._resumed_trace_id: Optional[str] = None
         self._escalation_run_ids: set[UUID] = set()
         self._process_run_ids: set[UUID] = set()
+        self._agent_run_ids: set[UUID] = set()
         # Guardrail tracking
         self._guardrail_containers: Dict[Tuple[str, str], Span] = {}
         self._guardrail_spans: Dict[UUID, Span] = {}
@@ -154,6 +159,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._pending_tool_name = None
         self._pending_tool_span = None
         self._pending_process_span = None
+        self._resumed_trace_id = None
+        self._resumed_tool_span_data = None
+        self._resumed_process_span_data = None
         self._guardrail_containers.clear()
         self._guardrail_spans.clear()
         self._guardrail_info.clear()
@@ -165,6 +173,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._pending_guardrail_actions.clear()
         self._escalation_run_ids.clear()
         self._process_run_ids.clear()
+        self._agent_run_ids.clear()
 
         # Clear only this run_id's stack (not all stacks) for parallel agent support
         if run_id in _span_stacks:
@@ -196,9 +205,23 @@ class UiPathTracingCallback(BaseCallbackHandler):
             scope, stage = key
             self._close_container(scope, stage)
 
-    def set_resume_context(self, tool_name: str) -> None:
-        """Set resume context - skip creating spans for this tool on first encounter."""
+    def set_resume_context(
+        self,
+        tool_name: str,
+        trace_id: Optional[str] = None,
+        tool_span_data: Optional[Dict[str, Any]] = None,
+        process_span_data: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Set resume context - skip creating spans for this tool on first encounter.
+
+        Also stores span data for immediate upsert when tool completes, fixing
+        duration update timing (span duration updates when tool finishes, not
+        when outer agent ends).
+        """
         self._resume_tool_name = tool_name
+        self._resumed_trace_id = trace_id
+        self._resumed_tool_span_data = tool_span_data
+        self._resumed_process_span_data = process_span_data
 
     def get_pending_tool_info(
         self,
@@ -207,6 +230,19 @@ class UiPathTracingCallback(BaseCallbackHandler):
             self._pending_tool_name,
             self._pending_tool_span,
             self._pending_process_span,
+        )
+
+    def resumed_spans_completed(self) -> bool:
+        """Check if resumed tool spans were already completed by the callback.
+
+        Returns True if spans were upserted on tool completion, meaning
+        _handle_resume_complete can skip redundant upsert.
+        """
+        # If resume data was cleared, spans were completed
+        return (
+            self._resumed_trace_id is None
+            and self._resumed_tool_span_data is None
+            and self._resumed_process_span_data is None
         )
 
     def _get_span_or_root(self, run_id: Optional[UUID]) -> Optional[Span]:
@@ -428,29 +464,41 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 self._reinvoked_tool_run_ids.add(run_id)
                 return
 
+            # Parse arguments and call_id early for typed attributes
+            call_id = kwargs.get("tool_call_id")
+            arguments = self._parse_tool_arguments(input_str)
+
+            # Map tool_type to toolType attribute value
+            tool_type_value = self._get_tool_type_value(tool_type)
+
             # Check if tool span was created early by tool_pre guardrails
             if self._current_tool_span and self._tool_span_from_guardrail:
                 span = self._current_tool_span
                 span.update_name(f"Tool call - {tool_name}")
                 span.set_attribute("toolName", tool_name)
                 span.set_attribute("tool.name", tool_name)
+                span.set_attribute("toolType", tool_type_value)
+                if call_id:
+                    span.set_attribute("callId", call_id)
+                if arguments:
+                    span.set_attribute("arguments", json.dumps(arguments))
                 self._spans[run_id] = span
                 self._tool_span_from_guardrail = False
                 self._close_container(GuardrailScope.TOOL, GuardrailStage.PRE)
             else:
                 parent = self._get_span_or_root(parent_run_id)
-                span = self._tracer.start_tool_call(tool_name, parent_span=parent)
+                span = self._tracer.start_tool_call(
+                    tool_name,
+                    tool_type_value=tool_type_value,
+                    arguments=arguments,
+                    call_id=call_id,
+                    parent_span=parent,
+                )
                 span.set_attribute("tool.name", tool_name)
                 self._spans[run_id] = span
                 self._current_tool_span = span
 
             self._push_span(run_id, span)
-
-            call_id = kwargs.get("tool_call_id")
-            if call_id:
-                span.set_attribute("callId", call_id)
-            if input_str:
-                self._set_tool_arguments(span, input_str)
 
             if tool_type:
                 child_span = None
@@ -460,9 +508,17 @@ class UiPathTracingCallback(BaseCallbackHandler):
                         parent_span=span,
                     )
                     self._escalation_run_ids.add(run_id)
+                elif tool_type == "agent" and tool_display_name:
+                    child_span = self._tracer.start_agent_tool(
+                        agent_name=tool_display_name,
+                        arguments=arguments,
+                        parent_span=span,
+                    )
+                    self._agent_run_ids.add(run_id)
                 elif tool_type == "process" and tool_display_name:
                     child_span = self._tracer.start_process_tool(
                         process_name=tool_display_name,
+                        arguments=arguments,
                         parent_span=span,
                     )
                     self._process_run_ids.add(run_id)
@@ -475,8 +531,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 if child_span:
                     self._spans[self._interruptible_span_key(run_id)] = child_span
                     self._push_span(run_id, child_span)
-                    # Track as pending for suspend scenario (escalation/process only)
-                    if tool_type in ("escalation", "process"):
+                    # Track as pending for suspend scenario (escalation/process/agent)
+                    if tool_type in ("escalation", "process", "agent"):
                         self._pending_tool_name = tool_name
                         self._pending_tool_span = span
                         self._pending_process_span = child_span
@@ -493,9 +549,10 @@ class UiPathTracingCallback(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         try:
-            # Skip re-invoked tool after resume - original spans already upserted
+            # Handle resumed tool completion - upsert spans immediately with final duration
             if run_id in self._reinvoked_tool_run_ids:
                 self._reinvoked_tool_run_ids.discard(run_id)
+                self._upsert_resumed_spans_on_completion(output)
                 return
 
             # Close child span first (inner), then tool span (outer)
@@ -514,6 +571,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 if run_id in self._process_run_ids:
                     self._set_process_job_info(child_span, output)
                     self._process_run_ids.discard(run_id)
+                if run_id in self._agent_run_ids:
+                    self._set_process_job_info(child_span, output)
+                    self._agent_run_ids.discard(run_id)
                 self._tracer.end_span_ok(child_span)
                 if child_span == self._pending_process_span:
                     self._pending_process_span = None
@@ -533,6 +593,61 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
         except Exception:
             logger.exception("Error in on_tool_end callback")
+
+    def _upsert_resumed_spans_on_completion(self, output: Any) -> None:
+        """Upsert resumed tool/process spans immediately when tool completes.
+
+        Fixes duration timing: span duration reflects actual tool execution time,
+        not time until outer agent ends. Sets Status=OK + EndTime to mark complete.
+        """
+        if not self._resumed_trace_id:
+            return
+
+        # Upsert process span first (inner span)
+        if self._resumed_process_span_data:
+            # Add result to span data
+            if output is not None:
+                if isinstance(output, (dict, list)):
+                    self._resumed_process_span_data["attributes"]["result"] = (
+                        json.dumps(output)
+                    )
+                else:
+                    self._resumed_process_span_data["attributes"]["result"] = str(
+                        output
+                    )
+
+            self._tracer.upsert_span_complete_by_data(
+                trace_id=self._resumed_trace_id,
+                span_data=self._resumed_process_span_data,
+            )
+            logger.debug(
+                "Upserted resumed process span %s on tool completion",
+                self._resumed_process_span_data.get("name", "unknown"),
+            )
+
+        # Upsert tool span (outer span)
+        if self._resumed_tool_span_data:
+            if output is not None:
+                if isinstance(output, (dict, list)):
+                    self._resumed_tool_span_data["attributes"]["result"] = json.dumps(
+                        output
+                    )
+                else:
+                    self._resumed_tool_span_data["attributes"]["result"] = str(output)
+
+            self._tracer.upsert_span_complete_by_data(
+                trace_id=self._resumed_trace_id,
+                span_data=self._resumed_tool_span_data,
+            )
+            logger.debug(
+                "Upserted resumed tool span %s on tool completion",
+                self._resumed_tool_span_data.get("name", "unknown"),
+            )
+
+        # Clear resumed span data
+        self._resumed_trace_id = None
+        self._resumed_tool_span_data = None
+        self._resumed_process_span_data = None
 
     def _is_graph_interrupt(self, error: BaseException) -> bool:
         """Check if the error is a GraphInterrupt (suspend signal).
@@ -765,6 +880,27 @@ class UiPathTracingCallback(BaseCallbackHandler):
             span.set_attribute("result", json.dumps(output))
         else:
             span.set_attribute("result", str(output))
+
+    def _parse_tool_arguments(self, input_str: str) -> Optional[Dict[str, Any]]:
+        """Parse tool arguments from input string."""
+        if not input_str:
+            return None
+        try:
+            args = json.loads(input_str)
+            return args if isinstance(args, dict) else None
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    def _get_tool_type_value(self, tool_type: Optional[str]) -> str:
+        """Map tool_type metadata to toolType attribute value."""
+        if tool_type == "agent":
+            return "Agent"
+        elif tool_type == "process":
+            return "Process"
+        elif tool_type == "escalation":
+            return "ActionCenter"
+        else:
+            return "Integration"
 
     def _set_escalation_task_info(self, span: Span, output: Any) -> None:
         """Extract and set task_id/task_url from escalation output."""
@@ -1081,6 +1217,11 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._pending_tool_span = None
         self._pending_process_span = None
         self._pending_tool_name = None
+
+        # Clear resume-related fields
+        self._resumed_trace_id = None
+        self._resumed_tool_span_data = None
+        self._resumed_process_span_data = None
 
         for span in self._guardrail_spans.values():
             try:

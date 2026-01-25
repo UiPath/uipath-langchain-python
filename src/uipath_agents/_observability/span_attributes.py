@@ -147,6 +147,7 @@ class BaseSpanAttributes(BaseModel, ABC):
         """
         attrs: Dict[str, Any] = {
             "type": self.type,
+            "span_type": self.type,
             "uipath.custom_instrumentation": True,
         }
         data = self.model_dump(by_alias=True, exclude_none=True, exclude={"error"})
@@ -302,9 +303,14 @@ class ToolExecutionSpanAttributes(BaseSpanAttributes):
         return SpanType.TOOL_EXECUTION
 
 
-class ProcessToolSpanAttributes(ToolCallSpanAttributes):
+class ProcessToolSpanAttributes(BaseSpanAttributes):
     """Attributes for UiPath process tool calls."""
 
+    model_config = ConfigDict(populate_by_name=True)
+
+    tool_name: str = Field(..., alias="toolName")
+    arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
+    result: Optional[Any] = Field(None, alias="result")
     job_id: Optional[str] = Field(None, alias="jobId")
     job_details_uri: Optional[str] = Field(None, alias="jobDetailsUri")
 

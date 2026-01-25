@@ -251,9 +251,21 @@ class TelemetryRuntimeWrapper:
             async with self._restore_trace_context(saved_context) as agent_span:
                 self._callback.set_agent_span(agent_span, uuid.UUID(self._agent_run_id))
                 # Tell callback to skip span creation for the pending tool
+                # and provide span data for immediate upsert on completion
                 pending_tool = saved_context.get("pending_tool_name")
                 if pending_tool:
-                    self._callback.set_resume_context(pending_tool)
+                    pending_tool_span = saved_context.get("pending_tool_span")
+                    pending_process_span = saved_context.get("pending_process_span")
+                    self._callback.set_resume_context(
+                        tool_name=pending_tool,
+                        trace_id=saved_context.get("trace_id"),
+                        tool_span_data=dict(pending_tool_span)
+                        if pending_tool_span
+                        else None,
+                        process_span_data=dict(pending_process_span)
+                        if pending_process_span
+                        else None,
+                    )
                 try:
                     yield agent_span
                 finally:
@@ -379,8 +391,10 @@ class TelemetryRuntimeWrapper:
         """Handle suspended state: upsert spans and save trace context.
 
         Called when agent execution returns SUSPENDED status.
-        Upserts pending tool/process spans with RUNNING status so they survive
-        process restart, then saves trace context for resume.
+        Upserts pending tool/process spans with UNSET status (no end time)
+        so they survive process restart, then saves trace context for resume.
+
+        Matches C# pattern: Status=Unset + EndTime=null = in-progress/waiting.
 
         Args:
             agent_span: The current agent span
@@ -388,12 +402,12 @@ class TelemetryRuntimeWrapper:
         # Get pending tool span info from callback
         tool_name, tool_span, process_span = self._callback.get_pending_tool_info()
 
-        # Upsert spans with RUNNING status before suspend
+        # Upsert spans with UNSET status before suspend
         # This ensures spans survive process restart with correct state
         if tool_span:
-            self._tracer.upsert_span_running(tool_span)
+            self._tracer.upsert_span_suspended(tool_span)
         if process_span:
-            self._tracer.upsert_span_running(process_span)
+            self._tracer.upsert_span_suspended(process_span)
 
         if self._trace_context_storage:
             runtime_id = self._get_runtime_id()
@@ -446,9 +460,19 @@ class TelemetryRuntimeWrapper:
         Called when agent execution completes successfully after resume.
         Upserts pending tool/process spans with OK status and final end_time.
 
+        Note: If callback already completed spans on tool_end (for accurate duration),
+        this method becomes a no-op.
+
         Args:
             saved_context: Previously saved trace context with pending span data
         """
+        # Skip if callback already completed the spans on tool_end
+        if self._callback.resumed_spans_completed():
+            logger.debug(
+                "Resumed spans already completed by callback, skipping duplicate upsert"
+            )
+            return
+
         trace_id = saved_context["trace_id"]
 
         # Complete pending tool span

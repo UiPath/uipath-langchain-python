@@ -24,6 +24,7 @@ class SpanType(str, Enum):
     # Tool spans
     TOOL_CALL = "toolCall"  # Generic tool call
     PROCESS_TOOL = "processTool"  # UiPath Process invocation
+    AGENT_TOOL = "agentTool"  # Agent-as-tool invocation
     INTEGRATION_TOOL = "integrationTool"  # UiPath Integration connector
     CONTEXT_GROUNDING_TOOL = "contextGroundingTool"  # RAG/context tool
     MCP_TOOL = "mcpTool"  # Model Context Protocol tool
