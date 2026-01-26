@@ -1343,16 +1343,16 @@ wheels = [
 
 [[package]]
 name = "langgraph-checkpoint-sqlite"
-version = "3.0.2"
+version = "3.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "langgraph-checkpoint" },
     { name = "sqlite-vec" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a9/f6/eceda876bbbc15c9d9060c95e392f8a9f9fb9262ace23f30995f865f04c0/langgraph_checkpoint_sqlite-3.0.2.tar.gz", hash = "sha256:a34961c035944af0ee7af416f8f26fec25059b10387a69dcb13fc6cc59c30a25", size = 109772, upload-time = "2026-01-12T20:31:51.951Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/61/40b7f8f29d6de92406e668c35265f409f57064907e31eae84ab3f2a3e3e1/langgraph_checkpoint_sqlite-3.0.3.tar.gz", hash = "sha256:438c234d37dabda979218954c9c6eb1db73bee6492c2f1d3a00552fe23fa34ed", size = 123876, upload-time = "2026-01-19T00:38:44.473Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ae/e3/8ed603baf04368618faaedabb198684b5d214697e17ddf8d8aced0f0b58f/langgraph_checkpoint_sqlite-3.0.2-py3-none-any.whl", hash = "sha256:c627e4be7b801f7ac3d1dd3ab407f068bb1150d76b302a458c45904d57feca01", size = 33386, upload-time = "2026-01-12T20:31:51.111Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/d8/84ef22ee1cc485c4910df450108fd5e246497379522b3c6cfba896f71bf6/langgraph_checkpoint_sqlite-3.0.3-py3-none-any.whl", hash = "sha256:02eb683a79aa6fcda7cd4de43861062a5d160dbbb990ef8a9fd76c979998a952", size = 33593, upload-time = "2026-01-19T00:38:43.288Z" },
 ]
 
 [[package]]
@@ -3300,7 +3300,6 @@ name = "uipath-langchain"
 version = "0.5.7"
 source = { editable = "." }
 dependencies = [
-    { name = "aiosqlite" },
     { name = "httpx" },
     { name = "jsonpath-ng" },
     { name = "jsonschema-pydantic-converter" },
@@ -3346,7 +3345,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiosqlite", specifier = "==0.21.0" },
     { name = "boto3-stubs", marker = "extra == 'bedrock'", specifier = ">=1.41.4" },
     { name = "google-generativeai", marker = "extra == 'vertex'", specifier = ">=0.8.0" },
     { name = "httpx", specifier = ">=0.27.0" },
@@ -3359,7 +3357,7 @@ requires-dist = [
     { name = "langchain-mcp-adapters", specifier = "==0.2.1" },
     { name = "langchain-openai", specifier = ">=1.0.0,<2.0.0" },
     { name = "langgraph", specifier = ">=1.0.0,<2.0.0" },
-    { name = "langgraph-checkpoint-sqlite", specifier = ">=3.0.0,<4.0.0" },
+    { name = "langgraph-checkpoint-sqlite", specifier = ">=3.0.3,<4.0.0" },
     { name = "mcp", specifier = "==1.24.0" },
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.56" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
