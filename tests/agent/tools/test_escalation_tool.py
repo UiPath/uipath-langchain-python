@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.messages import ToolCall
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationChannelProperties,
@@ -10,6 +11,9 @@ from uipath.agent.models.agent import (
     AgentEscalationResourceConfig,
     AssetRecipient,
     StandardRecipient,
+    TextBuilderTaskTitle,
+    TextToken,
+    TextTokenType,
 )
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 
@@ -308,3 +312,99 @@ class TestEscalationToolMetadata:
 
         assert tool.metadata is not None
         assert tool.metadata["recipient"] is None
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    async def test_escalation_tool_with_string_task_title(self, mock_interrupt):
+        """Test escalation tool with legacy string task title."""
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_interrupt.return_value = mock_result
+
+        # Create resource with string task title
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                    ),
+                    recipients=[],
+                    task_title="Static Task Title",
+                )
+            ],
+        )
+
+        tool = await create_escalation_tool(resource)
+
+        # Invoke the tool
+        await tool.ainvoke({})
+
+        # Verify interrupt was called with the static title
+        call_args = mock_interrupt.call_args[0][0]
+        assert call_args.title == "Static Task Title"
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    async def test_escalation_tool_with_text_builder_task_title(self, mock_interrupt):
+        """Test escalation tool with TEXT_BUILDER task title builds from tokens."""
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_interrupt.return_value = mock_result
+
+        # Create resource with TEXT_BUILDER task title containing variable token
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                    ),
+                    recipients=[],
+                    task_title=TextBuilderTaskTitle(
+                        type="textBuilder",
+                        tokens=[
+                            TextToken(
+                                type=TextTokenType.SIMPLE_TEXT,
+                                raw_string="Approve request for ",
+                            ),
+                            TextToken(
+                                type=TextTokenType.VARIABLE, raw_string="input.userName"
+                            ),
+                        ],
+                    ),
+                )
+            ],
+        )
+
+        tool = await create_escalation_tool(resource)
+
+        # Create mock state with variables for token interpolation
+        state = {"userName": "John Doe", "messages": []}
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        # Invoke through the wrapper to test full flow
+        await tool.awrapper(tool, call, state)  # type: ignore[attr-defined]
+
+        # Verify interrupt was called with the correctly built task title
+        assert mock_interrupt.called
+        call_args = mock_interrupt.call_args[0][0]
+        assert call_args.title == "Approve request for John Doe"
