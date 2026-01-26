@@ -44,11 +44,19 @@ from ..._observability.tracing import (
     FilteringSpanExporter,
     is_custom_instrumentation_span,
 )
+from ..._observability.utils import configure_appinsights_cloud_role, setup_otel_env
 from ..constants import AGENT_ENTRYPOINT
 from ..utils import _prepare_agent_execution_contract, load_agent_configuration
 from .runtime import AgentsLangGraphRuntime
 
 load_dotenv()
+
+# Setup OTEL environment variables at module load time
+# This must happen before any TracerProvider is created
+setup_otel_env()
+
+# Configure cloud role for Application Insights custom events
+configure_appinsights_cloud_role()
 
 logger = logging.getLogger(__name__)
 

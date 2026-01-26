@@ -14,6 +14,7 @@ Supports interruptible process trace context preservation:
 
 import json
 import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -583,7 +584,7 @@ class TelemetryRuntimeWrapper:
         """Get enriched telemetry properties from AgentDefinition and execution context."""
         properties = base_properties.copy()
 
-        trace_id = None
+        trace_id = UiPathConfig.trace_id
         if agent_span:
             span_context = agent_span.get_span_context()
             if span_context and span_context.trace_id:
@@ -662,7 +663,7 @@ class TelemetryRuntimeWrapper:
             properties["ProcessUuid"] = UiPathConfig.process_uuid
         if UiPathConfig.process_version:
             properties["ProcessVersion"] = UiPathConfig.process_version
-
+        properties["ImageVersion"] = os.getenv("IMAGE_VERSION", None)
         return properties
 
     def _get_agent_id(self) -> Optional[str]:

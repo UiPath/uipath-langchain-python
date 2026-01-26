@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from langchain_core.callbacks import BaseCallbackHandler
+from opentelemetry import trace
 from uipath.telemetry import flush_events as _flush_events
 from uipath.telemetry import track_event as _track_event
 
@@ -29,7 +30,10 @@ def track_event(
     properties: Optional[Dict[str, Any]] = None,
     measurements: Optional[Dict[str, float]] = None,
 ) -> None:
-    """Track a custom event to Application Insights.
+    """Track a custom event to Application Insights with trace context.
+
+    Links the custom event to the current OpenTelemetry trace by setting
+    operation_Id (trace ID) and operation_ParentId (span ID) on the event.
 
     Args:
         name: Name of the event
@@ -38,8 +42,51 @@ def track_event(
                      kept for backward compatibility)
     """
     logger.info(f"track_event called: {name}, properties: {properties}")
+
+    # Set operation context from current span before tracking event
+    _set_operation_context_from_current_span()
+
     _track_event(name, properties)
     logger.info(f"_track_event completed for: {name}")
+
+
+def _set_operation_context_from_current_span() -> None:
+    """Set Application Insights operation context from current OpenTelemetry span.
+
+    This links custom events to the current trace by setting:
+    - operation.id = trace_id (32-char hex string)
+    - operation.parent_id = span_id in W3C format (|trace_id.span_id.)
+    """
+    try:
+        # Get current span from OpenTelemetry context
+        current_span = trace.get_current_span()
+        if not current_span:
+            return
+
+        span_context = current_span.get_span_context()
+        if not span_context or not span_context.is_valid:
+            return
+
+        # Format IDs for Application Insights
+        trace_id = format(span_context.trace_id, "032x")
+        span_id = format(span_context.span_id, "016x")
+
+        # W3C trace-context format for parent_id: |trace_id.span_id.
+        operation_parent_id = f"|{trace_id}.{span_id}."
+
+        # Access the Application Insights client and set operation context
+        from uipath.telemetry._track import _AppInsightsEventClient
+
+        client = _AppInsightsEventClient._client
+        if client:
+            client.context.operation.id = trace_id
+            client.context.operation.parent_id = operation_parent_id
+
+    except Exception as e:
+        # Silently fail - telemetry should never break the application
+        logger.warning(
+            f"Failed to set operation context from current span: {type(e).__name__}: {e}"
+        )
 
 
 class AppInsightsTelemetryCallback(BaseCallbackHandler):
