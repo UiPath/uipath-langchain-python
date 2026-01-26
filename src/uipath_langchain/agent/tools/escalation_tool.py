@@ -105,7 +105,9 @@ def create_escalation_tool(
         # Get task title: use built string from tokens if TEXT_BUILDER, otherwise use directly
         if isinstance(channel.task_title, TextBuilderTaskTitle):
             if tool.metadata is None:
-                raise RuntimeError("Tool metadata is required for TEXT_BUILDER task titles")
+                raise RuntimeError(
+                    "Tool metadata is required for TEXT_BUILDER task titles"
+                )
             task_title = tool.metadata["taskTitle"]
         elif isinstance(channel.task_title, str):
             task_title = channel.task_title
@@ -165,7 +167,9 @@ def create_escalation_tool(
         # Build task title from tokens if it's a TEXT_BUILDER type
         if isinstance(channel.task_title, TextBuilderTaskTitle):
             if tool.metadata is None:
-                raise RuntimeError("Tool metadata is required for TEXT_BUILDER task titles")
+                raise RuntimeError(
+                    "Tool metadata is required for TEXT_BUILDER task titles"
+                )
             tool.metadata["taskTitle"] = build_string_from_tokens(
                 channel.task_title.tokens, sanitize_dict_for_serialization(dict(state))
             )

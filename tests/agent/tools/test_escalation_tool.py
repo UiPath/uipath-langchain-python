@@ -11,9 +11,6 @@ from uipath.agent.models.agent import (
     AgentEscalationResourceConfig,
     AssetRecipient,
     StandardRecipient,
-    TextBuilderTaskTitle,
-    TextToken,
-    TextTokenType,
 )
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 
@@ -323,25 +320,25 @@ class TestEscalationToolMetadata:
         mock_interrupt.return_value = mock_result
 
         # Create resource with string task title
+        channel_dict = {
+            "name": "action_center",
+            "type": "actionCenter",
+            "description": "Action Center channel",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {"type": "object", "properties": {}},
+            "properties": {
+                "appName": "ApprovalApp",
+                "appVersion": 1,
+                "resourceKey": "test-key",
+            },
+            "recipients": [],
+            "taskTitle": "Static Task Title",
+        }
+
         resource = AgentEscalationResourceConfig(
             name="approval",
             description="Request approval",
-            channels=[
-                AgentEscalationChannel(
-                    name="action_center",
-                    type="actionCenter",
-                    description="Action Center channel",
-                    input_schema={"type": "object", "properties": {}},
-                    output_schema={"type": "object", "properties": {}},
-                    properties=AgentEscalationChannelProperties(
-                        app_name="ApprovalApp",
-                        app_version=1,
-                        resource_key="test-key",
-                    ),
-                    recipients=[],
-                    task_title="Static Task Title",
-                )
-            ],
+            channels=[AgentEscalationChannel(**channel_dict)],
         )
 
         tool = await create_escalation_tool(resource)
@@ -363,36 +360,31 @@ class TestEscalationToolMetadata:
         mock_interrupt.return_value = mock_result
 
         # Create resource with TEXT_BUILDER task title containing variable token
+        channel_dict = {
+            "name": "action_center",
+            "type": "actionCenter",
+            "description": "Action Center channel",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {"type": "object", "properties": {}},
+            "properties": {
+                "appName": "ApprovalApp",
+                "appVersion": 1,
+                "resourceKey": "test-key",
+            },
+            "recipients": [],
+            "taskTitle": {
+                "type": "textBuilder",
+                "tokens": [
+                    {"type": "simpleText", "rawString": "Approve request for "},
+                    {"type": "variable", "rawString": "input.userName"},
+                ],
+            },
+        }
+
         resource = AgentEscalationResourceConfig(
             name="approval",
             description="Request approval",
-            channels=[
-                AgentEscalationChannel(
-                    name="action_center",
-                    type="actionCenter",
-                    description="Action Center channel",
-                    input_schema={"type": "object", "properties": {}},
-                    output_schema={"type": "object", "properties": {}},
-                    properties=AgentEscalationChannelProperties(
-                        app_name="ApprovalApp",
-                        app_version=1,
-                        resource_key="test-key",
-                    ),
-                    recipients=[],
-                    task_title=TextBuilderTaskTitle(
-                        type="textBuilder",
-                        tokens=[
-                            TextToken(
-                                type=TextTokenType.SIMPLE_TEXT,
-                                raw_string="Approve request for ",
-                            ),
-                            TextToken(
-                                type=TextTokenType.VARIABLE, raw_string="input.userName"
-                            ),
-                        ],
-                    ),
-                )
-            ],
+            channels=[AgentEscalationChannel(**channel_dict)],
         )
 
         tool = await create_escalation_tool(resource)
