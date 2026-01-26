@@ -217,21 +217,40 @@ class UiPathChat(UiPathRequestMixin, AzureChatOpenAI):
         **kwargs: Any,
     ) -> dict[Any, Any]:
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-        # hacks to make the request work with uipath normalized
-        for message in payload["messages"]:
-            if message["content"] is None:
-                message["content"] = ""
-            if "tool_calls" in message:
-                for tool_call in message["tool_calls"]:
-                    tool_call["name"] = tool_call["function"]["name"]
-                    tool_call["arguments"] = json.loads(
-                        tool_call["function"]["arguments"]
-                    )
-            if message["role"] == "tool":
-                message["content"] = {
-                    "result": message["content"],
-                    "call_id": message["tool_call_id"],
-                }
+
+        # Handle both Responses API (input array) and Chat Completions API (messages array)
+        if "input" in payload:
+            # Responses API format - arguments should remain as JSON strings
+            for item in payload["input"]:
+                if item.get("type") == "function_call":
+                    # Ensure arguments exists and is a valid JSON string
+                    if "arguments" not in item or not item["arguments"]:
+                        item["arguments"] = "{}"
+                    elif not isinstance(item["arguments"], str):
+                        # If it's already a dict/object, convert back to JSON string
+                        item["arguments"] = json.dumps(item["arguments"])
+                elif item.get("type") == "function_call_output":
+                    # Ensure output exists
+                    if "output" not in item:
+                        item["output"] = ""
+        elif "messages" in payload:
+            # Chat Completions API format - transform messages array
+            for message in payload["messages"]:
+                if message["content"] is None:
+                    message["content"] = ""
+                if "tool_calls" in message:
+                    for tool_call in message["tool_calls"]:
+                        tool_call["name"] = tool_call["function"]["name"]
+                        arguments_str = tool_call["function"].get("arguments", "{}")
+                        try:
+                            tool_call["arguments"] = json.loads(arguments_str) if arguments_str else {}
+                        except (json.JSONDecodeError, ValueError):
+                            tool_call["arguments"] = {}
+                if message["role"] == "tool":
+                    message["content"] = {
+                        "result": message["content"],
+                        "call_id": message["tool_call_id"],
+                    }
         return payload
 
     def _normalize_tool_choice(self, kwargs: dict[str, Any]) -> None:
