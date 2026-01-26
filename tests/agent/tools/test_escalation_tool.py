@@ -308,3 +308,105 @@ class TestEscalationToolMetadata:
 
         assert tool.metadata is not None
         assert tool.metadata["recipient"] is None
+
+
+class TestBuildTaskUrl:
+    """Test cases for _build_task_url function."""
+
+    def test_returns_none_when_task_id_is_none(self):
+        """Should return None when task_id is None."""
+        from uipath_langchain.agent.tools.escalation_tool import _build_task_url
+
+        result = _build_task_url(None)
+        assert result is None
+
+    def test_returns_none_when_uipath_url_not_set(self):
+        """Should return None when UIPATH_URL env var is not set."""
+        import os
+
+        from uipath_langchain.agent.tools.escalation_tool import _build_task_url
+
+        with patch.dict(os.environ, {}, clear=True):
+            result = _build_task_url(123)
+            assert result is None
+
+    def test_builds_url_from_env_vars(self):
+        """Should build URL using org/tenant from env vars."""
+        import os
+
+        from uipath_langchain.agent.tools.escalation_tool import _build_task_url
+
+        env = {
+            "UIPATH_URL": "https://cloud.uipath.com/myorg/mytenant",
+            "UIPATH_ORGANIZATION_ID": "myorg",
+            "UIPATH_TENANT_ID": "mytenant",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = _build_task_url(12345)
+            assert (
+                result == "https://cloud.uipath.com/myorg/mytenant/actions_/tasks/12345"
+            )
+
+    def test_extracts_org_tenant_from_url_path(self):
+        """Should extract org/tenant from URL path when env vars not set."""
+        import os
+
+        from uipath_langchain.agent.tools.escalation_tool import _build_task_url
+
+        env = {
+            "UIPATH_URL": "https://cloud.uipath.com/orgfromurl/tenantfromurl/orchestrator_",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = _build_task_url(999)
+            assert (
+                result
+                == "https://cloud.uipath.com/orgfromurl/tenantfromurl/actions_/tasks/999"
+            )
+
+    def test_returns_none_when_org_tenant_cannot_be_determined(self):
+        """Should return None when org/tenant cannot be determined."""
+        import os
+
+        from uipath_langchain.agent.tools.escalation_tool import _build_task_url
+
+        env = {
+            "UIPATH_URL": "https://cloud.uipath.com/",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = _build_task_url(123)
+            assert result is None
+
+    def test_uses_env_vars_over_url_path(self):
+        """Env vars should take precedence over URL path extraction."""
+        import os
+
+        from uipath_langchain.agent.tools.escalation_tool import _build_task_url
+
+        env = {
+            "UIPATH_URL": "https://cloud.uipath.com/urlorg/urltenant/orchestrator_",
+            "UIPATH_ORGANIZATION_ID": "envorg",
+            "UIPATH_TENANT_ID": "envtenant",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = _build_task_url(42)
+            assert (
+                result == "https://cloud.uipath.com/envorg/envtenant/actions_/tasks/42"
+            )
+
+    def test_handles_alpha_domain(self):
+        """Should work with alpha.uipath.com domain."""
+        import os
+
+        from uipath_langchain.agent.tools.escalation_tool import _build_task_url
+
+        env = {
+            "UIPATH_URL": "https://alpha.uipath.com/alphaorg/alphatenant",
+            "UIPATH_ORGANIZATION_ID": "alphaorg",
+            "UIPATH_TENANT_ID": "alphatenant",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = _build_task_url(555)
+            assert (
+                result
+                == "https://alpha.uipath.com/alphaorg/alphatenant/actions_/tasks/555"
+            )

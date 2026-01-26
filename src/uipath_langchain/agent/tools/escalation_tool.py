@@ -1,7 +1,9 @@
 """Escalation tool creation for Action Center integration."""
 
+import os
 from enum import Enum
 from typing import Any
+from urllib.parse import urlparse
 
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
@@ -16,7 +18,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
+from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
 from uipath.platform.common import CreateEscalation
 from uipath.runtime.errors import UiPathErrorCode
 
@@ -32,6 +34,33 @@ class EscalationAction(str, Enum):
 
     CONTINUE = "continue"
     END = "end"
+
+
+def _build_task_url(task_id: int | None) -> str | None:
+    """Construct Action Center task URL from environment variables."""
+    if task_id is None:
+        return None
+
+    uipath_url = os.environ.get("UIPATH_URL", "")
+    org_id = os.environ.get("UIPATH_ORGANIZATION_ID", "")
+    tenant_id = os.environ.get("UIPATH_TENANT_ID", "")
+
+    if not uipath_url:
+        return None
+
+    # Use org_id/tenant_id env vars if available, otherwise extract from URL
+    if not org_id or not tenant_id:
+        parsed = urlparse(uipath_url)
+        parts = [p for p in parsed.path.split("/") if p]
+        org_id = org_id or (parts[0] if len(parts) >= 1 else "")
+        tenant_id = tenant_id or (parts[1] if len(parts) >= 2 else "")
+
+    if not org_id or not tenant_id:
+        return None
+
+    parsed = urlparse(uipath_url)
+    domain = f"{parsed.scheme}://{parsed.netloc}"
+    return f"{domain}/{org_id}/{tenant_id}/actions_/tasks/{task_id}"
 
 
 async def resolve_recipient_value(
@@ -124,8 +153,35 @@ async def create_escalation_tool(
             )
         )
 
+        # Extract task info for span attributes
+        task_id: str | None = None
+        task_url: str | None = None
+        if isinstance(result, Task):
+            task_id = str(result.id) if result.id else None
+            # Try to get task_url from Task object first (API may return it)
+            # Fall back to constructing it from env vars
+            task_url = getattr(result, "task_url", None) or getattr(
+                result, "taskUrl", None
+            )
+            if not task_url:
+                task_url = _build_task_url(result.id)
+
         escalation_action = getattr(result, "action", None)
-        escalation_output = getattr(result, "data", {})
+        escalation_output = getattr(result, "data", {}) or {}
+
+        # Ensure escalation_output is a mutable dict for adding task info
+        if not isinstance(escalation_output, dict):
+            escalation_output = {"data": escalation_output}
+        else:
+            escalation_output = dict(
+                escalation_output
+            )  # copy to avoid mutating original
+
+        # Add task info for callback to extract
+        if task_id:
+            escalation_output["task_id"] = task_id
+        if task_url:
+            escalation_output["task_url"] = task_url
 
         outcome_str = (
             channel.outcome_mapping.get(escalation_action)
