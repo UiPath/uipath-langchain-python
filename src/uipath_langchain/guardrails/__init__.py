@@ -8,6 +8,7 @@ from uipath.agent.models.agent import AgentGuardrailSeverityLevel
 from uipath.core.guardrails import GuardrailScope
 
 from .actions import BlockAction, LogAction
+from .decorators import pii_guardrail
 from .enums import GuardrailExecutionStage, PIIDetectionEntity
 from .middleware import (
     UiPathDeterministicGuardrailMiddleware,
@@ -27,5 +28,6 @@ __all__ = [
     "UiPathPIIDetectionMiddleware",
     "UiPathPromptInjectionMiddleware",
     "UiPathDeterministicGuardrailMiddleware",
+    "pii_guardrail",
     "AgentGuardrailSeverityLevel",  # Re-export for convenience
 ]
