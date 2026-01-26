@@ -10,6 +10,7 @@ from openinference.instrumentation.langchain import (
     get_current_span,
 )
 from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager
+from uipath.core.tracing.types import UiPathTraceSettings
 from uipath.platform.resume_triggers import (
     UiPathResumeTriggerHandler,
 )
@@ -230,12 +231,6 @@ class UiPathLangGraphRuntimeFactory:
             return []
         return config.entrypoints
 
-    async def get_settings(self) -> UiPathRuntimeFactorySettings | None:
-        """
-        Get the factory settings.
-        """
-        return None
-
     async def get_storage(self) -> UiPathRuntimeStorageProtocol | None:
         """
         Get the runtime storage protocol instance.
@@ -306,6 +301,30 @@ class UiPathLangGraphRuntimeFactory:
             runtime_id=runtime_id,
             entrypoint=entrypoint,
             **kwargs,
+        )
+
+    async def get_settings(self):
+        """Get factory settings with span filtering for low-code agents.
+
+        Low-code agents (LangGraph) generate many framework spans from:
+        - LangGraph state management
+        - LangChain internals
+        - Checkpoint operations
+        - Node/edge traversals
+
+        We filter to only export spans marked with uipath.custom_instrumentation=True
+        (eval runtime spans and LLM calls), reducing trace noise significantly.
+
+        Returns:
+            UiPathRuntimeFactorySettings with span_filter configured
+        """
+        return UiPathRuntimeFactorySettings(
+            trace_settings=UiPathTraceSettings(
+                span_filter=lambda span: bool(
+                    span.attributes
+                    and span.attributes.get("uipath.custom_instrumentation")
+                )
+            )
         )
 
     async def dispose(self) -> None:
