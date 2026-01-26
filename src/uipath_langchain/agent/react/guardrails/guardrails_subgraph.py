@@ -184,7 +184,6 @@ def _build_guardrail_node_chain(
         guardrail, execution_stage, next_node, fail_node_name
     )
 
-    # Add both nodes to the subgraph.
     guardrail_node_metadata = getattr(guardrail_node, "__metadata__", None) or {}
     fail_node_metadata = getattr(fail_node, "__metadata__", None) or {}
     subgraph.add_node(

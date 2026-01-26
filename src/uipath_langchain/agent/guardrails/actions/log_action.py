@@ -55,7 +55,6 @@ class LogAction(GuardrailAction):
             logger.log(self.level, message)
             return {}
 
-        # Attach observability metadata as function attribute (used by downstream tooling).
         _node.__metadata__ = {  # type: ignore[attr-defined]
             "severity_level": logging.getLevelName(self.level),
             "guardrail": guardrail,
