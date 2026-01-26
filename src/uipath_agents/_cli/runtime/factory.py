@@ -12,11 +12,13 @@ from uipath.agent.models.agent import AgentDefinition
 from uipath.agent.react.conversational_prompts import PromptUserSettings
 from uipath.core import UiPathSpanUtils, UiPathTraceManager
 from uipath.core.chat import UiPathConversationMessage
+from uipath.core.tracing import UiPathTraceSettings
 from uipath.platform.common import UiPathConfig
 from uipath.platform.resume_triggers import UiPathResumeTriggerHandler
 from uipath.runtime import (
     UiPathResumableRuntime,
     UiPathRuntimeContext,
+    UiPathRuntimeFactorySettings,
     UiPathRuntimeProtocol,
 )
 from uipath.runtime.errors import UiPathErrorCategory
@@ -100,6 +102,17 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             entrypoint=entrypoint,
             memory=memory,
             agent_definition=agent_definition,
+        )
+
+    async def get_settings(self) -> UiPathRuntimeFactorySettings | None:
+        """Return factory settings with low-code specific trace filtering."""
+        return UiPathRuntimeFactorySettings(
+            trace_settings=UiPathTraceSettings(
+                span_filter=lambda span: bool(
+                    span.attributes
+                    and span.attributes.get("uipath.custom_instrumentation")
+                )
+            )
         )
 
     async def dispose(self) -> None:
