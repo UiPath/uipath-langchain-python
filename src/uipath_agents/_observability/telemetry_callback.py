@@ -23,6 +23,13 @@ logger = logging.getLogger(__name__)
 AGENTRUN_STARTED = "AgentRun.Start"
 AGENTRUN_COMPLETED = "AgentRun.End"
 AGENTRUN_FAILED = "AgentRun.Failed"
+GUARDRAIL_SKIPPED = "Guardrail.Skipped"
+GUARDRAIL_BLOCKED = "Guardrail.Blocked"
+GUARDRAIL_LOGGED = "Guardrail.Logged"
+GUARDRAIL_FILTERED = "Guardrail.Filtered"
+GUARDRAIL_ESCALATED = "Guardrail.Escalated"
+GUARDRAIL_ESCALATION_APPROVED = "Guardrail.EscalationApproved"
+GUARDRAIL_ESCALATION_REJECTED = "Guardrail.EscalationRejected"
 
 
 def track_event(

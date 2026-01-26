@@ -1414,6 +1414,226 @@ class TestSpanStackParallelExecution:
         assert results["tool_1_span"] is not results["tool_2_span"]
 
 
+class TestGuardrailTelemetryEvents:
+    """Tests for guardrail telemetry event tracking."""
+
+    def test_skip_action_tracks_guardrail_skipped_event(
+        self, callback, tracer, span_exporter
+    ):
+        """When validation passes (Skip), Guardrail.Skipped event should be tracked."""
+        from unittest.mock import patch
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+            callback.set_enriched_properties({"AgentName": "TestAgent"})
+
+            with patch(
+                "uipath_agents._observability.callback.track_event"
+            ) as mock_track:
+                run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=run_id,
+                    metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+                )
+                callback.on_chain_end(
+                    {
+                        INNER_STATE_KEY: {
+                            GUARDRAIL_VALIDATION_RESULT_KEY: True,
+                            GUARDRAIL_VALIDATION_DETAILS_KEY: "No PII found",
+                        }
+                    },
+                    run_id=run_id,
+                )
+
+                # Verify Guardrail.Skipped event was tracked
+                mock_track.assert_called_once()
+                call_args = mock_track.call_args
+                assert call_args[0][0] == "Guardrail.Skipped"
+                props = call_args[0][1]
+                assert props["ActionType"] == "Skip"
+                assert props["AgentName"] == "TestAgent"
+                assert props.get("validationDetails") == "No PII found"
+
+    def test_block_action_tracks_guardrail_blocked_event(
+        self, callback, tracer, span_exporter
+    ):
+        """When validation fails with Block, Guardrail.Blocked event should be tracked."""
+        from unittest.mock import patch
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+            callback.set_enriched_properties({"AgentName": "TestAgent"})
+
+            with patch(
+                "uipath_agents._observability.callback.track_event"
+            ) as mock_track:
+                run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=run_id,
+                    metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+                )
+                callback.on_chain_end(
+                    {
+                        INNER_STATE_KEY: {
+                            GUARDRAIL_VALIDATION_RESULT_KEY: False,
+                            GUARDRAIL_VALIDATION_DETAILS_KEY: "PII detected",
+                        }
+                    },
+                    run_id=run_id,
+                )
+
+                # Action node fires with _block suffix
+                action_run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=action_run_id,
+                    metadata={"langgraph_node": "agent_pre_execution_pii_guard_block"},
+                )
+
+                # Verify Guardrail.Blocked event was tracked
+                mock_track.assert_called_once()
+                call_args = mock_track.call_args
+                assert call_args[0][0] == "Guardrail.Blocked"
+                props = call_args[0][1]
+                assert props["ActionType"] == "Block"
+                assert props["AgentName"] == "TestAgent"
+
+    def test_log_action_tracks_guardrail_logged_event(
+        self, callback, tracer, span_exporter
+    ):
+        """When validation fails with Log, Guardrail.Logged event should be tracked."""
+        from unittest.mock import patch
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+            callback.set_enriched_properties({"AgentName": "TestAgent"})
+
+            with patch(
+                "uipath_agents._observability.callback.track_event"
+            ) as mock_track:
+                run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=run_id,
+                    metadata={"langgraph_node": "llm_pre_execution_prompt_injection"},
+                )
+                callback.on_chain_end(
+                    {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: False}},
+                    run_id=run_id,
+                )
+
+                # Action node fires with _log suffix
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=uuid4(),
+                    metadata={
+                        "langgraph_node": "llm_pre_execution_prompt_injection_log"
+                    },
+                )
+
+                mock_track.assert_called_once()
+                call_args = mock_track.call_args
+                assert call_args[0][0] == "Guardrail.Logged"
+                props = call_args[0][1]
+                assert props["ActionType"] == "Log"
+
+    def test_enriched_properties_included_in_event(
+        self, callback, tracer, span_exporter
+    ):
+        """Enriched properties from runtime should be included in guardrail events."""
+        from unittest.mock import patch
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+            callback.set_enriched_properties(
+                {
+                    "AgentName": "MyAgent",
+                    "AgentId": "agent-123",
+                    "Model": "gpt-4o",
+                    "CloudOrganizationId": "org-456",
+                }
+            )
+
+            with patch(
+                "uipath_agents._observability.callback.track_event"
+            ) as mock_track:
+                run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=run_id,
+                    metadata={"langgraph_node": "agent_pre_execution_guard"},
+                )
+                callback.on_chain_end(
+                    {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                    run_id=run_id,
+                )
+
+                props = mock_track.call_args[0][1]
+                assert props["AgentName"] == "MyAgent"
+                assert props["AgentId"] == "agent-123"
+                assert props["Model"] == "gpt-4o"
+                assert props["CloudOrganizationId"] == "org-456"
+
+    def test_builtin_validator_guardrail_metadata_enrichment(
+        self, callback, tracer, span_exporter
+    ):
+        """BuiltInValidatorGuardrail metadata should enrich telemetry properties."""
+        from unittest.mock import MagicMock, patch
+
+        from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailScope
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # Create mock BuiltInValidatorGuardrail
+            mock_guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtIn"
+            mock_guardrail.validator_type = "pii_detection"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT, GuardrailScope.LLM]
+
+            with patch(
+                "uipath_agents._observability.callback.track_event"
+            ) as mock_track:
+                run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=run_id,
+                    metadata={
+                        "langgraph_node": "agent_pre_execution_pii_guard",
+                        "guardrail": mock_guardrail,
+                        "scope": GuardrailScope.AGENT,
+                    },
+                )
+                callback.on_chain_end(
+                    {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                    run_id=run_id,
+                )
+
+                props = mock_track.call_args[0][1]
+                assert props["EnabledForEvals"] == "true"
+                assert props["GuardrailType"] == "BuiltIn"
+                assert props["ValidatorType"] == "PiiDetection"
+                assert props["CurrentScope"] == "Agent"
+                assert "Agent" in props["GuardrailScopes"]
+                assert "Llm" in props["GuardrailScopes"]
+
+
 class TestLangchainConfigStructure:
     """Integration tests verifying langchain internal config structure.
 

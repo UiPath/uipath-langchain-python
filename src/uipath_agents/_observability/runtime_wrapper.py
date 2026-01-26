@@ -309,6 +309,7 @@ class TelemetryRuntimeWrapper:
                         base_properties["AgentId"] = agent_id
 
                     enriched_properties = self._get_enriched_properties(base_properties)
+                    self._callback.set_enriched_properties(enriched_properties)
 
                     self._telemetry_callback.track_event(
                         AGENTRUN_STARTED, enriched_properties

@@ -19,11 +19,18 @@ from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 from opentelemetry.trace import Span
 from uipath.eval.mocks.mockable import MOCKED_ANNOTATION_KEY
+from uipath.platform.guardrails import BuiltInValidatorGuardrail
 
 from .schema import (
     GUARDRAIL_VALIDATION_DETAILS_KEY,
     GUARDRAIL_VALIDATION_RESULT_KEY,
     INNER_STATE_KEY,
+)
+from .telemetry_callback import (
+    GUARDRAIL_BLOCKED,
+    GUARDRAIL_LOGGED,
+    GUARDRAIL_SKIPPED,
+    track_event,
 )
 from .tracer import UiPathTracer
 
@@ -84,6 +91,7 @@ class GuardrailAction:
     LOG = "Log"
     BLOCK = "Block"
     ESCALATE = "Escalate"
+    FILTER = "Filter"
 
 
 # Pattern: {scope}_{stage}_execution_{guardrail_name}
@@ -94,6 +102,7 @@ ACTION_SUFFIX_TO_NAME = {
     "_log": GuardrailAction.LOG,
     "_block": GuardrailAction.BLOCK,
     "_hitl": GuardrailAction.ESCALATE,
+    "_filter": GuardrailAction.FILTER,
 }
 
 
@@ -114,9 +123,14 @@ class UiPathTracingCallback(BaseCallbackHandler):
             await runtime.execute(input)
     """
 
-    def __init__(self, tracer: UiPathTracer) -> None:
+    def __init__(
+        self,
+        tracer: UiPathTracer,
+        enriched_properties: Optional[Dict[str, Any]] = None,
+    ) -> None:
         super().__init__()
         self._tracer = tracer
+        self._enriched_properties = enriched_properties or {}
         self._agent_span: Optional[Span] = None
         # LLM spans stored at run_id, model spans at run_id ^ 1 (XOR with 1)
         self._spans: Dict[UUID, Span] = {}
@@ -140,6 +154,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._guardrail_containers: Dict[Tuple[str, str], Span] = {}
         self._guardrail_spans: Dict[UUID, Span] = {}
         self._guardrail_info: Dict[UUID, Tuple[str, str, str]] = {}
+        self._guardrail_metadata: Dict[UUID, Dict[str, Any]] = {}
         self._current_llm_span: Optional[Span] = None
         self._llm_span_from_guardrail: bool = False
         # Current tool span for tool guardrail parenting
@@ -151,7 +166,11 @@ class UiPathTracingCallback(BaseCallbackHandler):
         # When validation fails, we defer span ending until action node fires
         self._pending_guardrail_actions: Dict[str, Tuple[Span, Optional[str]]] = {}
 
-    def set_agent_span(self, agent_span: Span, run_id: UUID) -> None:
+    def set_agent_span(
+        self,
+        agent_span: Span,
+        run_id: UUID,
+    ) -> None:
         self._agent_span = agent_span
         self._agent_run_id = run_id
         self._spans.clear()
@@ -165,6 +184,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._guardrail_containers.clear()
         self._guardrail_spans.clear()
         self._guardrail_info.clear()
+        self._guardrail_metadata.clear()
         self._current_llm_span = None
         self._llm_span_from_guardrail = False
         self._current_tool_span = None
@@ -182,6 +202,17 @@ class UiPathTracingCallback(BaseCallbackHandler):
             _span_stacks[run_id] = []
 
         _span_stacks[run_id].append(agent_span)
+
+    def set_enriched_properties(
+        self,
+        enriched_properties: Dict[str, Any],
+    ) -> None:
+        """Set enriched telemetry properties.
+
+        Args:
+            enriched_properties: Dictionary of properties to set for telemetry events.
+        """
+        self._enriched_properties = enriched_properties
 
     # --- Span Stack Methods ---
 
@@ -700,6 +731,65 @@ class UiPathTracingCallback(BaseCallbackHandler):
     # Helper methods
     # -------------------------------------------------------------------------
 
+    def _track_guardrail_event(
+        self,
+        action: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        extra_props: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Track guardrail telemetry event."""
+        props = self._enriched_properties.copy()
+        if extra_props:
+            props.update(extra_props)
+        props["ActionType"] = action
+        if metadata:
+            props.update(self._build_guardrail_telemetry_props(metadata))
+
+        event_name = None
+        if action == GuardrailAction.BLOCK:
+            event_name = GUARDRAIL_BLOCKED
+        elif action == GuardrailAction.LOG:
+            event_name = GUARDRAIL_LOGGED
+        elif action == GuardrailAction.SKIP:
+            event_name = GUARDRAIL_SKIPPED
+
+        if event_name is None:
+            return
+
+        track_event(event_name, props)
+
+    def _build_guardrail_telemetry_props(
+        self, metadata: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Enrich telemetry properties with guardrail metadata."""
+        props: Dict[str, Any] = {}
+
+        guardrail = metadata.get("guardrail")
+        scope = metadata.get("scope")
+        execution_stage = metadata.get("execution_stage")
+
+        if guardrail:
+            props["EnabledForEvals"] = str(guardrail.enabled_for_evals).lower()
+            props["GuardrailScopes"] = json.dumps(
+                [s.name.title() for s in guardrail.selector.scopes]
+            )
+
+            if isinstance(guardrail, BuiltInValidatorGuardrail):
+                props["GuardrailType"] = (
+                    guardrail.guardrail_type[0].upper() + guardrail.guardrail_type[1:]
+                )
+                props["ValidatorType"] = "".join(
+                    x.title() for x in guardrail.validator_type.split("_")
+                )
+
+        if scope:
+            props["CurrentScope"] = scope.name.title()
+
+        if execution_stage:
+            props["ExecutionStage"] = execution_stage.name.title().replace("_", "")
+
+        return props
+
     def _sanitize_file_data(self, obj: Any) -> Any:
         """Recursively sanitize content, replacing file data with placeholders."""
         if isinstance(obj, bytes):
@@ -1001,7 +1091,11 @@ class UiPathTracingCallback(BaseCallbackHandler):
             self._close_container(S.LLM, T.POST)
             self._close_container(S.TOOL, T.POST)
 
-    def _check_and_handle_action_node(self, node_name: str) -> bool:
+    def _check_and_handle_action_node(
+        self,
+        node_name: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Check if node is an action node and end the pending guardrail span.
 
         Action nodes have the pattern: {evaluation_node_name}_{action}
@@ -1017,12 +1111,25 @@ class UiPathTracingCallback(BaseCallbackHandler):
                     span, validation_details = self._pending_guardrail_actions.pop(
                         eval_node_name
                     )
+
+                    # Extract metadata from action node
+                    severity_level = None
+                    reason = None
+
+                    if metadata:
+                        severity_level = metadata.get("severity_level")
+                        reason = metadata.get("reason")
+
                     self._tracer.end_guardrail_evaluation(
                         span,
                         validation_passed=False,
                         validation_result=validation_details,
                         action=action,
+                        severity_level=severity_level,
+                        reason=reason,
                     )
+
+                    self._track_guardrail_event(action, metadata, {})
 
                     # If tool_pre guardrail blocks, end the placeholder tool span
                     if (
@@ -1063,7 +1170,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 return
 
             # Check if this is an action node (fires after failed validation)
-            if self._check_and_handle_action_node(node_name):
+            if self._check_and_handle_action_node(node_name, metadata):
                 return
 
             guardrail_info = self._parse_guardrail_node(node_name)
@@ -1104,6 +1211,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
             )
             self._guardrail_spans[run_id] = eval_span
             self._guardrail_info[run_id] = (scope, stage, guardrail_name)
+            self._guardrail_metadata[run_id] = metadata
             self._push_span(run_id, eval_span)
 
         except Exception:
@@ -1125,6 +1233,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
             self._pop_span(run_id)
             span = self._guardrail_spans.pop(run_id)
             info = self._guardrail_info.pop(run_id, None)
+            metadata = self._guardrail_metadata.pop(run_id, None)
 
             validation_result = None
             validation_details = None
@@ -1157,6 +1266,10 @@ class UiPathTracingCallback(BaseCallbackHandler):
                     validation_result=validation_details,
                     action=GuardrailAction.SKIP,
                 )
+
+                # Track Guardrail.Skipped event
+                base_props = {"validationDetails": validation_details}
+                self._track_guardrail_event(GuardrailAction.SKIP, metadata, base_props)
             else:
                 # Validation failed - defer span ending until action node fires
                 # Reconstruct the evaluation node name from guardrail info
@@ -1230,6 +1343,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 pass
         self._guardrail_spans.clear()
         self._guardrail_info.clear()
+        self._guardrail_metadata.clear()
 
         # End any pending guardrail action spans
         for span, _ in self._pending_guardrail_actions.values():
