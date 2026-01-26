@@ -181,6 +181,17 @@ class UiPathChatMessagesMapper:
                             tool_args = tool_chunk_block.get("args")
 
                             if tool_call_id:
+                                # Extract metadata including simulated flag from response_metadata
+                                metadata: dict[str, Any] = {}
+                                if (
+                                    self.current_message.response_metadata
+                                    and "simulated" in self.current_message.response_metadata
+                                ):
+                                    metadata["simulated"] = self.current_message.response_metadata["simulated"]
+                                    logger.info(
+                                        f"Tool call {tool_call_id} for {tool_name} is marked as simulated"
+                                    )
+
                                 tool_event = UiPathConversationMessageEvent(
                                     message_id=message.id,
                                     tool_call=UiPathConversationToolCallEvent(
@@ -189,6 +200,7 @@ class UiPathChatMessagesMapper:
                                             tool_name=tool_name,
                                             timestamp=timestamp,
                                             input=UiPathInlineValue(inline=tool_args),
+                                            metadata=metadata if metadata else None,
                                         ),
                                     ),
                                 )
