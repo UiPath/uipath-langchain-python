@@ -3255,7 +3255,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.6.0"
+version = "2.6.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -3276,9 +3276,9 @@ dependencies = [
     { name = "uipath-core" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/9f/3b419a3397a8eac404062d98f4a64ccf421187c8b9f35f344cbff1307124/uipath-2.6.0.tar.gz", hash = "sha256:fbbd18b1c940a63b0541a96ad8181708c7c0a708838f2f0a0779de91244b2fc8", size = 3904808, upload-time = "2026-01-25T15:29:56.032Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/51/47a3dfced6fbcdede0b3108840a0589221a6b56a13b657cf6f0615c26361/uipath-2.6.4.tar.gz", hash = "sha256:a817d7c0c2559067602cfc9bced20cf69abf024927f1bb8b7042ff63f38aae07", size = 3913050, upload-time = "2026-01-26T13:59:09.863Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/2f/9e25ea4d91286e53d7d7934e85e6efa5bacfacbe7e69d5baa5b26d9f6429/uipath-2.6.0-py3-none-any.whl", hash = "sha256:f1f4fe7a3c5c20d75aef88c51c95f2f4af92ea736a1a1e0f8f95f4dece1cdac4", size = 449292, upload-time = "2026-01-25T15:29:53.506Z" },
+    { url = "https://files.pythonhosted.org/packages/a5/73/52eda03edc9e3e86ce0cfd11d4768a190af61c48a546f04bb723097ade4c/uipath-2.6.4-py3-none-any.whl", hash = "sha256:76e41d955ff42f11889cea62af0c46d78f6c64a319468a67880e8be445b6f499", size = 453435, upload-time = "2026-01-26T13:59:07.799Z" },
 ]
 
 [[package]]
@@ -3297,7 +3297,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.5.2"
+version = "0.5.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -3364,7 +3364,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.56" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.6.0,<2.7.0" },
+    { name = "uipath", specifier = ">=2.6.4,<2.7.0" },
     { name = "uipath-runtime", specifier = ">=0.6.0,<0.7.0" },
 ]
 provides-extras = ["vertex", "bedrock"]

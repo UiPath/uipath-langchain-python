@@ -442,6 +442,53 @@ class TestGetJobAttachments:
         ids = {str(att.id) for att in result}
         assert ids == {uuid1, uuid2, uuid3}
 
+    def test_filters_out_none_attachments_in_array(self):
+        """Should filter out None items from attachment arrays."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/job-attachment"},
+                }
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "FullName": {"type": "string"},
+                        "MimeType": {"type": "string"},
+                    },
+                    "required": ["FullName", "MimeType"],
+                }
+            },
+        }
+        model = create_model(schema)
+        uuid1 = "550e8400-e29b-41d4-a716-446655440001"
+        uuid2 = "550e8400-e29b-41d4-a716-446655440002"
+        data = {
+            "attachments": [
+                {"ID": uuid1, "FullName": "file1.pdf", "MimeType": "application/pdf"},
+                None,  # This should be filtered out
+                {
+                    "ID": uuid2,
+                    "FullName": "file2.docx",
+                    "MimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                },
+                None,  # This should also be filtered out
+            ]
+        }
+
+        result = get_job_attachments(model, data)
+
+        # Should only get 2 attachments, None items should be filtered out
+        assert len(result) == 2
+        assert str(result[0].id) == uuid1
+        assert result[0].full_name == "file1.pdf"
+        assert str(result[1].id) == uuid2
+        assert result[1].full_name == "file2.docx"
+
 
 class TestAddJobAttachments:
     """Test attachment dictionary merging."""

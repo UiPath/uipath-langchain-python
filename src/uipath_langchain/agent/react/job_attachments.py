@@ -27,9 +27,11 @@ def get_job_attachments(
     job_attachment_paths = get_job_attachment_paths(schema)
     job_attachments = extract_values_by_paths(data, job_attachment_paths)
 
-    result = []
-    for attachment in job_attachments:
-        result.append(Attachment.model_validate(attachment, from_attributes=True))
+    result = [
+        Attachment.model_validate(att, from_attributes=True)
+        for att in job_attachments
+        if att
+    ]
 
     return result
 
