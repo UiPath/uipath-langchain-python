@@ -39,4 +39,11 @@ class BlockAction(GuardrailAction):
                 category=UiPathErrorCategory.USER,
             )
 
+        _node.__metadata__ = {  # type: ignore[attr-defined]
+            "reason": self.reason,
+            "guardrail": guardrail,
+            "scope": scope,
+            "execution_stage": execution_stage,
+        }
+
         return node_name, _node

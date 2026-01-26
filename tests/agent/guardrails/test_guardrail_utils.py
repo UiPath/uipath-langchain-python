@@ -32,7 +32,13 @@ class FakeStateGraph:
         self.added_nodes: list[tuple[str, Any]] = []
         self.added_edges: list[tuple[str, str]] = []
 
-    def add_node(self, name: str, node: Any) -> None:
+    def add_node(
+        self,
+        name: str,
+        node: Any,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         """Record a node added to the graph."""
         self.added_nodes.append((name, node))
 
@@ -58,7 +64,13 @@ class FakeStateGraphWithAinvoke(FakeStateGraph):
         super().__init__(_state_type)
         self._main_node_name: str | None = None
 
-    def add_node(self, name: str, node: Any) -> None:
+    def add_node(
+        self,
+        name: str,
+        node: Any,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         """Record a node and remember the first-added node name as the main node."""
         if self._main_node_name is None:
             self._main_node_name = name

@@ -55,4 +55,11 @@ class LogAction(GuardrailAction):
             logger.log(self.level, message)
             return {}
 
+        _node.__metadata__ = {  # type: ignore[attr-defined]
+            "severity_level": logging.getLevelName(self.level),
+            "guardrail": guardrail,
+            "scope": scope,
+            "execution_stage": execution_stage,
+        }
+
         return node_name, _node
