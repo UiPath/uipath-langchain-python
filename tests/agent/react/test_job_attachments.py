@@ -8,7 +8,7 @@ from uipath.platform.attachments import Attachment
 from uipath_langchain.agent.react.job_attachments import get_job_attachments
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.reducers import (
-    add_job_attachments,
+    merge_dicts,
 )
 
 
@@ -490,15 +490,15 @@ class TestGetJobAttachments:
         assert result[1].full_name == "file2.docx"
 
 
-class TestAddJobAttachments:
-    """Test attachment dictionary merging."""
+class TestMergeDicts:
+    """Test dictionary merging."""
 
     def test_both_empty_dictionaries(self):
         """Should return empty dict when both inputs are empty."""
         left: dict[str, Attachment] = {}
         right: dict[str, Attachment] = {}
 
-        result = add_job_attachments(left, right)
+        result = merge_dicts(left, right)
 
         assert result == {}
 
@@ -515,7 +515,7 @@ class TestAddJobAttachments:
             )
         }
 
-        result = add_job_attachments({}, right)
+        result = merge_dicts({}, right)
 
         assert result == right
         assert len(result) == 1
@@ -534,7 +534,7 @@ class TestAddJobAttachments:
             )
         }
 
-        result = add_job_attachments(left, {})
+        result = merge_dicts(left, {})
 
         assert result == left
         assert len(result) == 1
@@ -564,7 +564,7 @@ class TestAddJobAttachments:
             )
         }
 
-        result = add_job_attachments(left, right)
+        result = merge_dicts(left, right)
 
         assert len(result) == 2
         assert str(uuid1) in result
@@ -595,7 +595,7 @@ class TestAddJobAttachments:
             )
         }
 
-        result = add_job_attachments(left, right)
+        result = merge_dicts(left, right)
 
         assert len(result) == 1
         assert result[str(uuid1)].full_name == "new_file.pdf"  # Right takes precedence
@@ -639,7 +639,7 @@ class TestAddJobAttachments:
             ),
         }
 
-        result = add_job_attachments(left, right)
+        result = merge_dicts(left, right)
 
         assert len(result) == 3
         assert result[str(uuid1)].full_name == "file1_new.pdf"  # Right overrides
@@ -686,7 +686,7 @@ class TestAddJobAttachments:
             ),
         }
 
-        result = add_job_attachments(left, right)
+        result = merge_dicts(left, right)
 
         assert len(result) == 4
         assert all(str(uid) in result for uid in [uuid1, uuid2, uuid3, uuid4])
