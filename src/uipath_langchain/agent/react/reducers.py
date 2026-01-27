@@ -1,22 +1,21 @@
 """Dict-like object reducers for merging state with field-specific reducers."""
 
-from typing import Any
+from typing import Any, Hashable, TypeVar
 
 from pydantic import BaseModel
-from uipath.platform.attachments import Attachment
+
+K = TypeVar("K", bound=Hashable)
 
 
-def add_job_attachments(
-    left: dict[str, Attachment], right: dict[str, Attachment]
-) -> dict[str, Attachment]:
-    """Merge attachment dictionaries, with right values taking precedence.
+def merge_dicts(left: dict[K, Any], right: dict[K, Any]) -> dict[K, Any]:
+    """Generic dict merger with right values taking precedence.
 
-    This reducer function merges two dictionaries of attachments by UUID string.
-    If the same UUID exists in both dictionaries, the value from 'right' takes precedence.
+    This reducer function merges two dictionaries.
+    If the same key exists in both dictionaries, the value from 'right' takes precedence.
 
     Args:
-        left: Existing dictionary of attachments keyed by UUID string
-        right: New dictionary of attachments to merge
+        left: Existing dictionary
+        right: New dictionary to merge
 
     Returns:
         Merged dictionary with right values overriding left values for duplicate keys
