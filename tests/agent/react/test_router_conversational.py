@@ -3,7 +3,7 @@
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
 
 from uipath_langchain.agent.exceptions import AgentNodeRoutingException
@@ -170,6 +170,44 @@ class TestCreateRouteAgentConversational:
         result = route_function(state)
 
         assert result == "first_tool"
+
+    def test_routes_to_sequence_tool_in_sequence_when_first_tool_completed(
+        self, route_function
+    ):
+        """Should route to first tool in sequential execution."""
+        ai_message = AIMessage(
+            content="Using tools in order",
+            tool_calls=[
+                {"name": "first_tool", "args": {}, "id": "call_1"},
+                {"name": "second_tool", "args": {}, "id": "call_2"},
+                {"name": "third_tool", "args": {}, "id": "call_3"},
+            ],
+        )
+        tool_message = ToolMessage(tool_call_id="call_1")
+        state = MockAgentGraphState(messages=[ai_message, tool_message])
+
+        result = route_function(state)
+
+        assert result == "second_tool"
+
+    def test_routes_to_agent_when_tools_calls_completed(self, route_function):
+        """Should route to first tool in sequential execution."""
+        ai_message = AIMessage(
+            content="Using tools in order",
+            tool_calls=[
+                {"name": "first_tool", "args": {}, "id": "call_1"},
+                {"name": "second_tool", "args": {}, "id": "call_2"},
+            ],
+        )
+        tool_message_1 = ToolMessage(tool_call_id="call_1")
+        tool_message_2 = ToolMessage(tool_call_id="call_2")
+        state = MockAgentGraphState(
+            messages=[ai_message, tool_message_1, tool_message_2]
+        )
+
+        result = route_function(state)
+
+        assert result == AgentGraphNode.AGENT
 
 
 class TestRouteAgentConversationalFactory:
