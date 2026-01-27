@@ -1,11 +1,11 @@
 [project]
 name = "uipath-langchain"
-version = "0.5.4"
+version = "0.5.5"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
-    "uipath>=2.6.6,<2.7.0",
+    "uipath>=2.6.11,<2.7.0",
     "uipath-runtime>=0.6.0, <0.7.0",
     "langgraph>=1.0.0, <2.0.0",
     "langchain-core>=1.2.5, <2.0.0",

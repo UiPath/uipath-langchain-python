@@ -21,9 +21,16 @@ from uipath.platform.common import CreateEscalation
 from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.static_args import (
+    handle_static_args,
+)
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
+)
 
 from ..exceptions import AgentTerminationException
-from .tool_node import ToolWrapperMixin
+from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
 
 
@@ -72,10 +79,6 @@ async def resolve_asset(asset_name: str, folder_path: str) -> str | None:
         raise ValueError(
             f"Failed to resolve asset '{asset_name}' in folder '{folder_path}': {str(e)}"
         ) from e
-
-
-class StructuredToolWithWrapper(StructuredTool, ToolWrapperMixin):
-    pass
 
 
 async def create_escalation_tool(
@@ -145,7 +148,9 @@ async def create_escalation_tool(
     async def escalation_wrapper(
         tool: BaseTool,
         call: ToolCall,
-    ) -> dict[str, Any] | None:
+        state: AgentGraphState,
+    ) -> ToolWrapperReturnType:
+        call["args"] = handle_static_args(resource, state, call["args"])
         result = await tool.ainvoke(call["args"])
 
         if result["action"] == EscalationAction.END:
@@ -163,11 +168,13 @@ async def create_escalation_tool(
 
         return result["output"]
 
-    tool = StructuredToolWithWrapper(
+    tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
+        output_type=output_model,
         coroutine=escalation_tool_fn,
+        argument_properties=channel.argument_properties,
         metadata={
             "tool_type": "escalation",
             "display_name": channel.properties.app_name,
