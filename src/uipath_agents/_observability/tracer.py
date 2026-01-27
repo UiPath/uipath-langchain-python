@@ -781,7 +781,7 @@ class UiPathTracer:
             span.set_attribute("guardrailAction", action)
             span.set_attribute("action", action)
         if severity_level:
-            span.set_attribute("severityLevel", severity_level)
+            span.set_attribute("severityLevel", severity_level.title())
         if reason:
             span.set_attribute("reason", reason)
 

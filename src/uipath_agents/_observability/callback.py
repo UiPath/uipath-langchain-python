@@ -18,8 +18,9 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 from opentelemetry.trace import Span
+from uipath.core.guardrails import UniversalRule
 from uipath.eval.mocks.mockable import MOCKED_ANNOTATION_KEY
-from uipath.platform.guardrails import BuiltInValidatorGuardrail
+from uipath.platform.guardrails import BuiltInValidatorGuardrail, DeterministicGuardrail
 
 from .schema import (
     GUARDRAIL_VALIDATION_DETAILS_KEY,
@@ -28,6 +29,7 @@ from .schema import (
 )
 from .telemetry_callback import (
     GUARDRAIL_BLOCKED,
+    GUARDRAIL_FILTERED,
     GUARDRAIL_LOGGED,
     GUARDRAIL_SKIPPED,
     track_event,
@@ -733,15 +735,18 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
     def _track_guardrail_event(
         self,
-        action: str,
+        action: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
-        extra_props: Optional[Dict[str, Any]] = None,
+        validation_details: Optional[str] = None,
     ) -> None:
         """Track guardrail telemetry event."""
         props = self._enriched_properties.copy()
-        if extra_props:
-            props.update(extra_props)
         props["ActionType"] = action
+
+        if validation_details:
+            reason = self._translate_validation_reason(validation_details)
+            props["Reason"] = reason
+
         if metadata:
             props.update(self._build_guardrail_telemetry_props(metadata))
 
@@ -752,6 +757,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
             event_name = GUARDRAIL_LOGGED
         elif action == GuardrailAction.SKIP:
             event_name = GUARDRAIL_SKIPPED
+        elif action == GuardrailAction.FILTER:
+            event_name = GUARDRAIL_FILTERED
 
         if event_name is None:
             return
@@ -767,19 +774,25 @@ class UiPathTracingCallback(BaseCallbackHandler):
         guardrail = metadata.get("guardrail")
         scope = metadata.get("scope")
         execution_stage = metadata.get("execution_stage")
+        severity_level = metadata.get("severity_level")
 
         if guardrail:
             props["EnabledForEvals"] = str(guardrail.enabled_for_evals).lower()
             props["GuardrailScopes"] = json.dumps(
                 [s.name.title() for s in guardrail.selector.scopes]
             )
+            props["GuardrailType"] = (
+                guardrail.guardrail_type[0].upper() + guardrail.guardrail_type[1:]
+            )
 
             if isinstance(guardrail, BuiltInValidatorGuardrail):
-                props["GuardrailType"] = (
-                    guardrail.guardrail_type[0].upper() + guardrail.guardrail_type[1:]
-                )
                 props["ValidatorType"] = "".join(
                     x.title() for x in guardrail.validator_type.split("_")
+                )
+            elif isinstance(guardrail, DeterministicGuardrail):
+                props["NumberOfRules"] = str(len(guardrail.rules))
+                props["RuleDetails"] = json.dumps(
+                    self._extract_rule_details(guardrail.rules)
                 )
 
         if scope:
@@ -788,7 +801,104 @@ class UiPathTracingCallback(BaseCallbackHandler):
         if execution_stage:
             props["ExecutionStage"] = execution_stage.name.title().replace("_", "")
 
+        if severity_level:
+            props["SeverityLevel"] = severity_level.title()
+
         return props
+
+    def _extract_rule_details(self, rules: List[Any]) -> List[Dict[str, str]]:
+        """Extract rule details for telemetry from DeterministicGuardrail rules.
+
+        Args:
+            rules: List of rule objects (WordRule, NumberRule, BooleanRule, UniversalRule)
+
+        Returns:
+            List of dictionaries with rule details for telemetry.
+            - For word/number/boolean rules: Type, FieldSelectorType, Operator
+            - For universal rules: Type, ApplyTo
+        """
+        rule_details = []
+        for rule in rules:
+            # Handle UniversalRule (always enforce)
+            if isinstance(rule, UniversalRule):
+                rule_details.append(
+                    {
+                        "Type": "Always enforce the guardrail",
+                        "ApplyTo": rule.apply_to[0].upper() + rule.apply_to[1:],
+                    }
+                )
+                continue
+
+            operator = self._extract_operator_from_description(rule.rule_description)
+
+            rule_details.append(
+                {
+                    "Type": rule.rule_type.title(),
+                    "FieldSelectorType": rule.field_selector.selector_type.title(),
+                    "Operator": operator,
+                }
+            )
+
+        return rule_details
+
+    def _extract_operator_from_description(
+        self, rule_description: Optional[str]
+    ) -> str:
+        """Extract operator from rule description string.
+
+        Rule descriptions follow the format:
+        - "{field_path} {operator} {value}" for value-based operators
+        - "{field_path} {operator}" for isEmpty/isNotEmpty
+        - "All fields {operator} {value}" for all fields selector
+
+        Args:
+            rule_description: The rule description string
+
+        Returns:
+            The operator in PascalCase format, or "Unknown" if not found.
+        """
+        if not rule_description:
+            return "Unknown"
+
+        # Known operators (camelCase as they appear in descriptions)
+        known_operators = [
+            "doesNotContain",
+            "doesNotEqual",
+            "doesNotStartWith",
+            "doesNotEndWith",
+            "greaterThanOrEqual",
+            "lessThanOrEqual",
+            "greaterThan",
+            "lessThan",
+            "startsWith",
+            "endsWith",
+            "contains",
+            "equals",
+            "isEmpty",
+            "isNotEmpty",
+            "matchesRegex",
+        ]
+
+        # Search for known operators in the description
+        for op in known_operators:
+            if f" {op} " in rule_description or rule_description.endswith(f" {op}"):
+                # Convert camelCase to PascalCase
+                return op[0].upper() + op[1:]
+
+        return "Unknown"
+
+    def _translate_validation_reason(self, reason: Optional[str]) -> Optional[str]:
+        """Translate validation reason to standardized format.
+
+        Args:
+            reason: The original validation reason string
+
+        Returns:
+            Translated reason, or original if no translation needed.
+        """
+        if reason and "didn't match" in reason:
+            return "RuleDidNotMeet"
+        return reason
 
     def _sanitize_file_data(self, obj: Any) -> Any:
         """Recursively sanitize content, replacing file data with placeholders."""
@@ -1125,8 +1235,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
                         reason=reason,
                     )
 
-                    self._track_guardrail_event(action, metadata, {})
-
                     # If tool_pre guardrail blocks, end the placeholder tool span
                     if (
                         action == GuardrailAction.BLOCK
@@ -1160,6 +1268,10 @@ class UiPathTracingCallback(BaseCallbackHandler):
         try:
             if not metadata:
                 return
+
+            # Store guardrail metadata to use it for telemetry once the action node is completed
+            if metadata.get("guardrail") is not None:
+                self._guardrail_metadata[run_id] = metadata
 
             node_name = metadata.get("langgraph_node", "")
             if not node_name:
@@ -1207,7 +1319,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
             )
             self._guardrail_spans[run_id] = eval_span
             self._guardrail_info[run_id] = (scope, stage, guardrail_name)
-            self._guardrail_metadata[run_id] = metadata
             self._push_span(run_id, eval_span)
 
         except Exception:
@@ -1223,6 +1334,17 @@ class UiPathTracingCallback(BaseCallbackHandler):
     ) -> None:
         """End guardrail span with results."""
         try:
+            guardrail_metadata = (
+                self._guardrail_metadata.get(run_id)
+                if self._guardrail_metadata is not None
+                else None
+            )
+            if guardrail_metadata is not None:
+                self._track_guardrail_event(
+                    guardrail_metadata.get("action_type"),
+                    guardrail_metadata,
+                )
+
             if run_id not in self._guardrail_spans:
                 return
 
@@ -1264,8 +1386,9 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 )
 
                 # Track Guardrail.Skipped event
-                base_props = {"validationDetails": validation_details}
-                self._track_guardrail_event(GuardrailAction.SKIP, metadata, base_props)
+                self._track_guardrail_event(
+                    GuardrailAction.SKIP, metadata, validation_details
+                )
             else:
                 # Validation failed - defer span ending until action node fires
                 # Reconstruct the evaluation node name from guardrail info

@@ -4,6 +4,12 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from uipath.core.guardrails import (
+    AllFieldsSelector,
+    FieldReference,
+    FieldSource,
+    SpecificFieldsSelector,
+)
 
 from uipath_agents._observability.callback import UiPathTracingCallback
 from uipath_agents._observability.schema import (
@@ -1455,18 +1461,27 @@ class TestGuardrailTelemetryEvents:
                 props = call_args[0][1]
                 assert props["ActionType"] == "Skip"
                 assert props["AgentName"] == "TestAgent"
-                assert props.get("validationDetails") == "No PII found"
+                assert props.get("Reason") == "No PII found"
 
     def test_block_action_tracks_guardrail_blocked_event(
         self, callback, tracer, span_exporter
     ):
         """When validation fails with Block, Guardrail.Blocked event should be tracked."""
-        from unittest.mock import patch
+        from unittest.mock import MagicMock, patch
+
+        from uipath.platform.guardrails import GuardrailScope
 
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
             callback.set_enriched_properties({"AgentName": "TestAgent"})
+
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
 
             with patch(
                 "uipath_agents._observability.callback.track_event"
@@ -1494,8 +1509,15 @@ class TestGuardrailTelemetryEvents:
                     {},
                     {},
                     run_id=action_run_id,
-                    metadata={"langgraph_node": "agent_pre_execution_pii_guard_block"},
+                    metadata={
+                        "langgraph_node": "agent_pre_execution_pii_guard_block",
+                        "action_type": "Block",
+                        "guardrail": mock_guardrail,
+                        "scope": GuardrailScope.AGENT,
+                    },
                 )
+                # Event is tracked on chain end
+                callback.on_chain_end({}, run_id=action_run_id)
 
                 # Verify Guardrail.Blocked event was tracked
                 mock_track.assert_called_once()
@@ -1509,12 +1531,21 @@ class TestGuardrailTelemetryEvents:
         self, callback, tracer, span_exporter
     ):
         """When validation fails with Log, Guardrail.Logged event should be tracked."""
-        from unittest.mock import patch
+        from unittest.mock import MagicMock, patch
+
+        from uipath.platform.guardrails import GuardrailScope
 
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
             callback.set_enriched_properties({"AgentName": "TestAgent"})
+
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
 
             with patch(
                 "uipath_agents._observability.callback.track_event"
@@ -1532,20 +1563,86 @@ class TestGuardrailTelemetryEvents:
                 )
 
                 # Action node fires with _log suffix
+                action_run_id = uuid4()
                 callback.on_chain_start(
                     {},
                     {},
-                    run_id=uuid4(),
+                    run_id=action_run_id,
                     metadata={
-                        "langgraph_node": "llm_pre_execution_prompt_injection_log"
+                        "langgraph_node": "llm_pre_execution_prompt_injection_log",
+                        "severity_level": "Info",
+                        "action_type": "Log",
+                        "guardrail": mock_guardrail,
+                        "scope": GuardrailScope.TOOL,
                     },
                 )
+                # Event is tracked on chain end
+                callback.on_chain_end({}, run_id=action_run_id)
 
                 mock_track.assert_called_once()
                 call_args = mock_track.call_args
                 assert call_args[0][0] == "Guardrail.Logged"
                 props = call_args[0][1]
                 assert props["ActionType"] == "Log"
+                assert props["SeverityLevel"] == "Info"
+
+    def test_filter_action_tracks_guardrail_filtered_event(
+        self, callback, tracer, span_exporter
+    ):
+        """When validation fails with Filter, Guardrail.Filtered event should be tracked."""
+        from unittest.mock import MagicMock, patch
+
+        from uipath.platform.guardrails import GuardrailScope
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+            callback.set_enriched_properties({"AgentName": "TestAgent"})
+
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
+
+            with patch(
+                "uipath_agents._observability.callback.track_event"
+            ) as mock_track:
+                run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=run_id,
+                    metadata={"langgraph_node": "tool_post_execution_pii"},
+                )
+                callback.on_chain_end(
+                    {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: False}},
+                    run_id=run_id,
+                )
+
+                # Action node fires with _filter suffix
+                action_run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=action_run_id,
+                    metadata={
+                        "langgraph_node": "tool_post_execution_pii_filter",
+                        "action_type": "Filter",
+                        "guardrail": mock_guardrail,
+                        "scope": GuardrailScope.TOOL,
+                    },
+                )
+                # Event is tracked on chain end
+                callback.on_chain_end({}, run_id=action_run_id)
+
+                mock_track.assert_called_once()
+                call_args = mock_track.call_args
+                assert call_args[0][0] == "Guardrail.Filtered"
+                props = call_args[0][1]
+                assert props["ActionType"] == "Filter"
+                assert props["AgentName"] == "TestAgent"
 
     def test_enriched_properties_included_in_event(
         self, callback, tracer, span_exporter
@@ -1632,6 +1729,342 @@ class TestGuardrailTelemetryEvents:
                 assert props["CurrentScope"] == "Agent"
                 assert "Agent" in props["GuardrailScopes"]
                 assert "Llm" in props["GuardrailScopes"]
+
+
+class TestRuleDetailsExtraction:
+    """Tests for rule details extraction for guardrail telemetry events."""
+
+    def test_translate_validation_reason_didnt_match(self, callback):
+        """Test that 'didn't match' is translated to 'RuleDidNotMeet'."""
+        result = callback._translate_validation_reason(
+            "Field 'name' didn't match the expected pattern"
+        )
+        assert result == "RuleDidNotMeet"
+
+    def test_translate_validation_reason_no_translation(self, callback):
+        """Test that reasons without 'didn't match' are returned as-is."""
+        result = callback._translate_validation_reason("No PII found")
+        assert result == "No PII found"
+
+    def test_translate_validation_reason_none(self, callback):
+        """Test that None is returned as-is."""
+        result = callback._translate_validation_reason(None)
+        assert result is None
+
+    def test_extract_operator_from_description_contains(self, callback):
+        """Test extraction of 'contains' operator from rule description."""
+        result = callback._extract_operator_from_description(
+            "message.content contains 'forbidden'"
+        )
+        assert result == "Contains"
+
+    def test_extract_operator_from_description_does_not_contain(self, callback):
+        """Test extraction of 'doesNotContain' operator from rule description."""
+        result = callback._extract_operator_from_description(
+            "message.content doesNotContain 'allowed'"
+        )
+        assert result == "DoesNotContain"
+
+    def test_extract_operator_from_description_greater_than(self, callback):
+        """Test extraction of 'greaterThan' operator from rule description."""
+        result = callback._extract_operator_from_description(
+            "data.count greaterThan 10.0"
+        )
+        assert result == "GreaterThan"
+
+    def test_extract_operator_from_description_greater_than_or_equal(self, callback):
+        """Test extraction of 'greaterThanOrEqual' operator from rule description."""
+        result = callback._extract_operator_from_description(
+            "data.value greaterThanOrEqual 5.0"
+        )
+        assert result == "GreaterThanOrEqual"
+
+    def test_extract_operator_from_description_less_than(self, callback):
+        """Test extraction of 'lessThan' operator from rule description."""
+        result = callback._extract_operator_from_description("data.count lessThan 100")
+        assert result == "LessThan"
+
+    def test_extract_operator_from_description_equals(self, callback):
+        """Test extraction of 'equals' operator from rule description."""
+        result = callback._extract_operator_from_description("All fields equals 'test'")
+        assert result == "Equals"
+
+    def test_extract_operator_from_description_is_empty(self, callback):
+        """Test extraction of 'isEmpty' operator (no value) from rule description."""
+        result = callback._extract_operator_from_description("message.content isEmpty")
+        assert result == "IsEmpty"
+
+    def test_extract_operator_from_description_is_not_empty(self, callback):
+        """Test extraction of 'isNotEmpty' operator from rule description."""
+        result = callback._extract_operator_from_description(
+            "message.content isNotEmpty"
+        )
+        assert result == "IsNotEmpty"
+
+    def test_extract_operator_from_description_starts_with(self, callback):
+        """Test extraction of 'startsWith' operator from rule description."""
+        result = callback._extract_operator_from_description(
+            "data.prefix startsWith 'hello'"
+        )
+        assert result == "StartsWith"
+
+    def test_extract_operator_from_description_ends_with(self, callback):
+        """Test extraction of 'endsWith' operator from rule description."""
+        result = callback._extract_operator_from_description(
+            "data.suffix endsWith 'world'"
+        )
+        assert result == "EndsWith"
+
+    def test_extract_operator_from_description_matches_regex(self, callback):
+        """Test extraction of 'matchesRegex' operator from rule description."""
+        result = callback._extract_operator_from_description(
+            "data.pattern matchesRegex '^[0-9]+$'"
+        )
+        assert result == "MatchesRegex"
+
+    def test_extract_operator_from_description_none(self, callback):
+        """Test extraction returns 'Unknown' for None description."""
+        result = callback._extract_operator_from_description(None)
+        assert result == "Unknown"
+
+    def test_extract_operator_from_description_empty(self, callback):
+        """Test extraction returns 'Unknown' for empty description."""
+        result = callback._extract_operator_from_description("")
+        assert result == "Unknown"
+
+    def test_extract_operator_from_description_unknown_operator(self, callback):
+        """Test extraction returns 'Unknown' for unrecognized operator."""
+        result = callback._extract_operator_from_description(
+            "field.path unknownOp 'value'"
+        )
+        assert result == "Unknown"
+
+    def test_extract_rule_details_word_rule(self, callback):
+        """Test rule details extraction for word rule."""
+        from unittest.mock import MagicMock
+
+        mock_rule = MagicMock()
+        mock_rule.rule_type = "word"
+        mock_rule.field_selector = SpecificFieldsSelector(
+            selector_type="specific",
+            fields=[FieldReference(path="age", source=FieldSource.INPUT)],
+        )
+        mock_rule.rule_description = "message.content contains 'forbidden'"
+
+        result = callback._extract_rule_details([mock_rule])
+
+        assert len(result) == 1
+        assert result[0]["Type"] == "Word"
+        assert result[0]["FieldSelectorType"] == "Specific"
+        assert result[0]["Operator"] == "Contains"
+
+    def test_extract_rule_details_number_rule(self, callback):
+        """Test rule details extraction for number rule."""
+        from unittest.mock import MagicMock
+
+        mock_rule = MagicMock()
+        mock_rule.rule_type = "number"
+        mock_rule.field_selector = AllFieldsSelector(
+            selector_type="all", sources=[FieldSource.OUTPUT]
+        )
+        mock_rule.field_selector_type = "all"
+        mock_rule.rule_description = "All fields greaterThan 10.0"
+
+        result = callback._extract_rule_details([mock_rule])
+
+        assert len(result) == 1
+        assert result[0]["Type"] == "Number"
+        assert result[0]["FieldSelectorType"] == "All"
+        assert result[0]["Operator"] == "GreaterThan"
+
+    def test_extract_rule_details_boolean_rule(self, callback):
+        """Test rule details extraction for boolean rule."""
+        from unittest.mock import MagicMock
+
+        mock_rule = MagicMock()
+        mock_rule.rule_type = "boolean"
+        mock_rule.field_selector = SpecificFieldsSelector(
+            selector_type="specific",
+            fields=[FieldReference(path="is_active", source=FieldSource.INPUT)],
+        )
+        mock_rule.rule_description = "data.is_active equals True"
+
+        result = callback._extract_rule_details([mock_rule])
+
+        assert len(result) == 1
+        assert result[0]["Type"] == "Boolean"
+        assert result[0]["FieldSelectorType"] == "Specific"
+        assert result[0]["Operator"] == "Equals"
+
+    def test_extract_rule_details_universal_rule(self, callback):
+        """Test rule details extraction for universal rule (always enforce)."""
+        from uipath.core.guardrails import ApplyTo, UniversalRule
+
+        mock_rule = UniversalRule(
+            rule_type="always",
+            apply_to=ApplyTo.INPUT_AND_OUTPUT,
+        )
+
+        result = callback._extract_rule_details([mock_rule])
+
+        assert len(result) == 1
+        assert result[0]["Type"] == "Always enforce the guardrail"
+        assert result[0]["ApplyTo"] == "InputAndOutput"
+
+    def test_extract_rule_details_multiple_rules(self, callback):
+        """Test rule details extraction for multiple rules."""
+        from unittest.mock import MagicMock
+
+        word_rule = MagicMock()
+        word_rule.rule_type = "word"
+        word_rule.field_selector_type = "specific"
+        word_rule.rule_description = "field contains 'test'"
+
+        number_rule = MagicMock()
+        number_rule.rule_type = "number"
+        number_rule.field_selector_type = "all"
+        number_rule.rule_description = "All fields lessThan 100"
+
+        result = callback._extract_rule_details([word_rule, number_rule])
+
+        assert len(result) == 2
+        assert result[0]["Type"] == "Word"
+        assert result[0]["Operator"] == "Contains"
+        assert result[1]["Type"] == "Number"
+        assert result[1]["Operator"] == "LessThan"
+
+
+class TestDeterministicGuardrailTelemetry:
+    """Tests for DeterministicGuardrail telemetry properties."""
+
+    def test_deterministic_guardrail_includes_rule_details(
+        self, callback, tracer, span_exporter
+    ):
+        """DeterministicGuardrail metadata should include NumberOfRules property."""
+        import json
+        from unittest.mock import MagicMock, patch
+
+        from uipath.core.guardrails import DeterministicGuardrail
+        from uipath.platform.guardrails import GuardrailScope
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # Create mock DeterministicGuardrail with rules
+            mock_guardrail = MagicMock(spec=DeterministicGuardrail)
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "custom"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
+
+            # Create mock rules
+            mock_rule1 = MagicMock()
+            mock_rule1.rule_type = "word"
+            mock_rule1.field_selector = SpecificFieldsSelector(
+                selector_type="specific",
+                fields=[FieldReference(path="status", source=FieldSource.INPUT)],
+            )
+            mock_rule1.rule_description = "field contains 'test'"
+
+            mock_rule2 = MagicMock()
+            mock_rule2.rule_type = "number"
+            mock_rule2.field_selector = AllFieldsSelector(
+                selector_type="all", sources=[FieldSource.OUTPUT]
+            )
+            mock_rule2.rule_description = "All fields greaterThan 5"
+
+            mock_guardrail.rules = [mock_rule1, mock_rule2]
+
+            with patch(
+                "uipath_agents._observability.callback.track_event"
+            ) as mock_track:
+                run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=run_id,
+                    metadata={
+                        "langgraph_node": "tool_pre_execution_custom_guard",
+                        "guardrail": mock_guardrail,
+                        "scope": GuardrailScope.TOOL,
+                    },
+                )
+                callback.on_chain_end(
+                    {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                    run_id=run_id,
+                )
+
+                props = mock_track.call_args[0][1]
+                assert props["NumberOfRules"] == "2"
+                assert props["GuardrailType"] == "Custom"
+
+                assert "RuleDetails" in props
+
+                rule_details = json.loads(props["RuleDetails"])
+                assert len(rule_details) == 2
+                assert rule_details[0]["Type"] == "Word"
+                assert rule_details[0]["FieldSelectorType"] == "Specific"
+                assert rule_details[0]["Operator"] == "Contains"
+                assert rule_details[1]["Type"] == "Number"
+                assert rule_details[1]["FieldSelectorType"] == "All"
+                assert rule_details[1]["Operator"] == "GreaterThan"
+
+    def test_deterministic_guardrail_with_universal_rule(
+        self, callback, tracer, span_exporter
+    ):
+        """DeterministicGuardrail with UniversalRule should have correct RuleDetails."""
+        import json
+        from unittest.mock import MagicMock, patch
+
+        from uipath.core.guardrails import (
+            ApplyTo,
+            DeterministicGuardrail,
+            UniversalRule,
+        )
+        from uipath.platform.guardrails import GuardrailScope
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            mock_guardrail = MagicMock(spec=DeterministicGuardrail)
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "custom"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
+
+            universal_rule = UniversalRule(
+                rule_type="always",
+                apply_to=ApplyTo.INPUT_AND_OUTPUT,
+            )
+            mock_guardrail.rules = [universal_rule]
+
+            with patch(
+                "uipath_agents._observability.callback.track_event"
+            ) as mock_track:
+                run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=run_id,
+                    metadata={
+                        "langgraph_node": "tool_pre_execution_always_guard",
+                        "guardrail": mock_guardrail,
+                        "scope": GuardrailScope.TOOL,
+                    },
+                )
+                callback.on_chain_end(
+                    {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                    run_id=run_id,
+                )
+
+                props = mock_track.call_args[0][1]
+                rule_details = json.loads(props["RuleDetails"])
+
+                assert len(rule_details) == 1
+                assert rule_details[0]["Type"] == "Always enforce the guardrail"
+                assert rule_details[0]["ApplyTo"] == "InputAndOutput"
 
 
 class TestLangchainConfigStructure:
