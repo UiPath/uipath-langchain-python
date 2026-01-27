@@ -2,9 +2,10 @@
 
 import copy
 import logging
-from typing import Any, Iterator, Mapping
+from typing import Any, Iterator, Mapping, TypeVar
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
+from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
@@ -22,13 +23,14 @@ from uipath_langchain.agent.tools.schema_editing import (
     SchemaModificationError,
     apply_static_value_to_schema,
 )
-from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
-    StructuredToolWithArgumentProperties,
-)
 
 from .utils import sanitize_dict_for_serialization
 
 logger = logging.getLogger(__name__)
+
+
+class ArgumentPropertiesMixin:
+    argument_properties: dict[str, AgentToolArgumentProperties]
 
 
 class ToolStaticArgument(BaseModel):
@@ -89,17 +91,20 @@ def _resolve_argument_properties_to_static_arguments(
     return static_args
 
 
+ToolT = TypeVar("ToolT", bound=StructuredTool)
+
+
 def apply_static_argument_properties_to_schema(
-    tool: StructuredToolWithArgumentProperties,
+    tool: ToolT,
     agent_input: dict[str, Any],
-) -> StructuredToolWithArgumentProperties:
+) -> ToolT:
     """Modify tool schema based on static argumentProperties.
 
     Args:
         tool: The tool to modify
         agent_input: The agent input to use for resolving argument variants
     """
-    if not tool.argument_properties:
+    if not isinstance(tool, ArgumentPropertiesMixin) or not tool.argument_properties:
         return tool
 
     if isinstance(tool.args_schema, dict):
