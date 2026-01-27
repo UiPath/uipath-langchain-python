@@ -95,28 +95,6 @@ def is_custom_instrumentation_span(span: ReadableSpan) -> bool:
     return (span.attributes or {}).get("uipath.custom_instrumentation") is True
 
 
-def patch_trace_manager_with_filter(trace_manager: UiPathTraceManager) -> None:
-    """Intercept add_span_exporter to wrap raw exporters with whitelist filter.
-
-    Needed because cli_run.py (uipath-python) adds exporters we can't modify.
-    Exporters already wrapped with FilteringSpanExporter pass through unchanged.
-    """
-    original = trace_manager.add_span_exporter
-
-    def filtered_add(exporter: SpanExporter, **kwargs: Any) -> None:
-        if isinstance(exporter, FilteringSpanExporter):
-            # Already has filter - pass through unchanged
-            original(exporter, **kwargs)
-        else:
-            # Raw exporter - add whitelist filter
-            wrapped = FilteringSpanExporter(
-                exporter, filter_fn=is_custom_instrumentation_span
-            )
-            original(wrapped, **kwargs)
-
-    trace_manager.add_span_exporter = filtered_add  # type: ignore[assignment]
-
-
 class _TelemetryState:
     """Module-level telemetry state for idempotency and cleanup."""
 
@@ -145,8 +123,6 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
     setup_otel_env()
 
     if trace_manager:
-        patch_trace_manager_with_filter(trace_manager)
-
         # Azure Monitor exporter (OpenInference spans only)
         azure_exporter = _get_azure_exporter()
         if azure_exporter:

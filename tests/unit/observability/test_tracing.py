@@ -49,11 +49,7 @@ class TestConfigureTelemetry:
             mock_setup.assert_called_once()
 
     def test_adds_filtered_azure_exporter_when_trace_manager_provided(self):
-        """Test that filtered Azure exporter passes through unchanged.
-
-        Azure exporter is already wrapped with FilteringSpanExporter by configure_telemetry,
-        so patch_trace_manager_with_filter should not double-wrap it.
-        """
+        """Test that Azure exporter is wrapped with FilteringSpanExporter and PIIFilteringExporter."""
         from uipath_agents._observability.pii_filtering_exporter import (
             PIIFilteringExporter,
         )
@@ -73,8 +69,6 @@ class TestConfigureTelemetry:
         ):
             tracing.configure_telemetry(trace_manager=mock_trace_manager)
 
-            # Should have 1 exporter (Azure) - NOT double-wrapped
-            # Already has FilteringSpanExporter, so passes through unchanged
             assert len(added_exporters) == 1
             wrapper = added_exporters[0]
             assert isinstance(wrapper, tracing.FilteringSpanExporter)
@@ -83,7 +77,7 @@ class TestConfigureTelemetry:
             assert wrapper._delegate._delegate is mock_exporter
 
     def test_adds_azure_exporter_without_pii_redaction_when_disabled(self):
-        """Test that Azure exporter passes through without double-wrapping when PII disabled."""
+        """Test that Azure exporter is wrapped only with FilteringSpanExporter when PII disabled."""
         mock_trace_manager = MagicMock()
         mock_exporter = MagicMock()
         added_exporters: list[tracing.FilteringSpanExporter] = []
@@ -100,7 +94,6 @@ class TestConfigureTelemetry:
         ):
             tracing.configure_telemetry(trace_manager=mock_trace_manager)
 
-            # Should have 1 exporter - NOT double-wrapped (no PII filtering)
             assert len(added_exporters) == 1
             wrapper = added_exporters[0]
             assert isinstance(wrapper, tracing.FilteringSpanExporter)
@@ -304,54 +297,6 @@ class TestIsAzureMonitorSpan:
         span.instrumentation_scope.name = "some.other.instrumentation"
 
         assert tracing.is_azure_monitor_span(span) is False
-
-
-class TestPatchTraceManagerWithFilter:
-    """Test patch_trace_manager_with_filter function."""
-
-    def test_bypasses_already_wrapped_exporter(self):
-        """Test that already-wrapped FilteringSpanExporter passes through unchanged."""
-        mock_trace_manager = MagicMock()
-        captured_exporters: list[Any] = []
-
-        def capture_add(exporter: Any, **kwargs: Any) -> None:
-            captured_exporters.append(exporter)
-
-        mock_trace_manager.add_span_exporter = capture_add
-
-        tracing.patch_trace_manager_with_filter(mock_trace_manager)
-
-        # Add an already-wrapped exporter
-        inner_delegate = MagicMock()
-        pre_wrapped = tracing.FilteringSpanExporter(inner_delegate, lambda s: True)
-        mock_trace_manager.add_span_exporter(pre_wrapped)
-
-        # Should pass through unchanged (not double-wrapped)
-        assert len(captured_exporters) == 1
-        assert captured_exporters[0] is pre_wrapped
-
-    def test_wraps_raw_exporter_with_filter(self):
-        """Test that raw exporters get wrapped with custom instrumentation filter."""
-        mock_trace_manager = MagicMock()
-        captured_exporters: list[Any] = []
-
-        def capture_add(exporter: Any, **kwargs: Any) -> None:
-            captured_exporters.append(exporter)
-
-        mock_trace_manager.add_span_exporter = capture_add
-
-        tracing.patch_trace_manager_with_filter(mock_trace_manager)
-
-        # Add a raw exporter
-        raw_exporter = MagicMock()
-        mock_trace_manager.add_span_exporter(raw_exporter)
-
-        # Should be wrapped with FilteringSpanExporter
-        assert len(captured_exporters) == 1
-        wrapper = captured_exporters[0]
-        assert isinstance(wrapper, tracing.FilteringSpanExporter)
-        assert wrapper._delegate is raw_exporter
-        assert wrapper._filter_fn is tracing.is_custom_instrumentation_span
 
 
 class TestShutdownTelemetry:
