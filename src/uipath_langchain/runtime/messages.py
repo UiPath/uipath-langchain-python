@@ -41,8 +41,8 @@ class UiPathChatMessagesMapper:
     def __init__(self):
         """Initialize the mapper with empty state."""
         self.tool_call_to_ai_message: dict[str, str] = {}
-        self.current_message: AIMessageChunk
         self.seen_message_ids: set[str] = set()
+        self.pending_message_tool_call_count: dict[str, int] = {}
 
     def _extract_text(self, content: Any) -> str:
         """Normalize LangGraph message.content to plain text."""
@@ -151,164 +151,199 @@ class UiPathChatMessagesMapper:
         Returns:
             A UiPathConversationMessageEvent if the message should be emitted, None otherwise.
         """
-        # Format timestamp as ISO 8601 UTC with milliseconds: 2025-01-04T10:30:00.123Z
-        timestamp = (
+        # --- Streaming AIMessageChunk ---
+        if isinstance(message, AIMessageChunk):
+            return self.map_ai_message_chunk_to_events(message)
+
+        # --- ToolMessage ---
+        if isinstance(message, ToolMessage):
+            return self.map_tool_message_to_events(message)
+
+        # Don't send events for system or user messages. Agent messages are handled above.
+        return None
+
+    def get_timestamp(self):
+        """Format current time as ISO 8601 UTC with milliseconds: 2025-01-04T10:30:00.123Z"""
+        return (
             datetime.now(timezone.utc)
             .isoformat(timespec="milliseconds")
             .replace("+00:00", "Z")
         )
 
-        # --- Streaming AIMessageChunk ---
-        if isinstance(message, AIMessageChunk):
-            if message.id is None:
-                return None
+    def get_content_part_id(self, message_id: str) -> str:
+        return f"chunk-{message_id}-0"
 
-            msg_event = UiPathConversationMessageEvent(
-                message_id=message.id,
-            )
+    def map_ai_message_chunk_to_events(
+        self, message: AIMessageChunk
+    ) -> list[UiPathConversationMessageEvent]:
+        if message.id is None:  # Should we throw instead?
+            return []
 
-            # Check if this is the last chunk by examining chunk_position
-            if message.chunk_position == "last":
-                events: list[UiPathConversationMessageEvent] = []
+        events: list[UiPathConversationMessageEvent] = []
 
-                # Loop through all content_blocks in current_message and create toolCallStart events for each tool_call_chunk
-                if self.current_message and self.current_message.content_blocks:
-                    for block in self.current_message.content_blocks:
-                        if block.get("type") == "tool_call_chunk":
-                            tool_chunk_block = cast(ToolCallChunk, block)
-                            tool_call_id = tool_chunk_block.get("id")
-                            tool_name = tool_chunk_block.get("name")
-                            tool_args = tool_chunk_block.get("args")
+        # For every new message_id, start a new message
+        if message.id not in self.seen_message_ids:
+            self.seen_message_ids.add(message.id)
+            self.pending_message_tool_call_count[message.id] = 0
+            events.append(self.map_to_message_start_event(message.id))
 
-                            if tool_call_id:
-                                tool_event = UiPathConversationMessageEvent(
-                                    message_id=message.id,
-                                    tool_call=UiPathConversationToolCallEvent(
-                                        tool_call_id=tool_call_id,
-                                        start=UiPathConversationToolCallStartEvent(
-                                            tool_name=tool_name,
-                                            timestamp=timestamp,
-                                            input=UiPathInlineValue(inline=tool_args),
-                                        ),
-                                    ),
-                                )
-                                events.append(tool_event)
-
-                # Create the final event for the message
-                msg_event.end = UiPathConversationMessageEndEvent(timestamp=timestamp)
-                msg_event.content_part = UiPathConversationContentPartEvent(
-                    content_part_id=f"chunk-{message.id}-0",
-                    end=UiPathConversationContentPartEndEvent(),
-                )
-                events.append(msg_event)
-
-                return events
-
-            # For every new message_id, start a new message
-            if message.id not in self.seen_message_ids:
-                self.seen_message_ids.add(message.id)
-                self.current_message = message
-                msg_event.start = UiPathConversationMessageStartEvent(
-                    role="assistant", timestamp=timestamp
-                )
-                msg_event.content_part = UiPathConversationContentPartEvent(
-                    content_part_id=f"chunk-{message.id}-0",
-                    start=UiPathConversationContentPartStartEvent(
-                        mime_type="text/plain"
-                    ),
-                )
-
-            elif message.content_blocks:
-                for block in message.content_blocks:
-                    block_type = block.get("type")
-
-                    if block_type == "text":
-                        text_block = cast(TextContentBlock, block)
-                        text = text_block["text"]
-
-                        msg_event.content_part = UiPathConversationContentPartEvent(
-                            content_part_id=f"chunk-{message.id}-0",
-                            chunk=UiPathConversationContentPartChunkEvent(
-                                data=text,
-                            ),
+        if message.content_blocks:
+            # Generate events for each chunk
+            for block in message.content_blocks:
+                block_type = block.get("type")
+                match block_type:
+                    case "text":
+                        events.append(
+                            self.map_block_to_content_part_chunk_event(
+                                message.id, cast(TextContentBlock, block)
+                            )
+                        )
+                    case "tool_call_chunk":
+                        events.extend(
+                            self.map_block_to_tool_call_start_event(
+                                message.id, cast(ToolCallChunk, block)
+                            )
                         )
 
-                    elif block_type == "tool_call_chunk":
-                        tool_chunk_block = cast(ToolCallChunk, block)
-
-                        tool_call_id = tool_chunk_block.get("id")
-                        if tool_call_id:
-                            # Track tool_call_id -> ai_message_id mapping
-                            self.tool_call_to_ai_message[tool_call_id] = message.id
-
-                        # Accumulate the message chunk
-                        self.current_message = self.current_message + message
-                        continue
-
+        elif isinstance(message.content, str) and message.content:
             # Fallback: raw string content on the chunk (rare when using content_blocks)
-            elif isinstance(message.content, str) and message.content:
-                msg_event.content_part = UiPathConversationContentPartEvent(
-                    content_part_id=f"content-{message.id}",
-                    chunk=UiPathConversationContentPartChunkEvent(
-                        data=message.content,
-                    ),
+            events.append(
+                self.map_content_to_content_part_chunk_event(
+                    message.id, message.content
                 )
-
-            if (
-                msg_event.start
-                or msg_event.content_part
-                or msg_event.tool_call
-                or msg_event.end
-            ):
-                return [msg_event]
-
-            return None
-
-        # --- ToolMessage ---
-        if isinstance(message, ToolMessage):
-            # Look up the AI message ID using the tool_call_id
-            result_message_id = (
-                self.tool_call_to_ai_message.get(message.tool_call_id)
-                if message.tool_call_id
-                else None
             )
 
-            # If no AI message ID was found, we cannot properly associate this tool result
-            if not result_message_id:
-                logger.warning(
-                    f"Tool message {message.tool_call_id} has no associated AI message ID. Skipping."
-                )
+        # Check if this is the last chunk by examining chunk_position, send end message event only if there are no pending tool calls
+        if (
+            message.chunk_position == "last"
+            and self.pending_message_tool_call_count.get(message.id, 0) == 0
+        ):
+            del self.pending_message_tool_call_count[message.id]
+            events.append(self.map_to_message_end_event(message.id))
 
-            # Clean up the mapping after use
-            if (
-                message.tool_call_id
-                and message.tool_call_id in self.tool_call_to_ai_message
-            ):
-                del self.tool_call_to_ai_message[message.tool_call_id]
+        return events
 
-            content_value: Any = message.content
-            if isinstance(content_value, str):
-                try:
-                    content_value = json.loads(content_value)
-                except (json.JSONDecodeError, TypeError):
-                    # Keep as string if not valid JSON
-                    pass
+    def map_tool_message_to_events(
+        self, message: ToolMessage
+    ) -> list[UiPathConversationMessageEvent]:
+        # Look up the AI message ID using the tool_call_id
+        message_id = self.tool_call_to_ai_message.get(message.tool_call_id)
+        if message_id is None:
+            logger.warning(
+                f"Tool message {message.tool_call_id} has no associated AI message ID. Skipping."
+            )
+            return []
 
-            return [
-                UiPathConversationMessageEvent(
-                    message_id=result_message_id or str(uuid4()),
-                    tool_call=UiPathConversationToolCallEvent(
-                        tool_call_id=message.tool_call_id,
-                        end=UiPathConversationToolCallEndEvent(
-                            timestamp=timestamp,
-                            output=UiPathInlineValue(inline=content_value),
-                        ),
+        # Clean up the mapping after use
+        del self.tool_call_to_ai_message[message.tool_call_id]
+
+        content_value: Any = message.content
+        if isinstance(content_value, str):
+            try:
+                content_value = json.loads(content_value)
+            except (json.JSONDecodeError, TypeError):
+                # Keep as string if not valid JSON
+                pass
+
+        events = [
+            UiPathConversationMessageEvent(
+                message_id=message_id,
+                tool_call=UiPathConversationToolCallEvent(
+                    tool_call_id=message.tool_call_id,
+                    end=UiPathConversationToolCallEndEvent(
+                        timestamp=self.get_timestamp(),
+                        output=UiPathInlineValue(inline=content_value),
                     ),
-                )
-            ]
+                ),
+            )
+        ]
 
-        # Don't send events for system or user messages. Agent messages are handled above.
-        return []
+        self.pending_message_tool_call_count[message_id] -= 1
+        if self.pending_message_tool_call_count[message_id] == 0:
+            events.append(self.map_to_message_end_event(message_id))
+
+        return events
+
+    def map_block_to_tool_call_start_event(
+        self, message_id: str, block
+    ) -> list[UiPathConversationMessageEvent]:
+        tool_call_id = block.get("id")
+        if tool_call_id is None:
+            return []
+
+        self.tool_call_to_ai_message[tool_call_id] = message_id
+
+        self.pending_message_tool_call_count[message_id] += 1
+
+        tool_name = block.get("name")
+        tool_args = block.get("args")
+
+        return [
+            UiPathConversationMessageEvent(
+                message_id=message_id,
+                tool_call=UiPathConversationToolCallEvent(
+                    tool_call_id=tool_call_id,
+                    start=UiPathConversationToolCallStartEvent(
+                        tool_name=tool_name,
+                        timestamp=self.get_timestamp(),
+                        input=UiPathInlineValue(inline=tool_args),
+                    ),
+                ),
+            )
+        ]
+
+    def map_block_to_content_part_chunk_event(
+        self, message_id: str, block: TextContentBlock
+    ) -> UiPathConversationMessageEvent:
+        text = block["text"]
+        return UiPathConversationMessageEvent(
+            message_id=message_id,
+            content_part=UiPathConversationContentPartEvent(
+                content_part_id=self.get_content_part_id(message_id),
+                chunk=UiPathConversationContentPartChunkEvent(
+                    data=text,
+                ),
+            ),
+        )
+
+    def map_content_to_content_part_chunk_event(
+        self, message_id: str, content: str
+    ) -> UiPathConversationMessageEvent:
+        return UiPathConversationMessageEvent(
+            message_id=message_id,
+            content_part=UiPathConversationContentPartEvent(
+                content_part_id=self.get_content_part_id(message_id),
+                chunk=UiPathConversationContentPartChunkEvent(
+                    data=content,
+                ),
+            ),
+        )
+
+    def map_to_message_start_event(
+        self, message_id: str
+    ) -> UiPathConversationMessageEvent:
+        return UiPathConversationMessageEvent(
+            message_id=message_id,
+            start=UiPathConversationMessageStartEvent(
+                role="assistant", timestamp=self.get_timestamp()
+            ),
+            content_part=UiPathConversationContentPartEvent(
+                content_part_id=self.get_content_part_id(message_id),
+                start=UiPathConversationContentPartStartEvent(mime_type="text/plain"),
+            ),
+        )
+
+    def map_to_message_end_event(
+        self, message_id: str
+    ) -> UiPathConversationMessageEvent:
+        return UiPathConversationMessageEvent(
+            message_id=message_id,
+            end=UiPathConversationMessageEndEvent(),
+            content_part=UiPathConversationContentPartEvent(
+                content_part_id=self.get_content_part_id(message_id),
+                end=UiPathConversationContentPartEndEvent(),
+            ),
+        )
 
 
 __all__ = ["UiPathChatMessagesMapper"]
