@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "id": "test-basic",
+  "name": "Basic Agent Test Set",
+  "description": "Test cases for basic agent without suspend/resume",
+  "evaluatorRefs": ["uipath-contains"],
+  "evaluations": [
+    {
+      "id": "test_basic_hello",
+      "name": "Basic hello world test",
+      "inputs": {
+        "query": "Hello world"
+      },
+      "evaluationCriterias": {
+        "uipath-contains": {
+          "searchText": "Processed: Hello world"
+        }
+      }
+    },
+    {
+      "id": "test_basic_query",
+      "name": "Basic query test",
+      "inputs": {
+        "query": "Test query"
+      },
+      "evaluationCriterias": {
+        "uipath-contains": {
+          "searchText": "Processed: Test query"
+        }
+      }
+    }
+  ]
+}

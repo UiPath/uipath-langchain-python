@@ -1,0 +1,15 @@
+[project]
+name = "tool-calling-suspend-resume"
+version = "0.1.0"
+description = "Tool-calling agent demonstrating suspend/resume with RPA process invocation"
+authors = [{ name = "UiPath", email = "support@uipath.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "uipath-langchain>=0.4.29",
+    "uipath>=2.5.40",
+]
+
+[dependency-groups]
+dev = [
+    "uipath-dev>=0.0.19",
+]
