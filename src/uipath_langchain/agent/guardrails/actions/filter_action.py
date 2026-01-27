@@ -75,6 +75,13 @@ class FilterAction(GuardrailAction):
                 category=UiPathErrorCategory.USER,
             )
 
+        _node.__metadata__ = {  # type: ignore[attr-defined]
+            "guardrail": guardrail,
+            "scope": scope,
+            "execution_stage": execution_stage,
+            "action_type": "Filter",
+        }
+
         return node_name, _node
 
 
