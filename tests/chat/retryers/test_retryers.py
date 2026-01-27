@@ -9,29 +9,13 @@ from google.genai import errors as genai_errors
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from tenacity import wait_none
 
-from uipath_langchain._utils._retry_after_strategy import (
-    AsyncRetryAfterHeaderStrategy,
-    RetryAfterHeaderStrategy,
+from uipath_langchain.chat.retryers.bedrock import (
+    AsyncBedrockRetryer,
 )
-
-
-# Test utility functions for raising test exceptions
-def raise_httpx_error(
-    status_code: int,
-    headers: dict[str, str] | None = None,
-    url: str = "https://example.com",
-) -> NoReturn:
-    """Raise an httpx.HTTPStatusError for testing."""
-    response = httpx.Response(
-        status_code=status_code,
-        headers=headers or {},
-        request=httpx.Request("GET", url),
-    )
-    raise httpx.HTTPStatusError(
-        f"{status_code} Error",
-        request=response.request,
-        response=response,
-    )
+from uipath_langchain.chat.retryers.vertex import (
+    AsyncVertexRetryer,
+    VertexRetryer,
+)
 
 
 def raise_boto3_error(
@@ -80,8 +64,8 @@ def raise_google_genai_error(
     raise genai_error
 
 
-class TestRetryAfterHeaderStrategy:
-    """Tests for RetryAfterHeaderStrategy and AsyncRetryAfterHeaderStrategy classes."""
+class TestVertexRetryStrategy:
+    """Tests for VertexRetryStrategy and AsyncVertexRetryStrategy classes."""
 
     def test_retry_strategy_retries_on_exception(
         self,
@@ -92,10 +76,10 @@ class TestRetryAfterHeaderStrategy:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
-                raise_httpx_error(429)
+                raise_google_genai_error(429)
             return "Success"
 
-        retryer = RetryAfterHeaderStrategy(max_retries=5)
+        retryer = VertexRetryer(max_retries=5)
         retryer.wait = wait_none()
 
         result = retryer(failing_function)
@@ -112,10 +96,10 @@ class TestRetryAfterHeaderStrategy:
             nonlocal call_count
             call_count += 1
             if call_count < 3:
-                raise_httpx_error(429)
+                raise_google_genai_error(429)
             return "Success"
 
-        retryer = AsyncRetryAfterHeaderStrategy(max_retries=5)
+        retryer = AsyncVertexRetryer(max_retries=5)
         retryer.wait = wait_none()
 
         result: str = await retryer(failing_async_function)
@@ -132,17 +116,15 @@ class TestRetryAfterHeaderStrategy:
         async def always_failing_async_function():
             nonlocal call_count
             call_count += 1
-            raise_httpx_error(503)
+            raise_google_genai_error(503)
 
-        retryer = AsyncRetryAfterHeaderStrategy(
-            max_retries=4, initial=5.0, max_delay=60.0
-        )
+        retryer = AsyncVertexRetryer(max_retries=4, initial=5.0, max_delay=60.0)
 
         with patch("asyncio.sleep") as mock_sleep:
             mock_sleep.side_effect = lambda delay: sleep_delays.append(delay)
             try:
                 await retryer(always_failing_async_function)
-            except httpx.HTTPStatusError:
+            except ChatGoogleGenerativeAIError:
                 pass
 
         assert call_count == 4
@@ -164,11 +146,10 @@ class TestRetryAfterHeaderStrategy:
             call_count += 1
             raise httpx.TimeoutException("Timeout")
 
-        retryer = AsyncRetryAfterHeaderStrategy(
+        retryer = AsyncVertexRetryer(
             max_retries=4,
             initial=5.0,
             max_delay=60.0,
-            retry_on_exceptions=(httpx.TimeoutException,),
         )
 
         with patch("asyncio.sleep") as mock_sleep:
@@ -195,20 +176,22 @@ class TestRetryAfterHeaderStrategy:
         async def always_failing_async_function():
             nonlocal call_count
             call_count += 1
-            raise_httpx_error(503)
+            raise_google_genai_error(503)
 
-        retryer = AsyncRetryAfterHeaderStrategy(max_retries=3)
+        retryer = AsyncVertexRetryer(max_retries=3)
         retryer.wait = wait_none()
 
         try:
             await retryer(always_failing_async_function)
             raise AssertionError("Should have raised an exception")
-        except httpx.HTTPStatusError:
+        except ChatGoogleGenerativeAIError:
             pass
 
         assert call_count == 3  # Should stop after 3 attempts
 
-    async def test_retry_strategy_uses_retry_after_header_with_httpx(self) -> None:
+    async def test_retry_strategy_uses_retry_after_header_with_google_genai(
+        self,
+    ) -> None:
         call_count = 0
         sleep_delays: list[float] = []
 
@@ -216,10 +199,14 @@ class TestRetryAfterHeaderStrategy:
             nonlocal call_count
             call_count += 1
             if call_count < 2:
-                raise_httpx_error(429, headers={"retry-after": "30"})
+                raise_google_genai_error(
+                    429,
+                    "Resource exhausted",
+                    headers={"retry-after": "30"},
+                )
             return "Success"
 
-        retryer = AsyncRetryAfterHeaderStrategy(max_retries=3)
+        retryer = AsyncVertexRetryer(max_retries=3)
 
         with patch("asyncio.sleep") as mock_sleep:
             mock_sleep.side_effect = lambda delay: sleep_delays.append(delay)
@@ -229,32 +216,6 @@ class TestRetryAfterHeaderStrategy:
         assert call_count == 2
         assert len(sleep_delays) == 1
         assert sleep_delays[0] == 30.0
-
-    async def test_retry_strategy_uses_retry_after_header_with_bedrock(self) -> None:
-        call_count = 0
-        sleep_delays: list[float] = []
-
-        async def function_with_retry_after():
-            nonlocal call_count
-            call_count += 1
-            if call_count < 2:
-                raise_boto3_error(
-                    "ThrottlingException",
-                    "Rate exceeded",
-                    headers={"retry-after": "25"},
-                )
-            return "Success"
-
-        retryer = AsyncRetryAfterHeaderStrategy(max_retries=3)
-
-        with patch("asyncio.sleep") as mock_sleep:
-            mock_sleep.side_effect = lambda delay: sleep_delays.append(delay)
-            result: str = await retryer(function_with_retry_after)
-
-        assert result == "Success"
-        assert call_count == 2
-        assert len(sleep_delays) == 1
-        assert sleep_delays[0] == 25.0
 
     async def test_retry_strategy_uses_retry_after_header_with_vertex(self) -> None:
         call_count = 0
@@ -271,7 +232,7 @@ class TestRetryAfterHeaderStrategy:
                 )
             return "Success"
 
-        retryer = AsyncRetryAfterHeaderStrategy(max_retries=3)
+        retryer = AsyncVertexRetryer(max_retries=3)
 
         with patch("asyncio.sleep") as mock_sleep:
             mock_sleep.side_effect = lambda delay: sleep_delays.append(delay)
@@ -281,3 +242,33 @@ class TestRetryAfterHeaderStrategy:
         assert call_count == 2
         assert len(sleep_delays) == 1
         assert sleep_delays[0] == 45.0
+
+
+class TestBedrockRetryStrategy:
+    """Tests for BedrockRetryer and AsyncBedrockRetryer classes."""
+
+    async def test_retry_strategy_uses_retry_after_header_with_bedrock(self) -> None:
+        call_count = 0
+        sleep_delays: list[float] = []
+
+        async def function_with_retry_after():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise_boto3_error(
+                    "ThrottlingException",
+                    "Rate exceeded",
+                    headers={"retry-after": "25"},
+                )
+            return "Success"
+
+        retryer = AsyncBedrockRetryer(max_retries=3)
+
+        with patch("asyncio.sleep") as mock_sleep:
+            mock_sleep.side_effect = lambda delay: sleep_delays.append(delay)
+            result: str = await retryer(function_with_retry_after)
+
+        assert result == "Success"
+        assert call_count == 2
+        assert len(sleep_delays) == 1
+        assert sleep_delays[0] == 25.0
