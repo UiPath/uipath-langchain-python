@@ -1,6 +1,7 @@
 {
   "functions": {
-    "agent-simple": "agent-simple.py"
+    "agent-simple": "agent-simple.py",
+    "agent-basic": "agent-basic.py"
   },
   "runtimeOptions": {
     "isConversational": false

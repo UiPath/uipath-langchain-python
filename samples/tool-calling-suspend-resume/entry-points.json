@@ -155,29 +155,19 @@
             }
         },
         {
-            "filePath": "agent-calculator",
-            "uniqueId": "2b821c93-7f42-44ff-b13d-38e5fdb5908f",
+            "filePath": "agent-basic",
+            "uniqueId": "3d7f8a91-e8bc-4d3a-9f2c-5e1a6b7c8d9e",
             "type": "agent",
             "input": {
                 "type": "object",
                 "properties": {
-                    "a": {
-                        "title": "A",
-                        "type": "integer"
-                    },
-                    "b": {
-                        "title": "B",
-                        "type": "integer"
-                    },
-                    "operator": {
-                        "title": "Operator",
+                    "query": {
+                        "title": "Query",
                         "type": "string"
                     }
                 },
                 "required": [
-                    "a",
-                    "b",
-                    "operator"
+                    "query"
                 ]
             },
             "output": {
@@ -186,15 +176,10 @@
                     "result": {
                         "title": "Result",
                         "type": "string"
-                    },
-                    "calculation": {
-                        "title": "Calculation",
-                        "type": "string"
                     }
                 },
                 "required": [
-                    "result",
-                    "calculation"
+                    "result"
                 ]
             },
             "graph": {
@@ -207,8 +192,8 @@
                         "metadata": {}
                     },
                     {
-                        "id": "calculator_process",
-                        "name": "calculator_process",
+                        "id": "process",
+                        "name": "process",
                         "type": "node",
                         "subgraph": null,
                         "metadata": {}
@@ -224,11 +209,11 @@
                 "edges": [
                     {
                         "source": "__start__",
-                        "target": "calculator_process",
+                        "target": "process",
                         "label": null
                     },
                     {
-                        "source": "calculator_process",
+                        "source": "process",
                         "target": "__end__",
                         "label": null
                     }
