@@ -1,8 +1,31 @@
-"""OpenAI payload handlers."""
+"""OpenAI Chat Completions payload handler."""
 
 from typing import Any
 
+from langchain_core.messages import AIMessage
+from uipath.runtime.errors import UiPathErrorCode
+
+from uipath_langchain.agent.exceptions import AgentTerminationException
+
 from .base import ModelPayloadHandler
+
+FAULTY_FINISH_REASONS: set[str] = {
+    "length",
+    "content_filter",
+}
+
+FINISH_REASON_MESSAGES: dict[str, tuple[str, str]] = {
+    "length": (
+        "Model response truncated due to max tokens limit.",
+        "The model ran out of tokens while generating a response. "
+        "Consider increasing max_tokens or simplifying the request.",
+    ),
+    "content_filter": (
+        "Response filtered due to content policy.",
+        "The model's response was filtered due to content policy violation. "
+        "Modify your request to comply with content policies.",
+    ),
+}
 
 
 class OpenAICompletionsPayloadHandler(ModelPayloadHandler):
@@ -11,3 +34,32 @@ class OpenAICompletionsPayloadHandler(ModelPayloadHandler):
     def get_required_tool_choice(self) -> str | dict[str, Any]:
         """Get tool_choice value for OpenAI Completions API."""
         return "required"
+
+    def check_stop_reason(self, response: AIMessage) -> None:
+        """Check OpenAI finish_reason and raise exception for faulty terminations.
+
+        OpenAI Chat Completions API returns finish_reason in response_metadata.
+
+        Args:
+            response: The AIMessage response from the model
+
+        Raises:
+            AgentTerminationException: If finish_reason indicates a faulty termination
+        """
+        finish_reason = response.response_metadata.get("finish_reason")
+        if not finish_reason:
+            return
+
+        if finish_reason in FAULTY_FINISH_REASONS:
+            title, detail = FINISH_REASON_MESSAGES.get(
+                finish_reason,
+                (
+                    f"Model stopped with reason: {finish_reason}",
+                    f"The model terminated with finish reason '{finish_reason}'.",
+                ),
+            )
+            raise AgentTerminationException(
+                code=UiPathErrorCode.EXECUTION_ERROR,
+                title=title,
+                detail=detail,
+            )
