@@ -94,6 +94,7 @@ class EscalateAction(GuardrailAction):
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
                 "Component": _build_component_name(scope, guarded_component_name),
+                "TenantName": UiPathConfig.tenant_name,
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
                 "GuardrailResult": state.inner_state.guardrail_validation_details,
             }
@@ -101,7 +102,6 @@ class EscalateAction(GuardrailAction):
             # Add tenant and trace URL if base_url is configured
             cloud_base_url = UiPathConfig.base_url
             if cloud_base_url is not None:
-                data["TenantName"] = _get_tenant_name(cloud_base_url)
                 data["AgentTrace"] = _get_agent_execution_viewer_url(cloud_base_url)
 
             # Add stage-specific fields
@@ -689,19 +689,6 @@ def _execution_stage_to_string(
     return "PostExecution"
 
 
-def _get_tenant_name(cloud_base_url: str) -> str:
-    """Extract the tenant name from the UiPath base URL.
-
-    Args:
-        cloud_base_url: The UiPath cloud base URL to extract tenant name from.
-
-    Returns:
-        str: The tenant name extracted from the base URL.
-    """
-    uiPath_Url = UiPathUrl(cloud_base_url)
-    return uiPath_Url.tenant_name
-
-
 def _get_agent_execution_viewer_url(cloud_base_url: str) -> str:
     """Generate the agent execution viewer URL based on execution context.
 
@@ -717,15 +704,17 @@ def _get_agent_execution_viewer_url(cloud_base_url: str) -> str:
     """
     uiPath_Url = UiPathUrl(cloud_base_url)
     organization_id = UiPathConfig.organization_id
-    agent_id = UiPathConfig.project_id
+    project_id = UiPathConfig.project_id
 
     # Route to appropriate URL based on source
     if UiPathConfig.is_studio_project:
-        return f"{uiPath_Url.base_url}/{organization_id}/studio_/designer/{agent_id}"
+        solutionId = UiPathConfig.studio_solution_id
+        return f"{uiPath_Url.base_url}/{organization_id}/studio_/designer/{project_id}?solutionId={solutionId}"
     else:
         execution_folder_id = UiPathConfig.folder_key
         process_uuid = UiPathConfig.process_uuid
         trace_id = UiPathConfig.trace_id
         package_version = UiPathConfig.process_version
+        project_key = UiPathConfig.project_key
 
-        return f"{uiPath_Url.base_url}/{organization_id}/agents_/deployed/{execution_folder_id}/{process_uuid}/{agent_id}/{package_version}/traces/{trace_id}"
+        return f"{uiPath_Url.base_url}/{organization_id}/agents_/deployed/{execution_folder_id}/{process_uuid}/{project_key}/{package_version}/traces/{trace_id}"
