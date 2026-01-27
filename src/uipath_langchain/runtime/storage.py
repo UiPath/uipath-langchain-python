@@ -84,9 +84,25 @@ class SqliteResumableStorage:
 
             # Insert new triggers
             for trigger in triggers:
-                trigger_data = trigger.model_dump()
-                trigger_data["payload"] = trigger.payload
-                trigger_data["trigger_name"] = trigger.trigger_name
+                trigger_data = trigger.model_dump(mode="json")
+
+                # add excluded fields back, ensuring they're JSON-serializable
+                if trigger.payload is not None:
+                    # if payload is a Pydantic model, dump it with mode="json"
+                    if isinstance(trigger.payload, BaseModel):
+                        trigger_data["payload"] = trigger.payload.model_dump(
+                            mode="json"
+                        )
+                    else:
+                        trigger_data["payload"] = trigger.payload
+
+                # convert enum to its string value
+                if trigger.trigger_name is not None:
+                    trigger_data["trigger_name"] = (
+                        trigger.trigger_name.value
+                        if hasattr(trigger.trigger_name, "value")
+                        else str(trigger.trigger_name)
+                    )
 
                 await cur.execute(
                     f"""
@@ -97,7 +113,7 @@ class SqliteResumableStorage:
                     (
                         runtime_id,
                         trigger.interrupt_id,
-                        json.dumps(trigger_data),
+                        json.dumps(trigger_data, default=str),
                     ),
                 )
             await self.memory.conn.commit()
@@ -207,7 +223,7 @@ class SqliteResumableStorage:
         if value is None:
             return None
         if isinstance(value, BaseModel):
-            return "j:" + json.dumps(value.model_dump())
+            return "j:" + json.dumps(value.model_dump(mode="json"))
         if isinstance(value, dict):
             return "j:" + json.dumps(value)
         return "s:" + value
