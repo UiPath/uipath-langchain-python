@@ -28,7 +28,6 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 )
 from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
-from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 from uipath_langchain.chat.helpers import (
     append_content_blocks_to_message,
     extract_text_content,
@@ -44,6 +43,9 @@ ANALYZE_FILES_SYSTEM_MESSAGE = (
 def create_analyze_file_tool(
     resource: AgentInternalToolResourceConfig, llm: BaseChatModel
 ) -> StructuredTool:
+    # Import here to avoid circular dependency
+    from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
+
     tool_name = sanitize_tool_name(resource.name)
     input_model = create_model(resource.input_schema)
     output_model = create_model(resource.output_schema)

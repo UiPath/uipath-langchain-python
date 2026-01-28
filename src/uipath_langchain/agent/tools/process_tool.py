@@ -19,13 +19,15 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
-from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 
 from .utils import sanitize_tool_name
 
 
 def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredTool:
     """Uses interrupt() to suspend graph execution until process completes (handled by runtime)."""
+    # Import here to avoid circular dependency
+    from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
+
     tool_name: str = sanitize_tool_name(resource.name)
     process_name = resource.properties.process_name
     folder_path = resource.properties.folder_path

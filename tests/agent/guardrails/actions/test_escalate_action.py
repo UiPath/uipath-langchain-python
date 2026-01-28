@@ -1549,9 +1549,7 @@ class TestEscalateAction:
             ),
         ],
     )
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
     async def test_node_resolves_recipient_correctly(
         self, mock_interrupt, mock_resolve_recipient, recipient, expected_value
@@ -1597,9 +1595,7 @@ class TestEscalateAction:
         assert call_args.recipient == expected_value
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_node_with_asset_recipient_resolution_failure(
         self, mock_resolve_recipient
     ) -> None:
