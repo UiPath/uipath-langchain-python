@@ -1,0 +1,10 @@
+{
+    "document_id": "DOC-2025-001",
+    "document_type": "invoice",
+    "title": "Invoice for Q4 Software Licenses",
+    "content": "This invoice covers the payment for enterprise software licenses purchased in Q4 2024. Total amount due: $45,000. Payment terms: Net 30. Please process this invoice for immediate payment to avoid service interruption.",
+    "sender_email": "vendor@techsupplier.com",
+    "sender_department": null,
+    "urgency_level": "high",
+    "tags": ["invoice", "software", "Q4", "payment"]
+}
