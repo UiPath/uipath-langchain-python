@@ -282,8 +282,11 @@ class TestEscalationToolMetadata:
 
         tool = create_escalation_tool(escalation_resource)
 
-        # Invoke the tool to trigger assignee resolution
-        await tool.ainvoke({})
+        # Create mock state and call to invoke through wrapper
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        # Invoke through the wrapper to test full flow
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert tool.metadata is not None
         assert tool.metadata["recipient"] == TaskRecipient(
@@ -304,8 +307,11 @@ class TestEscalationToolMetadata:
 
         tool = create_escalation_tool(escalation_resource_no_recipient)
 
-        # Invoke the tool to trigger assignee resolution
-        await tool.ainvoke({})
+        # Create mock state and call to invoke through wrapper
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        # Invoke through the wrapper to test full flow
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert tool.metadata is not None
         assert tool.metadata["recipient"] is None
@@ -343,8 +349,10 @@ class TestEscalationToolMetadata:
 
         tool = await create_escalation_tool(resource)
 
-        # Invoke the tool
-        await tool.ainvoke({})
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        # Invoke through the wrapper to test full flow
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         # Verify interrupt was called with the static title
         call_args = mock_interrupt.call_args[0][0]

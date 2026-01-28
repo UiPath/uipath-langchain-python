@@ -102,29 +102,16 @@ def create_escalation_tool(
         example_calls=channel.properties.example_calls,
     )
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
-        # Get task title: use built string from tokens if TEXT_BUILDER, otherwise use directly
-        if isinstance(channel.task_title, TextBuilderTaskTitle):
-            if tool.metadata is None:
-                raise RuntimeError(
-                    "Tool metadata is required for TEXT_BUILDER task titles"
-                )
-            task_title = tool.metadata["taskTitle"]
-        elif isinstance(channel.task_title, str):
-            task_title = channel.task_title
-        else:
-            raise NotImplementedError(
-                f"TaskTitle type '{type(channel.task_title).__name__}' not implemented"
-            )
-
         recipient: TaskRecipient | None = (
             await resolve_recipient_value(channel.recipients[0])
             if channel.recipients
             else None
         )
 
-        # Recipient requires runtime resolution, store in metadata after resolving
         if tool.metadata is not None:
+            # Recipient requires runtime resolution, store in metadata after resolving
             tool.metadata["recipient"] = recipient
+            task_title = tool.metadata["task_title"]
 
         result = interrupt(
             CreateEscalation(
@@ -133,7 +120,6 @@ def create_escalation_tool(
                 recipient=recipient,
                 app_name=channel.properties.app_name,
                 app_folder_path=channel.properties.folder_name,
-                app_version=channel.properties.app_version,
                 priority=channel.priority,
                 labels=channel.labels,
                 is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
@@ -164,15 +150,16 @@ def create_escalation_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        # Build task title from tokens if it's a TEXT_BUILDER type
+        if tool.metadata is None:
+            raise RuntimeError("Tool metadata is required for task_title resolution")
+
         if isinstance(channel.task_title, TextBuilderTaskTitle):
-            if tool.metadata is None:
-                raise RuntimeError(
-                    "Tool metadata is required for TEXT_BUILDER task titles"
-                )
-            tool.metadata["taskTitle"] = build_string_from_tokens(
+            tool.metadata["task_title"] = build_string_from_tokens(
                 channel.task_title.tokens, sanitize_dict_for_serialization(dict(state))
             )
+        elif isinstance(channel.task_title, str):
+            tool.metadata["task_title"] = channel.task_title
+
         call["args"] = handle_static_args(resource, state, call["args"])
         result = await tool.ainvoke(call["args"])
 
