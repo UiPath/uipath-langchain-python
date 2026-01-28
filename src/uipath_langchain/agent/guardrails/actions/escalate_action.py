@@ -58,6 +58,10 @@ class EscalateAction(GuardrailAction):
         self.version = version
         self.recipient = recipient
 
+    @property
+    def action_type(self) -> str:
+        return "Escalate"
+
     def action_node(
         self,
         *,
@@ -171,7 +175,7 @@ class EscalateAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "action_type": "Escalate",
+            "action_type": self.action_type,
         }
 
         return node_name, _node
