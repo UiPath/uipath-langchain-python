@@ -34,6 +34,9 @@ async def create_tools_from_resources(
 
     logger.info("Creating tools for agent '%s' from resources", agent.name)
     for resource in agent.resources:
+        if not resource.is_enabled:
+            continue
+
         logger.info(
             "Creating tool for resource '%s' of type '%s'",
             resource.name,
