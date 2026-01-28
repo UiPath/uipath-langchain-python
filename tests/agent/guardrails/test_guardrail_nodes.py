@@ -755,3 +755,129 @@ class TestGuardrailNodeMetadata:
         assert metadata is not None
         assert metadata["scope"] == "Agent"
         assert metadata["execution_stage"] == "postExecution"
+
+    @pytest.mark.asyncio
+    async def test_builtin_guardrail_payload_populated_pre_execution(self, monkeypatch):
+        """Test that payload.input is populated for builtin guardrail at PRE_EXECUTION."""
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "TestGuardrail"
+        _patch_uipath(
+            monkeypatch,
+            result=GuardrailValidationResultType.PASSED,
+            reason="",
+        )
+
+        _, node = create_llm_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+
+        state = AgentGuardrailsGraphState(messages=[HumanMessage("test input")])
+        await node(state)
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert metadata["payload"]["input"] == "test input"
+        assert metadata["payload"]["output"] is None
+
+    @pytest.mark.asyncio
+    async def test_builtin_guardrail_payload_populated_post_execution(
+        self, monkeypatch
+    ):
+        """Test that payload.output is populated for builtin guardrail at POST_EXECUTION."""
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "TestGuardrail"
+        _patch_uipath(
+            monkeypatch,
+            result=GuardrailValidationResultType.PASSED,
+            reason="",
+        )
+
+        _, node = create_llm_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[{"name": "tool", "args": {"x": 1}, "id": "1"}],
+                )
+            ]
+        )
+        await node(state)
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert metadata["payload"]["output"] is not None
+        assert metadata["payload"]["input"] is None
+
+    @pytest.mark.asyncio
+    async def test_tool_guardrail_payload_populated_pre_execution(self, monkeypatch):
+        """Test that payload.input is populated for tool guardrail at PRE_EXECUTION."""
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "TestGuardrail"
+        _patch_uipath(
+            monkeypatch,
+            result=GuardrailValidationResultType.PASSED,
+            reason="",
+        )
+
+        _, node = create_tool_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "my_tool", "args": {"param": "value"}, "id": "call_1"}
+                    ],
+                )
+            ]
+        )
+        await node(state)
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert metadata["payload"]["input"] == '{"param": "value"}'
+        assert metadata["payload"]["output"] is None
+
+    @pytest.mark.asyncio
+    async def test_tool_guardrail_payload_populated_post_execution(self, monkeypatch):
+        """Test that payload.output is populated for tool guardrail at POST_EXECUTION."""
+        guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        guardrail.name = "TestGuardrail"
+        _patch_uipath(
+            monkeypatch,
+            result=GuardrailValidationResultType.PASSED,
+            reason="",
+        )
+
+        _, node = create_tool_guardrail_node(
+            guardrail=guardrail,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            success_node="ok",
+            failure_node="nope",
+            tool_name="my_tool",
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[ToolMessage(content="tool output data", tool_call_id="call_1")]
+        )
+        await node(state)
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert metadata["payload"]["output"] == "tool output data"
+        assert metadata["payload"]["input"] is None
