@@ -408,3 +408,47 @@ class TestEscalationToolMetadata:
         assert mock_interrupt.called
         call_args = mock_interrupt.call_args[0][0]
         assert call_args.title == "Approve request for John Doe"
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    async def test_escalation_tool_with_empty_task_title_defaults_to_escalation_task(
+        self, mock_interrupt
+    ):
+        """Test escalation tool defaults to 'Escalation Task' when task title is empty."""
+        mock_result = MagicMock()
+        mock_result.action = None
+        mock_result.data = {}
+        mock_interrupt.return_value = mock_result
+
+        # Create resource with empty string task title
+        channel_dict = {
+            "name": "action_center",
+            "type": "actionCenter",
+            "description": "Action Center channel",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {"type": "object", "properties": {}},
+            "properties": {
+                "appName": "ApprovalApp",
+                "appVersion": 1,
+                "resourceKey": "test-key",
+            },
+            "recipients": [],
+            "taskTitle": "",
+        }
+
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[AgentEscalationChannel(**channel_dict)],
+        )
+
+        tool = await create_escalation_tool(resource)
+
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        # Invoke through the wrapper to test full flow
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        # Verify interrupt was called with the default title
+        call_args = mock_interrupt.call_args[0][0]
+        assert call_args.title == "Escalation Task"
