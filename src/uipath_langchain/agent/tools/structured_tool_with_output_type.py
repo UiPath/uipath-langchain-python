@@ -1,11 +1,12 @@
 from typing import Any
 
-from langchain_core.tools import StructuredTool
 from pydantic import Field
 from typing_extensions import override
 
+from .base_uipath_structured_tool import BaseUiPathStructuredTool
 
-class StructuredToolWithOutputType(StructuredTool):
+
+class StructuredToolWithOutputType(BaseUiPathStructuredTool):
     output_type: Any = Field(Any, description="Output type.")
 
     @override
