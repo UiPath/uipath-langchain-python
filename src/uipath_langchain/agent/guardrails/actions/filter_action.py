@@ -1,4 +1,6 @@
+import json
 import re
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolMessage
@@ -17,6 +19,15 @@ from ...exceptions import AgentStateException, AgentTerminationException
 from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
 from .base_action import GuardrailAction, GuardrailActionNode
+
+
+@dataclass
+class FilterResult:
+    """Result of a filter operation."""
+
+    command: dict[str, Any] | Command[Any]
+    updated_input: dict[str, Any] | None = None
+    updated_output: dict[str, Any] | None = None
 
 
 class FilterAction(GuardrailAction):
@@ -60,16 +71,28 @@ class FilterAction(GuardrailAction):
         raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}_filter"
         node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
 
+        metadata: dict[str, Any] = {
+            "guardrail": guardrail,
+            "scope": scope,
+            "execution_stage": execution_stage,
+            "action_type": self.action_type,
+            "excluded_fields": self.fields,
+        }
+
         async def _node(
             _state: AgentGuardrailsGraphState,
         ) -> dict[str, Any] | Command[Any]:
             if scope == GuardrailScope.TOOL:
-                return _filter_tool_fields(
+                result = _filter_tool_fields(
                     _state,
                     self.fields,
                     execution_stage,
                     guarded_component_name,
                 )
+                # Update metadata with filter results
+                metadata["updated_input"] = result.updated_input
+                metadata["updated_output"] = result.updated_output
+                return result.command
 
             raise AgentTerminationException(
                 code=UiPathErrorCode.EXECUTION_ERROR,
@@ -78,16 +101,7 @@ class FilterAction(GuardrailAction):
                 category=UiPathErrorCategory.USER,
             )
 
-        _node.__metadata__ = {  # type: ignore[attr-defined]
-            "guardrail": guardrail,
-            "scope": scope,
-            "execution_stage": execution_stage,
-            "action_type": self.action_type,
-            "excluded_fields": self.fields,
-
-            # updated_input: Optional[Dict[str, Any]] = Field(None, alias="updatedInput")
-            # updated_output: Optional[Dict[str, Any]] = Field(None, alias="updatedOutput")
-        }
+        _node.__metadata__ = metadata  # type: ignore[attr-defined]
 
         return node_name, _node
 
@@ -97,7 +111,7 @@ def _filter_tool_fields(
     fields_to_filter: list[FieldReference],
     execution_stage: ExecutionStage,
     tool_name: str,
-) -> dict[str, Any] | Command[Any]:
+) -> FilterResult:
     """Filter specified fields from tool call arguments or tool output.
 
     The filter action filters fields based on the execution stage:
@@ -111,14 +125,14 @@ def _filter_tool_fields(
         tool_name: Name of the tool to filter.
 
     Returns:
-        Command to update messages with filtered tool call args or output.
+        FilterResult containing the command and updated input/output data.
 
     Raises:
         AgentTerminationException: If filtering fails.
     """
     try:
         if not fields_to_filter:
-            return {}
+            return FilterResult(command={})
 
         if execution_stage == ExecutionStage.PRE_EXECUTION:
             return _filter_tool_input_fields(state, fields_to_filter, tool_name)
@@ -138,7 +152,7 @@ def _filter_tool_input_fields(
     state: AgentGuardrailsGraphState,
     fields_to_filter: list[FieldReference],
     tool_name: str,
-) -> dict[str, Any] | Command[Any]:
+) -> FilterResult:
     """Filter specified input fields from tool call arguments (PRE_EXECUTION only).
 
     This function is called at PRE_EXECUTION to filter input fields from tool call arguments
@@ -150,7 +164,7 @@ def _filter_tool_input_fields(
         tool_name: Name of the tool to filter.
 
     Returns:
-        Command to update messages with filtered tool call args, or empty dict if no input fields to filter.
+        FilterResult with command to update messages and updated_input data.
     """
     # Check if there are any input fields to filter
     has_input_fields = any(
@@ -158,27 +172,28 @@ def _filter_tool_input_fields(
     )
 
     if not has_input_fields:
-        return {}
+        return FilterResult(command={})
 
     msgs = state.messages.copy()
     if not msgs:
-        return {}
+        return FilterResult(command={})
 
     # Find the AIMessage with tool calls
     # At PRE_EXECUTION, this is always the last message
     ai_message = find_latest_ai_message(msgs)
     if ai_message is None or not ai_message.tool_calls:
-        return {}
+        return FilterResult(command={})
 
     # Find and filter the tool call with matching name
     # Type assertion: we know ai_message is AIMessage from the check above
     assert isinstance(ai_message, AIMessage)
     tool_calls = list(ai_message.tool_calls)
     modified = False
+    filtered_args: dict[str, Any] = {}
 
     current_tool_call_index = extract_current_tool_call_index(msgs, tool_name)
     if current_tool_call_index is None:
-        return {}
+        return FilterResult(command={})
 
     tool_call = tool_calls[current_tool_call_index]
 
@@ -220,15 +235,18 @@ def _filter_tool_input_fields(
 
     if modified:
         ai_message = replace_tool_calls(ai_message, tool_calls)
-        return Command(update={"messages": [ai_message]})
+        return FilterResult(
+            command=Command(update={"messages": [ai_message]}),
+            updated_input=filtered_args,
+        )
 
-    return {}
+    return FilterResult(command={})
 
 
 def _filter_tool_output_fields(
     state: AgentGuardrailsGraphState,
     fields_to_filter: list[FieldReference],
-) -> dict[str, Any] | Command[Any]:
+) -> FilterResult:
     """Filter specified output fields from tool output (POST_EXECUTION only).
 
     This function is called at POST_EXECUTION to filter output fields from tool results
@@ -239,30 +257,29 @@ def _filter_tool_output_fields(
         fields_to_filter: List of FieldReference objects specifying which fields to filter.
 
     Returns:
-        Command to update messages with filtered tool output, or empty dict if no output fields to filter.
+        FilterResult with command to update messages and updated_output data.
     """
+    import ast
+
     # Check if there are any output fields to filter
     has_output_fields = any(
         field_ref.source == FieldSource.OUTPUT for field_ref in fields_to_filter
     )
 
     if not has_output_fields:
-        return {}
+        return FilterResult(command={})
 
     msgs = state.messages.copy()
     if not msgs:
-        return {}
+        return FilterResult(command={})
 
     last_message = msgs[-1]
     if not isinstance(last_message, ToolMessage):
-        return {}
-
-    # Parse the tool output content
-    import json
+        return FilterResult(command={})
 
     content = last_message.content
     if not content:
-        return {}
+        return FilterResult(command={})
 
     # Try to parse the content as JSON or dict
     try:
@@ -273,22 +290,20 @@ def _filter_tool_output_fields(
                 output_data = json.loads(content)
             except json.JSONDecodeError:
                 # Try to parse as Python literal (dict representation)
-                import ast
-
                 try:
                     output_data = ast.literal_eval(content)
                     if not isinstance(output_data, dict):
-                        return {}
+                        return FilterResult(command={})
                 except (ValueError, SyntaxError):
-                    return {}
+                    return FilterResult(command={})
         else:
             # Content is not JSON-parseable, can't filter specific fields
-            return {}
+            return FilterResult(command={})
     except Exception:
-        return {}
+        return FilterResult(command={})
 
     if not isinstance(output_data, dict):
-        return {}
+        return FilterResult(command={})
 
     # Filter out the specified fields
     filtered_output = output_data.copy()
@@ -303,6 +318,9 @@ def _filter_tool_output_fields(
     if modified:
         # Update the tool message content with filtered output
         last_message.content = json.dumps(filtered_output)
-        return Command(update={"messages": msgs})
+        return FilterResult(
+            command=Command(update={"messages": msgs}),
+            updated_output=filtered_output,
+        )
 
-    return {}
+    return FilterResult(command={})
