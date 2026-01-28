@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any, Optional
 
@@ -8,12 +9,16 @@ from langchain_core.callbacks import (
 )
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatResult
+from tenacity import AsyncRetrying, Retrying
 from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
+from .retryers.vertex import AsyncVertexRetryer, VertexRetryer
 from .supported_models import GeminiModels
 from .types import APIFlavor, LLMProvider
+
+logger = logging.getLogger(__name__)
 
 
 def _check_genai_dependencies() -> None:
@@ -118,6 +123,8 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
     _uipath_llmgw_url: Optional[str] = PrivateAttr(default=None)
     _agenthub_config: Optional[str] = PrivateAttr(default=None)
     _byo_connection_id: Optional[str] = PrivateAttr(default=None)
+    _retryer: Optional[Retrying] = PrivateAttr(default=None)
+    _aretryer: Optional[AsyncRetrying] = PrivateAttr(default=None)
 
     @resource_override(
         resource_identifier="byo_connection_id", resource_type="connection"
@@ -131,6 +138,8 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         temperature: Optional[float] = None,
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
+        retryer: Optional[Retrying] = None,
+        aretryer: Optional[AsyncRetrying] = None,
         **kwargs: Any,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -178,6 +187,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
             model=model_name,
             google_api_key="uipath-gateway",
             temperature=temperature,
+            max_retries=1,
             **kwargs,
         )
 
@@ -193,6 +203,8 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         self._uipath_llmgw_url = uipath_url
         self._agenthub_config = agenthub_config
         self._byo_connection_id = byo_connection_id
+        self._retryer = retryer
+        self._aretryer = aretryer
 
         if self.temperature is not None and not 0 <= self.temperature <= 2.0:
             raise ValueError("temperature must be in the range [0.0, 2.0]")
@@ -240,6 +252,14 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
             model=model_name,
         )
         return f"{env_uipath_url.rstrip('/')}/{formatted_endpoint}"
+
+    def invoke(self, *args, **kwargs):
+        retryer = self._retryer or _get_default_retryer()
+        return retryer(super().invoke, *args, **kwargs)
+
+    async def ainvoke(self, *args, **kwargs):
+        retryer = self._aretryer or _get_default_async_retryer()
+        return await retryer(super().ainvoke, *args, **kwargs)
 
     def _merge_finish_reason_to_response_metadata(
         self, result: ChatResult
@@ -289,3 +309,15 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
             messages, stop=stop, run_manager=run_manager, **kwargs
         )
         return self._merge_finish_reason_to_response_metadata(result)
+
+
+def _get_default_retryer() -> VertexRetryer:
+    return VertexRetryer(
+        logger=logger,
+    )
+
+
+def _get_default_async_retryer() -> AsyncVertexRetryer:
+    return AsyncVertexRetryer(
+        logger=logger,
+    )
