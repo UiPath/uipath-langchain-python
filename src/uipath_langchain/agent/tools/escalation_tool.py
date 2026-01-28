@@ -13,7 +13,9 @@ from uipath.agent.models.agent import (
     AgentEscalationResourceConfig,
     AssetRecipient,
     StandardRecipient,
+    TextBuilderTaskTitle,
 )
+from uipath.agent.utils.text_tokens import build_string_from_tokens
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
@@ -21,7 +23,6 @@ from uipath.platform.common import CreateEscalation
 from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.static_args import (
     handle_static_args,
 )
@@ -30,8 +31,9 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 )
 
 from ..exceptions import AgentTerminationException
+from ..react.types import AgentGraphState
 from .tool_node import ToolWrapperReturnType
-from .utils import sanitize_tool_name
+from .utils import sanitize_dict_for_serialization, sanitize_tool_name
 
 
 class EscalationAction(str, Enum):
@@ -100,17 +102,16 @@ async def create_escalation_tool(
         example_calls=channel.properties.example_calls,
     )
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
-        task_title = channel.task_title or "Escalation Task"
-
         recipient: TaskRecipient | None = (
             await resolve_recipient_value(channel.recipients[0])
             if channel.recipients
             else None
         )
 
-        # Recipient requires runtime resolution, store in metadata after resolving
         if tool.metadata is not None:
+            # Recipient requires runtime resolution, store in metadata after resolving
             tool.metadata["recipient"] = recipient
+            task_title = tool.metadata.get("task_title") or "Escalation Task"
 
         result = interrupt(
             CreateEscalation(
@@ -119,7 +120,6 @@ async def create_escalation_tool(
                 recipient=recipient,
                 app_name=channel.properties.app_name,
                 app_folder_path=channel.properties.folder_name,
-                app_version=channel.properties.app_version,
                 priority=channel.priority,
                 labels=channel.labels,
                 is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
@@ -150,6 +150,16 @@ async def create_escalation_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
+        if tool.metadata is None:
+            raise RuntimeError("Tool metadata is required for task_title resolution")
+
+        if isinstance(channel.task_title, TextBuilderTaskTitle):
+            tool.metadata["task_title"] = build_string_from_tokens(
+                channel.task_title.tokens, sanitize_dict_for_serialization(dict(state))
+            )
+        elif isinstance(channel.task_title, str):
+            tool.metadata["task_title"] = channel.task_title
+
         call["args"] = handle_static_args(resource, state, call["args"])
         result = await tool.ainvoke(call["args"])
 
@@ -179,7 +189,7 @@ async def create_escalation_tool(
             "tool_type": "escalation",
             "display_name": channel.properties.app_name,
             "channel_type": channel.type,
-            "assignee": None,
+            "recipient": None,
         },
     )
     tool.set_tool_wrappers(awrapper=escalation_wrapper)
