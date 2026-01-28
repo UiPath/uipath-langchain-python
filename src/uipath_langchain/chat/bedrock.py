@@ -1,7 +1,11 @@
 import logging
 import os
-from typing import Optional
+from collections.abc import Iterator
+from typing import Any, Optional
 
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from uipath._utils import resource_override
 from uipath.utils import EndpointManager
 
@@ -216,3 +220,57 @@ class UiPathChatBedrock(ChatBedrock):
         kwargs["model"] = model_name
         super().__init__(**kwargs)
         self.model = model_name
+
+    @staticmethod
+    def _convert_file_blocks_to_anthropic_documents(
+        messages: list[BaseMessage],
+    ) -> list[BaseMessage]:
+        """Convert FileContentBlock items to Anthropic document format.
+
+        langchain_aws's _format_data_content_block() does not support
+        type='file' blocks (only images). This pre-processes messages to
+        convert PDF FileContentBlocks into Anthropic's native 'document'
+        format so they pass through formatting without error.
+        """
+        for message in messages:
+            if not isinstance(message.content, list):
+                continue
+            for i, block in enumerate(message.content):
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "file"
+                    and block.get("mime_type") == "application/pdf"
+                    and "base64" in block
+                ):
+                    anthropic_block: dict[str, Any] = {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": block["mime_type"],
+                            "data": block["base64"],
+                        },
+                    }
+                    message.content[i] = anthropic_block
+        return messages
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: Optional[list[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        messages = self._convert_file_blocks_to_anthropic_documents(messages)
+        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: Optional[list[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        messages = self._convert_file_blocks_to_anthropic_documents(messages)
+        yield from super()._stream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
