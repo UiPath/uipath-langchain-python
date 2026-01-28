@@ -515,6 +515,8 @@ class TestInterruptibleTraceContext:
             pending_tool_name=None,
             pending_tool_span=None,
             pending_process_span=None,
+            pending_escalation_span=None,
+            pending_escalation_info=None,
         )
         mock_trace_context_storage.load_trace_context = AsyncMock(
             return_value=saved_context

@@ -251,8 +251,6 @@ class TelemetryRuntimeWrapper:
             # Resume: restore original trace context
             async with self._restore_trace_context(saved_context) as agent_span:
                 self._callback.set_agent_span(agent_span, uuid.UUID(self._agent_run_id))
-                # Tell callback to skip span creation for the pending tool
-                # and provide span data for immediate upsert on completion
                 pending_tool = saved_context.get("pending_tool_name")
                 if pending_tool:
                     pending_tool_span = saved_context.get("pending_tool_span")
@@ -266,6 +264,12 @@ class TelemetryRuntimeWrapper:
                         process_span_data=dict(pending_process_span)
                         if pending_process_span
                         else None,
+                    )
+                pending_escalation = saved_context.get("pending_escalation_span")
+                if pending_escalation:
+                    self._callback.set_escalation_resume_context(
+                        trace_id=saved_context.get("trace_id", ""),
+                        escalation_span_data=dict(pending_escalation),
                     )
                 try:
                     yield agent_span
@@ -401,8 +405,8 @@ class TelemetryRuntimeWrapper:
         Args:
             agent_span: The current agent span
         """
-        # Get pending tool span info from callback
         tool_name, tool_span, process_span = self._callback.get_pending_tool_info()
+        escalation_span, escalation_info = self._callback.get_pending_escalation_info()
 
         # Upsert spans with UNSET status before suspend
         # This ensures spans survive process restart with correct state
@@ -410,6 +414,8 @@ class TelemetryRuntimeWrapper:
             self._tracer.upsert_span_suspended(tool_span)
         if process_span:
             self._tracer.upsert_span_suspended(process_span)
+        if escalation_span:
+            self._tracer.upsert_span_suspended(escalation_span)
 
         if self._trace_context_storage:
             runtime_id = self._get_runtime_id()
@@ -426,6 +432,14 @@ class TelemetryRuntimeWrapper:
                     pending_process_data = self._extract_pending_span_data(process_span)
                     context["pending_process_span"] = pending_process_data
                     context["pending_process_span_id"] = pending_process_data["span_id"]
+
+            # Save escalation span data for resume completion
+            if escalation_span:
+                pending_escalation_data = self._extract_pending_span_data(
+                    escalation_span
+                )
+                context["pending_escalation_span"] = pending_escalation_data
+                context["pending_escalation_info"] = escalation_info
 
             await self._trace_context_storage.save_trace_context(runtime_id, context)
             logger.debug(
@@ -446,7 +460,6 @@ class TelemetryRuntimeWrapper:
             "start_time_ns": 0,
             "attributes": {},
         }
-        # Extract parent, start_time and attributes from ReadableSpan
         if isinstance(span, ReadableSpan):
             if span.parent and span.parent.span_id:
                 data["parent_span_id"] = format(span.parent.span_id, "016x")
@@ -468,7 +481,6 @@ class TelemetryRuntimeWrapper:
         Args:
             saved_context: Previously saved trace context with pending span data
         """
-        # Skip if callback already completed the spans on tool_end
         if self._callback.resumed_spans_completed():
             logger.debug(
                 "Resumed spans already completed by callback, skipping duplicate upsert"
@@ -477,7 +489,6 @@ class TelemetryRuntimeWrapper:
 
         trace_id = saved_context["trace_id"]
 
-        # Complete pending tool span
         pending_tool = saved_context.get("pending_tool_span")
         if pending_tool:
             self._tracer.upsert_span_complete_by_data(
@@ -489,7 +500,6 @@ class TelemetryRuntimeWrapper:
                 pending_tool.get("name", "unknown"),
             )
 
-        # Complete pending process span (inner span, should complete first in UI)
         pending_process = saved_context.get("pending_process_span")
         if pending_process:
             self._tracer.upsert_span_complete_by_data(
@@ -501,14 +511,24 @@ class TelemetryRuntimeWrapper:
                 pending_process.get("name", "unknown"),
             )
 
+        pending_escalation = saved_context.get("pending_escalation_span")
+        if pending_escalation:
+            escalation_attrs = dict(pending_escalation.get("attributes", {}))
+            escalation_attrs["reviewStatus"] = "completed"
+            escalation_attrs["reviewOutcome"] = "Approved"
+            pending_escalation_data = dict(pending_escalation)
+            pending_escalation_data["attributes"] = escalation_attrs
+
+            self._tracer.upsert_span_complete_by_data(
+                trace_id=trace_id,
+                span_data=pending_escalation_data,
+            )
+            logger.debug(
+                "Completed pending escalation span %s",
+                pending_escalation.get("name", "unknown"),
+            )
+
     async def _load_trace_context_if_resuming(self) -> Optional[TraceContextData]:
-        """Load trace context if this is a resume execution.
-
-        Checks storage for previously saved trace context.
-
-        Returns:
-            Saved trace context if exists, None otherwise
-        """
         if not self._trace_context_storage:
             return None
 
@@ -525,11 +545,6 @@ class TelemetryRuntimeWrapper:
         return saved
 
     async def _clear_trace_context(self) -> None:
-        """Clear trace context after completion.
-
-        Called on terminal states (SUCCESSFUL, FAILED) to clean up
-        saved trace context.
-        """
         if not self._trace_context_storage:
             return
 
@@ -538,14 +553,6 @@ class TelemetryRuntimeWrapper:
         logger.debug("Cleared trace context for runtime %s", runtime_id)
 
     def _extract_trace_context(self, span: Span) -> TraceContextData:
-        """Extract trace context data from a span for persistence.
-
-        Args:
-            span: The span to extract context from
-
-        Returns:
-            TraceContextData for persistence
-        """
         ctx = span.get_span_context()
 
         # Extract attributes if available (ReadableSpan has attributes)
@@ -565,6 +572,8 @@ class TelemetryRuntimeWrapper:
             pending_tool_name=None,
             pending_tool_span=None,
             pending_process_span=None,
+            pending_escalation_span=None,
+            pending_escalation_info=None,
         )
 
     def _get_runtime_id(self) -> str:
@@ -582,7 +591,6 @@ class TelemetryRuntimeWrapper:
     def _get_enriched_properties(
         self, base_properties: Dict[str, Any], agent_span: Optional[Span] = None
     ) -> Dict[str, Any]:
-        """Get enriched telemetry properties from AgentDefinition and execution context."""
         properties = base_properties.copy()
 
         trace_id = UiPathConfig.trace_id
@@ -647,7 +655,6 @@ class TelemetryRuntimeWrapper:
         except Exception:
             properties["CloudUserId"] = ""
 
-        # Check if delegate has entrypoint (agent.json path)
         entrypoint = getattr(self._delegate, "entrypoint", None)
         if entrypoint:
             properties["Entrypoint"] = str(entrypoint)

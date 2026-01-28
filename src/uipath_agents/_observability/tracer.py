@@ -34,6 +34,7 @@ from .span_attributes import (
     BaseSpanAttributes,
     CompletionSpanAttributes,
     EscalationToolSpanAttributes,
+    GuardrailEscalationSpanAttributes,
     GuardrailEvaluationSpanAttributes,
     IntegrationToolSpanAttributes,
     LlmCallSpanAttributes,
@@ -791,3 +792,82 @@ class UiPathTracer:
             span.set_status(Status(StatusCode.OK))  # Guardrail failure != span error
 
         span.end()
+
+    def start_guardrail_escalation(
+        self,
+        guardrail_name: str,
+        scope: str,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start a guardrail escalation span ('Review task').
+
+        Creates a span named 'Review task' as child of the guardrail evaluation span.
+        This matches the C# Temporal pattern where escalation creates a child span
+        that tracks the human review lifecycle.
+
+        Args:
+            guardrail_name: Name of the guardrail that escalated
+            scope: Scope of guardrail ("agent", "llm", "tool")
+            parent_span: The guardrail evaluation span (parent)
+
+        Returns:
+            The started Span (caller must track for later completion)
+        """
+        parent = parent_span or trace.get_current_span()
+        context = trace.set_span_in_context(parent) if parent else None
+
+        span = self._tracer.start_span(
+            SpanName.REVIEW_TASK,
+            kind=SpanKind.INTERNAL,
+            context=context,
+        )
+
+        attrs = GuardrailEscalationSpanAttributes(
+            guardrail_name=guardrail_name,
+            review_status="waiting",
+        )
+
+        self._apply_attributes(span, attrs)
+        self.upsert_span_started(span)
+        return span
+
+    def end_guardrail_escalation(
+        self,
+        span: Span,
+        review_outcome: str,
+        reviewed_by: Optional[str] = None,
+        review_reason: Optional[Any] = None,
+        reviewed_inputs: Optional[Any] = None,
+        reviewed_outputs: Optional[Any] = None,
+    ) -> None:
+        """End a guardrail escalation span with review results.
+
+        Args:
+            span: The escalation span to end
+            review_outcome: "Approved" or "Rejected"
+            reviewed_by: Who completed the review
+            review_reason: Reason for the decision
+            reviewed_inputs: Modified inputs (if any)
+            reviewed_outputs: Modified outputs (if any)
+        """
+        span.set_attribute("reviewStatus", "completed")
+        span.set_attribute("reviewOutcome", review_outcome)
+        if reviewed_by:
+            span.set_attribute("reviewedBy", reviewed_by)
+        if review_reason:
+            if isinstance(review_reason, dict):
+                span.set_attribute("reviewReason", json.dumps(review_reason))
+            else:
+                span.set_attribute("reviewReason", str(review_reason))
+        if reviewed_inputs:
+            if isinstance(reviewed_inputs, dict):
+                span.set_attribute("reviewedInputs", json.dumps(reviewed_inputs))
+            else:
+                span.set_attribute("reviewedInputs", str(reviewed_inputs))
+        if reviewed_outputs:
+            if isinstance(reviewed_outputs, dict):
+                span.set_attribute("reviewedOutputs", json.dumps(reviewed_outputs))
+            else:
+                span.set_attribute("reviewedOutputs", str(reviewed_outputs))
+
+        self.end_span_ok(span)

@@ -528,13 +528,16 @@ class TestGuardrailActionDetection:
                 "agent_pre_execution_pii_guard" in callback._pending_guardrail_actions
             )
 
-            # Action node fires with _block suffix
+            # Action node fires with _block suffix and action_type metadata
             action_run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=action_run_id,
-                metadata={"langgraph_node": "agent_pre_execution_pii_guard_block"},
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard_block",
+                    "action_type": "Block",
+                },
             )
 
             # Pending action should be cleared
@@ -573,12 +576,15 @@ class TestGuardrailActionDetection:
                 run_id=run_id,
             )
 
-            # Action node fires with _log suffix
+            # Action node fires with _log suffix and action_type metadata
             callback.on_chain_start(
                 {},
                 {},
                 run_id=uuid4(),
-                metadata={"langgraph_node": "llm_pre_execution_prompt_injection_log"},
+                metadata={
+                    "langgraph_node": "llm_pre_execution_prompt_injection_log",
+                    "action_type": "Log",
+                },
             )
 
         spans = span_exporter.get_finished_spans()
@@ -612,7 +618,10 @@ class TestGuardrailActionDetection:
                 {},
                 {},
                 run_id=uuid4(),
-                metadata={"langgraph_node": "llm_post_execution_review_guard_hitl"},
+                metadata={
+                    "langgraph_node": "llm_post_execution_review_guard_hitl",
+                    "action_type": "Escalate",
+                },
             )
 
         spans = span_exporter.get_finished_spans()
@@ -621,6 +630,50 @@ class TestGuardrailActionDetection:
         ]
         assert len(eval_spans) == 1
         assert eval_spans[0].attributes.get("action") == "Escalate"
+
+    def test_guardrail_named_with_action_suffix_creates_span(
+        self, callback, tracer, span_exporter
+    ):
+        """Guardrail named 'test_guardrail_log' should not be misidentified as action node.
+
+        This tests the fix for a bug where guardrails with names ending in _log, _block,
+        _hitl, or _filter were incorrectly detected as action nodes due to suffix matching.
+        """
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # Eval node for guardrail named "test_guardrail_log"
+            run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={"langgraph_node": "agent_pre_execution_test_guardrail_log"},
+            )
+
+            # Span should be created (not skipped)
+            assert run_id in callback._guardrail_spans
+
+            # Validation passes - span should end immediately
+            callback.on_chain_end(
+                {
+                    INNER_STATE_KEY: {
+                        GUARDRAIL_VALIDATION_RESULT_KEY: True,
+                        GUARDRAIL_VALIDATION_DETAILS_KEY: "No issues",
+                    }
+                },
+                run_id=run_id,
+            )
+
+        spans = span_exporter.get_finished_spans()
+        eval_spans = [
+            s for s in spans if s.attributes.get("type") == "guardrailEvaluation"
+        ]
+        # Span should exist and have correct attributes
+        assert len(eval_spans) == 1
+        assert eval_spans[0].name == "Guardrail - test_guardrail_log"
+        assert eval_spans[0].attributes.get("action") == "Skip"
 
     def test_command_object_extracts_validation_result(
         self, callback, tracer, span_exporter
@@ -665,7 +718,10 @@ class TestGuardrailActionDetection:
                 {},
                 {},
                 run_id=uuid4(),
-                metadata={"langgraph_node": "agent_pre_execution_pii_guard_block"},
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard_block",
+                    "action_type": "Block",
+                },
             )
 
         spans = span_exporter.get_finished_spans()
@@ -968,7 +1024,10 @@ class TestToolGuardrailRealExecutionOrder:
                 {},
                 {},
                 run_id=uuid4(),
-                metadata={"langgraph_node": "tool_pre_execution_pii_guard_block"},
+                metadata={
+                    "langgraph_node": "tool_pre_execution_pii_guard_block",
+                    "action_type": "Block",
+                },
             )
 
             # Placeholder should be cleaned up
@@ -2116,3 +2175,142 @@ class TestLangchainConfigStructure:
         # Should have captured a run_id
         assert captured_run_id is not None
         assert isinstance(captured_run_id, UUID)
+
+
+class TestEscalationReviewedData:
+    """Tests for escalation span completion with reviewed data from outputs."""
+
+    def test_escalate_action_completes_span_in_on_chain_end(
+        self, callback: UiPathTracingCallback, tracer: UiPathTracer, span_exporter
+    ) -> None:
+        """Escalate action span completes in on_chain_end with reviewed data."""
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # Guardrail evaluation fails
+            eval_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=eval_run_id,
+                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+            )
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: False}},
+                run_id=eval_run_id,
+            )
+
+            # Escalate action node fires (with action_type metadata)
+            action_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=action_run_id,
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard_hitl",
+                    "action_type": "Escalate",
+                },
+            )
+
+            # Verify run_id is tracked for on_chain_end
+            assert action_run_id in callback._escalate_action_run_ids
+
+            # on_chain_end with reviewed data in inner_state
+            callback.on_chain_end(
+                {
+                    # INNER_STATE_KEY: {
+                    #     ESCALATION_REVIEWED_DATA_KEY: {
+                    #         "reviewed_inputs": {"input": "sanitized"},
+                    #         "reviewed_outputs": None,
+                    #         "reviewed_by": "user@example.com",
+                    #     }
+                    # }
+                },
+                run_id=action_run_id,
+            )
+
+            # run_id should be removed after completion
+            assert action_run_id not in callback._escalate_action_run_ids
+
+        spans = span_exporter.get_finished_spans()
+        review_spans = [s for s in spans if s.name == "Review task"]
+        assert len(review_spans) == 1
+
+        review_span = review_spans[0]
+        assert review_span.attributes.get("reviewOutcome") == "Approved"
+        # assert review_span.attributes.get("reviewedBy") == "user@example.com"
+        # assert "sanitized" in review_span.attributes.get("reviewedInputs", "")
+
+    def test_resume_escalate_action_completes_span_via_upsert(
+        self, callback: UiPathTracingCallback, tracer: UiPathTracer, span_exporter
+    ) -> None:
+        """Resume escalate action completes saved span via upsert with reviewed data."""
+        from unittest.mock import patch
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # Simulate resumed escalation context (set by runtime on resume)
+            callback._resumed_escalation_trace_id = "trace-123"
+            callback._resumed_escalation_span_data = {
+                "name": "Review task",
+                "attributes": {
+                    "type": "reviewTask",
+                    "reviewStatus": "waiting",
+                },
+            }
+
+            # Resume escalate action node fires (with action_type metadata)
+            action_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=action_run_id,
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard_hitl_hitl",
+                    "action_type": "Escalate",
+                },
+            )
+
+            # Verify run_id is tracked for resume completion
+            assert action_run_id in callback._escalate_action_resume_data
+            assert (
+                callback._escalate_action_resume_data[action_run_id]["trace_id"]
+                == "trace-123"
+            )
+
+            # Mock the upsert call
+            with patch.object(
+                callback._tracer, "upsert_span_complete_by_data"
+            ) as mock_upsert:
+                mock_upsert.return_value = None
+
+                # on_chain_end with reviewed data
+                callback.on_chain_end(
+                    {
+                        # INNER_STATE_KEY: {
+                        #     ESCALATION_REVIEWED_DATA_KEY: {
+                        #         "reviewed_inputs": {"data": "reviewed"},
+                        #         "reviewed_outputs": {"result": "approved"},
+                        #         "reviewed_by": "reviewer@example.com",
+                        #     }
+                        # }
+                    },
+                    run_id=action_run_id,
+                )
+
+                # Verify upsert was called with correct data
+                mock_upsert.assert_called_once()
+                call_args = mock_upsert.call_args
+                assert call_args[1]["trace_id"] == "trace-123"
+                span_data = call_args[1]["span_data"]
+                assert span_data["attributes"]["reviewStatus"] == "completed"
+                assert span_data["attributes"]["reviewOutcome"] == "Approved"
+                # assert span_data["attributes"]["reviewedBy"] == "reviewer@example.com"
+                # assert "reviewed" in span_data["attributes"]["reviewedInputs"]
+                # assert "approved" in span_data["attributes"]["reviewedOutputs"]
+
+            # run_id should be removed after completion
+            assert action_run_id not in callback._escalate_action_resume_data

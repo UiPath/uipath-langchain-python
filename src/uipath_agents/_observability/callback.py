@@ -99,12 +99,20 @@ class GuardrailAction:
 # Pattern: {scope}_{stage}_execution_{guardrail_name}
 GUARDRAIL_NODE_PATTERN = re.compile(r"^(agent|llm|tool)_(pre|post)_execution_(.+)$")
 
-# Map action suffix to action name
+# Map action suffix to action name (fallback for nodes without metadata)
 ACTION_SUFFIX_TO_NAME = {
     "_log": GuardrailAction.LOG,
     "_block": GuardrailAction.BLOCK,
     "_hitl": GuardrailAction.ESCALATE,
     "_filter": GuardrailAction.FILTER,
+}
+
+# Map action_type metadata string to GuardrailAction
+ACTION_TYPE_TO_ACTION = {
+    "Log": GuardrailAction.LOG,
+    "Block": GuardrailAction.BLOCK,
+    "Escalate": GuardrailAction.ESCALATE,
+    "Filter": GuardrailAction.FILTER,
 }
 
 
@@ -167,6 +175,13 @@ class UiPathTracingCallback(BaseCallbackHandler):
         # Pending guardrail actions: node_name -> (span, validation_details)
         # When validation fails, we defer span ending until action node fires
         self._pending_guardrail_actions: Dict[str, Tuple[Span, Optional[str]]] = {}
+        # Pending guardrail escalation span (for HITL suspend/resume)
+        self._pending_escalation_span: Optional[Span] = None
+        self._pending_escalation_info: Optional[Dict[str, str]] = None
+        # Track escalate action nodes to read reviewed data in on_chain_end
+        self._escalate_action_run_ids: Dict[UUID, Span] = {}
+        # Track resume escalate actions (run_id -> {trace_id, span_data})
+        self._escalate_action_resume_data: Dict[UUID, Dict[str, Any]] = {}
 
     def set_agent_span(
         self,
@@ -196,6 +211,13 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._escalation_run_ids.clear()
         self._process_run_ids.clear()
         self._agent_run_ids.clear()
+        self._pending_escalation_span = None
+        self._pending_escalation_info = None
+        self._escalate_action_run_ids.clear()
+        self._escalate_action_resume_data.clear()
+        # Resumed escalation context (for guardrail HITL)
+        self._resumed_escalation_trace_id: Optional[str] = None
+        self._resumed_escalation_span_data: Optional[Dict[str, Any]] = None
 
         # Clear only this run_id's stack (not all stacks) for parallel agent support
         if run_id in _span_stacks:
@@ -209,11 +231,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self,
         enriched_properties: Dict[str, Any],
     ) -> None:
-        """Set enriched telemetry properties.
-
-        Args:
-            enriched_properties: Dictionary of properties to set for telemetry events.
-        """
         self._enriched_properties = enriched_properties
 
     # --- Span Stack Methods ---
@@ -256,6 +273,19 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self._resumed_tool_span_data = tool_span_data
         self._resumed_process_span_data = process_span_data
 
+    def set_escalation_resume_context(
+        self,
+        trace_id: str,
+        escalation_span_data: Dict[str, Any],
+    ) -> None:
+        """Set escalation resume context for guardrail HITL resume.
+
+        When resuming from guardrail HITL, this stores the span data needed to
+        complete the Review task span when the action node fires.
+        """
+        self._resumed_escalation_trace_id = trace_id
+        self._resumed_escalation_span_data = escalation_span_data
+
     def get_pending_tool_info(
         self,
     ) -> tuple[Optional[str], Optional[Span], Optional[Span]]:
@@ -263,6 +293,153 @@ class UiPathTracingCallback(BaseCallbackHandler):
             self._pending_tool_name,
             self._pending_tool_span,
             self._pending_process_span,
+        )
+
+    def get_pending_escalation_info(
+        self,
+    ) -> Tuple[Optional[Span], Optional[Dict[str, str]]]:
+        return self._pending_escalation_span, self._pending_escalation_info
+
+    def complete_escalation(
+        self,
+        review_outcome: str,
+        reviewed_by: Optional[str] = None,
+        review_reason: Optional[Any] = None,
+    ) -> None:
+        """Complete the pending escalation span with review results.
+
+        Called when agent resumes after human review.
+        """
+        if self._pending_escalation_span:
+            self._tracer.end_guardrail_escalation(
+                self._pending_escalation_span,
+                review_outcome=review_outcome,
+                reviewed_by=reviewed_by,
+                review_reason=review_reason,
+            )
+            self._pending_escalation_span = None
+            self._pending_escalation_info = None
+
+    def _complete_escalation_from_outputs(
+        self,
+        run_id: UUID,
+        outputs: Dict[str, Any],
+    ) -> None:
+        """Complete escalation span using reviewed data from node outputs.
+
+        Called in on_chain_end for escalate action nodes. The escalate_action
+        injects reviewed data into inner_state for us to read here.
+        """
+        escalation_span = self._escalate_action_run_ids.pop(run_id, None)
+        if not escalation_span:
+            return
+
+        # Extract reviewed data from outputs.inner_state._escalation_reviewed_data
+        # Todo: Bojan - get data from node metadata
+        # reviewed_data: Optional[Dict[str, Any]] = None
+        # if isinstance(outputs, dict) and INNER_STATE_KEY in outputs:
+        #     inner_state = outputs[INNER_STATE_KEY]
+        #     if isinstance(inner_state, dict):
+        #         reviewed_data = inner_state.get(ESCALATION_REVIEWED_DATA_KEY)
+        # Handle Command objects (outputs.update.inner_state)
+        # elif hasattr(outputs, "update") and isinstance(outputs.update, dict):
+        #     inner_state = outputs.update.get(INNER_STATE_KEY)
+        #     if isinstance(inner_state, dict):
+        #         reviewed_data = inner_state.get(ESCALATION_REVIEWED_DATA_KEY)
+
+        reviewed_inputs = None
+        reviewed_outputs = None
+        reviewed_by = None
+        # if reviewed_data:
+        #     reviewed_inputs = reviewed_data.get("reviewed_inputs")
+        #     reviewed_outputs = reviewed_data.get("reviewed_outputs")
+        #     reviewed_by = reviewed_data.get("reviewed_by")
+
+        logger.info(
+            f"Completing escalation span from outputs: "
+            f"reviewed_inputs={reviewed_inputs}, reviewed_outputs={reviewed_outputs}"
+        )
+
+        self._tracer.end_guardrail_escalation(
+            escalation_span,
+            review_outcome="Approved",
+            reviewed_by=reviewed_by,
+            reviewed_inputs=reviewed_inputs,
+            reviewed_outputs=reviewed_outputs,
+        )
+
+        # Clear pending references if this was the pending span
+        if escalation_span == self._pending_escalation_span:
+            self._pending_escalation_span = None
+            self._pending_escalation_info = None
+
+    def _complete_resumed_escalation_from_outputs(
+        self,
+        run_id: UUID,
+        outputs: Dict[str, Any],
+    ) -> None:
+        """Complete resumed escalation span using saved data and reviewed data from outputs.
+
+        Called in on_chain_end for resume escalate action nodes. Uses saved span data
+        from before suspend and adds reviewed data from current outputs.
+        """
+        resume_data = self._escalate_action_resume_data.pop(run_id, None)
+        if not resume_data:
+            return
+
+        trace_id = resume_data.get("trace_id")
+        span_data = resume_data.get("span_data")
+        if not trace_id or not span_data:
+            return
+
+        # Extract reviewed data from outputs.inner_state._escalation_reviewed_data
+        # Todo: Bojan - get data from node metadata
+        # reviewed_data: Optional[Dict[str, Any]] = None
+        # if isinstance(outputs, dict) and INNER_STATE_KEY in outputs:
+        #     inner_state = outputs[INNER_STATE_KEY]
+        #     if isinstance(inner_state, dict):
+        #         reviewed_data = inner_state.get(ESCALATION_REVIEWED_DATA_KEY)
+        # elif hasattr(outputs, "update") and isinstance(outputs.update, dict):
+        #     inner_state = outputs.update.get(INNER_STATE_KEY)
+        #     if isinstance(inner_state, dict):
+        #         reviewed_data = inner_state.get(ESCALATION_REVIEWED_DATA_KEY)
+
+        reviewed_inputs = None
+        reviewed_outputs = None
+        reviewed_by = None
+        # if reviewed_data:
+        #     reviewed_inputs = reviewed_data.get("reviewed_inputs")
+        #     reviewed_outputs = reviewed_data.get("reviewed_outputs")
+        #     reviewed_by = reviewed_data.get("reviewed_by")
+
+        logger.info(
+            f"Completing resumed escalation span from outputs: "
+            f"reviewed_inputs={reviewed_inputs}, reviewed_outputs={reviewed_outputs}"
+        )
+
+        # Build updated attributes
+        attrs = dict(span_data.get("attributes", {}))
+        attrs["reviewStatus"] = "completed"
+        attrs["reviewOutcome"] = "Approved"
+        if reviewed_by:
+            attrs["reviewedBy"] = reviewed_by
+        if reviewed_inputs:
+            if isinstance(reviewed_inputs, dict):
+                attrs["reviewedInputs"] = json.dumps(reviewed_inputs)
+            else:
+                attrs["reviewedInputs"] = str(reviewed_inputs)
+        if reviewed_outputs:
+            if isinstance(reviewed_outputs, dict):
+                attrs["reviewedOutputs"] = json.dumps(reviewed_outputs)
+            else:
+                attrs["reviewedOutputs"] = str(reviewed_outputs)
+
+        updated_span_data = dict(span_data)
+        updated_span_data["attributes"] = attrs
+
+        self._tracer.upsert_span_complete_by_data(
+            trace_id=trace_id,
+            span_data=updated_span_data,
         )
 
     def resumed_spans_completed(self) -> bool:
@@ -677,7 +854,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 self._resumed_tool_span_data.get("name", "unknown"),
             )
 
-        # Clear resumed span data
         self._resumed_trace_id = None
         self._resumed_tool_span_data = None
         self._resumed_process_span_data = None
@@ -739,7 +915,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
         metadata: Optional[Dict[str, Any]] = None,
         validation_details: Optional[str] = None,
     ) -> None:
-        """Track guardrail telemetry event."""
         props = self._enriched_properties.copy()
         props["ActionType"] = action
 
@@ -768,7 +943,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
     def _build_guardrail_telemetry_props(
         self, metadata: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Enrich telemetry properties with guardrail metadata."""
         props: Dict[str, Any] = {}
 
         guardrail = metadata.get("guardrail")
@@ -979,18 +1153,12 @@ class UiPathTracingCallback(BaseCallbackHandler):
     def _extract_settings(
         self, serialized: Dict[str, Any]
     ) -> tuple[Optional[int], Optional[float]]:
-        """Extract max_tokens and temperature from LLM config.
-
-        Returns:
-            Tuple of (max_tokens, temperature)
-        """
         kwargs = serialized.get("kwargs", {})
         max_tokens = kwargs.get("max_tokens")
         temperature = kwargs.get("temperature")
         return max_tokens, temperature
 
     def _set_usage_attributes(self, span: Span, response: Optional[LLMResult]) -> None:
-        """Extract and set token usage on span."""
         if not response:
             return
 
@@ -1032,7 +1200,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
     def _set_tool_calls_attributes(
         self, span: Span, response: Optional[LLMResult]
     ) -> None:
-        """Extract and set tool calls on span."""
         if not response or not response.generations or not response.generations[0]:
             return
 
@@ -1078,7 +1245,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
             span.set_attribute("result", str(output))
 
     def _parse_tool_arguments(self, input_str: str) -> Optional[Dict[str, Any]]:
-        """Parse tool arguments from input string."""
         if not input_str:
             return None
         try:
@@ -1088,7 +1254,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
             return None
 
     def _get_tool_type_value(self, tool_type: Optional[str]) -> str:
-        """Map tool_type metadata to toolType attribute value."""
         if tool_type == "agent":
             return "Agent"
         elif tool_type == "process":
@@ -1099,7 +1264,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
             return "Integration"
 
     def _set_escalation_task_info(self, span: Span, output: Any) -> None:
-        """Extract and set task_id/task_url from escalation output."""
         if not isinstance(output, dict):
             return
         task_id = output.get("task_id") or output.get("taskId") or output.get("id")
@@ -1110,7 +1274,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
             span.set_attribute("taskUrl", str(task_url))
 
     def _set_process_job_info(self, span: Span, output: Any) -> None:
-        """Extract and set job_id/job_details_uri from process tool output."""
         if not isinstance(output, dict):
             return
         job_id = output.get("job_id") or output.get("jobId") or output.get("JobId")
@@ -1138,16 +1301,25 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
         Returns:
             Tuple of (scope, stage, guardrail_name) or None if not a guardrail node
-        """
-        for suffix in ACTION_SUFFIX_TO_NAME:
-            if node_name.endswith(suffix):
-                return None
 
+        Note: Does NOT check for action suffixes here. Action nodes are identified
+        by _check_and_handle_action_node via pending_guardrail_actions lookup.
+        This allows guardrail names like "pii_guardrail_hitl" to be parsed correctly.
+        """
         match = GUARDRAIL_NODE_PATTERN.match(node_name)
         if match:
             scope, stage, guardrail_name = match.groups()
             return (scope, stage, guardrail_name)
         return None
+
+    def _extract_scope_stage(
+        self, eval_node_name: str
+    ) -> Tuple[Optional[str], Optional[str]]:
+        match = GUARDRAIL_NODE_PATTERN.match(eval_node_name)
+        if match:
+            scope, stage, _ = match.groups()
+            return (scope, stage)
+        return (None, None)
 
     def _get_or_create_container(
         self, scope: str, stage: str, parent_span: Optional[Span]
@@ -1200,58 +1372,103 @@ class UiPathTracingCallback(BaseCallbackHandler):
     def _check_and_handle_action_node(
         self,
         node_name: str,
+        run_id: UUID,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """Check if node is an action node and end the pending guardrail span.
 
-        Action nodes have the pattern: {evaluation_node_name}_{action}
-        where action is one of: log, block, escalate, hitl
+        Action nodes are identified by action_type in metadata. This is set by
+        all guardrail action nodes (Block, Log, Filter, Escalate) in uipath-langchain.
 
         Returns True if this was an action node (caller should skip further processing).
         """
-        for suffix, action in ACTION_SUFFIX_TO_NAME.items():
+        # Detect action nodes via action_type in metadata only
+        # Suffix-based detection was removed because it incorrectly matched
+        # eval nodes with names ending in _log, _block, _hitl, _filter
+        if not metadata or "action_type" not in metadata:
+            return False
+
+        action = ACTION_TYPE_TO_ACTION.get(metadata["action_type"])
+        if action is None:
+            return False
+
+        # Extract evaluation node name by removing the action suffix
+        eval_node_name = node_name
+        for suffix in ACTION_SUFFIX_TO_NAME:
             if node_name.endswith(suffix):
-                # Extract evaluation node name by removing the action suffix
                 eval_node_name = node_name[: -len(suffix)]
-                if eval_node_name in self._pending_guardrail_actions:
-                    span, validation_details = self._pending_guardrail_actions.pop(
-                        eval_node_name
-                    )
+                break
 
-                    # Extract metadata from action node
-                    severity_level = None
-                    reason = None
+        # Resume scenario: action node but no pending guardrail (new process instance)
+        if eval_node_name not in self._pending_guardrail_actions:
+            # Track HITL action for completion in on_chain_end with reviewed data
+            if (
+                action == GuardrailAction.ESCALATE
+                and self._resumed_escalation_trace_id
+                and self._resumed_escalation_span_data
+            ):
+                self._escalate_action_resume_data[run_id] = {
+                    "trace_id": self._resumed_escalation_trace_id,
+                    "span_data": self._resumed_escalation_span_data,
+                }
+                self._resumed_escalation_trace_id = None
+                self._resumed_escalation_span_data = None
+            return True
 
-                    if metadata:
-                        severity_level = metadata.get("severity_level")
-                        reason = metadata.get("reason")
+        # Normal flow: complete the pending guardrail span
+        span, validation_details = self._pending_guardrail_actions.pop(eval_node_name)
 
-                    self._tracer.end_guardrail_evaluation(
-                        span,
-                        validation_passed=False,
-                        validation_result=validation_details,
-                        action=action,
-                        severity_level=severity_level,
-                        reason=reason,
-                    )
+        # Extract metadata from action node
+        severity_level = None
+        reason = None
+        if metadata:
+            severity_level = metadata.get("severity_level")
+            reason = metadata.get("reason")
 
-                    # If tool_pre guardrail blocks, end the placeholder tool span
-                    if (
-                        action == GuardrailAction.BLOCK
-                        and self._tool_span_from_guardrail
-                        and "tool_pre" in eval_node_name
-                    ):
-                        self._close_container(GuardrailScope.TOOL, GuardrailStage.PRE)
-                        if self._current_tool_span:
-                            self._current_tool_span.set_attribute(
-                                "output", "Blocked by guardrail"
-                            )
-                            self._current_tool_span.end()
-                            self._current_tool_span = None
-                        self._tool_span_from_guardrail = False
+        self._tracer.end_guardrail_evaluation(
+            span,
+            validation_passed=False,
+            validation_result=validation_details,
+            action=action,
+            severity_level=severity_level,
+            reason=reason,
+        )
 
-                    return True
-        return False
+        # Create "Review task" child span for HITL escalation
+        if action == GuardrailAction.ESCALATE:
+            scope, _ = self._extract_scope_stage(eval_node_name)
+            guardrail_name = (
+                eval_node_name.split("_execution_")[-1]
+                if "_execution_" in eval_node_name
+                else eval_node_name
+            )
+            escalation_span = self._tracer.start_guardrail_escalation(
+                guardrail_name=guardrail_name,
+                scope=scope or "agent",
+                parent_span=span,
+            )
+            self._pending_escalation_span = escalation_span
+            self._pending_escalation_info = {
+                "guardrail_name": guardrail_name,
+                "scope": scope or "agent",
+            }
+            # Track run_id to read reviewed data from outputs in on_chain_end
+            self._escalate_action_run_ids[run_id] = escalation_span
+
+        # If tool_pre guardrail blocks, end the placeholder tool span
+        if (
+            action == GuardrailAction.BLOCK
+            and self._tool_span_from_guardrail
+            and "tool_pre" in eval_node_name
+        ):
+            self._close_container(GuardrailScope.TOOL, GuardrailStage.PRE)
+            if self._current_tool_span:
+                self._current_tool_span.set_attribute("output", "Blocked by guardrail")
+                self._current_tool_span.end()
+                self._current_tool_span = None
+            self._tool_span_from_guardrail = False
+
+        return True
 
     def on_chain_start(
         self,
@@ -1264,8 +1481,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
         metadata: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> None:
-        """Detect guardrail nodes and create spans."""
         try:
+            # Debug logging to understand what metadata is received
             if not metadata:
                 return
 
@@ -1278,7 +1495,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 return
 
             # Check if this is an action node (fires after failed validation)
-            if self._check_and_handle_action_node(node_name, metadata):
+            if self._check_and_handle_action_node(node_name, run_id, metadata):
                 return
 
             guardrail_info = self._parse_guardrail_node(node_name)
@@ -1332,8 +1549,17 @@ class UiPathTracingCallback(BaseCallbackHandler):
         parent_run_id: Optional[UUID] = None,
         **kwargs: Any,
     ) -> None:
-        """End guardrail span with results."""
         try:
+            # Handle escalate action nodes - read reviewed data from outputs
+            if run_id in self._escalate_action_run_ids:
+                self._complete_escalation_from_outputs(run_id, outputs)
+                return
+
+            # Handle resume escalate action nodes - upsert saved span with reviewed data
+            if run_id in self._escalate_action_resume_data:
+                self._complete_resumed_escalation_from_outputs(run_id, outputs)
+                return
+
             guardrail_metadata = (
                 self._guardrail_metadata.get(run_id)
                 if self._guardrail_metadata is not None
@@ -1420,7 +1646,6 @@ class UiPathTracingCallback(BaseCallbackHandler):
         parent_run_id: Optional[UUID] = None,
         **kwargs: Any,
     ) -> None:
-        """Handle guardrail chain errors."""
         try:
             if run_id not in self._guardrail_spans:
                 return
@@ -1478,6 +1703,22 @@ class UiPathTracingCallback(BaseCallbackHandler):
             except Exception:
                 pass
         self._guardrail_containers.clear()
+
+        # End any pending escalate action spans
+        for span in self._escalate_action_run_ids.values():
+            try:
+                span.end()
+            except Exception:
+                pass
+        self._escalate_action_run_ids.clear()
+
+        # End orphaned placeholder LLM span if guardrail created it but LLM never started
+        if self._llm_span_from_guardrail and self._current_llm_span:
+            try:
+                self._current_llm_span.end()
+            except Exception:
+                pass
+            self._llm_span_from_guardrail = False
 
         # End orphaned placeholder tool span if guardrail created it but tool never started
         if self._tool_span_from_guardrail and self._current_tool_span:

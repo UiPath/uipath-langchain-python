@@ -91,6 +91,8 @@ class SqliteTraceContextStorage(TraceContextStorage):
             pending_tool_name=value.get("pending_tool_name"),
             pending_tool_span=value.get("pending_tool_span"),
             pending_process_span=value.get("pending_process_span"),
+            pending_escalation_span=value.get("pending_escalation_span"),
+            pending_escalation_info=value.get("pending_escalation_info"),
         )
 
     async def clear_trace_context(self, runtime_id: str) -> None:

@@ -43,6 +43,7 @@ class SpanName:
     LLM_CALL = "LLM call"
     MODEL_RUN = "Model run"
     AGENT_OUTPUT = "Agent output"
+    REVIEW_TASK = "Review task"
 
     # Guardrail container span names (matching C# Temporal)
     AGENT_PRE_GUARDRAILS = "Agent input guardrail check"
