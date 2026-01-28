@@ -44,7 +44,8 @@ def _check_bedrock_dependencies() -> None:
 _check_bedrock_dependencies()
 
 import boto3
-import botocore.config
+from botocore import UNSIGNED
+from botocore.config import Config
 from langchain_aws import (
     ChatBedrock,
     ChatBedrockConverse,
@@ -97,10 +98,11 @@ class AwsBedrockCompletionsPassthroughClient:
             region_name="none",
             aws_access_key_id="none",
             aws_secret_access_key="none",
-            config=botocore.config.Config(
+            config=Config(
+                signature_version=UNSIGNED,
                 retries={
                     "total_max_attempts": 1,
-                }
+                },
             ),
         )
         client.meta.events.register(
@@ -183,6 +185,7 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
         client = passthrough_client.get_client()
         kwargs["client"] = client
         kwargs["model"] = model_name
+        kwargs.setdefault("region_name", "none")
         super().__init__(**kwargs)
         self.model = model_name
         self.retryer = retryer
@@ -244,6 +247,7 @@ class UiPathChatBedrock(ChatBedrock):
         client = passthrough_client.get_client()
         kwargs["client"] = client
         kwargs["model"] = model_name
+        kwargs.setdefault("region_name", "none")
         super().__init__(**kwargs)
         self.model = model_name
         self.retryer = retryer
