@@ -159,6 +159,14 @@ def _create_guardrail_node(
     raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}"
     node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
 
+    metadata: dict[str, Any] = {
+        "tool_name": tool_name,
+        "guardrail": guardrail,
+        "scope": scope,
+        "execution_stage": execution_stage,
+        "payload": {"input": None, "output": None},
+    }
+
     async def node(
         state: AgentGuardrailsGraphState,
     ):
@@ -169,6 +177,13 @@ def _create_guardrail_node(
                 and scope == GuardrailScope.TOOL
                 and input_data_extractor is not None
             ):
+                # Extract and store input/output data for observability
+                input_data = input_data_extractor(state)
+                metadata["payload"]["input"] = input_data
+                if output_data_extractor and execution_stage == ExecutionStage.POST_EXECUTION:
+                    output_data = output_data_extractor(state)
+                    metadata["payload"]["output"] = output_data
+
                 result = _evaluate_deterministic_guardrail(
                     state,
                     guardrail,
@@ -177,6 +192,13 @@ def _create_guardrail_node(
                     output_data_extractor,
                 )
             elif isinstance(guardrail, BuiltInValidatorGuardrail):
+                # Generate and store payload for observability
+                payload = payload_generator(state)
+                if execution_stage == ExecutionStage.PRE_EXECUTION:
+                    metadata["payload"]["input"] = payload
+                else:
+                    metadata["payload"]["output"] = payload
+
                 result = _evaluate_builtin_guardrail(
                     state, guardrail, payload_generator
                 )
@@ -208,13 +230,7 @@ def _create_guardrail_node(
             )
             raise
 
-    # Attach observability metadata as function attribute
-    node.__metadata__ = {  # type: ignore[attr-defined]
-        "tool_name": tool_name,
-        "guardrail": guardrail,
-        "scope": scope,
-        "execution_stage": execution_stage,
-    }
+    node.__metadata__ = metadata  # type: ignore[attr-defined]
 
     return node_name, node
 
