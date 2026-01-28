@@ -25,7 +25,6 @@ from ...exceptions import AgentStateException, AgentTerminationException
 from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
 from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
-from ...tools.escalation_tool import resolve_recipient_value
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNode
@@ -83,6 +82,9 @@ class EscalateAction(GuardrailAction):
         async def _node(
             state: AgentGuardrailsGraphState,
         ) -> Dict[str, Any] | Command[Any]:
+            # Import here to avoid circular dependency
+            from ...tools.escalation_tool import resolve_recipient_value
+
             # Resolve recipient value (handles both StandardRecipient and AssetRecipient)
             task_recipient = await resolve_recipient_value(self.recipient)
 
