@@ -111,7 +111,9 @@ class EscalateAction(GuardrailAction):
                     else self.recipient.value
                 )
             elif isinstance(self.recipient, AssetRecipient):
-                metadata["assigned_to"] = task_recipient.value if task_recipient else None
+                metadata["assigned_to"] = (
+                    task_recipient.value if task_recipient else None
+                )
 
             # Validate message count based on execution stage
             _validate_message_count(state, execution_stage)

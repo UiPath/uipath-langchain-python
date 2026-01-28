@@ -37,6 +37,12 @@ STANDARD_USER_EMAIL_RECIPIENT = StandardRecipient(
     value="user@example.com",
 )
 
+STANDARD_USER_EMAIL_RECIPIENT_WITH_DISPLAY_NAME = StandardRecipient(
+    type=AgentEscalationRecipientType.USER_EMAIL,
+    value="user@example.com",
+    display_name="John Doe",
+)
+
 STANDARD_GROUP_NAME_RECIPIENT = StandardRecipient(
     type=AgentEscalationRecipientType.GROUP_NAME,
     value="AdminGroup",
@@ -1628,3 +1634,125 @@ class TestEscalateAction:
             await node(state)
 
         assert "Asset 'email_asset' not found" in str(excinfo.value)
+
+
+class TestEscalateActionMetadata:
+    """Tests for EscalateAction node metadata."""
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_standard_recipient_assigned_to_uses_value(self, mock_interrupt):
+        """Test that assigned_to uses value for StandardRecipient without display_name."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            recipient=STANDARD_USER_EMAIL_RECIPIENT,
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+        )
+
+        await node(state)
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata["assigned_to"] == "user@example.com"
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_standard_recipient_assigned_to_uses_display_name(
+        self, mock_interrupt
+    ):
+        """Test that assigned_to uses display_name when present for StandardRecipient."""
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            recipient=STANDARD_USER_EMAIL_RECIPIENT_WITH_DISPLAY_NAME,
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+        )
+
+        await node(state)
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata["assigned_to"] == "John Doe"
+
+    @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
+    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
+    async def test_asset_recipient_assigned_to_uses_resolved_value(
+        self, mock_interrupt, mock_resolve_recipient
+    ):
+        """Test that assigned_to uses resolved task_recipient value for AssetRecipient."""
+        resolved_recipient = TaskRecipient(
+            value="resolved@example.com", type=TaskRecipientType.EMAIL
+        )
+        mock_resolve_recipient.return_value = resolved_recipient
+
+        action = EscalateAction(
+            app_name="TestApp",
+            app_folder_path="TestFolder",
+            version=1,
+            recipient=ASSET_USER_EMAIL_RECIPIENT,
+        )
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+        guardrail.description = "Test description"
+
+        mock_escalation_result = MagicMock()
+        mock_escalation_result.action = "Approve"
+        mock_escalation_result.data = {}
+        mock_interrupt.return_value = mock_escalation_result
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.LLM,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_node",
+        )
+
+        state = AgentGuardrailsGraphState(
+            messages=[HumanMessage(content="Test message")],
+        )
+
+        await node(state)
+
+        metadata = getattr(node, "__metadata__", None)
+        # AssetRecipient uses resolved task_recipient.value
+        assert metadata["assigned_to"] == "resolved@example.com"
