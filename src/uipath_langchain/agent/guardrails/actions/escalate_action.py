@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ast
 import json
-import logging
 import re
 from typing import Any, Dict, Literal, cast
 
@@ -30,8 +29,6 @@ from ...tools.escalation_tool import resolve_recipient_value
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNode
-
-logger = logging.getLogger(__name__)
 
 
 class EscalateAction(GuardrailAction):
@@ -159,11 +156,6 @@ class EscalateAction(GuardrailAction):
                 reviewed_outputs = escalation_result.data.get("ReviewedOutputs")
                 reviewed_by = escalation_result.data.get("ReviewedBy")
 
-                logger.info(
-                    f"HITL escalation approved: guardrail={guardrail.name}, "
-                    f"reviewed_inputs={reviewed_inputs}, reviewed_outputs={reviewed_outputs}"
-                )
-
                 response = _process_escalation_response(
                     state,
                     escalation_result.data,
@@ -185,14 +177,6 @@ class EscalateAction(GuardrailAction):
                 title="Escalation rejected",
                 detail=f"Please contact your administrator. Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data['Reason']}",
             )
-
-        # Attach observability metadata to the node function
-        _node.__metadata__ = {  # type: ignore[attr-defined]
-            "guardrail": guardrail,
-            "scope": scope,
-            "execution_stage": execution_stage,
-            "action_type": "Escalate",
-        }
 
         return node_name, _node
 
