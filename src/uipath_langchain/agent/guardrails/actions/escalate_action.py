@@ -178,6 +178,13 @@ class EscalateAction(GuardrailAction):
                 detail=f"Please contact your administrator. Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data['Reason']}",
             )
 
+        _node.__metadata__ = {  # type: ignore[attr-defined]
+            "guardrail": guardrail,
+            "scope": scope,
+            "execution_stage": execution_stage,
+            "action_type": "Escalate",
+        }
+
         return node_name, _node
 
 
