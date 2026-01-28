@@ -778,6 +778,7 @@ class TestGuardrailNodeMetadata:
         await node(state)
 
         metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
         assert metadata["payload"]["input"] == "test input"
         assert metadata["payload"]["output"] is None
 
@@ -812,6 +813,7 @@ class TestGuardrailNodeMetadata:
         await node(state)
 
         metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
         assert metadata["payload"]["output"] is not None
         assert metadata["payload"]["input"] is None
 
@@ -847,6 +849,7 @@ class TestGuardrailNodeMetadata:
         await node(state)
 
         metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
         assert metadata["payload"]["input"] == '{"param": "value"}'
         assert metadata["payload"]["output"] is None
 
@@ -875,5 +878,6 @@ class TestGuardrailNodeMetadata:
         await node(state)
 
         metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
         assert metadata["payload"]["output"] == "tool output data"
         assert metadata["payload"]["input"] is None
