@@ -4,15 +4,12 @@ from typing import Sequence, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall
-from langchain_core.tools import BaseTool
+from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
 
 from uipath_langchain.agent.tools.static_args import (
     apply_static_argument_properties_to_schema,
-)
-from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
-    StructuredToolWithArgumentProperties,
 )
 from uipath_langchain.chat.handlers import get_payload_handler
 
@@ -98,6 +95,8 @@ def create_llm_node(
                 f"LLM returned {type(response).__name__} instead of AIMessage"
             )
 
+        payload_handler.check_stop_reason(response)
+
         # filter out flow control tools when multiple tool calls exist
         if response.tool_calls:
             filtered_tool_calls = _filter_control_flow_tool_calls(response.tool_calls)
@@ -119,7 +118,7 @@ def _apply_tool_argument_properties(
     agent_input = extract_input_data_from_state(state, input_schema or type(state))
     return [
         apply_static_argument_properties_to_schema(tool, agent_input)
-        if isinstance(tool, StructuredToolWithArgumentProperties)
+        if isinstance(tool, StructuredTool)
         else tool
         for tool in tools
     ]

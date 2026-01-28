@@ -2,7 +2,34 @@
 
 from typing import Any
 
+from langchain_core.messages import AIMessage
+from uipath.runtime.errors import UiPathErrorCode
+
+from uipath_langchain.agent.exceptions import AgentTerminationException
+
 from .base import ModelPayloadHandler
+
+FAULTY_INCOMPLETE_REASONS: set[str] = {
+    "max_output_tokens",
+    "content_filter",
+}
+
+STOP_REASON_MESSAGES: dict[str, tuple[str, str]] = {
+    "max_output_tokens": (
+        "Model response truncated due to max tokens limit.",
+        "The model ran out of tokens while generating a response. "
+        "Consider increasing max_tokens or simplifying the request.",
+    ),
+    "content_filter": (
+        "Response filtered due to content policy.",
+        "The model's response was filtered due to content policy violation. "
+        "Modify your request to comply with content policies.",
+    ),
+    "failed": (
+        "Model request failed.",
+        "The model request failed.",
+    ),
+}
 
 
 class OpenAIResponsesPayloadHandler(ModelPayloadHandler):
@@ -11,3 +38,53 @@ class OpenAIResponsesPayloadHandler(ModelPayloadHandler):
     def get_required_tool_choice(self) -> str | dict[str, Any]:
         """Get tool_choice value for OpenAI Responses API."""
         return "required"
+
+    def check_stop_reason(self, response: AIMessage) -> None:
+        """Check OpenAI Responses API status and raise exception for faulty terminations.
+
+        OpenAI Responses API returns status and incomplete_details in response_metadata.
+        - status == "failed": Always an error
+        - status == "incomplete": Check incomplete_details.reason
+
+        Args:
+            response: The AIMessage response from the model
+
+        Raises:
+            AgentTerminationException: If status indicates a faulty termination
+        """
+        status = response.response_metadata.get("status")
+
+        if status == "failed":
+            error = response.response_metadata.get("error", {})
+            error_message = error.get("message", "") if isinstance(error, dict) else ""
+            title, detail = STOP_REASON_MESSAGES["failed"]
+            if error_message:
+                detail = f"{detail} Error: {error_message}"
+            raise AgentTerminationException(
+                code=UiPathErrorCode.EXECUTION_ERROR,
+                title=title,
+                detail=detail,
+            )
+
+        if status == "incomplete":
+            incomplete_details = response.response_metadata.get(
+                "incomplete_details", {}
+            )
+            reason = (
+                incomplete_details.get("reason")
+                if isinstance(incomplete_details, dict)
+                else None
+            )
+            if reason and reason in FAULTY_INCOMPLETE_REASONS:
+                title, detail = STOP_REASON_MESSAGES.get(
+                    reason,
+                    (
+                        f"Model response incomplete: {reason}",
+                        f"The model response was incomplete due to '{reason}'.",
+                    ),
+                )
+                raise AgentTerminationException(
+                    code=UiPathErrorCode.EXECUTION_ERROR,
+                    title=title,
+                    detail=detail,
+                )

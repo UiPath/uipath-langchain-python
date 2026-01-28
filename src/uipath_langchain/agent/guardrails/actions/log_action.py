@@ -60,6 +60,7 @@ class LogAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
+            "action_type": "Log",
         }
 
         return node_name, _node

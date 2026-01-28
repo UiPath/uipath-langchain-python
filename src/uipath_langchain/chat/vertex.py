@@ -2,6 +2,12 @@ import os
 from typing import Any, Optional
 
 import httpx
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+)
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatResult
 from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
@@ -231,6 +237,55 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
             model=model_name,
         )
         return f"{env_uipath_url.rstrip('/')}/{formatted_endpoint}"
+
+    def _merge_finish_reason_to_response_metadata(
+        self, result: ChatResult
+    ) -> ChatResult:
+        """Merge finish_reason from generation_info into AIMessage.response_metadata.
+
+        LangChain's ChatGoogleGenerativeAI stores finish_reason in generation_info
+        but not in AIMessage.response_metadata. This method merges it so that
+        check_stop_reason() in VertexGeminiPayloadHandler can access it.
+        """
+        for generation in result.generations:
+            finish_reason = None
+            if generation.generation_info:
+                finish_reason = generation.generation_info.get("finish_reason")
+
+            if finish_reason and hasattr(generation, "message"):
+                message = generation.message
+                if message.response_metadata is None:
+                    message.response_metadata = {}
+                if "finish_reason" not in message.response_metadata:
+                    message.response_metadata["finish_reason"] = finish_reason
+
+        return result
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        """Generate and ensure finish_reason is in response_metadata."""
+        result = super()._generate(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
+        return self._merge_finish_reason_to_response_metadata(result)
+
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        """Generate async and ensure finish_reason is in response_metadata."""
+        result = await super()._agenerate(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
+        return self._merge_finish_reason_to_response_metadata(result)
 
     def _stream(self, messages, stop=None, run_manager=None, **kwargs):
         """Streaming fallback - calls _generate and yields single response."""

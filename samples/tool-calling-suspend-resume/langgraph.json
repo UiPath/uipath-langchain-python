@@ -1,0 +1,8 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "graph": "./graph.py:graph",
+    "agent-simple": "./graph_simple.py:graph_simple",
+    "agent-basic": "./graph_basic.py:graph_basic"
+  }
+}
