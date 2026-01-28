@@ -241,7 +241,7 @@ class TestEscalationToolMetadata:
     @pytest.mark.asyncio
     async def test_escalation_tool_has_metadata(self, escalation_resource):
         """Test that escalation tool has metadata dict."""
-        tool = await create_escalation_tool(escalation_resource)
+        tool = create_escalation_tool(escalation_resource)
 
         assert tool.metadata is not None
         assert isinstance(tool.metadata, dict)
@@ -249,21 +249,21 @@ class TestEscalationToolMetadata:
     @pytest.mark.asyncio
     async def test_escalation_tool_metadata_has_tool_type(self, escalation_resource):
         """Test that metadata contains tool_type for span detection."""
-        tool = await create_escalation_tool(escalation_resource)
+        tool = create_escalation_tool(escalation_resource)
         assert tool.metadata is not None
         assert tool.metadata["tool_type"] == "escalation"
 
     @pytest.mark.asyncio
     async def test_escalation_tool_metadata_has_display_name(self, escalation_resource):
         """Test that metadata contains display_name from app_name."""
-        tool = await create_escalation_tool(escalation_resource)
+        tool = create_escalation_tool(escalation_resource)
         assert tool.metadata is not None
         assert tool.metadata["display_name"] == "ApprovalApp"
 
     @pytest.mark.asyncio
     async def test_escalation_tool_metadata_has_channel_type(self, escalation_resource):
         """Test that metadata contains channel_type for span attributes."""
-        tool = await create_escalation_tool(escalation_resource)
+        tool = create_escalation_tool(escalation_resource)
         assert tool.metadata is not None
         assert tool.metadata["channel_type"] == "actionCenter"
 
@@ -279,7 +279,7 @@ class TestEscalationToolMetadata:
         mock_result.data = {}
         mock_interrupt.return_value = mock_result
 
-        tool = await create_escalation_tool(escalation_resource)
+        tool = create_escalation_tool(escalation_resource)
 
         # Invoke the tool to trigger assignee resolution
         await tool.ainvoke({})
@@ -301,7 +301,7 @@ class TestEscalationToolMetadata:
         mock_result.data = {}
         mock_interrupt.return_value = mock_result
 
-        tool = await create_escalation_tool(escalation_resource_no_recipient)
+        tool = create_escalation_tool(escalation_resource_no_recipient)
 
         # Invoke the tool to trigger assignee resolution
         await tool.ainvoke({})

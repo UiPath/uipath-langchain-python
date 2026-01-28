@@ -1,7 +1,9 @@
-"""Process tool creation for UiPath process execution."""
+"""Ixp extraction tool."""
 
 from typing import Any
 
+from langchain.tools import BaseTool
+from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
 from langgraph.types import interrupt
 from uipath.agent.models.agent import AgentIxpExtractionResourceConfig
@@ -10,7 +12,10 @@ from uipath.platform.attachments import Attachment
 from uipath.platform.common import DocumentExtraction
 from uipath.platform.documents import ExtractionResponseIXP
 
-from .structured_tool_with_output_type import StructuredToolWithOutputType
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
+
+from .integration_tool import StructuredToolWithWrapper
 from .utils import sanitize_tool_name
 
 
@@ -19,6 +24,7 @@ def create_ixp_extraction_tool(
 ) -> StructuredTool:
     """Uses interrupt() to suspend graph execution until data is extracted (handled by runtime)."""
     tool_name: str = sanitize_tool_name(resource.name)
+    resource_name = resource.name
     project_name = resource.properties.project_name
     version_tag = resource.properties.version_tag
 
@@ -47,7 +53,7 @@ def create_ixp_extraction_tool(
         attachment_local_file_path = await uipath.attachments.download_async(
             key=attachment_id, destination_path=attachment_full_name
         )
-        return interrupt(
+        document_extraction_response = interrupt(
             DocumentExtraction(
                 project_name=project_name,
                 tag=version_tag,
@@ -55,12 +61,27 @@ def create_ixp_extraction_tool(
             )
         )
 
-    tool = StructuredToolWithOutputType(
+        return document_extraction_response
+
+    async def extraction_tool_wrapper(
+        tool: BaseTool,
+        call: ToolCall,
+        state: AgentGraphState,
+    ) -> ToolWrapperReturnType:
+        result = await tool.ainvoke(call["args"])
+
+        # store extraction response for later reuse in vsEscalation
+        state.inner_state.mappings = {resource_name: result}
+
+        return result
+
+    tool = StructuredToolWithWrapper(
         name=tool_name,
         description=resource.description,
         args_schema=Attachment,
         coroutine=extraction_tool_fn,
         output_type=ExtractionResponseIXP,
     )
+    tool.set_tool_wrappers(awrapper=extraction_tool_wrapper)
 
     return tool

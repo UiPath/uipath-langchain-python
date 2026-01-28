@@ -81,7 +81,7 @@ async def resolve_asset(asset_name: str, folder_path: str) -> str | None:
         ) from e
 
 
-async def create_escalation_tool(
+def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
 ) -> StructuredTool:
     """Uses interrupt() for Action Center human-in-the-loop."""
