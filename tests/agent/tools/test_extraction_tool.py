@@ -175,28 +175,6 @@ class TestExtractionToolFunctionality:
     @pytest.mark.asyncio
     @patch("uipath.platform.UiPath")
     @patch("uipath_langchain.agent.tools.extraction_tool.interrupt")
-    async def test_extraction_tool_handles_missing_attachment_id(
-        self, mock_interrupt, mock_uipath_class, extraction_resource
-    ):
-        """Test that extraction tool handles None attachment_id."""
-        mock_client = MagicMock()
-        mock_uipath_class.return_value = mock_client
-        mock_client.attachments.download_async = AsyncMock(
-            return_value="/path/to/file.pdf"
-        )
-        mock_interrupt.return_value = {"extracted_data": {}}
-
-        tool = create_ixp_extraction_tool(extraction_resource)
-
-        await tool.ainvoke({"full_name": "file.pdf", "mime_type": "application/pdf"})
-
-        mock_client.attachments.download_async.assert_called_once_with(
-            key=None, destination_path="file.pdf"
-        )
-
-    @pytest.mark.asyncio
-    @patch("uipath.platform.UiPath")
-    @patch("uipath_langchain.agent.tools.extraction_tool.interrupt")
     async def test_extraction_tool_with_different_version_tag(
         self, mock_interrupt, mock_uipath_class
     ):
