@@ -185,7 +185,10 @@ def _build_guardrail_node_chain(
     )
 
     guardrail_node_metadata = getattr(guardrail_node, "__metadata__", None) or {}
-    guardrail_node_metadata = {**guardrail_node_metadata, "action_type": action.action_type}
+    guardrail_node_metadata = {
+        **guardrail_node_metadata,
+        "action_type": action.action_type,
+    }
 
     fail_node_metadata = getattr(fail_node, "__metadata__", None) or {}
 

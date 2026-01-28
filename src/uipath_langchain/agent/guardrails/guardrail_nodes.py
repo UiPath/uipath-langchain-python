@@ -180,7 +180,10 @@ def _create_guardrail_node(
                 # Extract and store input/output data for observability
                 input_data = input_data_extractor(state)
                 metadata["payload"]["input"] = input_data
-                if output_data_extractor and execution_stage == ExecutionStage.POST_EXECUTION:
+                if (
+                    output_data_extractor
+                    and execution_stage == ExecutionStage.POST_EXECUTION
+                ):
                     output_data = output_data_extractor(state)
                     metadata["payload"]["output"] = output_data
 
