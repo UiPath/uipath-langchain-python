@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import re
 from typing import Any, Dict, Literal, cast
 
@@ -29,6 +30,8 @@ from ...tools.escalation_tool import resolve_recipient_value
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNode
+
+logger = logging.getLogger(__name__)
 
 
 class EscalateAction(GuardrailAction):
@@ -151,12 +154,30 @@ class EscalateAction(GuardrailAction):
             )
 
             if escalation_result.action == "Approve":
-                return _process_escalation_response(
+                # Extract reviewed data for observability
+                reviewed_inputs = escalation_result.data.get("ReviewedInputs")
+                reviewed_outputs = escalation_result.data.get("ReviewedOutputs")
+                reviewed_by = escalation_result.data.get("ReviewedBy")
+
+                logger.info(
+                    f"HITL escalation approved: guardrail={guardrail.name}, "
+                    f"reviewed_inputs={reviewed_inputs}, reviewed_outputs={reviewed_outputs}"
+                )
+
+                response = _process_escalation_response(
                     state,
                     escalation_result.data,
                     scope,
                     execution_stage,
                     guarded_component_name,
+                )
+
+                # Inject reviewed data into response for observability callback
+                return _inject_reviewed_data(
+                    response,
+                    reviewed_inputs,
+                    reviewed_outputs,
+                    reviewed_by,
                 )
 
             raise AgentTerminationException(
@@ -165,7 +186,56 @@ class EscalateAction(GuardrailAction):
                 detail=f"Please contact your administrator. Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data['Reason']}",
             )
 
+        # Attach observability metadata to the node function
+        _node.__metadata__ = {  # type: ignore[attr-defined]
+            "guardrail": guardrail,
+            "scope": scope,
+            "execution_stage": execution_stage,
+            "action_type": "escalate",
+        }
+
         return node_name, _node
+
+
+ESCALATION_REVIEWED_DATA_KEY = "_escalation_reviewed_data"
+
+
+def _inject_reviewed_data(
+    response: Dict[str, Any] | Command[Any],
+    reviewed_inputs: Any,
+    reviewed_outputs: Any,
+    reviewed_by: Any,
+) -> Dict[str, Any] | Command[Any]:
+    """Inject reviewed data into response for observability callback to read.
+
+    Args:
+        response: The response from _process_escalation_response.
+        reviewed_inputs: The reviewed inputs from escalation result.
+        reviewed_outputs: The reviewed outputs from escalation result.
+        reviewed_by: The reviewer from escalation result.
+
+    Returns:
+        The response with reviewed data injected into inner_state.
+    """
+    reviewed_data = {
+        "reviewed_inputs": reviewed_inputs,
+        "reviewed_outputs": reviewed_outputs,
+        "reviewed_by": reviewed_by,
+    }
+
+    if isinstance(response, Command):
+        update = dict(response.update) if response.update else {}
+        inner_state = dict(update.get("inner_state", {}))
+        inner_state[ESCALATION_REVIEWED_DATA_KEY] = reviewed_data
+        update["inner_state"] = inner_state
+        return Command(update=update, graph=response.graph)
+    elif isinstance(response, dict):
+        inner_state = dict(response.get("inner_state", {}))
+        inner_state[ESCALATION_REVIEWED_DATA_KEY] = reviewed_data
+        response["inner_state"] = inner_state
+        return response
+
+    return response
 
 
 def _validate_message_count(
