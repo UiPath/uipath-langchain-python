@@ -375,7 +375,7 @@ class TestEvalExecution:
             f"No results with default settings:\n{output_default[:500]}"
         )
 
-        # Test 2: Model settings ID with override (gpt-5-2025-08-07)
+        # Test 2: Model settings ID with override (gpt-4.1-2025-04-14)
         command_override = [
             "eval",
             "agent.json",
@@ -405,13 +405,13 @@ class TestEvalExecution:
         assert "Applying model settings override" in output_override, (
             "Expected log message about model settings override not found"
         )
-        assert "gpt-5-2025-08-07" in output_override, (
+        assert "gpt-4.1-2025-04-14" in output_override, (
             "Expected overridden model name not found in logs"
         )
 
         # Verify evaluators resolve to the overridden model
         assert (
-            "Resolving 'same-as-agent' to agent model: gpt-5-2025-08-07"
+            "Resolving 'same-as-agent' to agent model: gpt-4.1-2025-04-14"
             in output_override
         ), "Evaluators should resolve 'same-as-agent' to the overridden agent model"
 
@@ -421,7 +421,7 @@ class TestEvalExecution:
             eval_results_default,
         )
         summary_override, _ = build_results_summary(
-            "🧮 Calculator Model Settings - Override (gpt-5-2025-08-07)",
+            "🧮 Calculator Model Settings - Override (gpt-4.1-2025-04-14)",
             eval_results_override,
         )
 

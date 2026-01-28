@@ -118,7 +118,7 @@
         },
         {
             "id": "604d96fd-5e89-484b-b750-ccf3f516e2e1",
-            "modelName": "gpt-5-2025-08-07",
+            "modelName": "gpt-4.1-2025-04-14",
             "temperature": 0.1
         }
     ],
