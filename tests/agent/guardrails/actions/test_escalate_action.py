@@ -1672,6 +1672,7 @@ class TestEscalateActionMetadata:
         await node(state)
 
         metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
         assert metadata["assigned_to"] == "user@example.com"
 
     @pytest.mark.asyncio
@@ -1709,6 +1710,7 @@ class TestEscalateActionMetadata:
         await node(state)
 
         metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
         assert metadata["assigned_to"] == "John Doe"
 
     @pytest.mark.asyncio
@@ -1754,5 +1756,6 @@ class TestEscalateActionMetadata:
         await node(state)
 
         metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
         # AssetRecipient uses resolved task_recipient.value
         assert metadata["assigned_to"] == "resolved@example.com"

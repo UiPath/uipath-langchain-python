@@ -101,6 +101,10 @@ class FakeStateGraphWithAinvoke(FakeStateGraph):
 
 def fake_action(fail_prefix: str) -> GuardrailAction:
     class _Action(GuardrailAction):
+        @property
+        def action_type(self) -> str:
+            return "Fake"
+
         def action_node(
             self,
             *,
