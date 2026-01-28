@@ -1714,9 +1714,7 @@ class TestEscalateActionMetadata:
         assert metadata["assigned_to"] == "John Doe"
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
     async def test_asset_recipient_assigned_to_uses_resolved_value(
         self, mock_interrupt, mock_resolve_recipient
