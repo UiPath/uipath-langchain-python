@@ -13,7 +13,11 @@ from langchain_core.messages import (
 )
 from langgraph.types import Command, interrupt
 from uipath._utils import UiPathUrl
-from uipath.agent.models.agent import AgentEscalationRecipient
+from uipath.agent.models.agent import (
+    AgentEscalationRecipient,
+    AssetRecipient,
+    StandardRecipient,
+)
 from uipath.platform.common import CreateEscalation, UiPathConfig
 from uipath.platform.guardrails import (
     BaseGuardrail,
@@ -83,6 +87,14 @@ class EscalateAction(GuardrailAction):
         """
         node_name = _get_node_name(execution_stage, guardrail, scope)
 
+        metadata: Dict[str, Any] = {
+            "guardrail": guardrail,
+            "scope": scope,
+            "execution_stage": execution_stage,
+            "action_type": self.action_type,
+            "assigned_to": None,
+        }
+
         async def _node(
             state: AgentGuardrailsGraphState,
         ) -> Dict[str, Any] | Command[Any]:
@@ -91,6 +103,15 @@ class EscalateAction(GuardrailAction):
 
             # Resolve recipient value (handles both StandardRecipient and AssetRecipient)
             task_recipient = await resolve_recipient_value(self.recipient)
+
+            if isinstance(self.recipient, StandardRecipient):
+                metadata["assigned_to"] = (
+                    self.recipient.display_name
+                    if self.recipient.display_name
+                    else self.recipient.value
+                )
+            elif isinstance(self.recipient, AssetRecipient):
+                metadata["assigned_to"] = task_recipient.value if task_recipient else None
 
             # Validate message count based on execution stage
             _validate_message_count(state, execution_stage)
@@ -171,12 +192,7 @@ class EscalateAction(GuardrailAction):
                 detail=f"Please contact your administrator. Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data['Reason']}",
             )
 
-        _node.__metadata__ = {  # type: ignore[attr-defined]
-            "guardrail": guardrail,
-            "scope": scope,
-            "execution_stage": execution_stage,
-            "action_type": self.action_type,
-        }
+        _node.__metadata__ = metadata  # type: ignore[attr-defined]
 
         return node_name, _node
 
