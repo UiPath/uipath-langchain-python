@@ -136,20 +136,16 @@ def create_agent(
     builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
     tool_node_names = list(tool_nodes_with_guardrails.keys())
+    target_node_names = [
+        AgentGraphNode.AGENT,
+        *tool_node_names,
+        AgentGraphNode.TERMINATE,
+    ]
 
     if config.is_conversational:
         route_agent = create_route_agent_conversational()
-        target_node_names = [
-            *tool_node_names,
-            AgentGraphNode.TERMINATE,
-        ]
     else:
         route_agent = create_route_agent(config.thinking_messages_limit)
-        target_node_names = [
-            AgentGraphNode.AGENT,
-            *tool_node_names,
-            AgentGraphNode.TERMINATE,
-        ]
 
     builder.add_conditional_edges(
         AgentGraphNode.AGENT,
