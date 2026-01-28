@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from uipath.agent.models.agent import (
     AgentIxpExtractionResourceConfig,
     AgentIxpExtractionToolProperties,
@@ -188,11 +189,10 @@ class TestExtractionToolFunctionality:
 
         tool = create_ixp_extraction_tool(extraction_resource)
 
-        await tool.ainvoke({"full_name": "file.pdf", "mime_type": "application/pdf"})
-
-        mock_client.attachments.download_async.assert_called_once_with(
-            key=None, destination_path="file.pdf"
-        )
+        with pytest.raises(ValidationError):
+            await tool.ainvoke(
+                {"full_name": "file.pdf", "mime_type": "application/pdf"}
+            )
 
     @pytest.mark.asyncio
     @patch("uipath.platform.UiPath")
