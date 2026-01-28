@@ -25,6 +25,10 @@ class LogAction(GuardrailAction):
         self.message = message
         self.level = level
 
+    @property
+    def action_type(self) -> str:
+        return "Log"
+
     def action_node(
         self,
         *,
@@ -60,7 +64,7 @@ class LogAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "action_type": "Log",
+            "action_type": self.action_type,
         }
 
         return node_name, _node

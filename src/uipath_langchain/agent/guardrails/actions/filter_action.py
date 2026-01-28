@@ -34,6 +34,10 @@ class FilterAction(GuardrailAction):
         """
         self.fields = fields or []
 
+    @property
+    def action_type(self) -> str:
+        return "Filter"
+
     def action_node(
         self,
         *,
@@ -65,7 +69,6 @@ class FilterAction(GuardrailAction):
                     self.fields,
                     execution_stage,
                     guarded_component_name,
-                    guardrail.name,
                 )
 
             raise AgentTerminationException(
@@ -79,7 +82,11 @@ class FilterAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "action_type": "Filter",
+            "action_type": self.action_type,
+            "excluded_fields": self.fields,
+
+            # updated_input: Optional[Dict[str, Any]] = Field(None, alias="updatedInput")
+            # updated_output: Optional[Dict[str, Any]] = Field(None, alias="updatedOutput")
         }
 
         return node_name, _node
@@ -90,7 +97,6 @@ def _filter_tool_fields(
     fields_to_filter: list[FieldReference],
     execution_stage: ExecutionStage,
     tool_name: str,
-    guardrail_name: str,
 ) -> dict[str, Any] | Command[Any]:
     """Filter specified fields from tool call arguments or tool output.
 
@@ -103,7 +109,6 @@ def _filter_tool_fields(
         fields_to_filter: List of FieldReference objects specifying which fields to filter.
         execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
         tool_name: Name of the tool to filter.
-        guardrail_name: Name of the guardrail for logging purposes.
 
     Returns:
         Command to update messages with filtered tool call args or output.
