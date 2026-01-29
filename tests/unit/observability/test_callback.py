@@ -2314,3 +2314,331 @@ class TestEscalationReviewedData:
 
             # run_id should be removed after completion
             assert action_run_id not in callback._escalate_action_resume_data
+
+
+class TestToolResultSerialization:
+    """Tests for _set_tool_result with Pydantic models (MCP TextContent)."""
+
+    def test_tool_result_with_single_textcontent(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test tool result with single MCP TextContent object."""
+        from mcp.types import TextContent
+
+        run_id = uuid4()
+        callback.on_tool_start({"name": "mcp_tool"}, "input", run_id=run_id)
+
+        # Single TextContent object (Pydantic model)
+        output = TextContent(type="text", text="Tool execution result")
+        callback.on_tool_end(output, run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        assert len(spans) == 1
+
+        tool_span = spans[0]
+        assert tool_span.attributes["type"] == SpanType.TOOL_CALL.value
+
+        # Verify result attribute contains properly serialized JSON
+        result_json = tool_span.attributes.get("result")
+        assert result_json is not None
+
+        import json
+
+        parsed = json.loads(result_json)
+        assert parsed["type"] == "text"
+        assert parsed["text"] == "Tool execution result"
+
+    def test_tool_result_with_list_of_textcontent(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test tool result with list of MCP TextContent objects.
+
+        This is the exact bug scenario we fixed:
+        TypeError: Object of type TextContent is not JSON serializable
+        """
+        from mcp.types import TextContent
+
+        run_id = uuid4()
+        callback.on_tool_start({"name": "mcp_tool"}, "input", run_id=run_id)
+
+        # List of TextContent objects - what MCP tools actually return
+        output = [
+            TextContent(type="text", text="First result"),
+            TextContent(type="text", text="Second result"),
+        ]
+
+        # Should NOT raise TypeError
+        callback.on_tool_end(output, run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        assert len(spans) == 1
+
+        tool_span = spans[0]
+        result_json = tool_span.attributes.get("result")
+        assert result_json is not None
+
+        import json
+
+        parsed = json.loads(result_json)
+        assert isinstance(parsed, list)
+        assert len(parsed) == 2
+        assert parsed[0]["type"] == "text"
+        assert parsed[0]["text"] == "First result"
+        assert parsed[1]["type"] == "text"
+        assert parsed[1]["text"] == "Second result"
+
+    def test_tool_result_with_dict_containing_pydantic(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test tool result with dict containing Pydantic models."""
+        from mcp.types import TextContent
+
+        run_id = uuid4()
+        callback.on_tool_start({"name": "complex_tool"}, "input", run_id=run_id)
+
+        # Dict with Pydantic model values
+        output = {
+            "status": "success",
+            "content": TextContent(type="text", text="Result data"),
+            "metadata": {"count": 42},
+        }
+
+        callback.on_tool_end(output, run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_span = spans[0]
+        result_json = tool_span.attributes.get("result")
+
+        import json
+
+        parsed = json.loads(result_json)
+        assert parsed["status"] == "success"
+        assert parsed["content"]["type"] == "text"
+        assert parsed["content"]["text"] == "Result data"
+        assert parsed["metadata"]["count"] == 42
+
+    def test_tool_result_with_mixed_list(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test tool result with mixed list of primitives and Pydantic models."""
+        from mcp.types import TextContent
+
+        run_id = uuid4()
+        callback.on_tool_start({"name": "mixed_tool"}, "input", run_id=run_id)
+
+        # Mixed list
+        output = [
+            "string value",
+            42,
+            TextContent(type="text", text="Pydantic model"),
+            {"dict": "value"},
+        ]
+
+        callback.on_tool_end(output, run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_span = spans[0]
+        result_json = tool_span.attributes.get("result")
+
+        import json
+
+        parsed = json.loads(result_json)
+        assert parsed[0] == "string value"
+        assert parsed[1] == 42
+        assert parsed[2]["type"] == "text"
+        assert parsed[2]["text"] == "Pydantic model"
+        assert parsed[3] == {"dict": "value"}
+
+    def test_tool_result_with_none(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test tool result with None value."""
+        run_id = uuid4()
+        callback.on_tool_start({"name": "null_tool"}, "input", run_id=run_id)
+
+        callback.on_tool_end(None, run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_span = spans[0]
+
+        # Result should not be set when output is None
+        result_json = tool_span.attributes.get("result")
+        assert result_json is None
+
+    def test_tool_result_with_simple_dict(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test tool result with simple dict (backwards compatibility)."""
+        run_id = uuid4()
+        callback.on_tool_start({"name": "dict_tool"}, "input", run_id=run_id)
+
+        output = {"status": "success", "value": 123}
+        callback.on_tool_end(output, run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_span = spans[0]
+        result_json = tool_span.attributes.get("result")
+
+        import json
+
+        parsed = json.loads(result_json)
+        assert parsed == {"status": "success", "value": 123}
+
+    def test_tool_result_with_simple_string(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test tool result with simple string (backwards compatibility)."""
+        run_id = uuid4()
+        callback.on_tool_start({"name": "string_tool"}, "input", run_id=run_id)
+
+        callback.on_tool_end("simple result", run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_span = spans[0]
+        result_json = tool_span.attributes.get("result")
+
+        # Strings are returned as-is, not JSON-encoded
+        assert result_json == "simple result"
+
+    def test_tool_result_serialization_error_fallback(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test fallback to string representation for non-serializable objects."""
+
+        class NonSerializable:
+            def __str__(self):
+                return "custom_string_repr"
+
+        run_id = uuid4()
+        callback.on_tool_start({"name": "custom_tool"}, "input", run_id=run_id)
+
+        output = NonSerializable()
+        callback.on_tool_end(output, run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_span = spans[0]
+        result_json = tool_span.attributes.get("result")
+
+        # serialize_json() converts unknown objects to strings, then JSON-encodes them
+        assert result_json == '"custom_string_repr"'
+
+
+class TestResumedSpanSerialization:
+    """Tests for resumed span result serialization with Pydantic models."""
+
+    def test_resumed_tool_span_with_textcontent(
+        self, callback: UiPathTracingCallback, tracer, span_exporter
+    ) -> None:
+        """Test resumed tool span with TextContent result."""
+        from mcp.types import TextContent
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            tool_run_id = uuid4()
+            callback.on_tool_start(
+                {"name": "resumed_tool"}, "input", run_id=tool_run_id
+            )
+
+            # Simulate GraphInterrupt (tool is suspended)
+            class GraphInterrupt(Exception):
+                pass
+
+            callback.on_tool_error(GraphInterrupt("Suspended"), run_id=tool_run_id)
+
+            # Verify span is still tracked (not closed)
+            assert tool_run_id in callback._spans
+
+            # Now simulate resume with TextContent result
+            output = [
+                TextContent(type="text", text="Resumed result 1"),
+                TextContent(type="text", text="Resumed result 2"),
+            ]
+
+            # This should use the resumed span data path (line 664 in callback.py)
+            callback.on_tool_end(output, run_id=tool_run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_spans = [s for s in spans if s.attributes.get("type") == "toolCall"]
+        assert len(tool_spans) == 1
+
+        tool_span = tool_spans[0]
+        result_json = tool_span.attributes.get("result")
+        assert result_json is not None
+
+        import json
+
+        parsed = json.loads(result_json)
+        assert len(parsed) == 2
+        assert parsed[0]["text"] == "Resumed result 1"
+
+    def test_resumed_process_span_with_pydantic_result(
+        self, callback: UiPathTracingCallback, tracer, span_exporter
+    ) -> None:
+        """Test resumed process span with Pydantic model result."""
+        from pydantic import BaseModel
+
+        class ProcessOutput(BaseModel):
+            status: str
+            metrics: dict[str, int]
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # Simulate a process chain with metadata
+            run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=run_id,
+                metadata={
+                    "process_key": "test-process-123",
+                    "langgraph_node": "__start__",
+                },
+            )
+
+            # Resume with Pydantic output - tests line 644
+            output = ProcessOutput(status="success", metrics={"count": 42, "time": 100})
+            callback.on_chain_end(output, run_id=run_id)  # type: ignore[arg-type]
+
+        # Should not raise TypeError during serialization
+        spans = span_exporter.get_finished_spans()
+        assert len(spans) >= 1
+
+
+class TestToolArgumentsSerialization:
+    """Tests for _set_tool_arguments with Pydantic models."""
+
+    def test_tool_arguments_with_pydantic_input(
+        self, callback: UiPathTracingCallback, span_exporter
+    ) -> None:
+        """Test tool arguments containing Pydantic model serialization."""
+        from mcp.types import TextContent
+
+        run_id = uuid4()
+
+        # Tool input could contain Pydantic models
+        message = TextContent(type="text", text="Input message")
+
+        import json
+
+        serialized_input = json.dumps({"message": message.model_dump(), "count": 5})
+
+        callback.on_tool_start(
+            {"name": "pydantic_arg_tool"}, serialized_input, run_id=run_id
+        )
+        callback.on_tool_end("result", run_id=run_id)
+
+        spans = span_exporter.get_finished_spans()
+        tool_span = spans[0]
+
+        # Verify arguments were properly serialized
+        arguments_json = tool_span.attributes.get("arguments")
+        assert arguments_json is not None
+
+        parsed = json.loads(arguments_json)
+        assert parsed["message"]["type"] == "text"
+        assert parsed["message"]["text"] == "Input message"
+        assert parsed["count"] == 5

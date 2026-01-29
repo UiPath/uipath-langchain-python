@@ -19,6 +19,7 @@ from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
 from opentelemetry.trace import Span
 from uipath.core.guardrails import UniversalRule
+from uipath.core.serialization import serialize_json
 from uipath.eval.mocks.mockable import MOCKED_ANNOTATION_KEY
 from uipath.platform.guardrails import BuiltInValidatorGuardrail, DeterministicGuardrail
 
@@ -583,7 +584,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
         for msg in messages[0]:
             sanitized = self._sanitize_file_data(msg.content)
-            content = sanitized if isinstance(sanitized, str) else json.dumps(sanitized)
+            content = serialize_json(sanitized)
             if msg.type == "system" and self._agent_span:
                 self._agent_span.set_attribute("systemPrompt", content)
             elif msg.type == "human" and self._agent_span:
@@ -693,7 +694,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 if call_id:
                     span.set_attribute("callId", call_id)
                 if arguments:
-                    span.set_attribute("arguments", json.dumps(arguments))
+                    span.set_attribute("arguments", serialize_json(arguments))
                 self._spans[run_id] = span
                 self._tool_span_from_guardrail = False
                 self._close_container(GuardrailScope.TOOL, GuardrailStage.PRE)
@@ -1241,7 +1242,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
     def _set_tool_arguments(self, span: Span, input_str: str) -> None:
         try:
             args = json.loads(input_str)
-            span.set_attribute("arguments", json.dumps(args))
+            span.set_attribute("arguments", serialize_json(args))
         except (json.JSONDecodeError, TypeError):
             # input_str is not valid JSON, set as raw string
             span.set_attribute("arguments", input_str)
@@ -1249,9 +1250,19 @@ class UiPathTracingCallback(BaseCallbackHandler):
     def _set_tool_result(self, span: Span, output: Any) -> None:
         if output is None:
             return
-        if isinstance(output, (dict, list)):
-            span.set_attribute("result", json.dumps(output))
-        else:
+        # Handle strings directly without JSON encoding (backwards compatibility)
+        if isinstance(output, str):
+            span.set_attribute("result", output)
+            return
+        try:
+            serialized_result = serialize_json(output)
+            span.set_attribute("result", serialized_result)
+        except Exception as e:
+            # Fallback to string representation if serialization fails
+            logging.warning(
+                "Failed to serialize tool result to JSON: %s. Using string representation.",
+                e,
+            )
             span.set_attribute("result", str(output))
 
     def _parse_tool_arguments(self, input_str: str) -> Optional[Dict[str, Any]]:
