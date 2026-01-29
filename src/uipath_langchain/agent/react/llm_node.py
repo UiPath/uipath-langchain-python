@@ -60,7 +60,6 @@ def create_llm_node(
     """
     bindable_tools = list(tools) if tools else []
     payload_handler = get_payload_handler(model)
-    tool_choice_required_value = payload_handler.get_required_tool_choice()
 
     async def llm_node(state: StateT):
         messages: list[AnyMessage] = state.messages
@@ -78,16 +77,15 @@ def create_llm_node(
         static_schema_tools = _apply_tool_argument_properties(
             bindable_tools, state, input_schema
         )
-        base_llm = model.bind_tools(static_schema_tools)
 
         if (
             not is_conversational
             and bindable_tools
             and consecutive_thinking_messages >= thinking_messages_limit
         ):
-            llm = base_llm.bind(tool_choice=tool_choice_required_value)
+            llm = model.bind_tools(static_schema_tools, tool_choice="any")
         else:
-            llm = base_llm
+            llm = model.bind_tools(static_schema_tools)
 
         response = await llm.ainvoke(messages)
         if not isinstance(response, AIMessage):
