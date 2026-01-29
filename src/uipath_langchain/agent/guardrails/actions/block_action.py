@@ -48,7 +48,6 @@ class BlockAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "action_type": self.action_type,
         }
 
         return node_name, _node

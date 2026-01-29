@@ -75,7 +75,6 @@ class FilterAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "action_type": self.action_type,
             "excluded_fields": self.fields,
         }
 
