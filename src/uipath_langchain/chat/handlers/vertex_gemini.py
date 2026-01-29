@@ -1,7 +1,5 @@
 """Vertex Gemini payload handler."""
 
-from typing import Any
-
 from langchain_core.messages import AIMessage
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -113,10 +111,6 @@ FINISH_REASON_MESSAGES: dict[str, tuple[str, str]] = {
 
 class VertexGeminiPayloadHandler(ModelPayloadHandler):
     """Payload handler for Google Vertex AI Gemini API."""
-
-    def get_required_tool_choice(self) -> str | dict[str, Any]:
-        """Get tool_choice value for Vertex Gemini API."""
-        return "any"
 
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check Vertex Gemini finishReason and raise exception for faulty terminations.

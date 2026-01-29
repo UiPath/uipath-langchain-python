@@ -7,13 +7,8 @@ from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from uipath.platform.guardrails import BaseGuardrail
-from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import (
-    AgentStartupError,
-    AgentStartupErrorCode,
-)
-from uipath_langchain.chat.types import UiPathPassthroughChatModel
+from uipath_langchain.chat import UiPathBaseLLMClient
 
 from ..guardrails.actions import GuardrailAction
 from .guardrails.guardrails_subgraph import (
@@ -70,18 +65,13 @@ def create_agent(
     """
     from ..tools import create_tool_node
 
-    if not isinstance(model, UiPathPassthroughChatModel):
-        raise AgentStartupError(
-            code=AgentStartupErrorCode.LLM_INVALID_MODEL,
-            title=f"Model {type(model).__name__} does not implement UiPathPassthroughChatModel.",
-            detail="The model must have llm_provider and api_flavor properties.",
-            category=UiPathErrorCategory.SYSTEM,
+    if isinstance(model, UiPathBaseLLMClient):
+        agent_settings = AgentSettings(
+            llm_provider=model.api_config.vendor_type,
+            api_flavor=model.api_config.api_flavor,
         )
-
-    agent_settings = AgentSettings(
-        llm_provider=model.llm_provider,
-        api_flavor=model.api_flavor,
-    )
+    else:
+        agent_settings = None
 
     if config is None:
         config = AgentGraphConfig()

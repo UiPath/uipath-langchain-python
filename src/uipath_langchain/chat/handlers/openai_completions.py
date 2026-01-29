@@ -30,10 +30,6 @@ FINISH_REASON_MESSAGES: dict[str, tuple[str, str]] = {
 class OpenAICompletionsPayloadHandler(ModelPayloadHandler):
     """Payload handler for OpenAI Chat Completions API."""
 
-    def get_required_tool_choice(self) -> str | dict[str, Any]:
-        """Get tool_choice value for OpenAI Completions API."""
-        return "required"
-
     def get_parallel_tool_calls_kwargs(
         self, parallel_tool_calls: bool
     ) -> dict[str, Any]:

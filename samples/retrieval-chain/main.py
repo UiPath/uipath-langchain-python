@@ -11,14 +11,17 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.vectorstores import VectorStore
-from uipath_langchain.chat.models import UiPathAzureChatOpenAI
+
+from uipath_langchain.chat import UiPathAzureChatOpenAI
 from uipath_langchain.vectorstores.context_grounding_vectorstore import (
     ContextGroundingVectorStore,
 )
 
+
 @dataclass
 class MainInput:
     """Input parameters for the main function."""
+
     query: str
     index_name: str
     k: int
@@ -67,17 +70,16 @@ def create_retrieval_chain(vectorstore: VectorStore, model: BaseChatModel, k: in
 
 
 async def main(input_data: MainInput):
-
     """Run a simple example of ContextGroundingVectorStore."""
-    vectorstore = ContextGroundingVectorStore(
-        index_name=input_data.index_name
-    )
+    vectorstore = ContextGroundingVectorStore(index_name=input_data.index_name)
 
     # Use query from input
     query = input_data.query
 
     # Perform semantic searches with distance scores
-    docs_with_scores = await vectorstore.asimilarity_search_with_score(query=query, k=input_data.k)
+    docs_with_scores = await vectorstore.asimilarity_search_with_score(
+        query=query, k=input_data.k
+    )
     print("==== Docs with distance scores ====")
     pprint(
         [
@@ -88,7 +90,9 @@ async def main(input_data: MainInput):
 
     # Perform a similarity search with relevance scores
     docs_with_relevance_scores = (
-        await vectorstore.asimilarity_search_with_relevance_scores(query=query, k=input_data.k)
+        await vectorstore.asimilarity_search_with_relevance_scores(
+            query=query, k=input_data.k
+        )
     )
     print("==== Docs with relevance scores ====")
     pprint(
@@ -100,6 +104,7 @@ async def main(input_data: MainInput):
 
     # Run a retrieval chain
     model = UiPathAzureChatOpenAI(
+        model="gpt-4o-mini-2024-07-18",
         max_retries=3,
     )
 

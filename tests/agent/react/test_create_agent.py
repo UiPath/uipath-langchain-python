@@ -21,28 +21,16 @@ from uipath_langchain.agent.react.tools.tools import create_flow_control_tools
 from uipath_langchain.agent.react.types import (
     AgentGraphConfig,
     AgentGraphNode,
-    AgentSettings,
 )
-from uipath_langchain.chat.types import APIFlavor, LLMProvider
 
 
 def _make_mock_model() -> MagicMock:
-    """Create a mock chat model that satisfies UiPathPassthroughChatModel protocol."""
+    """Create a mock chat model for testing.
+
+    Returns a simple BaseChatModel mock. Since it's not a UiPathBaseLLMClient,
+    the agent will set agent_settings=None.
+    """
     model = MagicMock(spec=BaseChatModel)
-    model.llm_provider = LLMProvider.OPENAI
-    model.api_flavor = APIFlavor.OPENAI_RESPONSES
-
-    # Protocol check: make isinstance(model, UiPathPassthroughChatModel) return True
-    from uipath_langchain.chat.types import UiPathPassthroughChatModel
-
-    model.__class__ = type(
-        "MockUiPathModel",
-        (UiPathPassthroughChatModel,),
-        {
-            "llm_provider": property(lambda self: LLMProvider.OPENAI),
-            "api_flavor": property(lambda self: APIFlavor.OPENAI_RESPONSES),
-        },
-    )
     return model
 
 
@@ -167,10 +155,7 @@ class TestCreateAgent:
             messages,
             None,  # input schema
             False,  # is_conversational
-            AgentSettings(
-                llm_provider=mock_model.llm_provider,
-                api_flavor=mock_model.api_flavor,
-            ),
+            None,  # agent_settings (None for non-UiPathBaseLLMClient models)
         )
         mock_create_terminate_node.assert_called_once_with(
             None,  # output schema
@@ -266,10 +251,7 @@ class TestCreateAgent:
             messages,
             None,  # input schema
             True,  # is_conversational
-            AgentSettings(
-                llm_provider=mock_model.llm_provider,
-                api_flavor=mock_model.api_flavor,
-            ),
+            None,  # agent_settings (None for non-UiPathBaseLLMClient models)
         )
         mock_create_terminate_node.assert_called_once_with(
             None,  # output schema
