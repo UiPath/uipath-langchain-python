@@ -10,6 +10,7 @@ from uipath.agent.models.agent import AgentProcessToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform.common import InvokeProcess
 
+from uipath_langchain.agent.react.job_attachments import get_job_attachments
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.static_args import handle_static_args
@@ -43,12 +44,14 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
         example_calls=resource.properties.example_calls,
     )
     async def process_tool_fn(**kwargs: Any):
+        attachments = get_job_attachments(input_model, kwargs)
         return interrupt(
             InvokeProcess(
                 name=process_name,
                 input_arguments=kwargs,
                 process_folder_path=folder_path,
                 process_folder_key=None,
+                attachments=attachments,
             )
         )
 
