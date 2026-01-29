@@ -157,6 +157,9 @@ def create_agent(
         target_node_names,
     )
 
+    if config.is_conversational:
+        target_node_names.append(AgentGraphNode.AGENT)
+
     for tool_name in tool_node_names:
         builder.add_conditional_edges(tool_name, route_agent, target_node_names)
     builder.add_edge(AgentGraphNode.TERMINATE, END)
