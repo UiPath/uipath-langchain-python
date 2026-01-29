@@ -5,6 +5,7 @@ from typing import Any, cast
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import BaseModel
+from uipath.core.serialization import serialize_json
 from uipath.runtime import UiPathResumeTrigger
 
 
@@ -82,7 +83,6 @@ class SqliteResumableStorage:
                 (runtime_id,),
             )
 
-            # Insert new triggers
             for trigger in triggers:
                 trigger_data = trigger.model_dump()
                 trigger_data["payload"] = trigger.payload
@@ -97,7 +97,7 @@ class SqliteResumableStorage:
                     (
                         runtime_id,
                         trigger.interrupt_id,
-                        json.dumps(trigger_data),
+                        serialize_json(trigger_data),
                     ),
                 )
             await self.memory.conn.commit()
@@ -206,11 +206,9 @@ class SqliteResumableStorage:
     def _dump_value(self, value: str | dict[str, Any] | BaseModel | None) -> str | None:
         if value is None:
             return None
-        if isinstance(value, BaseModel):
-            return "j:" + json.dumps(value.model_dump())
-        if isinstance(value, dict):
-            return "j:" + json.dumps(value)
-        return "s:" + value
+        if isinstance(value, str):
+            return "s:" + value
+        return "j:" + serialize_json(value)
 
     def _load_value(self, raw: str | None) -> Any:
         if raw is None:
