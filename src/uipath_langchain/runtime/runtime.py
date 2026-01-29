@@ -13,6 +13,7 @@ from uipath.runtime import (
     UiPathExecuteOptions,
     UiPathRuntimeResult,
     UiPathRuntimeStatus,
+    UiPathRuntimeStorageProtocol,
     UiPathStreamOptions,
 )
 from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
@@ -43,6 +44,7 @@ class UiPathLangGraphRuntime:
         runtime_id: str | None = None,
         entrypoint: str | None = None,
         callbacks: list[BaseCallbackHandler] | None = None,
+        storage: UiPathRuntimeStorageProtocol | None = None,
     ):
         """
         Initialize the runtime.
@@ -56,7 +58,7 @@ class UiPathLangGraphRuntime:
         self.runtime_id: str = runtime_id or "default"
         self.entrypoint: str | None = entrypoint
         self.callbacks: list[BaseCallbackHandler] = callbacks or []
-        self.chat = UiPathChatMessagesMapper()
+        self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
     async def execute(
@@ -139,7 +141,7 @@ class UiPathLangGraphRuntime:
                     if isinstance(data, tuple):
                         message, _ = data
                         try:
-                            events = self.chat.map_event(message)
+                            events = await self.chat.map_event(message)
                         except Exception as e:
                             logger.warning(f"Error mapping message event: {e}")
                             events = None

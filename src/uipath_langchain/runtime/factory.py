@@ -264,15 +264,16 @@ class UiPathLangGraphRuntimeFactory:
         Returns:
             Configured runtime instance
         """
+        memory = await self._get_memory()
+        storage = SqliteResumableStorage(memory)
+        trigger_manager = UiPathResumeTriggerHandler()
+
         base_runtime = UiPathLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
+            storage=storage,
         )
-
-        memory = await self._get_memory()
-        storage = SqliteResumableStorage(memory)
-        trigger_manager = UiPathResumeTriggerHandler()
 
         return UiPathResumableRuntime(
             delegate=base_runtime,
