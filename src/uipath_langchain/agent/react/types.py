@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any, Hashable, Optional
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
@@ -7,7 +7,10 @@ from pydantic import BaseModel, Field
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.platform.attachments import Attachment
 
-from uipath_langchain.agent.react.reducers import add_job_attachments, merge_objects
+from uipath_langchain.agent.react.reducers import (
+    merge_dicts,
+    merge_objects,
+)
 from uipath_langchain.chat.types import APIFlavor, LLMProvider
 
 FLOW_CONTROL_TOOLS = [END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name]
@@ -21,8 +24,9 @@ class AgentSettings(BaseModel):
 
 
 class InnerAgentGraphState(BaseModel):
-    job_attachments: Annotated[dict[str, Attachment], add_job_attachments] = {}
+    job_attachments: Annotated[dict[str, Attachment], merge_dicts] = {}
     agent_settings: AgentSettings | None = None
+    tools_storage: Annotated[dict[Hashable, Any], merge_dicts] = {}
 
 
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
