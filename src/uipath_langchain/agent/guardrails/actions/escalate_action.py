@@ -123,6 +123,8 @@ class EscalateAction(GuardrailAction):
                 "GuardrailName": guardrail.name,
                 "GuardrailDescription": guardrail.description,
                 "Component": _build_component_name(scope, guarded_component_name),
+                # send Tool for backwards compatibility for agents that use old HITL app
+                "Tool": _build_component_name(scope, guarded_component_name),
                 "TenantName": UiPathConfig.tenant_name,
                 "ExecutionStage": _execution_stage_to_string(execution_stage),
                 "GuardrailResult": state.inner_state.guardrail_validation_details,
@@ -144,6 +146,8 @@ class EscalateAction(GuardrailAction):
                     guarded_component_name,
                 )
                 data["Inputs"] = input_content
+                # send ToolInputs for backwards compatibility for agents that use old HITL app
+                data["ToolInputs"] = input_content
             else:  # POST_EXECUTION
                 if scope == GuardrailScope.AGENT:
                     input_message = state.messages[1]
@@ -168,6 +172,9 @@ class EscalateAction(GuardrailAction):
 
                 data["Inputs"] = input_content
                 data["Outputs"] = output_content
+                # send ToolInputs and ToolOutputs for backwards compatibility for agents that use old HITL app
+                data["ToolInputs"] = input_content
+                data["ToolOutputs"] = output_content
 
             escalation_result = interrupt(
                 CreateEscalation(
