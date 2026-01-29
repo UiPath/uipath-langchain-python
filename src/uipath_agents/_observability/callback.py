@@ -96,6 +96,8 @@ class GuardrailAction:
     FILTER = "Filter"
 
 
+_BASE64_RE = re.compile(r"^[A-Za-z0-9+/\-_]+=*$")
+
 # Pattern: {scope}_{stage}_execution_{guardrail_name}
 GUARDRAIL_NODE_PATTERN = re.compile(r"^(agent|llm|tool)_(pre|post)_execution_(.+)$")
 
@@ -1081,6 +1083,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
         if isinstance(obj, str):
             if obj.startswith("data:") and ";base64," in obj:
                 return "<base64 data omitted>"
+            if len(obj) > 1000 and _BASE64_RE.match(obj):
+                return "<base64 data omitted>"
             return obj
         if isinstance(obj, list):
             return [self._sanitize_file_data(item) for item in obj]
@@ -1095,6 +1099,12 @@ class UiPathTracingCallback(BaseCallbackHandler):
                 ) and not isinstance(value, dict):
                     if isinstance(value, bytes):
                         sanitized[key] = f"<bytes: {len(value)} bytes>"
+                    elif (
+                        isinstance(value, str)
+                        and len(value) > 1000
+                        and _BASE64_RE.match(value)
+                    ):
+                        sanitized[key] = "<base64 data omitted>"
                     elif isinstance(value, list):
                         sanitized[key] = self._sanitize_file_data(value)
                     else:
