@@ -2130,6 +2130,174 @@ class TestDeterministicGuardrailTelemetry:
                 assert rule_details[0]["ApplyTo"] == "InputAndOutput"
 
 
+class TestNestedLlmCallsInTools:
+    """Tests for LLM calls made from within tools (e.g., analyze_files tool)."""
+
+    def test_llm_call_inside_tool_parents_to_tool_span(
+        self, tracer, span_exporter
+    ) -> None:
+        """LLM call from within a tool should be parented to the tool span.
+
+        Scenario: analyze_files tool calls llm.ainvoke() internally.
+        The LLM span should be a child of the tool span, not the agent span.
+        """
+        from unittest.mock import patch
+
+        callback = UiPathTracingCallback(tracer)
+        agent_run_id = uuid4()
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # Tool starts
+            tool_run_id = uuid4()
+            callback.on_tool_start(
+                {"name": "analyze_files"}, '{"files": ["a.py"]}', run_id=tool_run_id
+            )
+
+            # Inside the tool, an LLM call happens.
+            # LangChain gives it a different run_id, and parent_run_id may not
+            # match tool_run_id (this is the bug we're fixing).
+            # But get_current_run_id() should return tool_run_id via context.
+            llm_run_id = uuid4()
+            unrelated_parent_id = uuid4()  # Simulates LangChain's parent mismatch
+
+            # Mock get_current_run_id to return tool's run_id (simulating context)
+            with patch(
+                "uipath_agents._observability.callback.get_current_run_id",
+                return_value=tool_run_id,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=llm_run_id,
+                    parent_run_id=unrelated_parent_id,  # Doesn't match tool_run_id
+                )
+                callback.on_llm_end(None, run_id=llm_run_id)  # type: ignore[arg-type]
+
+            callback.on_tool_end("analysis result", run_id=tool_run_id)
+
+        spans = span_exporter.get_finished_spans()
+
+        agent = next(s for s in spans if s.attributes.get("type") == "agentRun")
+        tool = next(s for s in spans if s.attributes.get("type") == "toolCall")
+        llm = next(s for s in spans if s.name == "LLM call")
+        model = next(s for s in spans if s.name == "Model run")
+
+        # LLM span should be child of tool span (not agent span)
+        assert llm.parent.span_id == tool.context.span_id
+        # Model span should be child of LLM span
+        assert model.parent.span_id == llm.context.span_id
+        # Tool span should be child of agent span
+        assert tool.parent.span_id == agent.context.span_id
+
+    def test_independent_llm_call_parents_to_agent_span(
+        self, tracer, span_exporter
+    ) -> None:
+        """Independent LLM call (not inside a tool) should parent to agent span.
+
+        When get_current_run_id() returns None (no tool context), LLM span
+        should fall back to agent span as parent.
+        """
+        from unittest.mock import patch
+
+        callback = UiPathTracingCallback(tracer)
+        agent_run_id = uuid4()
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # LLM call without any tool context
+            llm_run_id = uuid4()
+
+            # Mock get_current_run_id to return None (no context)
+            with patch(
+                "uipath_agents._observability.callback.get_current_run_id",
+                return_value=None,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=llm_run_id,
+                    parent_run_id=None,
+                )
+                callback.on_llm_end(None, run_id=llm_run_id)  # type: ignore[arg-type]
+
+        spans = span_exporter.get_finished_spans()
+
+        agent = next(s for s in spans if s.attributes.get("type") == "agentRun")
+        llm = next(s for s in spans if s.name == "LLM call")
+
+        # LLM span should be child of agent span
+        assert llm.parent.span_id == agent.context.span_id
+
+    def test_parallel_tool_and_llm_isolated(self, tracer, span_exporter) -> None:
+        """Parallel tool and LLM call should have correct parents.
+
+        Tool's LLM call should parent to tool, while independent LLM call
+        should parent to agent.
+        """
+        from unittest.mock import patch
+
+        callback = UiPathTracingCallback(tracer)
+        agent_run_id = uuid4()
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # Tool starts
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "tool1"}, "{}", run_id=tool_run_id)
+
+            # LLM call inside tool (context returns tool_run_id)
+            llm_in_tool_id = uuid4()
+            with patch(
+                "uipath_agents._observability.callback.get_current_run_id",
+                return_value=tool_run_id,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=llm_in_tool_id,
+                    parent_run_id=None,
+                )
+                callback.on_llm_end(None, run_id=llm_in_tool_id)  # type: ignore[arg-type]
+
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+            # Independent LLM call (context returns None - no tool)
+            llm_independent_id = uuid4()
+            with patch(
+                "uipath_agents._observability.callback.get_current_run_id",
+                return_value=None,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=llm_independent_id,
+                    parent_run_id=None,
+                )
+                callback.on_llm_end(None, run_id=llm_independent_id)  # type: ignore[arg-type]
+
+        spans = span_exporter.get_finished_spans()
+
+        agent = next(s for s in spans if s.attributes.get("type") == "agentRun")
+        tool = next(s for s in spans if s.attributes.get("type") == "toolCall")
+        llm_spans = [s for s in spans if s.name == "LLM call"]
+
+        # Find which LLM is which by checking parent
+        llm_in_tool = next(
+            s for s in llm_spans if s.parent.span_id == tool.context.span_id
+        )
+        llm_independent = next(
+            s for s in llm_spans if s.parent.span_id == agent.context.span_id
+        )
+
+        assert llm_in_tool is not None
+        assert llm_independent is not None
+        assert llm_in_tool is not llm_independent
+
+
 class TestLangchainConfigStructure:
     """Integration tests verifying langchain internal config structure.
 

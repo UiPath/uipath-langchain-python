@@ -462,7 +462,8 @@ class UiPathTracingCallback(BaseCallbackHandler):
     def _get_span_or_root(self, run_id: Optional[UUID]) -> Optional[Span]:
         if run_id and run_id in self._spans:
             return self._spans[run_id]
-        return self._agent_span
+        # Try context stack before falling back to root
+        return _get_current_span() or self._agent_span
 
     def _model_span_key(self, run_id: UUID) -> UUID:
         """Derive a unique key for the model span from an LLM run_id.
