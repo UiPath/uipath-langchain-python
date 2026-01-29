@@ -11,7 +11,6 @@ from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
 from uipath_langchain.agent.react.llm_node import create_llm_node
 from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.chat.types import APIFlavor, LLMProvider
 
 
 class TestLLMNodeParallelToolCalls:
@@ -101,13 +100,10 @@ class TestLLMNodeToolCallFiltering:
         self.regular_tool = Mock(spec=BaseTool)
         self.regular_tool.name = "regular_tool"
 
-        # Create mock chat model that implements UiPathPassthroughChatModel
+        # Create mock chat model that implements UiPathBaseLLMClient
         self.mock_model = Mock(spec=BaseChatModel)
         self.mock_model.bind_tools.return_value = self.mock_model
         self.mock_model.bind.return_value = self.mock_model
-        # Add UiPath protocol properties
-        self.mock_model.llm_provider = LLMProvider.OPENAI
-        self.mock_model.api_flavor = APIFlavor.OPENAI_RESPONSES
 
         # Create test state
         self.test_state = AgentGraphState(messages=[HumanMessage(content="Test query")])

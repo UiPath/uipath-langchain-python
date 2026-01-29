@@ -7,12 +7,11 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, StateGraph, MessagesState
+from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
-
 from uipath.platform import UiPath
-from uipath.platform.common import CreateTask
+
 from uipath_langchain.chat import UiPathChat
 
 # Configuration
@@ -27,9 +26,11 @@ APP_FOLDER_PATH_PLACEHOLDER = "FOLDER_PATH_PLACEHOLDER"
 TicketCategory = Literal["security", "error", "system", "billing", "performance"]
 NextNode = Literal["classify", "notify_team"]
 
+
 # Data Models
 class GraphInput(BaseModel):
     """Input model for the ticket classification graph."""
+
     message: str
     ticket_id: str
     assignee: str | None = None
@@ -37,12 +38,14 @@ class GraphInput(BaseModel):
 
 class GraphOutput(BaseModel):
     """Output model for the ticket classification graph."""
+
     label: str
     confidence: float
 
 
 class GraphState(MessagesState):
     """State model for the ticket classification workflow."""
+
     message: str
     ticket_id: str
     assignee: str | None
@@ -54,6 +57,7 @@ class GraphState(MessagesState):
 
 class TicketClassification(BaseModel):
     """Model for ticket classification results."""
+
     label: TicketCategory = Field(
         description="The classification label for the support ticket"
     )
@@ -90,6 +94,7 @@ def create_system_message() -> str:
         format_instructions=output_parser.get_format_instructions()
     )
 
+
 # Node Functions
 def prepare_input(graph_input: GraphInput) -> GraphState:
     """Prepare the initial state from graph input."""
@@ -99,7 +104,7 @@ def prepare_input(graph_input: GraphInput) -> GraphState:
         assignee=graph_input.assignee,
         messages=[
             SystemMessage(content=create_system_message()),
-            HumanMessage(content=graph_input.message)
+            HumanMessage(content=graph_input.message),
         ],
         last_predicted_category=None,
         human_approval=None,
@@ -112,9 +117,10 @@ def decide_next_node(state: GraphState) -> NextNode:
         return "notify_team"
     return "classify"
 
+
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    llm = UiPathChat()
+    llm = UiPathChat(model="gpt-4o-mini-2024-07-18")
 
     # Add rejection message if there was a previous prediction
     if state.get("last_predicted_category"):
@@ -151,7 +157,10 @@ async def classify(state: GraphState) -> Command:
             }
         )
 
-def create_approval_message(ticket_id: str, ticket_message: str, label: str, confidence: float) -> str:
+
+def create_approval_message(
+    ticket_id: str, ticket_message: str, label: str, confidence: float
+) -> str:
     """Create formatted message for human approval."""
     return (
         f"This is how I classified the ticket: '{ticket_id}', "
@@ -170,8 +179,6 @@ async def wait_for_human(state: GraphState) -> Command:
     confidence = state["confidence"]
     is_resume = state.get("human_approval") is not None
 
-
-
     if not is_resume:
         logger.info("Waiting for human approval via regular interrupt")
     interrupt_message = (
@@ -186,6 +193,7 @@ async def wait_for_human(state: GraphState) -> Command:
             "human_approval": human_approved,
         }
     )
+
 
 async def notify_team(state: GraphState) -> GraphOutput:
     """Send team notification and return final output."""
