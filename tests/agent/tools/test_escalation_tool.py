@@ -347,7 +347,7 @@ class TestEscalationToolMetadata:
             channels=[AgentEscalationChannel(**channel_dict)],
         )
 
-        tool = await create_escalation_tool(resource)
+        tool = create_escalation_tool(resource)
 
         call = ToolCall(args={}, id="test-call", name=tool.name)
 
@@ -395,7 +395,7 @@ class TestEscalationToolMetadata:
             channels=[AgentEscalationChannel(**channel_dict)],
         )
 
-        tool = await create_escalation_tool(resource)
+        tool = create_escalation_tool(resource)
 
         # Create mock state with variables for token interpolation
         state = {"userName": "John Doe", "messages": []}
@@ -442,7 +442,7 @@ class TestEscalationToolMetadata:
             channels=[AgentEscalationChannel(**channel_dict)],
         )
 
-        tool = await create_escalation_tool(resource)
+        tool = create_escalation_tool(resource)
 
         call = ToolCall(args={}, id="test-call", name=tool.name)
 
