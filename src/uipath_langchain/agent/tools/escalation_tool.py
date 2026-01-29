@@ -13,6 +13,7 @@ from uipath.agent.models.agent import (
     AgentEscalationResourceConfig,
     AssetRecipient,
     StandardRecipient,
+    TaskTitle,
     TextBuilderTaskTitle,
 )
 from uipath.agent.utils.text_tokens import build_string_from_tokens
@@ -81,6 +82,19 @@ async def resolve_asset(asset_name: str, folder_path: str) -> str | None:
         raise ValueError(
             f"Failed to resolve asset '{asset_name}' in folder '{folder_path}': {str(e)}"
         ) from e
+
+
+def _resolve_task_title(
+    task_title: TaskTitle | str | None, agent_input: dict[str, Any]
+) -> str:
+    """Resolve task title based on channel configuration."""
+    if isinstance(task_title, TextBuilderTaskTitle):
+        return build_string_from_tokens(task_title.tokens, agent_input)
+
+    if isinstance(task_title, str):
+        return task_title
+
+    return "Escalation Task"
 
 
 def create_escalation_tool(
@@ -154,12 +168,9 @@ def create_escalation_tool(
         if tool.metadata is None:
             raise RuntimeError("Tool metadata is required for task_title resolution")
 
-        if isinstance(channel.task_title, TextBuilderTaskTitle):
-            tool.metadata["task_title"] = build_string_from_tokens(
-                channel.task_title.tokens, sanitize_dict_for_serialization(dict(state))
-            )
-        elif isinstance(channel.task_title, str):
-            tool.metadata["task_title"] = channel.task_title
+        tool.metadata["task_title"] = _resolve_task_title(
+            channel.task_title, sanitize_dict_for_serialization(dict(state))
+        )
 
         call["args"] = handle_static_args(resource, state, call["args"])
         result = await tool.ainvoke(call["args"])
