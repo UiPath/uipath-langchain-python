@@ -691,6 +691,91 @@ class TestInterruptibleTraceContext:
         assert len(events) == 2
         mock_trace_context_storage.save_trace_context.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_reference_id_persists_across_suspend_resume(
+        self, mock_delegate, tracer, callback, mock_runtime_context, span_exporter
+    ):
+        """Test that reference_id ContextVar persists across suspend/resume cycles."""
+        # Set up storage
+        stored_context = None
+
+        async def mock_save(runtime_id, context):
+            nonlocal stored_context
+            stored_context = context
+
+        async def mock_load(runtime_id):
+            return stored_context
+
+        async def mock_clear(runtime_id):
+            nonlocal stored_context
+            stored_context = None
+
+        storage = MagicMock()
+        storage.save_trace_context = AsyncMock(side_effect=mock_save)
+        storage.load_trace_context = AsyncMock(side_effect=mock_load)
+        storage.clear_trace_context = AsyncMock(side_effect=mock_clear)
+
+        # Set up agent definition with agent_id
+        agent_def = AgentDefinition(
+            name="TestAgent",
+            id="test-agent-id-123",
+            messages=[],
+            settings=AgentSettings(
+                model="gpt-4",
+                engine="v1",
+                max_tokens=1000,
+                temperature=0.7,
+            ),
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+        )
+
+        # First execution: SUSPENDED
+        suspended_result = MagicMock()
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
+
+        # Second execution: SUCCESSFUL
+        success_result = MagicMock()
+        success_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        success_result.output = {"result": "done"}
+
+        mock_delegate.execute.side_effect = [suspended_result, success_result]
+
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer,
+            callback,
+            mock_runtime_context,
+            agent_definition=agent_def,
+            trace_context_storage=storage,
+        )
+
+        # First execute - suspends
+        result1 = await wrapper.execute({"input": "initial"}, None)
+        assert result1.status == UiPathRuntimeStatus.SUSPENDED
+
+        # Verify reference_id was saved in trace context
+        assert stored_context is not None
+        assert "attributes" in stored_context
+        assert stored_context["attributes"]["referenceId"] == "test-agent-id-123"
+
+        # Second execute - resume
+        # This should restore the reference_id ContextVar
+        result2 = await wrapper.execute({"input": "resume"}, None)
+        assert result2.status == UiPathRuntimeStatus.SUCCESSFUL
+
+        # Verify that spans created during resume have reference_id
+        spans = span_exporter.get_finished_spans()
+
+        # Filter to agent run spans
+        agent_spans = [s for s in spans if "Agent run" in s.name]
+        assert len(agent_spans) >= 1
+
+        # All agent spans should have the same reference_id
+        for span in agent_spans:
+            if hasattr(span, "attributes") and "referenceId" in span.attributes:
+                assert span.attributes["referenceId"] == "test-agent-id-123"
+
 
 class TestUpsertSpanOnSuspend:
     """Tests for upsert span calls during suspend."""

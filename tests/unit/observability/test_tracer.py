@@ -12,6 +12,21 @@ from uipath_agents._observability.tracer import UiPathTracer
 # span_exporter fixture comes from conftest.py
 
 
+@pytest.fixture(autouse=True)
+def clear_env_caches():
+    """Clear cached environment variable functions before each test."""
+    from uipath_agents._observability.span_attributes import (
+        get_agent_version,
+        get_execution_type,
+    )
+
+    get_execution_type.cache_clear()
+    get_agent_version.cache_clear()
+    yield
+    get_execution_type.cache_clear()
+    get_agent_version.cache_clear()
+
+
 @pytest.fixture
 def tracer(span_exporter):
     """Create a fresh tracer for testing."""
@@ -30,6 +45,177 @@ def mock_exporter():
 def tracer_with_exporter(span_exporter, mock_exporter):
     """Create tracer with mock exporter."""
     return UiPathTracer(exporter=mock_exporter)
+
+
+class TestExecutionContextOnAllSpans:
+    """Tests for execution_type and agent_version on all span types."""
+
+    def test_llm_call_includes_execution_type(self, tracer, span_exporter, monkeypatch):
+        """Test LLM call span includes executionType from environment."""
+        monkeypatch.setenv("UIPATH_IS_DEBUG", "True")
+
+        span = tracer.start_llm_call()
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["executionType"] == 0  # DEBUG
+
+    def test_llm_call_includes_agent_version(self, tracer, span_exporter, monkeypatch):
+        """Test LLM call span includes agentVersion from environment."""
+        monkeypatch.setenv("UIPATH_PROCESS_VERSION", "3.1.4")
+
+        span = tracer.start_llm_call()
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["agentVersion"] == "3.1.4"
+
+    def test_tool_call_includes_execution_type(
+        self, tracer, span_exporter, monkeypatch
+    ):
+        """Test tool call span includes executionType from environment."""
+        monkeypatch.setenv("UIPATH_IS_DEBUG", "False")
+
+        span = tracer.start_tool_call(tool_name="calculator")
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["executionType"] == 1  # RUNTIME
+
+    def test_tool_call_includes_agent_version(self, tracer, span_exporter, monkeypatch):
+        """Test tool call span includes agentVersion from environment."""
+        monkeypatch.setenv("UIPATH_PROCESS_VERSION", "1.0.0")
+
+        span = tracer.start_tool_call(tool_name="calculator")
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["agentVersion"] == "1.0.0"
+
+    def test_model_run_includes_execution_type(
+        self, tracer, span_exporter, monkeypatch
+    ):
+        """Test model run span includes executionType from environment."""
+        monkeypatch.setenv("UIPATH_IS_DEBUG", "True")
+
+        span = tracer.start_model_run(model_name="gpt-4")
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["executionType"] == 0  # DEBUG
+
+    def test_execution_type_defaults_to_runtime_on_all_spans(
+        self, tracer, span_exporter, monkeypatch
+    ):
+        """Test executionType defaults to RUNTIME on all span types when env not set."""
+        monkeypatch.delenv("UIPATH_IS_DEBUG", raising=False)
+
+        span = tracer.start_tool_call(tool_name="test_tool")
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["executionType"] == 1  # RUNTIME
+
+
+class TestReferenceIdOnAllSpans:
+    """Tests for reference_id propagation to all span types."""
+
+    def test_child_spans_inherit_reference_id_from_agent_run(
+        self, tracer, span_exporter
+    ):
+        """Test child spans inherit reference_id from agent run."""
+        with tracer.start_agent_run(agent_name="TestAgent", agent_id="test-ref-123"):
+            llm_span = tracer.start_llm_call()
+            tool_span = tracer.start_tool_call(tool_name="calculator")
+            tracer.end_span_ok(tool_span)
+            tracer.end_span_ok(llm_span)
+
+        spans = span_exporter.get_finished_spans()
+        agent_span = next(s for s in spans if s.name.startswith("Agent run"))
+        llm_span_result = next(s for s in spans if s.name == "LLM call")
+        tool_span_result = next(s for s in spans if s.name == "Tool call - calculator")
+
+        # All spans should have the same reference_id
+        assert agent_span.attributes["referenceId"] == "test-ref-123"
+        assert llm_span_result.attributes["referenceId"] == "test-ref-123"
+        assert tool_span_result.attributes["referenceId"] == "test-ref-123"
+
+    def test_reference_id_matches_agent_id(self, tracer, span_exporter):
+        """Test reference_id is set to agent_id for agent run."""
+        with tracer.start_agent_run(agent_name="TestAgent", agent_id="my-agent-id"):
+            pass
+
+        spans = span_exporter.get_finished_spans()
+        assert spans[0].attributes["referenceId"] == "my-agent-id"
+        assert spans[0].attributes["agentId"] == "my-agent-id"
+
+    def test_reference_id_reset_after_agent_run(self, tracer, span_exporter):
+        """Test reference_id context is reset after agent run completes."""
+        with tracer.start_agent_run(agent_name="TestAgent1", agent_id="agent-1"):
+            pass
+
+        # Create span outside of agent run context
+        span = tracer.start_tool_call(tool_name="outside_tool")
+        tracer.end_span_ok(span)
+
+        spans = span_exporter.get_finished_spans()
+        agent_span = next(s for s in spans if s.name.startswith("Agent run"))
+        outside_span = next(s for s in spans if s.name == "Tool call - outside_tool")
+
+        # Agent span should have reference_id
+        assert agent_span.attributes["referenceId"] == "agent-1"
+        # Outside span should not have reference_id
+        assert "referenceId" not in outside_span.attributes
+
+    def test_model_run_inherits_reference_id(self, tracer, span_exporter):
+        """Test model run span inherits reference_id from agent run."""
+        with tracer.start_agent_run(agent_name="TestAgent", agent_id="ref-456"):
+            model_span = tracer.start_model_run(model_name="gpt-4")
+            tracer.end_span_ok(model_span)
+
+        spans = span_exporter.get_finished_spans()
+        model_span_result = next(s for s in spans if s.name == "Model run")
+
+        assert model_span_result.attributes["referenceId"] == "ref-456"
+
+    def test_nested_agent_runs_use_separate_reference_ids(self, tracer, span_exporter):
+        """Test nested agent runs maintain separate reference_id contexts."""
+        with tracer.start_agent_run(agent_name="OuterAgent", agent_id="outer-id"):
+            outer_tool = tracer.start_tool_call(tool_name="outer_tool")
+            tracer.end_span_ok(outer_tool)
+
+            # Start nested agent run with different reference_id
+            with tracer.start_agent_run(agent_name="InnerAgent", agent_id="inner-id"):
+                inner_tool = tracer.start_tool_call(tool_name="inner_tool")
+                tracer.end_span_ok(inner_tool)
+
+            # Back to outer context
+            outer_tool2 = tracer.start_tool_call(tool_name="outer_tool2")
+            tracer.end_span_ok(outer_tool2)
+
+        spans = span_exporter.get_finished_spans()
+        outer_agent = next(s for s in spans if "OuterAgent" in s.name)
+        outer_tool_span = next(
+            s for s in spans if "outer_tool" == s.name.split(" - ")[1]
+        )
+        inner_agent = next(s for s in spans if "InnerAgent" in s.name)
+        inner_tool_span = next(s for s in spans if "inner_tool" in s.name)
+        outer_tool2_span = next(s for s in spans if "outer_tool2" in s.name)
+
+        # Outer context spans use outer-id
+        assert outer_agent.attributes["referenceId"] == "outer-id"
+        assert outer_tool_span.attributes["referenceId"] == "outer-id"
+        assert outer_tool2_span.attributes["referenceId"] == "outer-id"
+
+        # Inner context spans use inner-id
+        assert inner_agent.attributes["referenceId"] == "inner-id"
+        assert inner_tool_span.attributes["referenceId"] == "inner-id"
 
 
 class TestAgentRunSpan:

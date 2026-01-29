@@ -51,7 +51,7 @@ from .trace_context_storage import (
     TraceContextData,
     TraceContextStorage,
 )
-from .tracer import UiPathTracer
+from .tracer import UiPathTracer, _reference_id_context
 
 logger = logging.getLogger(__name__)
 
@@ -372,6 +372,8 @@ class TelemetryRuntimeWrapper:
         during resume become children of the original agent span (not
         nested under a new child span).
 
+        Also restores the reference_id ContextVar so child spans inherit it.
+
         Args:
             saved_context: Previously saved trace context data
 
@@ -392,11 +394,22 @@ class TelemetryRuntimeWrapper:
         # This doesn't create a new span - it restores the original context
         restored_span = trace.NonRecordingSpan(restored_span_context)
 
+        # Restore reference_id ContextVar from saved attributes
+        reference_id = None
+        if "attributes" in saved_context and saved_context["attributes"]:
+            reference_id = saved_context["attributes"].get("referenceId")
+
+        reference_id_token = (
+            _reference_id_context.set(reference_id) if reference_id else None
+        )
+
         with trace.use_span(restored_span, end_on_exit=False):
             try:
                 yield restored_span
-            except Exception:
-                raise
+            finally:
+                # Reset ContextVar when done
+                if reference_id_token is not None:
+                    _reference_id_context.reset(reference_id_token)
 
     async def _handle_suspended(self, agent_span: Span) -> None:
         """Handle suspended state: upsert spans and save trace context.

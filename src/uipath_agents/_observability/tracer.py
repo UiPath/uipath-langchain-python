@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, Generator, Optional, Protocol, cast
 
 from opentelemetry import trace
@@ -50,6 +51,11 @@ from .span_attributes import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Context variable to propagate reference_id to all spans in a trace
+_reference_id_context: ContextVar[Optional[str]] = ContextVar(
+    "reference_id", default=None
+)
 
 
 class SyntheticReadableSpan:
@@ -144,10 +150,21 @@ class UiPathTracer:
         serialized here. To avoid double-escaping in storage, the span
         processor should handle final serialization.
 
+        Automatically populates execution_type, agent_version, and reference_id
+        on all spans.
+
         Args:
             span: The span to set attributes on
             attrs: Typed attributes to apply
         """
+        # Populate execution context fields on all spans
+        if attrs.execution_type is None:
+            attrs.execution_type = get_execution_type()
+        if attrs.agent_version is None:
+            attrs.agent_version = get_agent_version()
+        if attrs.reference_id is None:
+            attrs.reference_id = _reference_id_context.get()
+
         for key, value in attrs.to_otel_attributes().items():
             if value is None:
                 continue
@@ -189,6 +206,10 @@ class UiPathTracer:
         """
         span_name = SpanName.agent_run(agent_name, is_conversational)
 
+        # Set reference_id in context for all child spans
+        reference_id = agent_id
+        token = _reference_id_context.set(reference_id)
+
         # Create typed attributes
         attrs = AgentRunSpanAttributes(
             agent_name=agent_name,
@@ -199,28 +220,30 @@ class UiPathTracer:
             input=input_data,
             input_schema=input_schema,
             output_schema=output_schema,
-            execution_type=get_execution_type(),
-            agent_version=get_agent_version(),
-            reference_id=agent_id,
+            reference_id=reference_id,
         )
 
-        with self._tracer.start_as_current_span(
-            span_name,
-            kind=SpanKind.INTERNAL,
-        ) as span:
-            self._apply_attributes(span, attrs)
-            self.upsert_span_started(span)
+        try:
+            with self._tracer.start_as_current_span(
+                span_name,
+                kind=SpanKind.INTERNAL,
+            ) as span:
+                self._apply_attributes(span, attrs)
+                self.upsert_span_started(span)
 
-            try:
-                yield span
-                span.set_status(Status(StatusCode.OK))
-            except Exception as e:
-                span.set_attribute(
-                    "error",
-                    json.dumps({"message": str(e), "type": type(e).__name__}),
-                )
-                span.set_status(Status(StatusCode.ERROR, str(e)))
-                raise
+                try:
+                    yield span
+                    span.set_status(Status(StatusCode.OK))
+                except Exception as e:
+                    span.set_attribute(
+                        "error",
+                        json.dumps({"message": str(e), "type": type(e).__name__}),
+                    )
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    raise
+        finally:
+            # Reset context variable when agent run completes
+            _reference_id_context.reset(token)
 
     def start_llm_call(
         self,

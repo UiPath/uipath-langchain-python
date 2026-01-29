@@ -11,6 +11,16 @@ from uipath_agents._observability.span_attributes import (
 )
 
 
+@pytest.fixture(autouse=True)
+def clear_env_caches():
+    """Clear cached environment variable functions before each test."""
+    get_execution_type.cache_clear()
+    get_agent_version.cache_clear()
+    yield
+    get_execution_type.cache_clear()
+    get_agent_version.cache_clear()
+
+
 class TestExecutionType:
     def test_debug_when_env_true_lowercase(
         self, monkeypatch: pytest.MonkeyPatch

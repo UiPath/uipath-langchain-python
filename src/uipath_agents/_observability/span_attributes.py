@@ -8,6 +8,7 @@ import os
 from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import IntEnum
+from functools import cache
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,8 +29,11 @@ class ExecutionType(IntEnum):
     RUNTIME = 1
 
 
+@cache
 def get_execution_type() -> int:
     """Get execution type from environment.
+
+    Cached for process lifetime to avoid repeated environment variable reads.
 
     Returns:
         ExecutionType.DEBUG (0) if UIPATH_IS_DEBUG=true
@@ -41,8 +45,12 @@ def get_execution_type() -> int:
     return ExecutionType.RUNTIME
 
 
+@cache
 def get_agent_version() -> Optional[str]:
-    """Get agent version from environment."""
+    """Get agent version from environment.
+
+    Cached for process lifetime to avoid repeated environment variable reads.
+    """
     return os.getenv(ENV_UIPATH_PROCESS_VERSION) or None
 
 
@@ -135,6 +143,9 @@ class BaseSpanAttributes(BaseModel, ABC):
 
     error: Optional[ErrorDetails] = Field(None, alias="error")
     license_ref_id: Optional[str] = Field(None, alias="licenseRefId")
+    execution_type: Optional[int] = Field(None, alias="executionType")
+    agent_version: Optional[str] = Field(None, alias="agentVersion")
+    reference_id: Optional[str] = Field(None, alias="referenceId")
 
     @property
     @abstractmethod
@@ -176,11 +187,6 @@ class AgentRunSpanAttributes(BaseSpanAttributes):
     output_schema: Optional[Dict[str, Any]] = Field(None, alias="outputSchema")
     input: Optional[Dict[str, Any]] = Field(None, alias="input")
     output: Optional[Any] = Field(None, alias="output")
-
-    # Execution context fields (extracted to top-level by uipath.tracing)
-    execution_type: Optional[int] = Field(None, alias="executionType")
-    agent_version: Optional[str] = Field(None, alias="agentVersion")
-    reference_id: Optional[str] = Field(None, alias="referenceId")
 
     @property
     def type(self) -> str:
