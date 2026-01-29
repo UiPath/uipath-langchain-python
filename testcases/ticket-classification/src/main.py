@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from uipath.platform import UiPath
 from uipath.platform.common import CreateTask
-from uipath_langchain.chat import UiPathChat
+from uipath_langchain_client.clients.openai import UiPathAzureChatOpenAI
 
 # Configuration
 logger = logging.getLogger(__name__)
@@ -114,7 +114,7 @@ def decide_next_node(state: GraphState) -> NextNode:
 
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    llm = UiPathChat()
+    llm = UiPathAzureChatOpenAI(model="gpt-4o-mini-2024-07-18")
 
     # Add rejection message if there was a previous prediction
     if state.get("last_predicted_category"):

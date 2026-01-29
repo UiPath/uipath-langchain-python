@@ -30,14 +30,14 @@ def _create_openai_llm(
     agenthub_config: str,
     byo_connection_id: str | None = None,
 ) -> BaseChatModel:
-    """Create UiPathChatOpenAI for OpenAI models via LLMGateway."""
-    from uipath_langchain.chat.openai import UiPathChatOpenAI
+    """Create UiPathAzureChatOpenAI for OpenAI models via LLMGateway."""
+    from uipath_langchain_client.clients.openai import UiPathAzureChatOpenAI
 
     azure_open_ai_latest_api_version = "2025-04-01-preview"
 
     match api_flavor:
         case APIFlavor.OPENAI_RESPONSES:
-            return UiPathChatOpenAI(
+            return UiPathAzureChatOpenAI(
                 use_responses_api=True,
                 model_name=model,
                 temperature=temperature,
@@ -48,7 +48,7 @@ def _create_openai_llm(
                 output_version="v1",
             )
         case APIFlavor.OPENAI_COMPLETIONS:
-            return UiPathChatOpenAI(
+            return UiPathAzureChatOpenAI(
                 use_responses_api=False,
                 model_name=model,
                 temperature=temperature,
@@ -71,7 +71,8 @@ def _create_bedrock_llm(
     byo_connection_id: str | None = None,
 ) -> BaseChatModel:
     """Create UiPathChatBedrockConverse for Claude models via LLMGateway."""
-    from uipath_langchain.chat.bedrock import (
+
+    from uipath_langchain_client.clients.bedrock import (
         UiPathChatBedrock,
         UiPathChatBedrockConverse,
     )
@@ -108,11 +109,11 @@ def _create_vertex_llm(
     byo_connection_id: str | None = None,
 ) -> BaseChatModel:
     """Create UiPathChatVertex for Gemini models via LLMGateway."""
-    from uipath_langchain.chat.vertex import UiPathChatVertex
+    from uipath_langchain_client.clients.google import UiPathChatGoogleGenerativeAI
 
     match api_flavor:
         case APIFlavor.VERTEX_GEMINI_GENERATE_CONTENT:
-            return UiPathChatVertex(
+            return UiPathChatGoogleGenerativeAI(
                 model_name=model,
                 temperature=temperature,
                 max_tokens=max_tokens,

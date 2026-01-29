@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from uipath.core.guardrails import GuardrailScope
 
 from middleware import CustomFilterAction, LoggingMiddleware
-from uipath_langchain.chat import UiPathChat
+from uipath_langchain_client.clients.openai import UiPathAzureChatOpenAI
 from uipath_langchain.guardrails import (
     BlockAction,
     PIIDetectionEntity,
@@ -34,8 +34,8 @@ class Output(BaseModel):
     joke: str
 
 
-# Initialize UiPathChat LLM
-llm = UiPathChat(model="gpt-4o-2024-08-06", temperature=0.7)
+# Initialize UiPathAzureChatOpenAI LLM
+llm = UiPathAzureChatOpenAI(model="gpt-4o-2024-08-06", temperature=0.7)
 
 
 @tool

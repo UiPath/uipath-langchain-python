@@ -3,8 +3,7 @@ from langchain_community.tools import DuckDuckGoSearchResults
 from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import BaseModel
 
-from uipath_langchain.chat import UiPathChat
-
+from uipath_langchain_client.clients.openai import UiPathAzureChatOpenAI
 # Configuration constants
 
 
@@ -38,9 +37,9 @@ DO NOT do any math as specified in your instructions.
 """
 
 
-def create_llm() -> UiPathChat:
+def create_llm() -> UiPathAzureChatOpenAI:
     """Create and configure the language model."""
-    return UiPathChat(streaming=False)
+    return UiPathAzureChatOpenAI(streaming=False)
 
 
 def create_research_agent():
