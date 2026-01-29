@@ -185,7 +185,19 @@ def _build_guardrail_node_chain(
     )
 
     guardrail_node_metadata = getattr(guardrail_node, "__metadata__", None) or {}
+    guardrail_node_metadata = {
+        **guardrail_node_metadata,
+        "action_type": action.action_type,
+        "node_type": "guardrail_evaluation",
+    }
+
     fail_node_metadata = getattr(fail_node, "__metadata__", None) or {}
+    fail_node_metadata = {
+        **fail_node_metadata,
+        "action_type": action.action_type,
+        "node_type": "guardrail_action",
+    }
+
     subgraph.add_node(
         guardrail_node_name, guardrail_node, metadata={**guardrail_node_metadata}
     )

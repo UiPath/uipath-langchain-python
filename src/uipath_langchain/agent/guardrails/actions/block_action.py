@@ -20,6 +20,10 @@ class BlockAction(GuardrailAction):
     def __init__(self, reason: str) -> None:
         self.reason = reason
 
+    @property
+    def action_type(self) -> str:
+        return "Block"
+
     def action_node(
         self,
         *,
@@ -44,7 +48,6 @@ class BlockAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "action_type": "Block",
         }
 
         return node_name, _node

@@ -497,3 +497,91 @@ class TestFilterAction:
         result = await node(state)
 
         assert result == {}
+
+
+class TestFilterActionMetadata:
+    """Tests for FilterAction node metadata."""
+
+    def test_filter_action_node_has_excluded_fields_in_metadata(self):
+        """Test that FilterAction node has excluded_fields in metadata."""
+        fields = [create_field_reference("sentence", "input")]
+        action = FilterAction(fields=fields)
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.TOOL,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="test_tool",
+        )
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        assert "excluded_fields" in metadata
+        assert metadata["excluded_fields"] == fields
+
+    @pytest.mark.asyncio
+    async def test_filter_input_updates_metadata_with_updated_input(self) -> None:
+        """Test that filtering input populates updated_input in metadata."""
+        fields = [create_field_reference("sentence", "input")]
+        action = FilterAction(fields=fields)
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.TOOL,
+            execution_stage=ExecutionStage.PRE_EXECUTION,
+            guarded_component_name="Agent___Sentence_Analyzer",
+        )
+
+        ai_message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "Agent___Sentence_Analyzer",
+                    "args": {"sentence": "Test sentence", "other_param": "value"},
+                    "id": "call_1",
+                }
+            ],
+        )
+        state = AgentGuardrailsGraphState(messages=[ai_message])
+
+        await node(state)
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        # updated_input should contain the filtered args (without 'sentence')
+        assert metadata["updated_input"] == {"other_param": "value"}
+        assert metadata["updated_output"] is None
+
+    @pytest.mark.asyncio
+    async def test_filter_output_updates_metadata_with_updated_output(self) -> None:
+        """Test that filtering output populates updated_output in metadata."""
+        fields = [create_field_reference("content", "output")]
+        action = FilterAction(fields=fields)
+        guardrail = MagicMock()
+        guardrail.name = "Test Guardrail"
+
+        _, node = action.action_node(
+            guardrail=guardrail,
+            scope=GuardrailScope.TOOL,
+            execution_stage=ExecutionStage.POST_EXECUTION,
+            guarded_component_name="Agent___Sentence_Analyzer",
+        )
+
+        tool_message = ToolMessage(
+            content='{"content": "Test content", "other": "data"}',
+            tool_call_id="call_1",
+            name="Agent___Sentence_Analyzer",
+        )
+        state = AgentGuardrailsGraphState(messages=[tool_message])
+
+        await node(state)
+
+        metadata = getattr(node, "__metadata__", None)
+        assert metadata is not None
+        # updated_output should contain the filtered output (without 'content')
+        assert metadata["updated_output"] == {"other": "data"}
+        assert metadata["updated_input"] is None
