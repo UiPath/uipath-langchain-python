@@ -2,10 +2,10 @@
 
 from langchain_core.language_models import BaseChatModel
 
+from uipath_langchain.chat import UiPathBaseLLMClient
 from uipath_langchain.chat.types import (
     APIFlavor,
     LLMProvider,
-    UiPathPassthroughChatModel,
 )
 
 from .base import ModelPayloadHandler
@@ -40,20 +40,20 @@ def get_payload_handler(model: BaseChatModel) -> ModelPayloadHandler:
         A ModelPayloadHandler instance for the model.
 
     Raises:
-        TypeError: If the model doesn't implement UiPathPassthroughChatModel.
+        TypeError: If the model doesn't implement UiPathBaseLLMClient.
         ValueError: If no handler is registered for the model's provider/API flavor.
     """
-    if not isinstance(model, UiPathPassthroughChatModel):
+    if not isinstance(model, UiPathBaseLLMClient):
         raise TypeError(
-            f"Model {type(model).__name__} does not implement UiPathPassthroughChatModel"
+            f"Model {type(model).__name__} does not implement UiPathBaseLLMClient"
         )
-    key = (model.llm_provider, model.api_flavor)
+    key = (model.api_config.vendor_type, model.api_config.api_flavor)
     handler_class = _HANDLER_REGISTRY.get(key)
 
     if handler_class is None:
         raise ValueError(
-            f"No payload handler registered for provider={model.llm_provider}, "
-            f"api_flavor={model.api_flavor}"
+            f"No payload handler registered for provider={model.api_config.vendor_type}, "
+            f"api_flavor={model.api_config.api_flavor}"
         )
 
     return handler_class()
