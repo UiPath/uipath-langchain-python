@@ -5,7 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
 from opentelemetry.sdk.trace import ReadableSpan
-from uipath.agent.models.agent import AgentDefinition, AgentSettings
+from uipath.agent.models.agent import (
+    AgentDefinition,
+    AgentMessage,
+    AgentMessageRole,
+    AgentSettings,
+)
 from uipath.runtime import UiPathRuntimeContext, UiPathRuntimeStatus
 
 from uipath_agents._observability.callback import UiPathTracingCallback
@@ -95,7 +100,7 @@ class TestTelemetryRuntimeWrapper:
 
         agent_span_set = None
 
-        def capture_agent_span(span, run_id):
+        def capture_agent_span(span, run_id, prompts_captured=False):
             nonlocal agent_span_set
             agent_span_set = span
 
@@ -117,7 +122,7 @@ class TestTelemetryRuntimeWrapper:
         """Test stream calls set_agent_span on callback."""
         agent_span_set = None
 
-        def capture_agent_span(span, run_id):
+        def capture_agent_span(span, run_id, prompts_captured=False):
             nonlocal agent_span_set
             agent_span_set = span
 
@@ -195,6 +200,42 @@ class TestTelemetryRuntimeWrapper:
         )
         assert wrapper_empty._get_agent_name() == "unknown"
         assert wrapper_empty._get_prompts() == (None, None)
+
+    def test_get_prompts_extracts_templates_from_messages(
+        self, tracer, callback, mock_runtime_context
+    ):
+        mock_delegate = MagicMock(spec=[])  # No _get_trace_prompts method
+
+        agent_info = AgentDefinition(
+            name="template-agent",
+            messages=[
+                AgentMessage(
+                    role=AgentMessageRole.SYSTEM,
+                    content="You are a {{role}} assistant.",
+                ),
+                AgentMessage(
+                    role=AgentMessageRole.USER,
+                    content="Process this: {{input_string}}",
+                ),
+            ],
+            settings=AgentSettings(
+                model="gpt-4o-2024-11-20", engine="v1", max_tokens=1000, temperature=0.7
+            ),
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+        )
+        wrapper = TelemetryRuntimeWrapper(
+            mock_delegate,
+            tracer,
+            callback,
+            mock_runtime_context,
+            agent_definition=agent_info,
+        )
+
+        system_prompt, user_prompt = wrapper._get_prompts()
+
+        assert system_prompt == "You are a {{role}} assistant."
+        assert user_prompt == "Process this: {{input_string}}"
 
     @pytest.mark.asyncio
     async def test_same_callback_used_across_executions(
@@ -312,8 +353,8 @@ class TestCallbackPersistence:
 
         original_set_agent_span = callback.set_agent_span
 
-        def track_spans(span, run_id):
-            original_set_agent_span(span, run_id)
+        def track_spans(span, run_id, prompts_captured=False):
+            original_set_agent_span(span, run_id, prompts_captured)
             spans_per_execution.append(span)
 
         callback.set_agent_span = track_spans

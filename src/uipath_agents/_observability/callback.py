@@ -190,11 +190,12 @@ class UiPathTracingCallback(BaseCallbackHandler):
         self,
         agent_span: Span,
         run_id: UUID,
+        prompts_captured: bool = False,
     ) -> None:
         self._agent_span = agent_span
         self._agent_run_id = run_id
         self._spans.clear()
-        self._prompts_captured = False
+        self._prompts_captured = prompts_captured
         self._pending_tool_name = None
         self._pending_tool_span = None
         self._pending_process_span = None
@@ -575,19 +576,14 @@ class UiPathTracingCallback(BaseCallbackHandler):
             logger.exception("Error in on_chat_model_start callback")
 
     def _capture_interpolated_prompts(self, messages: List[List[BaseMessage]]) -> None:
-        """Extract and set interpolated prompts on the AgentRun span.
-
-        Overwrites template values ({{input.x}}) with actual interpolated values.
-        """
+        """Extract and set interpolated userPrompt on the AgentRun span."""
         if not messages or not messages[0]:
             return
 
         for msg in messages[0]:
-            sanitized = self._sanitize_file_data(msg.content)
-            content = serialize_json(sanitized)
-            if msg.type == "system" and self._agent_span:
-                self._agent_span.set_attribute("systemPrompt", content)
-            elif msg.type == "human" and self._agent_span:
+            if msg.type == "human" and self._agent_span:
+                sanitized = self._sanitize_file_data(msg.content)
+                content = serialize_json(sanitized)
                 self._agent_span.set_attribute("userPrompt", content)
 
         self._prompts_captured = True

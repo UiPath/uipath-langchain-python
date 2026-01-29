@@ -248,9 +248,11 @@ class TelemetryRuntimeWrapper:
             The agent span for the execution
         """
         if saved_context:
-            # Resume: restore original trace context
+            # Resume: restore original trace context (prompts already captured)
             async with self._restore_trace_context(saved_context) as agent_span:
-                self._callback.set_agent_span(agent_span, uuid.UUID(self._agent_run_id))
+                self._callback.set_agent_span(
+                    agent_span, uuid.UUID(self._agent_run_id), prompts_captured=True
+                )
                 pending_tool = saved_context.get("pending_tool_name")
                 if pending_tool:
                     pending_tool_span = saved_context.get("pending_tool_span")
@@ -300,7 +302,10 @@ class TelemetryRuntimeWrapper:
                 input_schema=input_schema,
                 output_schema=output_schema,
             ) as agent_span:
-                self._callback.set_agent_span(agent_span, uuid.UUID(self._agent_run_id))
+                prompts_captured = system_prompt is not None or user_prompt is not None
+                self._callback.set_agent_span(
+                    agent_span, uuid.UUID(self._agent_run_id), prompts_captured
+                )
 
                 if self._telemetry_callback:
                     self._telemetry_callback.set_agent_info(agent_name, agent_id)
@@ -690,6 +695,17 @@ class TelemetryRuntimeWrapper:
     def _get_prompts(self) -> tuple[Optional[str], Optional[str]]:
         if hasattr(self._delegate, "_get_trace_prompts"):
             return self._delegate._get_trace_prompts()
+
+        if self._agent_definition and self._agent_definition.messages:
+            system_prompt = None
+            user_prompt = None
+            for msg in self._agent_definition.messages:
+                if msg.role == "system":
+                    system_prompt = msg.content
+                elif msg.role == "user":
+                    user_prompt = msg.content
+            return system_prompt, user_prompt
+
         return None, None
 
     def _normalize_input(self, input_data: Any) -> Optional[Dict[str, Any]]:
