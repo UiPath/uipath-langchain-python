@@ -108,10 +108,11 @@ def create_escalation_tool(
             else None
         )
 
+        task_title = "Escalation Task"
         if tool.metadata is not None:
             # Recipient requires runtime resolution, store in metadata after resolving
             tool.metadata["recipient"] = recipient
-            task_title = tool.metadata.get("task_title") or "Escalation Task"
+            task_title = tool.metadata.get("task_title") or task_title
 
         result = interrupt(
             CreateEscalation(
