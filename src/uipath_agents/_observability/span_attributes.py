@@ -254,10 +254,11 @@ class CompletionSpanAttributes(BaseSpanAttributes):
 
 
 class LlmCallSpanAttributes(BaseSpanAttributes):
-    """Attributes for LLM call spans (outer wrapper, no model)."""
+    """Attributes for LLM call spans (outer wrapper)."""
 
     model_config = ConfigDict(populate_by_name=True)
 
+    model: Optional[str] = Field(None, alias="model")
     # Settings as nested object (matches Temporal)
     settings: Optional["ModelSettings"] = Field(None, alias="settings")
     input: Optional[str] = Field(None, alias="input")

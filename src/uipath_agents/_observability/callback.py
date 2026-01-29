@@ -495,6 +495,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
 
         if self._current_llm_span and self._llm_span_from_guardrail:
             llm_span = self._current_llm_span
+            llm_span.set_attribute("model", model_name)
             settings = {"maxTokens": max_tokens, "temperature": temperature}
             llm_span.set_attribute("settings", json.dumps(settings))
             if input:
@@ -503,6 +504,7 @@ class UiPathTracingCallback(BaseCallbackHandler):
         else:
             parent = self._get_span_or_root(parent_run_id)
             llm_span = self._tracer.start_llm_call(
+                model_name=model_name,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 input=input,

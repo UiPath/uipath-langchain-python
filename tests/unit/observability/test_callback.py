@@ -176,7 +176,9 @@ class TestModelNameExtraction:
         callback.on_llm_end(None, run_id=run_id)
 
         spans = span_exporter.get_finished_spans()
+        llm_span = next(s for s in spans if s.name == "LLM call")
         model_span = next(s for s in spans if s.name == "Model run")
+        assert llm_span.attributes["model"] == "gpt-4"
         assert model_span.attributes["model"] == "gpt-4"
 
     def test_extracts_model_from_kwargs_model(self, callback, span_exporter):
@@ -188,7 +190,9 @@ class TestModelNameExtraction:
         callback.on_llm_end(None, run_id=run_id)
 
         spans = span_exporter.get_finished_spans()
+        llm_span = next(s for s in spans if s.name == "LLM call")
         model_span = next(s for s in spans if s.name == "Model run")
+        assert llm_span.attributes["model"] == "claude-3"
         assert model_span.attributes["model"] == "claude-3"
 
     def test_falls_back_to_name(self, callback, span_exporter):

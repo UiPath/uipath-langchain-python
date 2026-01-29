@@ -224,6 +224,7 @@ class UiPathTracer:
 
     def start_llm_call(
         self,
+        model_name: Optional[str] = None,
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         input: Optional[str] = None,
@@ -235,6 +236,7 @@ class UiPathTracer:
         Use for callback-based instrumentation where context managers don't fit.
 
         Args:
+            model_name: Name of the model being called
             max_tokens: Maximum tokens for generation
             temperature: Temperature for generation
             input: The user input/prompt for this LLM call
@@ -251,11 +253,10 @@ class UiPathTracer:
             kind=SpanKind.INTERNAL,
             context=context,
         )
-        # LLM call: type=llmCall, no model (model only on child Model run span)
         settings = None
         if max_tokens is not None or temperature is not None:
             settings = ModelSettings(max_tokens=max_tokens, temperature=temperature)
-        attrs = LlmCallSpanAttributes(settings=settings, input=input)
+        attrs = LlmCallSpanAttributes(model=model_name, settings=settings, input=input)
         self._apply_attributes(span, attrs)
         self.upsert_span_started(span)
         return span
