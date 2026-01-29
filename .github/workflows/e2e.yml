@@ -20,7 +20,6 @@ on:
         default: "false"
         type: boolean
 
-# Permissions required for dorny/test-reporter to create check runs
 permissions:
   contents: read
   checks: write
@@ -30,8 +29,54 @@ env:
   UV_SYSTEM_PYTHON: 1
 
 jobs:
-  # Job 1: Validate example configurations (no secrets required)
-  # This checks that all example agent.json, eval-sets, and evaluators are valid
+  # Job 1: Discover tests dynamically
+  discover-tests:
+    name: Discover Tests
+    runs-on: ubuntu-latest
+    outputs:
+      run-tests: ${{ steps.discover-run.outputs.tests }}
+      telemetry-tests: ${{ steps.discover-telemetry.outputs.tests }}
+      eval-tests: ${{ steps.discover-eval.outputs.tests }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Discover run tests
+        id: discover-run
+        run: |
+          TESTS=$(uv run pytest tests/e2e/test_run.py::TestUiPathRun --collect-only -q 2>&1 | grep '<Function' | sed 's/.*<Function //' | sed 's/>//' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "tests=$TESTS" >> $GITHUB_OUTPUT
+          echo "Discovered run tests: $TESTS"
+
+      - name: Discover telemetry tests
+        id: discover-telemetry
+        run: |
+          TESTS=$(uv run pytest tests/e2e/test_telemetry.py::TestTelemetryE2E --collect-only -q 2>&1 | grep '<Function' | sed 's/.*<Function //' | sed 's/>//' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "tests=$TESTS" >> $GITHUB_OUTPUT
+          echo "Discovered telemetry tests: $TESTS"
+
+      - name: Discover eval tests
+        id: discover-eval
+        run: |
+          TESTS=$(uv run pytest tests/e2e/test_eval.py::TestEvalExecution --collect-only -q 2>&1 | grep '<Function' | sed 's/.*<Function //' | sed 's/>//' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "tests=$TESTS" >> $GITHUB_OUTPUT
+          echo "Discovered eval tests: $TESTS"
+
+  # Job 2: Validate example configurations (no secrets required)
   e2e-validation:
     name: Validate Examples
     runs-on: ubuntu-latest
@@ -74,13 +119,15 @@ jobs:
           reporter: java-junit
           fail-on-error: true
 
-  # Job 2: Run e2e tests that require authentication
-  # This actually runs the uipath CLI commands against the alpha environment
-  e2e-tests:
-    name: E2E Tests
+  # Job 3: Run e2e run tests (matrix)
+  e2e-run-tests:
+    name: "Run: ${{ matrix.test }}"
     runs-on: ubuntu-latest
-    environment: alpha
-    needs: e2e-validation  # Only run if validation passes
+    needs: [discover-tests, e2e-validation]
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJson(needs.discover-tests.outputs.run-tests) }}
 
     steps:
       - name: Checkout repository
@@ -99,17 +146,51 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Run e2e tests (uipath run command)
+      - name: Run test
         env:
           UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
           UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
           UIPATH_URL: ${{ secrets.UIPATH_URL }}
           UIPATH_PROJECT_ID: ${{ secrets.UIPATH_PROJECT_ID }}
         run: |
-          echo "=== Running e2e tests for 'uipath run' command ==="
-          uv run pytest tests/e2e/test_run.py -v -s -m "e2e" --junitxml=run-results.xml --tb=short
+          echo "=== Running ${{ matrix.test }} ==="
+          uv run pytest tests/e2e/test_run.py::TestUiPathRun::${{ matrix.test }} -v -s -m "e2e" --junitxml=${{ matrix.test }}-results.xml --tb=short
 
-      - name: Run e2e tests (telemetry)
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-${{ matrix.test }}-results
+          path: ${{ matrix.test }}-results.xml
+
+  # Job 4: Run e2e telemetry tests (matrix)
+  e2e-telemetry-tests:
+    name: "Telemetry: ${{ matrix.test }}"
+    runs-on: ubuntu-latest
+    needs: [discover-tests, e2e-validation]
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJson(needs.discover-tests.outputs.telemetry-tests) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run test
         env:
           UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
           UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
@@ -118,21 +199,55 @@ jobs:
           TELEMETRY_CONNECTION_STRING: ${{ secrets.APPLICATIONINSIGHTS_CONNECTION_STRING }}
           APPLICATIONINSIGHTS_API_KEY: ${{ secrets.APPLICATIONINSIGHTS_API_KEY }}
         run: |
-          echo "=== Running e2e tests for telemetry functionality ==="
-          uv run pytest tests/e2e/test_telemetry.py -v -s -m "e2e" --junitxml=telemetry-results.xml --tb=short
+          echo "=== Running ${{ matrix.test }} ==="
+          uv run pytest tests/e2e/test_telemetry.py::TestTelemetryE2E::${{ matrix.test }} -v -s -m "e2e" --junitxml=${{ matrix.test }}-results.xml --tb=short
 
-      - name: Run e2e tests (uipath eval command)
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: telemetry-${{ matrix.test }}-results
+          path: ${{ matrix.test }}-results.xml
+
+  # Job 5: Run e2e eval tests (matrix)
+  e2e-eval-tests:
+    name: "Eval: ${{ matrix.test }}"
+    runs-on: ubuntu-latest
+    needs: [discover-tests, e2e-validation]
+    strategy:
+      fail-fast: false
+      matrix:
+        test: ${{ fromJson(needs.discover-tests.outputs.eval-tests) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Run test
         env:
           UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
           UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
           UIPATH_URL: ${{ secrets.UIPATH_URL }}
           UIPATH_PROJECT_ID: ${{ secrets.UIPATH_PROJECT_ID }}
         run: |
-          echo "=== Running e2e tests for 'uipath eval' command ==="
-          uv run pytest tests/e2e/test_eval.py -v -s -m "e2e" --junitxml=eval-results.xml --tb=short
+          echo "=== Running ${{ matrix.test }} ==="
+          uv run pytest tests/e2e/test_eval.py::TestEvalExecution::${{ matrix.test }} -v -s -m "e2e" --junitxml=${{ matrix.test }}-results.xml --tb=short
 
       - name: Post evaluation results to PR
-        if: always() && github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request' && matrix.test == 'test_calculator_evaluations'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -174,26 +289,49 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: e2e-test-results
-          path: |
-            run-results.xml
-            eval-results.xml
-          if-no-files-found: ignore
+          name: eval-${{ matrix.test }}-results
+          path: ${{ matrix.test }}-results.xml
 
-      - name: Publish run test results
+  # Job 6: Aggregate and publish all test results
+  publish-test-results:
+    name: Publish Test Results
+    runs-on: ubuntu-latest
+    needs: [e2e-run-tests, e2e-telemetry-tests, e2e-eval-tests]
+    if: always()
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all test results
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+          pattern: "*-results"
+
+      - name: Publish aggregated run test results
         uses: dorny/test-reporter@v1
         if: always()
         with:
           name: E2E Run Tests
-          path: run-results.xml
+          path: "test-results/run-*-results/*.xml"
           reporter: java-junit
-          fail-on-error: true
+          fail-on-error: false
 
-      - name: Publish eval test results
+      - name: Publish aggregated telemetry test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: E2E Telemetry Tests
+          path: "test-results/telemetry-*-results/*.xml"
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Publish aggregated eval test results
         uses: dorny/test-reporter@v1
         if: always()
         with:
           name: E2E Eval Tests
-          path: eval-results.xml
+          path: "test-results/eval-*-results/*.xml"
           reporter: java-junit
-          fail-on-error: true
+          fail-on-error: false
