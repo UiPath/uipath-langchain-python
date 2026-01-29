@@ -1,4 +1,4 @@
-"""Deeprag tool for creation and retrieval of deeprags."""
+"""Batch Transform tool for creating and retrieving batch transformations."""
 
 import uuid
 from typing import Any
@@ -8,15 +8,15 @@ from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import interrupt
 from uipath.agent.models.agent import (
-    AgentInternalDeepRagToolProperties,
+    AgentInternalBatchTransformToolProperties,
     AgentInternalToolResourceConfig,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateDeepRag
+from uipath.platform.common import CreateBatchTransform
 from uipath.platform.common.interrupt_models import WaitEphemeralIndex
 from uipath.platform.context_grounding import (
-    CitationMode,
+    BatchTransformOutputColumn,
     EphemeralIndexUsage,
 )
 from uipath.platform.context_grounding.context_grounding_index import (
@@ -34,13 +34,13 @@ from uipath_langchain.agent.tools.utils import sanitize_tool_name
 from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 
 
-def create_deeprag_tool(
+def create_batch_transform_tool(
     resource: AgentInternalToolResourceConfig, llm: BaseChatModel
 ) -> StructuredTool:
-    """Create a DeepRAG internal tool from resource configuration."""
-    if not isinstance(resource.properties, AgentInternalDeepRagToolProperties):
+    """Create a Batch Transform internal tool from resource configuration."""
+    if not isinstance(resource.properties, AgentInternalBatchTransformToolProperties):
         raise ValueError(
-            f"Expected AgentInternalDeepRagToolProperties, got {type(resource.properties)}"
+            f"Expected AgentInternalBatchTransformToolProperties, got {type(resource.properties)}"
         )
 
     tool_name = sanitize_tool_name(resource.name)
@@ -49,32 +49,41 @@ def create_deeprag_tool(
 
     # Extract settings
     query_setting = settings.query
-    citation_mode_setting = settings.citation_mode
-
-    # Determine citation mode
-    citation_mode = (
-        CitationMode(citation_mode_setting.value)
-        if citation_mode_setting
-        else CitationMode.INLINE
-    )
+    folder_path_prefix_setting = settings.folder_path_prefix
+    output_columns_setting = settings.output_columns
+    web_search_grounding_setting = settings.web_search_grounding
 
     # Check if query is dynamic or static
     is_query_static = query_setting and query_setting.variant == "static"
     static_query = query_setting.value if is_query_static else None
 
+    # Get static values for other settings
+    static_folder_path_prefix = None
+    if folder_path_prefix_setting:
+        static_folder_path_prefix = getattr(folder_path_prefix_setting, "value", None)
+
+    static_web_search = False
+    if web_search_grounding_setting:
+        value = getattr(web_search_grounding_setting, "value", None)
+        static_web_search = value == "Enabled" if value else False
+
+    # Convert output columns to BatchTransformOutputColumn
+    batch_transform_output_columns = [
+        BatchTransformOutputColumn(name=col.name, description=col.description or "")
+        for col in output_columns_setting
+    ]
+
     # Use resource input schema and add query field if dynamic
     input_schema = dict(resource.input_schema)
     if not is_query_static:
-        # Add query field to the schema
         if "properties" not in input_schema:
             input_schema["properties"] = {}
         input_schema["properties"]["query"] = {
             "type": "string",
             "description": query_setting.description
             if query_setting and query_setting.description
-            else "The query to create a deeprag off of",
+            else "The query to create a batch transform off of",
         }
-        # Add query to required fields
         if "required" not in input_schema:
             input_schema["required"] = []
         if "query" not in input_schema["required"]:
@@ -91,28 +100,31 @@ def create_deeprag_tool(
         output_schema=output_model.model_json_schema(),
         example_calls=[],  # Examples cannot be provided for internal tools
     )
-    async def deeprag_tool_fn(**kwargs: Any) -> dict[str, Any]:
+    async def batch_transform_tool_fn(**kwargs: Any) -> dict[str, Any]:
         # Get query - dynamic from kwargs or static from settings
         query = kwargs.get("query") if not is_query_static else static_query
         if not query:
-            raise ValueError("Query is required for DeepRAG tool")
+            raise ValueError("Query is required for Batch Transform tool")
 
         if "attachment" not in kwargs:
             raise ValueError("Argument 'attachment' is not available")
 
         attachment = kwargs.get("attachment")
         if not attachment:
-            raise ValueError("Attachment is required for DeepRAG tool")
+            raise ValueError("Attachment is required for Batch Transform tool")
 
         # Extract attachment ID using getattr (works for Pydantic models)
         attachment_id = getattr(attachment, "ID", None)
         if not attachment_id:
             raise ValueError("Attachment ID is required")
 
+        # Get destination path, default to output.csv if not provided
+        destination_path = kwargs.get("destination_path", "output.csv")
+
         # Create ephemeral index directly via SDK
         uipath = UiPath()
         ephemeral_index = await uipath.context_grounding.create_ephemeral_index_async(
-            usage=EphemeralIndexUsage.DEEP_RAG,
+            usage=EphemeralIndexUsage.BATCH_RAG,
             attachments=[attachment_id],
         )
 
@@ -121,21 +133,24 @@ def create_deeprag_tool(
             ephemeral_index_dict = interrupt(WaitEphemeralIndex(index=ephemeral_index))
             ephemeral_index = ContextGroundingIndex(**ephemeral_index_dict)
 
-        # Create DeepRAG request using interrupt
+        # Create Batch Transform request using interrupt
         return interrupt(
-            CreateDeepRag(
+            CreateBatchTransform(
                 name=f"task-{uuid.uuid4()}",
                 index_name=ephemeral_index.name,
                 index_id=ephemeral_index.id,
                 prompt=query,
-                citation_mode=citation_mode,
+                output_columns=batch_transform_output_columns,
+                storage_bucket_folder_path_prefix=static_folder_path_prefix,
+                enable_web_search_grounding=static_web_search,
+                destination_path=destination_path,
                 is_ephemeral=True,
             )
         )
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 
-    async def deeprag_tool_wrapper(
+    async def batch_transform_tool_wrapper(
         tool: BaseTool,
         call: ToolCall,
         state: AgentGraphState,
@@ -147,9 +162,9 @@ def create_deeprag_tool(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
-        coroutine=deeprag_tool_fn,
+        coroutine=batch_transform_tool_fn,
         output_type=output_model,
         argument_properties=resource.argument_properties,
     )
-    tool.set_tool_wrappers(awrapper=deeprag_tool_wrapper)
+    tool.set_tool_wrappers(awrapper=batch_transform_tool_wrapper)
     return tool
