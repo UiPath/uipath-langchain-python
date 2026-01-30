@@ -5,7 +5,7 @@ from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
 from .integration_tool import create_integration_tool
 from .ixp_escalation_tool import create_ixp_escalation_tool
-from .mcp_tool import create_mcp_tools
+from .mcp.mcp_tool import create_mcp_tools
 from .process_tool import create_process_tool
 from .tool_factory import (
     create_tools_from_resources,

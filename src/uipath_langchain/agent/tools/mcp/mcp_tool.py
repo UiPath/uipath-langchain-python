@@ -17,7 +17,7 @@ from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
 )
 
-from .utils import sanitize_tool_name
+from ..utils import sanitize_tool_name
 
 
 def _deduplicate_tools(tools: list[BaseTool]) -> list[BaseTool]:
@@ -108,11 +108,25 @@ async def create_mcp_tools_from_metadata(
     Each tool manages its own session lifecycle - creating, using, and cleaning up
     the MCP connection within the tool invocation.
     """
-    # Lazy import to improve cold start time
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
 
+    if config.is_enabled is False:
+        return []
+
+    # Lazy import to improve cold start time
+    import logging
+
+    from ._mcp_client import McpClient
+
+    logger: logging.Logger = logging.getLogger(__name__)
     tools: list[BaseTool] = []
+
+    sdk = UiPath()
+    mcpServer: McpServer = await sdk.mcp.retrieve_async(
+        slug=config.slug, folder_path=config.folder_path
+    )
+    if mcpServer.mcp_url is None:
+        raise ValueError(f"MCP server '{config.slug}' has no URL configured")
+    mcpClient: McpClient = McpClient(mcpServer.mcp_url)
 
     for mcp_tool in config.available_tools:
         tool_name = sanitize_tool_name(mcp_tool.name)
@@ -131,41 +145,14 @@ async def create_mcp_tools_from_metadata(
                 output_schema=output_schema,
             )
             async def tool_fn(**kwargs: Any) -> Any:
-                """Execute MCP tool call with ephemeral session."""
-                async with AsyncExitStack() as stack:
-                    sdk = UiPath()
-                    mcpServer: McpServer = await sdk.mcp.retrieve_async(
-                        slug=config.slug, folder_path=config.folder_path
-                    )
+                """Execute MCP tool call with ephemeral session.
 
-                    default_client_kwargs = get_httpx_client_kwargs()
-                    client_kwargs = {
-                        **default_client_kwargs,
-                        "headers": {"Authorization": f"Bearer {sdk._config.secret}"},
-                        "timeout": httpx.Timeout(600),
-                    }
-
-                    # Create HTTP client
-                    http_client = await stack.enter_async_context(
-                        httpx.AsyncClient(**client_kwargs)
-                    )
-
-                    # Create streamable connection
-                    read, write, _ = await stack.enter_async_context(
-                        streamable_http_client(
-                            url=f"{mcpServer.mcp_url}", http_client=http_client
-                        )
-                    )
-
-                    # Create and initialize session
-                    session = await stack.enter_async_context(
-                        ClientSession(read, write)
-                    )
-                    await session.initialize()
-
-                    # Call the tool
-                    result = await session.call_tool(mcp_tool.name, arguments=kwargs)
-                    return result.content if hasattr(result, "content") else result
+                If a session disconnect error occurs (e.g., 404 or session terminated),
+                the tool will retry once by re-initializing the session.
+                """
+                result = await mcpClient.call_tool(mcp_tool.name, arguments=kwargs)
+                logger.info(f"Tool call successful for {mcp_tool.name}")
+                return result.content if hasattr(result, "content") else result
 
             return tool_fn
 

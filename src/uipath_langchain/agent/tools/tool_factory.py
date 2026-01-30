@@ -23,7 +23,7 @@ from .extraction_tool import create_ixp_extraction_tool
 from .integration_tool import create_integration_tool
 from .internal_tools import create_internal_tool
 from .ixp_escalation_tool import create_ixp_escalation_tool
-from .mcp_tool import create_mcp_tools_from_metadata
+from .mcp import create_mcp_tools_from_metadata
 from .process_tool import create_process_tool
 
 logger = getLogger(__name__)
