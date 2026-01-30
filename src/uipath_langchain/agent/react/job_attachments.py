@@ -45,7 +45,7 @@ def get_job_attachment_paths(model: type[BaseModel]) -> list[str]:
     Returns:
         List of JSONPath expressions pointing to job attachment fields
     """
-    return get_json_paths_by_type(model, "Job_attachment")
+    return get_json_paths_by_type(model, "__Job_attachment")
 
 
 def replace_job_attachment_ids(
