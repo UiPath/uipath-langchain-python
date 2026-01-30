@@ -76,14 +76,14 @@ def create_ixp_extraction_tool(
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
         tool_result = await tool.ainvoke(call["args"])
-
+        data_projection = tool_result["dataProjection"]
         # update the state with extraction response for later reuse in ixpVsEscalation
 
         return Command(
             update={
                 "messages": [
                     ToolMessage(
-                        content=str(tool_result),
+                        content=str(data_projection),
                         name=call["name"],
                         tool_call_id=call["id"],
                     )
