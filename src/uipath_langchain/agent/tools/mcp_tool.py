@@ -105,10 +105,109 @@ async def create_mcp_tools_from_metadata(
     the MCP connection within the tool invocation.
     """
     # Lazy import to improve cold start time
+    import contextlib
+    import logging
+    from collections.abc import AsyncGenerator
+    from contextlib import asynccontextmanager
+
+    import anyio
+    import httpx
+    from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
+    from mcp.client.streamable_http import GetSessionIdCallback, StreamableHTTPTransport
+    from mcp.shared._httpx_utils import create_mcp_http_client
+    from mcp.shared.message import SessionMessage
+
+    logger = logging.getLogger(__name__)
+
+    @asynccontextmanager
+    async def streamable_http_client(
+        url: str,
+        *,
+        http_client: httpx.AsyncClient | None = None,
+        session_id: str | None,
+        terminate_on_close: bool = False,
+    ) -> AsyncGenerator[
+        tuple[
+            MemoryObjectReceiveStream[SessionMessage | Exception],
+            MemoryObjectSendStream[SessionMessage],
+            GetSessionIdCallback,
+        ],
+        None,
+    ]:
+        """Client transport for StreamableHTTP.
+
+        Args:
+            url: The MCP server endpoint URL.
+            http_client: Optional pre-configured httpx.AsyncClient. If None, a default
+                client with recommended MCP timeouts will be created. To configure headers,
+                authentication, or other HTTP settings, create an httpx.AsyncClient and pass it here.
+            terminate_on_close: If True, send a DELETE request to terminate the session when the context exits.
+
+        Yields:
+            Tuple containing:
+                - read_stream: Stream for reading messages from the server
+                - write_stream: Stream for sending messages to the server
+                - get_session_id_callback: Function to retrieve the current session ID
+
+        Example:
+            See examples/snippets/clients/ for usage patterns.
+        """
+        read_stream_writer, read_stream = anyio.create_memory_object_stream[
+            SessionMessage | Exception
+        ](0)
+        write_stream, write_stream_reader = anyio.create_memory_object_stream[
+            SessionMessage
+        ](0)
+
+        # Determine if we need to create and manage the client
+        client_provided = http_client is not None
+        client = http_client
+
+        if client is None:
+            # Create default client with recommended MCP timeouts
+            client = create_mcp_http_client()
+
+        transport = StreamableHTTPTransport(url)
+        if session_id:
+            transport.session_id = session_id
+
+        async with anyio.create_task_group() as tg:
+            try:
+                logger.debug(f"Connecting to StreamableHTTP endpoint: {url}")
+
+                async with contextlib.AsyncExitStack() as stack:
+                    # Only manage client lifecycle if we created it
+                    if not client_provided:
+                        await stack.enter_async_context(client)
+
+                    def start_get_stream() -> None:
+                        tg.start_soon(
+                            transport.handle_get_stream, client, read_stream_writer
+                        )
+
+                    tg.start_soon(
+                        transport.post_writer,
+                        client,
+                        write_stream_reader,
+                        read_stream_writer,
+                        write_stream,
+                        start_get_stream,
+                        tg,
+                    )
+
+                    try:
+                        yield (read_stream, write_stream, transport.get_session_id)
+                    finally:
+                        if transport.session_id and terminate_on_close:
+                            await transport.terminate_session(client)
+                        tg.cancel_scope.cancel()
+            finally:
+                await read_stream_writer.aclose()
+                await write_stream.aclose()
 
     tools: list[BaseTool] = []
+    session_id: str | None = None
 
     for mcp_tool in config.available_tools:
         tool_name = sanitize_tool_name(mcp_tool.name)
@@ -147,9 +246,13 @@ async def create_mcp_tools_from_metadata(
                     )
 
                     # Create streamable connection
-                    read, write, _ = await stack.enter_async_context(
+                    nonlocal session_id
+                    logger.info(f"Connecting to session {session_id}")
+                    read, write, getSessionId = await stack.enter_async_context(
                         streamable_http_client(
-                            url=f"{mcpServer.mcp_url}", http_client=http_client
+                            url=f"{mcpServer.mcp_url}",
+                            http_client=http_client,
+                            session_id=session_id,
                         )
                     )
 
@@ -157,7 +260,11 @@ async def create_mcp_tools_from_metadata(
                     session = await stack.enter_async_context(
                         ClientSession(read, write)
                     )
-                    await session.initialize()
+
+                    if not session_id:
+                        await session.initialize()
+                        session_id = getSessionId()
+                        logger.info(f"session {session_id} created")
 
                     # Call the tool
                     result = await session.call_tool(mcp_tool.name, arguments=kwargs)
