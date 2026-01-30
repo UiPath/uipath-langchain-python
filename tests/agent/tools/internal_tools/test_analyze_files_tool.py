@@ -7,7 +7,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel, ConfigDict, Field
 from uipath.agent.models.agent import (
-    AgentInternalToolProperties,
+    AgentInternalAnalyzeFilesToolProperties,
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
 )
@@ -60,7 +60,7 @@ class TestCreateAnalyzeFileTool:
         }
         output_schema = {"type": "object", "properties": {"result": {"type": "string"}}}
 
-        properties = AgentInternalToolProperties(
+        properties = AgentInternalAnalyzeFilesToolProperties(
             tool_type=AgentInternalToolType.ANALYZE_FILES
         )
 
