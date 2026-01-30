@@ -49,7 +49,7 @@ class LlmOpsFileExporter(SpanExporter):
         with open(self.file_path, "w") as f:
             f.write("")
 
-        logger.info(f"LlmOps file exporter initialized: {self.file_path}")
+        logger.info("LlmOps file exporter initialized: %s", self.file_path)
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         """Export spans to the JSON Lines file in UiPath internal format.
@@ -71,7 +71,7 @@ class LlmOpsFileExporter(SpanExporter):
             logger.debug("No spans to export after filtering dropped spans")
             return SpanExportResult.SUCCESS
 
-        logger.debug(f"Exporting {len(filtered_spans)} spans to {self.file_path}")
+        logger.debug("Exporting %d spans to %s", len(filtered_spans), self.file_path)
 
         try:
             # Convert spans using the same logic as LlmOpsHttpExporter
@@ -96,11 +96,11 @@ class LlmOpsFileExporter(SpanExporter):
                 for span_data in span_list:
                     f.write(json.dumps(span_data) + "\n")
 
-            logger.debug(f"Successfully exported {len(span_list)} spans")
+            logger.debug("Successfully exported %d spans", len(span_list))
             return SpanExportResult.SUCCESS
 
         except Exception as e:
-            logger.error(f"Failed to export spans to {self.file_path}: {e}")
+            logger.error("Failed to export spans to %s: %s", self.file_path, e)
             return SpanExportResult.FAILURE
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
@@ -116,7 +116,7 @@ class LlmOpsFileExporter(SpanExporter):
 
     def shutdown(self) -> None:
         """Shutdown the exporter."""
-        logger.info(f"LlmOps file exporter shutdown: {self.file_path}")
+        logger.info("LlmOps file exporter shutdown: %s", self.file_path)
 
     def _should_drop_span(self, span: ReadableSpan) -> bool:
         """Drop spans without uipath.custom_instrumentation=True marker."""

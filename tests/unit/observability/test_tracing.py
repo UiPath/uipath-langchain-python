@@ -8,6 +8,8 @@ import pytest
 from opentelemetry.sdk.trace.export import SpanExportResult
 
 from uipath_agents._observability import tracing
+from uipath_agents._observability.exporters import FilteringSpanExporter
+from uipath_agents._observability.llmops import is_azure_monitor_span, span_filters
 from uipath_agents._observability.tracing import _TelemetryState
 
 
@@ -50,15 +52,15 @@ class TestConfigureTelemetry:
 
     def test_adds_filtered_azure_exporter_when_trace_manager_provided(self):
         """Test that Azure exporter is wrapped with FilteringSpanExporter and PIIFilteringExporter."""
-        from uipath_agents._observability.pii_filtering_exporter import (
+        from uipath_agents._observability.exporters.pii_filtering_exporter import (
             PIIFilteringExporter,
         )
 
         mock_trace_manager = MagicMock()
         mock_exporter = MagicMock()
-        added_exporters: list[tracing.FilteringSpanExporter] = []
+        added_exporters: list[FilteringSpanExporter] = []
 
-        def capture_add(exporter: tracing.FilteringSpanExporter, **kwargs: Any) -> None:
+        def capture_add(exporter: FilteringSpanExporter, **kwargs: Any) -> None:
             added_exporters.append(exporter)
 
         mock_trace_manager.add_span_exporter = capture_add
@@ -71,8 +73,8 @@ class TestConfigureTelemetry:
 
             assert len(added_exporters) == 1
             wrapper = added_exporters[0]
-            assert isinstance(wrapper, tracing.FilteringSpanExporter)
-            assert wrapper._filter_fn is tracing.is_azure_monitor_span
+            assert isinstance(wrapper, FilteringSpanExporter)
+            assert wrapper._filter_fn is is_azure_monitor_span
             assert isinstance(wrapper._delegate, PIIFilteringExporter)
             assert wrapper._delegate._delegate is mock_exporter
 
@@ -80,9 +82,9 @@ class TestConfigureTelemetry:
         """Test that Azure exporter is wrapped only with FilteringSpanExporter when PII disabled."""
         mock_trace_manager = MagicMock()
         mock_exporter = MagicMock()
-        added_exporters: list[tracing.FilteringSpanExporter] = []
+        added_exporters: list[FilteringSpanExporter] = []
 
-        def capture_add(exporter: tracing.FilteringSpanExporter, **kwargs: Any) -> None:
+        def capture_add(exporter: FilteringSpanExporter, **kwargs: Any) -> None:
             added_exporters.append(exporter)
 
         mock_trace_manager.add_span_exporter = capture_add
@@ -96,8 +98,8 @@ class TestConfigureTelemetry:
 
             assert len(added_exporters) == 1
             wrapper = added_exporters[0]
-            assert isinstance(wrapper, tracing.FilteringSpanExporter)
-            assert wrapper._filter_fn is tracing.is_azure_monitor_span
+            assert isinstance(wrapper, FilteringSpanExporter)
+            assert wrapper._filter_fn is is_azure_monitor_span
             assert wrapper._delegate is mock_exporter
 
     def test_skips_azure_exporter_when_no_trace_manager(self):
@@ -113,9 +115,9 @@ class TestConfigureTelemetry:
     def test_skips_azure_exporter_when_not_configured(self):
         """Test that Azure exporter setup is skipped when get_azure_exporter returns None."""
         mock_trace_manager = MagicMock()
-        added_exporters: list[tracing.FilteringSpanExporter] = []
+        added_exporters: list[FilteringSpanExporter] = []
 
-        def capture_add(exporter: tracing.FilteringSpanExporter, **kwargs: Any) -> None:
+        def capture_add(exporter: FilteringSpanExporter, **kwargs: Any) -> None:
             added_exporters.append(exporter)
 
         mock_trace_manager.add_span_exporter = capture_add
@@ -173,7 +175,7 @@ class TestFilteringSpanExporter:
         def filter_fn(s):
             return s.name == "keep"
 
-        exporter = tracing.FilteringSpanExporter(mock_delegate, filter_fn)
+        exporter = FilteringSpanExporter(mock_delegate, filter_fn)
 
         span_keep = MagicMock()
         span_keep.name = "keep"
@@ -188,7 +190,7 @@ class TestFilteringSpanExporter:
     def test_export_returns_success_when_all_filtered(self):
         """Test SUCCESS is returned when all spans are filtered out."""
         mock_delegate = MagicMock()
-        exporter = tracing.FilteringSpanExporter(mock_delegate, lambda s: False)
+        exporter = FilteringSpanExporter(mock_delegate, lambda s: False)
 
         span = MagicMock()
         result = exporter.export([span])
@@ -199,7 +201,7 @@ class TestFilteringSpanExporter:
     def test_shutdown_delegates(self):
         """Test shutdown is delegated."""
         mock_delegate = MagicMock()
-        exporter = tracing.FilteringSpanExporter(mock_delegate, lambda s: True)
+        exporter = FilteringSpanExporter(mock_delegate, lambda s: True)
 
         exporter.shutdown()
 
@@ -209,7 +211,7 @@ class TestFilteringSpanExporter:
         """Test force_flush is delegated."""
         mock_delegate = MagicMock()
         mock_delegate.force_flush.return_value = True
-        exporter = tracing.FilteringSpanExporter(mock_delegate, lambda s: True)
+        exporter = FilteringSpanExporter(mock_delegate, lambda s: True)
 
         result = exporter.force_flush(5000)
 
@@ -225,21 +227,21 @@ class TestIsOpeninferenceSpan:
         span = MagicMock()
         span.instrumentation_scope.name = "openinference.instrumentation.langchain"
 
-        assert tracing.is_openinference_span(span) is True
+        assert span_filters.is_openinference_span(span) is True
 
     def test_returns_false_for_non_openinference_scope(self):
         """Test returns False for non-openinference scope names."""
         span = MagicMock()
         span.instrumentation_scope.name = "uipath.agents.tracing"
 
-        assert tracing.is_openinference_span(span) is False
+        assert span_filters.is_openinference_span(span) is False
 
     def test_returns_false_when_no_scope(self):
         """Test returns False when instrumentation_scope is None."""
         span = MagicMock()
         span.instrumentation_scope = None
 
-        assert tracing.is_openinference_span(span) is False
+        assert span_filters.is_openinference_span(span) is False
 
 
 class TestIsHttpInstrumentationSpan:
@@ -250,28 +252,28 @@ class TestIsHttpInstrumentationSpan:
         span = MagicMock()
         span.instrumentation_scope.name = "opentelemetry.instrumentation.httpx"
 
-        assert tracing.is_http_instrumentation_span(span) is True
+        assert span_filters.is_http_instrumentation_span(span) is True
 
     def test_returns_true_for_aiohttp_scope(self):
         """Test returns True for aiohttp_client instrumentation scope."""
         span = MagicMock()
         span.instrumentation_scope.name = "opentelemetry.instrumentation.aiohttp_client"
 
-        assert tracing.is_http_instrumentation_span(span) is True
+        assert span_filters.is_http_instrumentation_span(span) is True
 
     def test_returns_false_for_other_scope(self):
         """Test returns False for non-HTTP instrumentation scopes."""
         span = MagicMock()
         span.instrumentation_scope.name = "opentelemetry.instrumentation.requests"
 
-        assert tracing.is_http_instrumentation_span(span) is False
+        assert span_filters.is_http_instrumentation_span(span) is False
 
     def test_returns_false_when_no_scope(self):
         """Test returns False when instrumentation_scope is None."""
         span = MagicMock()
         span.instrumentation_scope = None
 
-        assert tracing.is_http_instrumentation_span(span) is False
+        assert span_filters.is_http_instrumentation_span(span) is False
 
 
 class TestIsAzureMonitorSpan:
@@ -282,21 +284,21 @@ class TestIsAzureMonitorSpan:
         span = MagicMock()
         span.instrumentation_scope.name = "openinference.instrumentation.langchain"
 
-        assert tracing.is_azure_monitor_span(span) is True
+        assert is_azure_monitor_span(span) is True
 
     def test_returns_true_for_http_span(self):
         """Test returns True for HTTP instrumentation spans."""
         span = MagicMock()
         span.instrumentation_scope.name = "opentelemetry.instrumentation.httpx"
 
-        assert tracing.is_azure_monitor_span(span) is True
+        assert is_azure_monitor_span(span) is True
 
     def test_returns_false_for_other_span(self):
         """Test returns False for other spans."""
         span = MagicMock()
         span.instrumentation_scope.name = "some.other.instrumentation"
 
-        assert tracing.is_azure_monitor_span(span) is False
+        assert is_azure_monitor_span(span) is False
 
 
 class TestShutdownTelemetry:
@@ -348,5 +350,5 @@ class TestShutdownTelemetry:
 
         tracing.shutdown_telemetry()
 
-        assert "Failed to uninstrument" in caplog.text
+        assert "Failed to un-instrument" in caplog.text
         assert not _TelemetryState.configured

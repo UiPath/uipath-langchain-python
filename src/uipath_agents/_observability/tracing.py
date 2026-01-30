@@ -1,98 +1,19 @@
 import logging
 import os
-from typing import Any, Callable, ClassVar, Optional, Sequence
+from typing import Any, ClassVar
 
 from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
 from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-from opentelemetry.sdk.trace import ReadableSpan
-from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from opentelemetry.sdk.trace.export import SpanExporter
 from uipath.core import UiPathTraceManager
 from uipath.platform.common import UiPathConfig
 
+from uipath_agents._observability.exporters import FilteringSpanExporter
+from uipath_agents._observability.llmops import is_azure_monitor_span
 from uipath_agents._observability.utils import setup_otel_env
 
 logger = logging.getLogger(__name__)
-
-
-class FilteringSpanExporter(SpanExporter):
-    """Wraps a SpanExporter to filter spans before export."""
-
-    def __init__(
-        self,
-        delegate: SpanExporter,
-        filter_fn: Callable[[ReadableSpan], bool],
-    ):
-        """Initialize the filtering exporter.
-
-        Args:
-            delegate: The underlying exporter to send filtered spans to.
-            filter_fn: Function that returns True for spans to export.
-        """
-        self._delegate = delegate
-        self._filter_fn = filter_fn
-
-    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        """Export only spans that pass the filter."""
-        filtered = [s for s in spans if self._filter_fn(s)]
-        if not filtered:
-            return SpanExportResult.SUCCESS
-        return self._delegate.export(filtered)
-
-    def upsert_span(
-        self,
-        span: ReadableSpan,
-        status_override: Optional[int] = None,
-    ) -> SpanExportResult:
-        """Upsert a single span, applying filter first."""
-        if not self._filter_fn(span):
-            return SpanExportResult.SUCCESS
-        return self._delegate.upsert_span(span, status_override)  # type: ignore[attr-defined]
-
-    def shutdown(self) -> None:
-        """Shutdown the delegate exporter."""
-        self._delegate.shutdown()
-
-    def force_flush(self, timeout_millis: int = 30000) -> bool:
-        """Force flush the delegate exporter."""
-        return self._delegate.force_flush(timeout_millis)
-
-
-def is_openinference_span(span: ReadableSpan) -> bool:
-    """Check if span is from OpenInference instrumentation.
-
-    OpenInference instrumentors use scope names like:
-    - openinference.instrumentation.langchain
-    - openinference.instrumentation.openai
-    """
-    scope = span.instrumentation_scope
-    return scope is not None and scope.name.startswith("openinference.")
-
-
-def is_http_instrumentation_span(span: ReadableSpan) -> bool:
-    """Check if span is from HTTP client instrumentation (httpx, aiohttp)."""
-    scope = span.instrumentation_scope
-    if scope is None:
-        return False
-    return scope.name in (
-        "opentelemetry.instrumentation.httpx",
-        "opentelemetry.instrumentation.aiohttp_client",
-    )
-
-
-def is_azure_monitor_span(span: ReadableSpan) -> bool:
-    """Check if span should be exported to Azure Monitor.
-
-    Includes:
-    - OpenInference spans (LangGraph/LangChain telemetry)
-    - HTTP client spans (httpx, aiohttp for debugging)
-    """
-    return is_openinference_span(span) or is_http_instrumentation_span(span)
-
-
-def is_custom_instrumentation_span(span: ReadableSpan) -> bool:
-    """Check if span has uipath.custom_instrumentation=True marker."""
-    return (span.attributes or {}).get("uipath.custom_instrumentation") is True
 
 
 class _TelemetryState:
@@ -123,40 +44,34 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
     setup_otel_env()
 
     if trace_manager:
-        # Azure Monitor exporter (OpenInference spans only)
         azure_exporter = _get_azure_exporter()
         if azure_exporter:
-            # Wrap Azure exporter to:
-            # 1. Filter to only OpenInference spans (LangGraph telemetry)
-            # 2. Redact PII from attributes before export
-            disable_otel_masking = os.getenv("DISABLE_OTEL_MASKING", "false").lower()
+            pii_masking_disabled = (
+                os.getenv("DISABLE_OTEL_MASKING", "false").lower() == "true"
+            )
 
-            if disable_otel_masking == "true":
-                # No PII redaction - just filter spans
-                filtered_exporter = FilteringSpanExporter(
-                    azure_exporter, filter_fn=is_azure_monitor_span
-                )
+            if pii_masking_disabled:
                 logger.warning(
                     "PII redaction is DISABLED - sensitive data may be exported"
                 )
+                base_exporter: Any = azure_exporter
             else:
-                from uipath_agents._observability.pii_filtering_exporter import (
+                from uipath_agents._observability.exporters.pii_filtering_exporter import (
                     PIIFilteringExporter,
                 )
 
-                # Wrap: Azure <- PII Filter <- Span Filter <- Trace Manager
-                pii_filtered_exporter = PIIFilteringExporter(azure_exporter)
-                filtered_exporter = FilteringSpanExporter(
-                    pii_filtered_exporter, filter_fn=is_azure_monitor_span
-                )
+                base_exporter = PIIFilteringExporter(azure_exporter)
                 logger.debug("Added PII redaction to Azure Monitor exporter")
 
+            filtered_exporter = FilteringSpanExporter(
+                base_exporter, filter_fn=is_azure_monitor_span
+            )
             trace_manager.add_span_exporter(filtered_exporter)
 
-        # LlmOps file exporter (local execution only)
-        llmops_file_exporter = _get_llmops_file_exporter()
-        if llmops_file_exporter:
-            trace_manager.add_span_exporter(llmops_file_exporter)
+        if llmops_trace_file := _enable_llmops_dev_traces():
+            trace_manager.add_span_exporter(
+                _get_llmops_file_exporter(llmops_trace_file)
+            )
 
     _TelemetryState.instrumentors = [
         HTTPXClientInstrumentor(),
@@ -178,32 +93,35 @@ def _get_azure_exporter() -> AzureMonitorTraceExporter | None:
     return AzureMonitorTraceExporter(connection_string=connection_string)
 
 
-def _get_llmops_file_exporter() -> SpanExporter | None:
-    """Get LlmOps file exporter if configured for local execution.
+def _enable_llmops_dev_traces() -> str | None:
+    """Check if LLMOps dev traces should be enabled.
 
-    Only returns an exporter when:
-    - LLMOPS_TRACE_FILE environment variable is set
-    - Running locally (no job_key = not in production)
-
-    Returns:
-        LlmOpsFileExporter if conditions are met, None otherwise
+    Returns file path if enabled (local execution only), None otherwise.
     """
     llmops_trace_file = os.getenv("LLMOPS_TRACE_FILE")
     if not llmops_trace_file:
         return None
 
-    # Only allow file export for local execution (no job_key = not in production)
     if UiPathConfig.job_key:
-        logger.debug(
-            "LLMOPS_TRACE_FILE is set but ignored in production environment "
-            "(job_key detected)"
-        )
         return None
 
-    # Import here to avoid circular dependency
-    from uipath_agents._observability.llmops_file_exporter import LlmOpsFileExporter
+    return llmops_trace_file
 
-    return LlmOpsFileExporter(file_path=llmops_trace_file)
+
+def _get_llmops_file_exporter(file_path: str) -> SpanExporter:
+    """Create LlmOps file exporter for the given file path.
+
+    Args:
+        file_path: Path to write traces to
+
+    Returns:
+        LlmOpsFileExporter instance
+    """
+    from uipath_agents._observability.exporters.llmops_file_exporter import (
+        LlmOpsFileExporter,
+    )
+
+    return LlmOpsFileExporter(file_path=file_path)
 
 
 def shutdown_telemetry() -> None:
@@ -219,7 +137,7 @@ def shutdown_telemetry() -> None:
         try:
             instrumentor.uninstrument()
         except Exception:
-            logger.exception("Failed to uninstrument %s", type(instrumentor).__name__)
+            logger.exception("Failed to un-instrument %s", type(instrumentor).__name__)
 
     _TelemetryState.configured = False
     _TelemetryState.instrumentors = []

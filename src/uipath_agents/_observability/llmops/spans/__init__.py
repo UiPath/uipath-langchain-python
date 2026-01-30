@@ -1,0 +1,105 @@
+"""Spans module for LLMOps traces.
+
+Provides modular span creation organized by span type.
+"""
+
+from .span_attributes import (
+    AgentInputSpanAttributes,
+    AgentOutputSpanAttributes,
+    AgentPostGuardrailsSpanAttributes,
+    AgentPreGuardrailsSpanAttributes,
+    AgentRunSpanAttributes,
+    AgentToolSpanAttributes,
+    BaseSpanAttributes,
+    CompletionSpanAttributes,
+    ContextGroundingToolSpanAttributes,
+    ErrorDetails,
+    EscalationToolSpanAttributes,
+    ExecutionType,
+    GovernanceSpanAttributes,
+    GuardrailEscalationSpanAttributes,
+    GuardrailEvaluationSpanAttributes,
+    IntegrationToolSpanAttributes,
+    LlmCallSpanAttributes,
+    LlmPostGuardrailsSpanAttributes,
+    LlmPreGuardrailsSpanAttributes,
+    McpSessionStartSpanAttributes,
+    McpToolSpanAttributes,
+    ModelSettings,
+    ProcessToolSpanAttributes,
+    SpanType,
+    ToolCallSpanAttributes,
+    ToolPostGuardrailsSpanAttributes,
+    ToolPreGuardrailsSpanAttributes,
+    get_agent_version,
+    get_execution_type,
+)
+from .span_factory import LlmOpsSpanFactory
+from .span_keys import SpanKeys
+from .span_name import SpanName
+from .spans_schema import (
+    AgentSpanSchema,
+    GuardrailSpanSchema,
+    LlmSpanSchema,
+    SpanUpsertProtocol,
+    SyntheticReadableSpan,
+    ToolSpanSchema,
+    apply_attributes,
+    create_span,
+    end_span_error,
+    end_span_ok,
+    get_parent_context,
+    reference_id_context,
+)
+
+__all__ = [
+    # Span factory
+    "LlmOpsSpanFactory",
+    # Span schemas
+    "AgentSpanSchema",
+    "LlmSpanSchema",
+    "ToolSpanSchema",
+    "GuardrailSpanSchema",
+    # Base utilities
+    "SyntheticReadableSpan",
+    "SpanUpsertProtocol",
+    "reference_id_context",
+    "apply_attributes",
+    "get_parent_context",
+    "create_span",
+    "end_span_ok",
+    "end_span_error",
+    # Span name and keys
+    "SpanName",
+    "SpanKeys",
+    # Span attributes
+    "BaseSpanAttributes",
+    "ErrorDetails",
+    "SpanType",
+    "ExecutionType",
+    "get_execution_type",
+    "get_agent_version",
+    "ModelSettings",
+    "AgentRunSpanAttributes",
+    "AgentOutputSpanAttributes",
+    "AgentInputSpanAttributes",
+    "CompletionSpanAttributes",
+    "LlmCallSpanAttributes",
+    "ToolCallSpanAttributes",
+    "ProcessToolSpanAttributes",
+    "AgentToolSpanAttributes",
+    "EscalationToolSpanAttributes",
+    "IntegrationToolSpanAttributes",
+    "ContextGroundingToolSpanAttributes",
+    "McpToolSpanAttributes",
+    "McpSessionStartSpanAttributes",
+    "GuardrailEvaluationSpanAttributes",
+    "GuardrailEscalationSpanAttributes",
+    "LlmPreGuardrailsSpanAttributes",
+    "LlmPostGuardrailsSpanAttributes",
+    "ToolPreGuardrailsSpanAttributes",
+    "ToolPostGuardrailsSpanAttributes",
+    "AgentPreGuardrailsSpanAttributes",
+    "AgentPostGuardrailsSpanAttributes",
+    "GovernanceSpanAttributes",
+]

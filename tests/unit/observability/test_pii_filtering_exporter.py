@@ -7,7 +7,7 @@ import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 
-from uipath_agents._observability.pii_filtering_exporter import (
+from uipath_agents._observability.exporters.pii_filtering_exporter import (
     PIIFilteringExporter,
     _redact_attributes,
     _redact_value,
@@ -18,7 +18,7 @@ from uipath_agents._observability.pii_filtering_exporter import (
 @pytest.fixture
 def _disable_selective_redaction():
     """Disable selective redaction for tests expecting full redaction."""
-    from uipath_agents._observability import pii_filtering_exporter
+    from uipath_agents._observability.exporters import pii_filtering_exporter
 
     original = pii_filtering_exporter._PRESERVE_FIELDS
     pii_filtering_exporter._PRESERVE_FIELDS = frozenset()
@@ -224,7 +224,7 @@ class TestSelectiveRedactionModes:
 
     def test_full_redaction_mode(self) -> None:
         """Test full redaction when preserve fields is empty."""
-        from uipath_agents._observability import pii_filtering_exporter
+        from uipath_agents._observability.exporters import pii_filtering_exporter
 
         original = pii_filtering_exporter._PRESERVE_FIELDS
         try:
@@ -279,7 +279,7 @@ class TestSelectiveRedactionModes:
 
     def test_custom_preserve_fields(self) -> None:
         """Test with custom preserve fields configuration."""
-        from uipath_agents._observability import pii_filtering_exporter
+        from uipath_agents._observability.exporters import pii_filtering_exporter
 
         original = pii_filtering_exporter._PRESERVE_FIELDS
         try:

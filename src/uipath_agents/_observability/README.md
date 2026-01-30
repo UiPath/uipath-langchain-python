@@ -53,7 +53,7 @@ The exporter writes spans in JSON Lines format (one JSON object per line). Each 
 
 ### Span Types
 
-The exporter produces spans with types defined in `schema.py`. See the `SpanType` enum in [schema.py](./schema.py) for the complete and authoritative list of span types.
+The exporter produces spans with types defined in `schema.py`. See the `SpanType` enum in [schema.py](span_name.py) for the complete and authoritative list of span types.
 
 Common span types include:
 - `agentRun` - Root span for agent execution

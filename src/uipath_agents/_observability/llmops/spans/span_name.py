@@ -1,40 +1,15 @@
-"""Span types and names matching UiPath Agents schema.
+"""Span type identifiers and human-readable span names for tracing."""
 
-This schema matches the C# Agents implementation for consistent
-span structure across all UiPath agent implementations.
-"""
-
-from enum import Enum
+__all__ = [
+    "SpanName",
+    "INNER_STATE_KEY",
+    "GUARDRAIL_VALIDATION_RESULT_KEY",
+    "GUARDRAIL_VALIDATION_DETAILS_KEY",
+]
 
 INNER_STATE_KEY = "inner_state"
 GUARDRAIL_VALIDATION_RESULT_KEY = "guardrail_validation_result"
 GUARDRAIL_VALIDATION_DETAILS_KEY = "guardrail_validation_details"
-
-
-class SpanType(str, Enum):
-    """Span types matching C# Agents schema."""
-
-    AGENT_RUN = "agentRun"
-    AGENT_OUTPUT = "agentOutput"
-
-    # LLM spans (nested: LLM call -> Model run)
-    COMPLETION = "completion"  # Outer LLM iteration wrapper
-    LLM_CALL = "llmCall"  # Inner actual API call
-
-    # Tool spans
-    TOOL_CALL = "toolCall"  # Generic tool call
-    PROCESS_TOOL = "processTool"  # UiPath Process invocation
-    AGENT_TOOL = "agentTool"  # Agent-as-tool invocation
-    INTEGRATION_TOOL = "integrationTool"  # UiPath Integration connector
-    CONTEXT_GROUNDING_TOOL = "contextGroundingTool"  # RAG/context tool
-    MCP_TOOL = "mcpTool"  # Model Context Protocol tool
-
-    LLM_PRE_GUARDRAILS = "llmPreGuardrails"
-    LLM_POST_GUARDRAILS = "llmPostGuardrails"
-    TOOL_PRE_GUARDRAILS = "toolPreGuardrails"
-    TOOL_POST_GUARDRAILS = "toolPostGuardrails"
-    AGENT_OUTPUT_PRE_GUARDRAILS = "agentOutputPreGuardrails"
-    AGENT_OUTPUT_POST_GUARDRAILS = "agentOutputPostGuardrails"
 
 
 class SpanName:
@@ -45,7 +20,7 @@ class SpanName:
     AGENT_OUTPUT = "Agent output"
     REVIEW_TASK = "Review task"
 
-    # Guardrail container span names (matching C# Temporal)
+    # Guardrail container span names
     AGENT_PRE_GUARDRAILS = "Agent input guardrail check"
     AGENT_POST_GUARDRAILS = "Agent output guardrail check"
     LLM_PRE_GUARDRAILS = "LLM input guardrail check"

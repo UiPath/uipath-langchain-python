@@ -5,7 +5,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from uipath_agents._observability.llmops_file_exporter import LlmOpsFileExporter
+from uipath_agents._observability.exporters.llmops_file_exporter import (
+    LlmOpsFileExporter,
+)
 
 
 class TestLlmOpsFileExporterWhitelist:

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from uipath_agents._observability.pii_filtering_exporter import (
+from uipath_agents._observability.exporters.pii_filtering_exporter import (
     _redact_attributes,
     _should_redact_attribute,
 )
@@ -21,7 +21,7 @@ def _setup_patterns():
         },
     ):
         # Force reload of module-level variables
-        from uipath_agents._observability import pii_filtering_exporter
+        from uipath_agents._observability.exporters import pii_filtering_exporter
 
         pii_filtering_exporter._PII_PATTERNS = [
             "llm.*.message.content",

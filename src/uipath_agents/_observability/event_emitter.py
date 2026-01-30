@@ -1,10 +1,11 @@
-"""LangChain callback handler for Application Insights telemetry.
+"""Telemetry event emitter for Application Insights.
 
-This callback focuses solely on sending custom telemetry events to Application Insights
+Sends custom telemetry events (not spans) to Application Insights
 for agent lifecycle monitoring, using the shared telemetry client from uipath-python.
 """
 
 import logging
+from enum import StrEnum
 from typing import Any, Dict, Optional
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -19,17 +20,25 @@ logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(
 
 logger = logging.getLogger(__name__)
 
-# Telemetry event names
-AGENTRUN_STARTED = "AgentRun.Start"
-AGENTRUN_COMPLETED = "AgentRun.End"
-AGENTRUN_FAILED = "AgentRun.Failed"
-GUARDRAIL_SKIPPED = "Guardrail.Skipped"
-GUARDRAIL_BLOCKED = "Guardrail.Blocked"
-GUARDRAIL_LOGGED = "Guardrail.Logged"
-GUARDRAIL_FILTERED = "Guardrail.Filtered"
-GUARDRAIL_ESCALATED = "Guardrail.Escalated"
-GUARDRAIL_ESCALATION_APPROVED = "Guardrail.EscalationApproved"
-GUARDRAIL_ESCALATION_REJECTED = "Guardrail.EscalationRejected"
+
+class AgentRunEvent(StrEnum):
+    """Telemetry event names for agent run lifecycle."""
+
+    STARTED = "AgentRun.Start"
+    COMPLETED = "AgentRun.End"
+    FAILED = "AgentRun.Failed"
+
+
+class GuardrailEvent(StrEnum):
+    """Telemetry event names for guardrail actions."""
+
+    SKIPPED = "Guardrail.Skipped"
+    BLOCKED = "Guardrail.Blocked"
+    LOGGED = "Guardrail.Logged"
+    FILTERED = "Guardrail.Filtered"
+    ESCALATED = "Guardrail.Escalated"
+    ESCALATION_APPROVED = "Guardrail.EscalationApproved"
+    ESCALATION_REJECTED = "Guardrail.EscalationRejected"
 
 
 def track_event(
@@ -48,13 +57,13 @@ def track_event(
         measurements: Numeric measurements for the event (currently ignored,
                      kept for backward compatibility)
     """
-    logger.info(f"track_event called: {name}, properties: {properties}")
+    logger.info("track_event called: %s, properties: %s", name, properties)
 
     # Set operation context from current span before tracking event
     _set_operation_context_from_current_span()
 
     _track_event(name, properties)
-    logger.info(f"_track_event completed for: {name}")
+    logger.info("_track_event completed for: %s", name)
 
 
 def _set_operation_context_from_current_span() -> None:
@@ -96,17 +105,16 @@ def _set_operation_context_from_current_span() -> None:
         )
 
 
-class AppInsightsTelemetryCallback(BaseCallbackHandler):
-    """LangChain callback that sends custom telemetry events to Application Insights.
+class TelemetryEventEmitter(BaseCallbackHandler):
+    """Emits custom telemetry events to Application Insights.
 
-    This callback is dedicated to tracking agent lifecycle events for monitoring
-    and analytics purposes. It sends events directly to AppInsights without
-    creating OpenTelemetry spans.
+    Dedicated to tracking agent lifecycle events for monitoring and analytics.
+    Sends events directly to AppInsights without creating OpenTelemetry spans.
 
     Usage:
-        callback = AppInsightsTelemetryCallback()
-        callback.set_agent_info("MyAgent", "agent-123")
-        runtime = SomeRuntime(callbacks=[callback])
+        emitter = TelemetryEventEmitter()
+        emitter.set_agent_info("MyAgent", "agent-123")
+        runtime = SomeRuntime(callbacks=[emitter])
         await runtime.execute(input)
     """
 

@@ -1,4 +1,4 @@
-"""Tests for enhanced TelemetryRuntimeWrapper functionality including telemetry callback and property enrichment."""
+"""Tests for enhanced InstrumentedRuntime functionality including telemetry callback and property enrichment."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,15 +7,13 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
 from uipath.agent.models.agent import AgentDefinition, AgentMetadata, AgentSettings
 from uipath.runtime import UiPathRuntimeContext
 
-from uipath_agents._observability.callback import UiPathTracingCallback
-from uipath_agents._observability.runtime_wrapper import TelemetryRuntimeWrapper
-from uipath_agents._observability.telemetry_callback import (
-    AGENTRUN_COMPLETED,
-    AGENTRUN_FAILED,
-    AGENTRUN_STARTED,
-    AppInsightsTelemetryCallback,
+from uipath_agents._observability.event_emitter import (
+    AgentRunEvent,
+    TelemetryEventEmitter,
 )
-from uipath_agents._observability.tracer import UiPathTracer
+from uipath_agents._observability.instrumented_runtime import InstrumentedRuntime
+from uipath_agents._observability.llmops.callback import LlmOpsInstrumentationCallback
+from uipath_agents._observability.llmops.spans.span_factory import LlmOpsSpanFactory
 
 
 @pytest.fixture
@@ -30,19 +28,19 @@ def mock_delegate():
 @pytest.fixture
 def tracer():
     """Create a tracer."""
-    return UiPathTracer()
+    return LlmOpsSpanFactory()
 
 
 @pytest.fixture
 def tracing_callback(tracer):
     """Create a tracing callback."""
-    return UiPathTracingCallback(tracer)
+    return LlmOpsInstrumentationCallback(tracer)
 
 
 @pytest.fixture
-def telemetry_callback():
+def event_emitter():
     """Create a telemetry callback."""
-    return AppInsightsTelemetryCallback()
+    return TelemetryEventEmitter()
 
 
 @pytest.fixture
@@ -84,34 +82,34 @@ def agent_info():
 class TestTelemetryCallbackIntegration:
     """Test integration of telemetry callback with runtime wrapper."""
 
-    def test_init_with_telemetry_callback(
+    def test_init_with_event_emitter(
         self,
         mock_delegate,
         tracer,
         tracing_callback,
-        telemetry_callback,
+        event_emitter,
         agent_info,
         mock_runtime_context,
     ):
-        wrapper = TelemetryRuntimeWrapper(
+        wrapper = InstrumentedRuntime(
             mock_delegate,
             tracer,
             tracing_callback,
             mock_runtime_context,
-            telemetry_callback=telemetry_callback,
+            event_emitter=event_emitter,
             agent_definition=agent_info,
         )
 
-        assert wrapper._telemetry_callback is telemetry_callback
+        assert wrapper._event_emitter is event_emitter
         assert wrapper._agent_definition is agent_info
 
     @pytest.mark.asyncio
-    async def test_execute_calls_telemetry_callback(
+    async def test_execute_calls_event_emitter(
         self,
         mock_delegate,
         tracer,
         tracing_callback,
-        telemetry_callback,
+        event_emitter,
         agent_info,
         mock_runtime_context,
     ):
@@ -123,55 +121,53 @@ class TestTelemetryCallbackIntegration:
         mock_result.output = {"result": "test"}
         mock_delegate.execute.return_value = mock_result
 
-        telemetry_callback.track_event = MagicMock()
-        telemetry_callback.set_agent_info = MagicMock()
+        event_emitter.track_event = MagicMock()
+        event_emitter.set_agent_info = MagicMock()
 
-        wrapper = TelemetryRuntimeWrapper(
+        wrapper = InstrumentedRuntime(
             mock_delegate,
             tracer,
             tracing_callback,
             mock_runtime_context,
-            telemetry_callback=telemetry_callback,
+            event_emitter=event_emitter,
             agent_definition=agent_info,
         )
 
         await wrapper.execute({"input": "test"}, None)
 
         # Verify telemetry callback was called
-        telemetry_callback.set_agent_info.assert_called_with(
-            "test-agent", "test-agent-id"
-        )
+        event_emitter.set_agent_info.assert_called_with("test-agent", "test-agent-id")
 
         # Should be called twice: once for STARTED, once for COMPLETED
-        assert telemetry_callback.track_event.call_count == 2
+        assert event_emitter.track_event.call_count == 2
 
         # Verify event names
-        calls = telemetry_callback.track_event.call_args_list
-        assert calls[0][0][0] == AGENTRUN_STARTED
-        assert calls[1][0][0] == AGENTRUN_COMPLETED
+        calls = event_emitter.track_event.call_args_list
+        assert calls[0][0][0] == AgentRunEvent.STARTED
+        assert calls[1][0][0] == AgentRunEvent.COMPLETED
 
     @pytest.mark.asyncio
-    async def test_execute_calls_telemetry_callback_on_failure(
+    async def test_execute_calls_event_emitter_on_failure(
         self,
         mock_delegate,
         tracer,
         tracing_callback,
-        telemetry_callback,
+        event_emitter,
         agent_info,
         mock_runtime_context,
     ):
         """Test that execute calls telemetry callback for failed events."""
-        telemetry_callback.track_event = MagicMock()
-        telemetry_callback.set_agent_info = MagicMock()
+        event_emitter.track_event = MagicMock()
+        event_emitter.set_agent_info = MagicMock()
 
         mock_delegate.execute.side_effect = RuntimeError("Test error")
 
-        wrapper = TelemetryRuntimeWrapper(
+        wrapper = InstrumentedRuntime(
             mock_delegate,
             tracer,
             tracing_callback,
             mock_runtime_context,
-            telemetry_callback=telemetry_callback,
+            event_emitter=event_emitter,
             agent_definition=agent_info,
         )
 
@@ -179,17 +175,17 @@ class TestTelemetryCallbackIntegration:
             await wrapper.execute({"input": "test"}, None)
 
         # Should be called twice: once for STARTED, once for FAILED
-        assert telemetry_callback.track_event.call_count == 2
+        assert event_emitter.track_event.call_count == 2
 
         # Verify event names
-        calls = telemetry_callback.track_event.call_args_list
-        assert calls[0][0][0] == AGENTRUN_STARTED
-        assert calls[1][0][0] == AGENTRUN_FAILED
+        calls = event_emitter.track_event.call_args_list
+        assert calls[0][0][0] == AgentRunEvent.STARTED
+        assert calls[1][0][0] == AgentRunEvent.FAILED
 
-    def test_without_telemetry_callback(
+    def test_without_event_emitter(
         self, mock_delegate, tracer, tracing_callback, agent_info, mock_runtime_context
     ):
-        wrapper = TelemetryRuntimeWrapper(
+        wrapper = InstrumentedRuntime(
             mock_delegate,
             tracer,
             tracing_callback,
@@ -197,7 +193,7 @@ class TestTelemetryCallbackIntegration:
             agent_definition=agent_info,
         )
 
-        assert wrapper._telemetry_callback is None
+        assert wrapper._event_emitter is None
 
 
 class TestPropertyEnrichment:
@@ -206,7 +202,7 @@ class TestPropertyEnrichment:
     def test_get_enriched_properties_basic(
         self, mock_delegate, tracer, tracing_callback, agent_info, mock_runtime_context
     ):
-        wrapper = TelemetryRuntimeWrapper(
+        wrapper = InstrumentedRuntime(
             mock_delegate,
             tracer,
             tracing_callback,
@@ -236,7 +232,7 @@ class TestPropertyEnrichment:
     def test_get_enriched_properties_with_trace_id(
         self, mock_delegate, tracer, tracing_callback, agent_info, mock_runtime_context
     ):
-        wrapper = TelemetryRuntimeWrapper(
+        wrapper = InstrumentedRuntime(
             mock_delegate,
             tracer,
             tracing_callback,
@@ -262,7 +258,7 @@ class TestPropertyEnrichment:
     def test_get_enriched_properties_without_agent_info(
         self, mock_delegate, tracer, tracing_callback, mock_runtime_context
     ):
-        wrapper = TelemetryRuntimeWrapper(
+        wrapper = InstrumentedRuntime(
             mock_delegate,
             tracer,
             tracing_callback,
@@ -292,7 +288,7 @@ class TestPropertyEnrichment:
         """Test cloud context extraction from UiPathConfig and runtime context."""
         # Mock UiPathConfig to provide organization_id
         with patch(
-            "uipath_agents._observability.runtime_wrapper.UiPathConfig"
+            "uipath_agents._observability.instrumented_runtime.UiPathConfig"
         ) as mock_config:
             mock_config.organization_id = "test-org-id"
             mock_config.folder_key = None
@@ -304,10 +300,10 @@ class TestPropertyEnrichment:
 
             # Mock get_claim_from_token to return None so CloudUserId uses empty string
             with patch(
-                "uipath_agents._observability.runtime_wrapper.get_claim_from_token",
+                "uipath_agents._observability.instrumented_runtime.get_claim_from_token",
                 return_value=None,
             ):
-                wrapper = TelemetryRuntimeWrapper(
+                wrapper = InstrumentedRuntime(
                     mock_delegate,
                     tracer,
                     tracing_callback,
@@ -336,7 +332,7 @@ class TestAgentRunIdConsistency:
         mock_delegate,
         tracer,
         tracing_callback,
-        telemetry_callback,
+        event_emitter,
         agent_info,
         mock_runtime_context,
     ):
@@ -348,21 +344,21 @@ class TestAgentRunIdConsistency:
         mock_result.output = {"result": "test"}
         mock_delegate.execute.return_value = mock_result
 
-        telemetry_callback.track_event = MagicMock()
+        event_emitter.track_event = MagicMock()
 
-        wrapper = TelemetryRuntimeWrapper(
+        wrapper = InstrumentedRuntime(
             mock_delegate,
             tracer,
             tracing_callback,
             mock_runtime_context,
-            telemetry_callback=telemetry_callback,
+            event_emitter=event_emitter,
             agent_definition=agent_info,
         )
 
         await wrapper.execute({"input": "test"}, None)
 
         # Get the calls to track_event
-        calls = telemetry_callback.track_event.call_args_list
+        calls = event_emitter.track_event.call_args_list
 
         # Extract AgentRunId from both calls
         start_properties = calls[0][0][1]  # First call (STARTED) properties
@@ -382,26 +378,26 @@ class TestAgentRunIdConsistency:
         mock_delegate,
         tracer,
         tracing_callback,
-        telemetry_callback,
+        event_emitter,
         agent_info,
         mock_runtime_context,
     ):
         """Test that different wrapper instances have different AgentRunIds."""
-        wrapper1 = TelemetryRuntimeWrapper(
+        wrapper1 = InstrumentedRuntime(
             mock_delegate,
             tracer,
             tracing_callback,
             mock_runtime_context,
-            telemetry_callback=telemetry_callback,
+            event_emitter=event_emitter,
             agent_definition=agent_info,
         )
 
-        wrapper2 = TelemetryRuntimeWrapper(
+        wrapper2 = InstrumentedRuntime(
             mock_delegate,
             tracer,
             tracing_callback,
             mock_runtime_context,
-            telemetry_callback=telemetry_callback,
+            event_emitter=event_emitter,
             agent_definition=agent_info,
         )
 

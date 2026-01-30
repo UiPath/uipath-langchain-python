@@ -1,9 +1,9 @@
-"""Unit tests for span attribute parity with C# Temporal schema."""
+"""Unit tests for span attribute serialization and JSON output."""
 
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-from uipath_agents._observability.span_attributes import (
+from uipath_agents._observability.llmops.spans.span_attributes import (
     AgenticProcessToolSpanAttributes,
     AgentOutputSpanAttributes,
     AgentRunSpanAttributes,
@@ -225,18 +225,15 @@ class TestAgenticProcessToolSpanAttributes:
 
 
 # ---------------------------------------------------------------------------
-# Trace Comparison Tests - Verify JSON matches C# Temporal schema
+# JSON Serialization Tests
 # ---------------------------------------------------------------------------
 
 
 class TestCSharpSchemaCompatibility:
-    """Tests verifying JSON output matches C# Temporal schema field names.
-
-    C# schema reference: agents/backend/Execution.Shared/Traces/SpanAttributes/
-    """
+    """Tests verifying JSON output field names and serialization."""
 
     def test_process_tool_json_matches_csharp_schema(self) -> None:
-        """ProcessToolSpanAttributes JSON must have exact C# field names."""
+        """ProcessToolSpanAttributes JSON serialization uses camelCase field names."""
         attrs = ProcessToolSpanAttributes(
             tool_name="InvoiceProcessor",
             job_id="12345678-abcd-1234-abcd-123456789012",
@@ -247,7 +244,7 @@ class TestCSharpSchemaCompatibility:
         )
         data = attrs.model_dump(by_alias=True, exclude_none=True)
 
-        # C# ProcessToolSpanAttributes expected fields
+        # ProcessToolSpanAttributes expected fields
         assert "toolName" in data
         assert "jobId" in data
         assert "jobDetailsUri" in data
@@ -262,7 +259,7 @@ class TestCSharpSchemaCompatibility:
         assert "license_ref_id" not in data
 
     def test_escalation_tool_json_matches_csharp_schema(self) -> None:
-        """EscalationToolSpanAttributes JSON must have exact C# field names."""
+        """EscalationToolSpanAttributes JSON serialization uses camelCase field names."""
         attrs = EscalationToolSpanAttributes(
             channel_type="ActionCenter",
             assigned_to="user@example.com",
@@ -274,7 +271,7 @@ class TestCSharpSchemaCompatibility:
         )
         data = attrs.model_dump(by_alias=True, exclude_none=True)
 
-        # C# EscalationToolSpanAttributes expected fields
+        # EscalationToolSpanAttributes expected fields
         assert "channelType" in data
         assert "assignedTo" in data
         assert "taskId" in data
@@ -284,7 +281,7 @@ class TestCSharpSchemaCompatibility:
         assert "licenseRefId" in data
 
     def test_completion_span_json_matches_csharp_schema(self) -> None:
-        """CompletionSpanAttributes JSON must have exact C# field names."""
+        """CompletionSpanAttributes JSON serialization uses camelCase field names."""
         model_attrs = ModelSpanAttributes(
             is_deprecated=True,
             retire_date=datetime(2025, 12, 31, tzinfo=timezone.utc),
@@ -298,7 +295,7 @@ class TestCSharpSchemaCompatibility:
         )
         data = attrs.model_dump(by_alias=True, exclude_none=True)
 
-        # C# CompletionSpanAttributes expected fields
+        # CompletionSpanAttributes expected fields
         assert "model" in data
         assert "content" in data
         assert "explanation" in data
@@ -310,7 +307,7 @@ class TestCSharpSchemaCompatibility:
         assert "retireDate" in data["attributes"]
 
     def test_llm_call_span_json_matches_csharp_schema(self) -> None:
-        """LlmCallSpanAttributes JSON must have exact C# field names."""
+        """LlmCallSpanAttributes JSON serialization uses camelCase field names."""
         attrs = LlmCallSpanAttributes(
             input="User query",
             content="LLM response",
@@ -319,14 +316,14 @@ class TestCSharpSchemaCompatibility:
         )
         data = attrs.model_dump(by_alias=True, exclude_none=True)
 
-        # C# LlmCallSpanAttributes expected fields
+        # LlmCallSpanAttributes expected fields
         assert "input" in data
         assert "content" in data
         assert "explanation" in data
         assert "licenseRefId" in data
 
     def test_integration_tool_json_matches_csharp_schema(self) -> None:
-        """IntegrationToolSpanAttributes JSON must have exact C# field names."""
+        """IntegrationToolSpanAttributes JSON serialization uses camelCase field names."""
         attrs = IntegrationToolSpanAttributes(
             tool_name="Salesforce_CreateAccount",
             arguments={"accountName": "Acme Corp"},
@@ -335,14 +332,14 @@ class TestCSharpSchemaCompatibility:
         )
         data = attrs.model_dump(by_alias=True, exclude_none=True)
 
-        # C# IntegrationToolSpanAttributes expected fields
+        # IntegrationToolSpanAttributes expected fields
         assert "toolName" in data
         assert "arguments" in data
         assert "result" in data
         assert "licenseRefId" in data
 
     def test_agent_tool_json_matches_csharp_schema(self) -> None:
-        """AgentToolSpanAttributes JSON must have exact C# field names."""
+        """AgentToolSpanAttributes JSON serialization uses camelCase field names."""
         attrs = AgentToolSpanAttributes(
             tool_name="SubAgent",
             job_id="agent-job-12345",
@@ -358,7 +355,7 @@ class TestCSharpSchemaCompatibility:
         assert attrs.type == SpanType.AGENT_TOOL
 
     def test_api_workflow_tool_json_matches_csharp_schema(self) -> None:
-        """ApiWorkflowToolSpanAttributes JSON must have exact C# field names."""
+        """ApiWorkflowToolSpanAttributes JSON serialization uses camelCase field names."""
         attrs = ApiWorkflowToolSpanAttributes(
             tool_name="WorkflowExecutor",
             job_id="wf-job-12345",
@@ -374,7 +371,7 @@ class TestCSharpSchemaCompatibility:
         assert attrs.type == SpanType.API_WORKFLOW_TOOL
 
     def test_agentic_process_tool_json_matches_csharp_schema(self) -> None:
-        """AgenticProcessToolSpanAttributes JSON must have exact C# field names."""
+        """AgenticProcessToolSpanAttributes JSON serialization uses camelCase field names."""
         attrs = AgenticProcessToolSpanAttributes(
             tool_name="AgenticProcess",
             job_id="ap-job-12345",
@@ -396,7 +393,7 @@ class TestCSharpSchemaCompatibility:
 
 
 class TestAgentRunSpanAttributes:
-    """Tests for AgentRunSpanAttributes parity with C# Temporal schema."""
+    """Tests for AgentRunSpanAttributes serialization and field handling."""
 
     def test_type_is_agent_run(self) -> None:
         """Verify type property returns correct span type."""
@@ -448,7 +445,7 @@ class TestAgentRunSpanAttributes:
         assert data["output"] == {"result": "success", "value": 42}
 
     def test_required_attributes_present(self) -> None:
-        """Verify all C# required attributes are present in to_otel_attributes()."""
+        """Verify all required attributes are present in to_otel_attributes()."""
         attrs = AgentRunSpanAttributes(
             agent_name="TestAgent",
             agent_id="agent-123",
@@ -463,7 +460,7 @@ class TestAgentRunSpanAttributes:
         )
         data = attrs.to_otel_attributes()
 
-        # Required by C# Temporal schema
+        # Required attributes
         assert data["type"] == "agentRun"
         assert data["agentName"] == "TestAgent"
         assert data["agentId"] == "agent-123"

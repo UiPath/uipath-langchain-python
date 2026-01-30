@@ -2,7 +2,7 @@
 
 import pytest
 
-from uipath_agents._observability.span_attributes import (
+from uipath_agents._observability.llmops.spans.span_attributes import (
     ENV_UIPATH_IS_DEBUG,
     ENV_UIPATH_PROCESS_VERSION,
     ExecutionType,
@@ -31,7 +31,7 @@ class TestExecutionType:
     def test_debug_when_env_True_csharp_style(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """C# bool.ToString() produces 'True'."""
+        """Recognize 'True' (capitalized) as debug mode."""
         monkeypatch.setenv(ENV_UIPATH_IS_DEBUG, "True")
         assert get_execution_type() == ExecutionType.DEBUG
 
@@ -44,7 +44,7 @@ class TestExecutionType:
     def test_runtime_when_env_False_csharp_style(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """C# bool.ToString() produces 'False'."""
+        """Recognize 'False' (capitalized) as runtime mode."""
         monkeypatch.setenv(ENV_UIPATH_IS_DEBUG, "False")
         assert get_execution_type() == ExecutionType.RUNTIME
 

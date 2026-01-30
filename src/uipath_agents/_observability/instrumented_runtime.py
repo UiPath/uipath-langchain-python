@@ -39,25 +39,24 @@ from uipath.runtime.events import UiPathRuntimeEvent
 from uipath.runtime.schema import UiPathRuntimeSchema
 
 from ..agent_graph_builder.config import get_execution_type
-from .callback import UiPathTracingCallback
-from .telemetry_callback import (
-    AGENTRUN_COMPLETED,
-    AGENTRUN_FAILED,
-    AGENTRUN_STARTED,
-    AppInsightsTelemetryCallback,
+from .event_emitter import (
+    AgentRunEvent,
+    TelemetryEventEmitter,
 )
-from .trace_context_storage import (
+from .llmops import (
+    LlmOpsInstrumentationCallback,
+    LlmOpsSpanFactory,
     PendingSpanData,
     TraceContextData,
     TraceContextStorage,
+    reference_id_context,
 )
-from .tracer import UiPathTracer, _reference_id_context
 
 logger = logging.getLogger(__name__)
 
 
-class TelemetryRuntimeWrapper:
-    """Wrapper that adds telemetry to any UiPathRuntimeProtocol implementation.
+class InstrumentedRuntime:
+    """Wrapper that adds instrumentation to any UiPathRuntimeProtocol implementation.
 
     Uses composition pattern to wrap any runtime with tracing capabilities.
     Manages agent span lifecycle and updates the callback before each execution.
@@ -71,42 +70,42 @@ class TelemetryRuntimeWrapper:
     - On resume: loads trace context and continues the same trace
 
     Example:
-        tracer = UiPathTracer()
-        callback = UiPathTracingCallback(tracer)
+        span_factory = LlmOpsSpanFactory()
+        callback = LlmOpsInstrumentationCallback(span_factory)
         storage = SqliteTraceContextStorage(sqlite_storage)
         base_runtime = AgentsLangGraphRuntime(graph, callbacks=[callback])
-        traced_runtime = TelemetryRuntimeWrapper(
-            base_runtime, tracer, callback, trace_context_storage=storage
+        instrumented = InstrumentedRuntime(
+            base_runtime, span_factory, callback, trace_context_storage=storage
         )
-        result = await traced_runtime.execute(input_data)
+        result = await instrumented.execute(input_data)
     """
 
     def __init__(
         self,
         delegate: UiPathRuntimeProtocol,
-        tracer: UiPathTracer,
-        callback: UiPathTracingCallback,
+        span_factory: LlmOpsSpanFactory,
+        callback: LlmOpsInstrumentationCallback,
         runtime_context: UiPathRuntimeContext,
-        telemetry_callback: AppInsightsTelemetryCallback | None = None,
+        event_emitter: TelemetryEventEmitter | None = None,
         agent_definition: AgentDefinition | None = None,
         trace_context_storage: TraceContextStorage | None = None,
     ):
-        """Initialize the telemetry wrapper.
+        """Initialize the instrumented runtime.
 
         Args:
-            delegate: The runtime to wrap with telemetry
-            tracer: UiPathTracer for creating spans
+            delegate: The runtime to wrap with instrumentation
+            span_factory: LlmOpsSpanFactory for creating spans
             callback: Callback for LangChain event instrumentation
             runtime_context: Runtime context containing command and environment info
-            telemetry_callback: Optional callback for Application Insights telemetry
+            event_emitter: Optional emitter for Application Insights telemetry events
             agent_definition: Optional agent metadata for span attributes and telemetry enrichment
             trace_context_storage: Optional storage for trace context preservation
                 across suspend/resume cycles. If None, trace context is not preserved.
         """
         self._delegate = delegate
-        self._tracer = tracer
+        self._span_factory = span_factory
         self._callback = callback
-        self._telemetry_callback = telemetry_callback
+        self._event_emitter = event_emitter
         self._agent_definition = agent_definition
         self._trace_context_storage = trace_context_storage
         self._agent_run_id = str(uuid.uuid4())
@@ -248,7 +247,7 @@ class TelemetryRuntimeWrapper:
             The agent span for the execution
         """
         if saved_context:
-            # Resume: restore original trace context (prompts already captured)
+            # Resume: restore original trace context
             async with self._restore_trace_context(saved_context) as agent_span:
                 self._callback.set_agent_span(
                     agent_span, uuid.UUID(self._agent_run_id), prompts_captured=True
@@ -277,8 +276,8 @@ class TelemetryRuntimeWrapper:
                     yield agent_span
                 finally:
                     self._callback.cleanup()
-                    if self._telemetry_callback:
-                        self._telemetry_callback.cleanup()
+                    if self._event_emitter:
+                        self._event_emitter.cleanup()
         else:
             # Normal: create new trace context
             agent_name = self._get_agent_name()
@@ -292,7 +291,7 @@ class TelemetryRuntimeWrapper:
                 else False
             )
 
-            with self._tracer.start_agent_run(
+            with self._span_factory.start_agent_run(
                 agent_name=agent_name,
                 agent_id=agent_id,
                 is_conversational=is_conversational or False,
@@ -307,8 +306,8 @@ class TelemetryRuntimeWrapper:
                     agent_span, uuid.UUID(self._agent_run_id), prompts_captured
                 )
 
-                if self._telemetry_callback:
-                    self._telemetry_callback.set_agent_info(agent_name, agent_id)
+                if self._event_emitter:
+                    self._event_emitter.set_agent_info(agent_name, agent_id)
 
                     base_properties: Dict[str, Any] = {
                         "AgentName": agent_name,
@@ -320,14 +319,14 @@ class TelemetryRuntimeWrapper:
                     enriched_properties = self._get_enriched_properties(base_properties)
                     self._callback.set_enriched_properties(enriched_properties)
 
-                    self._telemetry_callback.track_event(
-                        AGENTRUN_STARTED, enriched_properties
+                    self._event_emitter.track_event(
+                        AgentRunEvent.STARTED, enriched_properties
                     )
 
                 try:
                     yield agent_span
                 except Exception as e:
-                    if self._telemetry_callback:
+                    if self._event_emitter:
                         duration_ms = (
                             int((time.time() - start_time) * 1000)
                             if start_time
@@ -353,14 +352,14 @@ class TelemetryRuntimeWrapper:
                             base_properties
                         )
 
-                        self._telemetry_callback.track_event(
-                            AGENTRUN_FAILED, enriched_properties
+                        self._event_emitter.track_event(
+                            AgentRunEvent.FAILED, enriched_properties
                         )
                     raise
                 finally:
                     self._callback.cleanup()
-                    if self._telemetry_callback:
-                        self._telemetry_callback.cleanup()
+                    if self._event_emitter:
+                        self._event_emitter.cleanup()
 
     @asynccontextmanager
     async def _restore_trace_context(
@@ -395,13 +394,11 @@ class TelemetryRuntimeWrapper:
         restored_span = trace.NonRecordingSpan(restored_span_context)
 
         # Restore reference_id ContextVar from saved attributes
-        reference_id = None
+        ref_id = None
         if "attributes" in saved_context and saved_context["attributes"]:
-            reference_id = saved_context["attributes"].get("referenceId")
+            ref_id = saved_context["attributes"].get("referenceId")
 
-        reference_id_token = (
-            _reference_id_context.set(reference_id) if reference_id else None
-        )
+        reference_id_token = reference_id_context.set(ref_id) if ref_id else None
 
         with trace.use_span(restored_span, end_on_exit=False):
             try:
@@ -409,7 +406,7 @@ class TelemetryRuntimeWrapper:
             finally:
                 # Reset ContextVar when done
                 if reference_id_token is not None:
-                    _reference_id_context.reset(reference_id_token)
+                    reference_id_context.reset(reference_id_token)
 
     async def _handle_suspended(self, agent_span: Span) -> None:
         """Handle suspended state: upsert spans and save trace context.
@@ -418,7 +415,7 @@ class TelemetryRuntimeWrapper:
         Upserts pending tool/process spans with UNSET status (no end time)
         so they survive process restart, then saves trace context for resume.
 
-        Matches C# pattern: Status=Unset + EndTime=null = in-progress/waiting.
+        UNSET status with no end time indicates the span is in-progress/waiting.
 
         Args:
             agent_span: The current agent span
@@ -429,11 +426,19 @@ class TelemetryRuntimeWrapper:
         # Upsert spans with UNSET status before suspend
         # This ensures spans survive process restart with correct state
         if tool_span:
-            self._tracer.upsert_span_suspended(tool_span)
+            success = self._span_factory.upsert_span_suspended(tool_span)
+            if not success:
+                logger.error(
+                    "Failed to upsert tool span on suspend - trace may be incomplete"
+                )
         if process_span:
-            self._tracer.upsert_span_suspended(process_span)
+            success = self._span_factory.upsert_span_suspended(process_span)
+            if not success:
+                logger.error(
+                    "Failed to upsert process span on suspend - trace may be incomplete"
+                )
         if escalation_span:
-            self._tracer.upsert_span_suspended(escalation_span)
+            self._span_factory.upsert_span_suspended(escalation_span)
 
         if self._trace_context_storage:
             runtime_id = self._get_runtime_id()
@@ -509,7 +514,7 @@ class TelemetryRuntimeWrapper:
 
         pending_tool = saved_context.get("pending_tool_span")
         if pending_tool:
-            self._tracer.upsert_span_complete_by_data(
+            self._span_factory.upsert_span_complete_by_data(
                 trace_id=trace_id,
                 span_data=dict(pending_tool),
             )
@@ -520,7 +525,7 @@ class TelemetryRuntimeWrapper:
 
         pending_process = saved_context.get("pending_process_span")
         if pending_process:
-            self._tracer.upsert_span_complete_by_data(
+            self._span_factory.upsert_span_complete_by_data(
                 trace_id=trace_id,
                 span_data=dict(pending_process),
             )
@@ -537,7 +542,7 @@ class TelemetryRuntimeWrapper:
             pending_escalation_data = dict(pending_escalation)
             pending_escalation_data["attributes"] = escalation_attrs
 
-            self._tracer.upsert_span_complete_by_data(
+            self._span_factory.upsert_span_complete_by_data(
                 trace_id=trace_id,
                 span_data=pending_escalation_data,
             )
@@ -710,15 +715,16 @@ class TelemetryRuntimeWrapper:
             return self._delegate._get_trace_prompts()
 
         if self._agent_definition and self._agent_definition.messages:
+            from uipath.agent.models.agent import AgentMessageRole
+
             system_prompt = None
             user_prompt = None
             for msg in self._agent_definition.messages:
-                if msg.role == "system":
+                if msg.role == AgentMessageRole.SYSTEM:
                     system_prompt = msg.content
-                elif msg.role == "user":
+                elif msg.role == AgentMessageRole.USER:
                     user_prompt = msg.content
             return system_prompt, user_prompt
-
         return None, None
 
     def _normalize_input(self, input_data: Any) -> Optional[Dict[str, Any]]:
@@ -733,7 +739,7 @@ class TelemetryRuntimeWrapper:
         agent_span: Optional[Span] = None,
     ) -> None:
         if result.status == UiPathRuntimeStatus.SUCCESSFUL:
-            # Set output on parent agentRun span (matches C# schema)
+            # Set output on parent agentRun span
             if agent_span:
                 output = result.output
                 if isinstance(output, (dict, list)):
@@ -742,9 +748,9 @@ class TelemetryRuntimeWrapper:
                     output_str = str(output) if output is not None else ""
                 agent_span.set_attribute("output", output_str)
 
-            self._tracer.emit_agent_output(result.output)
+            self._span_factory.emit_agent_output(result.output)
 
-            if self._telemetry_callback:
+            if self._event_emitter:
                 agent_name = self._get_agent_name()
                 agent_id = self._get_agent_id()
 
@@ -764,6 +770,6 @@ class TelemetryRuntimeWrapper:
                     base_properties, agent_span
                 )
 
-                self._telemetry_callback.track_event(
-                    AGENTRUN_COMPLETED, enriched_properties
+                self._event_emitter.track_event(
+                    AgentRunEvent.COMPLETED, enriched_properties
                 )

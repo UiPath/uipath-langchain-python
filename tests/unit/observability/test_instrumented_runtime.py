@@ -1,4 +1,4 @@
-"""Tests for TelemetryRuntimeWrapper."""
+"""Tests for InstrumentedRuntime."""
 
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, create_autospec
@@ -13,10 +13,10 @@ from uipath.agent.models.agent import (
 )
 from uipath.runtime import UiPathRuntimeContext, UiPathRuntimeStatus
 
-from uipath_agents._observability.callback import UiPathTracingCallback
-from uipath_agents._observability.runtime_wrapper import TelemetryRuntimeWrapper
-from uipath_agents._observability.trace_context_storage import TraceContextData
-from uipath_agents._observability.tracer import UiPathTracer
+from uipath_agents._observability.instrumented_runtime import InstrumentedRuntime
+from uipath_agents._observability.llmops.callback import LlmOpsInstrumentationCallback
+from uipath_agents._observability.llmops.spans.span_factory import LlmOpsSpanFactory
+from uipath_agents._observability.llmops.trace_context_storage import TraceContextData
 
 
 @pytest.fixture
@@ -42,25 +42,25 @@ def mock_exporter():
 @pytest.fixture
 def tracer():
     """Create a tracer."""
-    return UiPathTracer()
+    return LlmOpsSpanFactory()
 
 
 @pytest.fixture
 def tracer_with_exporter(span_exporter, mock_exporter):
     """Create a tracer with mock exporter and consistent global tracer state."""
-    return UiPathTracer(exporter=mock_exporter)
+    return LlmOpsSpanFactory(exporter=mock_exporter)
 
 
 @pytest.fixture
 def callback(tracer):
     """Create a callback."""
-    return UiPathTracingCallback(tracer)
+    return LlmOpsInstrumentationCallback(tracer)
 
 
 @pytest.fixture
 def callback_with_exporter(tracer_with_exporter):
     """Create a callback with exporter-enabled tracer."""
-    return UiPathTracingCallback(tracer_with_exporter)
+    return LlmOpsInstrumentationCallback(tracer_with_exporter)
 
 
 @pytest.fixture
@@ -74,20 +74,20 @@ def mock_runtime_context():
     return context
 
 
-class TestTelemetryRuntimeWrapper:
-    """Test TelemetryRuntimeWrapper core functionality."""
+class TestInstrumentedRuntime:
+    """Test InstrumentedRuntime core functionality."""
 
-    def test_init_stores_delegate_tracer_callback(
+    def test_init_stores_delegate_span_factory_callback(
         self, mock_delegate, tracer, callback, mock_runtime_context
     ):
         """Test initialization stores all dependencies."""
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
 
-        assert wrapper.delegate is mock_delegate
-        assert wrapper._tracer is tracer
-        assert wrapper._callback is callback
+        assert instrumented_runtime.delegate is mock_delegate
+        assert instrumented_runtime._span_factory is tracer
+        assert instrumented_runtime._callback is callback
 
     @pytest.mark.asyncio
     async def test_execute_calls_set_agent_span(
@@ -106,10 +106,10 @@ class TestTelemetryRuntimeWrapper:
 
         callback.set_agent_span = MagicMock(side_effect=capture_agent_span)
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
-        await wrapper.execute({"input": "test"}, None)
+        await instrumented_runtime.execute({"input": "test"}, None)
 
         # set_agent_span should have been called with a span and run_id
         callback.set_agent_span.assert_called_once()
@@ -133,10 +133,10 @@ class TestTelemetryRuntimeWrapper:
 
         mock_delegate.stream = mock_stream
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
-        events = [e async for e in wrapper.stream({"input": "test"}, None)]
+        events = [e async for e in instrumented_runtime.stream({"input": "test"}, None)]
 
         assert events == ["event1"]
         callback.set_agent_span.assert_called_once()
@@ -150,12 +150,12 @@ class TestTelemetryRuntimeWrapper:
         mock_schema = MagicMock()
         mock_delegate.get_schema.return_value = mock_schema
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
 
-        assert await wrapper.get_schema() is mock_schema
-        await wrapper.dispose()
+        assert await instrumented_runtime.get_schema() is mock_schema
+        await instrumented_runtime.dispose()
         mock_delegate.dispose.assert_called_once()
 
     def test_metadata_extraction(self, tracer, callback, mock_runtime_context):
@@ -173,33 +173,36 @@ class TestTelemetryRuntimeWrapper:
             input_schema={"type": "object"},
             output_schema={"type": "string"},
         )
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer,
             callback,
             mock_runtime_context,
             agent_definition=agent_info,
         )
-        assert wrapper._get_agent_name() == "my-agent"
-        assert wrapper._get_prompts() == ("system", "user")
-        assert wrapper._get_schemas() == ({"type": "object"}, {"type": "string"})
+        assert instrumented_runtime._get_agent_name() == "my-agent"
+        assert instrumented_runtime._get_prompts() == ("system", "user")
+        assert instrumented_runtime._get_schemas() == (
+            {"type": "object"},
+            {"type": "string"},
+        )
 
         # Without agent_info - falls back to runtime_id
         mock_delegate_with_id = MagicMock()
         mock_delegate_with_id.runtime_id = "test-runtime-id"
-        wrapper_fallback = TelemetryRuntimeWrapper(
+        instrumented_runtime_fallback = InstrumentedRuntime(
             mock_delegate_with_id, tracer, callback, mock_runtime_context
         )
-        assert wrapper_fallback._get_agent_name() == "test-runtime-id"
-        assert wrapper_fallback._get_schemas() == (None, None)
+        assert instrumented_runtime_fallback._get_agent_name() == "test-runtime-id"
+        assert instrumented_runtime_fallback._get_schemas() == (None, None)
 
         # Without agent_info or runtime_id - falls back to unknown
         mock_delegate_empty = MagicMock(spec=[])
-        wrapper_empty = TelemetryRuntimeWrapper(
+        instrumented_runtime_empty = InstrumentedRuntime(
             mock_delegate_empty, tracer, callback, mock_runtime_context
         )
-        assert wrapper_empty._get_agent_name() == "unknown"
-        assert wrapper_empty._get_prompts() == (None, None)
+        assert instrumented_runtime_empty._get_agent_name() == "unknown"
+        assert instrumented_runtime_empty._get_prompts() == (None, None)
 
     def test_get_prompts_extracts_templates_from_messages(
         self, tracer, callback, mock_runtime_context
@@ -224,7 +227,7 @@ class TestTelemetryRuntimeWrapper:
             input_schema={"type": "object"},
             output_schema={"type": "string"},
         )
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer,
             callback,
@@ -232,7 +235,7 @@ class TestTelemetryRuntimeWrapper:
             agent_definition=agent_info,
         )
 
-        system_prompt, user_prompt = wrapper._get_prompts()
+        system_prompt, user_prompt = instrumented_runtime._get_prompts()
 
         assert system_prompt == "You are a {{role}} assistant."
         assert user_prompt == "Process this: {{input_string}}"
@@ -248,14 +251,14 @@ class TestTelemetryRuntimeWrapper:
 
         callback.set_agent_span = MagicMock()
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
 
         # Multiple executions (simulating debug/chat re-execution)
-        await wrapper.execute({"input": "1"}, None)
-        await wrapper.execute({"input": "2"}, None)
-        await wrapper.execute({"input": "3"}, None)
+        await instrumented_runtime.execute({"input": "1"}, None)
+        await instrumented_runtime.execute({"input": "2"}, None)
+        await instrumented_runtime.execute({"input": "3"}, None)
 
         # set_agent_span called 3 times, once per execution
         assert callback.set_agent_span.call_count == 3
@@ -271,10 +274,10 @@ class TestTelemetryRuntimeWrapper:
 
         callback.cleanup = MagicMock()
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
-        await wrapper.execute({"input": "test"}, None)
+        await instrumented_runtime.execute({"input": "test"}, None)
 
         callback.cleanup.assert_called_once()
 
@@ -287,12 +290,12 @@ class TestTelemetryRuntimeWrapper:
 
         callback.cleanup = MagicMock()
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
 
         with pytest.raises(RuntimeError):
-            await wrapper.execute({"input": "test"}, None)
+            await instrumented_runtime.execute({"input": "test"}, None)
 
         # Cleanup should still be called
         callback.cleanup.assert_called_once()
@@ -316,15 +319,15 @@ class TestTelemetryRuntimeWrapper:
         mock_delegate.execute.side_effect = delayed_execute
         callback.set_agent_span = MagicMock()
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
 
         # Run concurrent executions
         await asyncio.gather(
-            wrapper.execute({"input": "A"}, None),
-            wrapper.execute({"input": "B"}, None),
-            wrapper.execute({"input": "C"}, None),
+            instrumented_runtime.execute({"input": "A"}, None),
+            instrumented_runtime.execute({"input": "B"}, None),
+            instrumented_runtime.execute({"input": "C"}, None),
         )
 
         assert call_count == 3
@@ -344,7 +347,7 @@ class TestCallbackPersistence:
         mock_result.status = UiPathRuntimeStatus.FAULTED
         mock_delegate.execute.return_value = mock_result
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
 
@@ -360,11 +363,11 @@ class TestCallbackPersistence:
         callback.set_agent_span = track_spans
 
         # First execution (stopped at breakpoint)
-        await wrapper.execute({"input": "step1"}, None)
+        await instrumented_runtime.execute({"input": "step1"}, None)
         # Resume (re-execute)
-        await wrapper.execute({"input": "step2"}, None)
+        await instrumented_runtime.execute({"input": "step2"}, None)
         # Resume again
-        await wrapper.execute({"input": "step3"}, None)
+        await instrumented_runtime.execute({"input": "step3"}, None)
 
         # Each execution got its own agent span
         assert len(spans_per_execution) == 3
@@ -385,19 +388,19 @@ class TestCallbackPersistence:
         # First call suspends (needs HITL approval), second succeeds
         mock_delegate.execute.side_effect = [suspended_result, success_result]
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
 
         # Initial execution - suspends for HITL
-        result1 = await wrapper.execute({"input": "initial"}, None)
+        result1 = await instrumented_runtime.execute({"input": "initial"}, None)
         assert result1.status == UiPathRuntimeStatus.SUSPENDED
 
         # User approves, re-execute with resume
-        result2 = await wrapper.execute({"input": "approved"}, None)
+        result2 = await instrumented_runtime.execute({"input": "approved"}, None)
         assert result2.status == UiPathRuntimeStatus.SUCCESSFUL
 
-        # Both executions used same wrapper (and thus same callback)
+        # Both executions used same instrumented_runtime (and thus same callback)
         assert mock_delegate.execute.call_count == 2
 
 
@@ -423,8 +426,8 @@ class TestInterruptibleTraceContext:
         mock_trace_context_storage,
         mock_runtime_context,
     ):
-        """Test wrapper accepts optional trace_context_storage parameter."""
-        wrapper = TelemetryRuntimeWrapper(
+        """Test instrumented_runtime accepts optional trace_context_storage parameter."""
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer,
             callback,
@@ -432,18 +435,18 @@ class TestInterruptibleTraceContext:
             trace_context_storage=mock_trace_context_storage,
         )
 
-        assert wrapper._trace_context_storage is mock_trace_context_storage
+        assert instrumented_runtime._trace_context_storage is mock_trace_context_storage
 
     @pytest.mark.asyncio
     async def test_init_without_storage_works(
         self, mock_delegate, tracer, callback, mock_runtime_context
     ):
-        """Test wrapper works without trace context storage (backward compatibility)."""
-        wrapper = TelemetryRuntimeWrapper(
+        """Test instrumented_runtime works without trace context storage (backward compatibility)."""
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
 
-        assert wrapper._trace_context_storage is None
+        assert instrumented_runtime._trace_context_storage is None
 
     @pytest.mark.asyncio
     async def test_suspended_saves_trace_context(
@@ -459,7 +462,7 @@ class TestInterruptibleTraceContext:
         mock_result.status = UiPathRuntimeStatus.SUSPENDED
         mock_delegate.execute.return_value = mock_result
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer,
             callback,
@@ -467,7 +470,7 @@ class TestInterruptibleTraceContext:
             trace_context_storage=mock_trace_context_storage,
         )
 
-        await wrapper.execute({"input": "test"}, None)
+        await instrumented_runtime.execute({"input": "test"}, None)
 
         # Context should be saved for re-parenting on resume
         mock_trace_context_storage.save_trace_context.assert_called_once()
@@ -492,7 +495,7 @@ class TestInterruptibleTraceContext:
         mock_result.output = {"result": "done"}
         mock_delegate.execute.return_value = mock_result
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer,
             callback,
@@ -500,7 +503,7 @@ class TestInterruptibleTraceContext:
             trace_context_storage=mock_trace_context_storage,
         )
 
-        await wrapper.execute({"input": "test"}, None)
+        await instrumented_runtime.execute({"input": "test"}, None)
 
         mock_trace_context_storage.clear_trace_context.assert_called_once_with(
             "test-id"
@@ -520,7 +523,7 @@ class TestInterruptibleTraceContext:
         mock_result.status = UiPathRuntimeStatus.FAULTED
         mock_delegate.execute.return_value = mock_result
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer,
             callback,
@@ -528,7 +531,7 @@ class TestInterruptibleTraceContext:
             trace_context_storage=mock_trace_context_storage,
         )
 
-        await wrapper.execute({"input": "test"}, None)
+        await instrumented_runtime.execute({"input": "test"}, None)
 
         mock_trace_context_storage.clear_trace_context.assert_called_once_with(
             "test-id"
@@ -568,7 +571,7 @@ class TestInterruptibleTraceContext:
         mock_result.output = {"result": "done"}
         mock_delegate.execute.return_value = mock_result
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer,
             callback,
@@ -576,7 +579,7 @@ class TestInterruptibleTraceContext:
             trace_context_storage=mock_trace_context_storage,
         )
 
-        await wrapper.execute({"input": "resume"}, None)
+        await instrumented_runtime.execute({"input": "resume"}, None)
 
         # Should have loaded context
         mock_trace_context_storage.load_trace_context.assert_called_once_with("test-id")
@@ -616,7 +619,7 @@ class TestInterruptibleTraceContext:
 
         mock_delegate.execute.side_effect = [suspended_result, success_result]
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer,
             callback,
@@ -625,7 +628,7 @@ class TestInterruptibleTraceContext:
         )
 
         # First execute - suspends
-        result1 = await wrapper.execute({"input": "initial"}, None)
+        result1 = await instrumented_runtime.execute({"input": "initial"}, None)
         assert result1.status == UiPathRuntimeStatus.SUSPENDED
 
         # Context should be saved for re-parenting
@@ -633,7 +636,7 @@ class TestInterruptibleTraceContext:
         assert "trace_id" in stored_context
 
         # Second execute - resume (will re-parent to original trace)
-        result2 = await wrapper.execute({"input": "resume"}, None)
+        result2 = await instrumented_runtime.execute({"input": "resume"}, None)
         assert result2.status == UiPathRuntimeStatus.SUCCESSFUL
 
         # Context should be cleared after success
@@ -643,18 +646,18 @@ class TestInterruptibleTraceContext:
     async def test_no_storage_still_works(
         self, mock_delegate, tracer, callback, mock_runtime_context
     ):
-        """Test wrapper works without storage (no upsert/save, just normal execution)."""
+        """Test instrumented_runtime works without storage (no upsert/save, just normal execution)."""
         mock_result = MagicMock()
         mock_result.status = UiPathRuntimeStatus.SUSPENDED
         mock_delegate.execute.return_value = mock_result
 
         # No storage provided
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
 
         # Should not raise
-        result = await wrapper.execute({"input": "test"}, None)
+        result = await instrumented_runtime.execute({"input": "test"}, None)
         assert result.status == UiPathRuntimeStatus.SUSPENDED
 
     @pytest.mark.asyncio
@@ -678,7 +681,7 @@ class TestInterruptibleTraceContext:
 
         mock_delegate.stream = mock_stream
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer,
             callback,
@@ -686,7 +689,7 @@ class TestInterruptibleTraceContext:
             trace_context_storage=mock_trace_context_storage,
         )
 
-        events = [e async for e in wrapper.stream({"input": "test"}, None)]
+        events = [e async for e in instrumented_runtime.stream({"input": "test"}, None)]
 
         assert len(events) == 2
         mock_trace_context_storage.save_trace_context.assert_called_once()
@@ -741,7 +744,7 @@ class TestInterruptibleTraceContext:
 
         mock_delegate.execute.side_effect = [suspended_result, success_result]
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer,
             callback,
@@ -751,7 +754,7 @@ class TestInterruptibleTraceContext:
         )
 
         # First execute - suspends
-        result1 = await wrapper.execute({"input": "initial"}, None)
+        result1 = await instrumented_runtime.execute({"input": "initial"}, None)
         assert result1.status == UiPathRuntimeStatus.SUSPENDED
 
         # Verify reference_id was saved in trace context
@@ -761,7 +764,7 @@ class TestInterruptibleTraceContext:
 
         # Second execute - resume
         # This should restore the reference_id ContextVar
-        result2 = await wrapper.execute({"input": "resume"}, None)
+        result2 = await instrumented_runtime.execute({"input": "resume"}, None)
         assert result2.status == UiPathRuntimeStatus.SUCCESSFUL
 
         # Verify that spans created during resume have reference_id
@@ -813,7 +816,7 @@ class TestUpsertSpanOnSuspend:
             return_value=("test_tool", mock_tool_span, mock_process_span)
         )
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer_with_exporter,
             callback_with_exporter,
@@ -821,7 +824,7 @@ class TestUpsertSpanOnSuspend:
             trace_context_storage=mock_trace_context_storage,
         )
 
-        await wrapper.execute({"input": "test"}, None)
+        await instrumented_runtime.execute({"input": "test"}, None)
 
         # 3 upserts = 1 agent start (UNSET) + 2 pending spans (UNSET)
         assert mock_exporter.upsert_span.call_count == 3
@@ -829,7 +832,7 @@ class TestUpsertSpanOnSuspend:
         # First call is agent span with UNSET status
         assert mock_exporter.upsert_span.call_args_list[0][1]["status_override"] == 0
 
-        # Remaining calls are pending spans with UNSET status (matches C# pattern)
+        # Remaining calls are pending spans with UNSET status
         for call in mock_exporter.upsert_span.call_args_list[1:]:
             assert call[1]["status_override"] == 0
 
@@ -853,7 +856,7 @@ class TestUpsertSpanOnSuspend:
             return_value=(None, None, None)
         )
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer_with_exporter,
             callback_with_exporter,
@@ -861,7 +864,7 @@ class TestUpsertSpanOnSuspend:
             trace_context_storage=mock_trace_context_storage,
         )
 
-        await wrapper.execute({"input": "test"}, None)
+        await instrumented_runtime.execute({"input": "test"}, None)
 
         # 1 upsert = agent start only (no pending spans)
         assert mock_exporter.upsert_span.call_count == 1
@@ -894,7 +897,7 @@ class TestUpsertSpanOnSuspend:
             return_value=("test_tool", mock_tool_span, None)
         )
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
             tracer_with_exporter,
             callback_with_exporter,
@@ -902,7 +905,7 @@ class TestUpsertSpanOnSuspend:
             trace_context_storage=mock_trace_context_storage,
         )
 
-        await wrapper.execute({"input": "test"}, None)
+        await instrumented_runtime.execute({"input": "test"}, None)
 
         # 2 upserts = 1 agent start (UNSET) + 1 tool span (UNSET)
         assert mock_exporter.upsert_span.call_count == 2
@@ -911,7 +914,7 @@ class TestUpsertSpanOnSuspend:
         )  # UNSET
         assert (
             mock_exporter.upsert_span.call_args_list[1][1]["status_override"] == 0
-        )  # UNSET (matches C# pattern)
+        )  # UNSET
 
 
 class TestGetAgentModel:
@@ -924,10 +927,10 @@ class TestGetAgentModel:
         mock_delegate = MagicMock()
         mock_delegate.get_agent_model.return_value = "gpt-4o-2024-11-20"
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
-        model = wrapper.get_agent_model()
+        model = instrumented_runtime.get_agent_model()
 
         assert model == "gpt-4o-2024-11-20"
         mock_delegate.get_agent_model.assert_called_once()
@@ -938,10 +941,10 @@ class TestGetAgentModel:
         """Test get_agent_model returns None when delegate doesn't have the method."""
         mock_delegate = MagicMock(spec=[])  # Empty spec, no get_agent_model
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
-        model = wrapper.get_agent_model()
+        model = instrumented_runtime.get_agent_model()
 
         assert model is None
 
@@ -952,9 +955,9 @@ class TestGetAgentModel:
         mock_delegate = MagicMock()
         mock_delegate.get_agent_model.return_value = None
 
-        wrapper = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             mock_delegate, tracer, callback, mock_runtime_context
         )
-        model = wrapper.get_agent_model()
+        model = instrumented_runtime.get_agent_model()
 
         assert model is None

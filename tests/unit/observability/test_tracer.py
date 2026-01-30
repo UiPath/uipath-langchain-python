@@ -1,4 +1,4 @@
-"""Tests for UiPathTracer manual span instrumentation."""
+"""Tests for LlmOpsSpanFactory manual span instrumentation."""
 
 from unittest.mock import MagicMock
 
@@ -6,8 +6,8 @@ import pytest
 from opentelemetry.sdk.trace.export import SpanExportResult
 from uipath.tracing import SpanStatus
 
-from uipath_agents._observability.schema import SpanType
-from uipath_agents._observability.tracer import UiPathTracer
+from uipath_agents._observability.llmops.spans.span_attributes import SpanType
+from uipath_agents._observability.llmops.spans.span_factory import LlmOpsSpanFactory
 
 # span_exporter fixture comes from conftest.py
 
@@ -15,7 +15,7 @@ from uipath_agents._observability.tracer import UiPathTracer
 @pytest.fixture(autouse=True)
 def clear_env_caches():
     """Clear cached environment variable functions before each test."""
-    from uipath_agents._observability.span_attributes import (
+    from uipath_agents._observability.llmops.spans.span_attributes import (
         get_agent_version,
         get_execution_type,
     )
@@ -30,7 +30,7 @@ def clear_env_caches():
 @pytest.fixture
 def tracer(span_exporter):
     """Create a fresh tracer for testing."""
-    return UiPathTracer()
+    return LlmOpsSpanFactory()
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ def mock_exporter():
 @pytest.fixture
 def tracer_with_exporter(span_exporter, mock_exporter):
     """Create tracer with mock exporter."""
-    return UiPathTracer(exporter=mock_exporter)
+    return LlmOpsSpanFactory(exporter=mock_exporter)
 
 
 class TestExecutionContextOnAllSpans:
@@ -241,7 +241,7 @@ class TestAgentRunSpan:
         spans = span_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
 
-        assert attrs["type"] == SpanType.AGENT_RUN.value
+        assert attrs["type"] == SpanType.AGENT_RUN
         assert attrs["agentName"] == "TestAgent"
         assert attrs["agentId"] == "test-id-123"
         assert attrs["source"] == 1  # TraceSource.Agents
@@ -308,13 +308,13 @@ class TestLlmCallSpan:
     """Tests for LLM call span creation."""
 
     def test_creates_span_with_correct_type(self, tracer, span_exporter):
-        """Test LLM call span has correct type attribute (completion, matches C# Temporal)."""
+        """Test LLM call span has correct type attribute (completion)."""
         span = tracer.start_llm_call()
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
-        assert spans[0].attributes["type"] == SpanType.COMPLETION.value
+        assert spans[0].attributes["type"] == SpanType.COMPLETION
 
     def test_span_name(self, tracer, span_exporter):
         """Test LLM call span has correct name."""
@@ -336,8 +336,8 @@ class TestModelRunSpan:
         spans = span_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
 
-        # Model run uses completion type (matching Temporal schema)
-        assert attrs["type"] == SpanType.COMPLETION.value
+        # Model run uses completion type
+        assert attrs["type"] == SpanType.COMPLETION
         assert attrs["model"] == "gpt-4"
 
 
@@ -352,7 +352,7 @@ class TestToolCallSpan:
         spans = span_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
 
-        assert attrs["type"] == SpanType.TOOL_CALL.value
+        assert attrs["type"] == SpanType.TOOL_CALL
         assert attrs["toolName"] == "calculator"
         assert spans[0].name == "Tool call - calculator"
 
@@ -365,14 +365,14 @@ class TestToolCallSpan:
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
-        assert spans[0].attributes["type"] == SpanType.PROCESS_TOOL.value
+        assert spans[0].attributes["type"] == SpanType.PROCESS_TOOL
 
 
 class TestIntegrationToolSpan:
     """Tests for integration tool span creation."""
 
     def test_creates_span_with_correct_type(
-        self, tracer: UiPathTracer, span_exporter
+        self, tracer: LlmOpsSpanFactory, span_exporter
     ) -> None:
         """Test integration tool span has correct type attribute."""
         span = tracer.start_integration_tool(tool_name="Web_Search")
@@ -380,10 +380,10 @@ class TestIntegrationToolSpan:
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
-        assert spans[0].attributes["type"] == SpanType.INTEGRATION_TOOL.value
+        assert spans[0].attributes["type"] == SpanType.INTEGRATION_TOOL
 
     def test_uses_tool_name_as_span_name(
-        self, tracer: UiPathTracer, span_exporter
+        self, tracer: LlmOpsSpanFactory, span_exporter
     ) -> None:
         """Test integration tool span uses tool_name as span name."""
         span = tracer.start_integration_tool(tool_name="My_Custom_Tool")
@@ -393,7 +393,9 @@ class TestIntegrationToolSpan:
         assert spans[0].name == "My_Custom_Tool"
         assert spans[0].attributes["toolName"] == "My_Custom_Tool"
 
-    def test_respects_parent_span(self, tracer: UiPathTracer, span_exporter) -> None:
+    def test_respects_parent_span(
+        self, tracer: LlmOpsSpanFactory, span_exporter
+    ) -> None:
         """Test integration tool span correctly parents to provided span."""
         parent = tracer.start_tool_call(tool_name="wrapper_tool")
         child = tracer.start_integration_tool(
@@ -413,7 +415,7 @@ class TestAgentToolSpan:
     """Tests for agent tool span creation."""
 
     def test_creates_span_with_correct_type(
-        self, tracer: UiPathTracer, span_exporter
+        self, tracer: LlmOpsSpanFactory, span_exporter
     ) -> None:
         """Test agent tool span has correct type attribute."""
         span = tracer.start_agent_tool(agent_name="A_plus_B")
@@ -421,10 +423,10 @@ class TestAgentToolSpan:
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
-        assert spans[0].attributes["type"] == SpanType.AGENT_TOOL.value
+        assert spans[0].attributes["type"] == SpanType.AGENT_TOOL
 
     def test_uses_agent_name_as_span_name(
-        self, tracer: UiPathTracer, span_exporter
+        self, tracer: LlmOpsSpanFactory, span_exporter
     ) -> None:
         """Test agent tool span uses agent_name as span name."""
         span = tracer.start_agent_tool(agent_name="Calculator_Agent")
@@ -434,7 +436,7 @@ class TestAgentToolSpan:
         assert spans[0].name == "Calculator_Agent"
         assert spans[0].attributes["toolName"] == "Calculator_Agent"
 
-    def test_includes_arguments(self, tracer: UiPathTracer, span_exporter) -> None:
+    def test_includes_arguments(self, tracer: LlmOpsSpanFactory, span_exporter) -> None:
         """Test agent tool span includes arguments."""
         span = tracer.start_agent_tool(
             agent_name="A_plus_B", arguments={"a": 1, "b": 2}
@@ -450,7 +452,7 @@ class TestToolCallWithArguments:
     """Tests for tool call span with arguments and call_id."""
 
     def test_tool_call_includes_arguments(
-        self, tracer: UiPathTracer, span_exporter
+        self, tracer: LlmOpsSpanFactory, span_exporter
     ) -> None:
         """Test tool call span includes arguments when provided."""
         span = tracer.start_tool_call(
@@ -463,7 +465,7 @@ class TestToolCallWithArguments:
         assert '"x": 10' in spans[0].attributes["arguments"]
 
     def test_tool_call_includes_call_id(
-        self, tracer: UiPathTracer, span_exporter
+        self, tracer: LlmOpsSpanFactory, span_exporter
     ) -> None:
         """Test tool call span includes call_id when provided."""
         span = tracer.start_tool_call(
@@ -476,7 +478,7 @@ class TestToolCallWithArguments:
         assert spans[0].attributes["callId"] == "call_abc123"
 
     def test_tool_call_includes_tool_type_value(
-        self, tracer: UiPathTracer, span_exporter
+        self, tracer: LlmOpsSpanFactory, span_exporter
     ) -> None:
         """Test tool call span includes toolType value."""
         span = tracer.start_tool_call(
@@ -499,7 +501,7 @@ class TestAgentOutputSpan:
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
         assert spans[0].name == "Agent output"
-        assert spans[0].attributes["type"] == SpanType.AGENT_OUTPUT.value
+        assert spans[0].attributes["type"] == SpanType.AGENT_OUTPUT
         assert '"result": "success"' in spans[0].attributes["output"]
 
     def test_handles_string_output(self, tracer, span_exporter):

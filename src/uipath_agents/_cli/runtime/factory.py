@@ -31,19 +31,16 @@ from uipath_agents.agent_graph_builder import build_agent_graph
 from uipath_agents.agent_graph_builder.config import get_execution_type
 
 from ..._observability import configure_telemetry, shutdown_telemetry
-from ..._observability.callback import (
-    UiPathTracingCallback,
-    _get_ancestor_spans,
-    _get_current_span,
-)
-from ..._observability.runtime_wrapper import TelemetryRuntimeWrapper
-from ..._observability.sqlite_trace_context_storage import SqliteTraceContextStorage
-from ..._observability.telemetry_callback import AppInsightsTelemetryCallback
-from ..._observability.tracer import UiPathTracer
-from ..._observability.tracing import (
-    FilteringSpanExporter,
+from ..._observability.event_emitter import TelemetryEventEmitter
+from ..._observability.exporters import FilteringSpanExporter
+from ..._observability.instrumented_runtime import InstrumentedRuntime
+from ..._observability.llmops import (
+    LlmOpsInstrumentationCallback,
+    LlmOpsSpanFactory,
+    SqliteTraceContextStorage,
     is_custom_instrumentation_span,
 )
+from ..._observability.llmops.callback import _get_ancestor_spans, _get_current_span
 from ..._observability.utils import configure_appinsights_cloud_role, setup_otel_env
 from ..constants import AGENT_ENTRYPOINT
 from ..utils import _prepare_agent_execution_contract, load_agent_configuration
@@ -270,14 +267,14 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         Note:
             Runtime wrapping order:
             1. AgentsLangGraphRuntime (base - handles LangGraph execution)
-            2. TelemetryRuntimeWrapper (adds tracing spans + trace context preservation)
+            2. InstrumentedRuntime (adds tracing spans + trace context preservation)
             3. UiPathResumableRuntime (adds persistence/resume)
 
             The callback is passed via constructor to the base runtime,
             ensuring it persists across debug/chat re-executions where
             the same runtime instance is executed multiple times.
 
-            Trace context storage is shared between TelemetryRuntimeWrapper
+            Trace context storage is shared between InstrumentedRuntime
             (for trace context preservation) and UiPathResumableRuntime
             (for agent state persistence).
         """
@@ -298,28 +295,28 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         filtered_exporter = FilteringSpanExporter(
             llmops_exporter, filter_fn=is_custom_instrumentation_span
         )
-        tracer = UiPathTracer(exporter=filtered_exporter)
-        tracing_callback = UiPathTracingCallback(tracer)
-        telemetry_callback = AppInsightsTelemetryCallback()
+        span_factory = LlmOpsSpanFactory(exporter=filtered_exporter)
+        instrumentation_callback = LlmOpsInstrumentationCallback(span_factory)
+        event_emitter = TelemetryEventEmitter()
 
         base_runtime = AgentsLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
-            callbacks=[tracing_callback, telemetry_callback],
+            callbacks=[instrumentation_callback, event_emitter],
             agent_definition=agent_definition,
         )
-        telemetry_runtime = TelemetryRuntimeWrapper(
+        instrumented_runtime = InstrumentedRuntime(
             base_runtime,
-            tracer,
-            tracing_callback,
+            span_factory,
+            instrumentation_callback,
             self.context,
-            telemetry_callback=telemetry_callback,
+            event_emitter=event_emitter,
             agent_definition=agent_definition,
             trace_context_storage=trace_context_storage,
         )
         return await self._wrap_in_resumable_runtime(
-            telemetry_runtime, storage, runtime_id
+            instrumented_runtime, storage, runtime_id
         )
 
     async def _wrap_in_resumable_runtime(
@@ -332,7 +329,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
 
         Args:
             base_runtime: The base runtime to wrap
-            storage: Pre-created storage (shared with TelemetryRuntimeWrapper)
+            storage: Pre-created storage (shared with InstrumentedRuntime)
             runtime_id: Unique identifier for the runtime instance
 
         Returns:

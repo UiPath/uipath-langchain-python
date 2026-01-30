@@ -4,10 +4,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from uipath_agents._observability.sqlite_trace_context_storage import (
+from uipath_agents._observability.llmops.sqlite_trace_context_storage import (
     SqliteTraceContextStorage,
 )
-from uipath_agents._observability.trace_context_storage import TraceContextData
+from uipath_agents._observability.llmops.trace_context_storage import TraceContextData
 
 
 @pytest.fixture
