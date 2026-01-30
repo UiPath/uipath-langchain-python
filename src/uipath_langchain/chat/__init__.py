@@ -13,23 +13,23 @@ Instead, all exports are loaded on-demand when first accessed.
 
 
 def __getattr__(name):
-    if name == "UiPathAzureChatOpenAI":
-        from .models import UiPathAzureChatOpenAI
+    if name == "UiPathChat":
+        from uipath_langchain_client.clients.openai import UiPathAzureChatOpenAI
 
         return UiPathAzureChatOpenAI
-    if name == "UiPathChat":
-        from .models import UiPathChat
+    if name == "UiPathAzureChatOpenAI":
+        from uipath_langchain_client.clients.openai import UiPathAzureChatOpenAI
 
-        return UiPathChat
+        return UiPathAzureChatOpenAI
     if name == "UiPathChatOpenAI":
-        from .openai import UiPathChatOpenAI
+        from uipath_langchain_client.clients.openai import UiPathChatOpenAI
 
         return UiPathChatOpenAI
     if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
         from . import supported_models
 
         return getattr(supported_models, name)
-    if name in ("LLMProvider", "APIFlavor", "UiPathPassthroughChatModel"):
+    if name in ("LLMProvider", "APIFlavor"):
         from . import types
 
         return getattr(types, name)
@@ -40,7 +40,6 @@ __all__ = [
     "UiPathChat",
     "UiPathAzureChatOpenAI",
     "UiPathChatOpenAI",
-    "UiPathPassthroughChatModel",
     "OpenAIModels",
     "BedrockModels",
     "GeminiModels",
