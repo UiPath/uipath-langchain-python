@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from langchain_core.outputs import LLMResult
 from opentelemetry.trace import Span
+from uipath.core.serialization import serialize_json
 
 _BASE64_RE = re.compile(r"^[A-Za-z0-9+/\-_]+=*$")
 
@@ -135,7 +136,7 @@ def set_usage_attributes(span: Span, response: Optional[LLMResult]) -> None:
         "isPiiMasked": False,
         "llmCalls": 1,
     }
-    span.set_attribute("usage", json.dumps(usage))
+    span.set_attribute("usage", serialize_json(usage))
 
 
 def set_tool_calls_attributes(span: Span, response: Optional[LLMResult]) -> None:
@@ -166,7 +167,7 @@ def set_tool_calls_attributes(span: Span, response: Optional[LLMResult]) -> None
             }
         )
     if formatted_calls:
-        span.set_attribute("toolCalls", json.dumps(formatted_calls))
+        span.set_attribute("toolCalls", serialize_json(formatted_calls))
 
 
 def parse_tool_arguments(input_str: str) -> Optional[Dict[str, Any]]:
@@ -185,7 +186,7 @@ def set_tool_result(span: Span, output: Any) -> None:
     if output is None:
         return
     if isinstance(output, (dict, list)):
-        span.set_attribute("result", json.dumps(output))
+        span.set_attribute("result", serialize_json(output))
     else:
         span.set_attribute("result", str(output))
 
