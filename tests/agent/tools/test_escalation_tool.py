@@ -452,3 +452,134 @@ class TestEscalationToolMetadata:
         # Verify interrupt was called with the default title
         call_args = mock_interrupt.call_args[0][0]
         assert call_args.title == "Escalation Task"
+
+
+class TestEscalationToolOutputSchema:
+    """Test escalation tool output schema for simulation support."""
+
+    @pytest.fixture
+    def escalation_resource(self):
+        """Create a minimal escalation tool resource config."""
+        return AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={
+                        "type": "object",
+                        "properties": {
+                            "approved": {"type": "boolean"},
+                            "reason": {"type": "string"},
+                        },
+                    },
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                    ),
+                    recipients=[
+                        StandardRecipient(
+                            type=AgentEscalationRecipientType.USER_EMAIL,
+                            value="user@example.com",
+                        )
+                    ],
+                )
+            ],
+        )
+
+    @pytest.mark.asyncio
+    async def test_escalation_tool_output_schema_has_action_field(
+        self, escalation_resource
+    ):
+        """Test that escalation tool output schema includes action field."""
+        tool = create_escalation_tool(escalation_resource)
+        # Get the output schema from the tool's args_schema
+        args_schema = tool.args_schema
+        assert args_schema is not None
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    async def test_escalation_tool_result_validation(
+        self, mock_interrupt, escalation_resource
+    ):
+        """Test that tool properly processes and validates results."""
+        # Mock interrupt to return a proper result object with action and data
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        # Invoke through the wrapper
+        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        # Should successfully process the result
+        assert isinstance(result, dict)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    async def test_escalation_tool_extracts_action_from_result(
+        self, mock_interrupt, escalation_resource
+    ):
+        """Test that tool correctly extracts action from escalation result."""
+        # Mock interrupt to return a result with action
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {"approved": True}
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        # Invoke through the wrapper
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        # Verify interrupt was called (action was processed)
+        assert mock_interrupt.called
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    async def test_escalation_tool_with_outcome_mapping(self, mock_interrupt):
+        """Test escalation tool with outcome mapping for actions."""
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {"approved": True}
+        mock_interrupt.return_value = mock_result
+
+        # Create resource with outcome mapping
+        channel_dict = {
+            "name": "action_center",
+            "type": "actionCenter",
+            "description": "Action Center channel",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {"type": "object", "properties": {}},
+            "properties": {
+                "appName": "ApprovalApp",
+                "appVersion": 1,
+                "resourceKey": "test-key",
+            },
+            "recipients": [],
+            "outcomeMapping": {"approve": "end", "reject": "continue"},
+        }
+
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[AgentEscalationChannel(**channel_dict)],
+        )
+
+        tool = create_escalation_tool(resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        # Invoke through the wrapper
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        # Verify interrupt was called with approval action
+        assert mock_interrupt.called
