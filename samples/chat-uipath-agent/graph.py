@@ -1,7 +1,7 @@
 from langchain.agents import create_agent
 from langchain_community.tools import DuckDuckGoSearchResults
 
-from uipath_langchain_client.clients.openai import UiPathAzureChatOpenAI
+from uipath_langchain.chat import UiPathChatOpenAI
 search_tool = DuckDuckGoSearchResults()
 
 movie_system_prompt = """You are an advanced AI assistant specializing in movie research and analysis. Your primary functions are:
@@ -27,5 +27,5 @@ Always maintain an enthusiastic and knowledgeable tone about cinema. Provide acc
 DO NOT do any math calculations unless specifically related to movie statistics or box office figures.
 """
 
-llm = UiPathAzureChatOpenAI(model="gpt-4o-mini-2024-07-18")
+llm = UiPathChatOpenAI(model="gpt-4o-mini-2024-07-18")
 graph = create_agent(llm, tools=[search_tool], system_prompt=movie_system_prompt)

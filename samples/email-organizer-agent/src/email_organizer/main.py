@@ -9,8 +9,7 @@ from uipath.platform import UiPath
 from uipath.platform.common import CreateTask
 from email_organizer.outlook_client import OutlookClient
 from difflib import SequenceMatcher
-from uipath_langchain_client.clients.openai import UiPathAzureChatOpenAI
-
+from uipath_langchain.chat import UiPathChat
 # Configuration
 DEFAULT_CONFIDENCE = 0.0
 USER = 'me'
@@ -365,7 +364,7 @@ Analyze the email patterns and create the most valuable organizational rules.
         """
 
 
-        llm = UiPathAzureChatOpenAI(model="gpt-4o-mini-2024-07-18")
+        llm = UiPathChat(model="gpt-4o-mini-2024-07-18")
 
         structured_llm = llm.with_structured_output(RuleSuggestions)
         response = await structured_llm.ainvoke(prompt)
