@@ -25,6 +25,9 @@ from uipath.platform.context_grounding.context_grounding_index import (
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.internal_tools.schema_utils import (
+    add_query_field_to_schema,
+)
 from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
@@ -51,36 +54,23 @@ def create_deeprag_tool(
     query_setting = settings.query
     citation_mode_setting = settings.citation_mode
 
-    # Determine citation mode
     citation_mode = (
         CitationMode(citation_mode_setting.value)
         if citation_mode_setting
         else CitationMode.INLINE
     )
 
-    # Check if query is dynamic or static
     is_query_static = query_setting and query_setting.variant == "static"
     static_query = query_setting.value if is_query_static else None
 
-    # Use resource input schema and add query field if dynamic
     input_schema = dict(resource.input_schema)
     if not is_query_static:
-        # Add query field to the schema
-        if "properties" not in input_schema:
-            input_schema["properties"] = {}
-        input_schema["properties"]["query"] = {
-            "type": "string",
-            "description": query_setting.description
-            if query_setting and query_setting.description
-            else "The query to create a deeprag off of",
-        }
-        # Add query to required fields
-        if "required" not in input_schema:
-            input_schema["required"] = []
-        if "query" not in input_schema["required"]:
-            input_schema["required"].append("query")
+        add_query_field_to_schema(
+            input_schema,
+            query_description=query_setting.description if query_setting else None,
+            default_description="Describe the task: what to research across documents, what to synthesize and how to cite sources.",
+        )
 
-    # Create input model from modified schema
     input_model = create_model(input_schema)
     output_model = create_model(resource.output_schema)
 
@@ -92,7 +82,6 @@ def create_deeprag_tool(
         example_calls=[],  # Examples cannot be provided for internal tools
     )
     async def deeprag_tool_fn(**kwargs: Any) -> dict[str, Any]:
-        # Get query - dynamic from kwargs or static from settings
         query = kwargs.get("query") if not is_query_static else static_query
         if not query:
             raise ValueError("Query is required for DeepRAG tool")
@@ -104,24 +93,20 @@ def create_deeprag_tool(
         if not attachment:
             raise ValueError("Attachment is required for DeepRAG tool")
 
-        # Extract attachment ID using getattr (works for Pydantic models)
         attachment_id = getattr(attachment, "ID", None)
         if not attachment_id:
             raise ValueError("Attachment ID is required")
 
-        # Create ephemeral index directly via SDK
         uipath = UiPath()
         ephemeral_index = await uipath.context_grounding.create_ephemeral_index_async(
             usage=EphemeralIndexUsage.DEEP_RAG,
             attachments=[attachment_id],
         )
 
-        # Wait for index ingestion only if in progress
         if ephemeral_index.in_progress_ingestion():
             ephemeral_index_dict = interrupt(WaitEphemeralIndex(index=ephemeral_index))
             ephemeral_index = ContextGroundingIndex(**ephemeral_index_dict)
 
-        # Create DeepRAG request using interrupt
         return interrupt(
             CreateDeepRag(
                 name=f"task-{uuid.uuid4()}",
@@ -129,7 +114,7 @@ def create_deeprag_tool(
                 index_id=ephemeral_index.id,
                 prompt=query,
                 citation_mode=citation_mode,
-                is_ephemeral=True,
+                is_ephemeral_index=True,
             )
         )
 

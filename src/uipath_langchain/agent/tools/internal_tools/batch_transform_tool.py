@@ -25,6 +25,9 @@ from uipath.platform.context_grounding.context_grounding_index import (
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.internal_tools.schema_utils import (
+    add_query_field_to_schema,
+)
 from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
@@ -53,11 +56,9 @@ def create_batch_transform_tool(
     output_columns_setting = settings.output_columns
     web_search_grounding_setting = settings.web_search_grounding
 
-    # Check if query is dynamic or static
     is_query_static = query_setting and query_setting.variant == "static"
     static_query = query_setting.value if is_query_static else None
 
-    # Get static values for other settings
     static_folder_path_prefix = None
     if folder_path_prefix_setting:
         static_folder_path_prefix = getattr(folder_path_prefix_setting, "value", None)
@@ -67,7 +68,6 @@ def create_batch_transform_tool(
         value = getattr(web_search_grounding_setting, "value", None)
         static_web_search = value == "Enabled" if value else False
 
-    # Convert output columns to BatchTransformOutputColumn
     batch_transform_output_columns = [
         BatchTransformOutputColumn(name=col.name, description=col.description or "")
         for col in output_columns_setting
@@ -76,18 +76,11 @@ def create_batch_transform_tool(
     # Use resource input schema and add query field if dynamic
     input_schema = dict(resource.input_schema)
     if not is_query_static:
-        if "properties" not in input_schema:
-            input_schema["properties"] = {}
-        input_schema["properties"]["query"] = {
-            "type": "string",
-            "description": query_setting.description
-            if query_setting and query_setting.description
-            else "The query to create a batch transform off of",
-        }
-        if "required" not in input_schema:
-            input_schema["required"] = []
-        if "query" not in input_schema["required"]:
-            input_schema["required"].append("query")
+        add_query_field_to_schema(
+            input_schema,
+            query_description=query_setting.description if query_setting else None,
+            default_description="Describe the task: what to research, what to synthesize.",
+        )
 
     # Create input model from modified schema
     input_model = create_model(input_schema)
@@ -101,7 +94,6 @@ def create_batch_transform_tool(
         example_calls=[],  # Examples cannot be provided for internal tools
     )
     async def batch_transform_tool_fn(**kwargs: Any) -> dict[str, Any]:
-        # Get query - dynamic from kwargs or static from settings
         query = kwargs.get("query") if not is_query_static else static_query
         if not query:
             raise ValueError("Query is required for Batch Transform tool")
@@ -113,27 +105,22 @@ def create_batch_transform_tool(
         if not attachment:
             raise ValueError("Attachment is required for Batch Transform tool")
 
-        # Extract attachment ID using getattr (works for Pydantic models)
         attachment_id = getattr(attachment, "ID", None)
         if not attachment_id:
             raise ValueError("Attachment ID is required")
 
-        # Get destination path, default to output.csv if not provided
         destination_path = kwargs.get("destination_path", "output.csv")
 
-        # Create ephemeral index directly via SDK
         uipath = UiPath()
         ephemeral_index = await uipath.context_grounding.create_ephemeral_index_async(
             usage=EphemeralIndexUsage.BATCH_RAG,
             attachments=[attachment_id],
         )
 
-        # Wait for index ingestion only if in progress
         if ephemeral_index.in_progress_ingestion():
             ephemeral_index_dict = interrupt(WaitEphemeralIndex(index=ephemeral_index))
             ephemeral_index = ContextGroundingIndex(**ephemeral_index_dict)
 
-        # Create Batch Transform request using interrupt
         return interrupt(
             CreateBatchTransform(
                 name=f"task-{uuid.uuid4()}",
@@ -144,7 +131,7 @@ def create_batch_transform_tool(
                 storage_bucket_folder_path_prefix=static_folder_path_prefix,
                 enable_web_search_grounding=static_web_search,
                 destination_path=destination_path,
-                is_ephemeral=True,
+                is_ephemeral_index=True,
             )
         )
 
