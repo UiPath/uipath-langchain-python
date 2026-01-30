@@ -104,10 +104,6 @@ async def create_mcp_tools_from_metadata(
     Each tool manages its own session lifecycle - creating, using, and cleaning up
     the MCP connection within the tool invocation.
     """
-
-    if config.is_enabled is False:
-        return []
-
     # Lazy import to improve cold start time
     from mcp import ClientSession
     from mcp.client.streamable_http import streamable_http_client
