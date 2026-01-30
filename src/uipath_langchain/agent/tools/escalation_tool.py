@@ -1,11 +1,12 @@
 """Escalation tool creation for Action Center integration."""
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import interrupt
+from pydantic import BaseModel, TypeAdapter
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipient,
@@ -108,13 +109,10 @@ def create_escalation_tool(
     input_model: Any = create_model(channel.input_schema)
     output_model: Any = create_model(channel.output_schema)
 
-    @mockable(
-        name=resource.name,
-        description=resource.description,
-        input_schema=input_model.model_json_schema(),
-        output_schema=output_model.model_json_schema(),
-        example_calls=channel.properties.example_calls,
-    )
+    class EscalationToolOutput(BaseModel):
+        action: Literal["approve", "reject"]
+        data: output_model
+
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
         recipient: TaskRecipient | None = (
             await resolve_recipient_value(channel.recipients[0])
@@ -128,19 +126,31 @@ def create_escalation_tool(
             tool.metadata["recipient"] = recipient
             task_title = tool.metadata.get("task_title") or task_title
 
-        result = interrupt(
-            CreateEscalation(
-                title=task_title,
-                data=kwargs,
-                recipient=recipient,
-                app_name=channel.properties.app_name,
-                app_folder_path=channel.properties.folder_name,
-                priority=channel.priority,
-                labels=channel.labels,
-                is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
-                actionable_message_metadata=channel.properties.actionable_message_meta_data,
-            )
+        @mockable(
+            name=tool_name,
+            description=resource.description,
+            input_schema=input_model.model_json_schema(),
+            output_schema=EscalationToolOutput.model_json_schema(),
+            example_calls=channel.properties.example_calls,
         )
+        async def escalate():
+            interrupt(
+                CreateEscalation(
+                    title=task_title,
+                    data=kwargs,
+                    recipient=recipient,
+                    app_name=channel.properties.app_name,
+                    app_folder_path=channel.properties.folder_name,
+                    priority=channel.priority,
+                    labels=channel.labels,
+                    is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
+                    actionable_message_metadata=channel.properties.actionable_message_meta_data,
+                )
+            )
+
+        result = await escalate()
+        if isinstance(result, dict):
+            result = TypeAdapter(EscalationToolOutput).validate_python(result)
 
         escalation_action = getattr(result, "action", None)
         escalation_output = getattr(result, "data", {})
