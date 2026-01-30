@@ -8,9 +8,10 @@ from langgraph.graph import END, START, StateGraph, MessagesState
 from pydantic import BaseModel, Field
 from langchain_core.language_models import BaseChatModel
 
-from uipath_langchain.chat.bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
-from uipath_langchain.chat.vertex import UiPathChatVertex
-from uipath_langchain.chat import UiPathChatOpenAI, UiPathChat, UiPathAzureChatOpenAI
+
+from uipath_langchain_client.clients.openai import UiPathAzureChatOpenAI
+from uipath_langchain_client.clients.bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
+from uipath_langchain_client.clients.google import UiPathChatGoogleGenerativeAI
 
 logger = logging.getLogger(__name__)
 
@@ -18,11 +19,9 @@ logger = logging.getLogger(__name__)
 def create_test_models(max_tokens: int = 100) -> list[tuple[str, Any]]:
     """Create all test chat models with the specified max_tokens."""
     return [
-        ("UiPathChatOpenAI", UiPathChatOpenAI(use_responses_api=True)),
-        ("UiPathChatVertex", UiPathChatVertex()),
+        ("UiPathChatGoogleGenerativeAI", UiPathChatGoogleGenerativeAI()),
         ("UiPathChatBedrockConverse", UiPathChatBedrockConverse()),
         ("UiPathChatBedrock", UiPathChatBedrock()),
-        ("UiPathChat", UiPathChat()),
         ("UiPathAzureChatOpenAI", UiPathAzureChatOpenAI())
     ]
 
@@ -277,7 +276,7 @@ async def run_all_tests(state: GraphState) -> dict:
     # Build summary
     logger.info("="*80)
     summary_lines = []
-    for model_name in ["UiPathChatOpenAI", "UiPathChatVertex", "UiPathChatBedrockConverse", "UiPathChatBedrock", "UiPathChat", "UiPathAzureChatOpenAI"]:
+    for model_name in ["UiPathChatOpenAI", "UiPathChatGoogleGenerativeAI", "UiPathChatBedrockConverse", "UiPathChatBedrock", "UiPathChat", "UiPathAzureChatOpenAI"]:
         if model_name in all_model_results:
             summary_lines.append(f"{model_name}:")
             results = all_model_results[model_name]

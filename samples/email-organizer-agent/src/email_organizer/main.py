@@ -6,11 +6,10 @@ from typing import List, Dict, Optional
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
 from uipath.platform import UiPath
-from uipath_langchain.chat import UiPathChat
 from uipath.platform.common import CreateTask
 from email_organizer.outlook_client import OutlookClient
 from difflib import SequenceMatcher
-
+from uipath_langchain.chat import UiPathChat
 # Configuration
 DEFAULT_CONFIDENCE = 0.0
 USER = 'me'
@@ -365,7 +364,7 @@ Analyze the email patterns and create the most valuable organizational rules.
         """
 
 
-        llm = UiPathChat()
+        llm = UiPathChat(model="gpt-4o-mini-2024-07-18")
 
         structured_llm = llm.with_structured_output(RuleSuggestions)
         response = await structured_llm.ainvoke(prompt)

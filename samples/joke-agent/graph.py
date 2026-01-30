@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from uipath.core.guardrails import GuardrailScope
 
 from middleware import CustomFilterAction, LoggingMiddleware
-from uipath_langchain.chat import UiPathChat
 from uipath_langchain.guardrails import (
     BlockAction,
     PIIDetectionEntity,
@@ -21,7 +20,7 @@ from uipath_langchain.guardrails import (
     UiPathPromptInjectionMiddleware,
 )
 from uipath_langchain.guardrails.actions import LoggingSeverityLevel
-
+from uipath_langchain.chat import UiPathChat
 
 # Define input schema for the agent
 class Input(BaseModel):

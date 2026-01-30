@@ -10,7 +10,7 @@ from langgraph.types import Command
 from langchain.agents import create_agent
 from langchain.messages import SystemMessage, HumanMessage
 
-from uipath_langchain.chat.models import UiPathChat
+from uipath_langchain_client.clients.anthropic import UiPathChatAnthropic
 from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -58,7 +58,7 @@ async def agent_mcp(access_token: str):
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await load_mcp_tools(session)
-            model = UiPathChat(model="anthropic.claude-3-5-sonnet-20240620-v1:0")
+            model = UiPathChatAnthropic(model="anthropic.claude-3-5-sonnet-20240620-v1:0")
             agent = create_agent(model, tools=tools)
             yield agent
 

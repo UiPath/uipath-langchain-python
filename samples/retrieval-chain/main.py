@@ -11,7 +11,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.vectorstores import VectorStore
-from uipath_langchain.chat.models import UiPathAzureChatOpenAI
+
+from uipath_langchain_client.clients.openai import UiPathAzureChatOpenAI
 from uipath_langchain.vectorstores.context_grounding_vectorstore import (
     ContextGroundingVectorStore,
 )
@@ -100,6 +101,7 @@ async def main(input_data: MainInput):
 
     # Run a retrieval chain
     model = UiPathAzureChatOpenAI(
+        model="gpt-4o-mini-2024-07-18",
         max_retries=3,
     )
 

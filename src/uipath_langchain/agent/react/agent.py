@@ -7,8 +7,7 @@ from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from uipath.platform.guardrails import BaseGuardrail
-
-from uipath_langchain.chat.types import UiPathPassthroughChatModel
+from uipath_langchain_client.base_client import UiPathBaseLLMClient
 
 from ..guardrails.actions import GuardrailAction
 from .guardrails.guardrails_subgraph import (
@@ -65,15 +64,15 @@ def create_agent(
     """
     from ..tools import create_tool_node
 
-    if not isinstance(model, UiPathPassthroughChatModel):
+    if not isinstance(model, UiPathBaseLLMClient):
         raise TypeError(
-            f"Model {type(model).__name__} does not implement UiPathPassthroughChatModel. "
+            f"Model {type(model).__name__} does not implement UiPathBaseLLMClient. "
             "The model must have llm_provider and api_flavor properties."
         )
 
     agent_settings = AgentSettings(
-        llm_provider=model.llm_provider,
-        api_flavor=model.api_flavor,
+        llm_provider=model.api_config.vendor_type,
+        api_flavor=model.api_config.api_flavor,
     )
 
     if config is None:

@@ -8,8 +8,8 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 from uipath.runtime.schema import UiPathRuntimeGraph, UiPathRuntimeNode
+from uipath_langchain_client.clients.anthropic import UiPathChatAnthropic
 
-from uipath_langchain.chat import UiPathChat
 from uipath_langchain.runtime.schema import get_graph_schema
 
 
@@ -24,12 +24,7 @@ def test_agent_graph_schema():
 
     # Setup
     movie_system_prompt = """You are an advanced AI assistant specializing in movie research and analysis."""
-    llm = UiPathChat(
-        model="claude-3-7-sonnet-latest",
-        access_token="test-token",
-        azure_endpoint="test-base-url",
-        client_id="test-client-id",
-    )
+    llm = UiPathChatAnthropic(model="claude-3-7-sonnet-latest")
     graph: CompiledStateGraph[Any, Any, Any, Any] = create_agent(
         llm, tools=[search_movies], system_prompt=movie_system_prompt
     )
@@ -113,12 +108,7 @@ def test_supervisor_graph_schema():
 
         next: Literal["researcher", "coder", "FINISH"]
 
-    llm = UiPathChat(
-        model="claude-3-7-sonnet-latest",
-        access_token="test-token",
-        azure_endpoint="test-base-url",
-        client_id="test-client-id",
-    )
+    llm = UiPathChatAnthropic(model="claude-3-7-sonnet-latest")
 
     class GraphInput(BaseModel):
         question: str

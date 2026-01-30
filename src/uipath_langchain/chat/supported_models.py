@@ -31,24 +31,37 @@ class OpenAIModels(StrEnum):
 class GeminiModels(StrEnum):
     """Supported Google Gemini model identifiers."""
 
-    # Gemini 2 models
+    # Gemini 2.0 models
+    gemini_2_0_flash_001 = "gemini-2.0-flash-001"
+    gemini_2_0_pro_001 = "gemini-2.0-pro-001"
+
+    # Gemini 2.5 models
     gemini_2_5_pro = "gemini-2.5-pro"
     gemini_2_5_flash = "gemini-2.5-flash"
-    gemini_2_0_flash_001 = "gemini-2.0-flash-001"
 
     # Gemini 3 models
     gemini_3_pro_preview = "gemini-3-pro-preview"
+    gemini_3_flash_preview = "gemini-3-flash-preview"
 
 
 class BedrockModels(StrEnum):
     """Supported AWS Bedrock model identifiers."""
 
     # Claude 3.7 models
-    anthropic_claude_3_7_sonnet = "anthropic.claude-3-7-sonnet-20250219-v1:0"
+    anthropic_bedorck_claude_3_7_sonnet = "anthropic.claude-3-7-sonnet-20250219-v1:0"
 
     # Claude 4 models
-    anthropic_claude_sonnet_4 = "anthropic.claude-sonnet-4-20250514-v1:0"
+    anthropic_bedorck_claude_sonnet_4 = "anthropic.claude-sonnet-4-20250514-v1:0"
 
     # Claude 4.5 models
-    anthropic_claude_sonnet_4_5 = "anthropic.claude-sonnet-4-5-20250929-v1:0"
-    anthropic_claude_haiku_4_5 = "anthropic.claude-haiku-4-5-20251001-v1:0"
+    anthropic_bedorck_claude_sonnet_4_5 = "anthropic.claude-sonnet-4-5-20250929-v1:0"
+    anthropic_bedorck_claude_haiku_4_5 = "anthropic.claude-haiku-4-5-20251001-v1:0"
+    anthropic_bedorck_claude_opus_4_5 = "anthropic.claude-opus-4-5-20251101-v1:0"
+
+
+class VertexModels(StrEnum):
+    """Supported Vertex model identifiers."""
+
+    anthropic_vertex_claude_4_5_sonnet = "claude-opus-4-5@20251101"
+    anthropic_vertex_claude_4_5_haiku = "claude-haiku-4-5@20251001"
+    anthropic_vertex_claude_4_5_opus = "claude-opus-4-5@20251101"
