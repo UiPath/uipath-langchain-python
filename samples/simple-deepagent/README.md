@@ -1,10 +1,10 @@
 # Simple DeepAgent
 
-A research agent using the DeepAgents library with planning, sub-agent delegation, and web search capabilities.
+A research agent using the [DeepAgents](https://github.com/langchain-ai/deepagents) harness with planning, sub-agent delegation, and web search capabilities.
 
 ## Overview
 
-This sample demonstrates the DeepAgents framework, which provides advanced agentic patterns beyond simple tool-calling loops. DeepAgents combines:
+This sample demonstrates the [DeepAgents](https://github.com/langchain-ai/deepagents) harness, which provides advanced agentic patterns beyond simple tool-calling loops. DeepAgents combines:
 - **Planning** through task decomposition
 - **Subagent spawning** for specialized tasks (researcher and critic)
 - **File system access** for memory management
