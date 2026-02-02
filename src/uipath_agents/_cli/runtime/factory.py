@@ -181,7 +181,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             ) from e
 
     def _apply_settings_override(
-        self, agent_definition: Any, settings: dict[str, Any]
+        self, agent_definition: AgentDefinition, settings: dict[str, Any]
     ) -> Any:
         """Apply settings override to agent definition.
 
@@ -214,9 +214,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         agent_dict["settings"] = updated_settings
 
         # Reconstruct the agent definition
-        from uipath.agent.models.agent import LowCodeAgentDefinition
-
-        return LowCodeAgentDefinition.model_validate(agent_dict)
+        return AgentDefinition.model_validate(agent_dict)
 
     async def _load_graph(
         self, entrypoint: str, **kwargs: Any
