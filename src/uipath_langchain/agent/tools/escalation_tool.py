@@ -168,6 +168,9 @@ def create_escalation_tool(
             "action": outcome,
             "output": escalation_output,
             "escalation_action": escalation_action,
+            "task_id": getattr(result, "id", None),
+            "task_url": getattr(result, "task_url", None),
+            "recipient": recipient.value,
         }
 
     async def escalation_wrapper(
