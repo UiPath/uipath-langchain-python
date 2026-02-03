@@ -185,12 +185,25 @@ class EscalateAction(GuardrailAction):
             )
 
             if escalation_result.action == "Approve":
-                return _process_escalation_response(
+                # Extract reviewed data for observability
+                reviewed_inputs = escalation_result.data.get("ReviewedInputs")
+                reviewed_outputs = escalation_result.data.get("ReviewedOutputs")
+                reviewed_by = escalation_result.data.get("ReviewedBy")
+
+                response = _process_escalation_response(
                     state,
                     escalation_result.data,
                     scope,
                     execution_stage,
                     guarded_component_name,
+                )
+
+                # Inject reviewed data into response for observability callback
+                return _inject_reviewed_data(
+                    response,
+                    reviewed_inputs,
+                    reviewed_outputs,
+                    reviewed_by,
                 )
 
             raise AgentTerminationException(
@@ -202,6 +215,47 @@ class EscalateAction(GuardrailAction):
         _node.__metadata__ = metadata  # type: ignore[attr-defined]
 
         return node_name, _node
+
+
+ESCALATION_REVIEWED_DATA_KEY = "_escalation_reviewed_data"
+
+
+def _inject_reviewed_data(
+    response: Dict[str, Any] | Command[Any],
+    reviewed_inputs: Any,
+    reviewed_outputs: Any,
+    reviewed_by: Any,
+) -> Dict[str, Any] | Command[Any]:
+    """Inject reviewed data into response for observability callback to read.
+
+    Args:
+        response: The response from _process_escalation_response.
+        reviewed_inputs: The reviewed inputs from escalation result.
+        reviewed_outputs: The reviewed outputs from escalation result.
+        reviewed_by: The reviewer from escalation result.
+
+    Returns:
+        The response with reviewed data injected into inner_state.
+    """
+    reviewed_data = {
+        "reviewed_inputs": reviewed_inputs,
+        "reviewed_outputs": reviewed_outputs,
+        "reviewed_by": reviewed_by,
+    }
+
+    if isinstance(response, Command):
+        update = dict(response.update) if response.update else {}
+        inner_state = dict(update.get("inner_state", {}))
+        inner_state[ESCALATION_REVIEWED_DATA_KEY] = reviewed_data
+        update["inner_state"] = inner_state
+        return Command(update=update, graph=response.graph)
+    elif isinstance(response, dict):
+        inner_state = dict(response.get("inner_state", {}))
+        inner_state[ESCALATION_REVIEWED_DATA_KEY] = reviewed_data
+        response["inner_state"] = inner_state
+        return response
+
+    return response
 
 
 def _validate_message_count(
