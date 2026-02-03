@@ -10,6 +10,7 @@ from tenacity import AsyncRetrying, Retrying
 from uipath._utils import resource_override
 from uipath.utils import EndpointManager
 
+from .header_capture import HeaderCapture
 from .retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
 from .supported_models import BedrockModels
 from .types import APIFlavor, LLMProvider
@@ -62,6 +63,7 @@ class AwsBedrockCompletionsPassthroughClient:
         api_flavor: str,
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
+        header_capture: HeaderCapture | None = None,
     ):
         self.model = model
         self.token = token
@@ -70,6 +72,7 @@ class AwsBedrockCompletionsPassthroughClient:
         self.byo_connection_id = byo_connection_id
         self._vendor = "awsbedrock"
         self._url: Optional[str] = None
+        self.header_capture = header_capture
 
     @property
     def endpoint(self) -> str:
@@ -91,6 +94,12 @@ class AwsBedrockCompletionsPassthroughClient:
 
         return self._url
 
+    def _capture_response_headers(self, parsed, model, **kwargs):
+        if "ResponseMetadata" in parsed:
+            headers = parsed["ResponseMetadata"].get("HTTPHeaders", {})
+            if self.header_capture:
+                self.header_capture.set(dict(headers))
+
     def get_client(self):
         client = boto3.client(
             "bedrock-runtime",
@@ -105,6 +114,9 @@ class AwsBedrockCompletionsPassthroughClient:
         )
         client.meta.events.register(
             "before-send.bedrock-runtime.*", self._modify_request
+        )
+        client.meta.events.register(
+            "after-call.bedrock-runtime.*", self._capture_response_headers
         )
         return client
 
@@ -203,6 +215,7 @@ class UiPathChatBedrock(ChatBedrock):
     model: str = ""  # For tracing serialization
     retryer: Optional[Retrying] = None
     aretryer: Optional[AsyncRetrying] = None
+    header_capture: HeaderCapture
 
     def __init__(
         self,
@@ -233,17 +246,21 @@ class UiPathChatBedrock(ChatBedrock):
                 "UIPATH_ACCESS_TOKEN environment variable or token parameter is required"
             )
 
+        header_capture = HeaderCapture(name=f"bedrock_headers_{id(self)}")
+
         passthrough_client = AwsBedrockCompletionsPassthroughClient(
             model=model_name,
             token=token,
             api_flavor="invoke",
             agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
+            header_capture=header_capture,
         )
 
         client = passthrough_client.get_client()
         kwargs["client"] = client
         kwargs["model"] = model_name
+        kwargs["header_capture"] = header_capture
         super().__init__(**kwargs)
         self.model = model_name
         self.retryer = retryer
@@ -297,7 +314,15 @@ class UiPathChatBedrock(ChatBedrock):
         **kwargs: Any,
     ) -> ChatResult:
         messages = self._convert_file_blocks_to_anthropic_documents(messages)
-        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+        result = super()._generate(
+            messages,
+            stop=stop,
+            run_manager=run_manager,
+            **kwargs,
+        )
+        self.header_capture.attach_to_chat_result(result)
+        self.header_capture.clear()
+        return result
 
     def _stream(
         self,
@@ -307,9 +332,12 @@ class UiPathChatBedrock(ChatBedrock):
         **kwargs: Any,
     ) -> Iterator[ChatGenerationChunk]:
         messages = self._convert_file_blocks_to_anthropic_documents(messages)
-        yield from super()._stream(
-            messages, stop=stop, run_manager=run_manager, **kwargs
-        )
+        chunks = super()._stream(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+        for chunk in chunks:
+            self.header_capture.attach_to_chat_generation(chunk)
+            yield chunk
+        self.header_capture.clear()
 
 
 def _get_default_retryer() -> BedrockRetryer:

@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import AsyncIterator, Iterator
 from typing import Any, Optional
 
 import httpx
@@ -8,12 +9,13 @@ from langchain_core.callbacks import (
     CallbackManagerForLLMRun,
 )
 from langchain_core.messages import BaseMessage
-from langchain_core.outputs import ChatResult
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
 from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
+from .header_capture import HeaderCapture
 from .retryers.vertex import AsyncVertexRetryer, VertexRetryer
 from .supported_models import GeminiModels
 from .types import APIFlavor, LLMProvider
@@ -70,9 +72,15 @@ def _rewrite_vertex_url(original_url: str, gateway_url: str) -> httpx.URL | None
 class _UrlRewriteTransport(httpx.HTTPTransport):
     """Transport that rewrites URLs to redirect to UiPath gateway."""
 
-    def __init__(self, gateway_url: str, verify: bool = True):
+    def __init__(
+        self,
+        gateway_url: str,
+        verify: bool = True,
+        header_capture: HeaderCapture | None = None,
+    ):
         super().__init__(verify=verify)
         self.gateway_url = gateway_url
+        self.header_capture = header_capture
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         original_url = str(request.url)
@@ -86,15 +94,26 @@ class _UrlRewriteTransport(httpx.HTTPTransport):
             # Update host header to match the new URL
             request.headers["host"] = new_url.host
             request.url = new_url
-        return super().handle_request(request)
+
+        response = super().handle_request(request)
+        if self.header_capture:
+            self.header_capture.set(dict(response.headers))
+
+        return response
 
 
 class _AsyncUrlRewriteTransport(httpx.AsyncHTTPTransport):
     """Async transport that rewrites URLs to redirect to UiPath gateway."""
 
-    def __init__(self, gateway_url: str, verify: bool = True):
+    def __init__(
+        self,
+        gateway_url: str,
+        verify: bool = True,
+        header_capture: HeaderCapture | None = None,
+    ):
         super().__init__(verify=verify)
         self.gateway_url = gateway_url
+        self.header_capture = header_capture
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         original_url = str(request.url)
@@ -108,7 +127,12 @@ class _AsyncUrlRewriteTransport(httpx.AsyncHTTPTransport):
             # Update host header to match the new URL
             request.headers["host"] = new_url.host
             request.url = new_url
-        return await super().handle_async_request(request)
+
+        response = await super().handle_async_request(request)
+        if self.header_capture:
+            self.header_capture.set(dict(response.headers))
+
+        return response
 
 
 class UiPathChatVertex(ChatGoogleGenerativeAI):
@@ -162,17 +186,22 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         uipath_url = self._build_base_url(model_name)
         headers = self._build_headers(token, agenthub_config, byo_connection_id)
 
+        header_capture = HeaderCapture(name=f"vertex_headers_{id(self)}")
         client_kwargs = get_httpx_client_kwargs()
         verify = client_kwargs.get("verify", True)
 
         http_options = genai_types.HttpOptions(
             httpx_client=httpx.Client(
-                transport=_UrlRewriteTransport(uipath_url, verify=verify),
+                transport=_UrlRewriteTransport(
+                    uipath_url, verify=verify, header_capture=header_capture
+                ),
                 headers=headers,
                 **client_kwargs,
             ),
             httpx_async_client=httpx.AsyncClient(
-                transport=_AsyncUrlRewriteTransport(uipath_url, verify=verify),
+                transport=_AsyncUrlRewriteTransport(
+                    uipath_url, verify=verify, header_capture=header_capture
+                ),
                 headers=headers,
                 **client_kwargs,
             ),
@@ -205,6 +234,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         self._byo_connection_id = byo_connection_id
         self._retryer = retryer
         self._aretryer = aretryer
+        self._header_capture = header_capture
 
         if self.temperature is not None and not 0 <= self.temperature <= 2.0:
             raise ValueError("temperature must be in the range [0.0, 2.0]")
@@ -295,7 +325,10 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         result = super()._generate(
             messages, stop=stop, run_manager=run_manager, **kwargs
         )
-        return self._merge_finish_reason_to_response_metadata(result)
+        result = self._merge_finish_reason_to_response_metadata(result)
+        self._header_capture.attach_to_chat_result(result)
+        self._header_capture.clear()
+        return result
 
     async def _agenerate(
         self,
@@ -308,7 +341,40 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         result = await super()._agenerate(
             messages, stop=stop, run_manager=run_manager, **kwargs
         )
-        return self._merge_finish_reason_to_response_metadata(result)
+        result = self._merge_finish_reason_to_response_metadata(result)
+        self._header_capture.attach_to_chat_result(result)
+        self._header_capture.clear()
+        return result
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        for chunk in super()._stream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        ):
+            self._header_capture.attach_to_chat_generation(chunk)
+            yield chunk
+
+        self._header_capture.clear()
+
+    async def _astream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        async for chunk in super()._astream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        ):
+            self._header_capture.attach_to_chat_generation(chunk)
+            yield chunk
+
+        self._header_capture.clear()
 
 
 def _get_default_retryer() -> VertexRetryer:
