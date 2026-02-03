@@ -53,9 +53,7 @@ class TestCreateDeepRagTool:
             ),
             folder_path_prefix=None,
             citation_mode=DeepRagCitationModeSetting(value=CitationMode.INLINE),
-            file_extension=DeepRagFileExtensionSetting(
-                value=DeepRagFileExtension.PDF
-            ),
+            file_extension=DeepRagFileExtensionSetting(value=DeepRagFileExtension.PDF),
         )
 
     @pytest.fixture
@@ -68,9 +66,7 @@ class TestCreateDeepRagTool:
             ),
             folder_path_prefix=None,
             citation_mode=DeepRagCitationModeSetting(value=CitationMode.SKIP),
-            file_extension=DeepRagFileExtensionSetting(
-                value=DeepRagFileExtension.TXT
-            ),
+            file_extension=DeepRagFileExtensionSetting(value=DeepRagFileExtension.TXT),
         )
 
     @pytest.fixture
@@ -104,7 +100,10 @@ class TestCreateDeepRagTool:
             "properties": {"attachment": {"type": "object"}},
             "required": ["attachment"],
         }
-        output_schema = {"type": "object", "properties": {"content": {"type": "string"}}}
+        output_schema = {
+            "type": "object",
+            "properties": {"content": {"type": "string"}},
+        }
 
         properties = AgentInternalDeepRagToolProperties(
             tool_type=AgentInternalToolType.DEEP_RAG,
@@ -124,7 +123,10 @@ class TestCreateDeepRagTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
-    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable", lambda **kwargs: lambda f: f)
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
     async def test_create_deeprag_tool_static_query_index_ready(
         self,
         mock_interrupt,
@@ -187,7 +189,10 @@ class TestCreateDeepRagTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
-    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable", lambda **kwargs: lambda f: f)
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
     async def test_create_deeprag_tool_static_query_wait_for_ingestion(
         self,
         mock_interrupt,
@@ -249,7 +254,10 @@ class TestCreateDeepRagTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
-    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable", lambda **kwargs: lambda f: f)
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
     async def test_create_deeprag_tool_dynamic_query(
         self,
         mock_interrupt,

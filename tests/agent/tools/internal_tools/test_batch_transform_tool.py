@@ -148,7 +148,10 @@ class TestCreateBatchTransformTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable", lambda **kwargs: lambda f: f)
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
     async def test_create_batch_transform_tool_static_query_index_ready(
         self,
         mock_interrupt,
@@ -182,9 +185,7 @@ class TestCreateBatchTransformTool:
 
         # Verify tool creation
         assert tool.name == "batch_transform_static"
-        assert (
-            tool.description == "Transform CSV with Batch Transform (static query)"
-        )
+        assert tool.description == "Transform CSV with Batch Transform (static query)"
 
         # Test tool execution
         mock_attachment = MockAttachment(
@@ -213,7 +214,10 @@ class TestCreateBatchTransformTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable", lambda **kwargs: lambda f: f)
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
     async def test_create_batch_transform_tool_static_query_wait_for_ingestion(
         self,
         mock_interrupt,
@@ -275,7 +279,10 @@ class TestCreateBatchTransformTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable", lambda **kwargs: lambda f: f)
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
     async def test_create_batch_transform_tool_dynamic_query(
         self,
         mock_interrupt,
@@ -325,7 +332,10 @@ class TestCreateBatchTransformTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable", lambda **kwargs: lambda f: f)
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
     async def test_create_batch_transform_tool_default_destination_path(
         self,
         mock_interrupt,
@@ -376,7 +386,10 @@ class TestCreateBatchTransformTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable", lambda **kwargs: lambda f: f)
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
     async def test_create_batch_transform_tool_custom_destination_path(
         self,
         mock_interrupt,
@@ -475,9 +488,7 @@ class TestCreateBatchTransformTool:
             FullName: str
             MimeType: str
 
-        mock_attachment = AttachmentWithoutID(
-            FullName="data.csv", MimeType="text/csv"
-        )
+        mock_attachment = AttachmentWithoutID(FullName="data.csv", MimeType="text/csv")
 
         assert tool.coroutine is not None
         with pytest.raises(ValueError, match="Attachment ID is required"):
