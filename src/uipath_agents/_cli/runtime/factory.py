@@ -303,7 +303,6 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             entrypoint=entrypoint,
             callbacks=[instrumentation_callback, event_emitter],
             agent_definition=agent_definition,
-            storage=storage,
         )
         instrumented_runtime = InstrumentedRuntime(
             base_runtime,
