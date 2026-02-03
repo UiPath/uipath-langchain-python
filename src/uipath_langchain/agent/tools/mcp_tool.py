@@ -6,12 +6,16 @@ from itertools import chain
 from typing import Any, AsyncGenerator
 
 import httpx
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import AgentMcpResourceConfig, AgentMcpTool
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.orchestrator.mcp import McpServer
+
+from uipath_langchain.agent.tools.base_uipath_structured_tool import (
+    BaseUiPathStructuredTool,
+)
 
 from .utils import sanitize_tool_name
 
@@ -165,7 +169,7 @@ async def create_mcp_tools_from_metadata(
 
             return tool_fn
 
-        tool = StructuredTool(
+        tool = BaseUiPathStructuredTool(
             name=tool_name,
             description=mcp_tool.description,
             args_schema=mcp_tool.input_schema,
