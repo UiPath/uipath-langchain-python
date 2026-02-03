@@ -4,7 +4,7 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "d770033b-53dc-4b15-9ebd-eaf8cdc03825",
+            "uniqueId": "a73409e9-1978-4873-bf9f-457c1b1b201d",
             "type": "agent",
             "input": {
                 "type": "object",
@@ -61,10 +61,9 @@
                                             "type": "string"
                                         },
                                         "tool_calls": {
-                                            "default": [],
                                             "items": {
                                                 "additionalProperties": true,
-                                                "description": "Represents an AI's request to call a tool.\n\nExample:\n    ```python\n    {\"name\": \"foo\", \"args\": {\"a\": 1}, \"id\": \"123\"}\n    ```\n\n    This represents a request to call the tool named `'foo'` with arguments\n    `{\"a\": 1}` and an identifier of `'123'`.",
+                                                "description": "Represents an AI's request to call a tool.\n\nExample:\n    ```python\n    {\"name\": \"foo\", \"args\": {\"a\": 1}, \"id\": \"123\"}\n    ```\n\n    This represents a request to call the tool named `'foo'` with arguments\n    `{\"a\": 1}` and an identifier of `'123'`.\n\n!!! note \"Factory function\"\n\n    `tool_call` may also be used as a factory to create a `ToolCall`. Benefits\n    include:\n\n    * Required arguments strictly validated at creation time",
                                                 "properties": {
                                                     "name": {
                                                         "title": "Name",
@@ -96,7 +95,6 @@
                                             "type": "array"
                                         },
                                         "invalid_tool_calls": {
-                                            "default": [],
                                             "items": {
                                                 "additionalProperties": true,
                                                 "description": "Allowance for errors made by LLM.\n\nHere we add an `error` key to surface errors made during generation\n(e.g., invalid JSON arguments.)",
@@ -565,10 +563,9 @@
                                             "type": "string"
                                         },
                                         "tool_calls": {
-                                            "default": [],
                                             "items": {
                                                 "additionalProperties": true,
-                                                "description": "Represents an AI's request to call a tool.\n\nExample:\n    ```python\n    {\"name\": \"foo\", \"args\": {\"a\": 1}, \"id\": \"123\"}\n    ```\n\n    This represents a request to call the tool named `'foo'` with arguments\n    `{\"a\": 1}` and an identifier of `'123'`.",
+                                                "description": "Represents an AI's request to call a tool.\n\nExample:\n    ```python\n    {\"name\": \"foo\", \"args\": {\"a\": 1}, \"id\": \"123\"}\n    ```\n\n    This represents a request to call the tool named `'foo'` with arguments\n    `{\"a\": 1}` and an identifier of `'123'`.\n\n!!! note \"Factory function\"\n\n    `tool_call` may also be used as a factory to create a `ToolCall`. Benefits\n    include:\n\n    * Required arguments strictly validated at creation time",
                                                 "properties": {
                                                     "name": {
                                                         "title": "Name",
@@ -600,7 +597,6 @@
                                             "type": "array"
                                         },
                                         "invalid_tool_calls": {
-                                            "default": [],
                                             "items": {
                                                 "additionalProperties": true,
                                                 "description": "Allowance for errors made by LLM.\n\nHere we add an `error` key to surface errors made during generation\n(e.g., invalid JSON arguments.)",
@@ -714,10 +710,9 @@
                                             "type": "object"
                                         },
                                         "tool_call_chunks": {
-                                            "default": [],
                                             "items": {
                                                 "additionalProperties": true,
-                                                "description": "A chunk of a tool call (yielded when streaming).\n\nWhen merging `ToolCallChunk`s (e.g., via `AIMessageChunk.__add__`),\nall string attributes are concatenated. Chunks are only merged if their\nvalues of `index` are equal and not None.\n\nExample:\n```python\nleft_chunks = [ToolCallChunk(name=\"foo\", args='{\"a\":', index=0)]\nright_chunks = [ToolCallChunk(name=None, args=\"1}\", index=0)]\n\n(\n    AIMessageChunk(content=\"\", tool_call_chunks=left_chunks)\n    + AIMessageChunk(content=\"\", tool_call_chunks=right_chunks)\n).tool_call_chunks == [ToolCallChunk(name=\"foo\", args='{\"a\":1}', index=0)]\n```",
+                                                "description": "A chunk of a tool call (yielded when streaming).\n\nWhen merging `ToolCallChunk` objects (e.g., via `AIMessageChunk.__add__`), all\nstring attributes are concatenated. Chunks are only merged if their values of\n`index` are equal and not `None`.\n\nExample:\n```python\nleft_chunks = [ToolCallChunk(name=\"foo\", args='{\"a\":', index=0)]\nright_chunks = [ToolCallChunk(name=None, args=\"1}\", index=0)]\n\n(\n    AIMessageChunk(content=\"\", tool_call_chunks=left_chunks)\n    + AIMessageChunk(content=\"\", tool_call_chunks=right_chunks)\n).tool_call_chunks == [ToolCallChunk(name=\"foo\", args='{\"a\":1}', index=0)]\n```",
                                                 "properties": {
                                                     "name": {
                                                         "type": "string"
@@ -1064,6 +1059,37 @@
                         },
                         "title": "Messages",
                         "type": "array"
+                    },
+                    "files": {
+                        "additionalProperties": {
+                            "description": "Data structure for storing file contents with metadata.",
+                            "properties": {
+                                "content": {
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "title": "Content",
+                                    "type": "array"
+                                },
+                                "created_at": {
+                                    "title": "Created At",
+                                    "type": "string"
+                                },
+                                "modified_at": {
+                                    "title": "Modified At",
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "content",
+                                "created_at",
+                                "modified_at"
+                            ],
+                            "title": "FileData",
+                            "type": "object"
+                        },
+                        "title": "Files",
+                        "type": "object"
                     }
                 },
                 "required": [
@@ -1074,7 +1100,6 @@
                 "type": "object",
                 "properties": {
                     "messages": {
-                        "default": null,
                         "items": {
                             "oneOf": [
                                 {
@@ -1126,10 +1151,9 @@
                                             "type": "string"
                                         },
                                         "tool_calls": {
-                                            "default": [],
                                             "items": {
                                                 "additionalProperties": true,
-                                                "description": "Represents an AI's request to call a tool.\n\nExample:\n    ```python\n    {\"name\": \"foo\", \"args\": {\"a\": 1}, \"id\": \"123\"}\n    ```\n\n    This represents a request to call the tool named `'foo'` with arguments\n    `{\"a\": 1}` and an identifier of `'123'`.",
+                                                "description": "Represents an AI's request to call a tool.\n\nExample:\n    ```python\n    {\"name\": \"foo\", \"args\": {\"a\": 1}, \"id\": \"123\"}\n    ```\n\n    This represents a request to call the tool named `'foo'` with arguments\n    `{\"a\": 1}` and an identifier of `'123'`.\n\n!!! note \"Factory function\"\n\n    `tool_call` may also be used as a factory to create a `ToolCall`. Benefits\n    include:\n\n    * Required arguments strictly validated at creation time",
                                                 "properties": {
                                                     "name": {
                                                         "title": "Name",
@@ -1161,7 +1185,6 @@
                                             "type": "array"
                                         },
                                         "invalid_tool_calls": {
-                                            "default": [],
                                             "items": {
                                                 "additionalProperties": true,
                                                 "description": "Allowance for errors made by LLM.\n\nHere we add an `error` key to surface errors made during generation\n(e.g., invalid JSON arguments.)",
@@ -1630,10 +1653,9 @@
                                             "type": "string"
                                         },
                                         "tool_calls": {
-                                            "default": [],
                                             "items": {
                                                 "additionalProperties": true,
-                                                "description": "Represents an AI's request to call a tool.\n\nExample:\n    ```python\n    {\"name\": \"foo\", \"args\": {\"a\": 1}, \"id\": \"123\"}\n    ```\n\n    This represents a request to call the tool named `'foo'` with arguments\n    `{\"a\": 1}` and an identifier of `'123'`.",
+                                                "description": "Represents an AI's request to call a tool.\n\nExample:\n    ```python\n    {\"name\": \"foo\", \"args\": {\"a\": 1}, \"id\": \"123\"}\n    ```\n\n    This represents a request to call the tool named `'foo'` with arguments\n    `{\"a\": 1}` and an identifier of `'123'`.\n\n!!! note \"Factory function\"\n\n    `tool_call` may also be used as a factory to create a `ToolCall`. Benefits\n    include:\n\n    * Required arguments strictly validated at creation time",
                                                 "properties": {
                                                     "name": {
                                                         "title": "Name",
@@ -1665,7 +1687,6 @@
                                             "type": "array"
                                         },
                                         "invalid_tool_calls": {
-                                            "default": [],
                                             "items": {
                                                 "additionalProperties": true,
                                                 "description": "Allowance for errors made by LLM.\n\nHere we add an `error` key to surface errors made during generation\n(e.g., invalid JSON arguments.)",
@@ -1779,10 +1800,9 @@
                                             "type": "object"
                                         },
                                         "tool_call_chunks": {
-                                            "default": [],
                                             "items": {
                                                 "additionalProperties": true,
-                                                "description": "A chunk of a tool call (yielded when streaming).\n\nWhen merging `ToolCallChunk`s (e.g., via `AIMessageChunk.__add__`),\nall string attributes are concatenated. Chunks are only merged if their\nvalues of `index` are equal and not None.\n\nExample:\n```python\nleft_chunks = [ToolCallChunk(name=\"foo\", args='{\"a\":', index=0)]\nright_chunks = [ToolCallChunk(name=None, args=\"1}\", index=0)]\n\n(\n    AIMessageChunk(content=\"\", tool_call_chunks=left_chunks)\n    + AIMessageChunk(content=\"\", tool_call_chunks=right_chunks)\n).tool_call_chunks == [ToolCallChunk(name=\"foo\", args='{\"a\":1}', index=0)]\n```",
+                                                "description": "A chunk of a tool call (yielded when streaming).\n\nWhen merging `ToolCallChunk` objects (e.g., via `AIMessageChunk.__add__`), all\nstring attributes are concatenated. Chunks are only merged if their values of\n`index` are equal and not `None`.\n\nExample:\n```python\nleft_chunks = [ToolCallChunk(name=\"foo\", args='{\"a\":', index=0)]\nright_chunks = [ToolCallChunk(name=None, args=\"1}\", index=0)]\n\n(\n    AIMessageChunk(content=\"\", tool_call_chunks=left_chunks)\n    + AIMessageChunk(content=\"\", tool_call_chunks=right_chunks)\n).tool_call_chunks == [ToolCallChunk(name=\"foo\", args='{\"a\":1}', index=0)]\n```",
                                                 "properties": {
                                                     "name": {
                                                         "type": "string"
@@ -2129,9 +2149,73 @@
                         },
                         "title": "Messages",
                         "type": "array"
+                    },
+                    "structured_response": {
+                        "title": "Structured Response"
+                    },
+                    "todos": {
+                        "items": {
+                            "description": "A single todo item with content and status.",
+                            "properties": {
+                                "content": {
+                                    "title": "Content",
+                                    "type": "string"
+                                },
+                                "status": {
+                                    "enum": [
+                                        "pending",
+                                        "in_progress",
+                                        "completed"
+                                    ],
+                                    "title": "Status",
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "content",
+                                "status"
+                            ],
+                            "title": "Todo",
+                            "type": "object"
+                        },
+                        "title": "Todos",
+                        "type": "array"
+                    },
+                    "files": {
+                        "additionalProperties": {
+                            "description": "Data structure for storing file contents with metadata.",
+                            "properties": {
+                                "content": {
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "title": "Content",
+                                    "type": "array"
+                                },
+                                "created_at": {
+                                    "title": "Created At",
+                                    "type": "string"
+                                },
+                                "modified_at": {
+                                    "title": "Modified At",
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "content",
+                                "created_at",
+                                "modified_at"
+                            ],
+                            "title": "FileData",
+                            "type": "object"
+                        },
+                        "title": "Files",
+                        "type": "object"
                     }
                 },
-                "required": []
+                "required": [
+                    "messages"
+                ]
             },
             "graph": {
                 "nodes": [
@@ -2143,104 +2227,55 @@
                         "metadata": {}
                     },
                     {
-                        "id": "agent",
-                        "name": "agent",
-                        "type": "node",
-                        "subgraph": {
-                            "nodes": [
-                                {
-                                    "id": "__start__",
-                                    "name": "__start__",
-                                    "type": "__start__",
-                                    "subgraph": null,
-                                    "metadata": {}
-                                },
-                                {
-                                    "id": "model",
-                                    "name": "model",
-                                    "type": "model",
-                                    "subgraph": null,
-                                    "metadata": {
-                                        "model_name": "claude-haiku-4-5",
-                                        "max_tokens": 4096
-                                    }
-                                },
-                                {
-                                    "id": "tools",
-                                    "name": "tools",
-                                    "type": "tool",
-                                    "subgraph": null,
-                                    "metadata": {
-                                        "tool_names": [
-                                            "write_todos",
-                                            "ls",
-                                            "read_file",
-                                            "write_file",
-                                            "edit_file",
-                                            "glob",
-                                            "grep",
-                                            "execute",
-                                            "task",
-                                            "tavily_search"
-                                        ],
-                                        "tool_count": 10
-                                    }
-                                },
-                                {
-                                    "id": "SummarizationMiddleware.before_model",
-                                    "name": "SummarizationMiddleware.before_model",
-                                    "type": "node",
-                                    "subgraph": null,
-                                    "metadata": {}
-                                },
-                                {
-                                    "id": "PatchToolCallsMiddleware.before_agent",
-                                    "name": "PatchToolCallsMiddleware.before_agent",
-                                    "type": "node",
-                                    "subgraph": null,
-                                    "metadata": {}
-                                },
-                                {
-                                    "id": "__end__",
-                                    "name": "__end__",
-                                    "type": "__end__",
-                                    "subgraph": null,
-                                    "metadata": {}
-                                }
+                        "id": "model",
+                        "name": "model",
+                        "type": "model",
+                        "subgraph": null,
+                        "metadata": {
+                            "model_name": "claude-haiku-4-5",
+                            "max_tokens": 64000
+                        }
+                    },
+                    {
+                        "id": "tools",
+                        "name": "tools",
+                        "type": "tool",
+                        "subgraph": null,
+                        "metadata": {
+                            "tool_names": [
+                                "write_todos",
+                                "ls",
+                                "read_file",
+                                "write_file",
+                                "edit_file",
+                                "glob",
+                                "grep",
+                                "execute",
+                                "task",
+                                "tavily_search"
                             ],
-                            "edges": [
-                                {
-                                    "source": "PatchToolCallsMiddleware.before_agent",
-                                    "target": "SummarizationMiddleware.before_model",
-                                    "label": null
-                                },
-                                {
-                                    "source": "SummarizationMiddleware.before_model",
-                                    "target": "model",
-                                    "label": null
-                                },
-                                {
-                                    "source": "__start__",
-                                    "target": "PatchToolCallsMiddleware.before_agent",
-                                    "label": null
-                                },
-                                {
-                                    "source": "model",
-                                    "target": "__end__",
-                                    "label": null
-                                },
-                                {
-                                    "source": "model",
-                                    "target": "tools",
-                                    "label": null
-                                },
-                                {
-                                    "source": "tools",
-                                    "target": "SummarizationMiddleware.before_model",
-                                    "label": null
-                                }
-                            ]
-                        },
+                            "tool_count": 10
+                        }
+                    },
+                    {
+                        "id": "TodoListMiddleware.after_model",
+                        "name": "TodoListMiddleware.after_model",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "SummarizationMiddleware.before_model",
+                        "name": "SummarizationMiddleware.before_model",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "PatchToolCallsMiddleware.before_agent",
+                        "name": "PatchToolCallsMiddleware.before_agent",
+                        "type": "node",
+                        "subgraph": null,
                         "metadata": {}
                     },
                     {
@@ -2253,13 +2288,43 @@
                 ],
                 "edges": [
                     {
-                        "source": "__start__",
-                        "target": "agent",
+                        "source": "PatchToolCallsMiddleware.before_agent",
+                        "target": "SummarizationMiddleware.before_model",
                         "label": null
                     },
                     {
-                        "source": "agent",
+                        "source": "SummarizationMiddleware.before_model",
+                        "target": "model",
+                        "label": null
+                    },
+                    {
+                        "source": "TodoListMiddleware.after_model",
+                        "target": "SummarizationMiddleware.before_model",
+                        "label": null
+                    },
+                    {
+                        "source": "TodoListMiddleware.after_model",
                         "target": "__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "TodoListMiddleware.after_model",
+                        "target": "tools",
+                        "label": null
+                    },
+                    {
+                        "source": "__start__",
+                        "target": "PatchToolCallsMiddleware.before_agent",
+                        "label": null
+                    },
+                    {
+                        "source": "model",
+                        "target": "TodoListMiddleware.after_model",
+                        "label": null
+                    },
+                    {
+                        "source": "tools",
+                        "target": "SummarizationMiddleware.before_model",
                         "label": null
                     }
                 ]

@@ -1,20 +1,16 @@
 flowchart TB
   __start__(__start__)
+  model(model)
+  tools(tools)
+  TodoListMiddleware.after_model(TodoListMiddleware.after_model)
+  SummarizationMiddleware.before_model(SummarizationMiddleware.before_model)
+  PatchToolCallsMiddleware.before_agent(PatchToolCallsMiddleware.before_agent)
   __end__(__end__)
-  __start__ --> agent
-  agent --> __end__
-  subgraph agent [agent]
-    direction LR
-    __start__(__start__)
-    model(model)
-    tools(tools)
-    SummarizationMiddleware.before_model(SummarizationMiddleware.before_model)
-    PatchToolCallsMiddleware.before_agent(PatchToolCallsMiddleware.before_agent)
-    __end__(__end__)
-    PatchToolCallsMiddleware.before_agent --> SummarizationMiddleware.before_model
-    SummarizationMiddleware.before_model --> model
-    __start__ --> PatchToolCallsMiddleware.before_agent
-    model --> __end__
-    model --> tools
-    tools --> SummarizationMiddleware.before_model
-  end
+  PatchToolCallsMiddleware.before_agent --> SummarizationMiddleware.before_model
+  SummarizationMiddleware.before_model --> model
+  TodoListMiddleware.after_model --> SummarizationMiddleware.before_model
+  TodoListMiddleware.after_model --> __end__
+  TodoListMiddleware.after_model --> tools
+  __start__ --> PatchToolCallsMiddleware.before_agent
+  model --> TodoListMiddleware.after_model
+  tools --> SummarizationMiddleware.before_model
