@@ -324,7 +324,7 @@ def get_entrypoints_schema(
         "output": {"type": "object", "properties": {}, "required": []},
     }
 
-    if hasattr(graph, "input_schema"):
+    if hasattr(graph, "get_input_jsonschema"):
         input_schema = graph.get_input_jsonschema()
         unpacked_ref_def_properties, input_circular_dependency = transform_references(
             input_schema
@@ -339,7 +339,7 @@ def get_entrypoints_schema(
         schema["input"]["required"] = unpacked_ref_def_properties.get("required", [])
         schema["input"] = transform_attachments(schema["input"])
 
-    if hasattr(graph, "output_schema"):
+    if hasattr(graph, "get_output_jsonschema"):
         output_schema = graph.get_output_jsonschema()
         unpacked_ref_def_properties, output_circular_dependency = transform_references(
             output_schema
