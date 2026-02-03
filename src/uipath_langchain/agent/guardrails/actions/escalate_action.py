@@ -91,6 +91,7 @@ class EscalateAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
+            "escalation_data": {}
         }
 
         async def _node(
@@ -103,13 +104,13 @@ class EscalateAction(GuardrailAction):
             task_recipient = await resolve_recipient_value(self.recipient)
 
             if isinstance(self.recipient, StandardRecipient):
-                metadata["assigned_to"] = (
+                metadata["escalation_data"]["assigned_to"] = (
                     self.recipient.display_name
                     if self.recipient.display_name
                     else self.recipient.value
                 )
             elif isinstance(self.recipient, AssetRecipient):
-                metadata["assigned_to"] = (
+                metadata["escalation_data"]["assigned_to"] = (
                     task_recipient.value if task_recipient else None
                 )
 
@@ -183,6 +184,9 @@ class EscalateAction(GuardrailAction):
                     recipient=task_recipient,
                 )
             )
+            print("ESCALATION RESULT")
+            print(escalation_result)
+            print("=================")
 
             if escalation_result.action == "Approve":
                 return _process_escalation_response(
