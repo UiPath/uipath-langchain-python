@@ -200,7 +200,7 @@ class EscalateAction(GuardrailAction):
             raise AgentTerminationException(
                 code=UiPathErrorCode.EXECUTION_ERROR,
                 title="Escalation rejected",
-                detail=f"Please contact your administrator. Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data['Reason']}",
+                detail=f"Please contact your administrator. Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data.get('Reason', None)}",
             )
 
         _node.__metadata__ = metadata  # type: ignore[attr-defined]
