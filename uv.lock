@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -3268,7 +3268,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.60b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.60b0" },
     { name = "uipath", specifier = "==2.6.28" },
-    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.5.18" },
+    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.5.21" },
 ]
 
 [package.metadata.requires-dev]
@@ -3318,7 +3318,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.5.18"
+version = "0.5.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -3337,9 +3337,9 @@ dependencies = [
     { name = "uipath" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ff/b6/a195b35f326633809a19fd953130af67d56e4dc8b36feb43d482ad89858d/uipath_langchain-0.5.18.tar.gz", hash = "sha256:9d34215b69d7b192423ff6fb67393a3ce9e99ad445516287c0faee1c23ea159c", size = 8727120, upload-time = "2026-02-01T02:00:56.366Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c5/ad/1e156c7170952b9e7ecdc9a260aef85c877472c53e1221737d3802537742/uipath_langchain-0.5.21.tar.gz", hash = "sha256:884944dc846b83c39cf64ef0f0ae8e2de561f2e57b743d74017bc1e3ded6eb79", size = 8956306, upload-time = "2026-02-03T19:06:50.354Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/b6/54497857901c3fc9eeb396e7f9bc38b0f7abf8971a780beaf0c607a64fbf/uipath_langchain-0.5.18-py3-none-any.whl", hash = "sha256:381a6d8b2007afdc57fb81334a663d9573927b7f9367b096872d4315cc147d58", size = 167454, upload-time = "2026-02-01T02:00:54.357Z" },
+    { url = "https://files.pythonhosted.org/packages/70/42/ec712c965a5b87d99fd540ce0f4e0584d02c21dd0b27fdda72fbb2410208/uipath_langchain-0.5.21-py3-none-any.whl", hash = "sha256:3a5a6b444c87a6c2f7a707931425baebc3822e12f4da20615a18049ef1ae0c56", size = 169206, upload-time = "2026-02-03T19:06:48.768Z" },
 ]
 
 [package.optional-dependencies]
