@@ -2,7 +2,6 @@
 
 from langchain_anthropic import ChatAnthropic
 from langchain_tavily import TavilySearch
-from langgraph.graph import START, END, StateGraph, MessagesState
 from deepagents import create_deep_agent
 
 # Initialize tools
@@ -71,18 +70,3 @@ deep_agent = create_deep_agent(
     tools=[tavily_tool],
     subagents=[research_subagent, critique_subagent]
 )
-
-# Wrap the deep agent in a StateGraph with a simple schema for compatibility
-async def agent_node(state: MessagesState) -> MessagesState:
-    """Node that runs the deep agent."""
-    result = await deep_agent.ainvoke(state)
-    return result
-
-# Build wrapper graph with standard MessagesState
-builder = StateGraph(MessagesState)
-builder.add_node("agent", agent_node)
-builder.add_edge(START, "agent")
-builder.add_edge("agent", END)
-
-# Compile the wrapper graph
-graph = builder.compile()
