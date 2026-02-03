@@ -95,6 +95,7 @@ class LlmOpsSpanFactory:
         input_data: Optional[Dict[str, Any]] = None,
         input_schema: Optional[Dict[str, Any]] = None,
         output_schema: Optional[Dict[str, Any]] = None,
+        source: str = "unknown",
     ) -> Generator[Span, None, None]:
         """Start an agent run span (root span for agent execution).
 
@@ -109,6 +110,7 @@ class LlmOpsSpanFactory:
             input_data: Input arguments passed to the agent
             input_schema: JSON schema for agent input
             output_schema: JSON schema for agent output
+            source: Execution source (runtime, playground, eval, unknown)
 
         Yields:
             The OpenTelemetry Span object
@@ -122,6 +124,7 @@ class LlmOpsSpanFactory:
             input_data=input_data,
             input_schema=input_schema,
             output_schema=output_schema,
+            source=source,
         ) as span:
             yield span
 

@@ -471,7 +471,8 @@ class TestAgentRunSpanAttributes:
         assert data["inputSchema"] == {"type": "object"}
         assert data["outputSchema"] == {"type": "object"}
         assert data["output"] == {"content": "response"}
-        assert data["source"] == 1  # TraceSource.Agents
+        assert data["source"] == "unknown"
+        assert data["uipath.source"] == 1  # SourceEnum.Agents
 
     def test_no_snake_case_in_output(self) -> None:
         """Verify no snake_case field names leak into JSON output."""
@@ -496,6 +497,7 @@ class TestAgentRunSpanAttributes:
         assert "input_schema" not in data
         assert "output_schema" not in data
         assert "execution_type" not in data
+        assert "uipath_source" not in data
 
 
 class TestAgentOutputSpanAttributes:

@@ -300,6 +300,7 @@ class InstrumentedRuntime:
                 input_data=self._normalize_input(input_data),
                 input_schema=input_schema,
                 output_schema=output_schema,
+                source=get_execution_type(self._runtime_context).value,
             ) as agent_span:
                 prompts_captured = system_prompt is not None or user_prompt is not None
                 self._callback.set_agent_span(

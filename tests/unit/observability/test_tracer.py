@@ -244,7 +244,8 @@ class TestAgentRunSpan:
         assert attrs["type"] == SpanType.AGENT_RUN
         assert attrs["agentName"] == "TestAgent"
         assert attrs["agentId"] == "test-id-123"
-        assert attrs["source"] == 1  # TraceSource.Agents
+        assert attrs["source"] == "unknown"
+        assert attrs["uipath.source"] == 1  # SourceEnum.Agents
 
     def test_includes_execution_type_from_env(self, tracer, span_exporter, monkeypatch):
         """Test agent run span includes executionType from UIPATH_IS_DEBUG env."""

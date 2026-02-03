@@ -15,7 +15,7 @@ class AgentRunSpanAttributes(BaseSpanAttributes):
 
     agent_id: Optional[str] = Field(None, alias="agentId")
     agent_name: str = Field(..., alias="agentName")
-    source: int = Field(default=1, alias="source")
+    source: str = Field(default="unknown", alias="source")
     is_conversational: Optional[bool] = Field(None, alias="isConversational")
     system_prompt: Optional[str] = Field(None, alias="systemPrompt")
     user_prompt: Optional[str] = Field(None, alias="userPrompt")
@@ -28,6 +28,7 @@ class AgentRunSpanAttributes(BaseSpanAttributes):
     execution_type: Optional[int] = Field(None, alias="executionType")
     agent_version: Optional[str] = Field(None, alias="agentVersion")
     reference_id: Optional[str] = Field(None, alias="referenceId")
+    uipath_source: int = Field(default=1, alias="uipath.source")  # SourceEnum.Agents
 
     @property
     def type(self) -> str:
