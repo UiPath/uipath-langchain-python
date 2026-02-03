@@ -9,6 +9,8 @@ from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
+from uipath_langchain.chat.helpers import get_action_id
+
 from .supported_models import OpenAIModels
 from .types import APIFlavor, LLMProvider
 
@@ -51,6 +53,10 @@ class UiPathURLRewriteTransport(httpx.AsyncHTTPTransport):
         if new_url:
             request.url = new_url
 
+        action_id = get_action_id()
+        if action_id:
+            request.headers["X-UiPath-LlmGateway-ActionId"] = action_id
+
         return await super().handle_async_request(request)
 
 
@@ -62,6 +68,10 @@ class UiPathSyncURLRewriteTransport(httpx.HTTPTransport):
         new_url = _rewrite_openai_url(str(request.url), request.url.params)
         if new_url:
             request.url = new_url
+
+        action_id = get_action_id()
+        if action_id:
+            request.headers["X-UiPath-LlmGateway-ActionId"] = action_id
 
         return super().handle_request(request)
 

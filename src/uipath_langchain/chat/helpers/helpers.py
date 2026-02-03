@@ -1,8 +1,10 @@
 """Helper functions for chat messages manipulation."""
 
+import uuid
 from typing import Any, cast
 
 from langchain_core.messages import BaseMessage, ContentBlock
+from opentelemetry import trace
 
 
 def append_content_blocks_to_message(
@@ -60,3 +62,16 @@ def extract_text_content(message: BaseMessage) -> str:
                 text_parts.append(text)
 
     return "\n".join(text_parts) if text_parts else ""
+
+
+def get_action_id() -> str | None:
+    """Get the current trace ID as a UUID for the X-UiPath-LlmGateway-ActionId header.
+
+    Returns:
+        The trace ID formatted as a UUID string, or None if no trace is active.
+    """
+    span = trace.get_current_span()
+    ctx = span.get_span_context()
+    if ctx and ctx.trace_id:
+        return str(uuid.UUID(int=ctx.trace_id))
+    return None

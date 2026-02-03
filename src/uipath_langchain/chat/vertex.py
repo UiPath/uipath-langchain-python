@@ -15,6 +15,8 @@ from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
+from uipath_langchain.chat.helpers import get_action_id
+
 from .header_capture import HeaderCapture
 from .retryers.vertex import AsyncVertexRetryer, VertexRetryer
 from .supported_models import GeminiModels
@@ -95,6 +97,10 @@ class _UrlRewriteTransport(httpx.HTTPTransport):
             request.headers["host"] = new_url.host
             request.url = new_url
 
+        action_id = get_action_id()
+        if action_id:
+            request.headers["X-UiPath-LlmGateway-ActionId"] = action_id
+
         response = super().handle_request(request)
         if self.header_capture:
             self.header_capture.set(dict(response.headers))
@@ -127,6 +133,10 @@ class _AsyncUrlRewriteTransport(httpx.AsyncHTTPTransport):
             # Update host header to match the new URL
             request.headers["host"] = new_url.host
             request.url = new_url
+
+        action_id = get_action_id()
+        if action_id:
+            request.headers["X-UiPath-LlmGateway-ActionId"] = action_id
 
         response = await super().handle_async_request(request)
         if self.header_capture:

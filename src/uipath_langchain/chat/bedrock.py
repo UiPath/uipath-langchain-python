@@ -10,6 +10,8 @@ from tenacity import AsyncRetrying, Retrying
 from uipath._utils import resource_override
 from uipath.utils import EndpointManager
 
+from uipath_langchain.chat.helpers import get_action_id
+
 from .header_capture import HeaderCapture
 from .retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
 from .supported_models import BedrockModels
@@ -144,6 +146,10 @@ class AwsBedrockCompletionsPassthroughClient:
             headers["X-UiPath-JobKey"] = job_key
         if process_key:
             headers["X-UiPath-ProcessKey"] = process_key
+
+        action_id = get_action_id()
+        if action_id:
+            request.headers["X-UiPath-LlmGateway-ActionId"] = action_id
 
         request.headers.update(headers)
 
