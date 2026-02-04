@@ -101,6 +101,9 @@ def create_analyze_file_tool(
         coroutine=tool_fn,
         output_type=output_model,
         argument_properties=resource.argument_properties,
+        metadata={
+            "args_schema": input_model,
+        },
     )
     tool.set_tool_wrappers(awrapper=analyze_file_tool_wrapper)
     return tool
