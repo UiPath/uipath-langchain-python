@@ -184,9 +184,29 @@ class EscalateAction(GuardrailAction):
                     recipient=task_recipient,
                 )
             )
+
             print("ESCALATION RESULT")
             print(escalation_result)
             print("=================")
+
+            # Store reviewed inputs/outputs in metadata for observability
+            if escalation_result.data:
+                reviewed_inputs = escalation_result.data.get("ReviewedInputs")
+                reviewed_outputs = escalation_result.data.get("ReviewedOutputs")
+                reason = escalation_result.data.get("Reason")
+                if reviewed_inputs:
+                    metadata["escalation_data"]["reviewed_inputs"] = reviewed_inputs
+                if reviewed_outputs:
+                    metadata["escalation_data"]["reviewed_outputs"] = reviewed_outputs
+                if reason:
+                    metadata["escalation_data"]["reason"] = reason
+
+            # Store reviewed_by from completed_by_user
+            completed_by_user = getattr(escalation_result, "completed_by_user", None)
+            if completed_by_user:
+                reviewed_by = completed_by_user.get("displayName") or completed_by_user.get("emailAddress")
+                if reviewed_by:
+                    metadata["escalation_data"]["reviewed_by"] = reviewed_by
 
             if escalation_result.action == "Approve":
                 return _process_escalation_response(
