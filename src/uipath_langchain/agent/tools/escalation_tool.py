@@ -214,19 +214,12 @@ def create_escalation_tool(
                 detail=output_detail,
             )
 
-        output = result["output"]
-        if hasattr(output, "model_dump"):
-            output = output.model_dump()
-        elif not isinstance(output, dict):
-            output = {"value": output}
-
-        outcome = result.get("outcome")
-        if outcome:
-            output = {**output, "outcome": outcome}
-        output["task_id"] = result.get("task_id")
-        output["assigned_to"] = result.get("assigned_to")
-
-        return output
+        return {
+            **result["output"],
+            "outcome": result["outcome"],
+            "task_id": result["task_id"],
+            "assigned_to": result["assigned_to"],
+        }
 
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,
