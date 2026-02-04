@@ -519,7 +519,7 @@ class TestFilterActionMetadata:
         metadata = getattr(node, "__metadata__", None)
         assert metadata is not None
         assert "excluded_fields" in metadata
-        assert metadata["excluded_fields"] == fields
+        assert metadata["excluded_fields"] == ["sentence"]
 
     @pytest.mark.asyncio
     async def test_filter_input_updates_metadata_with_updated_input(self) -> None:
@@ -553,8 +553,8 @@ class TestFilterActionMetadata:
         metadata = getattr(node, "__metadata__", None)
         assert metadata is not None
         # updated_input should contain the filtered args (without 'sentence')
-        assert metadata["updated_input"] == {"other_param": "value"}
-        assert metadata["updated_output"] is None
+        assert metadata["updated_data"]["input"] == {"other_param": "value"}
+        assert metadata["updated_data"]["output"] is None
 
     @pytest.mark.asyncio
     async def test_filter_output_updates_metadata_with_updated_output(self) -> None:
@@ -583,5 +583,5 @@ class TestFilterActionMetadata:
         metadata = getattr(node, "__metadata__", None)
         assert metadata is not None
         # updated_output should contain the filtered output (without 'content')
-        assert metadata["updated_output"] == {"other": "data"}
-        assert metadata["updated_input"] is None
+        assert metadata["updated_data"]["updated_output"] == {"other": "data"}
+        assert metadata["updated_data"]["updated_input"] is None

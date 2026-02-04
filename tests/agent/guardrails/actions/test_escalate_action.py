@@ -1673,7 +1673,7 @@ class TestEscalateActionMetadata:
 
         metadata = getattr(node, "__metadata__", None)
         assert metadata is not None
-        assert metadata["assigned_to"] == "user@example.com"
+        assert metadata["escalation_data"]["assigned_to"] == "user@example.com"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -1711,7 +1711,7 @@ class TestEscalateActionMetadata:
 
         metadata = getattr(node, "__metadata__", None)
         assert metadata is not None
-        assert metadata["assigned_to"] == "John Doe"
+        assert metadata["escalation_data"]["assigned_to"] == "John Doe"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
@@ -1756,4 +1756,4 @@ class TestEscalateActionMetadata:
         metadata = getattr(node, "__metadata__", None)
         assert metadata is not None
         # AssetRecipient uses resolved task_recipient.value
-        assert metadata["assigned_to"] == "resolved@example.com"
+        assert metadata["escalation_data"]["assigned_to"] == "resolved@example.com"
