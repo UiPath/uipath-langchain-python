@@ -583,5 +583,5 @@ class TestFilterActionMetadata:
         metadata = getattr(node, "__metadata__", None)
         assert metadata is not None
         # updated_output should contain the filtered output (without 'content')
-        assert metadata["updated_data"]["updated_output"] == {"other": "data"}
-        assert metadata["updated_data"]["updated_input"] is None
+        assert metadata["updated_data"]["output"] == {"other": "data"}
+        assert metadata["updated_data"]["input"] is None
