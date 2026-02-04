@@ -6,7 +6,7 @@ from typing import Any, Literal
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import interrupt
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipient,
@@ -160,18 +160,11 @@ def create_escalation_tool(
         result = await escalate()
 
         # Extract task info before validation
-        if isinstance(result, dict):
-            task_id = result.get("id") or result.get("key")
-            assigned_to = _get_user_email(
-                result.get("assigned_to_user") or result.get("assignedToUser")
-            )
-            result = TypeAdapter(EscalationToolOutput).validate_python(result)
-        else:
-            task_id = getattr(result, "id", None) or getattr(result, "key", None)
-            assigned_to = _get_user_email(getattr(result, "assigned_to_user", None))
+        task_id = result.id
+        assigned_to = _get_user_email(result.assigned_to_user)
 
-        escalation_action = getattr(result, "action", None)
-        escalation_output = getattr(result, "data", {})
+        escalation_action = result.action
+        escalation_output = result.data or {}
 
         outcome_str = (
             channel.outcome_mapping.get(escalation_action)
