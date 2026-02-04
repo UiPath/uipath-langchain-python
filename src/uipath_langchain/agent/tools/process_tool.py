@@ -75,6 +75,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             "tool_type": "process",
             "display_name": process_name,
             "folder_path": folder_path,
+            "args_schema": input_model,
         },
         argument_properties=resource.argument_properties,
     )
