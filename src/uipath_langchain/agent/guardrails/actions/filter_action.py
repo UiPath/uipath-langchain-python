@@ -75,7 +75,10 @@ class FilterAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "excluded_fields": self.fields,
+            "excluded_fields": [field.path for field in self.fields]
+            if self.fields
+            else [],
+            "updated_data": {"input": None, "output": None},
         }
 
         async def _node(
@@ -89,8 +92,8 @@ class FilterAction(GuardrailAction):
                     guarded_component_name,
                 )
                 # Update metadata with filter results
-                metadata["updated_input"] = result.updated_input
-                metadata["updated_output"] = result.updated_output
+                metadata["updated_data"]["input"] = result.updated_input
+                metadata["updated_data"]["output"] = result.updated_output
                 return result.command
 
             raise AgentTerminationException(
