@@ -368,6 +368,9 @@ def _convert_agent_rule_to_deterministic(
     """
     if isinstance(agent_rule, UniversalRule):
         # UniversalRule is already compatible
+        agent_rule.rule_description = (
+            f"Always enforce the guardrail on {agent_rule.apply_to.value}"
+        )
         return agent_rule
 
     if isinstance(agent_rule, AgentWordRule):

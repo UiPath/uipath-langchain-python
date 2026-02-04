@@ -32,11 +32,13 @@ from uipath.agent.models.agent import (
 )
 from uipath.core.guardrails import (
     AllFieldsSelector,
+    ApplyTo,
     BooleanRule,
     DeterministicGuardrail,
     FieldSource,
     GuardrailSelector,
     NumberRule,
+    UniversalRule,
     WordRule,
 )
 
@@ -817,6 +819,32 @@ class TestConvertAgentRuleToDeterministic:
         assert result.rule_type == "boolean"
         assert result.detects_violation(True) is True
         assert result.detects_violation(False) is False
+
+    def test_convert_universal_rule_sets_rule_description(self) -> None:
+        """UniversalRule should have rule_description set based on apply_to value."""
+        universal_rule = UniversalRule(
+            rule_type="always",
+            apply_to=ApplyTo.INPUT_AND_OUTPUT,
+        )
+        # Create a minimal guardrail for testing
+        guardrail = AgentCustomGuardrail.model_validate(
+            {
+                "$guardrailType": "custom",
+                "id": "test-id",
+                "name": "test-guardrail",
+                "description": "Test",
+                "enabledForEvals": True,
+                "selector": {"$selectorType": "all"},
+                "rules": [],
+                "action": {"$actionType": "block", "reason": "test"},
+            }
+        )
+        result = _convert_agent_rule_to_deterministic(universal_rule, guardrail, [])
+
+        assert isinstance(result, UniversalRule)
+        assert (
+            result.rule_description == "Always enforce the guardrail on inputAndOutput"
+        )
 
     def test_unsupported_rule_type_raises_value_error(self) -> None:
         # Create a mock rule that's not a supported type
