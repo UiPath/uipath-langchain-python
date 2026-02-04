@@ -34,7 +34,9 @@ class TraceContextData(TypedDict):
     pending_process_span: Optional[PendingSpanData]
     # Pending guardrail escalation span (for HITL)
     pending_escalation_span: Optional[PendingSpanData]
-    pending_escalation_info: Optional[dict[str, str]]
+    pending_guardrail_hitl_evaluation_span: Optional[PendingSpanData]
+    pending_guardrail_hitl_container_span: Optional[PendingSpanData]
+    pending_llm_span: Optional[PendingSpanData]
 
 
 class TraceContextStorage(Protocol):

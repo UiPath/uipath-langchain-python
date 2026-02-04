@@ -3,16 +3,17 @@
 Handles guardrail container, evaluation, and escalation spans.
 """
 
+import ast
 import json
 from typing import Any, Callable, Optional
 
 from opentelemetry.trace import (
     Span,
     SpanKind,
-    Status,
-    StatusCode,
     Tracer,
 )
+from uipath.core.guardrails import GuardrailScope
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ..span_attributes import (
     AgentPostGuardrailsSpanAttributes,
@@ -26,11 +27,52 @@ from ..span_attributes import (
     ToolPreGuardrailsSpanAttributes,
 )
 from ..span_name import SpanName
-from .base import apply_attributes, create_span, end_span_ok
+from .base import apply_attributes, create_span, end_span_error, end_span_ok
 
 __all__ = [
     "GuardrailSpanSchema",
 ]
+
+
+def to_json_string(value: Any) -> str:
+    """Convert a value to a JSON string, handling Python repr format."""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    if isinstance(value, str):
+        try:
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, (dict, list)):
+                return json.dumps(parsed)
+        except (ValueError, SyntaxError):
+            pass
+        return value
+    return str(value)
+
+
+def _format_guardrail_payload(payload: Optional[Any]) -> Optional[str]:
+    """Format payload for span attribute, handling None values.
+
+    Payload can contain input and/or output; if any of input or output is None,
+    it will be excluded. If only one non-null value remains, use that directly.
+
+    Args:
+        payload: Dict with input/output keys, or any other value
+
+    Returns:
+        JSON string representation of the payload, or None if empty
+    """
+    if not payload:
+        return None
+
+    non_null = {k: v for k, v in payload.items() if v is not None}
+    if len(non_null) == 1:
+        payload_attr = next(iter(non_null.values()))
+    else:
+        payload_attr = non_null
+
+    if payload_attr is not None:
+        return to_json_string(payload_attr)
+    return None
 
 
 class GuardrailSpanSchema:
@@ -69,40 +111,47 @@ class GuardrailSpanSchema:
         Returns:
             The started container Span (caller must call span.end())
         """
-        span_name = SpanName.guardrails_container(scope, stage)
+        # Select appropriate attributes class based on scope and stage
+        attrs: BaseSpanAttributes
+        if scope == GuardrailScope.AGENT:
+            if stage == ExecutionStage.PRE_EXECUTION:
+                attrs = AgentPreGuardrailsSpanAttributes()
+                span_name = SpanName.AGENT_PRE_GUARDRAILS
+            else:
+                attrs = AgentPostGuardrailsSpanAttributes()
+                span_name = SpanName.AGENT_POST_GUARDRAILS
+        elif scope == GuardrailScope.LLM:
+            if stage == ExecutionStage.PRE_EXECUTION:
+                attrs = LlmPreGuardrailsSpanAttributes()
+                span_name = SpanName.LLM_PRE_GUARDRAILS
+            else:
+                attrs = LlmPostGuardrailsSpanAttributes()
+                span_name = SpanName.LLM_POST_GUARDRAILS
+        else:  # tool
+            if stage == ExecutionStage.PRE_EXECUTION:
+                attrs = ToolPreGuardrailsSpanAttributes()
+                span_name = SpanName.TOOL_PRE_GUARDRAILS
+            else:
+                attrs = ToolPostGuardrailsSpanAttributes()
+                span_name = SpanName.TOOL_POST_GUARDRAILS
+
         span = create_span(
             self._tracer,
             span_name,
             parent_span=parent_span,
             kind=SpanKind.INTERNAL,
         )
-
-        # Select appropriate attributes class based on scope and stage
-        attrs: BaseSpanAttributes
-        if scope == "agent":
-            if stage == "pre":
-                attrs = AgentPreGuardrailsSpanAttributes()
-            else:
-                attrs = AgentPostGuardrailsSpanAttributes()
-        elif scope == "llm":
-            if stage == "pre":
-                attrs = LlmPreGuardrailsSpanAttributes()
-            else:
-                attrs = LlmPostGuardrailsSpanAttributes()
-        else:  # tool
-            if stage == "pre":
-                attrs = ToolPreGuardrailsSpanAttributes()
-            else:
-                attrs = ToolPostGuardrailsSpanAttributes()
-
         apply_attributes(span, attrs)
+        if self._upsert_started:
+            self._upsert_started(span)
         return span
 
     def start_guardrail_evaluation(
         self,
         guardrail_name: str,
+        guardrail_action: str,
         guardrail_description: Optional[str] = None,
-        scope: str = "agent",
+        rule_details: Optional[list[str]] = None,
         parent_span: Optional[Span] = None,
     ) -> Span:
         """Start an individual guardrail evaluation span.
@@ -110,7 +159,8 @@ class GuardrailSpanSchema:
         Args:
             guardrail_name: Name of the guardrail being evaluated
             guardrail_description: Optional description of the guardrail
-            scope: "agent", "llm", or "tool" - determines span type
+            guardrail_action: "Log", "Block", "Filter" or "Escalate" - action that was configured to be enforced ig guardrail validation fails
+            rule_details: Optional details about the guardrail rules being evaluated
             parent_span: Optional parent span. If None, uses current span.
 
         Returns:
@@ -127,43 +177,124 @@ class GuardrailSpanSchema:
         attrs = GuardrailEvaluationSpanAttributes(
             guardrail_name=guardrail_name,
             guardrail_description=guardrail_description,
+            guardrail_action=guardrail_action,
+            details=rule_details,
         )
 
         apply_attributes(span, attrs)
+        if self._upsert_started:
+            self._upsert_started(span)
         return span
 
     def end_guardrail_evaluation(
         self,
         span: Span,
-        validation_passed: bool,
         validation_result: Optional[str] = None,
         action: Optional[str] = None,
         severity_level: Optional[str] = None,
         reason: Optional[str] = None,
+        payload: Optional[Any] = None,
+        excluded_fields: Optional[Any] = None,
+        updated_data: Optional[dict[str, Any]] = None,
     ) -> None:
         """End a guardrail evaluation span with result attributes.
 
         Args:
             span: The guardrail evaluation span to end
-            validation_passed: Whether the guardrail validation passed
             validation_result: The validation result message (if failed)
             action: The action taken ("allow", "block", "log", "escalate")
-            severity_level: Severity level for log actions
-            reason: Reason for block/skip actions
+            severity_level: Severity level for log actions (for Log action)
+            reason: Reason for block/skip actions (for Block action)
+            payload: Data was validated against the guardrail rule
+            excluded_fields: List of fields to exclude from the guardrail evaluation (for Filter action)
+            updated_data: Optional updated data (contains updated input and updated output) (for Filter action)
         """
         if validation_result:
             span.set_attribute("validationResult", validation_result)
         if action:
-            span.set_attribute("guardrailAction", action)
             span.set_attribute("action", action)
         if severity_level:
             span.set_attribute("severityLevel", severity_level.title())
         if reason:
             span.set_attribute("reason", reason)
+        if excluded_fields:
+            span.set_attribute("excludedFields", to_json_string(excluded_fields))
+        if updated_data and updated_data.get("input"):
+            span.set_attribute(
+                "updatedInput", to_json_string(updated_data.get("input"))
+            )
+        if updated_data and updated_data.get("output"):
+            span.set_attribute(
+                "updatedOutput", to_json_string(updated_data.get("output"))
+            )
+        if payload:
+            formatted_payload = _format_guardrail_payload(payload)
+            if formatted_payload:
+                span.set_attribute("payload", formatted_payload)
 
         # Guardrail failure != span error
-        span.set_status(Status(StatusCode.OK))
-        span.end()
+        end_span_ok(span, self._upsert_complete)
+
+    def upsert_guardrail_evaluation(
+        self,
+        span: Span,
+        validation_result: Optional[str] = None,
+        payload: Optional[Any] = None,
+    ) -> None:
+        """Update a guardrail evaluation span with attributes and upsert without ending.
+
+        Used to update span attributes while the span is still in progress
+        (e.g., before HITL escalation). Upserts with UNSET status so the span
+        appears in traces as "in progress".
+
+        Args:
+            span: The guardrail evaluation span to update
+            validation_result: The validation result message
+            payload: Data that was validated against the guardrail rule
+        """
+        if validation_result:
+            span.set_attribute("validationResult", validation_result)
+        if payload:
+            formatted_payload = _format_guardrail_payload(payload)
+            if formatted_payload:
+                span.set_attribute("payload", formatted_payload)
+
+        # Upsert without ending (UNSET status = in progress)
+        if self._upsert_started:
+            self._upsert_started(span)
+
+    def error_guardrail_evaluation(
+        self,
+        span: Span,
+        error_message: str,
+        validation_result: Optional[str] = None,
+        action: Optional[str] = None,
+        reason: Optional[str] = None,
+        payload: Optional[Any] = None,
+    ) -> None:
+        """End a guardrail evaluation span with result attributes and error status.
+
+        Args:
+            span: The guardrail evaluation span to end
+            validation_result: The validation result message
+            action: The action taken ("allow", "block", "log", "escalate")
+            reason: Reason for block/skip actions (for Block action)
+            payload: Data was validated against the guardrail rule
+            error_message: Error message
+        """
+        if validation_result:
+            span.set_attribute("validationResult", validation_result)
+        if action:
+            span.set_attribute("action", action)
+        if reason:
+            span.set_attribute("reason", reason)
+        if payload:
+            formatted_payload = _format_guardrail_payload(payload)
+            if formatted_payload:
+                span.set_attribute("payload", formatted_payload)
+
+        error = Exception(str(error_message))
+        end_span_error(span, error, self._upsert_complete)
 
     def start_guardrail_escalation(
         self,
@@ -200,44 +331,3 @@ class GuardrailSpanSchema:
         if self._upsert_started:
             self._upsert_started(span)
         return span
-
-    def end_guardrail_escalation(
-        self,
-        span: Span,
-        review_outcome: str,
-        reviewed_by: Optional[str] = None,
-        review_reason: Optional[Any] = None,
-        reviewed_inputs: Optional[Any] = None,
-        reviewed_outputs: Optional[Any] = None,
-    ) -> None:
-        """End a guardrail escalation span with review results.
-
-        Args:
-            span: The escalation span to end
-            review_outcome: "Approved" or "Rejected"
-            reviewed_by: Who completed the review
-            review_reason: Reason for the decision
-            reviewed_inputs: Modified inputs (if any)
-            reviewed_outputs: Modified outputs (if any)
-        """
-        span.set_attribute("reviewStatus", "completed")
-        span.set_attribute("reviewOutcome", review_outcome)
-        if reviewed_by:
-            span.set_attribute("reviewedBy", reviewed_by)
-        if review_reason:
-            if isinstance(review_reason, dict):
-                span.set_attribute("reviewReason", json.dumps(review_reason))
-            else:
-                span.set_attribute("reviewReason", str(review_reason))
-        if reviewed_inputs:
-            if isinstance(reviewed_inputs, dict):
-                span.set_attribute("reviewedInputs", json.dumps(reviewed_inputs))
-            else:
-                span.set_attribute("reviewedInputs", str(reviewed_inputs))
-        if reviewed_outputs:
-            if isinstance(reviewed_outputs, dict):
-                span.set_attribute("reviewedOutputs", json.dumps(reviewed_outputs))
-            else:
-                span.set_attribute("reviewedOutputs", str(reviewed_outputs))
-
-        end_span_ok(span, self._upsert_complete)

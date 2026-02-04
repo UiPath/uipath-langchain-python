@@ -253,8 +253,8 @@ class InstrumentedRuntime:
                     agent_span, uuid.UUID(self._agent_run_id), prompts_captured=True
                 )
                 pending_tool = saved_context.get("pending_tool_name")
+                pending_tool_span = saved_context.get("pending_tool_span")
                 if pending_tool:
-                    pending_tool_span = saved_context.get("pending_tool_span")
                     pending_process_span = saved_context.get("pending_process_span")
                     self._callback.set_resume_context(
                         tool_name=pending_tool,
@@ -267,10 +267,33 @@ class InstrumentedRuntime:
                         else None,
                     )
                 pending_escalation = saved_context.get("pending_escalation_span")
-                if pending_escalation:
+                pending_guardrail_hitl_evaluation_span = saved_context.get(
+                    "pending_guardrail_hitl_evaluation_span"
+                )
+                pending_guardrail_hitl_container_span = saved_context.get(
+                    "pending_guardrail_hitl_container_span"
+                )
+                pending_llm_span = saved_context.get("pending_llm_span")
+                if (
+                    pending_escalation
+                    and pending_guardrail_hitl_evaluation_span
+                    and pending_guardrail_hitl_container_span
+                ):
                     self._callback.set_escalation_resume_context(
                         trace_id=saved_context.get("trace_id", ""),
                         escalation_span_data=dict(pending_escalation),
+                        hitl_guardrail_span_data=dict(
+                            pending_guardrail_hitl_evaluation_span
+                        ),
+                        hitl_guardrail_container_span_data=dict(
+                            pending_guardrail_hitl_container_span
+                        ),
+                        llm_span_data=dict(pending_llm_span)
+                        if pending_llm_span
+                        else None,
+                        tool_span_data=dict(pending_tool_span)
+                        if pending_tool_span
+                        else None,
                     )
                 try:
                     yield agent_span
@@ -422,24 +445,16 @@ class InstrumentedRuntime:
             agent_span: The current agent span
         """
         tool_name, tool_span, process_span = self._callback.get_pending_tool_info()
-        escalation_span, escalation_info = self._callback.get_pending_escalation_info()
-
-        # Upsert spans with UNSET status before suspend
-        # This ensures spans survive process restart with correct state
-        if tool_span:
-            success = self._span_factory.upsert_span_suspended(tool_span)
-            if not success:
-                logger.error(
-                    "Failed to upsert tool span on suspend - trace may be incomplete"
-                )
-        if process_span:
-            success = self._span_factory.upsert_span_suspended(process_span)
-            if not success:
-                logger.error(
-                    "Failed to upsert process span on suspend - trace may be incomplete"
-                )
-        if escalation_span:
-            self._span_factory.upsert_span_suspended(escalation_span)
+        escalation_span = self._callback.get_pending_escalation()
+        guardrail_hitl_evaluation_span = (
+            self._callback.get_pending_guardrail_hitl_evaluation()
+        )
+        guardrail_hitl_container_span = (
+            self._callback.get_pending_guardrail_hitl_container()
+        )
+        llm_span = self._callback.get_current_llm()
+        current_tool_span = self._callback.get_current_tool()
+        resumed_tool_span_data = self._callback.get_resumed_tool_data()
 
         if self._trace_context_storage:
             runtime_id = self._get_runtime_id()
@@ -456,6 +471,10 @@ class InstrumentedRuntime:
                     pending_process_data = self._extract_pending_span_data(process_span)
                     context["pending_process_span"] = pending_process_data
                     context["pending_process_span_id"] = pending_process_data["span_id"]
+            # In case we are in a context after a HITL, the current_tool_span is a NonRecordingSpan, but we should have resumed_tool_span_data
+            if resumed_tool_span_data:
+                context["pending_tool_span"] = resumed_tool_span_data
+                context["pending_tool_span_id"] = resumed_tool_span_data["span_id"]
 
             # Save escalation span data for resume completion
             if escalation_span:
@@ -463,7 +482,34 @@ class InstrumentedRuntime:
                     escalation_span
                 )
                 context["pending_escalation_span"] = pending_escalation_data
-                context["pending_escalation_info"] = escalation_info
+
+                if guardrail_hitl_evaluation_span:
+                    pending_guardrail_hitl_evaluation_data = (
+                        self._extract_pending_span_data(guardrail_hitl_evaluation_span)
+                    )
+                    context["pending_guardrail_hitl_evaluation_span"] = (
+                        pending_guardrail_hitl_evaluation_data
+                    )
+
+                if guardrail_hitl_container_span:
+                    pending_guardrail_hitl_container_data = (
+                        self._extract_pending_span_data(guardrail_hitl_container_span)
+                    )
+                    context["pending_guardrail_hitl_container_span"] = (
+                        pending_guardrail_hitl_container_data
+                    )
+
+                if llm_span:
+                    pending_llm_data = self._extract_pending_span_data(llm_span)
+                    context["pending_llm_span"] = pending_llm_data
+
+                if resumed_tool_span_data:
+                    context["pending_tool_span"] = resumed_tool_span_data
+                elif current_tool_span:
+                    current_tool_span_data = self._extract_pending_span_data(
+                        current_tool_span
+                    )
+                    context["pending_tool_span"] = current_tool_span_data
 
             await self._trace_context_storage.save_trace_context(runtime_id, context)
             logger.debug(
@@ -538,7 +584,7 @@ class InstrumentedRuntime:
         pending_escalation = saved_context.get("pending_escalation_span")
         if pending_escalation:
             escalation_attrs = dict(pending_escalation.get("attributes", {}))
-            escalation_attrs["reviewStatus"] = "completed"
+            escalation_attrs["reviewStatus"] = "Completed"
             escalation_attrs["reviewOutcome"] = "Approved"
             pending_escalation_data = dict(pending_escalation)
             pending_escalation_data["attributes"] = escalation_attrs
@@ -597,7 +643,9 @@ class InstrumentedRuntime:
             pending_tool_span=None,
             pending_process_span=None,
             pending_escalation_span=None,
-            pending_escalation_info=None,
+            pending_guardrail_hitl_evaluation_span=None,
+            pending_guardrail_hitl_container_span=None,
+            pending_llm_span=None,
         )
 
     def _get_runtime_id(self) -> str:

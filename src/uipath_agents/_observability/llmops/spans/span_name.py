@@ -7,6 +7,7 @@ __all__ = [
     "GUARDRAIL_VALIDATION_DETAILS_KEY",
 ]
 
+
 INNER_STATE_KEY = "inner_state"
 GUARDRAIL_VALIDATION_RESULT_KEY = "guardrail_validation_result"
 GUARDRAIL_VALIDATION_DETAILS_KEY = "guardrail_validation_details"
@@ -40,18 +41,4 @@ class SpanName:
 
     @staticmethod
     def guardrail(guardrail_name: str) -> str:
-        return f"Guardrail - {guardrail_name}"
-
-    @staticmethod
-    def guardrails_container(scope: str, stage: str) -> str:
-        """Get container span name for a guardrails phase.
-
-        Args:
-            scope: "agent", "llm", or "tool"
-            stage: "pre" or "post"
-
-        Returns:
-            Human-readable container span name
-        """
-        scope_map = {"agent": "Agent", "llm": "LLM", "tool": "Tool"}
-        return f"{scope_map.get(scope, scope.capitalize())} {stage} guardrails"
+        return f"{guardrail_name}"

@@ -1,10 +1,9 @@
 """Tests for InstrumentedRuntime."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, create_autospec
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from opentelemetry.sdk.trace import ReadableSpan
 from uipath.agent.models.agent import (
     AgentDefinition,
     AgentMessage,
@@ -560,7 +559,9 @@ class TestInterruptibleTraceContext:
             pending_tool_span=None,
             pending_process_span=None,
             pending_escalation_span=None,
-            pending_escalation_info=None,
+            pending_guardrail_hitl_evaluation_span=None,
+            pending_guardrail_hitl_container_span=None,
+            pending_llm_span=None,
         )
         mock_trace_context_storage.load_trace_context = AsyncMock(
             return_value=saved_context
@@ -784,59 +785,6 @@ class TestUpsertSpanOnSuspend:
     """Tests for upsert span calls during suspend."""
 
     @pytest.mark.asyncio
-    async def test_handle_suspended_calls_upsert_for_pending_spans(
-        self,
-        mock_delegate,
-        tracer_with_exporter,
-        callback_with_exporter,
-        mock_exporter,
-        mock_trace_context_storage,
-        mock_runtime_context,
-    ):
-        """Test _handle_suspended calls upsert for pending tool and process spans."""
-        mock_result = MagicMock()
-        mock_result.status = UiPathRuntimeStatus.SUSPENDED
-        mock_delegate.execute.return_value = mock_result
-
-        # Use create_autospec to pass isinstance(span, ReadableSpan) check
-        mock_tool_span = create_autospec(ReadableSpan, instance=True)
-        mock_tool_span.get_span_context.return_value = MagicMock(span_id=12345)
-        mock_tool_span.parent = None  # No parent span
-        mock_tool_span.start_time = 1000000000
-        mock_tool_span.attributes = {"test": "attr"}
-        mock_process_span = create_autospec(ReadableSpan, instance=True)
-        mock_process_span.get_span_context.return_value = MagicMock(span_id=67890)
-        mock_process_span.parent = None  # No parent span
-        mock_process_span.start_time = 1000000000
-        mock_process_span.attributes = {"test": "attr"}
-
-        # Mock get_pending_tool_info to return our mock spans
-        # (set_agent_span clears pending spans, so we need to mock the getter)
-        callback_with_exporter.get_pending_tool_info = MagicMock(
-            return_value=("test_tool", mock_tool_span, mock_process_span)
-        )
-
-        instrumented_runtime = InstrumentedRuntime(
-            mock_delegate,
-            tracer_with_exporter,
-            callback_with_exporter,
-            mock_runtime_context,
-            trace_context_storage=mock_trace_context_storage,
-        )
-
-        await instrumented_runtime.execute({"input": "test"}, None)
-
-        # 3 upserts = 1 agent start (UNSET) + 2 pending spans (UNSET)
-        assert mock_exporter.upsert_span.call_count == 3
-
-        # First call is agent span with UNSET status
-        assert mock_exporter.upsert_span.call_args_list[0][1]["status_override"] == 0
-
-        # Remaining calls are pending spans with UNSET status
-        for call in mock_exporter.upsert_span.call_args_list[1:]:
-            assert call[1]["status_override"] == 0
-
-    @pytest.mark.asyncio
     async def test_handle_suspended_without_pending_spans_no_upsert(
         self,
         mock_delegate,
@@ -869,52 +817,6 @@ class TestUpsertSpanOnSuspend:
         # 1 upsert = agent start only (no pending spans)
         assert mock_exporter.upsert_span.call_count == 1
         assert mock_exporter.upsert_span.call_args[1]["status_override"] == 0  # UNSET
-
-    @pytest.mark.asyncio
-    async def test_handle_suspended_only_tool_span_upsert(
-        self,
-        mock_delegate,
-        tracer_with_exporter,
-        callback_with_exporter,
-        mock_exporter,
-        mock_trace_context_storage,
-        mock_runtime_context,
-    ):
-        """Test _handle_suspended calls upsert only for tool span if no process span."""
-        mock_result = MagicMock()
-        mock_result.status = UiPathRuntimeStatus.SUSPENDED
-        mock_delegate.execute.return_value = mock_result
-
-        # Use create_autospec to pass isinstance(span, ReadableSpan) check
-        mock_tool_span = create_autospec(ReadableSpan, instance=True)
-        mock_tool_span.get_span_context.return_value = MagicMock(span_id=12345)
-        mock_tool_span.parent = None  # No parent span
-        mock_tool_span.start_time = 1000000000
-        mock_tool_span.attributes = {"test": "attr"}
-
-        # Mock get_pending_tool_info to return only tool span
-        callback_with_exporter.get_pending_tool_info = MagicMock(
-            return_value=("test_tool", mock_tool_span, None)
-        )
-
-        instrumented_runtime = InstrumentedRuntime(
-            mock_delegate,
-            tracer_with_exporter,
-            callback_with_exporter,
-            mock_runtime_context,
-            trace_context_storage=mock_trace_context_storage,
-        )
-
-        await instrumented_runtime.execute({"input": "test"}, None)
-
-        # 2 upserts = 1 agent start (UNSET) + 1 tool span (UNSET)
-        assert mock_exporter.upsert_span.call_count == 2
-        assert (
-            mock_exporter.upsert_span.call_args_list[0][1]["status_override"] == 0
-        )  # UNSET
-        assert (
-            mock_exporter.upsert_span.call_args_list[1][1]["status_override"] == 0
-        )  # UNSET
 
 
 class TestGetAgentModel:

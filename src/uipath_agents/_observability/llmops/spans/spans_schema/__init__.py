@@ -14,7 +14,7 @@ from .base import (
     get_parent_context,
     reference_id_context,
 )
-from .guardrails import GuardrailSpanSchema
+from .guardrails import GuardrailSpanSchema, to_json_string
 from .llm import LlmSpanSchema
 from .tool import ToolSpanSchema
 
@@ -28,6 +28,7 @@ __all__ = [
     "create_span",
     "end_span_ok",
     "end_span_error",
+    "to_json_string",
     # Span schemas
     "AgentSpanSchema",
     "LlmSpanSchema",

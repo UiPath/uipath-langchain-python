@@ -135,11 +135,13 @@ def apply_attributes(span: Span, attrs: BaseSpanAttributes) -> None:
         span.set_attribute("referenceId", ref_id)
 
 
-def get_parent_context(parent_span: Optional[Span] = None) -> Optional[Any]:
+def get_parent_context(
+    parent_span: Optional[Span] = None,
+) -> Optional[Any]:
     """Get parent context for span creation.
 
     Args:
-        parent_span: Optional parent span. If None, uses current span.
+        parent_span: Optional parent span object. If None, uses current span.
 
     Returns:
         OpenTelemetry context for the parent span
@@ -159,13 +161,15 @@ def create_span(
     Args:
         tracer: The OpenTelemetry tracer to use
         name: Name of the span
-        parent_span: Optional parent span. If None, uses current span.
+        parent_span: Optional parent span object. If None, uses current span.
         kind: Span kind (default INTERNAL)
 
     Returns:
         The created Span
     """
-    context = get_parent_context(parent_span)
+    context = get_parent_context(
+        parent_span=parent_span,
+    )
     return tracer.start_span(name, kind=kind, context=context)
 
 

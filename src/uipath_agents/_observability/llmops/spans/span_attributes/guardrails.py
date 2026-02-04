@@ -19,7 +19,7 @@ class GuardrailEvaluationSpanAttributes(BaseSpanAttributes):
     guardrail_action: Optional[str] = Field(None, alias="guardrailAction")
 
     # Additional evaluation fields
-    details: Optional[Dict[str, Any]] = Field(None, alias="details")
+    details: Optional[list[str]] = Field(None, alias="details")
     action: Optional[str] = Field(None, alias="action")
     payload: Optional[Dict[str, Any]] = Field(None, alias="payload")
 

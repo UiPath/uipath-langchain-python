@@ -1,13 +1,15 @@
 """LLM span instrumentor for LLMOps instrumentation."""
 
-import json
 import logging
 from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID
 
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
+from opentelemetry.trace import NonRecordingSpan
+from uipath.core.guardrails import GuardrailScope
 from uipath.core.serialization import serialize_json
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ..span_hierarchy import SpanHierarchyManager
 from ..spans import SpanKeys
@@ -65,20 +67,20 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
         If LLM span was created early by llm_pre guardrails, reuses it.
         """
         # Close agent_pre container before LLM starts
-        self._close_container("agent", "pre")
+        self._close_container(GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION)
 
         model_name = extract_model_name(serialized)
         max_tokens, temperature = extract_settings(serialized)
 
         # Check if llmCall was created early by guardrails
+        # Only reuse if the flag indicates it was created by guardrails
         if self._state.current_llm_span and self._state.llm_span_from_guardrail:
             llm_span = self._state.current_llm_span
-            llm_span.set_attribute("model", model_name)
-            settings = {"maxTokens": max_tokens, "temperature": temperature}
-            llm_span.set_attribute("settings", json.dumps(settings))
             if input_text:
                 llm_span.set_attribute("input", input_text)
+            # Clear the flag after reuse - span was consumed by on_llm_start
             self._state.llm_span_from_guardrail = False
+            # Keep current_llm_span set for llm_post guardrails to use
         else:
             parent = self._state.get_span_or_root(parent_run_id)
             llm_span = self._span_factory.start_llm_call(
@@ -88,12 +90,13 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
                 input=input_text,
                 parent_span=parent,
             )
+            # Set current_llm_span for HITL to access if needed
+            self._state.current_llm_span = llm_span
 
-        self._state.current_llm_span = llm_span
         self._spans[run_id] = llm_span
 
         # Close llm_pre container before model span
-        self._close_container("llm", "pre")
+        self._close_container(GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION)
 
         model_span = self._span_factory.start_model_run(
             model_name,
@@ -187,9 +190,22 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
 
             llm_span = self._spans.pop(run_id, None)
             if llm_span:
-                self._span_factory.end_span_ok(llm_span)
+                # Handle NonRecordingSpan (resumed LLM span) - use upsert_span_complete_by_data
+                if isinstance(llm_span, NonRecordingSpan):
+                    llm_span_data = self._state.resumed_llm_span_data
+                    trace_id = (
+                        self._state.resumed_escalation_trace_id
+                        or self._state.resumed_trace_id
+                    )
+                    if llm_span_data and trace_id:
+                        self._span_factory.upsert_span_complete_by_data(
+                            trace_id=trace_id,
+                            span_data=llm_span_data,
+                        )
+                else:
+                    self._span_factory.end_span_ok(llm_span)
 
-            self._close_container("llm", "post")
+            self._close_container(GuardrailScope.LLM, ExecutionStage.POST_EXECUTION)
 
         except Exception:
             logger.exception("Error in on_llm_end callback")
@@ -216,7 +232,7 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
             if llm_span:
                 self._span_factory.end_span_error(llm_span, exc)
 
-            self._close_container("llm", "post")
+            self._close_container(GuardrailScope.LLM, ExecutionStage.POST_EXECUTION)
 
         except Exception:
             logger.exception("Error in on_llm_error callback")

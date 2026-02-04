@@ -15,7 +15,7 @@ import langchain_core.runnables.config
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import LLMResult
-from opentelemetry.trace import Span
+from opentelemetry.trace import NonRecordingSpan, Span, SpanContext, TraceFlags
 
 from .instrumentors import (
     GuardrailSpanInstrumentor,
@@ -119,10 +119,48 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
         self,
         trace_id: str,
         escalation_span_data: Dict[str, Any],
+        hitl_guardrail_span_data: Dict[str, Any],
+        hitl_guardrail_container_span_data: Dict[str, Any],
+        llm_span_data: Optional[Dict[str, Any]] = None,
+        tool_span_data: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Set escalation resume context for guardrail HITL resume."""
         self._state.resumed_escalation_trace_id = trace_id
         self._state.resumed_escalation_span_data = escalation_span_data
+        self._state.resumed_hitl_guardrail_span_data = hitl_guardrail_span_data
+        self._state.resumed_hitl_guardrail_container_span_data = (
+            hitl_guardrail_container_span_data
+        )
+
+        if llm_span_data:
+            restored_span_context = SpanContext(
+                trace_id=int(trace_id, 16),
+                span_id=int(llm_span_data["span_id"], 16),
+                is_remote=True,
+                trace_flags=TraceFlags(0x01),  # Sampled
+            )
+
+            # Create NonRecordingSpan to represent the restored agent span
+            # This doesn't create a new span - it restores the original context
+            self._state.current_llm_span = NonRecordingSpan(restored_span_context)
+            self._state.resumed_llm_span_data = llm_span_data
+            # Set flag so on_llm_start reuses this span instead of creating new one
+            self._state.llm_span_from_guardrail = True
+        if tool_span_data:
+            restored_span_context = SpanContext(
+                trace_id=int(trace_id, 16),
+                span_id=int(tool_span_data["span_id"], 16),
+                is_remote=True,
+                trace_flags=TraceFlags(0x01),  # Sampled
+            )
+
+            # Create NonRecordingSpan to represent the restored agent span
+            # This doesn't create a new span - it restores the original context
+            self._state.current_tool_span = NonRecordingSpan(restored_span_context)
+            self._state.resumed_tool_span_data = tool_span_data
+            self._state.resumed_trace_id = trace_id
+            # Set flag so on_tool_start reuses this span instead of creating new one
+            self._state.tool_span_from_guardrail = True
 
     def get_pending_tool_info(
         self,
@@ -133,27 +171,35 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
             self._state.pending_process_span,
         )
 
-    def get_pending_escalation_info(
+    def get_pending_escalation(
         self,
-    ) -> Tuple[Optional[Span], Optional[Dict[str, str]]]:
-        return self._state.pending_escalation_span, self._state.pending_escalation_info
+    ) -> Optional[Span]:
+        return self._state.pending_escalation_span
 
-    def complete_escalation(
+    def get_pending_guardrail_hitl_evaluation(
         self,
-        review_outcome: str,
-        reviewed_by: Optional[str] = None,
-        review_reason: Optional[Any] = None,
-    ) -> None:
-        """Complete the pending escalation span with review results."""
-        if self._state.pending_escalation_span:
-            self._state.span_factory.end_guardrail_escalation(
-                self._state.pending_escalation_span,
-                review_outcome=review_outcome,
-                reviewed_by=reviewed_by,
-                review_reason=review_reason,
-            )
-            self._state.pending_escalation_span = None
-            self._state.pending_escalation_info = None
+    ) -> Optional[Span]:
+        return self._state.pending_hitl_guardrail_span
+
+    def get_pending_guardrail_hitl_container(
+        self,
+    ) -> Optional[Span]:
+        return self._state.pending_hitl_guardrail_container_span
+
+    def get_current_llm(
+        self,
+    ) -> Optional[Span]:
+        return self._state.current_llm_span
+
+    def get_current_tool(
+        self,
+    ) -> Optional[Span]:
+        return self._state.current_tool_span
+
+    def get_resumed_tool_data(
+        self,
+    ) -> Optional[Any]:
+        return self._state.resumed_tool_span_data
 
     def resumed_spans_completed(self) -> bool:
         """Check if resumed tool spans were already completed."""
@@ -377,24 +423,8 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
         self._state.resumed_process_span_data = None
 
         # End guardrail spans
-        for span in self._state.guardrail_spans.values():
-            try:
-                span.end()
-            except Exception as e:
-                logger.debug("Failed to end guardrail span during cleanup: %s", e)
-        self._state.guardrail_spans.clear()
-        self._state.guardrail_info.clear()
         self._state.guardrail_metadata.clear()
-
-        # End pending guardrail action spans
-        for span, _ in self._state.pending_guardrail_actions.values():
-            try:
-                span.end()
-            except Exception as e:
-                logger.debug(
-                    "Failed to end guardrail action span during cleanup: %s", e
-                )
-        self._state.pending_guardrail_actions.clear()
+        self._state.upcoming_guardrail_actions_info.clear()
 
         # End guardrail containers
         for span in self._state.guardrail_containers.values():
@@ -404,31 +434,21 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
                 logger.debug("Failed to end guardrail container during cleanup: %s", e)
         self._state.guardrail_containers.clear()
 
-        # End escalate action spans
-        for span in self._state.escalate_action_run_ids.values():
-            try:
-                span.end()
-            except Exception as e:
-                logger.debug("Failed to end escalate action span during cleanup: %s", e)
-        self._state.escalate_action_run_ids.clear()
-
         # End orphaned placeholder LLM span
-        if self._state.llm_span_from_guardrail and self._state.current_llm_span:
+        if self._state.current_llm_span:
             try:
                 self._state.current_llm_span.end()
             except Exception as e:
                 logger.debug("Failed to end placeholder LLM span during cleanup: %s", e)
-            self._state.llm_span_from_guardrail = False
 
         # End orphaned placeholder tool span
-        if self._state.tool_span_from_guardrail and self._state.current_tool_span:
+        if self._state.current_tool_span:
             try:
                 self._state.current_tool_span.end()
             except Exception as e:
                 logger.debug(
                     "Failed to end placeholder tool span during cleanup: %s", e
                 )
-            self._state.tool_span_from_guardrail = False
 
         self._state.current_llm_span = None
         self._state.current_tool_span = None

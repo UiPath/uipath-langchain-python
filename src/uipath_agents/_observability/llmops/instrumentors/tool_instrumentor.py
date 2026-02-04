@@ -5,7 +5,9 @@ import logging
 from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID
 
+from uipath.core.guardrails import GuardrailScope
 from uipath.eval.mocks.mockable import MOCKED_ANNOTATION_KEY
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ..span_hierarchy import SpanHierarchyManager
 from ..spans import SpanKeys
@@ -83,9 +85,9 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             tool_type_value = get_tool_type_value(tool_type)
 
             # Check if tool span was created early by tool_pre guardrails
+            # Only reuse if the flag indicates it was created by guardrails
             if self._state.current_tool_span and self._state.tool_span_from_guardrail:
                 span = self._state.current_tool_span
-                span.update_name(f"Tool call - {tool_name}")
                 span.set_attribute("toolName", tool_name)
                 span.set_attribute("tool.name", tool_name)
                 span.set_attribute("toolType", tool_type_value)
@@ -94,8 +96,9 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 if arguments:
                     span.set_attribute("arguments", json.dumps(arguments))
                 self._spans[run_id] = span
+                # Clear the flag after reuse - span was consumed by on_tool_start
                 self._state.tool_span_from_guardrail = False
-                self._close_container("tool", "pre")
+                self._close_container(GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION)
             else:
                 parent = self._state.get_span_or_root(parent_run_id)
                 span = self._span_factory.start_tool_call(
@@ -107,6 +110,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 )
                 span.set_attribute("tool.name", tool_name)
                 self._spans[run_id] = span
+                # Set current_tool_span for HITL to access if needed
                 self._state.current_tool_span = span
 
             SpanHierarchyManager.push(run_id, span)
@@ -199,9 +203,6 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 if span == self._state.pending_tool_span:
                     self._state.pending_tool_span = None
                     self._state.pending_tool_name = None
-                if span == self._state.current_tool_span:
-                    # Mark tool as ended, keep for post guardrails
-                    self._state.tool_ended_pending_post = True
 
         except Exception:
             logger.exception("Error in on_tool_end callback")
@@ -249,8 +250,6 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 self._state.resumed_tool_span_data.get("name", "unknown"),
             )
 
-        self._state.resumed_trace_id = None
-        self._state.resumed_tool_span_data = None
         self._state.resumed_process_span_data = None
 
     def _is_graph_interrupt(self, error: BaseException) -> bool:

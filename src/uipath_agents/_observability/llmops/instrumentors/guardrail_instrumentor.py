@@ -5,9 +5,11 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
-from opentelemetry.trace import Span
-from uipath.core.guardrails import UniversalRule
+from opentelemetry.trace import NonRecordingSpan, Span, SpanContext, TraceFlags
+from uipath.core.guardrails import GuardrailScope, UniversalRule
 from uipath.platform.guardrails import BuiltInValidatorGuardrail, DeterministicGuardrail
+from uipath.tracing import SpanStatus
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ...event_emitter import GuardrailEvent, track_event
 from ..span_hierarchy import SpanHierarchyManager
@@ -16,14 +18,12 @@ from ..spans.span_name import (
     GUARDRAIL_VALIDATION_RESULT_KEY,
     INNER_STATE_KEY,
 )
+from ..spans.spans_schema import to_json_string
 from .base import BaseSpanInstrumentor, InstrumentationState
 from .constants import (
     ACTION_SUFFIX_TO_NAME,
-    ACTION_TYPE_TO_ACTION,
     GUARDRAIL_NODE_PATTERN,
     GuardrailAction,
-    GuardrailScope,
-    GuardrailStage,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,33 +46,81 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
 
     # --- Container Management ---
 
-    def _get_or_create_container(
-        self, scope: str, stage: str, parent_span: Optional[Span]
+    def _get_or_create_guardrails_group_span(
+        self,
+        scope: str,
+        stage: str,
+        parent_span: Optional[Span],
     ) -> Span:
-        """Get or create a guardrail container span."""
+        """Get or create a guardrail container span.
+
+        If there's a resumed HITL container span data available, restore it as a
+        NonRecordingSpan so that children spans can be created under it.
+        """
         key = (scope, stage)
         if key not in self._state.guardrail_containers:
-            container = self._span_factory.start_guardrails_container(
-                scope, stage, parent_span
-            )
-            self._state.guardrail_containers[key] = container
+            # Check if we have resumed container span data to restore
+            container_data = self._state.resumed_hitl_guardrail_container_span_data
+            if container_data and self._state.resumed_escalation_trace_id:
+                restored_span_context = SpanContext(
+                    trace_id=int(self._state.resumed_escalation_trace_id, 16),
+                    span_id=int(container_data["span_id"], 16),
+                    is_remote=True,
+                    trace_flags=TraceFlags(0x01),  # Sampled
+                )
+                self._state.guardrail_containers[key] = NonRecordingSpan(
+                    restored_span_context
+                )
+            else:
+                self._state.guardrail_containers[key] = (
+                    self._span_factory.start_guardrails_container(
+                        scope, stage, parent_span
+                    )
+                )
         return self._state.guardrail_containers[key]
 
     def close_container(self, scope: str, stage: str) -> None:
         """Close a guardrail container span."""
         key = (scope, stage)
+        container_closed = False
         if key in self._state.guardrail_containers:
             container = self._state.guardrail_containers.pop(key)
-            self._span_factory.end_span_ok(container)
+            # Handle NonRecordingSpan (resumed container) - use upsert_span_complete_by_data
+            if isinstance(container, NonRecordingSpan):
+                container_data = self._state.resumed_hitl_guardrail_container_span_data
+                trace_id = self._state.resumed_escalation_trace_id
+                if container_data and trace_id:
+                    self._span_factory.upsert_span_complete_by_data(
+                        trace_id=trace_id,
+                        span_data=container_data,
+                    )
+            else:
+                self._span_factory.end_span_ok(container)
+            self._state.resumed_hitl_guardrail_container_span_data = None
+            self._state.pending_hitl_guardrail_container_span = None
+            container_closed = True
+
+        # Only clear LLM/tool spans if we actually closed a container
+        # (prevents premature clearing when on_llm_end/on_tool_end calls this
+        # before POST guardrails have run)
+        if not container_closed:
+            return
+
+        # Clear LLM span after post guardrails complete
+        if (
+            scope == GuardrailScope.LLM
+            and stage == ExecutionStage.POST_EXECUTION
+            and self._state.current_llm_span is not None
+        ):
+            self._state.current_llm_span = None
 
         # Clear tool span after post guardrails complete
         if (
             scope == GuardrailScope.TOOL
-            and stage == GuardrailStage.POST
-            and self._state.tool_ended_pending_post
+            and stage == ExecutionStage.POST_EXECUTION
+            and self._state.current_tool_span is not None
         ):
             self._state.current_tool_span = None
-            self._state.tool_ended_pending_post = False
 
     def cleanup_containers(self) -> None:
         """Close all remaining open guardrail container spans."""
@@ -84,19 +132,33 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
         self, current_scope: str, current_stage: str
     ) -> None:
         """Close containers from previous phases when transitioning."""
-        S, T = GuardrailScope, GuardrailStage
-        if current_scope == S.LLM and current_stage == T.PRE:
-            self.close_container(S.AGENT, T.PRE)
-            self.close_container(S.TOOL, T.POST)
-        elif current_scope == S.LLM and current_stage == T.POST:
-            self.close_container(S.LLM, T.PRE)
-        elif current_scope == S.TOOL and current_stage == T.PRE:
-            self.close_container(S.LLM, T.POST)
-        elif current_scope == S.TOOL and current_stage == T.POST:
-            self.close_container(S.TOOL, T.PRE)
-        elif current_scope == S.AGENT and current_stage == T.POST:
-            self.close_container(S.LLM, T.POST)
-            self.close_container(S.TOOL, T.POST)
+        if (
+            current_scope == GuardrailScope.LLM
+            and current_stage == ExecutionStage.PRE_EXECUTION
+        ):
+            self.close_container(GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION)
+            self.close_container(GuardrailScope.TOOL, ExecutionStage.POST_EXECUTION)
+        elif (
+            current_scope == GuardrailScope.LLM
+            and current_stage == ExecutionStage.POST_EXECUTION
+        ):
+            self.close_container(GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION)
+        elif (
+            current_scope == GuardrailScope.TOOL
+            and current_stage == ExecutionStage.PRE_EXECUTION
+        ):
+            self.close_container(GuardrailScope.LLM, ExecutionStage.POST_EXECUTION)
+        elif (
+            current_scope == GuardrailScope.TOOL
+            and current_stage == ExecutionStage.POST_EXECUTION
+        ):
+            self.close_container(GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION)
+        elif (
+            current_scope == GuardrailScope.AGENT
+            and current_stage == ExecutionStage.POST_EXECUTION
+        ):
+            self.close_container(GuardrailScope.LLM, ExecutionStage.POST_EXECUTION)
+            self.close_container(GuardrailScope.TOOL, ExecutionStage.POST_EXECUTION)
 
     # --- Node Parsing ---
 
@@ -120,95 +182,176 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
 
     # --- Action Node Handling ---
 
-    def _check_and_handle_action_node(
+    def handle_action_node(
         self,
-        node_name: str,
         run_id: UUID,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """Check if node is an action node and end the pending guardrail span."""
-        if not metadata or "action_type" not in metadata:
-            return False
+        metadata: Optional[Dict[str, Any]],
+        error_str: Optional[str] = None,
+    ) -> None:
+        if metadata is None:
+            return
+        action = metadata.get("action_type")
+        self._track_guardrail_event(action, metadata)
 
-        action = ACTION_TYPE_TO_ACTION.get(metadata["action_type"])
-        if action is None:
-            return False
+        node_name = metadata.get("langgraph_node", "")
+        if not node_name:
+            return
 
         # Extract evaluation node name by removing the action suffix
+        eval_node_name = self._get_guardrail_eval_node_name(node_name)
+
+        # Resume scenario: approved HITL task
+        if (
+            eval_node_name not in self._state.upcoming_guardrail_actions_info
+            and error_str is None
+        ):
+            if action == GuardrailAction.ESCALATE:
+                trace_id = self._state.resumed_escalation_trace_id
+                eval_span_data = self._state.resumed_hitl_guardrail_span_data
+
+                # Complete Review task span
+                self._complete_resumed_escalation_from_outputs(metadata)
+
+                # Complete guardrail eval span
+                if trace_id and eval_span_data:
+                    self._span_factory.upsert_span_complete_by_data(
+                        trace_id=trace_id,
+                        span_data=eval_span_data,
+                    )
+            return
+
+        # Normal flow: complete the pending guardrail span
+        severity_level = metadata.get("severity_level")
+        reason = metadata.get("reason")
+        excluded_fields = metadata.get("excluded_fields")
+        updated_data = metadata.get("updated_data")
+
+        if action == GuardrailAction.BLOCK or action == GuardrailAction.ESCALATE:
+            error_message = None
+
+            if action == GuardrailAction.BLOCK:
+                eval_span, eval_run_id = (
+                    self._state.upcoming_guardrail_actions_info.pop(eval_node_name)
+                )
+                # Remove mapping for action node run id
+                SpanHierarchyManager.pop(run_id)
+                # Remove mapping for eval node run id
+                SpanHierarchyManager.pop(eval_run_id)
+
+                # End guardrail span
+                if eval_span and error_str:
+                    self._span_factory.error_guardrail_evaluation(
+                        eval_span, action=action, reason=reason, error_message=error_str
+                    )
+            elif action == GuardrailAction.ESCALATE:
+                # Complete Review task span
+                self._complete_resumed_escalation_from_outputs(metadata, error_str)
+
+                # Complete guardrail eval span
+                eval_span_data = self._state.resumed_hitl_guardrail_span_data
+                trace_id = self._state.resumed_escalation_trace_id
+                if trace_id and eval_span_data:
+                    self._span_factory.upsert_span_complete_by_data(
+                        trace_id=trace_id,
+                        span_data=eval_span_data,
+                        status=SpanStatus.ERROR,
+                    )
+
+            # End guardrail group span
+            scope = metadata.get("scope")
+            execution_stage = metadata.get("execution_stage")
+            error = Exception(str(error_str))
+
+            if scope and execution_stage:
+                container_key = (scope, execution_stage)
+                if container_key in self._state.guardrail_containers:
+                    guardrail_group_span = self._state.guardrail_containers.pop(
+                        container_key
+                    )
+                    if isinstance(guardrail_group_span, NonRecordingSpan):
+                        container_data = (
+                            self._state.resumed_hitl_guardrail_container_span_data
+                        )
+                        trace_id = self._state.resumed_escalation_trace_id
+                        if container_data and trace_id:
+                            container_data["attributes"]["error"] = str(error_str)
+                            self._span_factory.upsert_span_complete_by_data(
+                                trace_id=trace_id,
+                                span_data=container_data,
+                                status=SpanStatus.ERROR,
+                            )
+                    else:
+                        self._span_factory.end_span_error(guardrail_group_span, error)
+
+            # End LLM call span
+            if scope == GuardrailScope.LLM:
+                if isinstance(self._state.current_llm_span, NonRecordingSpan):
+                    llm_span_data = self._state.resumed_llm_span_data
+                    trace_id = self._state.resumed_escalation_trace_id
+                    if llm_span_data and trace_id:
+                        llm_span_data["attributes"]["error"] = str(error_str)
+                        self._span_factory.upsert_span_complete_by_data(
+                            trace_id=trace_id,
+                            span_data=llm_span_data,
+                            status=SpanStatus.ERROR,
+                        )
+                elif self._state.current_llm_span:
+                    self._span_factory.end_span_error(
+                        self._state.current_llm_span, error
+                    )
+
+                self._state.current_llm_span = None
+                return
+
+            # End Tool call span
+            if scope == GuardrailScope.TOOL:
+                # Use upsert_span_complete_by_data for resumed spans because they are NonRecordingSpan that can't record attributes
+                if self._state.resumed_tool_span_data and self._state.resumed_trace_id:
+                    # Add error attributes to the span data
+                    self._state.resumed_tool_span_data["attributes"]["error"] = (
+                        error_message
+                    )
+                    self._span_factory.upsert_span_complete_by_data(
+                        trace_id=self._state.resumed_trace_id,
+                        span_data=self._state.resumed_tool_span_data,
+                        status=SpanStatus.ERROR,
+                    )
+                elif self._state.current_tool_span:
+                    self._span_factory.end_span_error(
+                        self._state.current_tool_span, error
+                    )
+                    self._state.current_tool_span = None
+
+                    # TODO: make sure we mark the agent root as error too
+                return
+
+        else:
+            if eval_node_name in self._state.upcoming_guardrail_actions_info:
+                eval_span, eval_run_id = (
+                    self._state.upcoming_guardrail_actions_info.pop(eval_node_name)
+                )
+                # Remove mapping for action node run id
+                SpanHierarchyManager.pop(run_id)
+                # Remove mapping for eval node run id
+                SpanHierarchyManager.pop(eval_run_id)
+                if eval_span:
+                    self._span_factory.end_guardrail_evaluation(
+                        eval_span,
+                        action=action,
+                        severity_level=severity_level,
+                        reason=reason,
+                        excluded_fields=excluded_fields,
+                        updated_data=updated_data,
+                    )
+        return
+
+    def _get_guardrail_eval_node_name(self, node_name: str) -> str:
         eval_node_name = node_name
         for suffix in ACTION_SUFFIX_TO_NAME:
             if node_name.endswith(suffix):
                 eval_node_name = node_name[: -len(suffix)]
                 break
-
-        # Resume scenario: action node but no pending guardrail
-        if eval_node_name not in self._state.pending_guardrail_actions:
-            if (
-                action == GuardrailAction.ESCALATE
-                and self._state.resumed_escalation_trace_id
-                and self._state.resumed_escalation_span_data
-            ):
-                self._state.escalate_action_resume_data[run_id] = {
-                    "trace_id": self._state.resumed_escalation_trace_id,
-                    "span_data": self._state.resumed_escalation_span_data,
-                }
-                self._state.resumed_escalation_trace_id = None
-                self._state.resumed_escalation_span_data = None
-            return True
-
-        # Normal flow: complete the pending guardrail span
-        span, validation_details = self._state.pending_guardrail_actions.pop(
-            eval_node_name
-        )
-
-        severity_level = metadata.get("severity_level") if metadata else None
-        reason = metadata.get("reason") if metadata else None
-
-        self._span_factory.end_guardrail_evaluation(
-            span,
-            validation_passed=False,
-            validation_result=validation_details,
-            action=action,
-            severity_level=severity_level,
-            reason=reason,
-        )
-
-        # Create "Review task" child span for HITL escalation
-        if action == GuardrailAction.ESCALATE:
-            scope, _ = self._extract_scope_stage(eval_node_name)
-            guardrail_name = (
-                eval_node_name.split("_execution_")[-1]
-                if "_execution_" in eval_node_name
-                else eval_node_name
-            )
-            escalation_span = self._span_factory.start_guardrail_escalation(
-                guardrail_name=guardrail_name,
-                scope=scope or "agent",
-                parent_span=span,
-            )
-            self._state.pending_escalation_span = escalation_span
-            self._state.pending_escalation_info = {
-                "guardrail_name": guardrail_name,
-                "scope": scope or "agent",
-            }
-            self._state.escalate_action_run_ids[run_id] = escalation_span
-
-        # If tool_pre guardrail blocks, end the placeholder tool span
-        if (
-            action == GuardrailAction.BLOCK
-            and self._state.tool_span_from_guardrail
-            and "tool_pre" in eval_node_name
-        ):
-            self.close_container(GuardrailScope.TOOL, GuardrailStage.PRE)
-            if self._state.current_tool_span:
-                self._state.current_tool_span.set_attribute(
-                    "output", "Blocked by guardrail"
-                )
-                self._state.current_tool_span.end()
-                self._state.current_tool_span = None
-            self._state.tool_span_from_guardrail = False
-
-        return True
+        return eval_node_name
 
     # --- Telemetry ---
 
@@ -285,7 +428,7 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
 
         return props
 
-    def _extract_rule_details(self, rules: List[Any]) -> List[Dict[str, str]]:
+    def _extract_rule_details(self, rules: list[Any]) -> list[Dict[str, str]]:
         """Extract rule details for telemetry."""
         rule_details = []
         for rule in rules:
@@ -345,6 +488,31 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
             return "RuleDidNotMeet"
         return reason
 
+    def _get_guardrail_validation_result(
+        self, source: dict[str, Any]
+    ) -> tuple[Optional[bool], Optional[str]]:
+        validation_result: Optional[bool] = None
+        validation_details: Optional[str] = None
+        if isinstance(source, dict) and INNER_STATE_KEY in source:
+            validation_result = source[INNER_STATE_KEY].get(
+                GUARDRAIL_VALIDATION_RESULT_KEY
+            )
+            validation_details = source[INNER_STATE_KEY].get(
+                GUARDRAIL_VALIDATION_DETAILS_KEY
+            )
+        elif (
+            hasattr(source, "update")
+            and isinstance(source.update, dict)
+            and INNER_STATE_KEY in source.update
+        ):
+            validation_result = source.update[INNER_STATE_KEY].get(
+                GUARDRAIL_VALIDATION_RESULT_KEY
+            )
+            validation_details = source.update[INNER_STATE_KEY].get(
+                GUARDRAIL_VALIDATION_DETAILS_KEY
+            )
+        return validation_result, validation_details
+
     # --- Chain Event Handlers ---
 
     def on_chain_start(
@@ -360,61 +528,139 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
     ) -> None:
         """Handle chain start event (for guardrail nodes)."""
         try:
-            if not metadata:
+            if not metadata or metadata.get("guardrail") is None:
                 return
 
-            # Store guardrail metadata for telemetry
-            if metadata.get("guardrail") is not None:
-                self._state.guardrail_metadata[run_id] = metadata
+            self._state.guardrail_metadata[run_id] = metadata
 
             node_name = metadata.get("langgraph_node", "")
             if not node_name:
                 return
 
-            # Check if this is an action node
-            if self._check_and_handle_action_node(node_name, run_id, metadata):
+            scope = metadata.get("scope")
+            execution_stage = metadata.get("execution_stage")
+            guardrail = metadata.get("guardrail")
+            if not guardrail:
                 return
-
-            guardrail_info = self._parse_guardrail_node(node_name)
-            if not guardrail_info:
-                return
-
-            scope, stage, guardrail_name = guardrail_info
-            self._close_previous_phase_containers(scope, stage)
+            guardrail_name = guardrail.name
+            node_type = metadata.get("node_type")
 
             # Determine parent span based on scope
+            parent: Optional[Span] = None
             if scope == GuardrailScope.LLM:
-                if stage == GuardrailStage.PRE:
-                    if not self._state.llm_span_from_guardrail:
-                        self._state.current_llm_span = (
-                            self._span_factory.start_llm_call(
-                                max_tokens=None,
-                                temperature=None,
-                                parent_span=self._agent_span,
-                            )
-                        )
-                        self._state.llm_span_from_guardrail = True
+                if (
+                    execution_stage == ExecutionStage.PRE_EXECUTION
+                    and self._state.current_llm_span is None
+                ):
+                    self._state.current_llm_span = self._span_factory.start_llm_call(
+                        parent_span=self._agent_span,
+                    )
+                    self._state.llm_span_from_guardrail = True
                 parent = self._state.current_llm_span or self._agent_span
             elif scope == GuardrailScope.TOOL:
-                if stage == GuardrailStage.PRE and not self._state.current_tool_span:
+                if (
+                    execution_stage == ExecutionStage.PRE_EXECUTION
+                    and self._state.current_tool_span is None
+                ):
+                    tool_name = metadata.get("tool_name") or "unknown"
                     self._state.current_tool_span = self._span_factory.start_tool_call(
-                        tool_name="Tool call",
+                        tool_name=tool_name,
                         parent_span=self._agent_span,
                     )
                     self._state.tool_span_from_guardrail = True
-                parent = self._state.current_tool_span or self._agent_span
+                # Use existing tool span as parent for PRE_EXECUTION
+                if execution_stage == ExecutionStage.PRE_EXECUTION:
+                    parent = self._state.current_tool_span
+                # For POST execution after resume, current_tool_span will be None, and we have to recreate the context based on the span id and trace id
+                elif execution_stage == ExecutionStage.POST_EXECUTION:
+                    resumed_data = self._state.resumed_tool_span_data
+                    trace_id = self._state.resumed_trace_id
+                    if resumed_data and trace_id:
+                        parent_span_id = resumed_data.get("span_id")
+                        if parent_span_id:
+                            span_context = SpanContext(
+                                trace_id=int(trace_id, 16),
+                                span_id=int(parent_span_id, 16),
+                                is_remote=True,
+                                trace_flags=TraceFlags(0x01),  # Sampled
+                            )
+                            parent = NonRecordingSpan(span_context)
+                    # Fallback to current tool span for non-resume POST_EXECUTION
+                    if parent is None and self._state.current_tool_span is not None:
+                        parent = self._state.current_tool_span
             else:
                 parent = self._state.get_span_or_root(parent_run_id)
 
-            container = self._get_or_create_container(scope, stage, parent)
-            eval_span = self._span_factory.start_guardrail_evaluation(
-                guardrail_name=guardrail_name,
-                scope=scope,
-                parent_span=container,
-            )
-            self._state.guardrail_spans[run_id] = eval_span
-            self._state.guardrail_info[run_id] = (scope, stage, guardrail_name)
-            SpanHierarchyManager.push(run_id, eval_span)
+            if node_type == "guardrail_evaluation":
+                if scope and execution_stage:
+                    self._close_previous_phase_containers(scope, execution_stage)
+
+                    guardrails_group_span = self._get_or_create_guardrails_group_span(
+                        scope, execution_stage, parent
+                    )
+                    rule_descriptions: list[str] = []
+                    if isinstance(guardrail, DeterministicGuardrail):
+                        rule_descriptions = [
+                            rule.rule_description
+                            for rule in guardrail.rules
+                            if hasattr(rule, "rule_description")
+                            and rule.rule_description
+                        ]
+                    eval_span = self._span_factory.start_guardrail_evaluation(
+                        guardrail_name=guardrail_name,
+                        guardrail_description=guardrail.description,
+                        guardrail_action=metadata.get("action_type") or "unknown",
+                        rule_details=rule_descriptions,
+                        parent_span=guardrails_group_span,
+                    )
+                    SpanHierarchyManager.push(run_id, eval_span)
+            #  Checking if self._state.upcoming_guardrail_actions_info is not None makes this logic to not apply for resumed nodes
+            elif node_type == "guardrail_action":
+                action = metadata.get("action_type")
+
+                # On resume escalation task
+                if (
+                    action == GuardrailAction.ESCALATE
+                    and self._state.resumed_hitl_guardrail_container_span_data
+                    and scope
+                    and execution_stage
+                ):
+                    self._get_or_create_guardrails_group_span(
+                        scope, execution_stage, parent
+                    )
+
+                eval_node_name = self._get_guardrail_eval_node_name(node_name)
+                if eval_node_name not in self._state.upcoming_guardrail_actions_info:
+                    return
+
+                eval_span_tuple = self._state.upcoming_guardrail_actions_info.get(
+                    eval_node_name
+                )
+                if not eval_span_tuple:
+                    return
+                eval_span, _ = eval_span_tuple
+                if not eval_span:
+                    return
+                # Make sure we store the guardrail span for action node run id, so that we can close them accordingly
+                # For Block, we will close them with error on_chain_error flow
+                SpanHierarchyManager.push(run_id, eval_span)
+
+                # Create "Review task" child span for HITL escalation
+                if action == GuardrailAction.ESCALATE and scope:
+                    review_task_span = self._span_factory.start_guardrail_escalation(
+                        guardrail_name=guardrail_name,
+                        scope=scope,
+                        parent_span=eval_span,
+                    )
+                    self._state.pending_escalation_span = review_task_span
+                    self._state.pending_hitl_guardrail_span = eval_span
+                    # Store the container span for completion after resume
+                    if scope and execution_stage:
+                        container_key = (scope, execution_stage)
+                        if container_key in self._state.guardrail_containers:
+                            self._state.pending_hitl_guardrail_container_span = (
+                                self._state.guardrail_containers[container_key]
+                            )
 
         except Exception:
             logger.exception("Error in on_chain_start callback (guardrail)")
@@ -429,79 +675,53 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
     ) -> None:
         """Handle chain end event (for guardrail nodes)."""
         try:
-            # Handle escalate action nodes
-            if run_id in self._state.escalate_action_run_ids:
-                self._complete_escalation_from_outputs(run_id, outputs)
+            guardrail_metadata = self._state.guardrail_metadata.pop(run_id, None)
+            if guardrail_metadata is None:
                 return
 
-            # Handle resume escalate action nodes
-            if run_id in self._state.escalate_action_resume_data:
-                self._complete_resumed_escalation_from_outputs(run_id, outputs)
+            node_name = guardrail_metadata.get("langgraph_node", "")
+            if not node_name:
                 return
 
-            guardrail_metadata = self._state.guardrail_metadata.get(run_id)
-            if guardrail_metadata is not None:
-                self._track_guardrail_event(
-                    guardrail_metadata.get("action_type"),
-                    guardrail_metadata,
+            node_type = guardrail_metadata.get("node_type")
+            payload = guardrail_metadata.get("payload")
+
+            if node_type == "guardrail_evaluation":
+                validation_result, validation_details = (
+                    self._get_guardrail_validation_result(outputs)
                 )
 
-            if run_id not in self._state.guardrail_spans:
-                return
+                validation_passed = validation_result is True
 
-            SpanHierarchyManager.pop(run_id)
-            span = self._state.guardrail_spans.pop(run_id)
-            info = self._state.guardrail_info.pop(run_id, None)
-            metadata = self._state.guardrail_metadata.pop(run_id, None)
-
-            validation_result = None
-            validation_details = None
-            if isinstance(outputs, dict) and INNER_STATE_KEY in outputs:
-                validation_result = outputs[INNER_STATE_KEY].get(
-                    GUARDRAIL_VALIDATION_RESULT_KEY
-                )
-                validation_details = outputs[INNER_STATE_KEY].get(
-                    GUARDRAIL_VALIDATION_DETAILS_KEY
-                )
-            elif (
-                hasattr(outputs, "update")
-                and isinstance(outputs.update, dict)
-                and INNER_STATE_KEY in outputs.update
-            ):
-                validation_result = outputs.update[INNER_STATE_KEY].get(
-                    GUARDRAIL_VALIDATION_RESULT_KEY
-                )
-                validation_details = outputs.update[INNER_STATE_KEY].get(
-                    GUARDRAIL_VALIDATION_DETAILS_KEY
-                )
-
-            validation_passed = validation_result is True
-
-            if validation_passed:
-                self._span_factory.end_guardrail_evaluation(
-                    span,
-                    validation_passed=True,
-                    validation_result=validation_details,
-                    action=GuardrailAction.SKIP,
-                )
-                self._track_guardrail_event(
-                    GuardrailAction.SKIP, metadata, validation_details
-                )
-            else:
-                if info:
-                    scope, stage, guardrail_name = info
-                    eval_node_name = f"{scope}_{stage}_execution_{guardrail_name}"
-                    self._state.pending_guardrail_actions[eval_node_name] = (
-                        span,
-                        validation_details,
+                if validation_passed:
+                    span = SpanHierarchyManager.pop(run_id)
+                    if span:
+                        self._span_factory.end_guardrail_evaluation(
+                            span,
+                            validation_result=validation_details,
+                            action=GuardrailAction.SKIP,
+                            payload=payload,
+                        )
+                    self._track_guardrail_event(
+                        GuardrailAction.SKIP, guardrail_metadata, validation_details
                     )
                 else:
-                    self._span_factory.end_guardrail_evaluation(
-                        span,
-                        validation_passed=False,
-                        validation_result=validation_details,
-                        action=GuardrailAction.LOG,
-                    )
+                    eval_span = SpanHierarchyManager.current(run_id)
+                    # pass the eval span, so that on action nodes we can close the span accordingly
+                    if eval_span:
+                        self._state.upcoming_guardrail_actions_info[node_name] = (
+                            eval_span,
+                            run_id,
+                        )
+
+                        # Update span attributes and upsert without ending the span
+                        self._span_factory.upsert_guardrail_evaluation(
+                            eval_span,
+                            validation_result=validation_details,
+                            payload=payload,
+                        )
+            elif node_type == "guardrail_action":
+                self.handle_action_node(run_id, guardrail_metadata)
 
         except Exception:
             logger.exception("Error in on_chain_end callback (guardrail)")
@@ -516,98 +736,71 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
     ) -> None:
         """Handle chain error event (for guardrail nodes)."""
         try:
-            if run_id not in self._state.guardrail_spans:
+            guardrail_metadata = self._state.guardrail_metadata.get(run_id, None)
+            if guardrail_metadata is None:
                 return
 
-            SpanHierarchyManager.pop(run_id)
-            span = self._state.guardrail_spans.pop(run_id)
-            self._state.guardrail_info.pop(run_id, None)
+            # Only call _check_and_handle_action_node for BLOCK action
+            reason = guardrail_metadata.get("reason")
+            action = guardrail_metadata.get("action_type")
+            if action == GuardrailAction.BLOCK and reason is not None:
+                # Check if any error arg (as string) contains the reason text
+                error_args_str = " ".join(str(arg) for arg in error.args)
+                if reason in error_args_str:
+                    self.handle_action_node(run_id, guardrail_metadata)
+                    return
 
-            exc = error if isinstance(error, Exception) else Exception(str(error))
-            self._span_factory.end_span_error(span, exc)
+            escalate_data = guardrail_metadata.get("escalation_data")
+            reviewed_by = escalate_data.get("reviewed_by") if escalate_data else None
+            if action == GuardrailAction.ESCALATE and reviewed_by is not None:
+                # Check if any error arg (as string) contains the Reject text
+                error_args_str = " ".join(str(arg) for arg in error.args)
+                if "reject" in error_args_str:
+                    self.handle_action_node(run_id, guardrail_metadata, error_args_str)
+                    return
 
         except Exception:
             logger.exception("Error in on_chain_error callback (guardrail)")
 
     # --- Escalation Completion ---
 
-    def _complete_escalation_from_outputs(
-        self,
-        run_id: UUID,
-        outputs: Dict[str, Any],
-    ) -> None:
-        """Complete escalation span using reviewed data from node outputs."""
-        escalation_span = self._state.escalate_action_run_ids.pop(run_id, None)
-        if not escalation_span:
-            return
-
-        reviewed_inputs = None
-        reviewed_outputs = None
-        reviewed_by = None
-
-        logger.info(
-            f"Completing escalation span from outputs: "
-            f"reviewed_inputs={reviewed_inputs}, reviewed_outputs={reviewed_outputs}"
-        )
-
-        self._span_factory.end_guardrail_escalation(
-            escalation_span,
-            review_outcome="Approved",
-            reviewed_by=reviewed_by,
-            reviewed_inputs=reviewed_inputs,
-            reviewed_outputs=reviewed_outputs,
-        )
-
-        if escalation_span == self._state.pending_escalation_span:
-            self._state.pending_escalation_span = None
-            self._state.pending_escalation_info = None
-
     def _complete_resumed_escalation_from_outputs(
         self,
-        run_id: UUID,
-        outputs: Dict[str, Any],
+        metadata: Dict[str, Any],
+        error_str: Optional[str] = None,
     ) -> None:
         """Complete resumed escalation span using saved data."""
-        resume_data = self._state.escalate_action_resume_data.pop(run_id, None)
-        if not resume_data:
+        trace_id = self._state.resumed_escalation_trace_id
+        review_task_span_data = self._state.resumed_escalation_span_data
+        if not trace_id or not review_task_span_data:
             return
 
-        trace_id = resume_data.get("trace_id")
-        span_data = resume_data.get("span_data")
-        if not trace_id or not span_data:
-            return
+        escalation_data = metadata.get("escalation_data") or {}
+        assigned_to = escalation_data.get("assigned_to")
+        reviewed_by = escalation_data.get("reviewed_by")
+        reviewed_inputs = escalation_data.get("reviewed_inputs")
+        reviewed_outputs = escalation_data.get("reviewed_outputs")
+        reason = escalation_data.get("reason")
 
-        reviewed_inputs = None
-        reviewed_outputs = None
-        reviewed_by = None
-
-        logger.info(
-            f"Completing resumed escalation span from outputs: "
-            f"reviewed_inputs={reviewed_inputs}, reviewed_outputs={reviewed_outputs}"
-        )
-
-        attrs = dict(span_data.get("attributes", {}))
-        attrs["reviewStatus"] = "completed"
-        attrs["reviewOutcome"] = "Approved"
+        attrs = dict(review_task_span_data.get("attributes", {}))
+        attrs["reviewStatus"] = "Completed"
+        attrs["reviewOutcome"] = "Rejected" if error_str else "Approved"
+        if assigned_to:
+            attrs["assignedTo"] = assigned_to
         if reviewed_by:
             attrs["reviewedBy"] = reviewed_by
+        if reason:
+            attrs["reason"] = reason
         if reviewed_inputs:
-            attrs["reviewedInputs"] = (
-                json.dumps(reviewed_inputs)
-                if isinstance(reviewed_inputs, dict)
-                else str(reviewed_inputs)
-            )
+            attrs["reviewedInputs"] = to_json_string(reviewed_inputs)
         if reviewed_outputs:
-            attrs["reviewedOutputs"] = (
-                json.dumps(reviewed_outputs)
-                if isinstance(reviewed_outputs, dict)
-                else str(reviewed_outputs)
-            )
+            attrs["reviewedOutputs"] = to_json_string(reviewed_outputs)
 
-        updated_span_data = dict(span_data)
+        updated_span_data = dict(review_task_span_data)
         updated_span_data["attributes"] = attrs
 
         self._span_factory.upsert_span_complete_by_data(
             trace_id=trace_id,
             span_data=updated_span_data,
+            status=SpanStatus.ERROR if error_str else SpanStatus.OK,
         )

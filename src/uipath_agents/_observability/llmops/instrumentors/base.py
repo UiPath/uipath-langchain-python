@@ -28,12 +28,13 @@ class InstrumentationState:
     # LLM-specific state
     prompts_captured: bool = False
     current_llm_span: Optional[Span] = None
-    llm_span_from_guardrail: bool = False
+    llm_span_from_guardrail: bool = False  # Track if LLM span was created by guardrails
 
     # Tool-specific state
     current_tool_span: Optional[Span] = None
-    tool_span_from_guardrail: bool = False
-    tool_ended_pending_post: bool = False
+    tool_span_from_guardrail: bool = (
+        False  # Track if tool span was created by guardrails
+    )
     escalation_run_ids: Set[UUID] = field(default_factory=set)
     process_run_ids: Set[UUID] = field(default_factory=set)
     agent_run_ids: Set[UUID] = field(default_factory=set)
@@ -52,17 +53,18 @@ class InstrumentationState:
 
     # Guardrail state
     guardrail_containers: Dict[Tuple[str, str], Span] = field(default_factory=dict)
-    guardrail_spans: Dict[UUID, Span] = field(default_factory=dict)
-    guardrail_info: Dict[UUID, Tuple[str, str, str]] = field(default_factory=dict)
     guardrail_metadata: Dict[UUID, Dict[str, Any]] = field(default_factory=dict)
-    pending_guardrail_actions: Dict[str, Tuple[Span, Optional[str]]] = field(
+    upcoming_guardrail_actions_info: Dict[str, Tuple[Span, UUID]] = field(
         default_factory=dict
     )
+    pending_hitl_guardrail_span: Optional[Span] = None
+    resumed_hitl_guardrail_span_data: Optional[Dict[str, Any]] = None
+    resumed_llm_span_data: Optional[Dict[str, Any]] = None
+    pending_hitl_guardrail_container_span: Optional[Span] = None
+    resumed_hitl_guardrail_container_span_data: Optional[Dict[str, Any]] = None
 
     # Escalation state
     pending_escalation_span: Optional[Span] = None
-    pending_escalation_info: Optional[Dict[str, str]] = None
-    escalate_action_run_ids: Dict[UUID, Span] = field(default_factory=dict)
     escalate_action_resume_data: Dict[UUID, Dict[str, Any]] = field(
         default_factory=dict
     )
@@ -87,7 +89,6 @@ class InstrumentationState:
         self.pending_process_span = None
         self.current_tool_span = None
         self.tool_span_from_guardrail = False
-        self.tool_ended_pending_post = False
         self.escalation_run_ids.clear()
         self.process_run_ids.clear()
         self.agent_run_ids.clear()
@@ -99,17 +100,18 @@ class InstrumentationState:
 
         # Guardrail state
         self.guardrail_containers.clear()
-        self.guardrail_spans.clear()
-        self.guardrail_info.clear()
         self.guardrail_metadata.clear()
         self.current_llm_span = None
         self.llm_span_from_guardrail = False
-        self.pending_guardrail_actions.clear()
+        self.upcoming_guardrail_actions_info.clear()
+        self.pending_hitl_guardrail_span = None
+        self.resumed_hitl_guardrail_span_data = None
+        self.resumed_llm_span_data = None
+        self.pending_hitl_guardrail_container_span = None
+        self.resumed_hitl_guardrail_container_span_data = None
 
         # Escalation state
         self.pending_escalation_span = None
-        self.pending_escalation_info = None
-        self.escalate_action_run_ids.clear()
         self.escalate_action_resume_data.clear()
         self.resumed_escalation_trace_id = None
         self.resumed_escalation_span_data = None

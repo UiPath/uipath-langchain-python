@@ -1,6 +1,7 @@
 """Tests for LlmOpsInstrumentationCallback LangChain callback handler."""
 
 from typing import Any
+from unittest.mock import MagicMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -8,8 +9,10 @@ from uipath.core.guardrails import (
     AllFieldsSelector,
     FieldReference,
     FieldSource,
+    GuardrailScope,
     SpecificFieldsSelector,
 )
+from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from uipath_agents._observability.llmops.callback import LlmOpsInstrumentationCallback
 from uipath_agents._observability.llmops.spans.span_attributes import SpanType
@@ -480,13 +483,29 @@ class TestGuardrailActionDetection:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
             run_id = uuid4()
             # Start guardrail evaluation
             callback.on_chain_start(
                 {},
                 {},
                 run_id=run_id,
-                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
             # End with passed validation_result
             callback.on_chain_end(
@@ -509,13 +528,29 @@ class TestGuardrailActionDetection:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
             run_id = uuid4()
             # Start guardrail evaluation
             callback.on_chain_start(
                 {},
                 {},
                 run_id=run_id,
-                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Log",
+                },
             )
             # End with validation_result (failed)
             callback.on_chain_end(
@@ -528,36 +563,29 @@ class TestGuardrailActionDetection:
                 run_id=run_id,
             )
 
-            # Span should be pending action
-            assert (
-                "agent_pre_execution_pii_guard"
-                in callback._state.pending_guardrail_actions
-            )
-
-            # Action node fires with _block suffix and action_type metadata
+            # Action node fires with _log suffix and action_type metadata
             action_run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=action_run_id,
                 metadata={
-                    "langgraph_node": "agent_pre_execution_pii_guard_block",
-                    "action_type": "Block",
+                    "langgraph_node": "agent_pre_execution_pii_guard_log",
+                    "action_type": "Log",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_action",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
                 },
             )
-
-            # Pending action should be cleared
-            assert (
-                "agent_pre_execution_pii_guard"
-                not in callback._state.pending_guardrail_actions
-            )
+            callback.on_chain_end({}, run_id=action_run_id)
 
         spans = span_exporter.get_finished_spans()
         eval_spans = [
             s for s in spans if s.attributes.get("type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
-        assert eval_spans[0].attributes.get("action") == "Block"
+        assert eval_spans[0].attributes.get("action") == "Log"
         assert eval_spans[0].attributes.get("validationResult") == "PII detected"
 
     def test_action_node_log_sets_correct_action(self, callback, tracer, span_exporter):
@@ -566,32 +594,55 @@ class TestGuardrailActionDetection:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "prompt_injection"
+            mock_guardrail.description = "Prompt Injection Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.LLM]
+
             run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=run_id,
-                metadata={"langgraph_node": "llm_pre_execution_prompt_injection"},
+                metadata={
+                    "langgraph_node": "llm_pre_execution_prompt_injection",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.LLM,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Log",
+                },
             )
             callback.on_chain_end(
                 {
                     INNER_STATE_KEY: {
-                        GUARDRAIL_VALIDATION_RESULT_KEY: "Injection detected"
+                        GUARDRAIL_VALIDATION_RESULT_KEY: False,
+                        GUARDRAIL_VALIDATION_DETAILS_KEY: "Injection detected",
                     }
                 },
                 run_id=run_id,
             )
 
             # Action node fires with _log suffix and action_type metadata
+            action_run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
-                run_id=uuid4(),
+                run_id=action_run_id,
                 metadata={
                     "langgraph_node": "llm_pre_execution_prompt_injection_log",
                     "action_type": "Log",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_action",
+                    "scope": GuardrailScope.LLM,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
                 },
             )
+            callback.on_chain_end({}, run_id=action_run_id)
 
         spans = span_exporter.get_finished_spans()
         eval_spans = [
@@ -603,39 +654,78 @@ class TestGuardrailActionDetection:
     def test_action_node_hitl_sets_correct_action(
         self, callback, tracer, span_exporter
     ):
-        """Test action node with _hitl suffix sets action=Escalate."""
+        """Test action node with _hitl suffix sets action=Escalate.
+
+        For Escalate actions, the eval span is NOT ended immediately - it remains
+        pending until HITL review completes. A "Review task" child span is created.
+        """
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
+
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "review_guard"
+            mock_guardrail.description = "Review Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.LLM]
 
             run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=run_id,
-                metadata={"langgraph_node": "llm_post_execution_review_guard"},
-            )
-            callback.on_chain_end(
-                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: "Review needed"}},
-                run_id=run_id,
-            )
-
-            callback.on_chain_start(
-                {},
-                {},
-                run_id=uuid4(),
                 metadata={
-                    "langgraph_node": "llm_post_execution_review_guard_hitl",
+                    "langgraph_node": "llm_post_execution_review_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.LLM,
+                    "execution_stage": ExecutionStage.POST_EXECUTION,
                     "action_type": "Escalate",
                 },
             )
+            callback.on_chain_end(
+                {
+                    INNER_STATE_KEY: {
+                        GUARDRAIL_VALIDATION_RESULT_KEY: False,
+                        GUARDRAIL_VALIDATION_DETAILS_KEY: "Review needed",
+                    }
+                },
+                run_id=run_id,
+            )
 
+            action_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=action_run_id,
+                metadata={
+                    "langgraph_node": "llm_post_execution_review_guard_hitl",
+                    "action_type": "Escalate",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_action",
+                    "scope": GuardrailScope.LLM,
+                    "execution_stage": ExecutionStage.POST_EXECUTION,
+                },
+            )
+
+            # Verify escalation state is set up correctly
+            assert callback._state.pending_escalation_span is not None
+            assert callback._state.pending_hitl_guardrail_span is not None
+
+        # For Escalate, eval span is NOT finished - it's pending HITL review
         spans = span_exporter.get_finished_spans()
         eval_spans = [
             s for s in spans if s.attributes.get("type") == "guardrailEvaluation"
         ]
-        assert len(eval_spans) == 1
-        assert eval_spans[0].attributes.get("action") == "Escalate"
+        # Eval span should NOT be finished yet (pending HITL)
+        assert len(eval_spans) == 0
+
+        # Review task span should be created but not finished
+        review_spans = [s for s in spans if s.name == "Review task"]
+        assert len(review_spans) == 0  # Not finished, pending HITL
 
     def test_guardrail_named_with_action_suffix_creates_span(
         self, callback, tracer, span_exporter
@@ -649,17 +739,30 @@ class TestGuardrailActionDetection:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "test_guardrail_log"
+            mock_guardrail.description = "Test Guardrail Log"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
             # Eval node for guardrail named "test_guardrail_log"
             run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=run_id,
-                metadata={"langgraph_node": "agent_pre_execution_test_guardrail_log"},
+                metadata={
+                    "langgraph_node": "agent_pre_execution_test_guardrail_log",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
-
-            # Span should be created (not skipped)
-            assert run_id in callback._state.guardrail_spans
 
             # Validation passes - span should end immediately
             callback.on_chain_end(
@@ -678,7 +781,7 @@ class TestGuardrailActionDetection:
         ]
         # Span should exist and have correct attributes
         assert len(eval_spans) == 1
-        assert eval_spans[0].name == "Guardrail - test_guardrail_log"
+        assert eval_spans[0].name == "test_guardrail_log"
         assert eval_spans[0].attributes.get("action") == "Skip"
 
     def test_command_object_extracts_validation_result(
@@ -696,12 +799,28 @@ class TestGuardrailActionDetection:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
             run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=run_id,
-                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Log",
+                },
             )
             # End with Command object containing validation failure
             command = MockCommand(
@@ -714,29 +833,29 @@ class TestGuardrailActionDetection:
             )
             callback.on_chain_end(command, run_id=run_id)
 
-            # Span should be pending action
-            assert (
-                "agent_pre_execution_pii_guard"
-                in callback._state.pending_guardrail_actions
-            )
-
             # Action node fires
+            action_run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
-                run_id=uuid4(),
+                run_id=action_run_id,
                 metadata={
-                    "langgraph_node": "agent_pre_execution_pii_guard_block",
-                    "action_type": "Block",
+                    "langgraph_node": "agent_pre_execution_pii_guard_log",
+                    "action_type": "Log",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_action",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
                 },
             )
+            callback.on_chain_end({}, run_id=action_run_id)
 
         spans = span_exporter.get_finished_spans()
         eval_spans = [
             s for s in spans if s.attributes.get("type") == "guardrailEvaluation"
         ]
         assert len(eval_spans) == 1
-        assert eval_spans[0].attributes.get("action") == "Block"
+        assert eval_spans[0].attributes.get("action") == "Log"
         assert (
             eval_spans[0].attributes.get("validationResult") == "PII detected in input"
         )
@@ -752,12 +871,28 @@ class TestGuardrailActionDetection:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
             run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=run_id,
-                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
             # Command with validation result = passed
             command = MockCommand(
@@ -784,6 +919,15 @@ class TestToolGuardrailParenting:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "input_guard"
+            mock_guardrail.description = "Input Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
+
             tool_run_id = uuid4()
             callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
 
@@ -793,12 +937,24 @@ class TestToolGuardrailParenting:
                 {},
                 {},
                 run_id=guard_run_id,
-                metadata={"langgraph_node": "tool_pre_execution_input_guard"},
+                metadata={
+                    "langgraph_node": "tool_pre_execution_input_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
-            callback.on_chain_end({}, run_id=guard_run_id)
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=guard_run_id,
+            )
 
             # Close tool_pre container manually since tool_end doesn't close it
-            callback._guardrail_instrumentor.close_container("tool", "pre")
+            callback._guardrail_instrumentor.close_container(
+                GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION
+            )
 
             callback.on_tool_end("result", run_id=tool_run_id)
 
@@ -823,6 +979,15 @@ class TestToolGuardrailParenting:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "output_guard"
+            mock_guardrail.description = "Output Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
+
             tool_run_id = uuid4()
             callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
 
@@ -835,9 +1000,19 @@ class TestToolGuardrailParenting:
                 {},
                 {},
                 run_id=guard_run_id,
-                metadata={"langgraph_node": "tool_post_execution_output_guard"},
+                metadata={
+                    "langgraph_node": "tool_post_execution_output_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.POST_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
-            callback.on_chain_end({}, run_id=guard_run_id)
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=guard_run_id,
+            )
 
             # Cleanup containers (in real execution, next phase or agent end closes them)
             callback.cleanup_containers()
@@ -860,18 +1035,48 @@ class TestPhaseTransitions:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrails
+            mock_guardrail_llm = MagicMock()
+            mock_guardrail_llm.name = "guard1"
+            mock_guardrail_llm.description = "LLM Guard"
+            mock_guardrail_llm.enabled_for_evals = True
+            mock_guardrail_llm.guardrail_type = "builtInValidator"
+            mock_guardrail_llm.selector = MagicMock()
+            mock_guardrail_llm.selector.scopes = [GuardrailScope.LLM]
+
+            mock_guardrail_tool = MagicMock()
+            mock_guardrail_tool.name = "guard2"
+            mock_guardrail_tool.description = "Tool Guard"
+            mock_guardrail_tool.enabled_for_evals = True
+            mock_guardrail_tool.guardrail_type = "builtInValidator"
+            mock_guardrail_tool.selector = MagicMock()
+            mock_guardrail_tool.selector.scopes = [GuardrailScope.TOOL]
+
             # LLM post guardrail creates llm_post container
             run_id1 = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=run_id1,
-                metadata={"langgraph_node": "llm_post_execution_guard1"},
+                metadata={
+                    "langgraph_node": "llm_post_execution_guard1",
+                    "guardrail": mock_guardrail_llm,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.LLM,
+                    "execution_stage": ExecutionStage.POST_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
-            callback.on_chain_end({}, run_id=run_id1)
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=run_id1,
+            )
 
             # Should have llm_post container
-            assert ("llm", "post") in callback._state.guardrail_containers
+            assert (
+                GuardrailScope.LLM,
+                ExecutionStage.POST_EXECUTION,
+            ) in callback._state.guardrail_containers
 
             # Start tool
             tool_run_id = uuid4()
@@ -883,13 +1088,26 @@ class TestPhaseTransitions:
                 {},
                 {},
                 run_id=run_id2,
-                metadata={"langgraph_node": "tool_pre_execution_guard"},
+                metadata={
+                    "langgraph_node": "tool_pre_execution_guard",
+                    "guardrail": mock_guardrail_tool,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
 
             # llm_post should be closed
-            assert ("llm", "post") not in callback._state.guardrail_containers
+            assert (
+                GuardrailScope.LLM,
+                ExecutionStage.POST_EXECUTION,
+            ) not in callback._state.guardrail_containers
 
-            callback.on_chain_end({}, run_id=run_id2)
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=run_id2,
+            )
             callback.on_tool_end("result", run_id=tool_run_id)
 
     def test_tool_post_closes_tool_pre(self, callback, tracer, span_exporter):
@@ -897,6 +1115,23 @@ class TestPhaseTransitions:
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
+
+            # Create mock guardrails
+            mock_guardrail_pre = MagicMock()
+            mock_guardrail_pre.name = "pre_guard"
+            mock_guardrail_pre.description = "Tool Pre Guard"
+            mock_guardrail_pre.enabled_for_evals = True
+            mock_guardrail_pre.guardrail_type = "builtInValidator"
+            mock_guardrail_pre.selector = MagicMock()
+            mock_guardrail_pre.selector.scopes = [GuardrailScope.TOOL]
+
+            mock_guardrail_post = MagicMock()
+            mock_guardrail_post.name = "post_guard"
+            mock_guardrail_post.description = "Tool Post Guard"
+            mock_guardrail_post.enabled_for_evals = True
+            mock_guardrail_post.guardrail_type = "builtInValidator"
+            mock_guardrail_post.selector = MagicMock()
+            mock_guardrail_post.selector.scopes = [GuardrailScope.TOOL]
 
             tool_run_id = uuid4()
             callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
@@ -907,11 +1142,24 @@ class TestPhaseTransitions:
                 {},
                 {},
                 run_id=run_id1,
-                metadata={"langgraph_node": "tool_pre_execution_guard"},
+                metadata={
+                    "langgraph_node": "tool_pre_execution_guard",
+                    "guardrail": mock_guardrail_pre,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
-            callback.on_chain_end({}, run_id=run_id1)
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=run_id1,
+            )
 
-            assert ("tool", "pre") in callback._state.guardrail_containers
+            assert (
+                GuardrailScope.TOOL,
+                ExecutionStage.PRE_EXECUTION,
+            ) in callback._state.guardrail_containers
 
             # Tool post guardrail should close tool_pre
             run_id2 = uuid4()
@@ -919,12 +1167,25 @@ class TestPhaseTransitions:
                 {},
                 {},
                 run_id=run_id2,
-                metadata={"langgraph_node": "tool_post_execution_guard"},
+                metadata={
+                    "langgraph_node": "tool_post_execution_guard",
+                    "guardrail": mock_guardrail_post,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.POST_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
 
-            assert ("tool", "pre") not in callback._state.guardrail_containers
+            assert (
+                GuardrailScope.TOOL,
+                ExecutionStage.PRE_EXECUTION,
+            ) not in callback._state.guardrail_containers
 
-            callback.on_chain_end({}, run_id=run_id2)
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=run_id2,
+            )
             callback.on_tool_end("result", run_id=tool_run_id)
 
     def test_agent_post_closes_tool_post(self, callback, tracer, span_exporter):
@@ -932,6 +1193,23 @@ class TestPhaseTransitions:
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
+
+            # Create mock guardrails
+            mock_guardrail_tool = MagicMock()
+            mock_guardrail_tool.name = "tool_guard"
+            mock_guardrail_tool.description = "Tool Post Guard"
+            mock_guardrail_tool.enabled_for_evals = True
+            mock_guardrail_tool.guardrail_type = "builtInValidator"
+            mock_guardrail_tool.selector = MagicMock()
+            mock_guardrail_tool.selector.scopes = [GuardrailScope.TOOL]
+
+            mock_guardrail_agent = MagicMock()
+            mock_guardrail_agent.name = "agent_guard"
+            mock_guardrail_agent.description = "Agent Post Guard"
+            mock_guardrail_agent.enabled_for_evals = True
+            mock_guardrail_agent.guardrail_type = "builtInValidator"
+            mock_guardrail_agent.selector = MagicMock()
+            mock_guardrail_agent.selector.scopes = [GuardrailScope.AGENT]
 
             tool_run_id = uuid4()
             callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
@@ -942,13 +1220,26 @@ class TestPhaseTransitions:
                 {},
                 {},
                 run_id=run_id1,
-                metadata={"langgraph_node": "tool_post_execution_guard"},
+                metadata={
+                    "langgraph_node": "tool_post_execution_guard",
+                    "guardrail": mock_guardrail_tool,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.POST_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
-            callback.on_chain_end({}, run_id=run_id1)
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=run_id1,
+            )
 
             # Don't end tool yet - agent_post fires before tool ends in some flows
 
-            assert ("tool", "post") in callback._state.guardrail_containers
+            assert (
+                GuardrailScope.TOOL,
+                ExecutionStage.POST_EXECUTION,
+            ) in callback._state.guardrail_containers
 
             # Agent post guardrail should close tool_post
             run_id2 = uuid4()
@@ -956,12 +1247,25 @@ class TestPhaseTransitions:
                 {},
                 {},
                 run_id=run_id2,
-                metadata={"langgraph_node": "agent_post_execution_guard"},
+                metadata={
+                    "langgraph_node": "agent_post_execution_guard",
+                    "guardrail": mock_guardrail_agent,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.POST_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
 
-            assert ("tool", "post") not in callback._state.guardrail_containers
+            assert (
+                GuardrailScope.TOOL,
+                ExecutionStage.POST_EXECUTION,
+            ) not in callback._state.guardrail_containers
 
-            callback.on_chain_end({}, run_id=run_id2)
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=run_id2,
+            )
             callback.on_tool_end("result", run_id=tool_run_id)
 
 
@@ -976,13 +1280,29 @@ class TestToolGuardrailRealExecutionOrder:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "deterministic"
+            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
+
             # Real order: guardrail FIRST (before tool starts)
             guard_run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=guard_run_id,
-                metadata={"langgraph_node": "tool_pre_execution_pii_guard"},
+                metadata={
+                    "langgraph_node": "tool_pre_execution_pii_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                    "tool_name": "my_tool",
+                },
             )
             callback.on_chain_end({}, run_id=guard_run_id)
 
@@ -1008,17 +1328,32 @@ class TestToolGuardrailRealExecutionOrder:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "deterministic"
+            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
+
             # Guardrail fires (creates placeholder tool span)
             guard_run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=guard_run_id,
-                metadata={"langgraph_node": "tool_pre_execution_pii_guard"},
+                metadata={
+                    "langgraph_node": "tool_pre_execution_pii_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                    "tool_name": "my_tool",
+                },
             )
             # Placeholder should exist
             assert callback._state.current_tool_span is not None
-            assert callback._state.tool_span_from_guardrail is True
 
             # Guardrail fails
             callback.on_chain_end(
@@ -1027,19 +1362,30 @@ class TestToolGuardrailRealExecutionOrder:
             )
 
             # Block action fires - tool will NOT execute
+            block_run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
-                run_id=uuid4(),
+                run_id=block_run_id,
                 metadata={
                     "langgraph_node": "tool_pre_execution_pii_guard_block",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_action",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
                     "action_type": "Block",
+                    "tool_name": "my_tool",
+                    "reason": "PII detected",
                 },
+            )
+            # Block action ends with error
+            callback.on_chain_error(
+                Exception("PII detected"),
+                run_id=block_run_id,
             )
 
             # Placeholder should be cleaned up
             assert callback._state.current_tool_span is None
-            assert callback._state.tool_span_from_guardrail is False
 
         spans = span_exporter.get_finished_spans()
         tool_spans = [s for s in spans if s.attributes.get("type") == "toolCall"]
@@ -1054,13 +1400,36 @@ class TestToolGuardrailRealExecutionOrder:
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrails
+            mock_guardrail1 = MagicMock()
+            mock_guardrail1.name = "guard1"
+            mock_guardrail1.description = "Guard 1"
+            mock_guardrail1.enabled_for_evals = True
+            mock_guardrail1.guardrail_type = "deterministic"
+            mock_guardrail1.selector.scopes = [GuardrailScope.TOOL]
+
+            mock_guardrail2 = MagicMock()
+            mock_guardrail2.name = "guard2"
+            mock_guardrail2.description = "Guard 2"
+            mock_guardrail2.enabled_for_evals = True
+            mock_guardrail2.guardrail_type = "deterministic"
+            mock_guardrail2.selector.scopes = [GuardrailScope.TOOL]
+
             # First guardrail fires (creates placeholder)
             guard1_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=guard1_id,
-                metadata={"langgraph_node": "tool_pre_execution_guard1"},
+                metadata={
+                    "langgraph_node": "tool_pre_execution_guard1",
+                    "guardrail": mock_guardrail1,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                    "tool_name": "my_tool",
+                },
             )
             callback.on_chain_end({}, run_id=guard1_id)
 
@@ -1074,7 +1443,15 @@ class TestToolGuardrailRealExecutionOrder:
                 {},
                 {},
                 run_id=guard2_id,
-                metadata={"langgraph_node": "tool_pre_execution_guard2"},
+                metadata={
+                    "langgraph_node": "tool_pre_execution_guard2",
+                    "guardrail": mock_guardrail2,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                    "tool_name": "my_tool",
+                },
             )
             callback.on_chain_end({}, run_id=guard2_id)
 
@@ -1413,20 +1790,34 @@ class TestSpanStackIntegration:
         self, callback: LlmOpsInstrumentationCallback, tracer, span_exporter
     ) -> None:
         """Guardrail span should be in stack during evaluation."""
-        from unittest.mock import patch
-
         from uipath_agents._observability.llmops.callback import _get_current_span
 
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
             run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=run_id,
-                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Skip",
+                },
             )
 
             with patch(
@@ -1435,10 +1826,11 @@ class TestSpanStackIntegration:
             ):
                 current = _get_current_span()
                 assert current is not None
-                eval_span = callback._state.guardrail_spans.get(run_id)
-                assert current is eval_span
 
-            callback.on_chain_end({}, run_id=run_id)
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=run_id,
+            )
 
     def test_guardrail_span_popped_on_end(
         self, callback: LlmOpsInstrumentationCallback, tracer, span_exporter
@@ -1524,12 +1916,19 @@ class TestGuardrailTelemetryEvents:
         self, callback, tracer, span_exporter
     ):
         """When validation passes (Skip), Guardrail.Skipped event should be tracked."""
-        from unittest.mock import patch
-
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
             callback.set_enriched_properties({"AgentName": "TestAgent"})
+
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
 
             with patch(
                 "uipath_agents._observability.llmops.instrumentors.guardrail_instrumentor.track_event"
@@ -1539,7 +1938,14 @@ class TestGuardrailTelemetryEvents:
                     {},
                     {},
                     run_id=run_id,
-                    metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+                    metadata={
+                        "langgraph_node": "agent_pre_execution_pii_guard",
+                        "guardrail": mock_guardrail,
+                        "node_type": "guardrail_evaluation",
+                        "scope": GuardrailScope.AGENT,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Skip",
+                    },
                 )
                 callback.on_chain_end(
                     {
@@ -1564,10 +1970,6 @@ class TestGuardrailTelemetryEvents:
         self, callback, tracer, span_exporter
     ):
         """When validation fails with Block, Guardrail.Blocked event should be tracked."""
-        from unittest.mock import MagicMock, patch
-
-        from uipath.platform.guardrails import GuardrailScope
-
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
@@ -1575,6 +1977,8 @@ class TestGuardrailTelemetryEvents:
 
             # Create mock guardrail for metadata
             mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
             mock_guardrail.enabled_for_evals = True
             mock_guardrail.guardrail_type = "builtInValidator"
             mock_guardrail.selector = MagicMock()
@@ -1588,7 +1992,14 @@ class TestGuardrailTelemetryEvents:
                     {},
                     {},
                     run_id=run_id,
-                    metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
+                    metadata={
+                        "langgraph_node": "agent_pre_execution_pii_guard",
+                        "guardrail": mock_guardrail,
+                        "node_type": "guardrail_evaluation",
+                        "scope": GuardrailScope.AGENT,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Block",
+                    },
                 )
                 callback.on_chain_end(
                     {
@@ -1610,7 +2021,9 @@ class TestGuardrailTelemetryEvents:
                         "langgraph_node": "agent_pre_execution_pii_guard_block",
                         "action_type": "Block",
                         "guardrail": mock_guardrail,
+                        "node_type": "guardrail_action",
                         "scope": GuardrailScope.AGENT,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
                     },
                 )
                 # Event is tracked on chain end
@@ -1628,10 +2041,6 @@ class TestGuardrailTelemetryEvents:
         self, callback, tracer, span_exporter
     ):
         """When validation fails with Log, Guardrail.Logged event should be tracked."""
-        from unittest.mock import MagicMock, patch
-
-        from uipath.platform.guardrails import GuardrailScope
-
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
@@ -1639,10 +2048,12 @@ class TestGuardrailTelemetryEvents:
 
             # Create mock guardrail for metadata
             mock_guardrail = MagicMock()
+            mock_guardrail.name = "prompt_injection"
+            mock_guardrail.description = "Prompt Injection Guard"
             mock_guardrail.enabled_for_evals = True
             mock_guardrail.guardrail_type = "builtInValidator"
             mock_guardrail.selector = MagicMock()
-            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
+            mock_guardrail.selector.scopes = [GuardrailScope.LLM]
 
             with patch(
                 "uipath_agents._observability.llmops.instrumentors.guardrail_instrumentor.track_event"
@@ -1652,7 +2063,14 @@ class TestGuardrailTelemetryEvents:
                     {},
                     {},
                     run_id=run_id,
-                    metadata={"langgraph_node": "llm_pre_execution_prompt_injection"},
+                    metadata={
+                        "langgraph_node": "llm_pre_execution_prompt_injection",
+                        "guardrail": mock_guardrail,
+                        "node_type": "guardrail_evaluation",
+                        "scope": GuardrailScope.LLM,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Log",
+                    },
                 )
                 callback.on_chain_end(
                     {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: False}},
@@ -1670,7 +2088,9 @@ class TestGuardrailTelemetryEvents:
                         "severity_level": "Info",
                         "action_type": "Log",
                         "guardrail": mock_guardrail,
-                        "scope": GuardrailScope.TOOL,
+                        "node_type": "guardrail_action",
+                        "scope": GuardrailScope.LLM,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
                     },
                 )
                 # Event is tracked on chain end
@@ -1687,10 +2107,6 @@ class TestGuardrailTelemetryEvents:
         self, callback, tracer, span_exporter
     ):
         """When validation fails with Filter, Guardrail.Filtered event should be tracked."""
-        from unittest.mock import MagicMock, patch
-
-        from uipath.platform.guardrails import GuardrailScope
-
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
@@ -1698,6 +2114,8 @@ class TestGuardrailTelemetryEvents:
 
             # Create mock guardrail for metadata
             mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii"
+            mock_guardrail.description = "PII Filter"
             mock_guardrail.enabled_for_evals = True
             mock_guardrail.guardrail_type = "builtInValidator"
             mock_guardrail.selector = MagicMock()
@@ -1711,7 +2129,14 @@ class TestGuardrailTelemetryEvents:
                     {},
                     {},
                     run_id=run_id,
-                    metadata={"langgraph_node": "tool_post_execution_pii"},
+                    metadata={
+                        "langgraph_node": "tool_post_execution_pii",
+                        "guardrail": mock_guardrail,
+                        "node_type": "guardrail_evaluation",
+                        "scope": GuardrailScope.TOOL,
+                        "execution_stage": ExecutionStage.POST_EXECUTION,
+                        "action_type": "Filter",
+                    },
                 )
                 callback.on_chain_end(
                     {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: False}},
@@ -1728,7 +2153,9 @@ class TestGuardrailTelemetryEvents:
                         "langgraph_node": "tool_post_execution_pii_filter",
                         "action_type": "Filter",
                         "guardrail": mock_guardrail,
+                        "node_type": "guardrail_action",
                         "scope": GuardrailScope.TOOL,
+                        "execution_stage": ExecutionStage.POST_EXECUTION,
                     },
                 )
                 # Event is tracked on chain end
@@ -1745,8 +2172,6 @@ class TestGuardrailTelemetryEvents:
         self, callback, tracer, span_exporter
     ):
         """Enriched properties from runtime should be included in guardrail events."""
-        from unittest.mock import patch
-
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
@@ -1759,6 +2184,15 @@ class TestGuardrailTelemetryEvents:
                 }
             )
 
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "guard"
+            mock_guardrail.description = "Test Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
             with patch(
                 "uipath_agents._observability.llmops.instrumentors.guardrail_instrumentor.track_event"
             ) as mock_track:
@@ -1767,7 +2201,14 @@ class TestGuardrailTelemetryEvents:
                     {},
                     {},
                     run_id=run_id,
-                    metadata={"langgraph_node": "agent_pre_execution_guard"},
+                    metadata={
+                        "langgraph_node": "agent_pre_execution_guard",
+                        "guardrail": mock_guardrail,
+                        "node_type": "guardrail_evaluation",
+                        "scope": GuardrailScope.AGENT,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Skip",
+                    },
                 )
                 callback.on_chain_end(
                     {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
@@ -1784,9 +2225,7 @@ class TestGuardrailTelemetryEvents:
         self, callback, tracer, span_exporter
     ):
         """BuiltInValidatorGuardrail metadata should enrich telemetry properties."""
-        from unittest.mock import MagicMock, patch
-
-        from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailScope
+        from uipath.platform.guardrails import BuiltInValidatorGuardrail
 
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
@@ -1794,6 +2233,8 @@ class TestGuardrailTelemetryEvents:
 
             # Create mock BuiltInValidatorGuardrail
             mock_guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
             mock_guardrail.enabled_for_evals = True
             mock_guardrail.guardrail_type = "builtIn"
             mock_guardrail.validator_type = "pii_detection"
@@ -1811,7 +2252,10 @@ class TestGuardrailTelemetryEvents:
                     metadata={
                         "langgraph_node": "agent_pre_execution_pii_guard",
                         "guardrail": mock_guardrail,
+                        "node_type": "guardrail_evaluation",
                         "scope": GuardrailScope.AGENT,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Skip",
                     },
                 )
                 callback.on_chain_end(
@@ -2051,10 +2495,8 @@ class TestDeterministicGuardrailTelemetry:
     ):
         """DeterministicGuardrail metadata should include NumberOfRules property."""
         import json
-        from unittest.mock import MagicMock, patch
 
         from uipath.core.guardrails import DeterministicGuardrail
-        from uipath.platform.guardrails import GuardrailScope
 
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
@@ -2062,6 +2504,8 @@ class TestDeterministicGuardrailTelemetry:
 
             # Create mock DeterministicGuardrail with rules
             mock_guardrail = MagicMock(spec=DeterministicGuardrail)
+            mock_guardrail.name = "custom_guard"
+            mock_guardrail.description = "Custom Guard"
             mock_guardrail.enabled_for_evals = True
             mock_guardrail.guardrail_type = "custom"
             mock_guardrail.selector = MagicMock()
@@ -2096,7 +2540,10 @@ class TestDeterministicGuardrailTelemetry:
                     metadata={
                         "langgraph_node": "tool_pre_execution_custom_guard",
                         "guardrail": mock_guardrail,
+                        "node_type": "guardrail_evaluation",
                         "scope": GuardrailScope.TOOL,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Skip",
                     },
                 )
                 callback.on_chain_end(
@@ -2124,20 +2571,20 @@ class TestDeterministicGuardrailTelemetry:
     ):
         """DeterministicGuardrail with UniversalRule should have correct RuleDetails."""
         import json
-        from unittest.mock import MagicMock, patch
 
         from uipath.core.guardrails import (
             ApplyTo,
             DeterministicGuardrail,
             UniversalRule,
         )
-        from uipath.platform.guardrails import GuardrailScope
 
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
             mock_guardrail = MagicMock(spec=DeterministicGuardrail)
+            mock_guardrail.name = "always_guard"
+            mock_guardrail.description = "Always Guard"
             mock_guardrail.enabled_for_evals = True
             mock_guardrail.guardrail_type = "custom"
             mock_guardrail.selector = MagicMock()
@@ -2160,7 +2607,10 @@ class TestDeterministicGuardrailTelemetry:
                     metadata={
                         "langgraph_node": "tool_pre_execution_always_guard",
                         "guardrail": mock_guardrail,
+                        "node_type": "guardrail_evaluation",
                         "scope": GuardrailScope.TOOL,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Skip",
                     },
                 )
                 callback.on_chain_end(
@@ -2228,33 +2678,44 @@ class TestLangchainConfigStructure:
 
 
 class TestEscalationReviewedData:
-    """Tests for escalation span completion with reviewed data from outputs."""
+    """Tests for escalation span completion with reviewed data on resume."""
 
-    def test_escalate_action_completes_span_in_on_chain_end(
+    def test_escalate_approved_on_resume_completes_via_on_chain_end(
         self,
         callback: LlmOpsInstrumentationCallback,
         tracer: LlmOpsSpanFactory,
         span_exporter,
     ) -> None:
-        """Escalate action span completes in on_chain_end with reviewed data."""
+        """When HITL is approved on resume, span completes via on_chain_end."""
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
-            # Guardrail evaluation fails
-            eval_run_id = uuid4()
-            callback.on_chain_start(
-                {},
-                {},
-                run_id=eval_run_id,
-                metadata={"langgraph_node": "agent_pre_execution_pii_guard"},
-            )
-            callback.on_chain_end(
-                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: False}},
-                run_id=eval_run_id,
-            )
+            # Create mock guardrail
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "deterministic"
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
 
-            # Escalate action node fires (with action_type metadata)
+            # Simulate resumed escalation context (set by runtime on resume)
+            callback._state.resumed_escalation_trace_id = "0123456789abcdef"
+            callback._state.resumed_escalation_span_data = {
+                "name": "Review task",
+                "span_id": "abcd1234",
+                "attributes": {
+                    "type": "guardrailEscalation",
+                    "reviewStatus": "Pending",
+                },
+            }
+            callback._state.resumed_hitl_guardrail_span_data = {
+                "name": "pii_guard",
+                "span_id": "eval5678",
+                "attributes": {},
+            }
+
+            # Resume: Escalate action node fires on resume
             action_run_id = uuid4()
             callback.on_chain_start(
                 {},
@@ -2262,114 +2723,125 @@ class TestEscalationReviewedData:
                 run_id=action_run_id,
                 metadata={
                     "langgraph_node": "agent_pre_execution_pii_guard_hitl",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_action",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
                     "action_type": "Escalate",
+                    "escalation_data": {
+                        "reviewed_by": "user@example.com",
+                        "reviewed_inputs": {"input": "sanitized"},
+                    },
                 },
             )
 
-            # Verify run_id is tracked for on_chain_end
-            assert action_run_id in callback._state.escalate_action_run_ids
+            # Mock upsert to verify it's called correctly
+            with patch.object(
+                callback._state.span_factory, "upsert_span_complete_by_data"
+            ) as mock_upsert:
+                mock_upsert.return_value = None
 
-            # on_chain_end with reviewed data in inner_state
-            callback.on_chain_end(
-                {
-                    # INNER_STATE_KEY: {
-                    #     ESCALATION_REVIEWED_DATA_KEY: {
-                    #         "reviewed_inputs": {"input": "sanitized"},
-                    #         "reviewed_outputs": None,
-                    #         "reviewed_by": "user@example.com",
-                    #     }
-                    # }
-                },
-                run_id=action_run_id,
-            )
+                # on_chain_end - HITL approved (no error)
+                callback.on_chain_end(
+                    {},
+                    run_id=action_run_id,
+                )
 
-            # run_id should be removed after completion
-            assert action_run_id not in callback._state.escalate_action_run_ids
+                # Verify upsert was called for the Review task span
+                assert mock_upsert.call_count >= 1
+                # Find the call for Review task span
+                review_call = None
+                for call in mock_upsert.call_args_list:
+                    span_data = call[1].get("span_data", {})
+                    if span_data.get("name") == "Review task":
+                        review_call = call
+                        break
 
-        spans = span_exporter.get_finished_spans()
-        review_spans = [s for s in spans if s.name == "Review task"]
-        assert len(review_spans) == 1
+                assert review_call is not None, "Review task span should be upserted"
+                span_data = review_call[1]["span_data"]
+                assert span_data["attributes"]["reviewStatus"] == "Completed"
+                assert span_data["attributes"]["reviewOutcome"] == "Approved"
 
-        review_span = review_spans[0]
-        assert review_span.attributes.get("reviewOutcome") == "Approved"
-        # assert review_span.attributes.get("reviewedBy") == "user@example.com"
-        # assert "sanitized" in review_span.attributes.get("reviewedInputs", "")
-
-    def test_resume_escalate_action_completes_span_via_upsert(
+    def test_escalate_rejected_on_resume_completes_via_on_chain_error(
         self,
         callback: LlmOpsInstrumentationCallback,
         tracer: LlmOpsSpanFactory,
         span_exporter,
     ) -> None:
-        """Resume escalate action completes saved span via upsert with reviewed data."""
-        from unittest.mock import patch
-
+        """When HITL is rejected on resume, span completes via on_chain_error."""
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
+            # Create mock guardrail
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "deterministic"
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
             # Simulate resumed escalation context (set by runtime on resume)
-            callback._state.resumed_escalation_trace_id = "trace-123"
+            callback._state.resumed_escalation_trace_id = "0123456789abcdef"
             callback._state.resumed_escalation_span_data = {
                 "name": "Review task",
+                "span_id": "abcd1234",
                 "attributes": {
-                    "type": "reviewTask",
-                    "reviewStatus": "waiting",
+                    "type": "guardrailEscalation",
+                    "reviewStatus": "Pending",
                 },
             }
+            callback._state.resumed_hitl_guardrail_span_data = {
+                "name": "pii_guard",
+                "span_id": "eval5678",
+                "attributes": {},
+            }
 
-            # Resume escalate action node fires (with action_type metadata)
+            # Resume: Escalate action node fires on resume
             action_run_id = uuid4()
             callback.on_chain_start(
                 {},
                 {},
                 run_id=action_run_id,
                 metadata={
-                    "langgraph_node": "agent_pre_execution_pii_guard_hitl_hitl",
+                    "langgraph_node": "agent_pre_execution_pii_guard_hitl",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_action",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
                     "action_type": "Escalate",
+                    "escalation_data": {
+                        "reviewed_by": "user@example.com",
+                    },
                 },
             )
 
-            # Verify run_id is tracked for resume completion
-            assert action_run_id in callback._state.escalate_action_resume_data
-            assert (
-                callback._state.escalate_action_resume_data[action_run_id]["trace_id"]
-                == "trace-123"
-            )
-
-            # Mock the upsert call
+            # Mock upsert to verify it's called correctly
             with patch.object(
                 callback._state.span_factory, "upsert_span_complete_by_data"
             ) as mock_upsert:
                 mock_upsert.return_value = None
 
-                # on_chain_end with reviewed data
-                callback.on_chain_end(
-                    {
-                        # INNER_STATE_KEY: {
-                        #     ESCALATION_REVIEWED_DATA_KEY: {
-                        #         "reviewed_inputs": {"data": "reviewed"},
-                        #         "reviewed_outputs": {"result": "approved"},
-                        #         "reviewed_by": "reviewer@example.com",
-                        #     }
-                        # }
-                    },
+                # on_chain_error - HITL rejected
+                callback.on_chain_error(
+                    Exception("User rejected: Invalid data"),
                     run_id=action_run_id,
                 )
 
-                # Verify upsert was called with correct data
-                mock_upsert.assert_called_once()
-                call_args = mock_upsert.call_args
-                assert call_args[1]["trace_id"] == "trace-123"
-                span_data = call_args[1]["span_data"]
-                assert span_data["attributes"]["reviewStatus"] == "completed"
-                assert span_data["attributes"]["reviewOutcome"] == "Approved"
-                # assert span_data["attributes"]["reviewedBy"] == "reviewer@example.com"
-                # assert "reviewed" in span_data["attributes"]["reviewedInputs"]
-                # assert "approved" in span_data["attributes"]["reviewedOutputs"]
+                # Verify upsert was called for the Review task span
+                assert mock_upsert.call_count >= 1
+                # Find the call for Review task span
+                review_call = None
+                for call in mock_upsert.call_args_list:
+                    span_data = call[1].get("span_data", {})
+                    if span_data.get("name") == "Review task":
+                        review_call = call
+                        break
 
-            # run_id should be removed after completion
-            assert action_run_id not in callback._state.escalate_action_resume_data
+                assert review_call is not None, "Review task span should be upserted"
+                span_data = review_call[1]["span_data"]
+                assert span_data["attributes"]["reviewStatus"] == "Completed"
+                assert span_data["attributes"]["reviewOutcome"] == "Rejected"
 
 
 class TestNestedLlmCallsInTools:

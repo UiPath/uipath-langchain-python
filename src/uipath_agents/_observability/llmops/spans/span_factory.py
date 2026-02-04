@@ -370,8 +370,9 @@ class LlmOpsSpanFactory:
     def start_guardrail_evaluation(
         self,
         guardrail_name: str,
+        guardrail_action: str,
         guardrail_description: Optional[str] = None,
-        scope: str = "agent",
+        rule_details: Optional[list[str]] = None,
         parent_span: Optional[Span] = None,
     ) -> Span:
         """Start an individual guardrail evaluation span.
@@ -379,7 +380,8 @@ class LlmOpsSpanFactory:
         Args:
             guardrail_name: Name of the guardrail being evaluated
             guardrail_description: Optional description of the guardrail
-            scope: "agent", "llm", or "tool" - determines span type
+            guardrail_action: "Log", "Block", "Filter" or "Escalate" - action that was configured to be enforced ig guardrail validation fails
+            rule_details: Optional details about the guardrail rules being evaluated
             parent_span: Optional parent span. If None, uses current span.
 
         Returns:
@@ -388,36 +390,94 @@ class LlmOpsSpanFactory:
         return self._guardrail_schema.start_guardrail_evaluation(
             guardrail_name=guardrail_name,
             guardrail_description=guardrail_description,
-            scope=scope,
+            guardrail_action=guardrail_action,
+            rule_details=rule_details,
             parent_span=parent_span,
         )
 
     def end_guardrail_evaluation(
         self,
         span: Span,
-        validation_passed: bool,
         validation_result: Optional[str] = None,
+        payload: Optional[Any] = None,
         action: Optional[str] = None,
         severity_level: Optional[str] = None,
         reason: Optional[str] = None,
+        excluded_fields: Optional[Any] = None,
+        updated_data: Optional[dict[str, Any]] = None,
     ) -> None:
         """End a guardrail evaluation span with result attributes.
 
         Args:
             span: The guardrail evaluation span to end
-            validation_passed: Whether the guardrail validation passed
             validation_result: The validation result message (if failed)
             action: The action taken ("allow", "block", "log", "escalate")
-            severity_level: Severity level for log actions
-            reason: Reason for block/skip actions
+            severity_level: Severity level for log actions (for Log action)
+            reason: Reason for block/skip actions (for Block action)
+            payload: Data was validated against the guardrail rule
+            excluded_fields: List of fields to exclude from the guardrail evaluation (for Filter action)
+            updated_data: Optional updated data (contains updated input and updated output) (for Filter action)
         """
         self._guardrail_schema.end_guardrail_evaluation(
             span=span,
-            validation_passed=validation_passed,
             validation_result=validation_result,
             action=action,
             severity_level=severity_level,
             reason=reason,
+            payload=payload,
+            excluded_fields=excluded_fields,
+            updated_data=updated_data,
+        )
+
+    def upsert_guardrail_evaluation(
+        self,
+        span: Span,
+        validation_result: Optional[str] = None,
+        payload: Optional[Any] = None,
+    ) -> None:
+        """Update a guardrail evaluation span with attributes and upsert without ending.
+
+        Used to update span attributes while the span is still in progress
+        (e.g., before HITL escalation). Upserts with UNSET status so the span
+        appears in traces as "in progress".
+
+        Args:
+            span: The guardrail evaluation span to update
+            validation_result: The validation result message
+            payload: Data that was validated against the guardrail rule
+        """
+        self._guardrail_schema.upsert_guardrail_evaluation(
+            span=span,
+            validation_result=validation_result,
+            payload=payload,
+        )
+
+    def error_guardrail_evaluation(
+        self,
+        span: Span,
+        error_message: str,
+        validation_result: Optional[str] = None,
+        payload: Optional[Any] = None,
+        action: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> None:
+        """End a guardrail evaluation span with result attributes and error status.
+
+        Args:
+            span: The guardrail evaluation span to end
+            validation_result: The validation result message (if failed)
+            action: The action taken ("allow", "block", "log", "escalate")
+            reason: Reason for block/skip actions (for Block action)
+            payload: Data was validated against the guardrail rule
+            error_message: Span error message
+        """
+        self._guardrail_schema.error_guardrail_evaluation(
+            span=span,
+            validation_result=validation_result,
+            action=action,
+            reason=reason,
+            payload=payload,
+            error_message=error_message,
         )
 
     def start_guardrail_escalation(
@@ -443,34 +503,6 @@ class LlmOpsSpanFactory:
             guardrail_name=guardrail_name,
             scope=scope,
             parent_span=parent_span,
-        )
-
-    def end_guardrail_escalation(
-        self,
-        span: Span,
-        review_outcome: str,
-        reviewed_by: Optional[str] = None,
-        review_reason: Optional[Any] = None,
-        reviewed_inputs: Optional[Any] = None,
-        reviewed_outputs: Optional[Any] = None,
-    ) -> None:
-        """End a guardrail escalation span with review results.
-
-        Args:
-            span: The escalation span to end
-            review_outcome: "Approved" or "Rejected"
-            reviewed_by: Who completed the review
-            review_reason: Reason for the decision
-            reviewed_inputs: Modified inputs (if any)
-            reviewed_outputs: Modified outputs (if any)
-        """
-        self._guardrail_schema.end_guardrail_escalation(
-            span=span,
-            review_outcome=review_outcome,
-            reviewed_by=reviewed_by,
-            review_reason=review_reason,
-            reviewed_inputs=reviewed_inputs,
-            reviewed_outputs=reviewed_outputs,
         )
 
     # -------------------------------------------------------------------------

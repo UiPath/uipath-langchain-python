@@ -6,21 +6,6 @@ Guardrail scopes, stages, actions, and patterns used across handlers.
 import re
 
 
-class GuardrailScope:
-    """Scope where guardrail is applied."""
-
-    AGENT = "agent"
-    LLM = "llm"
-    TOOL = "tool"
-
-
-class GuardrailStage:
-    """Execution stage for guardrail (before or after operation)."""
-
-    PRE = "pre"
-    POST = "post"
-
-
 class GuardrailAction:
     """Action taken when guardrail validation fails."""
 
