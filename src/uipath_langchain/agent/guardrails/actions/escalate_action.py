@@ -91,6 +91,7 @@ class EscalateAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
+            "escalation_data": {},
         }
 
         async def _node(
@@ -103,13 +104,13 @@ class EscalateAction(GuardrailAction):
             task_recipient = await resolve_recipient_value(self.recipient)
 
             if isinstance(self.recipient, StandardRecipient):
-                metadata["assigned_to"] = (
+                metadata["escalation_data"]["assigned_to"] = (
                     self.recipient.display_name
                     if self.recipient.display_name
                     else self.recipient.value
                 )
             elif isinstance(self.recipient, AssetRecipient):
-                metadata["assigned_to"] = (
+                metadata["escalation_data"]["assigned_to"] = (
                     task_recipient.value if task_recipient else None
                 )
 
@@ -184,6 +185,31 @@ class EscalateAction(GuardrailAction):
                 )
             )
 
+            # Store reviewed inputs/outputs in metadata for observability
+            if escalation_result.data:
+                reviewed_inputs = escalation_result.data.get("ReviewedInputs")
+                reviewed_outputs = escalation_result.data.get("ReviewedOutputs")
+                reason = escalation_result.data.get("Reason")
+                if reviewed_inputs:
+                    metadata["escalation_data"]["reviewed_inputs"] = (
+                        _parse_reviewed_data(reviewed_inputs)
+                    )
+                if reviewed_outputs:
+                    metadata["escalation_data"]["reviewed_outputs"] = (
+                        _parse_reviewed_data(reviewed_outputs)
+                    )
+                if reason:
+                    metadata["escalation_data"]["reason"] = reason
+
+            # Store reviewed_by from completed_by_user
+            completed_by_user = getattr(escalation_result, "completed_by_user", None)
+            if completed_by_user:
+                reviewed_by = completed_by_user.get(
+                    "displayName"
+                ) or completed_by_user.get("emailAddress")
+                if reviewed_by:
+                    metadata["escalation_data"]["reviewed_by"] = reviewed_by
+
             if escalation_result.action == "Approve":
                 return _process_escalation_response(
                     state,
@@ -196,12 +222,29 @@ class EscalateAction(GuardrailAction):
             raise AgentTerminationException(
                 code=UiPathErrorCode.EXECUTION_ERROR,
                 title="Escalation rejected",
-                detail=f"Please contact your administrator. Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data['Reason']}",
+                detail=f"Please contact your administrator. Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data.get('Reason', None)}",
             )
 
         _node.__metadata__ = metadata  # type: ignore[attr-defined]
 
         return node_name, _node
+
+
+def _parse_reviewed_data(value: Any) -> Any:
+    if not value:
+        return value
+
+    if isinstance(value, str):
+        try:
+            # Try to parse as JSON first (handles JSON strings like "abcd")
+            parsed = json.loads(value)
+            return parsed
+        except json.JSONDecodeError:
+            # If not valid JSON, return as-is (plain string)
+            return value
+
+    # Already parsed (dict/list), return as-is
+    return value
 
 
 def _validate_message_count(
