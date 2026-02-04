@@ -191,9 +191,13 @@ class EscalateAction(GuardrailAction):
                 reviewed_outputs = escalation_result.data.get("ReviewedOutputs")
                 reason = escalation_result.data.get("Reason")
                 if reviewed_inputs:
-                    metadata["escalation_data"]["reviewed_inputs"] = reviewed_inputs
+                    metadata["escalation_data"]["reviewed_inputs"] = (
+                        _parse_reviewed_data(reviewed_inputs)
+                    )
                 if reviewed_outputs:
-                    metadata["escalation_data"]["reviewed_outputs"] = reviewed_outputs
+                    metadata["escalation_data"]["reviewed_outputs"] = (
+                        _parse_reviewed_data(reviewed_outputs)
+                    )
                 if reason:
                     metadata["escalation_data"]["reason"] = reason
 
@@ -224,6 +228,23 @@ class EscalateAction(GuardrailAction):
         _node.__metadata__ = metadata  # type: ignore[attr-defined]
 
         return node_name, _node
+
+
+def _parse_reviewed_data(value: Any) -> Any:
+    if not value:
+        return value
+
+    if isinstance(value, str):
+        try:
+            # Try to parse as JSON first (handles JSON strings like "abcd")
+            parsed = json.loads(value)
+            return parsed
+        except json.JSONDecodeError:
+            # If not valid JSON, return as-is (plain string)
+            return value
+
+    # Already parsed (dict/list), return as-is
+    return value
 
 
 def _validate_message_count(
