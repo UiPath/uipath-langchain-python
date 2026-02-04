@@ -8,12 +8,13 @@ import json
 import logging
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, Optional, cast
+from typing import Any, Dict, Generator, Optional, Type, cast
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 from opentelemetry.trace import Span, Status, StatusCode
+from pydantic import BaseModel
 from uipath.tracing import SpanStatus
 
 from .spans_schema import (
@@ -128,13 +129,17 @@ class LlmOpsSpanFactory:
         ) as span:
             yield span
 
-    def emit_agent_output(self, output: Any) -> None:
+    def emit_agent_output(
+        self,
+        output: Any,
+        output_schema: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Emit agent output span (short-lived, captures final output).
 
         Args:
             output: The agent's output (will be JSON serialized if dict/list)
         """
-        self._agent_schema.emit_agent_output(output)
+        self._agent_schema.emit_agent_output(output, output_schema)
 
     # -------------------------------------------------------------------------
     # LLM spans
@@ -210,6 +215,7 @@ class LlmOpsSpanFactory:
         arguments: Optional[Dict[str, Any]] = None,
         call_id: Optional[str] = None,
         parent_span: Optional[Span] = None,
+        args_schema: Optional[Type[BaseModel]] = None,
     ) -> Span:
         """Start a tool call span.
 
@@ -231,6 +237,7 @@ class LlmOpsSpanFactory:
             arguments=arguments,
             call_id=call_id,
             parent_span=parent_span,
+            args_schema=args_schema,
         )
 
     def start_escalation_tool(

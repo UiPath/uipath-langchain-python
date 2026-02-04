@@ -797,7 +797,8 @@ class InstrumentedRuntime:
                     output_str = str(output) if output is not None else ""
                 agent_span.set_attribute("output", output_str)
 
-            self._span_factory.emit_agent_output(result.output)
+            input_schema, output_schema = self._get_schemas()
+            self._span_factory.emit_agent_output(result.output, output_schema)
 
             if self._event_emitter:
                 agent_name = self._get_agent_name()

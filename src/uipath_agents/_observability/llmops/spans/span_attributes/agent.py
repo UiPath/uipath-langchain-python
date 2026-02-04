@@ -1,8 +1,9 @@
 """Agent-related span attribute classes."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import ConfigDict, Field
+from uipath.tracing import SpanAttachment
 
 from .base import BaseSpanAttributes
 from .types import SpanType
@@ -23,6 +24,7 @@ class AgentRunSpanAttributes(BaseSpanAttributes):
     output_schema: Optional[Dict[str, Any]] = Field(None, alias="outputSchema")
     input: Optional[Dict[str, Any]] = Field(None, alias="input")
     output: Optional[Any] = Field(None, alias="output")
+    attachments: Optional[List[SpanAttachment]] = Field(None, alias="attachments")
 
     # Execution context fields (extracted to top-level by uipath.tracing)
     execution_type: Optional[int] = Field(None, alias="executionType")
@@ -41,6 +43,7 @@ class AgentOutputSpanAttributes(BaseSpanAttributes):
     model_config = ConfigDict(populate_by_name=True)
 
     output: Optional[str] = Field(None, alias="output")
+    attachments: Optional[List[SpanAttachment]] = Field(None, alias="attachments")
 
     @property
     def type(self) -> str:

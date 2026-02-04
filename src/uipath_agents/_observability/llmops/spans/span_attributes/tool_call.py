@@ -1,8 +1,9 @@
 """Core tool span attribute classes."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import ConfigDict, Field
+from uipath.tracing import SpanAttachment
 
 from .base import BaseSpanAttributes
 from .types import SpanType
@@ -18,6 +19,7 @@ class ToolCallSpanAttributes(BaseSpanAttributes):
     tool_type: str = Field(default="toolCall", alias="toolType")
     arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
     result: Optional[Any] = Field(None, alias="result")
+    attachments: Optional[List[SpanAttachment]] = Field(None, alias="attachments")
     _span_type: Optional[str] = None
 
     def __init__(self, span_type: Optional[str] = None, **data: Any):

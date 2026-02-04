@@ -14,7 +14,9 @@ from opentelemetry.trace import (
     StatusCode,
     Tracer,
 )
+from uipath.tracing import AttachmentDirection
 
+from ...instrumentors.attribute_helpers import get_span_attachments
 from ..span_attributes import (
     AgentOutputSpanAttributes,
     AgentRunSpanAttributes,
@@ -81,6 +83,9 @@ class AgentSpanSchema:
         # Set reference_id in context for all child spans
         reference_id = agent_id
         token = reference_id_context.set(reference_id)
+        attachments = get_span_attachments(
+            input_data, input_schema, direction=AttachmentDirection.IN
+        )
 
         # Create typed attributes
         attrs = AgentRunSpanAttributes(
@@ -94,6 +99,7 @@ class AgentSpanSchema:
             output_schema=output_schema,
             reference_id=reference_id,
             source=source,
+            attachments=attachments,
         )
 
         try:
@@ -119,7 +125,9 @@ class AgentSpanSchema:
             # Reset context variable when agent run completes
             reference_id_context.reset(token)
 
-    def emit_agent_output(self, output: Any) -> None:
+    def emit_agent_output(
+        self, output: Any, output_schema: Optional[Dict[str, Any]] = None
+    ) -> None:
         """Emit agent output span (short-lived, captures final output).
 
         Args:
@@ -135,6 +143,11 @@ class AgentSpanSchema:
             SpanName.AGENT_OUTPUT,
             kind=SpanKind.INTERNAL,
         ) as span:
-            attrs = AgentOutputSpanAttributes(output=output_str)
+            attachments = get_span_attachments(
+                output, output_schema, direction=AttachmentDirection.OUT
+            )
+            attrs = AgentOutputSpanAttributes(
+                output=output_str, attachments=attachments
+            )
             apply_attributes(span, attrs)
             span.set_status(Status(StatusCode.OK))

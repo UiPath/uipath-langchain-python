@@ -3,14 +3,17 @@
 Handles tool call, escalation, process, agent, and integration tool spans.
 """
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Type
 
 from opentelemetry.trace import (
     Span,
     SpanKind,
     Tracer,
 )
+from pydantic import BaseModel
+from uipath.tracing import AttachmentDirection
 
+from ...instrumentors.attribute_helpers import get_span_attachments
 from ..span_attributes import (
     AgentToolSpanAttributes,
     EscalationToolSpanAttributes,
@@ -52,6 +55,7 @@ class ToolSpanSchema:
         arguments: Optional[Dict[str, Any]] = None,
         call_id: Optional[str] = None,
         parent_span: Optional[Span] = None,
+        args_schema: Optional[Type[BaseModel]] = None,
     ) -> Span:
         """Start a tool call span.
 
@@ -72,12 +76,17 @@ class ToolSpanSchema:
             parent_span=parent_span,
             kind=SpanKind.INTERNAL,
         )
+
+        attachments = get_span_attachments(
+            arguments, args_schema, direction=AttachmentDirection.IN
+        )
         attrs = ToolCallSpanAttributes(
             tool_name=tool_name,
             span_type=tool_type,
             tool_type=tool_type_value or "Integration",
             arguments=arguments,
             call_id=call_id,
+            attachments=attachments,
         )
         apply_attributes(span, attrs)
         if self._upsert_started:

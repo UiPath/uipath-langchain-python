@@ -1,12 +1,18 @@
 """Attribute extraction and formatting helpers for span instrumentation."""
 
+import ast
 import json
+import logging
 import re
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 from langchain_core.outputs import LLMResult
 from opentelemetry.trace import Span
+from pydantic import BaseModel
 from uipath.core.serialization import serialize_json
+from uipath.tracing import AttachmentDirection, AttachmentProvider, SpanAttachment
+
+logger = logging.getLogger(__name__)
 
 _BASE64_RE = re.compile(r"^[A-Za-z0-9+/\-_]+=*$")
 
@@ -171,13 +177,26 @@ def set_tool_calls_attributes(span: Span, response: Optional[LLMResult]) -> None
 
 
 def parse_tool_arguments(input_str: str) -> Optional[Dict[str, Any]]:
-    """Parse tool arguments from JSON string."""
+    """Parse tool arguments from JSON string or Python dict representation."""
     if not input_str:
         return None
+
     try:
         args = json.loads(input_str)
         return args if isinstance(args, dict) else None
     except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Fallback: try Python dict string representation (single quotes)
+    try:
+        args = ast.literal_eval(input_str)
+        return args if isinstance(args, dict) else None
+    except (ValueError, SyntaxError, TypeError) as e:
+        logger.warning(
+            "Failed to parse tool arguments from string: %s. Error: %s",
+            input_str[:100],
+            str(e),
+        )
         return None
 
 
@@ -230,3 +249,76 @@ def set_process_job_info(span: Span, output: Any) -> None:
     )
     if job_uri:
         span.set_attribute("jobDetailsUri", str(job_uri))
+
+
+def get_span_attachments(
+    data: Optional[Dict[str, Any]],
+    schema: Optional[Union[Dict[str, Any], Type[BaseModel]]],
+    direction: Union[int, AttachmentDirection] = AttachmentDirection.NONE,
+    provider: Union[int, AttachmentProvider] = AttachmentProvider.ORCHESTRATOR,
+) -> Optional[List[SpanAttachment]]:
+    """Extract span attachments from input data using JSON schema or Pydantic model.
+
+    Converts input schema to a Pydantic model (if needed), extracts job attachments,
+    and converts them to SpanAttachment objects for tracing.
+
+    Args:
+        input_data: The input data dictionary to extract attachments from
+        input_schema: JSON schema definition (dict) or Pydantic model class
+        direction: Attachment direction (int or AttachmentDirection enum)
+        provider: Attachment provider (int or AttachmentProvider enum)
+
+    Returns:
+        List of SpanAttachment objects, or None if no attachments found
+    """
+    if not data or not schema:
+        return None
+
+    try:
+        from uipath_langchain.agent.react.job_attachments import get_job_attachments
+        from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+            create_model,
+        )
+
+        if isinstance(schema, dict):
+            pydantic_model = create_model(schema)
+        elif issubclass(schema, BaseModel):
+            pydantic_model = schema
+        else:
+            return None
+
+        job_attachments = get_job_attachments(pydantic_model, data)
+
+        if not job_attachments:
+            return None
+
+        span_attachments = [
+            SpanAttachment.model_validate(
+                {
+                    "id": str(att.id),
+                    "file_name": att.full_name or "",
+                    "mime_type": att.mime_type or "",
+                    "provider": provider,
+                    "direction": direction,
+                }
+            )
+            for att in job_attachments
+        ]
+
+        return span_attachments if span_attachments else None
+
+    except ImportError as e:
+        logger.warning(
+            "Failed to extract span attachments: uipath_langchain is not available. "
+            "Install uipath_langchain to enable attachment extraction. Error: %s",
+            str(e),
+        )
+        return None
+    except Exception as e:
+        logger.warning(
+            "Failed to extract span attachments from input data. "
+            "Tracing will continue without attachments. Error: %s",
+            str(e),
+            exc_info=True,
+        )
+        return None

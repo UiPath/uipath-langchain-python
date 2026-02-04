@@ -83,6 +83,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             call_id = kwargs.get("tool_call_id")
             arguments = parse_tool_arguments(input_str)
             tool_type_value = get_tool_type_value(tool_type)
+            args_schema = metadata.get("args_schema") if metadata else None
 
             # Check if tool span was created early by tool_pre guardrails
             # Only reuse if the flag indicates it was created by guardrails
@@ -107,6 +108,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                     arguments=arguments,
                     call_id=call_id,
                     parent_span=parent,
+                    args_schema=args_schema,
                 )
                 span.set_attribute("tool.name", tool_name)
                 self._spans[run_id] = span
