@@ -140,6 +140,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
             api_version=api_version,
             validate_base_url=False,
             use_responses_api=use_responses_api,
+            include_response_headers=True,
             **kwargs,
         )
 
