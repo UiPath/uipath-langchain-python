@@ -75,7 +75,9 @@ class FilterAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "excluded_fields": [field.path for field in self.fields] if self.fields else [],
+            "excluded_fields": [field.path for field in self.fields]
+            if self.fields
+            else [],
             "updated_data": {"input": None, "output": None},
         }
 

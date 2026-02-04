@@ -91,7 +91,7 @@ class EscalateAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "escalation_data": {}
+            "escalation_data": {},
         }
 
         async def _node(
@@ -200,7 +200,9 @@ class EscalateAction(GuardrailAction):
             # Store reviewed_by from completed_by_user
             completed_by_user = getattr(escalation_result, "completed_by_user", None)
             if completed_by_user:
-                reviewed_by = completed_by_user.get("displayName") or completed_by_user.get("emailAddress")
+                reviewed_by = completed_by_user.get(
+                    "displayName"
+                ) or completed_by_user.get("emailAddress")
                 if reviewed_by:
                     metadata["escalation_data"]["reviewed_by"] = reviewed_by
 
