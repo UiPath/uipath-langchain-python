@@ -1,0 +1,13 @@
+{
+  "fileName": "legacy-llm-as-a-judge.json",
+  "id": "c9d0e1f2-a3b4-5c6d-7e8f-9a0b1c2d3e4f",
+  "name": "LLM As A Judge Evaluator",
+  "description": "An evaluator that uses an LLM to judge the similarity of the actual output to the expected output",
+  "category": 1,
+  "type": 5,
+  "prompt": "As an expert evaluator, analyze the semantic similarity of these outputs to determine a score from 0-100.\n----\nExpectedOutput:\n{{ExpectedOutput}}\n----\nActualOutput:\n{{ActualOutput}}\n",
+  "targetOutputKey": "*",
+  "model": "gpt-4.1-2025-04-14",
+  "createdAt": "2025-12-16T00:00:00.000Z",
+  "updatedAt": "2025-12-16T00:00:00.000Z"
+}

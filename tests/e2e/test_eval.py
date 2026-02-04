@@ -166,7 +166,7 @@ def run_eval_and_parse(
         command=command,
         cwd=example_dir,
         env=authenticated_session,
-        timeout=300,
+        timeout=600,
     )
 
     output = result.stdout + result.stderr

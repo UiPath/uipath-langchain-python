@@ -5,7 +5,9 @@
   "batchSize": 10,
   "evaluatorRefs": [
     "e5f6a7b8-c9d0-1e2f-3a4b-5c6d7e8f9a0b",
-    "a7b8c9d0-e1f2-3a4b-5c6d-7e8f9a0b1c2d"
+    "a7b8c9d0-e1f2-3a4b-5c6d-7e8f9a0b1c2d",
+    "c9d0e1f2-a3b4-5c6d-7e8f-9a0b1c2d3e4f",
+    "d0e1f2a3-b4c5-6d7e-8f9a-0b1c2d3e4f5a"
   ],
   "evaluations": [
     {
@@ -68,6 +70,36 @@
         "result": 5
       },
       "expectedAgentBehavior": "The agent should correctly compute 15 / 3 = 5.",
+      "evalSetId": "f7a8b9c0-1d2e-3f4a-5b6c-7d8e9f0a1b2c",
+      "createdAt": "2025-12-16T00:00:00.000Z",
+      "updatedAt": "2025-12-16T00:00:00.000Z"
+    },
+    {
+      "id": "e5f6a7b8-c9d0-1e2f-3a4b-5c6d7e8f9a0b",
+      "name": "Test Empty Values (will result in score of 0 for LlmAsAJudge and Trajectory)",
+      "inputs": {
+        "a": 2,
+        "b": 2,
+        "operator": "+"
+      },
+      "expectedOutput": {},
+      "expectedAgentBehavior": "",
+      "evalSetId": "f7a8b9c0-1d2e-3f4a-5b6c-7d8e9f0a1b2c",
+      "createdAt": "2025-12-16T00:00:00.000Z",
+      "updatedAt": "2025-12-16T00:00:00.000Z"
+    },
+    {
+      "id": "f6a7b8c9-d0e1-2f3a-4b5c-6d7e8f9a0b1c",
+      "name": "Test Empty Values 2 (will result in score of 0 for LlmAsAJudge and Trajectory)",
+      "inputs": {
+        "a": 3,
+        "b": 3,
+        "operator": "*"
+      },
+      "expectedOutput": {
+        "result": ""
+      },
+      "expectedAgentBehavior": "   ",
       "evalSetId": "f7a8b9c0-1d2e-3f4a-5b6c-7d8e9f0a1b2c",
       "createdAt": "2025-12-16T00:00:00.000Z",
       "updatedAt": "2025-12-16T00:00:00.000Z"
