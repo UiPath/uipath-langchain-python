@@ -185,10 +185,6 @@ class EscalateAction(GuardrailAction):
                 )
             )
 
-            print("ESCALATION RESULT")
-            print(escalation_result)
-            print("=================")
-
             # Store reviewed inputs/outputs in metadata for observability
             if escalation_result.data:
                 reviewed_inputs = escalation_result.data.get("ReviewedInputs")
