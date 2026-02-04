@@ -127,7 +127,7 @@ def create_escalation_tool(
             task_title = tool.metadata.get("task_title") or task_title
 
         @mockable(
-            name=tool_name,
+            name=tool_name.lower(),
             description=resource.description,
             input_schema=input_model.model_json_schema(),
             output_schema=EscalationToolOutput.model_json_schema(),
