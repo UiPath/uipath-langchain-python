@@ -666,7 +666,7 @@ class TestEscalationToolTaskInfo:
 
         tool = create_escalation_tool(escalation_resource)
         call = ToolCall(args={}, id="test-call", name=tool.name)
-        result = await tool.awrapper(tool, call, {})
+        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert result["task_id"] == 12345
         assert result["assigned_to"] == "user@example.com"
@@ -688,7 +688,7 @@ class TestEscalationToolTaskInfo:
 
         tool = create_escalation_tool(escalation_resource)
         call = ToolCall(args={}, id="test-call", name=tool.name)
-        result = await tool.awrapper(tool, call, {})
+        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert result["task_id"] == 99999
         assert result["assigned_to"] is None
