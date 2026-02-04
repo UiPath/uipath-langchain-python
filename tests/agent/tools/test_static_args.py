@@ -346,6 +346,24 @@ class TestApplyStaticArgs:
         result = apply_static_args(static_args, kwargs)
         assert result == {"files": [{"id": "uuid-123"}]}
 
+    def test_apply_static_args_empty_array_does_not_skip_other_args(self):
+        """Test empty array handling does not skip applying other static args."""
+        static_args = {
+            "$['files'][*]": {"id": "uuid-123"},
+            "meta.source": "static-source",
+        }
+        kwargs: dict[str, Any] = {
+            "files": [],
+            "meta": {"source": "dynamic"},
+        }
+
+        result = apply_static_args(static_args, kwargs)
+
+        assert result == {
+            "files": [{"id": "uuid-123"}],
+            "meta": {"source": "static-source"},
+        }
+
     def test_apply_static_args_nested_property_in_array_element(self):
         """Test applying static args to nested property in array element - should replace property on every object."""
         static_args = {"users[*].profile.verified": True}
