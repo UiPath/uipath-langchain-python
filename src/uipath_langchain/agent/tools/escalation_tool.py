@@ -21,7 +21,7 @@ from uipath.agent.utils.text_tokens import build_string_from_tokens
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
-from uipath.platform.common import CreateEscalation
+from uipath.platform.common import CreateEscalation, UiPathConfig
 from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
@@ -107,6 +107,48 @@ def _get_user_email(user: Any) -> str | None:
     return getattr(user, "emailAddress", None)
 
 
+def _parse_task_data(
+    data: dict[str, Any],
+    input_schema: dict[str, Any],
+    output_schema: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Filter action center task data based on input/output schemas.
+
+    When output_schema is None, returns only fields not present in input_schema.
+    When output_schema is provided, returns only fields defined in output_schema.
+
+    Args:
+        data: Raw task data from action center
+        input_schema: JSON schema defining the input fields
+        output_schema: Optional JSON schema defining expected output fields
+
+    Returns:
+        Filtered dictionary containing only relevant output fields
+    """
+    filtered_fields: dict[str, Any] = {}
+
+    if output_schema is None:
+        input_field_names = set()
+        if "properties" in input_schema:
+            input_field_names = set(input_schema["properties"].keys())
+
+        for field_name, field_value in data.items():
+            if field_name not in input_field_names:
+                filtered_fields[field_name] = field_value
+
+    else:
+        output_field_names = set()
+        if "properties" in output_schema:
+            output_field_names = set(output_schema["properties"].keys())
+
+        for field_name, field_value in data.items():
+            if field_name in output_field_names:
+                filtered_fields[field_name] = field_value
+
+    return filtered_fields
+
+
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
 ) -> StructuredTool:
@@ -161,25 +203,31 @@ def create_escalation_tool(
 
         # Extract task info before validation
         task_id = result.id
+        task_url = f"{UiPathConfig.base_url}/actions_/tasks/{task_id}"
         assigned_to = _get_user_email(result.assigned_to_user)
 
-        escalation_action = result.action
-        escalation_output = result.data or {}
+        outcome = result.action
+        escalation_output = _parse_task_data(
+            result.data,
+            input_schema=input_model.model_json_schema(),
+            output_schema=EscalationToolOutput.model_json_schema(),
+        )
 
         outcome_str = (
-            channel.outcome_mapping.get(escalation_action)
-            if channel.outcome_mapping and escalation_action
+            channel.outcome_mapping.get(outcome)
+            if channel.outcome_mapping and outcome
             else None
         )
-        outcome = (
+        escalation_action = (
             EscalationAction(outcome_str) if outcome_str else EscalationAction.CONTINUE
         )
 
         return {
-            "action": outcome,
+            "action": escalation_action,
             "output": escalation_output,
-            "outcome": escalation_action,
+            "outcome": outcome,
             "task_id": task_id,
+            "task_url": task_url,
             "assigned_to": assigned_to,
         }
 
@@ -215,7 +263,7 @@ def create_escalation_tool(
             )
 
         return {
-            **result["output"],
+            "output": result["output"],
             "outcome": result["outcome"],
             "task_id": result["task_id"],
             "assigned_to": result["assigned_to"],

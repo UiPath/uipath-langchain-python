@@ -16,6 +16,7 @@ from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 
 from uipath_langchain.agent.tools.escalation_tool import (
     _get_user_email,
+    _parse_task_data,
     create_escalation_tool,
     resolve_asset,
     resolve_recipient_value,
@@ -692,3 +693,38 @@ class TestEscalationToolTaskInfo:
 
         assert result["task_id"] == 99999
         assert result["assigned_to"] is None
+
+
+class TestParseTaskData:
+    """Test output task data is filtered correctly."""
+
+    def test_filters_input_fields_when_no_output_schema(self):
+        """Test that input fields are excluded when output_schema is None."""
+        data = {"input_field": "value1", "output_field": "value2"}
+        input_schema = {"properties": {"input_field": {"type": "string"}}}
+
+        result = _parse_task_data(data, input_schema, output_schema=None)
+
+        assert result == {"output_field": "value2"}
+        assert "input_field" not in result
+
+    def test_includes_only_output_fields_when_output_schema_provided(self):
+        """Test that only output schema fields are included."""
+        data = {"field1": "a", "field2": "b", "field3": "c"}
+        input_schema = {"properties": {"field1": {"type": "string"}}}
+        output_schema = {
+            "properties": {"field1": {"type": "string"}, "field2": {"type": "string"}}
+        }
+
+        result = _parse_task_data(data, input_schema, output_schema)
+
+        assert result == {"field1": "a", "field2": "b"}
+        assert "field3" not in result
+
+    def test_handles_missing_properties_in_schemas(self):
+        """Test behavior when schemas lack 'properties' key."""
+        data = {"field": "value"}
+
+        # No properties key in schemas
+        result = _parse_task_data(data, {}, None)
+        assert result == {"field": "value"}
