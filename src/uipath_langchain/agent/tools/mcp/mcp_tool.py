@@ -15,8 +15,6 @@ from uipath.agent.models.agent import (
     LowCodeAgentDefinition,
 )
 from uipath.eval.mocks import mockable
-from uipath.platform import UiPath
-from uipath.platform.orchestrator.mcp import McpServer
 
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
@@ -177,8 +175,8 @@ async def create_mcp_tools_from_agent(
     Iterates over all MCP resources in the agent definition and creates tools
     for each enabled MCP server. Each MCP server gets its own McpClient instance.
 
-    The UiPath SDK is lazily initialized inside this function using environment
-    variables (UIPATH_URL, UIPATH_ACCESS_TOKEN).
+    The MCP server URL is loaded lazily on first tool call via the UiPath SDK,
+    using environment variables (UIPATH_URL, UIPATH_ACCESS_TOKEN).
 
     Args:
         agent: The agent definition containing MCP resources.
@@ -194,7 +192,6 @@ async def create_mcp_tools_from_agent(
     """
     tools: list[BaseTool] = []
     clients: list[McpClient] = []
-    sdk: UiPath = UiPath()  # Lazy initialization of SDK
 
     for resource in agent.resources:
         if not isinstance(resource, AgentMcpResourceConfig):
@@ -206,16 +203,8 @@ async def create_mcp_tools_from_agent(
 
         logger.info(f"Creating MCP tools for resource '{resource.name}'")
 
-        mcpServer: McpServer = await sdk.mcp.retrieve_async(
-            slug=resource.slug, folder_path=resource.folder_path
-        )
-        if mcpServer.mcp_url is None:
-            raise ValueError(f"MCP server '{resource.slug}' has no URL configured")
-
-        mcpClient = McpClient(
-            mcpServer.mcp_url,
-            headers={"Authorization": f"Bearer {sdk._config.secret}"},
-        )
+        # McpClient will lazily load the MCP server URL on first tool call
+        mcpClient = McpClient(config=resource)
         clients.append(mcpClient)
 
         resource_tools = await create_mcp_tools_from_metadata_for_mcp_server(
