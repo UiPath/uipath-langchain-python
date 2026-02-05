@@ -134,7 +134,7 @@ def create_escalation_tool(
             example_calls=channel.properties.example_calls,
         )
         async def escalate():
-            interrupt(
+            return interrupt(
                 CreateEscalation(
                     title=task_title,
                     data=kwargs,
@@ -155,6 +155,9 @@ def create_escalation_tool(
         escalation_action = getattr(result, "action", None)
         escalation_output = getattr(result, "data", {})
 
+        tool.metadata["task_id"] = getattr(result, "task_id", None)
+        tool.metadata["task_url"] = getattr(result, "task_url", None)
+
         outcome_str = (
             channel.outcome_mapping.get(escalation_action)
             if channel.outcome_mapping and escalation_action
@@ -166,11 +169,8 @@ def create_escalation_tool(
 
         return {
             "action": outcome,
-            "output": escalation_output,
-            "escalation_action": escalation_action,
-            "task_id": getattr(result, "id", None),
-            "task_url": getattr(result, "task_url", None),
-            "recipient": recipient.value,
+            "outcome": escalation_action,
+            "output": {}, # for now
         }
 
     async def escalation_wrapper(
