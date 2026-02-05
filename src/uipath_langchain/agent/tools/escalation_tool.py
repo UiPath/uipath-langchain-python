@@ -6,7 +6,7 @@ from typing import Any, Literal
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import interrupt
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipient,
@@ -98,6 +98,15 @@ def _resolve_task_title(
     return "Escalation Task"
 
 
+def _get_user_email(user: Any) -> str | None:
+    """Extract email from user object/dict."""
+    if user is None:
+        return None
+    if isinstance(user, dict):
+        return user.get("emailAddress")
+    return getattr(user, "emailAddress", None)
+
+
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
 ) -> StructuredTool:
@@ -134,7 +143,7 @@ def create_escalation_tool(
             example_calls=channel.properties.example_calls,
         )
         async def escalate():
-            interrupt(
+            return interrupt(
                 CreateEscalation(
                     title=task_title,
                     data=kwargs,
@@ -149,11 +158,13 @@ def create_escalation_tool(
             )
 
         result = await escalate()
-        if isinstance(result, dict):
-            result = TypeAdapter(EscalationToolOutput).validate_python(result)
 
-        escalation_action = getattr(result, "action", None)
-        escalation_output = getattr(result, "data", {})
+        # Extract task info before validation
+        task_id = result.id
+        assigned_to = _get_user_email(result.assigned_to_user)
+
+        escalation_action = result.action
+        escalation_output = result.data or {}
 
         outcome_str = (
             channel.outcome_mapping.get(escalation_action)
@@ -167,7 +178,9 @@ def create_escalation_tool(
         return {
             "action": outcome,
             "output": escalation_output,
-            "escalation_action": escalation_action,
+            "outcome": escalation_action,
+            "task_id": task_id,
+            "assigned_to": assigned_to,
         }
 
     async def escalation_wrapper(
@@ -182,6 +195,9 @@ def create_escalation_tool(
             channel.task_title, sanitize_dict_for_serialization(dict(state))
         )
 
+        tool.metadata["_call_id"] = call.get("id")
+        tool.metadata["_call_args"] = dict(call.get("args", {}))
+
         call["args"] = handle_static_args(resource, state, call["args"])
         result = await tool.ainvoke(call["args"])
 
@@ -189,7 +205,7 @@ def create_escalation_tool(
             output_detail = f"Escalation output: {result['output']}"
             termination_title = (
                 f"Agent run ended based on escalation outcome {result['action']} "
-                f"with directive {result['escalation_action']}"
+                f"with directive {result['outcome']}"
             )
 
             raise AgentTerminationException(
@@ -198,7 +214,12 @@ def create_escalation_tool(
                 detail=output_detail,
             )
 
-        return result["output"]
+        return {
+            **result["output"],
+            "outcome": result["outcome"],
+            "task_id": result["task_id"],
+            "assigned_to": result["assigned_to"],
+        }
 
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,
