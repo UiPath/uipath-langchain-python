@@ -1,0 +1,2 @@
+[dependencies]
+uipath-agents = { path = "/absolute/path/to/uipath-agents-python", editable = true }
