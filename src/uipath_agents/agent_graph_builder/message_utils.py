@@ -108,7 +108,9 @@ def create_message_factory(
         state: BaseModel | dict[str, Any],
     ) -> List[SystemMessage | HumanMessage]:
         input_arguments = extract_input_data_from_state(state, input_model)
-        return build_conversational_agent_messages(agent_definition, input_arguments)
+        return _create_conversational_agent_messages_from_definition(
+            agent_definition, input_arguments
+        )
 
     return (
         conversational_message_factory
@@ -154,9 +156,10 @@ def _build_message_content(
     tool_names: list[str] | None = None,
     escalation_names: list[str] | None = None,
     context_names: list[str] | None = None,
+    force_legacy_interpolation: bool = False,
 ) -> str:
     """Build a prompt from an AgentMessage, handling both legacy content and new content_tokens."""
-    if message.content_tokens is None:
+    if message.content_tokens is None or force_legacy_interpolation:
         # Support both {{input.x}} (Studio Web) and {{x}} (direct) formats
         wrapped_input = {"input": input_arguments, **input_arguments}
         return interpolate_legacy_message(message.content or "", wrapped_input)
@@ -199,16 +202,9 @@ def interpolate_legacy_message(content: str, input_values: dict[str, Any]) -> st
     return interpolated
 
 
-def build_conversational_agent_messages(
+def _create_conversational_agent_messages_from_definition(
     agent_definition: LowCodeAgentDefinition, input_arguments: dict[str, Any]
 ) -> list[SystemMessage | HumanMessage]:
-    # See note in runtime/factory.py about the use of input arguments for user settings.
-    user_settings = extract_user_settings(input_arguments)
-    if user_settings is None:
-        logger.warning(
-            "user_settings property not provided in input - user context will not be included in system prompt"
-        )
-
     system_message: AgentMessage | None = next(
         (
             msg
@@ -222,10 +218,31 @@ def build_conversational_agent_messages(
             "Conversational agent configuration must contain exactly one system message"
         )
 
+    # Keep only user-defined input properties for interpolation into agent-definition's system message
+    system_message_input_arguments = {
+        k: v
+        for k, v in input_arguments.items()
+        if k != "messages" and not k.startswith("uipath__")
+    }
+
+    # Interpolate variables in system message content before passing to chat system prompt
+    # Note: Using legacy interpolation rather than content_tokens, since inputs for conversational-agents are currently specified by using {{variable}} placeholders.
+    interpolated_system_message_content = _build_message_content(
+        system_message, system_message_input_arguments, force_legacy_interpolation=True
+    )
+
+    # Handle special uipath__user_settings field in input arguments, which is interpolated in the
+    # wrapper prompt for Conversational Agents (rather than the agent-definition's system prompt).
+    user_settings = extract_uipath_user_settings(input_arguments)
+    if user_settings is None:
+        logger.warning(
+            "uipath__user_settings property not provided in input - user context will not be included in system prompt"
+        )
+
     system_prompt = get_chat_system_prompt(
         agent_name=agent_definition.name,
         model=agent_definition.settings.model,
-        system_message=system_message.content,
+        system_message=interpolated_system_message_content,
         user_settings=user_settings,
     )
 
@@ -237,14 +254,13 @@ def build_conversational_agent_messages(
     return [SystemMessage(content=system_prompt)]
 
 
-def extract_user_settings(
+def extract_uipath_user_settings(
     input_data: Optional[dict[str, Any]],
 ) -> Optional[PromptUserSettings]:
     """Extract user settings from input data.
 
     Args:
-        input_data: Input data dict that may contain userSettings
-        is_resume: Whether this is a resume operation (suppresses warning)
+        input_data: Input data dict that may contain uipath__user_settings
 
     Returns:
         PromptUserSettings if found in input, None otherwise
@@ -252,7 +268,7 @@ def extract_user_settings(
     if not input_data or not isinstance(input_data, dict):
         return None
 
-    user_settings_data = input_data.get("userSettings")
+    user_settings_data = input_data.get("uipath__user_settings")
     if not user_settings_data or not isinstance(user_settings_data, dict):
         return None
 

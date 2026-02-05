@@ -690,7 +690,7 @@ class TestBuildAgentGraph:
             input_schema={
                 "type": "object",
                 "properties": {
-                    "userSettings": {
+                    "uipath__user_settings": {
                         "type": "object",
                         "properties": {"name": {"type": "string"}},
                     }
@@ -732,7 +732,7 @@ class TestBuildAgentGraph:
             message_factory = mock_create.call_args.kwargs["messages"]
 
             # Call the factory - for conversational agents it should return only SystemMessage
-            messages = message_factory({"userSettings": {"name": "Test User"}})
+            messages = message_factory({"uipath__user_settings": {"name": "Test User"}})
 
             # Conversational message factory returns only a SystemMessage
             # (it relies on init_node to manage user messages)

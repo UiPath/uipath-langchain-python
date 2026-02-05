@@ -32,40 +32,34 @@ class TestConversationalAgentInputSchema:
     def test_schema_is_object_type(self):
         """Schema should be an object type."""
         factory = AgentsRuntimeFactory(MagicMock())
-        assert factory._get_conversational_agent_input_schema()["type"] == "object"
-
-    def test_schema_allows_additional_properties(self):
-        """Schema should allow additional properties for flexibility."""
-        factory = AgentsRuntimeFactory(MagicMock())
-        assert (
-            factory._get_conversational_agent_input_schema()["additionalProperties"]
-            is True
-        )
+        assert factory._get_conversational_agent_input_schema(None)["type"] == "object"
 
     def test_schema_has_messages_property(self):
         """Schema should have a messages array property."""
         factory = AgentsRuntimeFactory(MagicMock())
-        properties = factory._get_conversational_agent_input_schema()["properties"]
+        properties = factory._get_conversational_agent_input_schema(None)["properties"]
         assert "messages" in properties
         assert properties["messages"]["type"] == "array"
 
-    def test_schema_has_user_settings_property(self):
-        """Schema should have a userSettings object property."""
+    def test_schema_has_uipath__user_settings_property(self):
+        """Schema should have a uipath__user_settings object property."""
         factory = AgentsRuntimeFactory(MagicMock())
-        schema = factory._get_conversational_agent_input_schema()
+        schema = factory._get_conversational_agent_input_schema(None)
         properties = schema["properties"]
 
-        assert "userSettings" in properties
+        assert "uipath__user_settings" in properties
 
-        user_settings = self._resolve_ref(schema, properties["userSettings"])
+        user_settings = self._resolve_ref(schema, properties["uipath__user_settings"])
         assert user_settings["type"] == "object"
 
-    def test_user_settings_has_expected_fields(self):
-        """UserSettings should have name, email, role, department, company, country, timezone."""
+    def test_uipath__user_settings_has_expected_fields(self):
+        """uipath__user_settings should have name, email, role, department, company, country, timezone."""
         factory = AgentsRuntimeFactory(MagicMock())
-        schema = factory._get_conversational_agent_input_schema()
+        schema = factory._get_conversational_agent_input_schema(None)
 
-        user_settings = self._resolve_ref(schema, schema["properties"]["userSettings"])
+        user_settings = self._resolve_ref(
+            schema, schema["properties"]["uipath__user_settings"]
+        )
         props = user_settings["properties"]
 
         expected_fields = [
@@ -79,6 +73,44 @@ class TestConversationalAgentInputSchema:
         ]
         for field in expected_fields:
             assert field in props, f"Missing field: {field}"
+
+    def test_merges_existing_schema_properties(self):
+        """Should merge existing schema properties with system fields."""
+        factory = AgentsRuntimeFactory(MagicMock())
+
+        existing_schema = {
+            "type": "object",
+            "title": "Custom Agent Input",
+            "description": "User-defined schema",
+            "properties": {
+                "custom_field": {"type": "string", "description": "A custom field"},
+                "another_field": {"type": "number"},
+            },
+            "required": ["custom_field"],
+            "additionalProperties": False,
+        }
+
+        result = factory._get_conversational_agent_input_schema(existing_schema)
+
+        # Default low-code conversational agent system fields should be present
+        assert "messages" in result["properties"]
+        assert "uipath__user_settings" in result["properties"]
+
+        # Existing schema properties should be preserved
+        assert "custom_field" in result["properties"]
+        assert "another_field" in result["properties"]
+        assert result["properties"]["custom_field"]["type"] == "string"
+
+        # Metadata should be preserved
+        assert result["title"] == "Custom Agent Input"
+        assert result["description"] == "User-defined schema"
+        assert result["additionalProperties"] is False
+
+        # Existing schema required fields should be preserved
+        assert "custom_field" in result["required"]
+        assert "another_field" not in result["required"]
+        assert "messages" not in result["required"]
+        assert "uipath__user_settings" not in result["required"]
 
 
 class TestLoadAgentDefinition:
@@ -112,7 +144,10 @@ class TestLoadAgentDefinition:
             result = factory._load_agent_definition("agent.json")
 
             assert (
-                result.input_schema == factory._get_conversational_agent_input_schema()
+                result.input_schema
+                == factory._get_conversational_agent_input_schema(
+                    mock_agent_def.input_schema
+                )
             )
 
     def test_does_not_set_schema_for_regular_agent(self, factory, tmp_path):
@@ -137,14 +172,16 @@ class TestLoadAgentDefinition:
             # Input schema should remain unchanged for regular agents
             assert result.input_schema == original_schema
 
-    def test_overwrites_existing_input_schema(self, factory, tmp_path):
-        """Should overwrite any existing input schema for conversational agents."""
+    def test_merges_existing_input_schema(self, factory, tmp_path):
+        """Should merge existing input schema with system fields for conversational agents."""
         mock_agent_def = MagicMock()
         mock_agent_def.is_conversational = True
-        mock_agent_def.input_schema = {
+        existing_schema = {
             "type": "object",
             "properties": {"custom_field": {"type": "string"}},
+            "required": ["custom_field"],
         }
+        mock_agent_def.input_schema = existing_schema
 
         with (
             patch("uipath_agents._cli.runtime.factory.Path.cwd", return_value=tmp_path),
@@ -155,8 +192,20 @@ class TestLoadAgentDefinition:
         ):
             result = factory._load_agent_definition("agent.json")
 
-            # Should be replaced with the conversational schema
             assert (
-                result.input_schema == factory._get_conversational_agent_input_schema()
+                result.input_schema
+                == factory._get_conversational_agent_input_schema(existing_schema)
             )
-            assert "custom_field" not in result.input_schema.get("properties", {})
+
+            # Default low-code conversational agent system fields should be present
+            assert "messages" in result.input_schema["properties"]
+            assert "uipath__user_settings" in result.input_schema["properties"]
+
+            # Existing schema properties should be preserved
+            assert "custom_field" in result.input_schema["properties"]
+            assert result.input_schema["properties"]["custom_field"]["type"] == "string"
+
+            # Existing schema required fields should be preserved
+            assert "custom_field" in result.input_schema["required"]
+            assert "messages" not in result.input_schema["required"]
+            assert "uipath__user_settings" not in result.input_schema["required"]

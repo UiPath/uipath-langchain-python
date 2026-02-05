@@ -10,55 +10,55 @@ from uipath.agent.models.agent import AgentMessage, AgentMessageRole
 from uipath.agent.react import PromptUserSettings
 
 from uipath_agents.agent_graph_builder.message_utils import (
-    build_conversational_agent_messages,
+    _create_conversational_agent_messages_from_definition,
     create_message_factory,
-    extract_user_settings,
+    extract_uipath_user_settings,
 )
 
 
 class TestExtractUserSettings:
-    """Test cases for extract_user_settings function."""
+    """Test cases for extract_uipath__user_settings function."""
 
     def test_returns_none_for_none_input(self):
         """Should return None when input_data is None."""
-        result = extract_user_settings(None)
+        result = extract_uipath_user_settings(None)
 
         assert result is None
 
     def test_returns_none_for_empty_dict(self):
         """Should return None when input_data is empty dict."""
-        result = extract_user_settings({})
+        result = extract_uipath_user_settings({})
 
         assert result is None
 
     def test_returns_none_for_non_dict_input(self):
         """Should return None when input_data is not a dict."""
-        result = extract_user_settings("not a dict")  # type: ignore
+        result = extract_uipath_user_settings("not a dict")  # type: ignore
 
         assert result is None
 
     def test_returns_none_when_user_settings_missing(self):
-        """Should return None when userSettings key is not present."""
-        result = extract_user_settings({"other_key": "value"})
+        """Should return None when uipath__user_settings key is not present."""
+        result = extract_uipath_user_settings({"other_key": "value"})
 
         assert result is None
 
     def test_returns_none_when_user_settings_is_none(self):
-        """Should return None when userSettings value is None."""
-        result = extract_user_settings({"userSettings": None})
+        """Should return None when uipath__user_settings value is None."""
+        result = extract_uipath_user_settings({"uipath__user_settings": None})
 
         assert result is None
 
     def test_returns_none_when_user_settings_is_not_dict(self):
-        """Should return None when userSettings is not a dict."""
-        result = extract_user_settings({"userSettings": "not a dict"})
+        """Should return None when uipath__user_settings is not a dict."""
+        result = extract_uipath_user_settings({"uipath__user_settings": "not a dict"})
 
         assert result is None
 
     def test_extracts_all_user_settings_fields(self):
         """Should extract all PromptUserSettings fields when present."""
         input_data = {
-            "userSettings": {
+            "uipath__user_settings": {
                 "name": "John Doe",
                 "email": "john@example.com",
                 "role": "Developer",
@@ -69,7 +69,7 @@ class TestExtractUserSettings:
             }
         }
 
-        result = extract_user_settings(input_data)
+        result = extract_uipath_user_settings(input_data)
 
         assert result is not None
         assert isinstance(result, PromptUserSettings)
@@ -82,16 +82,16 @@ class TestExtractUserSettings:
         assert result.timezone == "America/New_York"
 
     def test_extracts_partial_user_settings(self):
-        """Should handle partial userSettings with some fields None."""
+        """Should handle partial uipath__user_settings with some fields None."""
         input_data = {
-            "userSettings": {
+            "uipath__user_settings": {
                 "name": "Jane Smith",
                 "email": "jane@example.com",
                 # Other fields not provided
             }
         }
 
-        result = extract_user_settings(input_data)
+        result = extract_uipath_user_settings(input_data)
 
         assert result is not None
         assert result.name == "Jane Smith"
@@ -104,9 +104,9 @@ class TestExtractUserSettings:
 
     def test_handles_empty_user_settings_dict(self):
         """Should return PromptUserSettings with all None for empty dict."""
-        input_data: dict[str, Any] = {"userSettings": {}}
+        input_data: dict[str, Any] = {"uipath__user_settings": {}}
 
-        result = extract_user_settings(input_data)
+        result = extract_uipath_user_settings(input_data)
 
         # Returns None because empty dict is falsy
         assert result is None
@@ -114,14 +114,14 @@ class TestExtractUserSettings:
     def test_extracts_only_known_fields(self):
         """Should only extract known fields, ignoring extras."""
         input_data = {
-            "userSettings": {
+            "uipath__user_settings": {
                 "name": "Test User",
                 "unknown_field": "should be ignored",
                 "another_unknown": 123,
             }
         }
 
-        result = extract_user_settings(input_data)
+        result = extract_uipath_user_settings(input_data)
 
         assert result is not None
         assert result.name == "Test User"
@@ -129,7 +129,7 @@ class TestExtractUserSettings:
 
 
 class TestBuildConversationalAgentMessages:
-    """Test cases for build_conversational_agent_messages function."""
+    """Test cases for _create_conversational_agent_messages_from_definition function."""
 
     @pytest.fixture
     def mock_agent_definition(self):
@@ -147,8 +147,8 @@ class TestBuildConversationalAgentMessages:
             "uipath_agents.agent_graph_builder.message_utils.get_chat_system_prompt",
             return_value="Generated system prompt",
         ):
-            result = build_conversational_agent_messages(
-                mock_agent_definition, {"userSettings": {"name": "Test"}}
+            result = _create_conversational_agent_messages_from_definition(
+                mock_agent_definition, {"uipath__user_settings": {"name": "Test"}}
             )
 
         assert len(result) == 1
@@ -162,12 +162,14 @@ class TestBuildConversationalAgentMessages:
             return_value="System prompt",
         ) as mock_generate:
             input_args = {
-                "userSettings": {
+                "uipath__user_settings": {
                     "name": "Alice",
                     "email": "alice@example.com",
                 }
             }
-            build_conversational_agent_messages(mock_agent_definition, input_args)
+            _create_conversational_agent_messages_from_definition(
+                mock_agent_definition, input_args
+            )
 
             mock_generate.assert_called_once()
             call_args = mock_generate.call_args.kwargs
@@ -182,7 +184,9 @@ class TestBuildConversationalAgentMessages:
             "uipath_agents.agent_graph_builder.message_utils.get_chat_system_prompt",
             return_value="System prompt",
         ) as mock_generate:
-            build_conversational_agent_messages(mock_agent_definition, {})
+            _create_conversational_agent_messages_from_definition(
+                mock_agent_definition, {}
+            )
 
             mock_generate.assert_called_once()
             call_args = mock_generate.call_args.kwargs
@@ -190,7 +194,7 @@ class TestBuildConversationalAgentMessages:
             assert user_settings is None
 
     def test_logs_warning_when_user_settings_missing(self, mock_agent_definition):
-        """Should log a warning when userSettings is not provided."""
+        """Should log a warning when uipath__user_settings is not provided."""
         with (
             patch(
                 "uipath_agents.agent_graph_builder.message_utils.get_chat_system_prompt",
@@ -200,12 +204,15 @@ class TestBuildConversationalAgentMessages:
                 "uipath_agents.agent_graph_builder.message_utils.logger"
             ) as mock_logger,
         ):
-            build_conversational_agent_messages(mock_agent_definition, {})
+            _create_conversational_agent_messages_from_definition(
+                mock_agent_definition, {}
+            )
 
             mock_logger.warning.assert_called_once()
             warning_msg = mock_logger.warning.call_args[0][0]
             assert (
-                "user_settings" in warning_msg.lower() or "userSettings" in warning_msg
+                "user_settings" in warning_msg.lower()
+                or "uipath__user_settings" in warning_msg
             )
 
     def test_ignores_user_messages_in_agent_definition(self, mock_agent_definition):
@@ -221,8 +228,8 @@ class TestBuildConversationalAgentMessages:
             "uipath_agents.agent_graph_builder.message_utils.get_chat_system_prompt",
             return_value="Generated prompt",
         ):
-            result = build_conversational_agent_messages(
-                mock_agent_definition, {"userSettings": {"name": "Test"}}
+            result = _create_conversational_agent_messages_from_definition(
+                mock_agent_definition, {"uipath__user_settings": {"name": "Test"}}
             )
 
         # Should only return the generated system message, not the user message
@@ -269,7 +276,7 @@ class TestCreateMessageFactoryConversational:
             pass
 
         with patch(
-            "uipath_agents.agent_graph_builder.message_utils.build_conversational_agent_messages",
+            "uipath_agents.agent_graph_builder.message_utils._create_conversational_agent_messages_from_definition",
             return_value=[SystemMessage(content="Test")],
         ) as mock_build:
             factory = create_message_factory(
@@ -311,10 +318,10 @@ class TestCreateMessageFactoryConversational:
         """Should extract input data from state before building messages."""
 
         class InputModel(BaseModel):
-            userSettings: dict[str, Any] = {}
+            task: str = ""
 
         with patch(
-            "uipath_agents.agent_graph_builder.message_utils.build_conversational_agent_messages",
+            "uipath_agents.agent_graph_builder.message_utils._create_conversational_agent_messages_from_definition",
             return_value=[SystemMessage(content="Test")],
         ) as mock_build:
             factory = create_message_factory(
@@ -323,17 +330,17 @@ class TestCreateMessageFactoryConversational:
 
             # State with both input fields and internal fields
             state: dict[str, Any] = {
-                "userSettings": {"name": "Test User"},
+                "task": "test",
                 "messages": [],  # Internal field
                 "termination": None,  # Internal field
             }
 
             factory(state)
 
-            # The extracted input should only contain userSettings
+            # The extracted input should contain task field
             call_args = mock_build.call_args[0]
             input_arguments = call_args[1]
-            assert "userSettings" in input_arguments
+            assert "task" in input_arguments
             # Internal fields should be filtered out
             assert "messages" not in input_arguments
             assert "termination" not in input_arguments

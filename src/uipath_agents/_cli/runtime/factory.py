@@ -1,12 +1,13 @@
 import logging
 import os
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, cast
 
 from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph, StateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from uipath._cli._utils._folders import get_personal_workspace_key_async
 from uipath.agent.models.agent import AgentDefinition
 from uipath.agent.react.conversational_prompts import PromptUserSettings
@@ -165,9 +166,12 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
                     agent_definition, settings
                 )
 
+            # Conversational agents agent definition does not contain 'messages' and 'uipath__user_settings' input fields, which we manually add to the input-schema here.
             if agent_definition.is_conversational:
                 agent_definition.input_schema = (
-                    self._get_conversational_agent_input_schema()
+                    self._get_conversational_agent_input_schema(
+                        agent_definition.input_schema
+                    )
                 )
 
             return agent_definition
@@ -222,6 +226,53 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
 
         # Reconstruct the agent definition
         return AgentDefinition.model_validate(agent_dict)
+
+    def _get_conversational_agent_input_schema(
+        self, existing_input_schema: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Generate input schema for conversational agents.
+
+        Merges default low-code conversational-agent system fields (messages, uipath__user_settings)
+        into user-defined fields from existing_input_schema
+        """
+
+        class DefaultLowCodeConversationalInput(BaseModel):
+            messages: list[UiPathConversationMessage] = Field(default=[])
+            uipath__user_settings: PromptUserSettings | None = Field(default=None)
+            model_config = ConfigDict(extra="allow")
+
+        default_low_code_conversational_input_schema = (
+            DefaultLowCodeConversationalInput.model_json_schema()
+        )
+
+        # If no existing schema, return system schema as-is
+        if not existing_input_schema:
+            return default_low_code_conversational_input_schema
+
+        schema = deepcopy(existing_input_schema)
+
+        if "properties" not in schema:
+            schema["properties"] = {}
+
+        schema["properties"].update(
+            default_low_code_conversational_input_schema["properties"]
+        )
+
+        if "$defs" in default_low_code_conversational_input_schema:
+            if "$defs" not in schema:
+                schema["$defs"] = {}
+            schema["$defs"].update(
+                default_low_code_conversational_input_schema["$defs"]
+            )
+
+        if "required" in default_low_code_conversational_input_schema:
+            system_required = set(
+                default_low_code_conversational_input_schema["required"]
+            )
+            current_required = set(schema.get("required", []))
+            schema["required"] = list(current_required | system_required)
+
+        return schema
 
     async def _load_graph(
         self, entrypoint: str, **kwargs: Any
@@ -351,41 +402,3 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             trigger_manager=trigger_manager,
             runtime_id=runtime_id,
         )
-
-    def _get_conversational_agent_input_schema(self) -> dict[str, Any]:
-        """Gets conversational agent input schema."""
-        # Currently conversational agents don't support user defined input schemas, but we have
-        # https://uipath.atlassian.net/browse/JAR-9067 to enable. However, for the python runtime, we are also using the
-        # input property to provide the input message and userSettings and that usage will conflict with user defined
-        # inputs when implementing that feature. There are at least three solutions:
-        #
-        # 1) make agent builder emit the system defined schema with a nested field containing the user defined schema.
-        # Then when CAS starts the job it can include the inputs passed to the start conversation API along with the
-        # existing message and user settings inputs. In this case, the schema set here would be put in the agent
-        # definition by agent builder and this "fixup" step can be removed.
-        #
-        # 2) add a new "system_input" property that can be passed when starting/resuming the agent job and restore the
-        # input property to being user defined content only. Agent builder would then emit a schema for that property
-        # (just like for other agents, rather than special casing as done for option 1). In this case, we don't need the
-        # schema set below. The system_input property type could be statically defined, or maybe we want to make it a
-        # property bag that is used without a schema.
-        #
-        # 3) Rename these to __uipath_messages and __uipath_userSettings, and reserve the __uipath_ prefix for system
-        # properties.
-        #
-        # Note that there is an additional "fixup" that is done in the message factory: agent builder is including a
-        # vestigial user message in the agent definition ("What is the current date?"). That should be removed at some
-        # point as well.
-
-        class ConversationalAgentInput(BaseModel):
-            """Input schema for conversational agents."""
-
-            # Defining a BaseModel here to ensure $defs are properly included in the schema
-            messages: list[UiPathConversationMessage] = []
-            user_settings: PromptUserSettings | None = Field(
-                default=None, alias="userSettings"
-            )
-
-            model_config = {"extra": "allow"}
-
-        return ConversationalAgentInput.model_json_schema()
