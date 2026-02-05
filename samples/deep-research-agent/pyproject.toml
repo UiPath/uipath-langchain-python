@@ -11,6 +11,9 @@ dependencies = [
     "uipath-langchain",
 ]
 
+[project.optional-dependencies]
+tavily = ["langchain-tavily>=0.2.17"]
+
 [dependency-groups]
 dev = ["uipath-dev>=0.0.20"]
 

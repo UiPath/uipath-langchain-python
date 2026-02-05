@@ -183,5 +183,5 @@ cython_debug/
 
 /playground.py
 /.claude/settings.local.json
-samples/deep-research-agent/result.txt
+samples/deep-research-agent/result.json
 samples/deep-research-agent/web_search_config.json

@@ -11,7 +11,37 @@ uv sync
 uv run uipath auth --alpha
 ```
 
+## Search Provider
+
+The agent supports two search providers, controlled by the `SEARCH_PROVIDER` environment variable:
+
+### UiPath Integration
+
+Uses UiPath's built-in web search integration.
+
+```bash
+# No extra setup needed, uses web_search_config.json
+SEARCH_PROVIDER=uipath
+```
+
 Configure `web_search_config.json` with your UiPath Integration Tool settings.
+
+### Tavily (default)
+
+Uses Tavily search API.
+
+```bash
+# Install tavily dependency
+uv sync --extra tavily
+```
+
+Set in `.env`:
+```
+SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=your_tavily_api_key
+```
+
+## Configuration
 
 Set in `.env`:
 ```
@@ -28,6 +58,6 @@ uv run uipath run agent '{"messages": [{"role": "user", "content": "Research the
 
 ```
 Main Agent (Research Lead)
-├── researcher (UiPath Web Search)
+├── researcher (Web Search)
 └── reviewer (Quality check)
 ```
