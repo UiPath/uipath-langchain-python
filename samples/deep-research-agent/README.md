@@ -11,9 +11,10 @@ uv sync
 uv run uipath auth --alpha
 ```
 
+Configure `web_search_config.json` with your UiPath Integration Tool settings.
+
 Set in `.env`:
 ```
-TAVILY_API_KEY=your_key
 LANGCHAIN_RECURSION_LIMIT=100
 ```
 
@@ -27,6 +28,6 @@ uv run uipath run agent '{"messages": [{"role": "user", "content": "Research the
 
 ```
 Main Agent (Research Lead)
-├── researcher (Tavily search)
+├── researcher (UiPath Web Search)
 └── reviewer (Quality check)
 ```

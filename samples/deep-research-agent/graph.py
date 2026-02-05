@@ -1,5 +1,6 @@
 """Deep Research Agent with Subagents."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -7,12 +8,21 @@ from pathlib import Path
 src_path = Path(__file__).parent.parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
-from langchain_tavily import TavilySearch
+from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath_langchain.agent.deep import create_deep_agent
+from uipath_langchain.agent.tools import create_integration_tool
 from uipath_langchain.chat import UiPathChat
 
+# Load web search config from JSON
+config_path = Path(__file__).parent / "web_search_config.json"
+with open(config_path) as f:
+    web_search_dict = json.load(f)
+
+# Convert dict to AgentIntegrationToolResourceConfig
+web_search_config = AgentIntegrationToolResourceConfig(**web_search_dict)
+
 # Tools
-web_search = TavilySearch(max_results=5)
+web_search = create_integration_tool(web_search_config)
 
 # Models
 main_model = UiPathChat(model="gpt-4.1-2025-04-14", temperature=0)
