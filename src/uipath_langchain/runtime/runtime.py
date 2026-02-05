@@ -244,20 +244,12 @@ class UiPathLangGraphRuntime:
             if messages and isinstance(messages, list):
                 graph_input["messages"] = self.chat.map_messages(messages)
         if options and options.resume:
-            # Transform CAS generic format to LangGraph-specific format
             resume_data = self._transform_interrupt_resume(graph_input)
             return Command(resume=resume_data)
         return graph_input
 
     def _transform_interrupt_resume(self, cas_input: dict[str, Any]) -> Any:
-        """Transform CAS resume input to LangGraph Command.resume format.
-
-        The bridge includes interrupt metadata (interrupt_type, lg_interrupt_id)
-        alongside the widget response, allowing type-specific transformation:
-        - HITL tool call confirmation: transforms to middleware decisions format
-        - Generic interrupts: passes through the widget response directly
-        """
-        # Bridge format: { interrupt_type, lg_interrupt_id, response: {approved, input?} }
+        """Transform CAS resume input to LangGraph Command.resume format."""
         if "response" not in cas_input:
             return cas_input
 
@@ -267,7 +259,6 @@ class UiPathLangGraphRuntime:
         if not isinstance(response, dict):
             return response
 
-        # HITL tool call confirmation: transform to middleware decisions format
         if interrupt_type == InterruptTypeEnum.TOOL_CALL_CONFIRMATION:
             approved = response.get("approved", True)
             modified_input = response.get("input")
@@ -278,7 +269,6 @@ class UiPathLangGraphRuntime:
                 decision["modified_args"] = modified_input
             return {"decisions": [decision]}
 
-        # Generic interrupt: pass through widget response directly
         return response
 
     async def _get_graph_state(
@@ -374,7 +364,6 @@ class UiPathLangGraphRuntime:
 
     def _format_interrupt_value(self, value: Any) -> dict[str, Any]:
         """Format interrupt value for CAS consumption."""
-        # HITL middleware format: { action_requests: [...] }
         if isinstance(value, dict) and "action_requests" in value:
             actions = value.get("action_requests", [])
             if actions:
@@ -390,14 +379,12 @@ class UiPathLangGraphRuntime:
                         input_value=action.get("args"),
                     ),
                 ).model_dump(by_alias=True)
-        # Already CAS-compatible or generic - pass through
         return UiPathConversationGenericInterruptStart(
             type="generic",
             value=value,
         ).model_dump(by_alias=True)
 
     def _get_tool_input_schema(self, tool_name: str) -> dict[str, Any]:
-        """Get a tool's input JSON schema by name from the graph's tools."""
         tool = self._tools_by_name.get(tool_name)
         if not tool:
             return {}
@@ -431,7 +418,7 @@ class UiPathLangGraphRuntime:
         tools_map: dict[str, BaseTool] = {}
         try:
             graph = self.graph.get_graph(xray=0)
-            for _, node in graph.nodes.items():
+            for node in graph.nodes.values():
                 if node.data is None:
                     continue
                 tool_node = _unwrap_runnable_callable(node.data, ToolNode)
