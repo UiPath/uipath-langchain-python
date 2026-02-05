@@ -10,6 +10,15 @@ _DEFAULT_API_FLAVOR: dict[LLMProvider, APIFlavor] = {
     LLMProvider.VERTEX: APIFlavor.VERTEX_GEMINI_GENERATE_CONTENT,
 }
 
+_API_FLAVOR_TO_PROVIDER: dict[APIFlavor, LLMProvider] = {
+    APIFlavor.OPENAI_RESPONSES: LLMProvider.OPENAI,
+    APIFlavor.OPENAI_COMPLETIONS: LLMProvider.OPENAI,
+    APIFlavor.AWS_BEDROCK_CONVERSE: LLMProvider.BEDROCK,
+    APIFlavor.AWS_BEDROCK_INVOKE: LLMProvider.BEDROCK,
+    APIFlavor.VERTEX_GEMINI_GENERATE_CONTENT: LLMProvider.VERTEX,
+    APIFlavor.VERTEX_ANTHROPIC_CLAUDE: LLMProvider.VERTEX,
+}
+
 
 def _fetch_discovery(agenthub_config: str) -> list[dict[str, Any]]:
     """Fetch available models from LLM Gateway discovery endpoint."""
@@ -126,26 +135,56 @@ def _create_vertex_llm(
             raise ValueError(f"Unknown api_flavor={api_flavor} for Vertex")
 
 
-def _compute_api_flavor(
+def _resolve_vendor(api_flavor: APIFlavor) -> LLMProvider:
+    return _API_FLAVOR_TO_PROVIDER[api_flavor]
+
+
+def _resolve_api_flavor(vendor: LLMProvider, model_name: str) -> APIFlavor:
+    if vendor == LLMProvider.VERTEX and "claude" in model_name:
+        return APIFlavor.VERTEX_ANTHROPIC_CLAUDE
+    return _DEFAULT_API_FLAVOR[vendor]
+
+
+def _compute_vendor_and_api_flavor(
     model: dict[str, Any],
-) -> APIFlavor:
+) -> tuple[LLMProvider, APIFlavor]:
     vendor = model.get("vendor")
     api_flavor = model.get("apiFlavor")
     model_name = model.get("modelName", "")
 
-    if api_flavor is None and vendor == LLMProvider.VERTEX and "claude" in model_name:
-        api_flavor = APIFlavor.VERTEX_ANTHROPIC_CLAUDE
-
-    if api_flavor is None and vendor is not None:
-        api_flavor = _DEFAULT_API_FLAVOR[LLMProvider(vendor)]
-
-    if api_flavor not in [p.value for p in APIFlavor]:
+    if api_flavor is None and vendor is None:
         raise ValueError(
-            f"Unknown apiFlavor '{api_flavor}' for model '{model.get('modelName')}'. "
+            f"Neither vendor nor apiFlavor provided for model '{model_name}'. "
+            "At least one must be present."
+        )
+
+    if api_flavor is not None and api_flavor not in [p.value for p in APIFlavor]:
+        raise ValueError(
+            f"Unknown apiFlavor '{api_flavor}' for model '{model_name}'. "
             f"Supported apiFlavors: {[p.value for p in APIFlavor]}"
         )
 
-    return APIFlavor(api_flavor)
+    if vendor is not None and vendor not in [p.value for p in LLMProvider]:
+        raise ValueError(
+            f"Unknown vendor '{vendor}' for model '{model_name}'. "
+            f"Supported vendors: {[p.value for p in LLMProvider]}"
+        )
+
+    resolved_vendor: LLMProvider
+    resolved_api_flavor: APIFlavor
+
+    if vendor is None and api_flavor is not None:
+        resolved_api_flavor = APIFlavor(api_flavor)
+        resolved_vendor = _resolve_vendor(resolved_api_flavor)
+    elif api_flavor is None and vendor is not None:
+        resolved_vendor = LLMProvider(vendor)
+        resolved_api_flavor = _resolve_api_flavor(resolved_vendor, model_name)
+    else:
+        assert vendor is not None and api_flavor is not None
+        resolved_vendor = LLMProvider(vendor)
+        resolved_api_flavor = APIFlavor(api_flavor)
+
+    return resolved_vendor, resolved_api_flavor
 
 
 def _get_model_info(
@@ -192,13 +231,7 @@ def get_chat_model(
     """
     model_info = _get_model_info(model, agenthub_config, byo_connection_id)
 
-    vendor = model_info.get("vendor")
-    if vendor not in [p.value for p in LLMProvider]:
-        raise ValueError(
-            f"Unknown vendor '{vendor}' for model '{model}'. "
-            f"Supported vendors: {[p.value for p in LLMProvider]}"
-        )
-    api_flavor = _compute_api_flavor(model_info)
+    vendor, api_flavor = _compute_vendor_and_api_flavor(model_info)
     model_name: str = model_info.get("modelName", model)
 
     match LLMProvider(vendor):
