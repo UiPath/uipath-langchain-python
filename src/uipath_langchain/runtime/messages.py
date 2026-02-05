@@ -216,22 +216,27 @@ class UiPathChatMessagesMapper:
                 )
             )
 
-        # Check if this is the last chunk by examining chunk_position, send end message event only if there are no pending tool calls
+        # Check if this is the last chunk by examining chunk_position
         if message.chunk_position == "last":
             if (
                 self.current_message.tool_calls is not None
                 and len(self.current_message.tool_calls) > 0
             ):
-                events.extend(
-                    await self.map_current_message_to_start_tool_call_events()
-                )
+                # Store tool call mappings but DON'T emit startToolCall yet
+                # Tool calls will be emitted when they actually execute (in map_tool_message_to_events)
+                await self._store_tool_call_mappings()
+                # Don't emit endMessage yet - will be emitted after all tool calls complete
             else:
                 events.append(self.map_to_message_end_event(message.id))
 
         return events
 
-    async def map_current_message_to_start_tool_call_events(self):
-        events: list[UiPathConversationMessageEvent] = []
+    async def _store_tool_call_mappings(self):
+        """Store tool call ID to (message ID, tool call data) mappings without emitting events.
+
+        This allows us to correlate ToolMessages with their originating AI message later,
+        and emit startToolCall events with full tool data when the tool actually executes.
+        """
         if (
             self.current_message
             and self.current_message.id is not None
@@ -240,7 +245,7 @@ class UiPathChatMessagesMapper:
             async with self._storage_lock:
                 if self.storage is not None:
                     tool_call_id_to_message_id_map: dict[
-                        str, str
+                        str, dict[str, Any]
                     ] = await self.storage.get_value(
                         self.runtime_id,
                         STORAGE_NAMESPACE_EVENT_MAPPER,
@@ -252,17 +257,14 @@ class UiPathChatMessagesMapper:
                 else:
                     tool_call_id_to_message_id_map = {}
 
+                # Store full tool call data for each tool call
                 for tool_call in self.current_message.tool_calls:
                     tool_call_id = tool_call["id"]
                     if tool_call_id is not None:
-                        tool_call_id_to_message_id_map[tool_call_id] = (
-                            self.current_message.id
-                        )
-                        events.append(
-                            self.map_tool_call_to_tool_call_start_event(
-                                self.current_message.id, tool_call
-                            )
-                        )
+                        tool_call_id_to_message_id_map[tool_call_id] = {
+                            "message_id": self.current_message.id,
+                            "tool_call": tool_call,
+                        }
 
                 if self.storage is not None:
                     await self.storage.set_value(
@@ -272,18 +274,21 @@ class UiPathChatMessagesMapper:
                         tool_call_id_to_message_id_map,
                     )
 
-        return events
-
     async def map_tool_message_to_events(
         self, message: ToolMessage
     ) -> list[UiPathConversationMessageEvent]:
-        # Look up the AI message ID using the tool_call_id
-        message_id, is_last_tool_call = await self.get_message_id_for_tool_call(
+        """Map a ToolMessage to conversation events.
+
+        Emits both startToolCall and endToolCall events together, as the tool
+        has now actually executed (unlike when the AI message was generated).
+        """
+        # Look up the AI message ID and tool call data using the tool_call_id
+        message_id, tool_call, is_last_tool_call = await self.get_message_id_for_tool_call(
             message.tool_call_id
         )
-        if message_id is None:
+        if message_id is None or tool_call is None:
             logger.warning(
-                f"Tool message {message.tool_call_id} has no associated AI message ID. Skipping."
+                f"Tool message {message.tool_call_id} has no associated AI message ID or tool call data. Skipping."
             )
             return []
 
@@ -295,7 +300,12 @@ class UiPathChatMessagesMapper:
                 # Keep as string if not valid JSON
                 pass
 
+        # Emit BOTH startToolCall and endToolCall together
+        # This represents the tool actually executing (not just the LLM's intention)
         events = [
+            # First: tool call starts
+            self.map_tool_call_to_tool_call_start_event(message_id, tool_call),
+            # Then: tool call ends with result
             UiPathConversationMessageEvent(
                 message_id=message_id,
                 tool_call=UiPathConversationToolCallEvent(
@@ -308,6 +318,7 @@ class UiPathChatMessagesMapper:
             )
         ]
 
+        # End the AI message after all tool calls complete
         if is_last_tool_call:
             events.append(self.map_to_message_end_event(message_id))
 
@@ -315,16 +326,21 @@ class UiPathChatMessagesMapper:
 
     async def get_message_id_for_tool_call(
         self, tool_call_id: str
-    ) -> tuple[str | None, bool]:
+    ) -> tuple[str | None, ToolCall | None, bool]:
+        """Get message ID and tool call data for a given tool call ID.
+
+        Returns:
+            Tuple of (message_id, tool_call, is_last_tool_call)
+        """
         if self.storage is None:
             logger.error(
                 f"attempt to lookup tool call id {tool_call_id} when no storage provided"
             )
-            return None, False
+            return None, None, False
 
         async with self._storage_lock:
             tool_call_id_to_message_id_map: dict[
-                str, str
+                str, dict[str, Any]
             ] = await self.storage.get_value(
                 self.runtime_id,
                 STORAGE_NAMESPACE_EVENT_MAPPER,
@@ -335,14 +351,17 @@ class UiPathChatMessagesMapper:
                 logger.error(
                     f"attempt to lookup tool call id {tool_call_id} when no map present in storage"
                 )
-                return None, False
+                return None, None, False
 
-            message_id = tool_call_id_to_message_id_map.get(tool_call_id)
-            if message_id is None:
+            tool_call_info = tool_call_id_to_message_id_map.get(tool_call_id)
+            if tool_call_info is None:
                 logger.error(
                     f"tool call to message map does not contain tool call id {tool_call_id}"
                 )
-                return None, False
+                return None, None, False
+
+            message_id = tool_call_info["message_id"]
+            tool_call = tool_call_info["tool_call"]
 
             del tool_call_id_to_message_id_map[tool_call_id]
 
@@ -353,9 +372,13 @@ class UiPathChatMessagesMapper:
                 tool_call_id_to_message_id_map,
             )
 
-            is_last = message_id not in tool_call_id_to_message_id_map.values()
+            # Check if this is the last tool call by seeing if message_id appears in remaining values
+            is_last = not any(
+                info["message_id"] == message_id
+                for info in tool_call_id_to_message_id_map.values()
+            )
 
-        return message_id, is_last
+        return message_id, tool_call, is_last
 
     def map_tool_call_to_tool_call_start_event(
         self, message_id: str, tool_call: ToolCall
