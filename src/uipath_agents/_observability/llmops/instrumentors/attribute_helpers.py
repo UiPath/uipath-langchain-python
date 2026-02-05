@@ -6,11 +6,13 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
-from langchain_core.outputs import LLMResult
+from langchain_core.outputs import ChatGeneration, LLMResult
 from opentelemetry.trace import Span
 from pydantic import BaseModel
 from uipath.core.serialization import serialize_json
 from uipath.tracing import AttachmentDirection, AttachmentProvider, SpanAttachment
+
+from uipath_agents._observability.llmops.spans.span_attributes import Usage
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +107,21 @@ def extract_settings(
     return max_tokens, temperature
 
 
+def extract_headers(response: LLMResult) -> dict[str, Any]:
+    """Extract headers from LLM response."""
+    if response.generations and response.generations[0]:
+        gen = response.generations[0][0]
+        if not isinstance(gen, ChatGeneration):
+            return {}
+
+        response_metadata = gen.message.response_metadata
+        if "headers" in response_metadata:
+            headers = response_metadata.get("headers")
+        else:
+            headers = response_metadata.get("ResponseMetadata", {}).get("HTTPHeaders")
+    return headers or {}
+
+
 def set_usage_attributes(span: Span, response: Optional[LLMResult]) -> None:
     """Set token usage attributes on span from LLM response."""
     if not response:
@@ -130,18 +147,24 @@ def set_usage_attributes(span: Span, response: Optional[LLMResult]) -> None:
             "usage"
         )
 
-    if not token_usage:
+    token_usage = token_usage or {}
+    headers = extract_headers(response)
+
+    if not token_usage and not headers:
         return
 
-    usage = {
-        "completionTokens": token_usage.get("completion_tokens", 0),
-        "promptTokens": token_usage.get("prompt_tokens", 0),
-        "totalTokens": token_usage.get("total_tokens", 0),
-        "isByoExecution": False,
-        "executionDeploymentType": None,
-        "isPiiMasked": False,
-        "llmCalls": 1,
-    }
+    usage = Usage(
+        llm_calls=1,
+        completion_tokens=token_usage.get("completion_tokens", 0),
+        prompt_tokens=token_usage.get("prompt_tokens", 0),
+        total_tokens=token_usage.get("total_tokens", 0),
+        is_byo_execution=bool(headers.get("x-uipath-llmgateway-isbyoexecution", False)),
+        execution_deployment_type=headers.get(
+            "x-uipath-llmgateway-executiondeploymenttype"
+        ),
+        is_pii_masked=bool(headers.get("x-uipath-llmgateway-ispiimasked", False)),
+    )
+
     span.set_attribute("usage", serialize_json(usage))
 
 

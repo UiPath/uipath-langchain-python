@@ -23,7 +23,7 @@
       "contentTokens": [
         {
           "type": "simpleText",
-          "rawString": "Calculate: {{a}} {{operator}} {{b}}"
+          "rawString": "Calculate: "
         },
         {
           "type": "variable",
