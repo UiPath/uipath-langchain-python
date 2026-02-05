@@ -3,6 +3,14 @@ import os
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
+from langchain.agents.middleware.human_in_the_loop import (
+    ActionRequest,
+    ApproveDecision,
+    EditDecision,
+    HITLRequest,
+    HITLResponse,
+    RejectDecision,
+)
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -261,13 +269,12 @@ class UiPathLangGraphRuntime:
 
         if interrupt_type == InterruptTypeEnum.TOOL_CALL_CONFIRMATION:
             approved = response.get("approved", True)
-            modified_input = response.get("input")
             if not approved:
-                return {"decisions": [{"type": "reject", "message": "User rejected"}]}
-            decision: dict[str, Any] = {"type": "approve"}
-            if modified_input:
-                decision["modified_args"] = modified_input
-            return {"decisions": [decision]}
+                return HITLResponse(decisions=[RejectDecision(type="reject", message="User rejected")])
+            edited_args = response.get("input")
+            if edited_args:
+                return HITLResponse(decisions=[EditDecision(type="edit", edited_action=edited_args)])
+            return HITLResponse(decisions=[ApproveDecision(type="approve")])
 
         return response
 
@@ -365,18 +372,19 @@ class UiPathLangGraphRuntime:
     def _format_interrupt_value(self, value: Any) -> dict[str, Any]:
         """Format interrupt value for CAS consumption."""
         if isinstance(value, dict) and "action_requests" in value:
-            actions = value.get("action_requests", [])
+            request: HITLRequest = value
+            actions = request["action_requests"]
             if actions:
-                action = actions[0]  # First action for now
-                tool_name = action.get("name", "")
+                action: ActionRequest = actions[0]
+                tool_name = action["name"]
                 input_schema = self._get_tool_input_schema(tool_name)
                 return UiPathConversationToolCallConfirmationInterruptStart(
                     type=InterruptTypeEnum.TOOL_CALL_CONFIRMATION,
                     value=UiPathConversationToolCallConfirmationValue(
-                        tool_call_id=action.get("tool_call_id", str(uuid4())),
+                        tool_call_id=str(uuid4()),
                         tool_name=tool_name,
                         input_schema=input_schema,
-                        input_value=action.get("args"),
+                        input_value=action["args"],
                     ),
                 ).model_dump(by_alias=True)
         return UiPathConversationGenericInterruptStart(

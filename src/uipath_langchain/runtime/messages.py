@@ -236,7 +236,7 @@ class UiPathChatMessagesMapper:
         ):
             async with self._storage_lock:
                 if self.storage is not None:
-                    tool_call_id_to_message_id_map: dict[
+                    tool_call_map: dict[
                         str, dict[str, Any]
                     ] = await self.storage.get_value(
                         self.runtime_id,
@@ -244,13 +244,15 @@ class UiPathChatMessagesMapper:
                         STORAGE_KEY_TOOL_CALL_ID_TO_MESSAGE_ID_MAP,
                     )
 
+                    if tool_call_map is None:
+                        tool_call_map = {}
                 else:
-                    tool_call_id_to_message_id_map = {}
+                    tool_call_map = {}
 
                 for tool_call in self.current_message.tool_calls:
                     tool_call_id = tool_call["id"]
                     if tool_call_id is not None:
-                        tool_call_id_to_message_id_map[tool_call_id] = {
+                        tool_call_map[tool_call_id] = {
                             "message_id": self.current_message.id,
                             "tool_call": tool_call,
                         }
@@ -260,18 +262,19 @@ class UiPathChatMessagesMapper:
                         self.runtime_id,
                         STORAGE_NAMESPACE_EVENT_MAPPER,
                         STORAGE_KEY_TOOL_CALL_ID_TO_MESSAGE_ID_MAP,
-                        tool_call_id_to_message_id_map,
+                        tool_call_map,
                     )
 
     async def map_tool_message_to_events(
         self, message: ToolMessage
     ) -> list[UiPathConversationMessageEvent]:
+        # Look up the AI message ID using the tool_call_id
         message_id, tool_call, is_last_tool_call = await self.get_message_id_for_tool_call(
             message.tool_call_id
         )
-        if message_id is None or tool_call is None:
+        if message_id is None:
             logger.warning(
-                f"Tool message {message.tool_call_id} has no associated AI message ID or tool call data. Skipping."
+                f"Tool message {message.tool_call_id} has no associated AI message ID. Skipping."
             )
             return []
 
@@ -280,6 +283,7 @@ class UiPathChatMessagesMapper:
             try:
                 content_value = json.loads(content_value)
             except (json.JSONDecodeError, TypeError):
+                # Keep as string if not valid JSON
                 pass
 
         events = [
@@ -311,21 +315,21 @@ class UiPathChatMessagesMapper:
             return None, None, False
 
         async with self._storage_lock:
-            tool_call_id_to_message_id_map: dict[
-                str, dict[str, Any]
+            tool_call_map: dict[
+                str, dict[str, Any] # tool_call_id -> {message_id, tool_call}
             ] = await self.storage.get_value(
                 self.runtime_id,
                 STORAGE_NAMESPACE_EVENT_MAPPER,
                 STORAGE_KEY_TOOL_CALL_ID_TO_MESSAGE_ID_MAP,
             )
 
-            if tool_call_id_to_message_id_map is None:
+            if tool_call_map is None:
                 logger.error(
                     f"attempt to lookup tool call id {tool_call_id} when no map present in storage"
                 )
                 return None, None, False
 
-            tool_call_info = tool_call_id_to_message_id_map.get(tool_call_id)
+            tool_call_info = tool_call_map.get(tool_call_id)
             if tool_call_info is None:
                 logger.error(
                     f"tool call to message map does not contain tool call id {tool_call_id}"
@@ -335,18 +339,18 @@ class UiPathChatMessagesMapper:
             message_id = tool_call_info["message_id"]
             tool_call = tool_call_info["tool_call"]
 
-            del tool_call_id_to_message_id_map[tool_call_id]
+            del tool_call_map[tool_call_id]
 
             await self.storage.set_value(
                 self.runtime_id,
                 STORAGE_NAMESPACE_EVENT_MAPPER,
                 STORAGE_KEY_TOOL_CALL_ID_TO_MESSAGE_ID_MAP,
-                tool_call_id_to_message_id_map,
+                tool_call_map,
             )
 
             is_last = not any(
                 info["message_id"] == message_id
-                for info in tool_call_id_to_message_id_map.values()
+                for info in tool_call_map.values()
             )
 
         return message_id, tool_call, is_last
