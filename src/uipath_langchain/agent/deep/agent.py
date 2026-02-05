@@ -11,7 +11,8 @@ def create_deep_agent(
     model: BaseChatModel,
     system_prompt: str = "",
     tools: Sequence[BaseTool] = (),
-    subagents: Sequence[dict[str, Any]] | None = None,
+    subagents: Sequence[dict[str, Any]] = (),
+    **kwargs: Any,
 ) -> CompiledStateGraph:
     """Create a deep agent.
 
@@ -22,24 +23,24 @@ def create_deep_agent(
     - Auto-summarization for long conversations
 
     Args:
-        model: A BaseChatModel instance .
+        model: A BaseChatModel instance.
         system_prompt: Instructions for the agent.
         tools: Custom tools to provide to the agent.
         subagents: Optional list of subagent configurations. Each subagent is a dict
             with keys: name, description, system_prompt, tools, model.
+        **kwargs: Additional keyword arguments forwarded to the underlying
+            ``deepagents.create_deep_agent`` (e.g. ``middleware``,
+            ``interrupt_on``, ``checkpointer``).
 
     Returns:
         Compiled LangGraph agent ready for execution.
     """
     from deepagents import create_deep_agent as _create_deep_agent
 
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "system_prompt": system_prompt,
-        "tools": list(tools),
-    }
-
-    if subagents is not None:
-        kwargs["subagents"] = list(subagents)
-
-    return _create_deep_agent(**kwargs)
+    return _create_deep_agent(
+        model=model,
+        system_prompt=system_prompt,
+        tools=list(tools),
+        subagents=list(subagents),
+        **kwargs,
+    )
