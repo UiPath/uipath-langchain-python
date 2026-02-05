@@ -21,7 +21,7 @@ from uipath.agent.utils.text_tokens import build_string_from_tokens
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
-from uipath.platform.common import CreateEscalation
+from uipath.platform.common import CreateEscalation, UiPathConfig
 from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
@@ -37,6 +37,8 @@ from ..react.types import AgentGraphState
 from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_dict_for_serialization, sanitize_tool_name
 
+import logging
+logger = logging.getLogger(__name__)
 
 class EscalationAction(str, Enum):
     """Actions that can be taken after an escalation completes."""
@@ -107,6 +109,61 @@ def _get_user_email(user: Any) -> str | None:
     return getattr(user, "emailAddress", None)
 
 
+def _parse_task_data(
+    data: dict[str, Any],
+    input_schema: dict[str, Any],
+    output_schema: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Filter action center task data based on input/output schemas.
+
+    This replicates the C# AppTasksInternalClient.ParseTaskData logic:
+    - If output_schema is None: exclude all input fields (return only new fields)
+    - If output_schema is provided: include only fields defined in output schema
+
+    Args:
+        data: Raw task data from action center (complete form data)
+        input_schema: JSON schema defining the input fields
+        output_schema: Optional JSON schema defining expected output fields
+
+    Returns:
+        Filtered dictionary containing only relevant output fields
+    """
+    try:
+        filtered_fields: dict[str, Any] = {}
+
+        if output_schema is None:
+            # Scenario A: No output schema - exclude input fields
+            # Get all input field names from the schema
+            input_field_names = set()
+            if "properties" in input_schema:
+                input_field_names = set(input_schema["properties"].keys())
+
+                # Keep only fields that are NOT in the input schema
+            for field_name, field_value in data.items():
+                if field_name not in input_field_names:
+                    filtered_fields[field_name] = field_value
+
+        else:
+            # Scenario B: Output schema provided - include only output fields
+            # Get all output field names from the schema
+            output_field_names = set()
+            if "properties" in output_schema:
+                output_field_names = set(output_schema["properties"].keys())
+
+                # Keep ONLY fields present in the output schema
+            for field_name, field_value in data.items():
+                if field_name in output_field_names:
+                    filtered_fields[field_name] = field_value
+
+        return filtered_fields
+
+    except Exception as e:
+        # If filtering fails, return original data
+        import logging
+        logging.error(f"Error parsing task data: {e}")
+        return data
+
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
 ) -> StructuredTool:
@@ -161,10 +218,11 @@ def create_escalation_tool(
 
         # Extract task info before validation
         task_id = result.id
-        assigned_to = _get_user_email(result.assigned_to_user)
+        task_url = f"{UiPathConfig.base_url}/actions_/tasks/{task_id}"
+        assigned_to = recipient.value
 
         escalation_action = result.action
-        escalation_output = result.data or {}
+        escalation_output = _parse_task_data(result.data, input_schema=input_model.model_json_schema(), output_schema=EscalationToolOutput.model_json_schema())
 
         outcome_str = (
             channel.outcome_mapping.get(escalation_action)
@@ -180,6 +238,7 @@ def create_escalation_tool(
             "output": escalation_output,
             "outcome": escalation_action,
             "task_id": task_id,
+            "task_url": task_url,
             "assigned_to": assigned_to,
         }
 
@@ -215,7 +274,7 @@ def create_escalation_tool(
             )
 
         return {
-            **result["output"],
+            "output": result["output"],
             "outcome": result["outcome"],
             "task_id": result["task_id"],
             "assigned_to": result["assigned_to"],
