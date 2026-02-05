@@ -36,9 +36,9 @@ tests/agent/tools/test_mcp/
 │       ├── test_session_reused_across_calls
 │       ├── test_session_reinitializes_on_404_error  ← Key test
 │       ├── test_max_retries_exceeded
-│       ├── test_close_releases_resources
+│       ├── test_dispose_releases_resources
 │       ├── test_client_initialized_property
-│       └── test_session_can_be_reused_after_close
+│       └── test_session_can_be_reused_after_dispose
 │
 └── test_mcp_tool.py           # Tool factory tests (17 tests)
     ├── TestMcpToolMetadata (class)
@@ -277,13 +277,13 @@ assert tool_call_count[0] == 2   # Tried twice
 assert mock_async_client_class.call_count == 1  # Still only one client
 ```
 
-#### test_close_releases_resources
+#### test_dispose_releases_resources
 
-**Purpose:** Verify `close()` cleans up properly
+**Purpose:** Verify `dispose()` cleans up properly
 
 **Assertions:**
 ```python
-await session.close()
+await session.dispose()
 assert session.session_id is None
 assert session._session is None
 assert session._stack is None
@@ -299,21 +299,21 @@ assert not session.is_client_initialized
 assert not session.is_client_initialized  # Before
 await session.call_tool(...)
 assert session.is_client_initialized      # After call
-await session.close()
-assert not session.is_client_initialized  # After close
+await session.dispose()
+assert not session.is_client_initialized  # After dispose
 ```
 
-#### test_session_can_be_reused_after_close
+#### test_session_can_be_reused_after_dispose
 
-**Purpose:** Verify session can be fully reinitialized after `close()`
+**Purpose:** Verify session can be fully reinitialized after `dispose()`
 
 **Assertions:**
 ```python
 await session.call_tool(...)
-await session.close()
+await session.dispose()
 await session.call_tool(...)  # Should work!
 
-# HTTP client created TWICE (once before close, once after)
+# HTTP client created TWICE (once before dispose, once after)
 assert mock_async_client_class.call_count == 2
 ```
 
@@ -471,16 +471,16 @@ class CustomErrorMock:
 
 ### 6. Clean Up After Tests
 
-Always close the session:
+Always dispose the session:
 
 ```python
 try:
     # ... test logic ...
 finally:
-    await session.close()
+    await session.dispose()
 
 # Or simply:
-await session.close()  # At end of test
+await session.dispose()  # At end of test
 ```
 
 ### 7. Use Proper AgentSettings

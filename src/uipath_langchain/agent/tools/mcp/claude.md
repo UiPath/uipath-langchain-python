@@ -39,7 +39,7 @@ from .mcp_tool import (
 
 ### McpClient Class
 
-`McpClient` manages the lifecycle of MCP connections for tool invocations with **two distinct initialization phases**:
+`McpClient` implements `UiPathDisposableProtocol` and manages the lifecycle of MCP connections for tool invocations with **two distinct initialization phases**:
 
 1. **Client Initialization** (first call): Full stack creation
 2. **Session Reinitialization** (on 404): Lightweight, reuses existing client
@@ -76,7 +76,7 @@ from .mcp_tool import (
 │  Public Methods                                             │
 │  ──────────────                                             │
 │  + call_tool(name, arguments) -> CallToolResult             │
-│  + close() -> None                                          │
+│  + dispose() -> None  # UiPathDisposableProtocol            │
 │  + session_id: str | None (property)                        │
 │  + is_client_initialized: bool (property)                   │
 ├─────────────────────────────────────────────────────────────┤
@@ -111,7 +111,7 @@ async def create_mcp_tools_from_agent(
     Returns:
         A tuple of (tools, mcp_clients) where:
         - tools: List of BaseTool instances for all MCP resources
-        - mcp_clients: List of McpClient instances that need to be closed when done
+        - mcp_clients: List of McpClient instances that need to be disposed when done
 
     Note:
         The caller is responsible for closing the McpClient instances when done.
@@ -125,7 +125,7 @@ try:
     # Use tools...
 finally:
     for client in clients:
-        await client.close()
+        await client.dispose()
 ```
 
 #### `create_mcp_tools_from_metadata_for_mcp_server(config, mcpClient)` → `list[BaseTool]`
@@ -194,7 +194,7 @@ Phase 2: Session Initialization (lightweight, can repeat)
            │    Active    │─────────────────┘  not client)
            │   Session    │
            └──────┬───────┘
-                  │ close()
+                  │ dispose()
                   ▼
            ┌──────────────┐
            │    Closed    │

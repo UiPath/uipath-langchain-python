@@ -20,11 +20,12 @@ from mcp.shared.exceptions import McpError
 from mcp.shared.message import SessionMessage
 from mcp.types import CallToolResult
 from uipath._utils._ssl_context import get_httpx_client_kwargs
+from uipath.runtime.base import UiPathDisposableProtocol
 
 logger = logging.getLogger(__name__)
 
 
-class McpClient:
+class McpClient(UiPathDisposableProtocol):
     """Manages an MCP session for tool invocations.
 
     This class handles the lifecycle of MCP connections with two distinct phases:
@@ -262,11 +263,12 @@ class McpClient:
         # Should not reach here, but just in case
         raise RuntimeError("Exited retry loop unexpectedly")
 
-    async def close(self) -> None:
-        """Close the session and release all resources.
+    async def dispose(self) -> None:
+        """Dispose of the client and release all resources.
 
+        Implements UiPathDisposableProtocol.
         Releases the HTTP client, streamable connection, and ClientSession.
-        After calling close(), the session can be reused - a new call_tool()
+        After calling dispose(), the client can be reused - a new call_tool()
         will reinitialize everything.
         """
         async with self._lock:
@@ -285,4 +287,4 @@ class McpClient:
                     self._get_session_id = None
                     self._client_initialized = False
 
-            logger.info("MCP session closed")
+            logger.info("MCP client disposed")

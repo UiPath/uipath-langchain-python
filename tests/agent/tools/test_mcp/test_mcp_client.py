@@ -245,7 +245,7 @@ class TestMcpClient:
         assert "notifications/initialized" in method_call_sequence
         assert "tools/call" in method_call_sequence
 
-        await session.close()
+        await session.dispose()
 
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
@@ -279,7 +279,7 @@ class TestMcpClient:
         # HTTP client should still be created only once
         assert mock_async_client_class.call_count == 1
 
-        await session.close()
+        await session.dispose()
 
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
@@ -349,7 +349,7 @@ class TestMcpClient:
             f"Expected 2 tools/call, got {expected_tool_count}"
         )
 
-        await session.close()
+        await session.dispose()
 
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
@@ -441,12 +441,12 @@ class TestMcpClient:
         # HTTP client still created only once
         assert mock_async_client_class.call_count == 1
 
-        await session.close()
+        await session.dispose()
 
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
-    async def test_close_releases_resources(self, mock_async_client_class):
-        """Test that close() properly releases session resources."""
+    async def test_dispose_releases_resources(self, mock_async_client_class):
+        """Test that dispose() properly releases session resources."""
         method_call_sequence: list[str] = []
         initialize_count = [0]
         tool_call_count = [0]
@@ -469,7 +469,7 @@ class TestMcpClient:
         assert session.is_client_initialized
 
         # Close session
-        await session.close()
+        await session.dispose()
 
         # Verify resources are released
         assert session.session_id is None
@@ -504,14 +504,14 @@ class TestMcpClient:
         await session.call_tool("test_tool", {"query": "test"})
         assert session.is_client_initialized
 
-        # After close
-        await session.close()
+        # After dispose
+        await session.dispose()
         assert not session.is_client_initialized
 
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
-    async def test_session_can_be_reused_after_close(self, mock_async_client_class):
-        """Test that session can be reinitialized after close()."""
+    async def test_session_can_be_reused_after_dispose(self, mock_async_client_class):
+        """Test that session can be reinitialized after dispose()."""
         method_call_sequence: list[str] = []
         initialize_count = [0]
         tool_call_count = [0]
@@ -533,7 +533,7 @@ class TestMcpClient:
         assert session.session_id == "test-session-first"
 
         # Close
-        await session.close()
+        await session.dispose()
         assert session.session_id is None
 
         # Reuse - should create new client and session
@@ -542,7 +542,7 @@ class TestMcpClient:
         assert session.session_id == "test-session-retry"
         assert session.is_client_initialized
 
-        # HTTP client was created twice (once before close, once after)
+        # HTTP client was created twice (once before dispose, once after)
         assert mock_async_client_class.call_count == 2
 
-        await session.close()
+        await session.dispose()
