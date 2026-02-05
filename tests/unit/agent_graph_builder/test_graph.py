@@ -43,6 +43,16 @@ def create_test_agent_definition(**overrides: Any) -> LowCodeAgentDefinition:
 class TestBuildAgentGraph:
     """Test building the agent graph."""
 
+    @pytest.fixture(autouse=True)
+    def mock_mcp_tools(self):
+        """Mock create_mcp_tools_from_agent to avoid SDK initialization."""
+        with patch(
+            "uipath_agents.agent_graph_builder.graph.create_mcp_tools_from_agent",
+            new_callable=AsyncMock,
+            return_value=([], []),
+        ):
+            yield
+
     async def test_builds_graph_with_minimal_config(self):
         """Test that graph is built with minimal configuration."""
         agent_def = create_test_agent_definition()
@@ -65,9 +75,10 @@ class TestBuildAgentGraph:
             mock_llm.return_value = MagicMock()
             mock_create.return_value = MagicMock()
 
-            graph = await build_agent_graph(agent_def)
+            graph, disposables = await build_agent_graph(agent_def)
 
             assert graph is not None
+            assert disposables == []
             mock_create.assert_called_once()
 
     async def test_passes_llm_settings(self):

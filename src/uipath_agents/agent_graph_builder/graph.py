@@ -1,8 +1,12 @@
 """Agent graph construction - wrapper delegating to uipath_langchain.agent.graph."""
 
+from typing import Any
+
+from langgraph.graph.state import CompiledStateGraph, StateGraph
 from uipath.agent.models.agent import (
     LowCodeAgentDefinition,
 )
+from uipath.runtime.base import UiPathDisposableProtocol
 from uipath_langchain.agent.guardrails import build_guardrails_with_actions
 from uipath_langchain.agent.react import (
     AgentGraphConfig,
@@ -11,6 +15,7 @@ from uipath_langchain.agent.react import (
     resolve_output_model,
 )
 from uipath_langchain.agent.tools import create_tools_from_resources
+from uipath_langchain.agent.tools.mcp import create_mcp_tools_from_agent
 
 from .config import AgentExecutionType, get_thinking_messages_limit
 from .llm_utils import create_llm
@@ -22,7 +27,10 @@ AGENT_MAX_ITERATIONS_DEFAULT = 25
 async def build_agent_graph(
     agent_definition: LowCodeAgentDefinition,
     execution_type: AgentExecutionType = AgentExecutionType.RUNTIME,
-):
+) -> tuple[
+    StateGraph[Any, Any, Any, Any] | CompiledStateGraph[Any, Any, Any, Any],
+    list[UiPathDisposableProtocol],
+]:
     """Build LangGraph agent from agent.json configuration.
 
     Args:
@@ -30,9 +38,8 @@ async def build_agent_graph(
         execution_type: Execution mode of the agent: playground | runtime | eval
 
     Returns:
-        StateGraph configured with the agent definition and feature flags.
+        Tuple of (compiled graph, disposables list).
     """
-
     byo_connection_id = (
         agent_definition.settings.byom_properties.connection_id
         if agent_definition.settings.byom_properties
@@ -46,6 +53,8 @@ async def build_agent_graph(
         byo_connection_id=byo_connection_id,
     )
     tools = await create_tools_from_resources(agent_definition, llm)
+    mcp_tools, mcp_clients = await create_mcp_tools_from_agent(agent_definition)
+    tools.extend(mcp_tools)
     input_model = resolve_input_model(agent_definition.input_schema)
     output_model = resolve_output_model(agent_definition.output_schema)
 
@@ -62,7 +71,7 @@ async def build_agent_graph(
         is_conversational=agent_definition.is_conversational,
     )
 
-    return create_agent(
+    graph = create_agent(
         model=llm,
         tools=tools,
         messages=messages,
@@ -71,3 +80,4 @@ async def build_agent_graph(
         config=agent_config,
         guardrails=guardrails,
     )
+    return graph, list(mcp_clients)

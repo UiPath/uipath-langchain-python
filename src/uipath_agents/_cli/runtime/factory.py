@@ -21,6 +21,7 @@ from uipath.runtime import (
     UiPathRuntimeFactorySettings,
     UiPathRuntimeProtocol,
 )
+from uipath.runtime.base import UiPathDisposableProtocol
 from uipath.runtime.errors import UiPathErrorCategory
 from uipath.tracing import LlmOpsHttpExporter
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
@@ -69,6 +70,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         """
         logger.info(f"Initializing AgentsRuntimeFactory for command {context.command}")
         _prepare_agent_execution_contract()
+        self._disposables: list[UiPathDisposableProtocol] = []
 
         super().__init__(context)
 
@@ -125,6 +127,11 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         if self.context.trace_manager:
             self.context.trace_manager.flush_spans()
         shutdown_telemetry()
+
+        for disposable in self._disposables:
+            await disposable.dispose()
+        self._disposables.clear()
+
         await super().dispose()
 
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
@@ -232,9 +239,11 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         """
         agent_definition = cast(AgentDefinition, kwargs.get("agent_definition"))
         try:
-            return await build_agent_graph(
+            graph, disposables = await build_agent_graph(
                 agent_definition, execution_type=get_execution_type(self.context)
             )
+            self._disposables.extend(disposables)
+            return graph
         except Exception as e:
             raise LangGraphRuntimeError(
                 LangGraphErrorCode.GRAPH_LOAD_ERROR,
