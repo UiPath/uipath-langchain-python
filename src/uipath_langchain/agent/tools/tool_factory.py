@@ -11,7 +11,6 @@ from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
     AgentIxpExtractionResourceConfig,
     AgentIxpVsEscalationResourceConfig,
-    AgentMcpResourceConfig,
     AgentProcessToolResourceConfig,
     BaseAgentResourceConfig,
     LowCodeAgentDefinition,
@@ -23,7 +22,6 @@ from .extraction_tool import create_ixp_extraction_tool
 from .integration_tool import create_integration_tool
 from .internal_tools import create_internal_tool
 from .ixp_escalation_tool import create_ixp_escalation_tool
-from .mcp import create_mcp_tools_from_metadata
 from .process_tool import create_process_tool
 
 logger = getLogger(__name__)
@@ -79,9 +77,6 @@ async def _build_tool_for_resource(
 
     elif isinstance(resource, AgentIxpExtractionResourceConfig):
         return create_ixp_extraction_tool(resource)
-
-    elif isinstance(resource, AgentMcpResourceConfig):
-        return await create_mcp_tools_from_metadata(resource)
 
     elif isinstance(resource, AgentIxpVsEscalationResourceConfig):
         return create_ixp_escalation_tool(resource)

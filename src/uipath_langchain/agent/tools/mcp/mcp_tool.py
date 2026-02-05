@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from collections import Counter, defaultdict
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -8,7 +9,11 @@ from typing import Any, AsyncGenerator
 import httpx
 from langchain_core.tools import BaseTool
 from uipath._utils._ssl_context import get_httpx_client_kwargs
-from uipath.agent.models.agent import AgentMcpResourceConfig, AgentMcpTool
+from uipath.agent.models.agent import (
+    AgentMcpResourceConfig,
+    AgentMcpTool,
+    LowCodeAgentDefinition,
+)
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.orchestrator.mcp import McpServer
@@ -18,6 +23,9 @@ from uipath_langchain.agent.tools.base_uipath_structured_tool import (
 )
 
 from ..utils import sanitize_tool_name
+from .mcp_client import McpClient
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 def _deduplicate_tools(tools: list[BaseTool]) -> list[BaseTool]:
@@ -100,67 +108,30 @@ async def create_mcp_tools(
         yield _deduplicate_tools(list(chain.from_iterable(results)))
 
 
-async def create_mcp_tools_from_metadata(
+async def create_mcp_tools_from_metadata_for_mcp_server(
     config: AgentMcpResourceConfig,
+    mcpClient: McpClient,
 ) -> list[BaseTool]:
-    """Create individual StructuredTool instances for each MCP tool in the resource config.
+    """Create StructuredTool instances for each MCP tool in the resource config.
 
-    Each tool manages its own session lifecycle - creating, using, and cleaning up
-    the MCP connection within the tool invocation.
+    Args:
+        config: The MCP resource configuration containing available tools.
+        mcpClient: The McpClient instance to use for tool invocations.
+
+    Returns:
+        List of BaseTool instances, one for each tool in the config.
+        Returns empty list if config.is_enabled is False.
     """
 
     if config.is_enabled is False:
         return []
 
-    # Lazy import to improve cold start time
-    import logging
-
-    from ._mcp_client import McpClient
-
-    logger: logging.Logger = logging.getLogger(__name__)
-    tools: list[BaseTool] = []
-
-    sdk = UiPath()
-    mcpServer: McpServer = await sdk.mcp.retrieve_async(
-        slug=config.slug, folder_path=config.folder_path
-    )
-    if mcpServer.mcp_url is None:
-        raise ValueError(f"MCP server '{config.slug}' has no URL configured")
-    mcpClient: McpClient = McpClient(mcpServer.mcp_url)
-
-    for mcp_tool in config.available_tools:
-        tool_name = sanitize_tool_name(mcp_tool.name)
-
-        def build_mcp_tool(mcp_tool: AgentMcpTool) -> Any:
-            output_schema: Any
-            if mcp_tool.output_schema:
-                output_schema = mcp_tool.output_schema
-            else:
-                output_schema = {"type": "object", "properties": {}}
-
-            @mockable(
-                name=mcp_tool.name,
-                description=mcp_tool.description,
-                input_schema=mcp_tool.input_schema,
-                output_schema=output_schema,
-            )
-            async def tool_fn(**kwargs: Any) -> Any:
-                """Execute MCP tool call with ephemeral session.
-
-                If a session disconnect error occurs (e.g., 404 or session terminated),
-                the tool will retry once by re-initializing the session.
-                """
-                result = await mcpClient.call_tool(mcp_tool.name, arguments=kwargs)
-                logger.info(f"Tool call successful for {mcp_tool.name}")
-                return result.content if hasattr(result, "content") else result
-
-            return tool_fn
-
-        tool = BaseUiPathStructuredTool(
-            name=tool_name,
+    return [
+        BaseUiPathStructuredTool(
+            name=sanitize_tool_name(mcp_tool.name),
             description=mcp_tool.description,
             args_schema=mcp_tool.input_schema,
-            coroutine=build_mcp_tool(mcp_tool),
+            coroutine=build_mcp_tool(mcp_tool, mcpClient),
             metadata={
                 "tool_type": "mcp",
                 "display_name": mcp_tool.name,
@@ -168,7 +139,91 @@ async def create_mcp_tools_from_metadata(
                 "slug": config.slug,
             },
         )
+        for mcp_tool in config.available_tools
+    ]
 
-        tools.append(tool)
 
-    return tools
+def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
+    output_schema: Any
+    if mcp_tool.output_schema:
+        output_schema = mcp_tool.output_schema
+    else:
+        output_schema = {"type": "object", "properties": {}}
+
+    @mockable(
+        name=mcp_tool.name,
+        description=mcp_tool.description,
+        input_schema=mcp_tool.input_schema,
+        output_schema=output_schema,
+    )
+    async def tool_fn(**kwargs: Any) -> Any:
+        """Execute MCP tool call with ephemeral session.
+
+        If a session disconnect error occurs (e.g., 404 or session terminated),
+        the tool will retry once by re-initializing the session.
+        """
+        result = await mcpClient.call_tool(mcp_tool.name, arguments=kwargs)
+        logger.info(f"Tool call successful for {mcp_tool.name}")
+        return result.content if hasattr(result, "content") else result
+
+    return tool_fn
+
+
+async def create_mcp_tools_from_agent(
+    agent: LowCodeAgentDefinition,
+) -> tuple[list[BaseTool], list[McpClient]]:
+    """Create MCP tools from a LowCodeAgentDefinition.
+
+    Iterates over all MCP resources in the agent definition and creates tools
+    for each enabled MCP server. Each MCP server gets its own McpClient instance.
+
+    The UiPath SDK is lazily initialized inside this function using environment
+    variables (UIPATH_URL, UIPATH_ACCESS_TOKEN).
+
+    Args:
+        agent: The agent definition containing MCP resources.
+
+    Returns:
+        A tuple of (tools, mcp_clients) where:
+        - tools: List of BaseTool instances for all MCP resources
+        - mcp_clients: List of McpClient instances that need to be closed when done
+
+    Note:
+        The caller is responsible for closing the McpClient instances when done.
+        Each McpClient manages its own session lifecycle with automatic 404 recovery.
+    """
+    tools: list[BaseTool] = []
+    clients: list[McpClient] = []
+    sdk: UiPath = UiPath()  # Lazy initialization of SDK
+
+    for resource in agent.resources:
+        if not isinstance(resource, AgentMcpResourceConfig):
+            continue
+
+        if resource.is_enabled is False:
+            logger.info(f"Skipping disabled MCP resource '{resource.name}'")
+            continue
+
+        logger.info(f"Creating MCP tools for resource '{resource.name}'")
+
+        mcpServer: McpServer = await sdk.mcp.retrieve_async(
+            slug=resource.slug, folder_path=resource.folder_path
+        )
+        if mcpServer.mcp_url is None:
+            raise ValueError(f"MCP server '{resource.slug}' has no URL configured")
+
+        mcpClient = McpClient(
+            mcpServer.mcp_url,
+            headers={"Authorization": f"Bearer {sdk._config.secret}"},
+        )
+        clients.append(mcpClient)
+
+        resource_tools = await create_mcp_tools_from_metadata_for_mcp_server(
+            resource, mcpClient
+        )
+        tools.extend(resource_tools)
+        logger.info(
+            f"Created {len(resource_tools)} tools for MCP resource '{resource.name}'"
+        )
+
+    return tools, clients

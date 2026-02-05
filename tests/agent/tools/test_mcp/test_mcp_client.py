@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from uipath_langchain.agent.tools.mcp._mcp_client import McpClient
+from uipath_langchain.agent.tools.mcp import McpClient
 
 logger = logging.getLogger(__name__)
 

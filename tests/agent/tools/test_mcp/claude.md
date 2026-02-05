@@ -2,7 +2,7 @@
 
 > **CLAUDE: UPDATE THIS DOCUMENT**
 >
-> When you modify `test__mcp_client.py` or add new MCP-related tests, you MUST update this document to reflect:
+> When you modify `test_mcp_client.py` or `test_mcp_tool.py`, you MUST update this document to reflect:
 > - New test cases (add to Test File Structure and create explanation section)
 > - Changes to MockStreamResponse (update Handled MCP Methods table and examples)
 > - New mocking patterns (add to Common Patterns section)
@@ -13,7 +13,7 @@
 
 ## Overview
 
-This document explains the testing strategy for `McpClient` in `test__mcp_client.py`. Use this as a reference when adding or modifying MCP-related tests.
+This document explains the testing strategy for MCP-related code. Use this as a reference when adding or modifying MCP-related tests.
 
 ## Testing Philosophy
 
@@ -27,18 +27,46 @@ The tests mock **only the HTTP layer** (`httpx.AsyncClient`), allowing the real 
 ## Test File Structure
 
 ```
-tests/agent/tools/test_mcp/test__mcp_client.py
-├── TestMcpClient (class)
-│   ├── create_mock_stream_response()    # Factory for mock responses
-│   ├── create_mock_http_client()        # Creates mock httpx client
-│   │
-│   ├── test_session_initializes_on_first_call
-│   ├── test_session_reused_across_calls
-│   ├── test_session_reinitializes_on_404_error  ← Key test
-│   ├── test_max_retries_exceeded
-│   ├── test_close_releases_resources
-│   ├── test_client_initialized_property
-│   └── test_session_can_be_reused_after_close
+tests/agent/tools/test_mcp/
+├── test_mcp_client.py         # McpClient session tests (7 tests)
+│   └── TestMcpClient (class)
+│       ├── create_mock_stream_response()
+│       ├── create_mock_http_client()
+│       ├── test_session_initializes_on_first_call
+│       ├── test_session_reused_across_calls
+│       ├── test_session_reinitializes_on_404_error  ← Key test
+│       ├── test_max_retries_exceeded
+│       ├── test_close_releases_resources
+│       ├── test_client_initialized_property
+│       └── test_session_can_be_reused_after_close
+│
+└── test_mcp_tool.py           # Tool factory tests (17 tests)
+    ├── TestMcpToolMetadata (class)
+    │   ├── test_mcp_tool_has_metadata
+    │   ├── test_mcp_tool_metadata_has_tool_type
+    │   ├── test_mcp_tool_metadata_has_display_name
+    │   ├── test_mcp_tool_metadata_has_folder_path
+    │   └── test_mcp_tool_metadata_has_slug
+    │
+    ├── TestMcpToolCreation (class)
+    │   ├── test_creates_multiple_tools
+    │   ├── test_tool_has_correct_description
+    │   └── test_disabled_config_returns_empty_list
+    │
+    ├── TestCreateMcpToolsFromAgent (class)  ← New!
+    │   ├── test_creates_tools_from_multiple_mcp_servers
+    │   ├── test_returns_mcp_clients_for_each_server
+    │   ├── test_skips_disabled_mcp_resources
+    │   ├── test_returns_empty_for_agent_without_mcp
+    │   ├── test_raises_on_missing_mcp_url
+    │   └── test_tools_have_correct_metadata
+    │
+    ├── TestMcpToolInvocation (class)
+    │   └── test_tool_invocation_initializes_session_and_returns_result
+    │
+    └── TestMcpToolNameSanitization (class)
+        ├── test_tool_name_with_spaces
+        └── test_tool_name_with_special_chars
 ```
 
 ## Mocking Strategy
@@ -70,8 +98,8 @@ async def test_something(self, mock_async_client_class):
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐   │
-│  │ McpTool     │ ──► │ MCP SDK     │ ──► │ HTTP Mock   │   │
-│  │ Session     │     │ (real)      │     │ (mocked)    │   │
+│  │ McpClient   │ ──► │ MCP SDK     │ ──► │ HTTP Mock   │   │
+│  │             │     │ (real)      │     │ (mocked)    │   │
 │  └─────────────┘     └─────────────┘     └─────────────┘   │
 │        ▲                   │                   │            │
 │        │                   │                   │            │
@@ -177,7 +205,9 @@ def create_mock_stream_response(self, method_call_sequence, initialize_count, ..
 
 ## Test Cases Explained
 
-### test_session_initializes_on_first_call
+### TestMcpClient Tests
+
+#### test_session_initializes_on_first_call
 
 **Purpose:** Verify lazy initialization on first `call_tool()`
 
@@ -190,7 +220,7 @@ assert session.is_client_initialized
 assert mock_async_client_class.call_count == 1     # HTTP client created
 ```
 
-### test_session_reused_across_calls
+#### test_session_reused_across_calls
 
 **Purpose:** Verify session persists across multiple tool calls
 
@@ -204,7 +234,7 @@ assert initialize_count[0] == 1  # Still 1! No reinit
 assert tool_call_count[0] == 2   # But 2 tool calls
 ```
 
-### test_session_reinitializes_on_404_error ⭐
+#### test_session_reinitializes_on_404_error ⭐
 
 **Purpose:** THE KEY TEST - verify client reuse on session reinit
 
@@ -231,7 +261,7 @@ assert session.session_id == "test-session-retry"
 assert mock_async_client_class.call_count == 1
 ```
 
-### test_max_retries_exceeded
+#### test_max_retries_exceeded
 
 **Purpose:** Verify `McpError` is raised after max retries
 
@@ -247,7 +277,7 @@ assert tool_call_count[0] == 2   # Tried twice
 assert mock_async_client_class.call_count == 1  # Still only one client
 ```
 
-### test_close_releases_resources
+#### test_close_releases_resources
 
 **Purpose:** Verify `close()` cleans up properly
 
@@ -260,7 +290,7 @@ assert session._stack is None
 assert not session.is_client_initialized
 ```
 
-### test_client_initialized_property
+#### test_client_initialized_property
 
 **Purpose:** Verify `is_client_initialized` property accuracy
 
@@ -273,7 +303,7 @@ await session.close()
 assert not session.is_client_initialized  # After close
 ```
 
-### test_session_can_be_reused_after_close
+#### test_session_can_be_reused_after_close
 
 **Purpose:** Verify session can be fully reinitialized after `close()`
 
@@ -285,6 +315,80 @@ await session.call_tool(...)  # Should work!
 
 # HTTP client created TWICE (once before close, once after)
 assert mock_async_client_class.call_count == 2
+```
+
+### TestCreateMcpToolsFromAgent Tests
+
+Note: All tests use `patch("uipath_langchain.agent.tools.mcp.mcp_tool.UiPath")` to mock the SDK.
+
+#### test_creates_tools_from_multiple_mcp_servers
+
+**Purpose:** Verify tools are created from all MCP servers in agent
+
+**Assertions:**
+```python
+with patch(..., return_value=mock_uipath_class):
+    tools, clients = await create_mcp_tools_from_agent(agent)
+assert len(tools) == 3  # 2 from server 1 + 1 from server 2
+```
+
+#### test_returns_mcp_clients_for_each_server
+
+**Purpose:** Verify McpClient instances are returned for each server
+
+**Assertions:**
+```python
+with patch(..., return_value=mock_uipath_class):
+    tools, clients = await create_mcp_tools_from_agent(agent)
+assert len(clients) == 2  # One per MCP server
+```
+
+#### test_skips_disabled_mcp_resources
+
+**Purpose:** Verify disabled resources are not processed
+
+**Assertions:**
+```python
+with patch(..., return_value=mock_uipath_class):
+    tools, clients = await create_mcp_tools_from_agent(agent)
+assert len(tools) == 1  # Only enabled server's tool
+assert tools[0].name == "enabled_tool"
+```
+
+#### test_returns_empty_for_agent_without_mcp
+
+**Purpose:** Verify empty lists for agent without MCP resources
+
+**Assertions:**
+```python
+with patch(..., return_value=mock_uipath_class):
+    tools, clients = await create_mcp_tools_from_agent(agent)
+assert tools == []
+assert clients == []
+```
+
+#### test_raises_on_missing_mcp_url
+
+**Purpose:** Verify ValueError when MCP server has no URL
+
+**Assertions:**
+```python
+with patch(..., return_value=mock_sdk_no_url):
+    with pytest.raises(ValueError, match="has no URL configured"):
+        await create_mcp_tools_from_agent(agent)
+```
+
+#### test_tools_have_correct_metadata
+
+**Purpose:** Verify all tools have correct metadata
+
+**Assertions:**
+```python
+for tool in tools:
+    assert tool.metadata["tool_type"] == "mcp"
+    assert "display_name" in tool.metadata
+    assert "folder_path" in tool.metadata
+    assert "slug" in tool.metadata
 ```
 
 ## Guidelines for Adding New Tests
@@ -379,6 +483,23 @@ finally:
 await session.close()  # At end of test
 ```
 
+### 7. Use Proper AgentSettings
+
+When creating `LowCodeAgentDefinition` in tests, use a real `AgentSettings`:
+
+```python
+from uipath.agent.models.agent import AgentSettings
+
+settings = AgentSettings(
+    engine="openai", model="gpt-4", max_tokens=1000, temperature=0.7
+)
+agent = LowCodeAgentDefinition(
+    ...
+    settings=settings,  # NOT MagicMock()
+    ...
+)
+```
+
 ## Common Patterns
 
 ### Testing Different Session IDs
@@ -427,6 +548,31 @@ assert tool_call_count[0] == 3
 assert initialize_count[0] == 1  # Session reused
 ```
 
+### Testing create_mcp_tools_from_agent
+
+The function uses lazy SDK initialization (`sdk = UiPath()`), so we patch the `UiPath` class:
+
+```python
+@pytest.fixture
+def mock_uipath_class(self):
+    """Create a mock UiPath class for patching."""
+    mock_sdk = MagicMock()
+    mock_server = MagicMock()
+    mock_server.mcp_url = "https://test.uipath.com/mcp"
+    mock_sdk.mcp.retrieve_async = AsyncMock(return_value=mock_server)
+    mock_sdk._config = MagicMock()
+    mock_sdk._config.secret = "test-secret-token"
+    return mock_sdk
+
+@pytest.mark.asyncio
+async def test_example(self, agent_fixture, mock_uipath_class):
+    with patch(
+        "uipath_langchain.agent.tools.mcp.mcp_tool.UiPath",
+        return_value=mock_uipath_class,
+    ):
+        tools, clients = await create_mcp_tools_from_agent(agent_fixture)
+```
+
 ## Debugging Failed Tests
 
 ### Enable Logging
@@ -434,7 +580,7 @@ assert initialize_count[0] == 1  # Session reused
 Run with logging to see MCP flow:
 
 ```bash
-uv run pytest test__mcp_client.py -v -s --log-cli-level=DEBUG
+uv run pytest tests/agent/tools/test_mcp/ -v -s --log-cli-level=DEBUG
 ```
 
 ### Check Method Sequence
@@ -456,78 +602,12 @@ def _build_response(self):
     # ...
 ```
 
-## test_mcp_tool.py Tests
-
-This file tests `create_mcp_tools_from_metadata` in `mcp_tool.py`.
-
-### Test Classes
-
-| Class | Purpose |
-|-------|---------|
-| `TestMcpToolMetadata` | Tests tool metadata (tool_type, display_name, etc.) |
-| `TestMcpToolCreation` | Tests tool creation (multiple tools, descriptions, disabled config) |
-| `TestMcpToolInvocation` | Smoke test for full tool invocation flow |
-| `TestMcpToolNameSanitization` | Tests tool name sanitization |
-
-### Key Test: test_tool_invocation_initializes_session_and_returns_result
-
-This smoke test verifies the full integration between `create_mcp_tools_from_metadata` and `McpClient`:
-
-```python
-@pytest.mark.asyncio
-@patch("uipath_langchain.agent.tools.mcp.mcp_tool.UiPath")
-@patch("httpx.AsyncClient")
-async def test_tool_invocation_initializes_session_and_returns_result(
-    self,
-    mock_async_client_class,
-    mock_uipath_class,
-):
-```
-
-**What it tests:**
-- Tool creation from metadata config
-- MCP session initialization via real MCP SDK
-- Tool call execution and result retrieval
-- Full MCP protocol flow (initialize → notifications/initialized → tools/call)
-
-**What it mocks:**
-- `UiPath` SDK (for `mcp.retrieve_async`)
-- `httpx.AsyncClient` (HTTP layer only)
-
-**What it does NOT mock:**
-- MCP SDK (`mcp.ClientSession`, `streamable_http_client`, etc.)
-
-**Reuses pattern from test__mcp_client.py:**
-- `create_mock_stream_response()` factory
-- `create_mock_http_client()` helper
-
-### Mocking Strategy
-
-The tests follow the same principle as `test__mcp_client.py`:
-
-1. **Mock only `httpx.AsyncClient`** - The HTTP layer
-2. **Mock `UiPath` SDK** - For `mcp.retrieve_async` to get MCP server URL
-3. **Never mock MCP SDK** - Let real `ClientSession` process messages
-
-This ensures:
-- Real MCP protocol flow is tested
-- Integration between `mcp_tool.py` and `_mcp_client.py` is validated
-- HTTP layer behavior can be controlled for testing
-
-### Adding New Tests
-
-When adding tests to `test_mcp_tool.py`:
-
-1. **For metadata/creation tests**: Just mock `UiPath` SDK
-2. **For invocation tests**: Use the mock pattern from `TestMcpToolInvocation`
-3. **Never mock** `mcp.ClientSession` or other MCP SDK components
-
 ## Related Files
 
 | File | Purpose |
 |------|---------|
-| `test__mcp_client.py` | Session tests (McpClient class) |
-| `test_mcp_tool.py` | Tool creation and invocation tests |
-| `src/.../mcp/_mcp_client.py` | Session implementation |
-| `src/.../mcp/mcp_tool.py` | Tool creation implementation |
+| `test_mcp_client.py` | McpClient session tests (7 tests) |
+| `test_mcp_tool.py` | Tool factory tests (17 tests) |
+| `src/.../mcp/mcp_client.py` | McpClient implementation |
+| `src/.../mcp/mcp_tool.py` | Tool factory implementation |
 | `src/.../mcp/claude.md` | Implementation documentation |

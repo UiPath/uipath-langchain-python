@@ -281,7 +281,9 @@ class TestCreateToolsFromResources:
             "integration_resource",
             "internal_resource",
             "ixp_extraction_resource",
-            "mcp_resource",
+            # Note: mcp_resource is excluded because MCP tools are created
+            # separately via create_mcp_tools_from_agent, not through
+            # _build_tool_for_resource
         ],
     )
     async def test_resource_produces_base_uipath_tool(

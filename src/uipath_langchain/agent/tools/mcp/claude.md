@@ -2,7 +2,7 @@
 
 > **CLAUDE: UPDATE THIS DOCUMENT**
 >
-> When you modify `_mcp_client.py` or `mcp_tool.py` (MCP-related code), you MUST update this document to reflect:
+> When you modify `mcp_client.py` or `mcp_tool.py` (MCP-related code), you MUST update this document to reflect:
 > - New or changed class attributes/methods (update Architecture section)
 > - Changes to initialization phases (update Two-Phase Initialization section)
 > - New error codes (update Session Error Codes table)
@@ -13,7 +13,27 @@
 
 ## Overview
 
-This document describes the MCP (Model Context Protocol) session management implementation in `_mcp_client.py` and its associated tests. Use this as a reference when modifying MCP-related code.
+This document describes the MCP (Model Context Protocol) session management implementation in `mcp_client.py` and tool factory functions in `mcp_tool.py`. Use this as a reference when modifying MCP-related code.
+
+## Module Structure
+
+```
+src/uipath_langchain/agent/tools/mcp/
+├── __init__.py          # Public exports
+├── mcp_client.py        # McpClient class (session management)
+└── mcp_tool.py          # Tool factory functions
+```
+
+### Public Exports (`__init__.py`)
+
+```python
+from .mcp_client import McpClient
+from .mcp_tool import (
+    create_mcp_tools,                           # Context manager for live sessions
+    create_mcp_tools_from_agent,                # Factory from LowCodeAgentDefinition
+    create_mcp_tools_from_metadata_for_mcp_server,  # Factory from config + McpClient
+)
+```
 
 ## Architecture
 
@@ -26,7 +46,7 @@ This document describes the MCP (Model Context Protocol) session management impl
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     McpClient                          │
+│                     McpClient                               │
 ├─────────────────────────────────────────────────────────────┤
 │  Configuration (immutable after __init__)                   │
 │  ─────────────────────────────────────────                  │
@@ -69,6 +89,52 @@ This document describes the MCP (Model Context Protocol) session management impl
 │  - _is_session_error(error) -> bool                         │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### Tool Factory Functions
+
+#### `create_mcp_tools_from_agent(agent)` → `tuple[list[BaseTool], list[McpClient]]`
+
+**Primary factory function** for creating MCP tools from a LowCodeAgentDefinition.
+
+```python
+async def create_mcp_tools_from_agent(
+    agent: LowCodeAgentDefinition,
+) -> tuple[list[BaseTool], list[McpClient]]:
+    """Create MCP tools from a LowCodeAgentDefinition.
+
+    Iterates over all MCP resources in the agent definition and creates tools
+    for each enabled MCP server. Each MCP server gets its own McpClient instance.
+
+    The UiPath SDK is lazily initialized inside this function using environment
+    variables (UIPATH_URL, UIPATH_ACCESS_TOKEN).
+
+    Returns:
+        A tuple of (tools, mcp_clients) where:
+        - tools: List of BaseTool instances for all MCP resources
+        - mcp_clients: List of McpClient instances that need to be closed when done
+
+    Note:
+        The caller is responsible for closing the McpClient instances when done.
+    """
+```
+
+**Usage:**
+```python
+tools, clients = await create_mcp_tools_from_agent(agent)
+try:
+    # Use tools...
+finally:
+    for client in clients:
+        await client.close()
+```
+
+#### `create_mcp_tools_from_metadata_for_mcp_server(config, mcpClient)` → `list[BaseTool]`
+
+Creates tools for a single MCP resource config using an existing McpClient.
+
+#### `create_mcp_tools(config)` → Context Manager
+
+Async context manager that creates live MCP sessions (uses langchain-mcp-adapters).
 
 ### Two-Phase Initialization
 
@@ -172,9 +238,6 @@ Client                              Server
    │                                   │
    │──── tools/call ──────────────────►│  ← retry
    │◄─── result ───────────────────────│
-   │                                   │
-   │──── tools/list ──────────────────►│  ← SDK validates
-   │◄─── tool definitions ─────────────│
 ```
 
 ### Session Error Codes
@@ -188,7 +251,24 @@ The following error codes trigger automatic session reinitialization:
 
 ## Key Implementation Details
 
-### 1. Single Lock for Both Phases
+### 1. HTTP Client Configuration
+
+The HTTP client MUST use `get_httpx_client_kwargs()` for proper SSL/proxy configuration:
+
+```python
+from uipath._utils._ssl_context import get_httpx_client_kwargs
+
+default_client_kwargs = get_httpx_client_kwargs()
+self._http_client = await self._stack.enter_async_context(
+    httpx.AsyncClient(
+        **default_client_kwargs,
+        headers=self._headers,
+        timeout=self._timeout,
+    )
+)
+```
+
+### 2. Single Lock for Both Phases
 
 One `asyncio.Lock` protects both client initialization and session reinitialization:
 
@@ -209,30 +289,7 @@ async def _reinitialize_session(self) -> None:
             await self._initialize_session()  # Lightweight!
 ```
 
-### 2. Why asyncio.Lock?
-
-`asyncio.Lock` is the Pythonic choice for async code because:
-- It's designed for async/await patterns
-- It's non-blocking (doesn't block the event loop)
-- It handles async context managers properly
-- Standard library, no extra dependencies
-
-### 3. Client vs Session Separation
-
-```python
-async def _initialize_client(self) -> None:
-    """Phase 1: Create everything, then call Phase 2."""
-    # Create HTTP client, streams, ClientSession...
-    self._client_initialized = True
-    await self._initialize_session()  # Chain to Phase 2
-
-async def _initialize_session(self) -> None:
-    """Phase 2: Just the MCP handshake."""
-    await self._session.initialize()
-    self._session_id = self._get_session_id()
-```
-
-### 4. No `with` Statement for AsyncExitStack
+### 3. No `with` Statement for AsyncExitStack
 
 Manual lifecycle management:
 
@@ -248,7 +305,7 @@ async with AsyncExitStack() as stack:
     ...  # Stack closes here!
 ```
 
-### 5. Reinitialization Reuses Client
+### 4. Reinitialization Reuses Client
 
 The key optimization - on 404, only `_initialize_session()` is called:
 
@@ -263,22 +320,28 @@ async def _reinitialize_session(self) -> None:
 
 ## Tests
 
-Tests are in `tests/agent/tools/test_mcp/test__mcp_client.py`.
+Tests are in `tests/agent/tools/test_mcp/`.
 
 For detailed test documentation, mocking strategies, and guidelines for adding new tests, see:
 **`tests/agent/tools/test_mcp/claude.md`**
 
 ### Quick Reference
 
-| Test | Purpose |
-|------|---------|
-| `test_session_initializes_on_first_call` | Verifies lazy initialization |
-| `test_session_reused_across_calls` | Verifies session reuse |
-| `test_session_reinitializes_on_404_error` | **Key test**: client reused, only session reinit |
-| `test_max_retries_exceeded` | Verifies exception after max retries |
-| `test_close_releases_resources` | Verifies cleanup |
-| `test_client_initialized_property` | Verifies property reflects state |
-| `test_session_can_be_reused_after_close` | Verifies full reinit after close |
+| Test File | Purpose |
+|-----------|---------|
+| `test_mcp_client.py` | McpClient session tests (7 tests) |
+| `test_mcp_tool.py` | Tool factory tests (17 tests) |
+
+### Key Test Classes
+
+| Class | Tests |
+|-------|-------|
+| `TestMcpClient` | Session lifecycle, 404 retry, client reuse |
+| `TestMcpToolMetadata` | Tool metadata (tool_type, display_name, etc.) |
+| `TestMcpToolCreation` | Multiple tools, descriptions, disabled config |
+| `TestCreateMcpToolsFromAgent` | Agent factory function tests |
+| `TestMcpToolInvocation` | Full invocation flow smoke test |
+| `TestMcpToolNameSanitization` | Tool name sanitization |
 
 ### Key Assertion
 
@@ -294,22 +357,20 @@ assert initialize_count[0] == 2
 
 ## Guidelines for Changes
 
-### Adding New Error Codes for Retry
+### Adding New Factory Functions
 
-1. Add the error code to `SESSION_ERROR_CODES`:
-   ```python
-   SESSION_ERROR_CODES = [32600, -32000, NEW_CODE]
-   ```
-
-2. Add a test case that verifies the new code triggers retry
-3. Ensure it only triggers session reinit, not full client reinit
+1. Follow the pattern of existing functions
+2. Always handle `is_enabled=False` case by returning empty list
+3. Include proper metadata on created tools (`tool_type`, `display_name`, `folder_path`, `slug`)
+4. Add tests for the new function
 
 ### Modifying Client Initialization
 
 1. Changes go in `_initialize_client()`
 2. All resources must be added to `_stack` via `enter_async_context()`
 3. Set `_client_initialized = True` before calling `_initialize_session()`
-4. Update tests if the initialization sequence changes
+4. Always use `get_httpx_client_kwargs()` for HTTP client
+5. Update tests if the initialization sequence changes
 
 ### Modifying Session Initialization
 
@@ -331,31 +392,15 @@ assert initialize_count[0] == 2
 
 3. If the method modifies session state, acquire `_lock`
 
-### Modifying Tests
-
-See `tests/agent/tools/test_mcp/claude.md` for detailed guidance on:
-- Adding new MCP methods to `MockStreamResponse`
-- Testing error scenarios
-- Verifying client reuse
-- Debugging failed tests
-
-### SDK Changes
-
-If the MCP SDK (`mcp` package) changes:
-
-1. Check if `streamable_http_client` signature changed
-2. Check if `ClientSession.initialize()` can still be called multiple times
-3. Check if error codes changed
-4. Update `_is_session_error()` if error structure changes
-
 ## Related Files
 
 | File | Purpose |
 |------|---------|
-| `_mcp_client.py` | Session management implementation |
-| `mcp_tool.py` | Tool creation (uses McpClient) |
-| `test__mcp_client.py` | Session tests (7 tests including 404 retry) |
-| `test_mcp_tool.py` | Tool creation and invocation tests (11 tests) |
+| `mcp_client.py` | McpClient session management |
+| `mcp_tool.py` | Tool factory functions |
+| `__init__.py` | Public exports |
+| `test_mcp_client.py` | Session tests |
+| `test_mcp_tool.py` | Tool factory tests |
 
 ## MCP SDK Reference
 
@@ -365,8 +410,6 @@ The implementation uses these MCP SDK components:
 - `mcp.client.streamable_http.streamable_http_client` - HTTP transport
 - `mcp.shared.exceptions.McpError` - Error handling
 - `mcp.types.CallToolResult` - Tool call results
-
-SDK source: `/Users/eduard/work/agenthub/modelcontextprotocol/python-sdk/src/mcp/`
 
 Key SDK behaviors:
 - `ClientSession.initialize()` sends initialize request + initialized notification
