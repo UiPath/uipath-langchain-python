@@ -14,11 +14,11 @@ class ToolCallSpanAttributes(BaseSpanAttributes):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    call_id: Optional[str] = Field(None, alias="callId")
+    call_id: Optional[str] = Field(None, alias="call_id")
     tool_name: str = Field(..., alias="toolName")
     tool_type: str = Field(default="toolCall", alias="toolType")
-    arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
-    result: Optional[Any] = Field(None, alias="result")
+    arguments: Optional[Dict[str, Any]] = Field(None, alias="input")
+    result: Optional[Any] = Field(None, alias="output")
     attachments: Optional[List[SpanAttachment]] = Field(None, alias="attachments")
     _span_type: Optional[str] = None
 

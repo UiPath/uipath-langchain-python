@@ -200,14 +200,14 @@ def parse_tool_arguments(input_str: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def set_tool_result(span: Span, output: Any) -> None:
+def set_tool_result(span: Span, output: Any, attribute_name: str = "result") -> None:
     """Set tool result attribute on span."""
     if output is None:
         return
     if isinstance(output, (dict, list)):
-        span.set_attribute("result", serialize_json(output))
+        span.set_attribute(attribute_name, serialize_json(output))
     else:
-        span.set_attribute("result", str(output))
+        span.set_attribute(attribute_name, str(output))
 
 
 def get_tool_type_value(tool_type: Optional[str]) -> str:

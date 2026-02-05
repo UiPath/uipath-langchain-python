@@ -89,13 +89,12 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             # Only reuse if the flag indicates it was created by guardrails
             if self._state.current_tool_span and self._state.tool_span_from_guardrail:
                 span = self._state.current_tool_span
-                span.set_attribute("toolName", tool_name)
                 span.set_attribute("tool.name", tool_name)
                 span.set_attribute("toolType", tool_type_value)
                 if call_id:
-                    span.set_attribute("callId", call_id)
+                    span.set_attribute("call_id", call_id)
                 if arguments:
-                    span.set_attribute("arguments", json.dumps(arguments))
+                    span.set_attribute("input", json.dumps(arguments))
                 self._spans[run_id] = span
                 # Clear the flag after reuse - span was consumed by on_tool_start
                 self._state.tool_span_from_guardrail = False
@@ -143,6 +142,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 elif tool_type == "integration":
                     child_span = self._span_factory.start_integration_tool(
                         tool_name=tool_display_name or tool_name,
+                        arguments=arguments,
                         parent_span=span,
                     )
 
@@ -200,7 +200,9 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             span = self._spans.pop(run_id, None)
             if span:
                 SpanHierarchyManager.pop(run_id)
-                set_tool_result(span, output)
+                set_tool_result(
+                    span, output, "output"
+                )  # ugly fix for stupid problem...
                 self._span_factory.end_span_ok(span)
                 if span == self._state.pending_tool_span:
                     self._state.pending_tool_span = None

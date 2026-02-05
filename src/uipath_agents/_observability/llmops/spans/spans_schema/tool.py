@@ -208,6 +208,7 @@ class ToolSpanSchema:
         self,
         tool_name: str,
         *,
+        arguments: Optional[Dict[str, Any]] = None,
         parent_span: Optional[Span] = None,
     ) -> Span:
         """Start an integration tool span (child of tool call).
@@ -228,7 +229,7 @@ class ToolSpanSchema:
             parent_span=parent_span,
             kind=SpanKind.INTERNAL,
         )
-        attrs = IntegrationToolSpanAttributes(tool_name=tool_name)
+        attrs = IntegrationToolSpanAttributes(tool_name=tool_name, arguments=arguments)
         apply_attributes(span, attrs)
         # Note: integration tool doesn't upsert on start (short-lived span)
         return span

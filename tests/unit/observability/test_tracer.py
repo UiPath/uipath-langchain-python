@@ -445,8 +445,8 @@ class TestAgentToolSpan:
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
-        assert '"a": 1' in spans[0].attributes["arguments"]
-        assert '"b": 2' in spans[0].attributes["arguments"]
+        assert '"a": 1' in spans[0].attributes["input"]
+        assert '"b": 2' in spans[0].attributes["input"]
 
 
 class TestToolCallWithArguments:
@@ -463,7 +463,7 @@ class TestToolCallWithArguments:
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
-        assert '"x": 10' in spans[0].attributes["arguments"]
+        assert '"x": 10' in spans[0].attributes["input"]
 
     def test_tool_call_includes_call_id(
         self, tracer: LlmOpsSpanFactory, span_exporter
@@ -476,7 +476,7 @@ class TestToolCallWithArguments:
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
-        assert spans[0].attributes["callId"] == "call_abc123"
+        assert spans[0].attributes["call_id"] == "call_abc123"
 
     def test_tool_call_includes_tool_type_value(
         self, tracer: LlmOpsSpanFactory, span_exporter

@@ -329,6 +329,7 @@ class LlmOpsSpanFactory:
         self,
         tool_name: str,
         *,
+        arguments: Optional[Dict[str, Any]] = None,
         parent_span: Optional[Span] = None,
     ) -> Span:
         """Start an integration tool span (child of tool call).
@@ -345,6 +346,7 @@ class LlmOpsSpanFactory:
         """
         return self._tool_schema.start_integration_tool(
             tool_name,
+            arguments=arguments,
             parent_span=parent_span,
         )
 
