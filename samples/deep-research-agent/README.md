@@ -45,7 +45,7 @@ TAVILY_API_KEY=your_tavily_api_key
 
 Set in `.env`:
 ```
-LANGCHAIN_RECURSION_LIMIT=100
+LANGCHAIN_RECURSION_LIMIT=1000
 ```
 
 ## Usage
