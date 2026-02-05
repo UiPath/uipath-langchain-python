@@ -1,6 +1,5 @@
 """Escalation tool creation for Action Center integration."""
 
-import logging
 from enum import Enum
 from typing import Any, Literal
 
@@ -37,8 +36,6 @@ from ..exceptions import AgentTerminationException
 from ..react.types import AgentGraphState
 from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_dict_for_serialization, sanitize_tool_name
-
-logger = logging.getLogger(__name__)
 
 
 class EscalationAction(str, Enum):
@@ -129,32 +126,27 @@ def _parse_task_data(
     Returns:
         Filtered dictionary containing only relevant output fields
     """
-    try:
-        filtered_fields: dict[str, Any] = {}
+    filtered_fields: dict[str, Any] = {}
 
-        if output_schema is None:
-            input_field_names = set()
-            if "properties" in input_schema:
-                input_field_names = set(input_schema["properties"].keys())
+    if output_schema is None:
+        input_field_names = set()
+        if "properties" in input_schema:
+            input_field_names = set(input_schema["properties"].keys())
 
-            for field_name, field_value in data.items():
-                if field_name not in input_field_names:
-                    filtered_fields[field_name] = field_value
+        for field_name, field_value in data.items():
+            if field_name not in input_field_names:
+                filtered_fields[field_name] = field_value
 
-        else:
-            output_field_names = set()
-            if "properties" in output_schema:
-                output_field_names = set(output_schema["properties"].keys())
+    else:
+        output_field_names = set()
+        if "properties" in output_schema:
+            output_field_names = set(output_schema["properties"].keys())
 
-            for field_name, field_value in data.items():
-                if field_name in output_field_names:
-                    filtered_fields[field_name] = field_value
+        for field_name, field_value in data.items():
+            if field_name in output_field_names:
+                filtered_fields[field_name] = field_value
 
-        return filtered_fields
-
-    except Exception as e:
-        logging.error(f"Error parsing task data: {e}")
-        return data
+    return filtered_fields
 
 
 def create_escalation_tool(
