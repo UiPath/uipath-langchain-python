@@ -1,5 +1,6 @@
 """Escalation tool creation for Action Center integration."""
 
+import logging
 from enum import Enum
 from typing import Any, Literal
 
@@ -37,8 +38,8 @@ from ..react.types import AgentGraphState
 from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_dict_for_serialization, sanitize_tool_name
 
-import logging
 logger = logging.getLogger(__name__)
+
 
 class EscalationAction(str, Enum):
     """Actions that can be taken after an escalation completes."""
@@ -117,12 +118,11 @@ def _parse_task_data(
     """
     Filter action center task data based on input/output schemas.
 
-    This replicates the C# AppTasksInternalClient.ParseTaskData logic:
-    - If output_schema is None: exclude all input fields (return only new fields)
-    - If output_schema is provided: include only fields defined in output schema
+    When output_schema is None, returns only fields not present in input_schema.
+    When output_schema is provided, returns only fields defined in output_schema.
 
     Args:
-        data: Raw task data from action center (complete form data)
+        data: Raw task data from action center
         input_schema: JSON schema defining the input fields
         output_schema: Optional JSON schema defining expected output fields
 
@@ -133,25 +133,19 @@ def _parse_task_data(
         filtered_fields: dict[str, Any] = {}
 
         if output_schema is None:
-            # Scenario A: No output schema - exclude input fields
-            # Get all input field names from the schema
             input_field_names = set()
             if "properties" in input_schema:
                 input_field_names = set(input_schema["properties"].keys())
 
-                # Keep only fields that are NOT in the input schema
             for field_name, field_value in data.items():
                 if field_name not in input_field_names:
                     filtered_fields[field_name] = field_value
 
         else:
-            # Scenario B: Output schema provided - include only output fields
-            # Get all output field names from the schema
             output_field_names = set()
             if "properties" in output_schema:
                 output_field_names = set(output_schema["properties"].keys())
 
-                # Keep ONLY fields present in the output schema
             for field_name, field_value in data.items():
                 if field_name in output_field_names:
                     filtered_fields[field_name] = field_value
@@ -159,10 +153,9 @@ def _parse_task_data(
         return filtered_fields
 
     except Exception as e:
-        # If filtering fails, return original data
-        import logging
         logging.error(f"Error parsing task data: {e}")
         return data
+
 
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
@@ -219,24 +212,28 @@ def create_escalation_tool(
         # Extract task info before validation
         task_id = result.id
         task_url = f"{UiPathConfig.base_url}/actions_/tasks/{task_id}"
-        assigned_to = recipient.value
+        assigned_to = _get_user_email(result.assigned_to_user)
 
-        escalation_action = result.action
-        escalation_output = _parse_task_data(result.data, input_schema=input_model.model_json_schema(), output_schema=EscalationToolOutput.model_json_schema())
+        outcome = result.action
+        escalation_output = _parse_task_data(
+            result.data,
+            input_schema=input_model.model_json_schema(),
+            output_schema=EscalationToolOutput.model_json_schema(),
+        )
 
         outcome_str = (
-            channel.outcome_mapping.get(escalation_action)
-            if channel.outcome_mapping and escalation_action
+            channel.outcome_mapping.get(outcome)
+            if channel.outcome_mapping and outcome
             else None
         )
-        outcome = (
+        escalation_action = (
             EscalationAction(outcome_str) if outcome_str else EscalationAction.CONTINUE
         )
 
         return {
-            "action": outcome,
+            "action": escalation_action,
             "output": escalation_output,
-            "outcome": escalation_action,
+            "outcome": outcome,
             "task_id": task_id,
             "task_url": task_url,
             "assigned_to": assigned_to,
