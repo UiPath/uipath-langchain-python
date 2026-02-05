@@ -340,7 +340,9 @@ class InstrumentedRuntime:
                     if agent_id:
                         base_properties["AgentId"] = agent_id
 
-                    enriched_properties = self._get_enriched_properties(base_properties)
+                    enriched_properties = self._get_enriched_properties(
+                        base_properties, agent_span
+                    )
                     self._callback.set_enriched_properties(enriched_properties)
 
                     self._event_emitter.track_event(
