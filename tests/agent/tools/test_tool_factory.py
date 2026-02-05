@@ -45,8 +45,17 @@ EMPTY_SCHEMA = {"type": "object", "properties": {}}
 @pytest.fixture
 def mock_uipath_sdk():
     """Create a mock UiPath SDK."""
-    with patch("uipath_langchain.agent.tools.integration_tool.UiPath") as mock:
+    with (
+        patch("uipath_langchain.agent.tools.integration_tool.UiPath") as mock,
+        patch("uipath_langchain.agent.tools.mcp.mcp_tool.UiPath") as mock_mcp,
+    ):
         mock.return_value = MagicMock()
+        # Setup MCP mock to return a server with mcp_url
+        mock_mcp_instance = MagicMock()
+        mock_mcp_server = MagicMock()
+        mock_mcp_server.mcp_url = "https://test.uipath.com/mcp"
+        mock_mcp_instance.mcp.retrieve_async = AsyncMock(return_value=mock_mcp_server)
+        mock_mcp.return_value = mock_mcp_instance
         yield mock
 
 
@@ -272,7 +281,9 @@ class TestCreateToolsFromResources:
             "integration_resource",
             "internal_resource",
             "ixp_extraction_resource",
-            "mcp_resource",
+            # Note: mcp_resource is excluded because MCP tools are created
+            # separately via create_mcp_tools_from_agent, not through
+            # _build_tool_for_resource
         ],
     )
     async def test_resource_produces_base_uipath_tool(
