@@ -76,8 +76,6 @@ class LlmCallSpanAttributes(BaseSpanAttributes):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    model: Optional[str] = Field(None, alias="model")
-    settings: Optional[ModelSettings] = Field(None, alias="settings")
     input: Optional[str] = Field(None, alias="input")
     content: Optional[str] = Field(None, alias="content")
     explanation: Optional[str] = Field(None, alias="explanation")

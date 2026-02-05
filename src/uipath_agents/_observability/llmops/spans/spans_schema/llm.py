@@ -43,9 +43,6 @@ class LlmSpanSchema:
 
     def start_llm_call(
         self,
-        model_name: Optional[str] = None,
-        max_tokens: Optional[int] = None,
-        temperature: Optional[float] = None,
         input: Optional[str] = None,
         parent_span: Optional[Span] = None,
     ) -> Span:
@@ -55,9 +52,6 @@ class LlmSpanSchema:
         Use for callback-based instrumentation where context managers don't fit.
 
         Args:
-            model_name: Name of the model being called
-            max_tokens: Maximum tokens for generation
-            temperature: Temperature for generation
             input: The user input/prompt for this LLM call
             parent_span: Optional parent span. If None, uses current span.
 
@@ -70,14 +64,8 @@ class LlmSpanSchema:
             parent_span=parent_span,
             kind=SpanKind.INTERNAL,
         )
-        settings = None
-        if max_tokens is not None or temperature is not None:
-            settings = ModelSettings(max_tokens=max_tokens, temperature=temperature)
-        attrs = LlmCallSpanAttributes(model=model_name, settings=settings, input=input)
+        attrs = LlmCallSpanAttributes(input=input)
         apply_attributes(span, attrs)
-        # model is tracked separately for outer LLM call span
-        if model_name:
-            span.set_attribute("model", model_name)
         if self._upsert_started:
             self._upsert_started(span)
         return span

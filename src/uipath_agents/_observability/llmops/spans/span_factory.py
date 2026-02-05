@@ -147,9 +147,6 @@ class LlmOpsSpanFactory:
 
     def start_llm_call(
         self,
-        model_name: Optional[str] = None,
-        max_tokens: Optional[int] = None,
-        temperature: Optional[float] = None,
         input: Optional[str] = None,
         parent_span: Optional[Span] = None,
     ) -> Span:
@@ -159,9 +156,6 @@ class LlmOpsSpanFactory:
         Use for callback-based instrumentation where context managers don't fit.
 
         Args:
-            model_name: Name of the model being called
-            max_tokens: Maximum tokens for generation
-            temperature: Temperature for generation
             input: The user input/prompt for this LLM call
             parent_span: Optional parent span. If None, uses current span.
 
@@ -169,9 +163,6 @@ class LlmOpsSpanFactory:
             The started Span (caller must call span.end())
         """
         return self._llm_schema.start_llm_call(
-            model_name=model_name,
-            max_tokens=max_tokens,
-            temperature=temperature,
             input=input,
             parent_span=parent_span,
         )

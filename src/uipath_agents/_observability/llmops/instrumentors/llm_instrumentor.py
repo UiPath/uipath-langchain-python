@@ -84,9 +84,6 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
         else:
             parent = self._state.get_span_or_root(parent_run_id)
             llm_span = self._span_factory.start_llm_call(
-                model_name=model_name,
-                max_tokens=max_tokens,
-                temperature=temperature,
                 input=input_text,
                 parent_span=parent,
             )
