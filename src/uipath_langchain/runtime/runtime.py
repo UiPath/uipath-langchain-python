@@ -4,6 +4,7 @@ from typing import Any, AsyncGenerator
 from uuid import uuid4
 
 from langchain.agents.middleware.human_in_the_loop import (
+    Action,
     ActionRequest,
     ApproveDecision,
     EditDecision,
@@ -83,6 +84,7 @@ class UiPathLangGraphRuntime:
         self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
         self._tools_by_name: dict[str, BaseTool] = self._build_tools_map()
+        self._last_hitl_tool_name: str | None = None
 
     async def execute(
         self,
@@ -272,8 +274,9 @@ class UiPathLangGraphRuntime:
             if not approved:
                 return HITLResponse(decisions=[RejectDecision(type="reject", message="User rejected")])
             edited_args = response.get("input")
-            if edited_args:
-                return HITLResponse(decisions=[EditDecision(type="edit", edited_action=edited_args)])
+            if edited_args and self._last_hitl_tool_name:
+                edited_action = Action(name=self._last_hitl_tool_name, args=edited_args)
+                return HITLResponse(decisions=[EditDecision(type="edit", edited_action=edited_action)])
             return HITLResponse(decisions=[ApproveDecision(type="approve")])
 
         return response
@@ -377,6 +380,7 @@ class UiPathLangGraphRuntime:
             if actions:
                 action: ActionRequest = actions[0]
                 tool_name = action["name"]
+                self._last_hitl_tool_name = tool_name
                 input_schema = self._get_tool_input_schema(tool_name)
                 return UiPathConversationToolCallConfirmationInterruptStart(
                     type=InterruptTypeEnum.TOOL_CALL_CONFIRMATION,
@@ -397,29 +401,9 @@ class UiPathLangGraphRuntime:
         if not tool:
             return {}
         try:
-            schema = tool.args_schema.model_json_schema()
-            return self._resolve_schema_refs(schema)
+            return tool.args_schema.model_json_schema()
         except Exception:
             return {}
-
-    @staticmethod
-    def _resolve_schema_refs(schema: dict[str, Any]) -> dict[str, Any]:
-        """Inline $defs/$ref references so the frontend gets a flat schema."""
-        defs = schema.pop("$defs", {})
-        if not defs:
-            return schema
-
-        def resolve(obj: Any) -> Any:
-            if isinstance(obj, dict):
-                if "$ref" in obj:
-                    ref_name = obj["$ref"].rsplit("/", 1)[-1]
-                    return resolve(defs.get(ref_name, obj))
-                return {k: resolve(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [resolve(item) for item in obj]
-            return obj
-
-        return resolve(schema)
 
     def _build_tools_map(self) -> dict[str, BaseTool]:
         """Build a map of tool name -> BaseTool from the graph's ToolNode instances."""
