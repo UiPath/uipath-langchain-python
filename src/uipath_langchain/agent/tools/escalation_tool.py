@@ -201,6 +201,8 @@ def create_escalation_tool(
                 WaitEscalation(
                     action=task,
                     app_folder_path=channel.properties.folder_name,
+                    app_name=channel.properties.app_name,
+                    recipient=recipient,
                 )
             )
 
