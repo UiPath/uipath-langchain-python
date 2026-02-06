@@ -3,14 +3,27 @@ import os
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
+from langchain.agents.middleware.human_in_the_loop import (
+    Action,
+    ActionRequest,
+    ApproveDecision,
+    EditDecision,
+    HITLRequest,
+    HITLResponse,
+    RejectDecision,
+)
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.runnables.config import RunnableConfig
+from langchain_core.tools import BaseTool
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.prebuilt import ToolNode
 from langgraph.types import Command, Interrupt, StateSnapshot
 from uipath.runtime import (
     UiPathBreakpointResult,
     UiPathExecuteOptions,
+    UiPathResumeTrigger,
+    UiPathResumeTriggerType,
     UiPathRuntimeResult,
     UiPathRuntimeStatus,
     UiPathRuntimeStorageProtocol,
@@ -23,10 +36,20 @@ from uipath.runtime.events import (
     UiPathRuntimeStateEvent,
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
+from uipath.core.chat import (
+    InterruptTypeEnum,
+    UiPathConversationGenericInterruptStart,
+    UiPathConversationToolCallConfirmationInterruptStart,
+    UiPathConversationToolCallConfirmationValue,
+)
 
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
-from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
+from uipath_langchain.runtime.schema import (
+    _unwrap_runnable_callable,
+    get_entrypoints_schema,
+    get_graph_schema,
+)
 
 from ._serialize import serialize_output
 
@@ -60,6 +83,8 @@ class UiPathLangGraphRuntime:
         self.callbacks: list[BaseCallbackHandler] = callbacks or []
         self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
+        self._tools_by_name: dict[str, BaseTool] = self._build_tools_map()
+        self._last_hitl_tool_name: str | None = None
 
     async def execute(
         self,
@@ -229,8 +254,32 @@ class UiPathLangGraphRuntime:
             if messages and isinstance(messages, list):
                 graph_input["messages"] = self.chat.map_messages(messages)
         if options and options.resume:
-            return Command(resume=graph_input)
+            resume_data = self._transform_interrupt_resume(graph_input)
+            return Command(resume=resume_data)
         return graph_input
+
+    def _transform_interrupt_resume(self, cas_input: dict[str, Any]) -> Any:
+        """Transform CAS resume input to LangGraph Command.resume format."""
+        if "response" not in cas_input:
+            return cas_input
+
+        interrupt_type = cas_input.get("interrupt_type", "")
+        response = cas_input["response"]
+
+        if not isinstance(response, dict):
+            return response
+
+        if interrupt_type == InterruptTypeEnum.TOOL_CALL_CONFIRMATION:
+            approved = response.get("approved", True)
+            if not approved:
+                return HITLResponse(decisions=[RejectDecision(type="reject", message="User rejected")])
+            edited_args = response.get("input")
+            if edited_args and self._last_hitl_tool_name:
+                edited_action = Action(name=self._last_hitl_tool_name, args=edited_args)
+                return HITLResponse(decisions=[EditDecision(type="edit", edited_action=edited_action)])
+            return HITLResponse(decisions=[ApproveDecision(type="approve")])
+
+        return response
 
     async def _get_graph_state(
         self,
@@ -323,6 +372,54 @@ class UiPathLangGraphRuntime:
             # Normal completion
             return self._create_success_result(graph_output)
 
+    def _format_interrupt_value(self, value: Any) -> dict[str, Any]:
+        """Format interrupt value for CAS consumption."""
+        if isinstance(value, dict) and "action_requests" in value:
+            request: HITLRequest = value
+            actions = request["action_requests"]
+            if actions:
+                action: ActionRequest = actions[0]
+                tool_name = action["name"]
+                self._last_hitl_tool_name = tool_name
+                input_schema = self._get_tool_input_schema(tool_name)
+                return UiPathConversationToolCallConfirmationInterruptStart(
+                    type=InterruptTypeEnum.TOOL_CALL_CONFIRMATION,
+                    value=UiPathConversationToolCallConfirmationValue(
+                        tool_call_id=str(uuid4()),
+                        tool_name=tool_name,
+                        input_schema=input_schema,
+                        input_value=action["args"],
+                    ),
+                ).model_dump(by_alias=True)
+        return UiPathConversationGenericInterruptStart(
+            type="generic",
+            value=value,
+        ).model_dump(by_alias=True)
+
+    def _get_tool_input_schema(self, tool_name: str) -> dict[str, Any]:
+        tool = self._tools_by_name.get(tool_name)
+        if not tool:
+            return {}
+        try:
+            return tool.args_schema.model_json_schema()
+        except Exception:
+            return {}
+
+    def _build_tools_map(self) -> dict[str, BaseTool]:
+        """Build a map of tool name -> BaseTool from the graph's ToolNode instances."""
+        tools_map: dict[str, BaseTool] = {}
+        try:
+            graph = self.graph.get_graph(xray=0)
+            for node in graph.nodes.values():
+                if node.data is None:
+                    continue
+                tool_node = _unwrap_runnable_callable(node.data, ToolNode)
+                if tool_node and hasattr(tool_node, "_tools_by_name"):
+                    tools_map.update(tool_node._tools_by_name)
+        except Exception:
+            pass
+        return tools_map
+
     async def _create_suspended_result(
         self,
         graph_state: StateSnapshot,
@@ -338,7 +435,9 @@ class UiPathLangGraphRuntime:
                         if task.interrupts and interrupt in task.interrupts:
                             # Only include if this task is still waiting for interrupt resolution
                             if task.interrupts and not task.result:
-                                interrupt_map[interrupt.id] = interrupt.value
+                                interrupt_map[interrupt.id] = self._format_interrupt_value(
+                                    interrupt.value
+                                )
                             break
 
         # If we have dynamic interrupts, return suspended with interrupt map
@@ -347,6 +446,7 @@ class UiPathLangGraphRuntime:
             return UiPathRuntimeResult(
                 output=interrupt_map,
                 status=UiPathRuntimeStatus.SUSPENDED,
+                trigger=UiPathResumeTrigger(trigger_type=UiPathResumeTriggerType.API),
             )
         else:
             # Static interrupt (breakpoint)
