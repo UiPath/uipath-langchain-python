@@ -1,7 +1,5 @@
 """OpenAI payload handlers."""
 
-from typing import Any
-
 from langchain_core.messages import AIMessage
 from uipath.runtime.errors import UiPathErrorCode
 
@@ -34,10 +32,6 @@ STOP_REASON_MESSAGES: dict[str, tuple[str, str]] = {
 
 class OpenAIResponsesPayloadHandler(ModelPayloadHandler):
     """Payload handler for OpenAI Responses API."""
-
-    def get_required_tool_choice(self) -> str | dict[str, Any]:
-        """Get tool_choice value for OpenAI Responses API."""
-        return "required"
 
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check OpenAI Responses API status and raise exception for faulty terminations.
