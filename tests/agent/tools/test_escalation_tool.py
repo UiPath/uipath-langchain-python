@@ -808,9 +808,7 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
     ):
         """Test that task creation failure propagates as exception."""
         mock_client = MagicMock()
-        mock_client.tasks.create_async = AsyncMock(
-            side_effect=Exception("API error")
-        )
+        mock_client.tasks.create_async = AsyncMock(side_effect=Exception("API error"))
         mock_uipath_class.return_value = mock_client
 
         tool = create_escalation_tool(escalation_resource)
