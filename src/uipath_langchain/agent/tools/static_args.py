@@ -236,7 +236,7 @@ def apply_static_args(
                 # The array is empty. Updating it with jsonpath will leave it empty.
                 # We instead replace the empty array with a single static value
                 array_expr.update_or_create(sanitized_args, [value])
-                return sanitized_args
+                continue
 
         expr.update_or_create(sanitized_args, value)
 
