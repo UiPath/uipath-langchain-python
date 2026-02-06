@@ -93,7 +93,8 @@ def create_llm_node(
                 f"LLM returned {type(response).__name__} instead of AIMessage"
             )
 
-        payload_handler.check_stop_reason(response)
+        if payload_handler is not None:
+            payload_handler.check_stop_reason(response)
 
         # filter out flow control tools when multiple tool calls exist
         if response.tool_calls:
