@@ -341,6 +341,20 @@ class LlmOpsSpanFactory:
             parent_span=parent_span,
         )
 
+    def start_internal_tool(
+        self,
+        tool_name: str,
+        *,
+        arguments: Optional[Dict[str, Any]] = None,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start an internal tool span (child of tool call)."""
+        return self._tool_schema.start_internal_tool(
+            tool_name,
+            arguments=arguments,
+            parent_span=parent_span,
+        )
+
     # -------------------------------------------------------------------------
     # Guardrail spans
     # -------------------------------------------------------------------------

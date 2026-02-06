@@ -104,3 +104,16 @@ class IntegrationToolSpanAttributes(BaseSpanAttributes):
     @property
     def type(self) -> str:
         return SpanType.INTEGRATION_TOOL
+
+
+class InternalToolSpanAttributes(BaseSpanAttributes):
+    """Attributes for internal tool spans."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    tool_name: str = Field(..., alias="toolName")
+    arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
+
+    @property
+    def type(self) -> str:
+        return SpanType.TOOL_CALL

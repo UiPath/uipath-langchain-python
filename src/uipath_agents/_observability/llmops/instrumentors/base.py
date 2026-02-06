@@ -38,6 +38,7 @@ class InstrumentationState:
     escalation_run_ids: Set[UUID] = field(default_factory=set)
     process_run_ids: Set[UUID] = field(default_factory=set)
     agent_run_ids: Set[UUID] = field(default_factory=set)
+    tool_output_schemas: Dict[UUID, Any] = field(default_factory=dict)
 
     # Pending interruptible tool spans (for suspend/resume)
     pending_tool_name: Optional[str] = None
@@ -92,6 +93,7 @@ class InstrumentationState:
         self.escalation_run_ids.clear()
         self.process_run_ids.clear()
         self.agent_run_ids.clear()
+        self.tool_output_schemas.clear()
 
         # Resume state
         self.resumed_trace_id = None

@@ -2,11 +2,13 @@
 
 import json
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 from uuid import UUID
 
+from pydantic import BaseModel
 from uipath.core.guardrails import GuardrailScope
 from uipath.eval.mocks.mockable import MOCKED_ANNOTATION_KEY
+from uipath.tracing import AttachmentDirection
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ..span_hierarchy import SpanHierarchyManager
@@ -16,6 +18,7 @@ from .attribute_helpers import (
     parse_tool_arguments,
     set_escalation_task_info,
     set_process_job_info,
+    set_span_attachments,
     set_tool_result,
 )
 from .base import BaseSpanInstrumentor, InstrumentationState
@@ -69,6 +72,9 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             tool_name = serialized.get("name", "unknown")
             tool_type = metadata.get("tool_type") if metadata else None
             tool_display_name = metadata.get("display_name") if metadata else None
+            output_schema = metadata.get("output_schema") if metadata else None
+            if output_schema is not None:
+                self._state.tool_output_schemas[run_id] = output_schema
 
             # Resume mode: skip duplicate span for re-invoked tool
             if (
@@ -145,12 +151,18 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         arguments=arguments,
                         parent_span=span,
                     )
+                elif tool_type == "internal" and tool_display_name:
+                    child_span = self._span_factory.start_internal_tool(
+                        tool_name=tool_display_name,
+                        arguments=arguments,
+                        parent_span=span,
+                    )
 
                 if child_span:
                     self._spans[self._interruptible_span_key(run_id)] = child_span
                     SpanHierarchyManager.push(run_id, child_span)
                     # Track as pending for suspend scenario
-                    if tool_type in ("escalation", "process", "agent"):
+                    if tool_type in ("escalation", "process", "agent", "internal"):
                         self._state.pending_tool_name = tool_name
                         self._state.pending_tool_span = span
                         self._state.pending_process_span = child_span
@@ -168,10 +180,12 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
     ) -> None:
         """Handle tool end event."""
         try:
+            output_schema = self._state.tool_output_schemas.pop(run_id, None)
+
             # Handle resumed tool completion
             if run_id in self._state.reinvoked_tool_run_ids:
                 self._state.reinvoked_tool_run_ids.discard(run_id)
-                self._upsert_resumed_spans_on_completion(output)
+                self._upsert_resumed_spans_on_completion(output, output_schema)
                 return
 
             # Close child span first (inner), then tool span (outer)
@@ -203,6 +217,9 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 set_tool_result(
                     span, output, "output"
                 )  # ugly fix for stupid problem...
+                set_span_attachments(
+                    span, output, output_schema, AttachmentDirection.OUT
+                )
                 self._span_factory.end_span_ok(span)
                 if span == self._state.pending_tool_span:
                     self._state.pending_tool_span = None
@@ -211,7 +228,11 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
         except Exception:
             logger.exception("Error in on_tool_end callback")
 
-    def _upsert_resumed_spans_on_completion(self, output: Any) -> None:
+    def _upsert_resumed_spans_on_completion(
+        self,
+        output: Any,
+        output_schema: Optional[Union[Dict[str, Any], Type[BaseModel]]],
+    ) -> None:
         """Upsert resumed tool/process spans when tool completes."""
         if not self._state.resumed_trace_id:
             return
@@ -244,6 +265,12 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                     else str(output)
                 )
                 self._state.resumed_tool_span_data["attributes"]["result"] = result
+                set_span_attachments(
+                    self._state.resumed_tool_span_data,
+                    output,
+                    output_schema,
+                    AttachmentDirection.OUT,
+                )
 
             self._span_factory.upsert_span_complete_by_data(
                 trace_id=self._state.resumed_trace_id,
@@ -272,6 +299,8 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
     ) -> None:
         """Handle tool error event."""
         try:
+            self._state.tool_output_schemas.pop(run_id, None)
+
             if run_id in self._state.reinvoked_tool_run_ids:
                 self._state.reinvoked_tool_run_ids.discard(run_id)
                 return

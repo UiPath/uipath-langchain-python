@@ -52,6 +52,7 @@ from .tools import (
     ApiWorkflowToolSpanAttributes,
     EscalationToolSpanAttributes,
     IntegrationToolSpanAttributes,
+    InternalToolSpanAttributes,
     ProcessToolSpanAttributes,
 )
 from .types import (
@@ -94,6 +95,7 @@ __all__ = [
     "AgenticProcessToolSpanAttributes",
     "EscalationToolSpanAttributes",
     "IntegrationToolSpanAttributes",
+    "InternalToolSpanAttributes",
     # Guardrails
     "GuardrailEvaluationSpanAttributes",
     "LlmPreGuardrailsSpanAttributes",
@@ -130,6 +132,7 @@ SpanAttributes = Union[
     ProcessToolSpanAttributes,
     EscalationToolSpanAttributes,
     IntegrationToolSpanAttributes,
+    InternalToolSpanAttributes,
     AgentOutputSpanAttributes,
     GuardrailEvaluationSpanAttributes,
     LlmPreGuardrailsSpanAttributes,

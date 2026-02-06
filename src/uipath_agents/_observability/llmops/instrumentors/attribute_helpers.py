@@ -241,6 +241,8 @@ def get_tool_type_value(tool_type: Optional[str]) -> str:
         return "Process"
     elif tool_type == "escalation":
         return "ActionCenter"
+    elif tool_type == "internal":
+        return "Internal"
     return "Integration"
 
 
@@ -345,3 +347,88 @@ def get_span_attachments(
             exc_info=True,
         )
         return None
+
+
+def _get_existing_attachments(
+    existing_json: Optional[str],
+) -> Optional[List[Dict[str, Any]]]:
+    """Parse existing attachments from JSON string.
+
+    Args:
+        existing_json: JSON string containing existing attachments
+
+    Returns:
+        List of attachment dicts, or None if invalid/empty
+    """
+    if not existing_json:
+        return None
+
+    try:
+        attachments = json.loads(existing_json)
+        return attachments if isinstance(attachments, list) else None
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _merge_attachments(
+    existing: Optional[List[Dict[str, Any]]],
+    new: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge existing and new attachments.
+
+    Args:
+        existing: Existing attachment dicts (or None)
+        new: New attachment dicts to add
+
+    Returns:
+        Merged list of attachments
+    """
+    if existing:
+        return existing + new
+    return new
+
+
+def set_span_attachments(
+    span: Union[Span, Dict[str, Any]],
+    output: Any,
+    output_schema: Optional[Union[Dict[str, Any], Type[BaseModel]]],
+    direction: AttachmentDirection,
+) -> None:
+    """Set output attachments on span from tool output.
+
+    Merges new attachments with any existing attachments on the span.
+
+    Args:
+        span: The span (Span object or dict) to set attachments on
+        output: The tool output data
+        output_schema: JSON schema or Pydantic model for the output
+        direction: Attachment direction
+    """
+    if not output or not output_schema:
+        return
+
+    output_data = output if isinstance(output, dict) else None
+    if not output_data:
+        return
+
+    new_attachments = get_span_attachments(
+        output_data, output_schema, direction=direction
+    )
+    if not new_attachments:
+        return
+
+    new_attachments_list = [att.model_dump(by_alias=True) for att in new_attachments]
+
+    if isinstance(span, dict):
+        attributes = span.get("attributes", {})
+        existing = _get_existing_attachments(attributes.get("attachments"))
+        merged = _merge_attachments(existing, new_attachments_list)
+        attributes["attachments"] = serialize_json(merged)
+        span["attributes"] = attributes
+    else:
+        existing_json = (
+            span.attributes.get("attachments") if hasattr(span, "attributes") else None
+        )
+        existing = _get_existing_attachments(existing_json)
+        merged = _merge_attachments(existing, new_attachments_list)
+        span.set_attribute("attachments", serialize_json(merged))
