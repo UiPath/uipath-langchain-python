@@ -198,21 +198,6 @@ class TestCreateMcpToolsFromAgent:
     """Test create_mcp_tools_from_agent factory function."""
 
     @pytest.fixture
-    def mock_uipath_class(self):
-        """Create a mock UiPath class for patching.
-
-        The function uses lazy SDK initialization: `sdk = UiPath()`.
-        We patch the UiPath class to return our mock instance.
-        """
-        mock_sdk = MagicMock()
-        mock_server = MagicMock()
-        mock_server.mcp_url = "https://test.uipath.com/mcp"
-        mock_sdk.mcp.retrieve_async = AsyncMock(return_value=mock_server)
-        mock_sdk._config = MagicMock()
-        mock_sdk._config.secret = "test-secret-token"
-        return mock_sdk
-
-    @pytest.fixture
     def agent_with_mcp_resources(self):
         """Create an agent definition with MCP resources."""
         return LowCodeAgentDefinition(
@@ -326,14 +311,14 @@ class TestCreateMcpToolsFromAgent:
 
     @pytest.mark.asyncio
     async def test_creates_tools_from_multiple_mcp_servers(
-        self, agent_with_mcp_resources, mock_uipath_class
+        self, agent_with_mcp_resources
     ):
-        """Test that tools are created from all MCP servers in agent."""
-        with patch(
-            "uipath_langchain.agent.tools.mcp.mcp_tool.UiPath",
-            return_value=mock_uipath_class,
-        ):
-            tools, clients = await create_mcp_tools_from_agent(agent_with_mcp_resources)
+        """Test that tools are created from all MCP servers in agent.
+
+        Note: SDK is now called lazily inside McpClient, so no mocking needed
+        for tool creation (only for tool invocation).
+        """
+        tools, clients = await create_mcp_tools_from_agent(agent_with_mcp_resources)
 
         # Should have 3 tools total (2 from server 1, 1 from server 2)
         assert len(tools) == 3
@@ -343,29 +328,17 @@ class TestCreateMcpToolsFromAgent:
         assert "tool_c" in tool_names
 
     @pytest.mark.asyncio
-    async def test_returns_mcp_clients_for_each_server(
-        self, agent_with_mcp_resources, mock_uipath_class
-    ):
+    async def test_returns_mcp_clients_for_each_server(self, agent_with_mcp_resources):
         """Test that McpClient instances are returned for each MCP server."""
-        with patch(
-            "uipath_langchain.agent.tools.mcp.mcp_tool.UiPath",
-            return_value=mock_uipath_class,
-        ):
-            tools, clients = await create_mcp_tools_from_agent(agent_with_mcp_resources)
+        tools, clients = await create_mcp_tools_from_agent(agent_with_mcp_resources)
 
         # Should have 2 clients (one per MCP server)
         assert len(clients) == 2
 
     @pytest.mark.asyncio
-    async def test_skips_disabled_mcp_resources(
-        self, agent_with_disabled_mcp, mock_uipath_class
-    ):
+    async def test_skips_disabled_mcp_resources(self, agent_with_disabled_mcp):
         """Test that disabled MCP resources are skipped."""
-        with patch(
-            "uipath_langchain.agent.tools.mcp.mcp_tool.UiPath",
-            return_value=mock_uipath_class,
-        ):
-            tools, clients = await create_mcp_tools_from_agent(agent_with_disabled_mcp)
+        tools, clients = await create_mcp_tools_from_agent(agent_with_disabled_mcp)
 
         # Only enabled server's tool should be created
         assert len(tools) == 1
@@ -375,46 +348,17 @@ class TestCreateMcpToolsFromAgent:
         assert len(clients) == 1
 
     @pytest.mark.asyncio
-    async def test_returns_empty_for_agent_without_mcp(
-        self, agent_with_no_mcp, mock_uipath_class
-    ):
+    async def test_returns_empty_for_agent_without_mcp(self, agent_with_no_mcp):
         """Test that empty lists are returned for agent without MCP resources."""
-        with patch(
-            "uipath_langchain.agent.tools.mcp.mcp_tool.UiPath",
-            return_value=mock_uipath_class,
-        ):
-            tools, clients = await create_mcp_tools_from_agent(agent_with_no_mcp)
+        tools, clients = await create_mcp_tools_from_agent(agent_with_no_mcp)
 
         assert tools == []
         assert clients == []
 
     @pytest.mark.asyncio
-    async def test_raises_on_missing_mcp_url(self, agent_with_mcp_resources):
-        """Test that ValueError is raised when MCP server has no URL."""
-        mock_sdk = MagicMock()
-        mock_server = MagicMock()
-        mock_server.mcp_url = None  # No URL configured
-        mock_sdk.mcp.retrieve_async = AsyncMock(return_value=mock_server)
-        mock_sdk._config = MagicMock()
-        mock_sdk._config.secret = "test-token"
-
-        with patch(
-            "uipath_langchain.agent.tools.mcp.mcp_tool.UiPath",
-            return_value=mock_sdk,
-        ):
-            with pytest.raises(ValueError, match="has no URL configured"):
-                await create_mcp_tools_from_agent(agent_with_mcp_resources)
-
-    @pytest.mark.asyncio
-    async def test_tools_have_correct_metadata(
-        self, agent_with_mcp_resources, mock_uipath_class
-    ):
+    async def test_tools_have_correct_metadata(self, agent_with_mcp_resources):
         """Test that created tools have correct metadata."""
-        with patch(
-            "uipath_langchain.agent.tools.mcp.mcp_tool.UiPath",
-            return_value=mock_uipath_class,
-        ):
-            tools, clients = await create_mcp_tools_from_agent(agent_with_mcp_resources)
+        tools, clients = await create_mcp_tools_from_agent(agent_with_mcp_resources)
 
         for tool in tools:
             assert tool.metadata is not None
@@ -430,6 +374,17 @@ class TestMcpToolInvocation:
     This class tests the full flow of tool invocation without mocking the MCP SDK.
     Only httpx.AsyncClient is mocked, allowing the real MCP SDK to process messages.
     """
+
+    @pytest.fixture
+    def mock_uipath_sdk(self):
+        """Create a mock UiPath SDK for patching."""
+        mock_sdk = MagicMock()
+        mock_server = MagicMock()
+        mock_server.mcp_url = "https://test.uipath.com/mcp"
+        mock_sdk.mcp.retrieve_async = AsyncMock(return_value=mock_server)
+        mock_sdk._config = MagicMock()
+        mock_sdk._config.secret = "test-secret-token"
+        return mock_sdk
 
     def create_mock_stream_response(
         self,
@@ -604,6 +559,7 @@ class TestMcpToolInvocation:
     async def test_tool_invocation_initializes_session_and_returns_result(
         self,
         mock_async_client_class,
+        mock_uipath_sdk,
     ):
         """Smoke test: verify tool invocation initializes MCP session and returns result.
 
@@ -650,11 +606,8 @@ class TestMcpToolInvocation:
             ],
         )
 
-        # Create McpClient and tools
-        mcp_client = McpClient(
-            "https://test.uipath.com/mcp",
-            headers={"Authorization": "Bearer test-token"},
-        )
+        # Create McpClient and tools (SDK is called lazily on first tool call)
+        mcp_client = McpClient(config=mcp_resource)
         tools = await create_mcp_tools_from_metadata_for_mcp_server(
             mcp_resource, mcp_client
         )
@@ -663,8 +616,12 @@ class TestMcpToolInvocation:
         tool = tools[0]
         assert tool.name == "search_tool"
 
-        # Invoke tool
-        result = await tool.ainvoke({"query": "test query"})
+        # Invoke tool (SDK is called here during initialization)
+        with patch(
+            "uipath.platform.UiPath",
+            return_value=mock_uipath_sdk,
+        ):
+            result = await tool.ainvoke({"query": "test query"})
 
         # Verify session was initialized
         assert initialize_count[0] == 1, (

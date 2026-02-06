@@ -45,17 +45,10 @@ EMPTY_SCHEMA = {"type": "object", "properties": {}}
 @pytest.fixture
 def mock_uipath_sdk():
     """Create a mock UiPath SDK."""
-    with (
-        patch("uipath_langchain.agent.tools.integration_tool.UiPath") as mock,
-        patch("uipath_langchain.agent.tools.mcp.mcp_tool.UiPath") as mock_mcp,
-    ):
+    with patch("uipath_langchain.agent.tools.integration_tool.UiPath") as mock:
         mock.return_value = MagicMock()
-        # Setup MCP mock to return a server with mcp_url
-        mock_mcp_instance = MagicMock()
-        mock_mcp_server = MagicMock()
-        mock_mcp_server.mcp_url = "https://test.uipath.com/mcp"
-        mock_mcp_instance.mcp.retrieve_async = AsyncMock(return_value=mock_mcp_server)
-        mock_mcp.return_value = mock_mcp_instance
+        # Note: MCP tools no longer call SDK during tool creation.
+        # The SDK is called lazily in McpClient._initialize_client() on first tool use.
         yield mock
 
 

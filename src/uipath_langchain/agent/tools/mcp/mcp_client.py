@@ -7,7 +7,7 @@ including automatic reconnection on session disconnect errors.
 import asyncio
 import logging
 from contextlib import AsyncExitStack
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
@@ -22,6 +22,9 @@ from mcp.types import CallToolResult
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.runtime.base import UiPathDisposableProtocol
 
+if TYPE_CHECKING:
+    from uipath.agent.models.agent import AgentMcpResourceConfig
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +34,8 @@ class McpClient(UiPathDisposableProtocol):
     This class handles the lifecycle of MCP connections with two distinct phases:
 
     1. **Client Initialization** (first call):
-       - Creates HTTP client
+       - Instantiates UiPath SDK to retrieve MCP server URL
+       - Creates HTTP client with authorization headers
        - Establishes streamable HTTP connection
        - Creates ClientSession
        - Calls session.initialize() to get session ID
@@ -48,23 +52,27 @@ class McpClient(UiPathDisposableProtocol):
 
     def __init__(
         self,
-        url: str,
-        headers: dict[str, str] | None = None,
+        config: "AgentMcpResourceConfig",
         timeout: httpx.Timeout | None = None,
         max_retries: int = 1,
     ) -> None:
         """Initialize the MCP tool session.
 
+        The MCP server URL and authorization headers are retrieved lazily
+        from the UiPath SDK on first use, using the config's slug and folder_path.
+
         Args:
-            url: The MCP server endpoint URL.
-            headers: Optional headers to include in HTTP requests.
+            config: The MCP resource configuration containing slug and folder_path.
             timeout: Optional timeout configuration for HTTP requests.
             max_retries: Maximum number of retries on session disconnect errors.
         """
-        self._url = url
-        self._headers = headers or {}
+        self._config = config
         self._timeout = timeout or httpx.Timeout(600)
         self._max_retries = max_retries
+
+        # URL and headers are resolved lazily from SDK
+        self._url: str | None = None
+        self._headers: dict[str, str] = {}
 
         # Lock for both client initialization and session reinitialization
         self._lock = asyncio.Lock()
@@ -97,13 +105,34 @@ class McpClient(UiPathDisposableProtocol):
         """Initialize the HTTP client and streamable connection.
 
         This is called once on first use. Creates:
-        - httpx.AsyncClient
+        - UiPath SDK instance to retrieve MCP server URL
+        - httpx.AsyncClient with authorization headers
         - Streamable HTTP connection (read/write streams)
         - ClientSession
 
         Then calls _initialize_session() to complete the MCP handshake.
         """
-        logger.debug("Initializing MCP client")
+        logger.debug(
+            f"Initializing MCP client for '{self._config.slug}' "
+            f"in folder '{self._config.folder_path}'"
+        )
+
+        # Lazy import to improve cold start time
+        from uipath.platform import UiPath
+
+        # Retrieve MCP server URL from SDK
+        sdk = UiPath()
+        mcp_server = await sdk.mcp.retrieve_async(
+            slug=self._config.slug, folder_path=self._config.folder_path
+        )
+
+        if mcp_server.mcp_url is None:
+            raise ValueError(f"MCP server '{self._config.slug}' has no URL configured")
+
+        self._url = mcp_server.mcp_url
+        self._headers = {"Authorization": f"Bearer {sdk._config.secret}"}
+
+        logger.debug(f"Retrieved MCP server URL: {self._url}")
 
         # Create exit stack for resource management
         self._stack = AsyncExitStack()

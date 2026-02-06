@@ -41,7 +41,7 @@ from .mcp_tool import (
 
 `McpClient` implements `UiPathDisposableProtocol` and manages the lifecycle of MCP connections for tool invocations with **two distinct initialization phases**:
 
-1. **Client Initialization** (first call): Full stack creation
+1. **Client Initialization** (first call): Retrieves MCP server URL via SDK, then full stack creation
 2. **Session Reinitialization** (on 404): Lightweight, reuses existing client
 
 ```
@@ -50,10 +50,14 @@ from .mcp_tool import (
 ├─────────────────────────────────────────────────────────────┤
 │  Configuration (immutable after __init__)                   │
 │  ─────────────────────────────────────────                  │
-│  _url: str                                                  │
-│  _headers: dict[str, str]                                   │
+│  _config: AgentMcpResourceConfig  # Contains slug, folder   │
 │  _timeout: httpx.Timeout                                    │
 │  _max_retries: int                                          │
+├─────────────────────────────────────────────────────────────┤
+│  Lazy-Resolved State (set during _initialize_client)        │
+│  ───────────────────────────────────────────────────        │
+│  _url: str | None          # Retrieved from SDK             │
+│  _headers: dict[str, str]  # Auth header from SDK           │
 ├─────────────────────────────────────────────────────────────┤
 │  Synchronization                                            │
 │  ───────────────                                            │
@@ -82,7 +86,7 @@ from .mcp_tool import (
 ├─────────────────────────────────────────────────────────────┤
 │  Private Methods                                            │
 │  ───────────────                                            │
-│  - _initialize_client() -> None    # Full init (once)       │
+│  - _initialize_client() -> None    # SDK + full init (once) │
 │  - _initialize_session() -> None   # MCP handshake only     │
 │  - _ensure_session() -> ClientSession                       │
 │  - _reinitialize_session() -> None                          │
@@ -105,8 +109,8 @@ async def create_mcp_tools_from_agent(
     Iterates over all MCP resources in the agent definition and creates tools
     for each enabled MCP server. Each MCP server gets its own McpClient instance.
 
-    The UiPath SDK is lazily initialized inside this function using environment
-    variables (UIPATH_URL, UIPATH_ACCESS_TOKEN).
+    The MCP server URL is loaded lazily on first tool call via the UiPath SDK,
+    using environment variables (UIPATH_URL, UIPATH_ACCESS_TOKEN).
 
     Returns:
         A tuple of (tools, mcp_clients) where:
@@ -144,6 +148,11 @@ The key design principle is separating **client initialization** from **session 
 Phase 1: Client Initialization (expensive, done once)
 ──────────────────────────────────────────────────────
 ┌─────────────────┐
+│ UiPath SDK      │ ─── Retrieves MCP server URL
+│ mcp.retrieve()  │     and auth token (Bearer)
+└─────────────────┘
+
+┌─────────────────┐
 │ httpx.AsyncClient │ ─┐
 └─────────────────┘   │
                       │
@@ -179,8 +188,9 @@ Phase 2: Session Initialization (lightweight, can repeat)
            │ Initializing │
            │ (Phase 1)    │
            └──────┬───────┘
-                  │ creates HTTP client, streams, session
-                  │ then calls _initialize_session()
+                  │ 1. UiPath SDK retrieves MCP URL
+                  │ 2. creates HTTP client, streams, session
+                  │ 3. calls _initialize_session()
                   ▼
            ┌──────────────┐
            │   Session    │
@@ -251,7 +261,42 @@ The following error codes trigger automatic session reinitialization:
 
 ## Key Implementation Details
 
-### 1. HTTP Client Configuration
+### 1. Lazy SDK Loading
+
+The MCP server URL and authorization headers are loaded lazily on first tool call:
+
+```python
+async def _initialize_client(self) -> None:
+    # Lazy import to improve cold start time
+    from uipath.platform import UiPath
+
+    # Retrieve MCP server URL from SDK
+    sdk = UiPath()
+    mcp_server = await sdk.mcp.retrieve_async(
+        slug=self._config.slug, folder_path=self._config.folder_path
+    )
+
+    if mcp_server.mcp_url is None:
+        raise ValueError(f"MCP server '{self._config.slug}' has no URL configured")
+
+    self._url = mcp_server.mcp_url
+    self._headers = {"Authorization": f"Bearer {sdk._config.secret}"}
+```
+
+**Why lazy loading is required:**
+
+The `uipath debug` command loads resource bindings (which can override MCP server URLs)
+**after** the LangGraph agent graph is built. This means bindings are only available at
+execution time, not at graph construction time. By deferring the SDK call to the first
+tool invocation, we ensure the bindings are properly loaded and applied.
+
+**Benefits:**
+- Bindings are correctly applied (loaded after graph construction)
+- No SDK calls during tool creation (only during first use)
+- Faster agent startup time
+- Errors surface only when tools are actually used
+
+### 2. HTTP Client Configuration
 
 The HTTP client MUST use `get_httpx_client_kwargs()` for proper SSL/proxy configuration:
 
@@ -268,7 +313,7 @@ self._http_client = await self._stack.enter_async_context(
 )
 ```
 
-### 2. Single Lock for Both Phases
+### 3. Single Lock for Both Phases
 
 One `asyncio.Lock` protects both client initialization and session reinitialization:
 
@@ -289,7 +334,7 @@ async def _reinitialize_session(self) -> None:
             await self._initialize_session()  # Lightweight!
 ```
 
-### 3. No `with` Statement for AsyncExitStack
+### 4. No `with` Statement for AsyncExitStack
 
 Manual lifecycle management:
 
@@ -305,7 +350,7 @@ async with AsyncExitStack() as stack:
     ...  # Stack closes here!
 ```
 
-### 4. Reinitialization Reuses Client
+### 5. Reinitialization Reuses Client
 
 The key optimization - on 404, only `_initialize_session()` is called:
 
