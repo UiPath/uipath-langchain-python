@@ -137,6 +137,12 @@ def create_deeprag_tool(
         coroutine=deeprag_tool_fn,
         output_type=output_model,
         argument_properties=resource.argument_properties,
+        metadata={
+            "tool_type": resource.type.lower(),
+            "display_name": tool_name,
+            "args_schema": input_model,
+            "output_schema": output_model,
+        },
     )
     tool.set_tool_wrappers(awrapper=deeprag_tool_wrapper)
     return tool
