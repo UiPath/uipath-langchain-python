@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
+from langgraph.func import task
 from langgraph.types import interrupt
 from pydantic import BaseModel
 from uipath.agent.models.agent import (
@@ -185,21 +186,25 @@ def create_escalation_tool(
             example_calls=channel.properties.example_calls,
         )
         async def escalate():
-            client = UiPath()
-            task = await client.tasks.create_async(
-                title=task_title,
-                data=kwargs,
-                app_name=channel.properties.app_name,
-                app_folder_path=channel.properties.folder_name or "",
-                recipient=recipient,
-                priority=channel.priority,
-                labels=channel.labels,
-                is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
-                actionable_message_metadata=channel.properties.actionable_message_meta_data,
-            )
+            @task
+            async def create_escalation_task():
+                client = UiPath()
+                return await client.tasks.create_async(
+                    title=task_title,
+                    data=kwargs,
+                    app_name=channel.properties.app_name,
+                    app_folder_path=channel.properties.folder_name or "",
+                    recipient=recipient,
+                    priority=channel.priority,
+                    labels=channel.labels,
+                    is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
+                    actionable_message_metadata=channel.properties.actionable_message_meta_data,
+                )
+
+            created_task = await create_escalation_task()
             return interrupt(
                 WaitEscalation(
-                    action=task,
+                    action=created_task,
                     app_folder_path=channel.properties.folder_name,
                     app_name=channel.properties.app_name,
                     recipient=recipient,

@@ -3,6 +3,18 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+def _noop_task(fn):
+    """No-op replacement for @task so it works outside Pregel context."""
+    return fn
+
+
+@pytest.fixture(autouse=True)
+def _patch_lg_task():
+    """Patch @task decorator to no-op since unit tests run outside Pregel context."""
+    with patch("uipath_langchain.agent.tools.escalation_tool.task", _noop_task):
+        yield
 from langchain_core.messages import ToolCall
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
