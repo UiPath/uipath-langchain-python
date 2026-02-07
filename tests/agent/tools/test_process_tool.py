@@ -54,59 +54,21 @@ def process_resource_with_input() -> AgentProcessToolResourceConfig:
     )
 
 
-class TestProcessToolMetadata:
-    """Test that process tool has correct metadata for observability."""
+class TestProcessToolCreation:
+    """Test process tool creation, metadata, and structural properties."""
 
-    def test_process_tool_has_metadata(
+    def test_tool_properties_and_metadata(
         self, process_resource: AgentProcessToolResourceConfig
     ) -> None:
         tool = create_process_tool(process_resource)
 
-        assert tool.metadata is not None
-        assert isinstance(tool.metadata, dict)
-
-    def test_process_tool_metadata_has_tool_type(
-        self, process_resource: AgentProcessToolResourceConfig
-    ) -> None:
-        tool = create_process_tool(process_resource)
+        assert tool.name == "test_process"
+        assert tool.description == "Test process description"
+        assert tool.coroutine is not None
         assert tool.metadata is not None
         assert tool.metadata["tool_type"] == "process"
-
-    def test_process_tool_metadata_has_display_name(
-        self, process_resource: AgentProcessToolResourceConfig
-    ) -> None:
-        tool = create_process_tool(process_resource)
-        assert tool.metadata is not None
         assert tool.metadata["display_name"] == "MyProcess"
-
-    def test_process_tool_metadata_has_folder_path(
-        self, process_resource: AgentProcessToolResourceConfig
-    ) -> None:
-        tool = create_process_tool(process_resource)
-        assert tool.metadata is not None
         assert tool.metadata["folder_path"] == "/Shared/MyFolder"
-
-
-class TestProcessToolCreation:
-    """Test process tool structural properties."""
-
-    def test_tool_name_matches_resource_name(
-        self, process_resource: AgentProcessToolResourceConfig
-    ) -> None:
-        tool = create_process_tool(process_resource)
-        assert tool.name == "test_process"
-
-    def test_tool_description_matches_resource(
-        self, process_resource: AgentProcessToolResourceConfig
-    ) -> None:
-        tool = create_process_tool(process_resource)
-        assert tool.description == "Test process description"
-
-    def test_tool_is_async(
-        self, process_resource: AgentProcessToolResourceConfig
-    ) -> None:
-        tool = create_process_tool(process_resource)
-        assert tool.coroutine is not None
 
     def test_tool_name_sanitized_for_special_chars(self) -> None:
         resource = AgentProcessToolResourceConfig(
@@ -125,16 +87,11 @@ class TestProcessToolCreation:
         assert "(" not in tool.name
         assert "!" not in tool.name
 
-    def test_tool_with_input_schema_has_args_schema(
+    def test_tool_with_input_schema(
         self, process_resource_with_input: AgentProcessToolResourceConfig
     ) -> None:
         tool = create_process_tool(process_resource_with_input)
         assert tool.args_schema is not None
-
-    def test_tool_metadata_includes_args_schema(
-        self, process_resource_with_input: AgentProcessToolResourceConfig
-    ) -> None:
-        tool = create_process_tool(process_resource_with_input)
         assert tool.metadata is not None
         assert "args_schema" in tool.metadata
 

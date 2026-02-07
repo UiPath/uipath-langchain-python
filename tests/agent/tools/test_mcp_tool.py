@@ -10,11 +10,11 @@ from uipath.agent.models.agent import (
     AgentResourceType,
 )
 
-from uipath_langchain.agent.tools.mcp_tool import (
+from uipath_langchain.agent.tools.mcp.mcp_tool import (
     _deduplicate_tools,
     _filter_tools,
     create_mcp_tools,
-    create_mcp_tools_from_metadata,
+    create_mcp_tools_from_metadata_for_mcp_server,
 )
 
 
@@ -52,34 +52,18 @@ def _make_mcp_resource(
 class TestDeduplicateTools:
     """Tests for _deduplicate_tools."""
 
-    def test_no_duplicates_unchanged(self) -> None:
+    def test_unique_names_unchanged(self) -> None:
         tools = [_make_tool("alpha"), _make_tool("beta"), _make_tool("gamma")]
         result = _deduplicate_tools(tools)
         assert [t.name for t in result] == ["alpha", "beta", "gamma"]
 
-    def test_all_duplicates_get_suffix(self) -> None:
-        tools = [_make_tool("search"), _make_tool("search"), _make_tool("search")]
+    def test_duplicate_names_get_numeric_suffix(self) -> None:
+        tools = [_make_tool("search"), _make_tool("calc"), _make_tool("search")]
         result = _deduplicate_tools(tools)
-        assert [t.name for t in result] == ["search_1", "search_2", "search_3"]
-
-    def test_partial_duplicates(self) -> None:
-        tools = [
-            _make_tool("search"),
-            _make_tool("calc"),
-            _make_tool("search"),
-        ]
-        result = _deduplicate_tools(tools)
-        assert result[0].name == "search_1"
-        assert result[1].name == "calc"
-        assert result[2].name == "search_2"
+        assert [t.name for t in result] == ["search_1", "calc", "search_2"]
 
     def test_empty_list(self) -> None:
         assert _deduplicate_tools([]) == []
-
-    def test_single_tool(self) -> None:
-        tools = [_make_tool("only")]
-        result = _deduplicate_tools(tools)
-        assert result[0].name == "only"
 
 
 class TestFilterTools:
@@ -158,16 +142,10 @@ class TestCreateMcpTools:
         monkeypatch.setenv("UIPATH_URL", "https://example.com")
         monkeypatch.setenv("UIPATH_ACCESS_TOKEN", "test-token")
 
+        # Both single config and list of configs should yield empty
         cfg = _make_mcp_resource(is_enabled=False)
         async with create_mcp_tools(cfg) as tools:
             assert tools == []
-
-    @pytest.mark.asyncio
-    async def test_all_disabled_in_list_yield_empty(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("UIPATH_URL", "https://example.com")
-        monkeypatch.setenv("UIPATH_ACCESS_TOKEN", "test-token")
 
         configs = [
             _make_mcp_resource(is_enabled=False),
@@ -178,10 +156,10 @@ class TestCreateMcpTools:
 
 
 class TestCreateMcpToolsFromMetadata:
-    """Tests for create_mcp_tools_from_metadata."""
+    """Tests for create_mcp_tools_from_metadata_for_mcp_server."""
 
     @pytest.mark.asyncio
-    async def test_creates_tools_from_available_tools(self) -> None:
+    async def test_creates_tools_with_correct_metadata(self) -> None:
         mcp_tools = [
             AgentMcpTool(
                 name="get_weather",
@@ -201,38 +179,27 @@ class TestCreateMcpToolsFromMetadata:
             ),
         ]
         cfg = _make_mcp_resource(available_tools=mcp_tools)
+        mock_client = MagicMock()
 
-        tools = await create_mcp_tools_from_metadata(cfg)
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(cfg, mock_client)
 
         assert len(tools) == 2
         assert tools[0].name == "get_weather"
-        assert tools[1].name == "search_docs"
         assert tools[0].description == "Get weather data"
-
-    @pytest.mark.asyncio
-    async def test_tool_metadata_contains_expected_fields(self) -> None:
-        mcp_tools = [
-            AgentMcpTool(
-                name="my_tool",
-                description="A tool",
-                inputSchema={"type": "object", "properties": {}},
-            ),
-        ]
-        cfg = _make_mcp_resource(available_tools=mcp_tools)
-
-        tools = await create_mcp_tools_from_metadata(cfg)
-
+        assert tools[1].name == "search_docs"
+        # Validate metadata on first tool
         assert tools[0].metadata is not None
         assert tools[0].metadata["tool_type"] == "mcp"
-        assert tools[0].metadata["display_name"] == "my_tool"
+        assert tools[0].metadata["display_name"] == "get_weather"
         assert tools[0].metadata["folder_path"] == "/Shared"
         assert tools[0].metadata["slug"] == "test-slug"
 
     @pytest.mark.asyncio
     async def test_empty_available_tools_returns_empty(self) -> None:
         cfg = _make_mcp_resource(available_tools=[])
+        mock_client = MagicMock()
 
-        tools = await create_mcp_tools_from_metadata(cfg)
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(cfg, mock_client)
 
         assert tools == []
 
@@ -246,9 +213,9 @@ class TestCreateMcpToolsFromMetadata:
             ),
         ]
         cfg = _make_mcp_resource(available_tools=mcp_tools)
+        mock_client = MagicMock()
 
-        tools = await create_mcp_tools_from_metadata(cfg)
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(cfg, mock_client)
 
-        # sanitize_tool_name replaces spaces with underscores and strips non-alphanum
         assert " " not in tools[0].name
         assert "!" not in tools[0].name

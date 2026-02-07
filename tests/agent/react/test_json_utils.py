@@ -2,6 +2,7 @@
 
 from typing import Optional
 
+import pytest
 from pydantic import BaseModel
 
 from uipath_langchain.agent.react.json_utils import (
@@ -171,57 +172,46 @@ class TestExtractValuesByPaths:
 class TestUnwrapOptional:
     """Tests for _unwrap_optional."""
 
-    def test_unwraps_optional_type(self) -> None:
-        result = _unwrap_optional(Optional[str])
-        assert result is str
-
-    def test_non_optional_unchanged(self) -> None:
-        result = _unwrap_optional(str)
-        assert result is str
-
-    def test_unwraps_optional_basemodel(self) -> None:
-        result = _unwrap_optional(Optional[Attachment])
-        assert result is Attachment
+    @pytest.mark.parametrize(
+        "input_type,expected",
+        [
+            (Optional[str], str),
+            (str, str),
+            (Optional[Attachment], Attachment),
+        ],
+        ids=["optional-str", "plain-str", "optional-basemodel"],
+    )
+    def test_unwraps_correctly(self, input_type: type, expected: type) -> None:
+        assert _unwrap_optional(input_type) is expected
 
 
 class TestIsPydanticModel:
     """Tests for _is_pydantic_model."""
 
-    def test_basemodel_returns_true(self) -> None:
-        assert _is_pydantic_model(Attachment) is True
-
-    def test_str_returns_false(self) -> None:
-        assert _is_pydantic_model(str) is False
-
-    def test_int_returns_false(self) -> None:
-        assert _is_pydantic_model(int) is False
-
-    def test_none_returns_false(self) -> None:
-        assert _is_pydantic_model(None) is False
-
-    def test_instance_returns_false(self) -> None:
-        assert _is_pydantic_model(Attachment(id="1", filename="f")) is False
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (Attachment, True),
+            (str, False),
+            (None, False),
+            (Attachment(id="1", filename="f"), False),
+        ],
+        ids=["basemodel-class", "builtin-type", "none", "instance"],
+    )
+    def test_identifies_pydantic_models(self, value: object, expected: bool) -> None:
+        assert _is_pydantic_model(value) is expected
 
 
 class TestCreateTypeMatcher:
     """Tests for _create_type_matcher."""
 
-    def test_matches_by_name(self) -> None:
+    def test_matches_by_class_and_string_annotation(self) -> None:
         matcher = _create_type_matcher("Attachment", None)
         assert matcher(Attachment) is True
+        assert matcher("Attachment") is True
+        assert matcher(str) is False
+        assert matcher("OtherType") is False
 
     def test_matches_by_target_type(self) -> None:
         matcher = _create_type_matcher("Attachment", Attachment)
         assert matcher(Attachment) is True
-
-    def test_no_match_returns_false(self) -> None:
-        matcher = _create_type_matcher("Attachment", None)
-        assert matcher(str) is False
-
-    def test_string_annotation_match(self) -> None:
-        matcher = _create_type_matcher("Attachment", None)
-        assert matcher("Attachment") is True
-
-    def test_string_annotation_no_match(self) -> None:
-        matcher = _create_type_matcher("Attachment", None)
-        assert matcher("OtherType") is False

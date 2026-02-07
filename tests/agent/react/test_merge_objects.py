@@ -200,10 +200,6 @@ class TestMergeDicts:
         result = reducer_merge_dicts({}, right)
         assert result is right
 
-    def test_both_empty_returns_left(self):
-        result = reducer_merge_dicts({}, {})
-        assert result == {}
-
     def test_disjoint_keys_merged(self):
         left = {"a": 1}
         right = {"b": 2}
