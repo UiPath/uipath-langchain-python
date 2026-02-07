@@ -196,6 +196,7 @@ def _build_guardrail_node_chain(
         **fail_node_metadata,
         "action_type": action.action_type,
         "node_type": "guardrail_action",
+        "tool_type": guardrail_node_metadata.get("tool_type"),
     }
 
     subgraph.add_node(
@@ -254,6 +255,23 @@ def create_llm_guardrails_subgraph(
     )
 
 
+def _extract_tool_type(tool_node: RunnableCallable) -> str | None:
+    """Extract tool_type from a UiPathToolNode's underlying tool metadata.
+
+    Args:
+        tool_node: A RunnableCallable, potentially a UiPathToolNode with tool metadata.
+
+    Returns:
+        The tool_type string if available, otherwise None.
+    """
+    tool = getattr(tool_node, "tool", None)
+    if tool is not None:
+        metadata = getattr(tool, "metadata", None)
+        if isinstance(metadata, dict):
+            return metadata.get("tool_type")
+    return None
+
+
 def create_tools_guardrails_subgraph(
     tool_nodes: Mapping[str, RunnableCallable],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
@@ -271,10 +289,12 @@ def create_tools_guardrails_subgraph(
     """
     result: dict[str, RunnableCallable] = {}
     for tool_name, tool_node in tool_nodes.items():
+        tool_type = _extract_tool_type(tool_node)
         subgraph = create_tool_guardrails_subgraph(
             (tool_name, tool_node),
             guardrails,
             input_schema=input_schema,
+            tool_type=tool_type,
         )
         result[tool_name] = subgraph
 
@@ -378,6 +398,7 @@ def create_tool_guardrails_subgraph(
     tool_node: tuple[str, Any],
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
     input_schema: type[BaseModel] | None = None,
+    tool_type: str | None = None,
 ):
     """Create a guarded tool node.
 
@@ -385,6 +406,7 @@ def create_tool_guardrails_subgraph(
         tool_node: Tuple of (tool_name, tool_node_callable).
         guardrails: Optional sequence of (guardrail, action) tuples.
         input_schema: Optional input schema to include in state.
+        tool_type: Optional type of the tool (e.g., "process", "escalation", "mcp").
 
     Returns:
         Either the original tool node callable (if no matching guardrails) or a compiled
@@ -406,6 +428,8 @@ def create_tool_guardrails_subgraph(
         guardrails=applicable_guardrails,
         scope=GuardrailScope.TOOL,
         execution_stages=[ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION],
-        node_factory=partial(create_tool_guardrail_node, tool_name=tool_name),
+        node_factory=partial(
+            create_tool_guardrail_node, tool_name=tool_name, tool_type=tool_type
+        ),
         input_schema=input_schema,
     )

@@ -91,7 +91,11 @@ class EscalateAction(GuardrailAction):
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "escalation_data": {},
+            "escalation_data": {
+                "recipient_type": self.recipient.type.value
+                if self.recipient and self.recipient.type
+                else None,
+            },
         }
 
         async def _node(
