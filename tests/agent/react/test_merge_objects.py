@@ -3,6 +3,7 @@ from typing import Annotated
 import pytest
 from pydantic import BaseModel
 
+from uipath_langchain.agent.react.reducers import merge_dicts as reducer_merge_dicts
 from uipath_langchain.agent.react.reducers import merge_objects
 
 
@@ -184,3 +185,39 @@ class TestMergeObjects:
         assert result.name == "updated"
         # Invalid field should not exist
         assert not hasattr(result, "invalid_field")
+
+
+class TestMergeDicts:
+    """Test merge_dicts reducer from reducers.py."""
+
+    def test_empty_right_returns_left(self):
+        left = {"a": 1, "b": 2}
+        result = reducer_merge_dicts(left, {})
+        assert result is left
+
+    def test_empty_left_returns_right(self):
+        right = {"a": 1}
+        result = reducer_merge_dicts({}, right)
+        assert result is right
+
+    def test_both_empty_returns_left(self):
+        result = reducer_merge_dicts({}, {})
+        assert result == {}
+
+    def test_disjoint_keys_merged(self):
+        left = {"a": 1}
+        right = {"b": 2}
+        result = reducer_merge_dicts(left, right)
+        assert result == {"a": 1, "b": 2}
+
+    def test_overlapping_keys_right_wins(self):
+        left = {"a": 1, "b": 2}
+        right = {"b": 3, "c": 4}
+        result = reducer_merge_dicts(left, right)
+        assert result == {"a": 1, "b": 3, "c": 4}
+
+    def test_none_values_in_right_override(self):
+        left = {"a": 1}
+        right = {"a": None}
+        result = reducer_merge_dicts(left, right)
+        assert result == {"a": None}
