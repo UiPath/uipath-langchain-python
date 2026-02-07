@@ -91,6 +91,7 @@ def create_batch_transform_tool(
         input_schema=input_model.model_json_schema() if input_model else None,
         output_schema=output_model.model_json_schema(),
         example_calls=[],  # Examples cannot be provided for internal tools
+        recording=False,
     )
     async def batch_transform_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query
@@ -155,10 +156,17 @@ def create_batch_transform_tool(
         output_type=output_model,
         argument_properties=resource.argument_properties,
         metadata={
-            "tool_type": resource.type.lower(),
+            "tool_type": "context_grounding",
             "display_name": tool_name,
             "args_schema": input_model,
             "output_schema": output_model,
+            "retrieval_mode": "BatchTransform",
+            "output_columns": [
+                {"name": col.name, "description": col.description}
+                for col in batch_transform_output_columns
+            ],
+            "web_search_grounding": static_web_search,
+            **({"static_query": static_query} if is_query_static else {}),
         },
     )
     tool.set_tool_wrappers(awrapper=batch_transform_tool_wrapper)

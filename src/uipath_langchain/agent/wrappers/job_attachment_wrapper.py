@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from langchain_core.messages.tool import ToolCall, ToolMessage
@@ -84,7 +85,9 @@ def get_job_attachment_wrapper(
             update={
                 "messages": [
                     ToolMessage(
-                        content=str(tool_result),
+                        content=json.dumps(tool_result)
+                        if isinstance(tool_result, dict)
+                        else str(tool_result),
                         name=call["name"],
                         tool_call_id=call["id"],
                     )
