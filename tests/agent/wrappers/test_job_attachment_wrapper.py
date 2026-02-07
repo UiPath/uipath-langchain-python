@@ -43,7 +43,7 @@ class TestGetJobAttachmentWrapper:
         result: Command[Any],
         tool_call_id: str = "call_123",
         job_attachments: dict[str, Any] | None = None,
-        expected_content: str | None = "{'result': 'success'}",
+        expected_content: str | None = '{"result": "success"}',
     ):
         """Assert that result is a successful Command with expected structure."""
         if job_attachments is None:
