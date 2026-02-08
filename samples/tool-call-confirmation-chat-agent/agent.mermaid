@@ -1,0 +1,15 @@
+flowchart TB
+  __start__([__start__])
+  llm[llm]
+  email_tool[email_tool<br/>API Interrupt]
+  meeting_tool[meeting_tool<br/>JOB Interrupt]
+  join_tools[join_tools]
+  __end__([__end__])
+
+  __start__ --> llm
+  llm -->|fan_out_tools| email_tool
+  llm -->|fan_out_tools| meeting_tool
+  llm -->|no tools| __end__
+  email_tool --> join_tools
+  meeting_tool --> join_tools
+  join_tools --> llm
