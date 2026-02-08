@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "id": "DiscountEvaluator",
+  "evaluatorTypeId": "file://types/discount-evaluator-types.json",
+  "evaluatorSchema": "file://discount.py:DiscountEvaluator",
+  "description": "Evaluator that checks if the agent calculated the correct discount based on order history.\n\n    The evaluator validates the discount calculation against the discount policy:\n    - 7+ orders in last 7 days: 15% discount\n    - 5-6 orders in last 7 days: 10% discount\n    - 3-4 orders in last 7 days: 5% discount\n    - Less than 3 orders: 0% discount\n\n    If expected_discount is provided, checks strictly against that value.\n    If not provided, accepts a +/- 1% difference to account for edge cases.\n    ",
+  "evaluatorConfig": {
+    "name": "DiscountEvaluator",
+    "description": "",
+    "defaultEvaluationCriteria": {
+      "expected_discount": null
+    }
+  }
+}
