@@ -944,6 +944,7 @@ class TestToolGuardrailParenting:
                     "scope": GuardrailScope.TOOL,
                     "execution_stage": ExecutionStage.PRE_EXECUTION,
                     "action_type": "Skip",
+                    "tool_type": "integration",
                 },
             )
             callback.on_chain_end(
@@ -1007,6 +1008,7 @@ class TestToolGuardrailParenting:
                     "scope": GuardrailScope.TOOL,
                     "execution_stage": ExecutionStage.POST_EXECUTION,
                     "action_type": "Skip",
+                    "tool_type": "integration",
                 },
             )
             callback.on_chain_end(
@@ -1302,13 +1304,21 @@ class TestToolGuardrailRealExecutionOrder:
                     "execution_stage": ExecutionStage.PRE_EXECUTION,
                     "action_type": "Skip",
                     "tool_name": "my_tool",
+                    "tool_type": "process",
                 },
             )
             callback.on_chain_end({}, run_id=guard_run_id)
 
             # THEN tool starts
             tool_run_id = uuid4()
-            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+            callback.on_tool_start(
+                {"name": "my_tool"},
+                "input",
+                run_id=tool_run_id,
+                metadata={
+                    "tool_type": "process",
+                },
+            )
             callback.on_tool_end("result", run_id=tool_run_id)
 
         spans = span_exporter.get_finished_spans()
@@ -1321,6 +1331,7 @@ class TestToolGuardrailRealExecutionOrder:
         assert container.parent.span_id == tool_span.context.span_id
         # Tool span should have correct name after enrichment
         assert tool_span.name == "Tool call - my_tool"
+        assert tool_span.attributes.get("toolType") == "Process"
 
     def test_tool_blocked_by_guardrail_no_orphan(self, callback, tracer, span_exporter):
         """When guardrail blocks, placeholder tool span should end cleanly."""
@@ -1350,6 +1361,7 @@ class TestToolGuardrailRealExecutionOrder:
                     "execution_stage": ExecutionStage.PRE_EXECUTION,
                     "action_type": "Skip",
                     "tool_name": "my_tool",
+                    "tool_type": "integration",
                 },
             )
             # Placeholder should exist
@@ -1375,6 +1387,7 @@ class TestToolGuardrailRealExecutionOrder:
                     "execution_stage": ExecutionStage.PRE_EXECUTION,
                     "action_type": "Block",
                     "tool_name": "my_tool",
+                    "tool_type": "integration",
                     "reason": "PII detected",
                 },
             )
@@ -1391,6 +1404,7 @@ class TestToolGuardrailRealExecutionOrder:
         tool_spans = [s for s in spans if s.attributes.get("type") == "toolCall"]
         # Placeholder was created and properly ended
         assert len(tool_spans) == 1
+        assert tool_spans[0].attributes.get("toolType") == "Integration"
 
     def test_multiple_tool_pre_guardrails_before_tool(
         self, callback, tracer, span_exporter
@@ -1429,6 +1443,7 @@ class TestToolGuardrailRealExecutionOrder:
                     "execution_stage": ExecutionStage.PRE_EXECUTION,
                     "action_type": "Skip",
                     "tool_name": "my_tool",
+                    "tool_type": "escalation",
                 },
             )
             callback.on_chain_end({}, run_id=guard1_id)
@@ -1451,6 +1466,7 @@ class TestToolGuardrailRealExecutionOrder:
                     "execution_stage": ExecutionStage.PRE_EXECUTION,
                     "action_type": "Skip",
                     "tool_name": "my_tool",
+                    "tool_type": "escalation",
                 },
             )
             callback.on_chain_end({}, run_id=guard2_id)
@@ -1460,7 +1476,14 @@ class TestToolGuardrailRealExecutionOrder:
 
             # Tool starts
             tool_run_id = uuid4()
-            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+            callback.on_tool_start(
+                {"name": "my_tool"},
+                "input",
+                run_id=tool_run_id,
+                metadata={
+                    "tool_type": "escalation",
+                },
+            )
             callback.on_tool_end("result", run_id=tool_run_id)
 
         spans = span_exporter.get_finished_spans()
@@ -1478,6 +1501,7 @@ class TestToolGuardrailRealExecutionOrder:
         assert container.parent.span_id == tool_span.context.span_id
         # Tool should have correct name after enrichment
         assert tool_span.name == "Tool call - my_tool"
+        assert tool_span.attributes.get("toolType") == "ActionCenter"
 
 
 class TestSpanStackUnit:
@@ -1965,6 +1989,8 @@ class TestGuardrailTelemetryEvents:
                 assert props["ActionType"] == "Skip"
                 assert props["AgentName"] == "TestAgent"
                 assert props.get("Reason") == "No PII found"
+                # ToolType should not be present for non-TOOL scope guardrails
+                assert "ToolType" not in props
 
     def test_block_action_tracks_guardrail_blocked_event(
         self, callback, tracer, span_exporter
@@ -2136,6 +2162,7 @@ class TestGuardrailTelemetryEvents:
                         "scope": GuardrailScope.TOOL,
                         "execution_stage": ExecutionStage.POST_EXECUTION,
                         "action_type": "Filter",
+                        "tool_type": "process",
                     },
                 )
                 callback.on_chain_end(
@@ -2156,6 +2183,7 @@ class TestGuardrailTelemetryEvents:
                         "node_type": "guardrail_action",
                         "scope": GuardrailScope.TOOL,
                         "execution_stage": ExecutionStage.POST_EXECUTION,
+                        "tool_type": "process",
                     },
                 )
                 # Event is tracked on chain end
@@ -2167,6 +2195,7 @@ class TestGuardrailTelemetryEvents:
                 props = call_args[0][1]
                 assert props["ActionType"] == "Filter"
                 assert props["AgentName"] == "TestAgent"
+                assert props["ToolType"] == "Process"
 
     def test_enriched_properties_included_in_event(
         self, callback, tracer, span_exporter
@@ -2270,6 +2299,224 @@ class TestGuardrailTelemetryEvents:
                 assert props["CurrentScope"] == "Agent"
                 assert "Agent" in props["GuardrailScopes"]
                 assert "Llm" in props["GuardrailScopes"]
+
+    def test_escalate_action_tracks_guardrail_escalated_event(
+        self, callback, tracer, span_exporter
+    ):
+        """When escalation is initiated, Guardrail.Escalated event should be tracked."""
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+            callback.set_enriched_properties({"AgentName": "TestAgent"})
+
+            # Create mock guardrail for metadata
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
+            with patch(
+                "uipath_agents._observability.llmops.instrumentors.guardrail_instrumentor.track_event"
+            ) as mock_track:
+                # Evaluation node fires and fails validation
+                run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=run_id,
+                    metadata={
+                        "langgraph_node": "agent_pre_execution_pii_guard",
+                        "guardrail": mock_guardrail,
+                        "node_type": "guardrail_evaluation",
+                        "scope": GuardrailScope.AGENT,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Escalate",
+                    },
+                )
+                callback.on_chain_end(
+                    {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: False}},
+                    run_id=run_id,
+                )
+
+                # Action node fires with _hitl suffix (initial escalation)
+                action_run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=action_run_id,
+                    metadata={
+                        "langgraph_node": "agent_pre_execution_pii_guard_hitl",
+                        "action_type": "Escalate",
+                        "guardrail": mock_guardrail,
+                        "node_type": "guardrail_action",
+                        "scope": GuardrailScope.AGENT,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    },
+                )
+
+                # Verify Guardrail.Escalated event was tracked
+                mock_track.assert_called_once()
+                call_args = mock_track.call_args
+                assert call_args[0][0] == "Guardrail.Escalated"
+                props = call_args[0][1]
+                assert props["ActionType"] == "Escalate"
+                assert props["AgentName"] == "TestAgent"
+
+    def test_escalation_approved_tracks_guardrail_escalation_approved_event(
+        self, callback, tracer, span_exporter
+    ):
+        """When escalation is approved on resume, Guardrail.EscalationApproved event should be tracked."""
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+            callback.set_enriched_properties({"AgentName": "TestAgent"})
+
+            # Create mock guardrail
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "deterministic"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
+            # Simulate resumed escalation context
+            callback._state.resumed_escalation_trace_id = "0123456789abcdef"
+            callback._state.resumed_escalation_span_data = {
+                "name": "Review task",
+                "span_id": "abcd1234",
+                "attributes": {
+                    "type": "guardrailEscalation",
+                    "reviewStatus": "Pending",
+                },
+            }
+            callback._state.resumed_hitl_guardrail_span_data = {
+                "name": "pii_guard",
+                "span_id": "eval5678",
+                "attributes": {},
+            }
+
+            with patch(
+                "uipath_agents._observability.llmops.instrumentors.guardrail_instrumentor.track_event"
+            ) as mock_track:
+                # Resume: Escalate action node fires on resume
+                action_run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=action_run_id,
+                    metadata={
+                        "langgraph_node": "agent_pre_execution_pii_guard_hitl",
+                        "guardrail": mock_guardrail,
+                        "node_type": "guardrail_action",
+                        "scope": GuardrailScope.AGENT,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Escalate",
+                        "escalation_data": {
+                            "reviewed_by": "reviewer@example.com",
+                            "recipient_type": "UserEmail",
+                            "reviewed_inputs": {"input": "sanitized"},
+                        },
+                    },
+                )
+
+                with patch.object(
+                    callback._state.span_factory, "upsert_span_complete_by_data"
+                ):
+                    # on_chain_end - HITL approved (no error)
+                    callback.on_chain_end(
+                        {},
+                        run_id=action_run_id,
+                    )
+
+                # Verify Guardrail.EscalationApproved event was tracked
+                mock_track.assert_called_once()
+                call_args = mock_track.call_args
+                assert call_args[0][0] == "Guardrail.EscalationApproved"
+                props = call_args[0][1]
+                assert props["ActionType"] == "Escalate"
+                assert props["AgentName"] == "TestAgent"
+                assert props["RecipientType"] == "UserEmail"
+                assert props["WasDataModifiedByReviewer"]
+
+    def test_escalation_rejected_tracks_guardrail_escalation_rejected_event(
+        self, callback, tracer, span_exporter
+    ):
+        """When escalation is rejected on resume, Guardrail.EscalationRejected event should be tracked."""
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+            callback.set_enriched_properties({"AgentName": "TestAgent"})
+
+            # Create mock guardrail
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "deterministic"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
+            # Simulate resumed escalation context
+            callback._state.resumed_escalation_trace_id = "0123456789abcdef"
+            callback._state.resumed_escalation_span_data = {
+                "name": "Review task",
+                "span_id": "abcd1234",
+                "attributes": {
+                    "type": "guardrailEscalation",
+                    "reviewStatus": "Pending",
+                },
+            }
+            callback._state.resumed_hitl_guardrail_span_data = {
+                "name": "pii_guard",
+                "span_id": "eval5678",
+                "attributes": {},
+            }
+
+            # Resume: Escalate action node fires on resume
+            action_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=action_run_id,
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard_hitl",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_action",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Escalate",
+                    "escalation_data": {
+                        "recipient_type": "UserEmail",
+                        "reviewed_by": "reviewer@example.com",
+                    },
+                },
+            )
+
+            with patch(
+                "uipath_agents._observability.llmops.instrumentors.guardrail_instrumentor.track_event"
+            ) as mock_track:
+                with patch.object(
+                    callback._state.span_factory, "upsert_span_complete_by_data"
+                ):
+                    # on_chain_error - HITL rejected
+                    callback.on_chain_error(
+                        Exception("User rejected: Invalid data"),
+                        run_id=action_run_id,
+                    )
+
+                # Verify Guardrail.EscalationRejected event was tracked
+                mock_track.assert_called_once()
+                call_args = mock_track.call_args
+                assert call_args[0][0] == "Guardrail.EscalationRejected"
+                props = call_args[0][1]
+                assert props["ActionType"] == "Escalate"
+                assert props["AgentName"] == "TestAgent"
+                assert props["RecipientType"] == "UserEmail"
+                assert not props["WasDataModifiedByReviewer"]
 
 
 class TestRuleDetailsExtraction:

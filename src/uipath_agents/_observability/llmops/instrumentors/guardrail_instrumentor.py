@@ -19,6 +19,9 @@ from ..spans.span_name import (
     INNER_STATE_KEY,
 )
 from ..spans.spans_schema import to_json_string
+from .attribute_helpers import (
+    get_tool_type_value,
+)
 from .base import BaseSpanInstrumentor, InstrumentationState
 from .constants import (
     ACTION_SUFFIX_TO_NAME,
@@ -191,7 +194,6 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
         if metadata is None:
             return
         action = metadata.get("action_type")
-        self._track_guardrail_event(action, metadata)
 
         node_name = metadata.get("langgraph_node", "")
         if not node_name:
@@ -218,6 +220,10 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                         trace_id=trace_id,
                         span_data=eval_span_data,
                     )
+
+                self._track_escalation_outcome_event(
+                    GuardrailEvent.ESCALATION_APPROVED, metadata
+                )
             return
 
         # Normal flow: complete the pending guardrail span
@@ -243,6 +249,9 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                     self._span_factory.error_guardrail_evaluation(
                         eval_span, action=action, reason=reason, error_message=error_str
                     )
+
+                self._track_guardrail_event(action, metadata)
+
             elif action == GuardrailAction.ESCALATE:
                 # Complete Review task span
                 self._complete_resumed_escalation_from_outputs(metadata, error_str)
@@ -256,6 +265,10 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                         span_data=eval_span_data,
                         status=SpanStatus.ERROR,
                     )
+
+                self._track_escalation_outcome_event(
+                    GuardrailEvent.ESCALATION_REJECTED, metadata
+                )
 
             # End guardrail group span
             scope = metadata.get("scope")
@@ -343,6 +356,8 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                         excluded_fields=excluded_fields,
                         updated_data=updated_data,
                     )
+
+                self._track_guardrail_event(action, metadata)
         return
 
     def _get_guardrail_eval_node_name(self, node_name: str) -> str:
@@ -381,9 +396,34 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
             event_name = GuardrailEvent.SKIPPED
         elif action == GuardrailAction.FILTER:
             event_name = GuardrailEvent.FILTERED
+        elif action == GuardrailAction.ESCALATE:
+            event_name = GuardrailEvent.ESCALATED
 
         if event_name is None:
             return
+
+        track_event(event_name, props)
+
+    def _track_escalation_outcome_event(
+        self,
+        event_name: GuardrailEvent,
+        metadata: Dict[str, Any],
+    ) -> None:
+        """Track escalation outcome telemetry event (approved/rejected)."""
+        props = self._state.enriched_properties.copy()
+        props["ActionType"] = GuardrailAction.ESCALATE
+
+        escalation_data = metadata.get("escalation_data")
+        if escalation_data:
+            reviewed_inputs = escalation_data.get("reviewed_inputs")
+            reviewed_outputs = escalation_data.get("reviewed_outputs")
+
+            if reviewed_inputs is not None or reviewed_outputs is not None:
+                props["WasDataModifiedByReviewer"] = True
+            else:
+                props["WasDataModifiedByReviewer"] = False
+
+        props.update(self._build_guardrail_telemetry_props(metadata))
 
         track_event(event_name, props)
 
@@ -397,6 +437,8 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
         scope = metadata.get("scope")
         execution_stage = metadata.get("execution_stage")
         severity_level = metadata.get("severity_level")
+        escalation_data = metadata.get("escalation_data")
+        tool_type = metadata.get("tool_type")
 
         if guardrail:
             props["EnabledForEvals"] = str(guardrail.enabled_for_evals).lower()
@@ -425,6 +467,12 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
 
         if severity_level:
             props["SeverityLevel"] = severity_level.title()
+
+        if escalation_data:
+            props["RecipientType"] = escalation_data.get("recipient_type")
+
+        if tool_type:
+            props["ToolType"] = get_tool_type_value(tool_type)
 
         return props
 
@@ -563,8 +611,10 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                     and self._state.current_tool_span is None
                 ):
                     tool_name = metadata.get("tool_name") or "unknown"
+                    tool_type = metadata.get("tool_type") or None
                     self._state.current_tool_span = self._span_factory.start_tool_call(
                         tool_name=tool_name,
+                        tool_type_value=get_tool_type_value(tool_type),
                         parent_span=self._agent_span,
                     )
                     self._state.tool_span_from_guardrail = True
@@ -661,6 +711,8 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                             self._state.pending_hitl_guardrail_container_span = (
                                 self._state.guardrail_containers[container_key]
                             )
+
+                    self._track_guardrail_event(GuardrailAction.ESCALATE, metadata)
 
         except Exception:
             logger.exception("Error in on_chain_start callback (guardrail)")
