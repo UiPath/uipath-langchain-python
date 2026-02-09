@@ -79,7 +79,7 @@ def create_analyze_file_tool(
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),
             cast(AnyMessage, human_message_with_files),
         ]
-        result = await llm.ainvoke(messages)
+        result = await llm.model_copy(update={"disable_streaming": True}).ainvoke(messages)
 
         analysis_result = extract_text_content(result)
         return analysis_result

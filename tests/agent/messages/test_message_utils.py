@@ -7,7 +7,10 @@ from langchain_core.messages.content import (
     create_tool_call,
 )
 
-from uipath_langchain.agent.messages.message_utils import replace_tool_calls
+from uipath_langchain.agent.messages.message_utils import (
+    parse_attachment_id_from_uri,
+    replace_tool_calls,
+)
 
 
 class TestReplaceToolCalls:
@@ -208,3 +211,34 @@ class TestReplaceToolCalls:
         assert len(tool_call_blocks) == 1
         assert tool_call_blocks[0]["name"] == "new_tool"
         assert tool_call_blocks[0]["args"] == {"new": "args"}
+
+class TestParseAttachmentIdFromUri:
+    """Test URI parsing for attachment IDs."""
+
+    def test_valid_orchestrator_uri(self):
+        """Should extract UUID from valid orchestrator URI."""
+        uri = "urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+
+        result = parse_attachment_id_from_uri(uri)
+
+        assert result == "a940a416-b97b-4146-3089-08de5f4d0a87"
+
+    def test_empty_uri(self):
+        """Should return None for empty URI."""
+        result = parse_attachment_id_from_uri("")
+
+        assert result is None
+
+    def test_invalid_uri_no_uuid(self):
+        """Should return None for URI without UUID."""
+        result = parse_attachment_id_from_uri("urn:uipath:cas:file:orchestrator:")
+
+        assert result is None
+
+    def test_uri_with_uppercase_uuid_normalizes_to_lowercase(self):
+        """Should normalize uppercase UUIDs to lowercase."""
+        uri = "urn:uipath:cas:file:orchestrator:A940A416-B97B-4146-3089-08DE5F4D0A87"
+
+        result = parse_attachment_id_from_uri(uri)
+
+        assert result == "a940a416-b97b-4146-3089-08de5f4d0a87"

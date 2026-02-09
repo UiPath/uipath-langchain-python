@@ -8,7 +8,6 @@ from uipath.platform.attachments import Attachment
 
 from uipath_langchain.agent.react.job_attachments import (
     get_job_attachments,
-    parse_attachment_id_from_uri,
     parse_attachments_from_conversation_messages,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
@@ -695,38 +694,6 @@ class TestMergeDicts:
 
         assert len(result) == 4
         assert all(str(uid) in result for uid in [uuid1, uuid2, uuid3, uuid4])
-
-
-class TestParseAttachmentIdFromUri:
-    """Test URI parsing for attachment IDs."""
-
-    def test_valid_orchestrator_uri(self):
-        """Should extract UUID from valid orchestrator URI."""
-        uri = "urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
-
-        result = parse_attachment_id_from_uri(uri)
-
-        assert result == "a940a416-b97b-4146-3089-08de5f4d0a87"
-
-    def test_empty_uri(self):
-        """Should return None for empty URI."""
-        result = parse_attachment_id_from_uri("")
-
-        assert result is None
-
-    def test_invalid_uri_no_uuid(self):
-        """Should return None for URI without UUID."""
-        result = parse_attachment_id_from_uri("urn:uipath:cas:file:orchestrator:")
-
-        assert result is None
-
-    def test_uri_with_uppercase_uuid_normalizes_to_lowercase(self):
-        """Should normalize uppercase UUIDs to lowercase."""
-        uri = "urn:uipath:cas:file:orchestrator:A940A416-B97B-4146-3089-08DE5F4D0A87"
-
-        result = parse_attachment_id_from_uri(uri)
-
-        assert result == "a940a416-b97b-4146-3089-08de5f4d0a87"
 
 class TestParseAttachmentsFromConversationMessages:
     """Test parsing attachments from conversation message metadata."""

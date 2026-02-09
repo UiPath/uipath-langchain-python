@@ -308,30 +308,6 @@ class TestMapEvent:
     """Tests for the map_event method."""
 
     @pytest.mark.asyncio
-    async def test_map_event_filters_non_agent_node_chunks(self):
-        """Should return None for AIMessageChunk from non-agent nodes."""
-        mapper = UiPathChatMessagesMapper("test-runtime", None)
-        chunk = AIMessageChunk(content="hello", id="msg-123")
-        metadata = {"langgraph_node": "tools"}
-
-        result = await mapper.map_event(chunk, metadata=metadata)
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_map_event_passes_agent_node_chunks(self):
-        """Should process AIMessageChunk from agent node normally."""
-        mapper = UiPathChatMessagesMapper("test-runtime", None)
-        chunk = AIMessageChunk(content="", id="msg-123")
-        metadata = {"langgraph_node": "agent"}
-
-        result = await mapper.map_event(chunk, metadata=metadata)
-
-        assert result is not None
-        assert len(result) == 1
-        assert result[0].start is not None
-
-    @pytest.mark.asyncio
     async def test_map_event_returns_empty_list_for_ai_chunk_without_id(self):
         """Should return empty list for AIMessageChunk without id."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)

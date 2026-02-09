@@ -31,8 +31,7 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
-from uipath_langchain.agent.react.job_attachments import parse_attachment_id_from_uri
-from uipath_langchain.agent.react.types import AgentGraphNode
+from uipath_langchain.agent.messages.message_utils import parse_attachment_id_from_uri
 
 logger = logging.getLogger(__name__)
 
@@ -184,11 +183,6 @@ class UiPathChatMessagesMapper:
         """
         # --- Streaming AIMessageChunk ---
         if isinstance(message, AIMessageChunk):
-            if metadata:
-                langgraph_node = metadata.get("langgraph_node")
-                # Don't stream messages from non-agent nodes (e.g. internal tools with LLM calls)
-                if langgraph_node is not None and langgraph_node != AgentGraphNode.AGENT:
-                    return None
             return await self.map_ai_message_chunk_to_events(message)
 
         # --- ToolMessage ---
