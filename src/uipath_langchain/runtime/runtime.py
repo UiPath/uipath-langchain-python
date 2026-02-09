@@ -4,7 +4,6 @@ from typing import Any, AsyncGenerator
 from uuid import uuid4
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.messages import AIMessageChunk
 from langchain_core.runnables.config import RunnableConfig
 from langgraph.errors import EmptyInputError, GraphRecursionError, InvalidUpdateError
 from langgraph.graph.state import CompiledStateGraph
@@ -140,9 +139,9 @@ class UiPathLangGraphRuntime:
                 # Emit UiPathRuntimeMessageEvent for messages
                 if chunk_type == "messages":
                     if isinstance(data, tuple):
-                        message, metadata = data
+                        message, _ = data
                         try:
-                            events = await self.chat.map_event(message, metadata)
+                            events = await self.chat.map_event(message)
                         except Exception as e:
                             logger.warning(f"Error mapping message event: {e}")
                             events = None

@@ -169,14 +169,12 @@ class UiPathChatMessagesMapper:
 
     async def map_event(
         self,
-        message: BaseMessage,
-        metadata: dict[str, Any] | None = None,
+        message: BaseMessage
     ) -> list[UiPathConversationMessageEvent] | None:
         """Convert LangGraph BaseMessage (chunk or full) into a UiPathConversationMessageEvent.
 
         Args:
             message: The LangChain message to convert
-            metadata: Optional LangGraph metadata containing node info
 
         Returns:
             A UiPathConversationMessageEvent if the message should be emitted, None otherwise.
