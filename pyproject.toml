@@ -34,7 +34,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-  "uipath-robot>=0.0.11",
+  "uipath-robot>=0.0.12",
   "datamodel-code-generator>=0.33.0",
   "debugpy>=1.8.17",
   "mypy>=1.14.1",

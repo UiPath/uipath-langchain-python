@@ -3295,7 +3295,7 @@ dev = [
     { name = "requests", specifier = ">=2.32.5" },
     { name = "ruff", specifier = ">=0.9.4" },
     { name = "uipath-dev", specifier = ">=0.0.17" },
-    { name = "uipath-robot", specifier = ">=0.0.11" },
+    { name = "uipath-robot", specifier = ">=0.0.12" },
 ]
 
 [[package]]
@@ -3364,7 +3364,7 @@ vertex = [
 
 [[package]]
 name = "uipath-robot"
-version = "0.0.11"
+version = "0.0.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -3372,9 +3372,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "uipath" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/02/37/6c1129d416d428bdd690e7268881dd6b603239ab90ccf84d9713b0a931d9/uipath_robot-0.0.11.tar.gz", hash = "sha256:8e223d89db99bfa4018df06289c8b094bc4c82055bcc993a0e7deaac1b9a6e4a", size = 152983, upload-time = "2026-02-04T12:01:13.616Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5d/bd/22882201cb6824964b64692cdefcc13fadc642a367edb0100a892b5793f2/uipath_robot-0.0.12.tar.gz", hash = "sha256:957171968c03346ed0d94fa0c3c7ca7b729481ea8e99fc552af4246c79d53aa7", size = 153787, upload-time = "2026-02-09T10:52:35.274Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/e0/f6a7c8bcef62498ec5bc321e757ce79d4053139f20839cd396874cb4dfe2/uipath_robot-0.0.11-py3-none-any.whl", hash = "sha256:6a41c37402b56be223cbaac7023d6c0307afb0a2838da21263690bc2d9e2100b", size = 29069, upload-time = "2026-02-04T12:01:12.434Z" },
+    { url = "https://files.pythonhosted.org/packages/71/69/3eb32a176935f53a737fecb0140f45495b917986510e5d5b12564fcb6c99/uipath_robot-0.0.12-py3-none-any.whl", hash = "sha256:118b7393cdcf0cf2b98c67902fcd2a7b6a349873ed333dece1dc8dfdef053049", size = 29841, upload-time = "2026-02-09T10:52:34.057Z" },
 ]
 
 [[package]]
