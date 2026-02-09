@@ -149,6 +149,7 @@ def _create_guardrail_node(
     output_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]]
     | None = None,
     tool_name: str | None = None,
+    tool_type: str | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail evaluation nodes.
 
@@ -161,6 +162,7 @@ def _create_guardrail_node(
 
     metadata: dict[str, Any] = {
         "tool_name": tool_name,
+        "tool_type": tool_type,
         "guardrail": guardrail,
         "scope": scope,
         "execution_stage": execution_stage,
@@ -309,6 +311,7 @@ def create_tool_guardrail_node(
     success_node: str,
     failure_node: str,
     tool_name: str,
+    tool_type: str | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Create a guardrail node for TOOL scope guardrails.
 
@@ -318,6 +321,7 @@ def create_tool_guardrail_node(
         success_node: Node to route to on validation pass.
         failure_node: Node to route to on validation fail.
         tool_name: Name of the tool to extract arguments from.
+        tool_type: Optional type of the tool (e.g., "process", "escalation", "mcp").
 
     Returns:
         A tuple of (node_name, node_function) for the guardrail evaluation node.
@@ -369,4 +373,5 @@ def create_tool_guardrail_node(
         _input_data_extractor,
         _output_data_extractor,
         tool_name,
+        tool_type,
     )
