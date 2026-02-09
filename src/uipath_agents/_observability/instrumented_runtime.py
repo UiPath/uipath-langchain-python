@@ -458,6 +458,13 @@ class InstrumentedRuntime:
         current_tool_span = self._callback.get_current_tool()
         resumed_tool_span_data = self._callback.get_resumed_tool_data()
 
+        # Upsert pending spans so they're visible in UI during suspension
+        if process_span:
+            self._span_factory.upsert_span_suspended(process_span)
+        if tool_span:
+            self._span_factory.upsert_span_suspended(tool_span)
+        self._span_factory.upsert_span_suspended(agent_span)
+
         if self._trace_context_storage:
             runtime_id = self._get_runtime_id()
             context = self._extract_trace_context(agent_span)

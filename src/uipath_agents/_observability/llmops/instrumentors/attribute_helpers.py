@@ -240,22 +240,25 @@ def get_tool_type_value(tool_type: Optional[str]) -> str:
     elif tool_type == "process":
         return "Process"
     elif tool_type == "escalation":
-        return "ActionCenter"
+        return "Escalation"
     elif tool_type == "internal":
         return "Internal"
     return "Integration"
 
 
-def set_escalation_task_info(span: Span, output: Any) -> None:
-    """Set escalation task info attributes on span."""
-    if not isinstance(output, dict):
-        return
-    task_id = output.get("task_id") or output.get("taskId") or output.get("id")
-    if task_id:
-        span.set_attribute("taskId", str(task_id))
-    task_url = output.get("task_url") or output.get("taskUrl") or output.get("url")
-    if task_url:
-        span.set_attribute("taskUrl", str(task_url))
+def build_task_url(task_id: int | str) -> str | None:
+    """Build Action Center task URL from environment.
+
+    UIPATH_URL already includes org/tenant in the path
+    (e.g. https://alpha.uipath.com/org-id/tenant-id/).
+    """
+    from uipath.platform.common import UiPathConfig
+
+    base_url = UiPathConfig.base_url
+    if not base_url:
+        return None
+    url = f"{base_url.rstrip('/')}/actions_/tasks/{task_id}"
+    return url
 
 
 def set_process_job_info(span: Span, output: Any) -> None:

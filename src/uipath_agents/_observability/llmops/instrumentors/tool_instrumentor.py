@@ -14,9 +14,9 @@ from uipath_langchain.agent.guardrails.types import ExecutionStage
 from ..span_hierarchy import SpanHierarchyManager
 from ..spans import SpanKeys
 from .attribute_helpers import (
+    build_task_url,
     get_tool_type_value,
     parse_tool_arguments,
-    set_escalation_task_info,
     set_process_job_info,
     set_span_attachments,
     set_tool_result,
@@ -86,8 +86,16 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 self._state.reinvoked_tool_run_ids.add(run_id)
                 return
 
+            # Get call_id from kwargs, fall back to metadata (set by escalation_wrapper)
             call_id = kwargs.get("tool_call_id")
+            if not call_id and metadata:
+                call_id = metadata.get("_call_id")
+
+            # Get arguments from input_str, fall back to metadata
             arguments = parse_tool_arguments(input_str)
+            if not arguments and metadata:
+                arguments = metadata.get("_call_args")
+
             tool_type_value = get_tool_type_value(tool_type)
             args_schema = metadata.get("args_schema") if metadata else None
 
@@ -105,6 +113,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 # Clear the flag after reuse - span was consumed by on_tool_start
                 self._state.tool_span_from_guardrail = False
                 self._close_container(GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION)
+                self._span_factory.upsert_span_started(span)
             else:
                 parent = self._state.get_span_or_root(parent_run_id)
                 span = self._span_factory.start_tool_call(
@@ -116,6 +125,10 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                     args_schema=args_schema,
                 )
                 span.set_attribute("tool.name", tool_name)
+                if call_id:
+                    span.set_attribute("call_id", call_id)
+                if arguments:
+                    span.set_attribute("input", json.dumps(arguments))
                 self._spans[run_id] = span
                 # Set current_tool_span for HITL to access if needed
                 self._state.current_tool_span = span
@@ -126,8 +139,11 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             if tool_type:
                 child_span = None
                 if tool_type == "escalation" and tool_display_name:
+                    channel_type = metadata.get("channel_type") if metadata else None
                     child_span = self._span_factory.start_escalation_tool(
                         app_name=tool_display_name,
+                        arguments=arguments,
+                        channel_type=channel_type,
                         parent_span=span,
                     )
                     self._state.escalation_run_ids.add(run_id)
@@ -198,9 +214,6 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         child_span.update_name(f"Simulated result: {child_span.name}")
                 SpanHierarchyManager.pop(run_id)
                 set_tool_result(child_span, output)
-                if run_id in self._state.escalation_run_ids:
-                    set_escalation_task_info(child_span, output)
-                    self._state.escalation_run_ids.discard(run_id)
                 if run_id in self._state.process_run_ids:
                     set_process_job_info(child_span, output)
                     self._state.process_run_ids.discard(run_id)
@@ -238,14 +251,28 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             return
 
         # Upsert process span first (inner)
+        is_escalation = False
         if self._state.resumed_process_span_data:
+            span_attrs = self._state.resumed_process_span_data.setdefault(
+                "attributes", {}
+            )
+            span_type = span_attrs.get("span_type", "") or span_attrs.get("type", "")
+            is_escalation = span_type == "escalationTool"
+
             if output is not None:
                 result = (
                     json.dumps(output)
                     if isinstance(output, (dict, list))
                     else str(output)
                 )
-                self._state.resumed_process_span_data["attributes"]["result"] = result
+
+                if is_escalation:
+                    filtered_output = {
+                        k: output[k] for k in ("outcome", "output") if k in output
+                    }
+                    result = json.dumps(filtered_output)
+
+                span_attrs["result"] = result
 
             self._span_factory.upsert_span_complete_by_data(
                 trace_id=self._state.resumed_trace_id,
@@ -258,13 +285,28 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
 
         # Upsert tool span (outer)
         if self._state.resumed_tool_span_data:
+            tool_attrs = self._state.resumed_tool_span_data.setdefault("attributes", {})
+
+            # Ensure attributes use names exporter expects (call_id, input)
+            if tool_attrs.get("callId") and not tool_attrs.get("call_id"):
+                tool_attrs["call_id"] = tool_attrs["callId"]
+            if tool_attrs.get("arguments") and not tool_attrs.get("input"):
+                tool_attrs["input"] = tool_attrs["arguments"]
+
             if output is not None:
                 result = (
                     json.dumps(output)
                     if isinstance(output, (dict, list))
                     else str(output)
                 )
-                self._state.resumed_tool_span_data["attributes"]["result"] = result
+
+                if is_escalation:
+                    filtered_output = {
+                        k: output[k] for k in ("outcome", "output") if k in output
+                    }
+                    result = json.dumps(filtered_output)
+
+                tool_attrs["output"] = result
                 set_span_attachments(
                     self._state.resumed_tool_span_data,
                     output,
@@ -289,6 +331,45 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
         error_type = type(error).__name__
         return error_type == "GraphInterrupt" or error_str.startswith("GraphInterrupt(")
 
+    def _handle_graph_interrupt(self, run_id: UUID, error: BaseException) -> None:
+        """Extract task metadata from interrupt payload and upsert spans."""
+        child_key = self._interruptible_span_key(run_id)
+        child_span = self._spans.get(child_key)
+
+        # Set escalation task attributes from the interrupt payload
+        if child_span and run_id in self._state.escalation_run_ids:
+            self._set_escalation_interrupt_attrs(child_span, error)
+
+        # Upsert both spans as suspended
+        if child_span:
+            self._span_factory.upsert_span_suspended(child_span)
+        tool_span = self._spans.get(run_id)
+        if tool_span:
+            self._span_factory.upsert_span_suspended(tool_span)
+
+    def _set_escalation_interrupt_attrs(self, span: Any, error: BaseException) -> None:
+        """Extract task metadata from escalation interrupt and set span attributes."""
+        interrupts = error.args[0] if error.args else None
+        if not interrupts:
+            return
+
+        value = getattr(interrupts[0], "value", None)
+        if not value:
+            return
+
+        action = getattr(value, "action", None)
+        if action:
+            task_id = getattr(action, "id", None)
+            if task_id:
+                span.set_attribute("taskId", str(task_id))
+                task_url = build_task_url(task_id)
+                if task_url:
+                    span.set_attribute("taskUrl", task_url)
+
+        recipient = getattr(value, "recipient", None)
+        if recipient and getattr(recipient, "value", None):
+            span.set_attribute("assignedTo", recipient.value)
+
     def on_tool_error(
         self,
         error: BaseException,
@@ -305,11 +386,9 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 self._state.reinvoked_tool_run_ids.discard(run_id)
                 return
 
-            # GraphInterrupt = suspend signal, spans kept open
+            # GraphInterrupt = suspend signal; extract task metadata and upsert spans
             if self._is_graph_interrupt(error):
-                logger.debug(
-                    "GraphInterrupt detected for tool, spans kept open for upsert"
-                )
+                self._handle_graph_interrupt(run_id, error)
                 return
 
             exc = error if isinstance(error, Exception) else Exception(str(error))

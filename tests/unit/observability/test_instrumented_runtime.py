@@ -785,7 +785,7 @@ class TestUpsertSpanOnSuspend:
     """Tests for upsert span calls during suspend."""
 
     @pytest.mark.asyncio
-    async def test_handle_suspended_without_pending_spans_no_upsert(
+    async def test_handle_suspended_without_pending_spans_upserts_agent_span(
         self,
         mock_delegate,
         tracer_with_exporter,
@@ -794,7 +794,7 @@ class TestUpsertSpanOnSuspend:
         mock_trace_context_storage,
         mock_runtime_context,
     ):
-        """Test _handle_suspended doesn't call upsert when no pending spans."""
+        """Test _handle_suspended upserts agent span even without pending tool spans."""
         mock_result = MagicMock()
         mock_result.status = UiPathRuntimeStatus.SUSPENDED
         mock_delegate.execute.return_value = mock_result
@@ -814,9 +814,63 @@ class TestUpsertSpanOnSuspend:
 
         await instrumented_runtime.execute({"input": "test"}, None)
 
-        # 1 upsert = agent start only (no pending spans)
-        assert mock_exporter.upsert_span.call_count == 1
-        assert mock_exporter.upsert_span.call_args[1]["status_override"] == 0  # UNSET
+        # 2 upserts: agent start + agent suspended
+        assert mock_exporter.upsert_span.call_count == 2
+        # All upserts use UNSET status
+        for call in mock_exporter.upsert_span.call_args_list:
+            assert call[1]["status_override"] == 0  # UNSET
+
+    @pytest.mark.asyncio
+    async def test_handle_suspended_upserts_pending_tool_and_process_spans(
+        self,
+        mock_delegate,
+        tracer_with_exporter,
+        callback_with_exporter,
+        mock_exporter,
+        mock_trace_context_storage,
+        mock_runtime_context,
+    ):
+        """Test _handle_suspended upserts pending process, tool, and agent spans."""
+        from opentelemetry.sdk.trace import ReadableSpan
+
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = mock_result
+
+        mock_tool_span = MagicMock(spec=ReadableSpan)
+        mock_tool_span.get_span_context.return_value = MagicMock(
+            span_id=0x1234, trace_id=0xABCD
+        )
+        mock_tool_span.name = "tool"
+        mock_tool_span.attributes = {}
+        mock_tool_span.start_time = 0
+        mock_tool_span.parent = None
+
+        mock_process_span = MagicMock(spec=ReadableSpan)
+        mock_process_span.get_span_context.return_value = MagicMock(
+            span_id=0x5678, trace_id=0xABCD
+        )
+        mock_process_span.name = "process"
+        mock_process_span.attributes = {}
+        mock_process_span.start_time = 0
+        mock_process_span.parent = None
+
+        callback_with_exporter.get_pending_tool_info = MagicMock(
+            return_value=("escalate_tool", mock_tool_span, mock_process_span)
+        )
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer_with_exporter,
+            callback_with_exporter,
+            mock_runtime_context,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        await instrumented_runtime.execute({"input": "test"}, None)
+
+        # 4 upserts: agent start + process suspended + tool suspended + agent suspended
+        assert mock_exporter.upsert_span.call_count == 4
 
 
 class TestGetAgentModel:

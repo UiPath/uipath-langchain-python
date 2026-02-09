@@ -12,6 +12,7 @@ from uipath.core.guardrails import (
     GuardrailScope,
     SpecificFieldsSelector,
 )
+from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from uipath_agents._observability.llmops.callback import LlmOpsInstrumentationCallback
@@ -423,6 +424,83 @@ class TestGraphInterruptHandling:
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
         assert "error" in spans[0].attributes
+
+    def test_graph_interrupt_with_wait_escalation_extracts_task_id(
+        self, callback, span_exporter
+    ):
+        """Test on_tool_error extracts taskId from GraphInterrupt with WaitEscalation payload."""
+
+        class MockInterrupt:
+            def __init__(self, value: Any) -> None:
+                self.value = value
+
+        class MockAction:
+            def __init__(self) -> None:
+                self.id = 12345
+                self.key = "task-key-abc"
+
+        class MockWaitEscalation:
+            def __init__(self) -> None:
+                self.action = MockAction()
+                self.recipient = TaskRecipient(
+                    type=TaskRecipientType.EMAIL, value="user@example.com"
+                )
+
+        class GraphInterrupt(Exception):
+            def __init__(self) -> None:
+                interrupts = (MockInterrupt(MockWaitEscalation()),)
+                super().__init__(interrupts)
+
+        run_id = uuid4()
+        serialized = {"name": "escalate_approval"}
+        metadata = {
+            "tool_type": "escalation",
+            "display_name": "ApprovalApp",
+            "channel_type": "actionCenter",
+        }
+
+        callback.on_tool_start(serialized, "input", run_id=run_id, metadata=metadata)
+
+        # Child escalation span should exist
+        child_key = UUID(int=run_id.int ^ 2)
+        assert child_key in callback._state.spans
+
+        child_span = callback._state.spans[child_key]
+
+        callback.on_tool_error(GraphInterrupt(), run_id=run_id)
+
+        # Span should still be tracked (not closed)
+        assert run_id in callback._state.spans
+
+        # Child span should have taskId attribute set
+        assert child_span.attributes.get("taskId") == "12345"
+        assert child_span.attributes.get("assignedTo") == "user@example.com"
+
+        callback.cleanup()
+
+    def test_graph_interrupt_without_interrupts_attr_still_upserts(
+        self, callback, span_exporter
+    ):
+        """Test on_tool_error handles GraphInterrupt without .interrupts gracefully."""
+
+        class GraphInterrupt(Exception):
+            pass
+
+        run_id = uuid4()
+        serialized = {"name": "escalate_tool"}
+        metadata = {
+            "tool_type": "escalation",
+            "display_name": "TestApp",
+            "channel_type": "actionCenter",
+        }
+
+        callback.on_tool_start(serialized, "input", run_id=run_id, metadata=metadata)
+        callback.on_tool_error(GraphInterrupt("Suspended"), run_id=run_id)
+
+        # Spans should still be tracked (not closed)
+        assert run_id in callback._state.spans
+
+        callback.cleanup()
 
 
 class TestIntegrationToolCallback:
@@ -1501,7 +1579,7 @@ class TestToolGuardrailRealExecutionOrder:
         assert container.parent.span_id == tool_span.context.span_id
         # Tool should have correct name after enrichment
         assert tool_span.name == "Tool call - my_tool"
-        assert tool_span.attributes.get("toolType") == "ActionCenter"
+        assert tool_span.attributes.get("toolType") == "Escalation"
 
 
 class TestSpanStackUnit:

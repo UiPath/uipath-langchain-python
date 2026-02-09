@@ -8,6 +8,8 @@ import pytest
 from uipath.tracing import AttachmentDirection, AttachmentProvider, SpanAttachment
 
 from uipath_agents._observability.llmops.instrumentors.attribute_helpers import (
+    build_task_url,
+    get_tool_type_value,
     set_span_attachments,
 )
 
@@ -319,3 +321,63 @@ class TestSetSpanAttachments:
 
         set_span_attachments(mock_span, output, schema, AttachmentDirection.OUT)
         mock_span.set_attribute.assert_not_called()
+
+
+class TestBuildTaskUrl:
+    """Tests for build_task_url function.
+
+    UIPATH_URL already includes org/tenant in the path,
+    so build_task_url only needs UIPATH_URL.
+    """
+
+    def test_builds_url_with_uipath_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("UIPATH_URL", "https://alpha.uipath.com/org-123/tenant-456")
+
+        url = build_task_url(12345)
+
+        expected = "https://alpha.uipath.com/org-123/tenant-456/actions_/tasks/12345"
+        assert url == expected
+
+    def test_strips_trailing_slash_from_base_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("UIPATH_URL", "https://alpha.uipath.com/org/tenant/")
+
+        url = build_task_url(1)
+
+        assert url == "https://alpha.uipath.com/org/tenant/actions_/tasks/1"
+
+    def test_returns_none_when_uipath_url_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("UIPATH_URL", raising=False)
+
+        assert build_task_url(123) is None
+
+    def test_accepts_string_task_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("UIPATH_URL", "https://cloud.uipath.com/org/tenant")
+
+        url = build_task_url("task-abc-123")
+
+        expected = "https://cloud.uipath.com/org/tenant/actions_/tasks/task-abc-123"
+        assert url == expected
+
+
+class TestGetToolTypeValue:
+    """Tests for get_tool_type_value function."""
+
+    def test_escalation_returns_escalation(self) -> None:
+        assert get_tool_type_value("escalation") == "Escalation"
+
+    def test_agent_returns_agent(self) -> None:
+        assert get_tool_type_value("agent") == "Agent"
+
+    def test_process_returns_process(self) -> None:
+        assert get_tool_type_value("process") == "Process"
+
+    def test_none_returns_integration(self) -> None:
+        assert get_tool_type_value(None) == "Integration"
+
+    def test_unknown_returns_integration(self) -> None:
+        assert get_tool_type_value("unknown") == "Integration"
+        assert get_tool_type_value("other") == "Integration"
