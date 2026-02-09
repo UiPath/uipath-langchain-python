@@ -2,9 +2,10 @@
 
 import copy
 import uuid
-from typing import Any
+from typing import Any, Sequence
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
+from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel
 from uipath.platform.attachments import Attachment
 
@@ -125,3 +126,75 @@ def _create_job_attachment_error_message(attachment_id_str: str) -> str:
         f"Try invoking the tool again and please make sure that you pass "
         f"valid JobAttachment IDs associated with existing JobAttachments in the current context."
     )
+
+
+def parse_attachment_id_from_uri(uri: str) -> str | None:
+    """Parse attachment ID from a URI.
+
+    Extracts the UUID from URIs like:
+    "urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+
+    Args:
+        uri: The URI to parse
+
+    Returns:
+        The attachment ID if found, None otherwise
+    """
+    if not uri:
+        return None
+
+    # The UUID is the last segment after the final colon
+    parts = uri.rsplit(":", 1)
+    if len(parts) != 2:
+        return None
+
+    potential_uuid = parts[1]
+    if not potential_uuid:
+        return None
+
+    # Validate it's a proper UUID and normalize to lowercase
+    try:
+        return str(uuid.UUID(potential_uuid))
+    except (ValueError, AttributeError):
+        return None
+
+
+def parse_attachments_from_conversation_messages(
+    messages: Sequence[BaseMessage],
+) -> dict[str, Attachment]:
+    """Parse attachments from HumanMessage metadata.
+
+    Extracts attachment information from HumanMessages where metadata
+    contains an 'attachments' list with attachment details.
+
+    Args:
+        messages: Sequence of messages to parse
+
+    Returns:
+        Dictionary mapping attachment ID to Attachment objects
+    """
+    attachments: dict[str, Attachment] = {}
+
+    for message in messages:
+        if not isinstance(message, HumanMessage):
+            continue
+
+        metadata = getattr(message, "metadata", None)
+        if not metadata:
+            continue
+
+        # Handle attachments list in metadata
+        attachment_list = metadata.get("attachments", [])
+        for att in attachment_list:
+            id = att.get("id")
+            full_name = att.get("full_name")
+            mime_type = att.get("mime_type")
+
+            if id and full_name:
+                attachments[str(id)] = Attachment(
+                    id=id,
+                    full_name=full_name,
+                    mime_type=mime_type,
+                )
+
+    return attachments

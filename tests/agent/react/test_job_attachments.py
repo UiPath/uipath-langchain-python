@@ -2,10 +2,15 @@ import uuid
 from typing import Any
 
 from jsonschema_pydantic_converter import transform_with_modules
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 from uipath.platform.attachments import Attachment
 
-from uipath_langchain.agent.react.job_attachments import get_job_attachments
+from uipath_langchain.agent.react.job_attachments import (
+    get_job_attachments,
+    parse_attachment_id_from_uri,
+    parse_attachments_from_conversation_messages,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.reducers import (
     merge_dicts,
@@ -690,3 +695,215 @@ class TestMergeDicts:
 
         assert len(result) == 4
         assert all(str(uid) in result for uid in [uuid1, uuid2, uuid3, uuid4])
+
+
+class TestParseAttachmentIdFromUri:
+    """Test URI parsing for attachment IDs."""
+
+    def test_valid_orchestrator_uri(self):
+        """Should extract UUID from valid orchestrator URI."""
+        uri = "urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+
+        result = parse_attachment_id_from_uri(uri)
+
+        assert result == "a940a416-b97b-4146-3089-08de5f4d0a87"
+
+    def test_empty_uri(self):
+        """Should return None for empty URI."""
+        result = parse_attachment_id_from_uri("")
+
+        assert result is None
+
+    def test_invalid_uri_no_uuid(self):
+        """Should return None for URI without UUID."""
+        result = parse_attachment_id_from_uri("urn:uipath:cas:file:orchestrator:")
+
+        assert result is None
+
+    def test_uri_with_uppercase_uuid_normalizes_to_lowercase(self):
+        """Should normalize uppercase UUIDs to lowercase."""
+        uri = "urn:uipath:cas:file:orchestrator:A940A416-B97B-4146-3089-08DE5F4D0A87"
+
+        result = parse_attachment_id_from_uri(uri)
+
+        assert result == "a940a416-b97b-4146-3089-08de5f4d0a87"
+
+class TestParseAttachmentsFromConversationMessages:
+    """Test parsing attachments from conversation message metadata."""
+
+    def test_empty_messages(self):
+        """Should return empty dict for empty messages list."""
+        result = parse_attachments_from_conversation_messages([])
+
+        assert result == {}
+
+    def test_no_human_messages(self):
+        """Should return empty dict when no HumanMessages present."""
+        messages = [
+            SystemMessage(content="System prompt"),
+            AIMessage(content="AI response"),
+        ]
+
+        result = parse_attachments_from_conversation_messages(messages)
+
+        assert result == {}
+
+    def test_human_message_without_metadata(self):
+        """Should skip HumanMessages without attachment metadata."""
+        messages = [
+            HumanMessage(content="Hello"),
+        ]
+
+        result = parse_attachments_from_conversation_messages(messages)
+
+        assert result == {}
+
+    def test_human_message_with_attachments_in_metadata(self):
+        """Should extract attachments from HumanMessage metadata attachments list."""
+        attachment_id = "a940a416-b97b-4146-3089-08de5f4d0a87"
+        messages = [
+            HumanMessage(
+                content="Check this file",
+                metadata={
+                    "attachments": [
+                        {
+                            "id": attachment_id,
+                            "full_name": "document.pdf",
+                            "mime_type": "application/pdf",
+                        }
+                    ],
+                },
+            ),
+        ]
+
+        result = parse_attachments_from_conversation_messages(messages)
+
+        assert len(result) == 1
+        assert attachment_id in result
+        assert result[attachment_id].full_name == "document.pdf"
+        assert str(result[attachment_id].id) == attachment_id
+        assert result[attachment_id].mime_type == "application/pdf"
+
+    def test_human_message_without_full_name_skipped(self):
+        """Should skip attachments without full_name."""
+        messages = [
+            HumanMessage(
+                content="Check this",
+                metadata={
+                    "attachments": [
+                        {
+                            "id": "a940a416-b97b-4146-3089-08de5f4d0a87",
+                            "mime_type": "application/pdf",
+                        }
+                    ],
+                },
+            ),
+        ]
+
+        result = parse_attachments_from_conversation_messages(messages)
+
+        assert result == {}
+
+    def test_human_message_without_attachment_id_skipped(self):
+        """Should skip attachments without id."""
+        messages = [
+            HumanMessage(
+                content="Check this",
+                metadata={
+                    "attachments": [
+                        {
+                            "full_name": "file.pdf",
+                            "mime_type": "application/pdf",
+                        }
+                    ],
+                },
+            ),
+        ]
+
+        result = parse_attachments_from_conversation_messages(messages)
+
+        assert result == {}
+
+    def test_multiple_attachments_from_multiple_messages(self):
+        """Should extract attachments from multiple HumanMessages."""
+        id1 = "a940a416-b97b-4146-3089-08de5f4d0a87"
+        id2 = "b940b416-c97c-5146-4089-09de6f5d1a88"
+        messages = [
+            SystemMessage(content="System"),
+            HumanMessage(
+                content="First file",
+                metadata={
+                    "attachments": [
+                        {
+                            "id": id1,
+                            "full_name": "file1.jpg",
+                            "mime_type": "image/jpeg",
+                        }
+                    ],
+                },
+            ),
+            AIMessage(content="Got it"),
+            HumanMessage(
+                content="Second file",
+                metadata={
+                    "attachments": [
+                        {
+                            "id": id2,
+                            "full_name": "file2.pdf",
+                            "mime_type": "application/pdf",
+                        }
+                    ],
+                },
+            ),
+        ]
+
+        result = parse_attachments_from_conversation_messages(messages)
+
+        assert len(result) == 2
+        assert id1 in result
+        assert id2 in result
+        assert result[id1].full_name == "file1.jpg"
+        assert result[id2].full_name == "file2.pdf"
+
+    def test_multiple_attachments_in_single_message(self):
+        """Should extract multiple attachments from a single HumanMessage."""
+        id1 = "a940a416-b97b-4146-3089-08de5f4d0a87"
+        id2 = "b940b416-c97c-5146-4089-09de6f5d1a88"
+        messages = [
+            HumanMessage(
+                content="Check these files",
+                metadata={
+                    "attachments": [
+                        {
+                            "id": id1,
+                            "full_name": "file1.jpg",
+                            "mime_type": "image/jpeg",
+                        },
+                        {
+                            "id": id2,
+                            "full_name": "file2.pdf",
+                            "mime_type": "application/pdf",
+                        },
+                    ],
+                },
+            ),
+        ]
+
+        result = parse_attachments_from_conversation_messages(messages)
+
+        assert len(result) == 2
+        assert result[id1].full_name == "file1.jpg"
+        assert result[id2].full_name == "file2.pdf"
+
+    def test_empty_attachments_list(self):
+        """Should return empty dict when attachments list is empty."""
+        messages = [
+            HumanMessage(
+                content="Hello",
+                metadata={"attachments": []},
+            ),
+        ]
+
+        result = parse_attachments_from_conversation_messages(messages)
+
+        assert result == {}

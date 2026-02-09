@@ -13,6 +13,7 @@ from langchain_core.messages import (
 from uipath.core.chat import (
     UiPathConversationContentPart,
     UiPathConversationMessage,
+    UiPathExternalValue,
     UiPathInlineValue,
 )
 
@@ -145,8 +146,8 @@ class TestMapMessages:
         assert isinstance(msg, HumanMessage)
         assert msg.content == "hello world"
         assert msg.metadata["message_id"] == "msg-1"  # type: ignore[attr-defined]
-        assert msg.metadata["content_part_id"] == "part-1"  # type: ignore[attr-defined]
-        assert msg.metadata["mime_type"] == "text/plain"  # type: ignore[attr-defined]
+        assert msg.metadata["created_at"] == TEST_TIMESTAMP  # type: ignore[attr-defined]
+        assert msg.metadata["updated_at"] == TEST_TIMESTAMP  # type: ignore[attr-defined]
 
     def test_map_messages_converts_dict_messages(self):
         """Should convert dict messages to HumanMessages."""
@@ -193,8 +194,8 @@ class TestMapMessages:
 
         assert result == unknown
 
-    def test_map_messages_handles_multiple_content_parts(self):
-        """Should create separate HumanMessages for each content part."""
+    def test_map_messages_combines_multiple_inline_content_parts(self):
+        """Should concatenate multiple inline content parts into a single message."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         uipath_msg = UiPathConversationMessage(
             message_id="msg-1",
@@ -217,15 +218,11 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        assert len(result) == 2
-        msg0 = result[0]
-        msg1 = result[1]
-        assert isinstance(msg0, HumanMessage)
-        assert isinstance(msg1, HumanMessage)
-        assert msg0.content == "first part"
-        assert msg0.metadata["content_part_id"] == "part-1"  # type: ignore[attr-defined]
-        assert msg1.content == "second part"
-        assert msg1.metadata["content_part_id"] == "part-2"  # type: ignore[attr-defined]
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, HumanMessage)
+        assert msg.content == "first part second part"
+        assert msg.metadata["message_id"] == "msg-1"  # type: ignore[attr-defined]
 
     def test_map_messages_handles_message_without_content_parts(self):
         """Should handle UiPath message without content parts."""
@@ -244,11 +241,95 @@ class TestMapMessages:
         assert isinstance(msg, HumanMessage)
         assert msg.content == ""
         assert msg.metadata["message_id"] == "msg-1"  # type: ignore[attr-defined]
-        assert msg.metadata["role"] == "user"  # type: ignore[attr-defined]
+        assert msg.metadata["created_at"] == TEST_TIMESTAMP  # type: ignore[attr-defined]
+        assert msg.metadata["updated_at"] == TEST_TIMESTAMP  # type: ignore[attr-defined]
+
+    def test_map_messages_assistant_role_produces_ai_message(self):
+        """Should convert assistant role messages to AIMessage."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-1",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="I can help with that"),
+                )
+            ],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, AIMessage)
+        assert msg.content == "I can help with that"
+        assert msg.metadata["message_id"] == "msg-1"  # type: ignore[attr-defined]
+
+    def test_map_messages_external_value_produces_attachment_content(self):
+        """Should include attachment metadata in content for external value content parts."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="user",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-text",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="Check this file"),
+                ),
+                UiPathConversationContentPart(
+                    content_part_id="part-file",
+                    mime_type="application/pdf",
+                    data=UiPathExternalValue(
+                        uri="urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+                    ),
+                ),
+            ],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, HumanMessage)
+        assert "Check this file" in msg.content
+        assert "<uip:attachments>" in msg.content
+        assert "a940a416-b97b-4146-3089-08de5f4d0a87" in msg.content
+        assert "attachments" in msg.metadata  # type: ignore[attr-defined]
 
 
 class TestMapEvent:
     """Tests for the map_event method."""
+
+    @pytest.mark.asyncio
+    async def test_map_event_filters_non_agent_node_chunks(self):
+        """Should return None for AIMessageChunk from non-agent nodes."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        chunk = AIMessageChunk(content="hello", id="msg-123")
+        metadata = {"langgraph_node": "tools"}
+
+        result = await mapper.map_event(chunk, metadata=metadata)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_map_event_passes_agent_node_chunks(self):
+        """Should process AIMessageChunk from agent node normally."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        chunk = AIMessageChunk(content="", id="msg-123")
+        metadata = {"langgraph_node": "agent"}
+
+        result = await mapper.map_event(chunk, metadata=metadata)
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].start is not None
 
     @pytest.mark.asyncio
     async def test_map_event_returns_empty_list_for_ai_chunk_without_id(self):
