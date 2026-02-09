@@ -5,6 +5,7 @@ from typing import Any, Literal
 
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
+from langgraph.func import task
 from langgraph.types import interrupt
 from pydantic import BaseModel
 from uipath.agent.models.agent import (
@@ -21,7 +22,7 @@ from uipath.agent.utils.text_tokens import build_string_from_tokens
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
-from uipath.platform.common import CreateEscalation, UiPathConfig
+from uipath.platform.common import UiPathConfig, WaitEscalation
 from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
@@ -185,17 +186,28 @@ def create_escalation_tool(
             example_calls=channel.properties.example_calls,
         )
         async def escalate():
-            return interrupt(
-                CreateEscalation(
+            @task
+            async def create_escalation_task():
+                client = UiPath()
+                return await client.tasks.create_async(
                     title=task_title,
                     data=kwargs,
-                    recipient=recipient,
                     app_name=channel.properties.app_name,
-                    app_folder_path=channel.properties.folder_name,
+                    app_folder_path=channel.properties.folder_name or "",
+                    recipient=recipient,
                     priority=channel.priority,
                     labels=channel.labels,
                     is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
                     actionable_message_metadata=channel.properties.actionable_message_meta_data,
+                )
+
+            created_task = await create_escalation_task()
+            return interrupt(
+                WaitEscalation(
+                    action=created_task,
+                    app_folder_path=channel.properties.folder_name,
+                    app_name=channel.properties.app_name,
+                    recipient=recipient,
                 )
             )
 
@@ -266,6 +278,7 @@ def create_escalation_tool(
             "output": result["output"],
             "outcome": result["outcome"],
             "task_id": result["task_id"],
+            "task_url": result["task_url"],
             "assigned_to": result["assigned_to"],
         }
 
