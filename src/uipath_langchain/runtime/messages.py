@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Any, cast
+import uuid
 
 from langchain_core.messages import (
     AIMessage,
@@ -30,8 +31,6 @@ from uipath.core.chat import (
     UiPathInlineValue,
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
-
-from uipath_langchain.agent.messages.message_utils import parse_attachment_id_from_uri
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +140,7 @@ class UiPathChatMessagesMapper:
                     text_content += str(data.inline)
 
                 elif isinstance(data, UiPathExternalValue):
-                    attachment_id = parse_attachment_id_from_uri(data.uri)
+                    attachment_id = self.parse_attachment_id_from_content_part_uri(data.uri)
                     if attachment_id:
                         attachments.append({
                             "id": attachment_id,
@@ -200,6 +199,37 @@ class UiPathChatMessagesMapper:
 
     def get_content_part_id(self, message_id: str) -> str:
         return f"chunk-{message_id}-0"
+
+    def parse_attachment_id_from_content_part_uri(self, uri: str) -> str | None:
+        """Parse attachment ID from a URI.
+
+        Extracts the UUID from URIs like:
+        "urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+
+        Args:
+            uri: The URI to parse
+
+        Returns:
+            The attachment ID if found, None otherwise
+        """
+        if not uri:
+            return None
+
+        # The UUID is the last segment after the final colon
+        parts = uri.rsplit(":", 1)
+        if len(parts) != 2:
+            return None
+
+        potential_uuid = parts[1]
+        if not potential_uuid:
+            return None
+
+        # Validate it's a proper UUID and normalize to lowercase
+        try:
+            return str(uuid.UUID(potential_uuid))
+        except (ValueError, AttributeError):
+            return None
+
 
     async def map_ai_message_chunk_to_events(
         self, message: AIMessageChunk
