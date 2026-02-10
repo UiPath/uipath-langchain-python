@@ -3,7 +3,11 @@
 from typing import Sequence, TypeVar
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, ToolCall
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    ToolCall,
+)
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
 from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
@@ -44,6 +48,7 @@ def create_llm_node(
     is_conversational: bool = False,
     llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
     thinking_messages_limit: int = DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
+    enable_openai_parallel_tool_calls: bool = True,
 ):
     """Create LLM node with dynamic tool_choice enforcement.
 
@@ -78,7 +83,10 @@ def create_llm_node(
         static_schema_tools = _apply_tool_argument_properties(
             bindable_tools, state, input_schema
         )
-        base_llm = model.bind_tools(static_schema_tools)
+        parallel_kwargs = payload_handler.get_parallel_tool_calls_kwargs(
+            enable_openai_parallel_tool_calls
+        )
+        base_llm = model.bind_tools(static_schema_tools, **parallel_kwargs)
 
         if (
             not is_conversational
