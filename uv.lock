@@ -857,6 +857,15 @@ wheels = [
 ]
 
 [[package]]
+name = "graphtty"
+version = "0.1.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/06/96130c4d3e2cdaf965f1060143bea276905b7050adf324a00ed705a84617/graphtty-0.1.6.tar.gz", hash = "sha256:1d989baf901d2bfe125f1e2aee730fd4b143c0dd4b4640fef9dcf42535430386", size = 549561, upload-time = "2026-02-09T13:20:16.293Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ed/69/d3e359238c1846aead328c7efcf6875028b326e54253d3d7d65645943d5e/graphtty-0.1.6-py3-none-any.whl", hash = "sha256:163e0f8a35ebab9bd37d834619088aa2aa36a112a3c1f9577030cef1b9be8663", size = 22853, upload-time = "2026-02-09T13:20:15.011Z" },
+]
+
+[[package]]
 name = "grpcio"
 version = "1.76.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3213,12 +3222,13 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.8.1"
+version = "2.8.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
     { name = "click" },
     { name = "coverage" },
+    { name = "graphtty" },
     { name = "httpx" },
     { name = "mermaid-builder" },
     { name = "mockito" },
@@ -3234,9 +3244,9 @@ dependencies = [
     { name = "uipath-core" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e2/f7/ae79b8e84f4ecb50adf3d85ef4a4ef635c12d00b61e36d5e273a30500ae1/uipath-2.8.1.tar.gz", hash = "sha256:060d76a495506dfeffef51a50fd672020d1a0e0e247785415e67fd9348ef3355", size = 3939244, upload-time = "2026-02-09T12:28:54.357Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1a/c9/7ee4b94df749a2940a920e7ffebfe064f21bbf6aae139970b1234ca29cae/uipath-2.8.5.tar.gz", hash = "sha256:239115788b5052e3be9a98f6159abb9b36940fdc3cc3ee1bee3d4bff8b6217a6", size = 3944042, upload-time = "2026-02-10T12:16:17.957Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/95/0e/4e682cfe4511d0004764e19466380e9469343222245796108ef2a3a6a4ee/uipath-2.8.1-py3-none-any.whl", hash = "sha256:74acf8d0132adaec1fd86ef72a71d418a4318b6761b3c54a50b55073cc799f10", size = 467178, upload-time = "2026-02-09T12:28:52.749Z" },
+    { url = "https://files.pythonhosted.org/packages/44/15/bcc182f20b001a24d3bb31b9c57c1335115feb6df38c9dbd3b94907bb972/uipath-2.8.5-py3-none-any.whl", hash = "sha256:df231fd5c95159d97bba32167eceb1bb51d666e4e261ad140eb91f18a0c77979", size = 471910, upload-time = "2026-02-10T12:16:16.105Z" },
 ]
 
 [[package]]
@@ -3276,7 +3286,7 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.0.0,<2.0.0" },
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.60b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.60b0" },
-    { name = "uipath", specifier = "==2.8.1" },
+    { name = "uipath", specifier = "==2.8.5" },
     { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.5.37" },
 ]
 
@@ -3379,14 +3389,14 @@ wheels = [
 
 [[package]]
 name = "uipath-runtime"
-version = "0.6.2"
+version = "0.6.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d9/74/d141f84d845a6ecc8ede56ca1ce7aca5f56031895be9e6546c6ffd046ce3/uipath_runtime-0.6.2.tar.gz", hash = "sha256:f838e1e5e20cc7c070475c8f839ba6d0615a2e12750a7275bc4669fed15c26c6", size = 103641, upload-time = "2026-01-27T12:48:41.039Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/a2/ddbcb04e4191504778f0ec582ed5c4a4c021ef829e710e435565a12fe3dd/uipath_runtime-0.6.3.tar.gz", hash = "sha256:1f5163dfcf977987f6fd4479b38f457ff2806c57b854034985bd7d1c9dac7de5", size = 103695, upload-time = "2026-02-10T09:03:14.158Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4d/1c/20f1aa6a194c1e21557943d08c1a23dc3d55558d4f69644ccbfa62ddbc43/uipath_runtime-0.6.2-py3-none-any.whl", hash = "sha256:b33511f9a29269677049ab5dd54419aab302a5ae3a5820d8a86c7f060bd9fc62", size = 40770, upload-time = "2026-01-27T12:48:38.674Z" },
+    { url = "https://files.pythonhosted.org/packages/86/64/01f8b95024f4b2dfec820fe0a4839a67341c4b9c79cbdd6bcd2b6b40f67b/uipath_runtime-0.6.3-py3-none-any.whl", hash = "sha256:49248c5a3df6a5f29f8b4bf10ea921658fb3a0c01e7368007e29fe4d3d3d40f1", size = 40775, upload-time = "2026-02-10T09:03:13.029Z" },
 ]
 
 [[package]]
