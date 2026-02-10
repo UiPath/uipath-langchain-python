@@ -1,10 +1,12 @@
 """Tests for job_attachment_wrapper module."""
 
+import json
 import uuid
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.messages import ToolMessage
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
@@ -85,7 +87,15 @@ class TestGetJobAttachmentWrapper:
     def mock_tool(self):
         """Create a mock tool."""
         tool = MagicMock(spec=BaseTool)
-        tool.ainvoke = AsyncMock(return_value={"result": "success"})
+
+        async def ainvoke_side_effect(call):
+            tool_message = ToolMessage(
+                content="{'result': 'success'}",
+                tool_call_id=call.get("id", "call_123")
+            )
+            return tool_message
+
+        tool.ainvoke = AsyncMock(side_effect=ainvoke_side_effect)
         return tool
 
     @pytest.fixture
@@ -129,7 +139,7 @@ class TestGetJobAttachmentWrapper:
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
-        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
+        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call)
 
     @pytest.mark.asyncio
     async def test_tool_with_dict_args_schema(
@@ -143,7 +153,7 @@ class TestGetJobAttachmentWrapper:
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
-        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
+        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call)
 
     @pytest.mark.asyncio
     async def test_tool_with_non_basemodel_schema(
@@ -157,7 +167,7 @@ class TestGetJobAttachmentWrapper:
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
-        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
+        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call)
 
     @pytest.mark.asyncio
     @patch(
@@ -180,7 +190,7 @@ class TestGetJobAttachmentWrapper:
         assert isinstance(result, Command)
         self.assert_command_success(result)
         mock_get_paths.assert_called_once_with(MockAttachmentSchema)
-        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call["args"])
+        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call)
 
     @pytest.mark.asyncio
     @patch(
@@ -219,9 +229,9 @@ class TestGetJobAttachmentWrapper:
         self.assert_command_success(result)
         # Verify that tool.ainvoke was called (with replaced attachment)
         mock_tool.ainvoke.assert_awaited_once()
-        called_args = mock_tool.ainvoke.call_args[0][0]
-        assert called_args["name"] == "test"
-        assert "attachment" in called_args
+        called_tool_call = mock_tool.ainvoke.call_args[0][0]
+        assert called_tool_call["args"]["name"] == "test"
+        assert "attachment" in called_tool_call["args"]
 
     @pytest.mark.asyncio
     @patch(
@@ -557,7 +567,8 @@ class TestGetJobAttachmentWrapper:
         self.assert_command_success(result, tool_call_id="call_complex_456")
         # Tool should be invoked with replaced attachments
         mock_tool.ainvoke.assert_awaited_once()
-        called_args = mock_tool.ainvoke.call_args[0][0]
+        called_tool_call = mock_tool.ainvoke.call_args[0][0]
+        called_args = called_tool_call["args"]
 
         # Verify structure is preserved
         assert "request" in called_args
@@ -588,12 +599,15 @@ class TestGetJobAttachmentWrapper:
         # Create a tool with output type
         mock_tool = MagicMock(spec=BaseTool)
         mock_tool.args_schema = None
-        mock_tool.ainvoke = AsyncMock(
-            return_value={
-                "result_attachment": output_attachment.model_dump(),
-                "additional_attachments": [],
-            }
+        tool_output = {
+            "result_attachment": output_attachment.model_dump(),
+            "additional_attachments": [],
+        }
+        tool_message = ToolMessage(
+            content=json.dumps(tool_output),
+            tool_call_id=mock_tool_call["id"]
         )
+        mock_tool.ainvoke = AsyncMock(return_value=tool_message)
 
         wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
@@ -607,7 +621,7 @@ class TestGetJobAttachmentWrapper:
         )
         # Verify get_job_attachments was called with correct parameters
         mock_get_job_attachments.assert_called_once_with(
-            MockOutputSchema, mock_tool.ainvoke.return_value
+            MockOutputSchema, tool_output
         )
 
     @pytest.mark.asyncio
@@ -631,15 +645,18 @@ class TestGetJobAttachmentWrapper:
         # Create a tool with output type
         mock_tool = MagicMock(spec=BaseTool)
         mock_tool.args_schema = None
-        mock_tool.ainvoke = AsyncMock(
-            return_value={
-                "result_attachment": attachment1.model_dump(),
-                "additional_attachments": [
-                    attachment2.model_dump(),
-                    attachment3.model_dump(),
-                ],
-            }
+        tool_output = {
+            "result_attachment": attachment1.model_dump(),
+            "additional_attachments": [
+                attachment2.model_dump(),
+                attachment3.model_dump(),
+            ],
+        }
+        tool_message = ToolMessage(
+            content=json.dumps(tool_output),
+            tool_call_id=mock_tool_call["id"]
         )
+        mock_tool.ainvoke = AsyncMock(return_value=tool_message)
 
         wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
@@ -668,9 +685,12 @@ class TestGetJobAttachmentWrapper:
         # Create a tool with output type
         mock_tool = MagicMock(spec=BaseTool)
         mock_tool.args_schema = None
-        mock_tool.ainvoke = AsyncMock(
-            return_value={"result_attachment": None, "additional_attachments": []}
+        tool_output = {"result_attachment": None, "additional_attachments": []}
+        tool_message = ToolMessage(
+            content=json.dumps(tool_output),
+            tool_call_id=mock_tool_call["id"]
         )
+        mock_tool.ainvoke = AsyncMock(return_value=tool_message)
 
         wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
@@ -703,12 +723,15 @@ class TestGetJobAttachmentWrapper:
         # Create a tool with output type
         mock_tool = MagicMock(spec=BaseTool)
         mock_tool.args_schema = None
-        mock_tool.ainvoke = AsyncMock(
-            return_value={
-                "result_attachment": attachment_with_id.model_dump(),
-                "additional_attachments": [attachment_without_id.model_dump()],
-            }
+        tool_output = {
+            "result_attachment": attachment_with_id.model_dump(),
+            "additional_attachments": [attachment_without_id.model_dump()],
+        }
+        tool_message = ToolMessage(
+            content=json.dumps(tool_output),
+            tool_call_id=mock_tool_call["id"]
         )
+        mock_tool.ainvoke = AsyncMock(return_value=tool_message)
 
         wrapper = get_job_attachment_wrapper(output_type=MockOutputSchema)
         result = await wrapper(mock_tool, mock_tool_call, mock_state)
