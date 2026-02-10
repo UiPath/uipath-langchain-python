@@ -90,8 +90,7 @@ class TestGetJobAttachmentWrapper:
 
         async def ainvoke_side_effect(call):
             tool_message = ToolMessage(
-                content="{'result': 'success'}",
-                tool_call_id=call.get("id", "call_123")
+                content="{'result': 'success'}", tool_call_id=call.get("id", "call_123")
             )
             return tool_message
 
@@ -604,8 +603,7 @@ class TestGetJobAttachmentWrapper:
             "additional_attachments": [],
         }
         tool_message = ToolMessage(
-            content=json.dumps(tool_output),
-            tool_call_id=mock_tool_call["id"]
+            content=json.dumps(tool_output), tool_call_id=mock_tool_call["id"]
         )
         mock_tool.ainvoke = AsyncMock(return_value=tool_message)
 
@@ -620,9 +618,7 @@ class TestGetJobAttachmentWrapper:
             expected_content=None,
         )
         # Verify get_job_attachments was called with correct parameters
-        mock_get_job_attachments.assert_called_once_with(
-            MockOutputSchema, tool_output
-        )
+        mock_get_job_attachments.assert_called_once_with(MockOutputSchema, tool_output)
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachments")
@@ -653,8 +649,7 @@ class TestGetJobAttachmentWrapper:
             ],
         }
         tool_message = ToolMessage(
-            content=json.dumps(tool_output),
-            tool_call_id=mock_tool_call["id"]
+            content=json.dumps(tool_output), tool_call_id=mock_tool_call["id"]
         )
         mock_tool.ainvoke = AsyncMock(return_value=tool_message)
 
@@ -685,10 +680,12 @@ class TestGetJobAttachmentWrapper:
         # Create a tool with output type
         mock_tool = MagicMock(spec=BaseTool)
         mock_tool.args_schema = None
-        tool_output: dict[str, Any] = {"result_attachment": None, "additional_attachments": []}
+        tool_output: dict[str, Any] = {
+            "result_attachment": None,
+            "additional_attachments": [],
+        }
         tool_message = ToolMessage(
-            content=json.dumps(tool_output),
-            tool_call_id=mock_tool_call["id"]
+            content=json.dumps(tool_output), tool_call_id=mock_tool_call["id"]
         )
         mock_tool.ainvoke = AsyncMock(return_value=tool_message)
 
@@ -728,8 +725,7 @@ class TestGetJobAttachmentWrapper:
             "additional_attachments": [attachment_without_id.model_dump()],
         }
         tool_message = ToolMessage(
-            content=json.dumps(tool_output),
-            tool_call_id=mock_tool_call["id"]
+            content=json.dumps(tool_output), tool_call_id=mock_tool_call["id"]
         )
         mock_tool.ainvoke = AsyncMock(return_value=tool_message)
 
