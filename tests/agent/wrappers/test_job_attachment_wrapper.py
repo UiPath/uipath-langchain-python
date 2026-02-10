@@ -685,7 +685,7 @@ class TestGetJobAttachmentWrapper:
         # Create a tool with output type
         mock_tool = MagicMock(spec=BaseTool)
         mock_tool.args_schema = None
-        tool_output = {"result_attachment": None, "additional_attachments": []}
+        tool_output: dict[str, Any] = {"result_attachment": None, "additional_attachments": []}
         tool_message = ToolMessage(
             content=json.dumps(tool_output),
             tool_call_id=mock_tool_call["id"]
