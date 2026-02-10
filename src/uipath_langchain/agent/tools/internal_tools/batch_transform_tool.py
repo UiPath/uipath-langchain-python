@@ -36,6 +36,38 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
+# Define the output schema with job-attachment
+BATCH_TRANSFORM_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "result": {
+            "$ref": "#/definitions/job-attachment",
+            "description": "The transformed result file as an attachment",
+        }
+    },
+    "required": ["result"],
+    "definitions": {
+        "job-attachment": {
+            "type": "object",
+            "properties": {
+                "ID": {"type": "string", "description": "Orchestrator attachment key"},
+                "FullName": {"type": "string", "description": "File name"},
+                "MimeType": {
+                    "type": "string",
+                    "description": "The MIME type of the content",
+                },
+                "Metadata": {
+                    "type": "object",
+                    "description": "Dictionary<string, string> of metadata",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            "required": ["ID", "FullName", "MimeType"],
+            "x-uipath-resource-kind": "JobAttachment",
+        }
+    },
+}
+
 
 def create_batch_transform_tool(
     resource: AgentInternalToolResourceConfig, llm: BaseChatModel
@@ -84,7 +116,8 @@ def create_batch_transform_tool(
 
     # Create input model from modified schema
     input_model = create_model(input_schema)
-    output_model = create_model(resource.output_schema)
+    # Create output model from schema with job-attachment definition
+    output_model = create_model(BATCH_TRANSFORM_OUTPUT_SCHEMA)
 
     async def batch_transform_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query
@@ -144,7 +177,10 @@ def create_batch_transform_tool(
                 )
             )
 
-        return await invoke_batch_transform()
+        result_attachment = await invoke_batch_transform()
+
+        # The resume trigger returns the attachment info directly
+        return {"result": result_attachment}
 
     # Import here to avoid circular dependency
     from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
