@@ -197,6 +197,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
         """Handle tool end event."""
         try:
             output_schema = self._state.tool_output_schemas.pop(run_id, None)
+            output = output.content if hasattr(output, "content") else output
 
             # Handle resumed tool completion
             if run_id in self._state.reinvoked_tool_run_ids:
@@ -213,7 +214,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                     ):
                         child_span.update_name(f"Simulated result: {child_span.name}")
                 SpanHierarchyManager.pop(run_id)
-                set_tool_result(child_span, output)
+                set_tool_result(child_span, output, "output")
                 if run_id in self._state.process_run_ids:
                     set_process_job_info(child_span, output)
                     self._state.process_run_ids.discard(run_id)
