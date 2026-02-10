@@ -1,0 +1,23 @@
+[project]
+name = "tool-call-confirmation-chat-agent"
+version = "0.0.1"
+description = "tool-call-confirmation-chat-agent"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+dependencies = [
+    "langchain-anthropic>=1.3.2",
+    "uipath-langchain==0.5.377.dev1005342628",
+    "uipath-runtime>=0.7.0, < 0.8.0",
+    "uipath>=2.8.5.dev1012700000,<2.8.5.dev1012710000",
+    "uipath-core>= 0.3.0,< 0.4.0"
+]
+requires-python = ">=3.11"
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
+
+[tool.uv.sources]
+uipath = {index = "testpypi"}
+uipath-langchain = { index = "testpypi" }
