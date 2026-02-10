@@ -93,9 +93,11 @@ class UiPathRequestMixin(BaseModel):
         default_factory=lambda: os.getenv("UIPATH_CLIENT_SECRET")
     )
     base_url: str | None = Field(
-        default_factory=lambda data: getattr(data["settings"], "base_url", None)
-        or os.getenv("UIPATH_BASE_URL")
-        or get_from_uipath_url(),
+        default_factory=lambda data: (
+            getattr(data["settings"], "base_url", None)
+            or os.getenv("UIPATH_BASE_URL")
+            or get_from_uipath_url()
+        ),
         alias="azure_endpoint",
     )
     access_token: str | None = Field(
@@ -103,24 +105,28 @@ class UiPathRequestMixin(BaseModel):
     )
 
     org_id: Any = Field(
-        default_factory=lambda data: getattr(data["settings"], "org_id", None)
-        or os.getenv("UIPATH_ORGANIZATION_ID", "")
+        default_factory=lambda data: (
+            getattr(data["settings"], "org_id", None)
+            or os.getenv("UIPATH_ORGANIZATION_ID", "")
+        )
     )
     tenant_id: Any = Field(
-        default_factory=lambda data: getattr(data["settings"], "tenant_id", None)
-        or os.getenv("UIPATH_TENANT_ID", "")
+        default_factory=lambda data: (
+            getattr(data["settings"], "tenant_id", None)
+            or os.getenv("UIPATH_TENANT_ID", "")
+        )
     )
     requesting_product: Any = Field(
-        default_factory=lambda data: getattr(
-            data["settings"], "requesting_product", None
+        default_factory=lambda data: (
+            getattr(data["settings"], "requesting_product", None)
+            or os.getenv("UIPATH_REQUESTING_PRODUCT", "uipath-python-sdk")
         )
-        or os.getenv("UIPATH_REQUESTING_PRODUCT", "uipath-python-sdk")
     )
     requesting_feature: Any = Field(
-        default_factory=lambda data: getattr(
-            data["settings"], "requesting_feature", None
+        default_factory=lambda data: (
+            getattr(data["settings"], "requesting_feature", None)
+            or os.getenv("UIPATH_REQUESTING_FEATURE", "langgraph-agent")
         )
-        or os.getenv("UIPATH_REQUESTING_FEATURE", "langgraph-agent")
     )
     default_request_timeout: Any = Field(
         default_factory=lambda data: float(
