@@ -7,9 +7,7 @@ from langchain_core.messages.content import (
     create_tool_call,
 )
 
-from uipath_langchain.agent.messages.message_utils import (
-    replace_tool_calls,
-)
+from uipath_langchain.agent.messages.message_utils import replace_tool_calls
 
 
 class TestReplaceToolCalls:

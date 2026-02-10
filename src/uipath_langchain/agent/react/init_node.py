@@ -46,7 +46,9 @@ def create_init_node(
         }
         # Merge attachments from preserved messages for conversational agents
         if is_conversational:
-            message_attachments = parse_attachments_from_conversation_messages(preserved_messages)
+            message_attachments = parse_attachments_from_conversation_messages(
+                preserved_messages
+            )
             job_attachments_dict.update(message_attachments)
 
         return {

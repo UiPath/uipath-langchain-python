@@ -351,9 +351,7 @@ class TestMapMessages:
                 UiPathConversationContentPart(
                     content_part_id="part-file",
                     mime_type="application/pdf",
-                    data=UiPathExternalValue(
-                        uri="urn:uipath:cas:file:orchestrator:"
-                    ),
+                    data=UiPathExternalValue(uri="urn:uipath:cas:file:orchestrator:"),
                 ),
             ],
         )

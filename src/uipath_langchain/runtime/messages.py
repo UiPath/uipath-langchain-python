@@ -1,9 +1,9 @@
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any, cast
-import uuid
 
 from langchain_core.messages import (
     AIMessage,
@@ -140,13 +140,17 @@ class UiPathChatMessagesMapper:
                     text_content += str(data.inline)
 
                 elif isinstance(data, UiPathExternalValue):
-                    attachment_id = self.parse_attachment_id_from_content_part_uri(data.uri)
+                    attachment_id = self.parse_attachment_id_from_content_part_uri(
+                        data.uri
+                    )
                     if attachment_id:
-                        attachments.append({
-                            "id": attachment_id,
-                            "full_name": part.name or "",
-                            "mime_type": part.mime_type or "",
-                        })
+                        attachments.append(
+                            {
+                                "id": attachment_id,
+                                "full_name": part.name or "",
+                                "mime_type": part.mime_type or "",
+                            }
+                        )
 
             if attachments:
                 metadata["attachments"] = attachments
@@ -168,7 +172,7 @@ class UiPathChatMessagesMapper:
 
     async def map_event(
         self,
-        message: BaseMessage
+        message: BaseMessage,
     ) -> list[UiPathConversationMessageEvent] | None:
         """Convert LangGraph BaseMessage (chunk or full) into a UiPathConversationMessageEvent.
 
@@ -229,7 +233,6 @@ class UiPathChatMessagesMapper:
             return str(uuid.UUID(potential_uuid))
         except (ValueError, AttributeError):
             return None
-
 
     async def map_ai_message_chunk_to_events(
         self, message: AIMessageChunk

@@ -695,6 +695,7 @@ class TestMergeDicts:
         assert len(result) == 4
         assert all(str(uid) in result for uid in [uuid1, uuid2, uuid3, uuid4])
 
+
 class TestParseAttachmentsFromConversationMessages:
     """Test parsing attachments from conversation message metadata."""
 
