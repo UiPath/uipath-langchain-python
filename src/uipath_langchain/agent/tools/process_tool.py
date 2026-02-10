@@ -45,10 +45,11 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
     )
     async def process_tool_fn(**kwargs: Any):
         attachments = get_job_attachments(input_model, kwargs)
+        input_arguments = input_model.model_validate(kwargs).model_dump(mode="json")
         return interrupt(
             InvokeProcess(
                 name=process_name,
-                input_arguments=kwargs,
+                input_arguments=input_arguments,
                 process_folder_path=folder_path,
                 process_folder_key=None,
                 attachments=attachments,
