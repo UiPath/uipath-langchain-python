@@ -31,6 +31,7 @@ __all__ = [
     "SyntheticReadableSpan",
     "SpanUpsertProtocol",
     "reference_id_context",
+    "uipath_source_context",
     "apply_attributes",
     "get_parent_context",
     "create_span",
@@ -41,6 +42,10 @@ __all__ = [
 # Context variable to propagate reference_id to all spans in a trace
 reference_id_context: ContextVar[Optional[str]] = ContextVar(
     "reference_id", default=None
+)
+
+uipath_source_context: ContextVar[Optional[int]] = ContextVar(
+    "uipath_source", default=None
 )
 
 
@@ -133,6 +138,9 @@ def apply_attributes(span: Span, attrs: BaseSpanAttributes) -> None:
     ref_id = reference_id_context.get()
     if ref_id:
         span.set_attribute("referenceId", ref_id)
+    uipath_src = uipath_source_context.get()
+    if uipath_src is not None:
+        span.set_attribute("uipath.source", uipath_src)
 
 
 def get_parent_context(

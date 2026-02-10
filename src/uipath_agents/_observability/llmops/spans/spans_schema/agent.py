@@ -22,7 +22,7 @@ from ..span_attributes import (
     AgentRunSpanAttributes,
 )
 from ..span_name import SpanName
-from .base import apply_attributes, reference_id_context
+from .base import apply_attributes, reference_id_context, uipath_source_context
 
 __all__ = [
     "AgentSpanSchema",
@@ -80,9 +80,9 @@ class AgentSpanSchema:
         """
         span_name = SpanName.agent_run(agent_name, is_conversational)
 
-        # Set reference_id in context for all child spans
         reference_id = agent_id
         token = reference_id_context.set(reference_id)
+        source_token = uipath_source_context.set(1)
         attachments = get_span_attachments(
             input_data, input_schema, direction=AttachmentDirection.IN
         )
@@ -122,8 +122,9 @@ class AgentSpanSchema:
                     span.set_status(Status(StatusCode.ERROR, str(e)))
                     raise
         finally:
-            # Reset context variable when agent run completes
+            # Reset context variables when agent run completes
             reference_id_context.reset(token)
+            uipath_source_context.reset(source_token)
 
     def emit_agent_output(
         self, output: Any, output_schema: Optional[Dict[str, Any]] = None
