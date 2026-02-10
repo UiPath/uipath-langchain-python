@@ -15,6 +15,7 @@ from uipath.platform.guardrails import (
 from uipath_langchain.agent.guardrails.actions.base_action import (
     GuardrailAction,
     GuardrailActionNode,
+    GuardrailActionNodes,
 )
 from uipath_langchain.agent.guardrails.guardrail_nodes import (
     create_agent_init_guardrail_node,
@@ -172,16 +173,25 @@ def _build_guardrail_node_chain(
     guardrail, action = guardrails[-1]
     remaining_guardrails = guardrails[:-1]
 
-    fail_node_name, fail_node = action.action_node(
+    action_nodes: GuardrailActionNodes = action.action_node(
         guardrail=guardrail,
         scope=scope,
         execution_stage=execution_stage,
         guarded_component_name=guarded_node_name,
     )
 
+    # Normalize to a list: single tuple → list of one tuple
+    if isinstance(action_nodes, tuple):
+        action_nodes = [action_nodes]
+
+    # The first node is where the guardrail-eval routes on failure;
+    # the last node gets the outgoing edge to ``next_node``.
+    first_fail_node_name = action_nodes[0][0]
+    last_fail_node_name = action_nodes[-1][0]
+
     # Create the guardrail evaluation node.
     guardrail_node_name, guardrail_node = node_factory(
-        guardrail, execution_stage, next_node, fail_node_name
+        guardrail, execution_stage, next_node, first_fail_node_name
     )
 
     guardrail_node_metadata = getattr(guardrail_node, "__metadata__", None) or {}
@@ -191,21 +201,27 @@ def _build_guardrail_node_chain(
         "node_type": "guardrail_evaluation",
     }
 
-    fail_node_metadata = getattr(fail_node, "__metadata__", None) or {}
-    fail_node_metadata = {
-        **fail_node_metadata,
-        "action_type": action.action_type,
-        "node_type": "guardrail_action",
-        "tool_type": guardrail_node_metadata.get("tool_type"),
-    }
-
     subgraph.add_node(
         guardrail_node_name, guardrail_node, metadata={**guardrail_node_metadata}
     )
-    subgraph.add_node(fail_node_name, fail_node, metadata={**fail_node_metadata})
 
-    # Failure path route to the next node
-    subgraph.add_edge(fail_node_name, next_node)
+    # Add all action nodes and chain them together
+    for i, (fail_node_name, fail_node) in enumerate(action_nodes):
+        fail_node_metadata = getattr(fail_node, "__metadata__", None) or {}
+        fail_node_metadata = {
+            **fail_node_metadata,
+            "action_type": action.action_type,
+            "node_type": "guardrail_action",
+            "tool_type": guardrail_node_metadata.get("tool_type"),
+        }
+        subgraph.add_node(fail_node_name, fail_node, metadata={**fail_node_metadata})
+        # Chain consecutive action nodes: node[i] → node[i+1]
+        if i > 0:
+            prev_name = action_nodes[i - 1][0]
+            subgraph.add_edge(prev_name, fail_node_name)
+
+    # Last action node routes to the next guardrail / inner node
+    subgraph.add_edge(last_fail_node_name, next_node)
 
     previous_node_name = _build_guardrail_node_chain(
         subgraph,
