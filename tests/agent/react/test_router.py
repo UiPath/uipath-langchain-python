@@ -278,3 +278,91 @@ class TestRouteAgentErrorHandling:
             match="Agent produced empty response without tool calls",
         ):
             route_function_no_limit(state)
+
+
+class TestRouteAgentMultipleToolCallSequencing:
+    """Test sequential dispatching of multiple tool calls in a single AI message."""
+
+    def test_three_tools_dispatched_sequentially(self):
+        """Router dispatches each tool in order when multiple tool calls exist."""
+        route_func = create_route_agent(thinking_messages_limit=0)
+
+        ai_message = AIMessage(
+            content="Using three tools",
+            tool_calls=[
+                {"name": "tool_a", "args": {}, "id": "call_a"},
+                {"name": "tool_b", "args": {}, "id": "call_b"},
+                {"name": "tool_c", "args": {}, "id": "call_c"},
+            ],
+        )
+
+        # Step 1: No tool results yet — route to first tool
+        state_0 = MockAgentGraphState(
+            messages=[HumanMessage(content="query"), ai_message]
+        )
+        assert route_func(state_0) == "tool_a"
+
+        # Step 2: First tool done — route to second
+        state_1 = MockAgentGraphState(
+            messages=[
+                HumanMessage(content="query"),
+                ai_message,
+                ToolMessage(content="result_a", tool_call_id="call_a"),
+            ]
+        )
+        assert route_func(state_1) == "tool_b"
+
+        # Step 3: Two tools done — route to third
+        state_2 = MockAgentGraphState(
+            messages=[
+                HumanMessage(content="query"),
+                ai_message,
+                ToolMessage(content="result_a", tool_call_id="call_a"),
+                ToolMessage(content="result_b", tool_call_id="call_b"),
+            ]
+        )
+        assert route_func(state_2) == "tool_c"
+
+        # Step 4: All done — route back to agent
+        state_3 = MockAgentGraphState(
+            messages=[
+                HumanMessage(content="query"),
+                ai_message,
+                ToolMessage(content="result_a", tool_call_id="call_a"),
+                ToolMessage(content="result_b", tool_call_id="call_b"),
+                ToolMessage(content="result_c", tool_call_id="call_c"),
+            ]
+        )
+        assert route_func(state_3) == AgentGraphNode.AGENT
+
+    def test_flow_control_tool_among_multiple_terminates(self):
+        """Router should terminate when the next tool is a flow control tool."""
+        route_func = create_route_agent(thinking_messages_limit=0)
+
+        ai_message = AIMessage(
+            content="Using tools then ending",
+            tool_calls=[
+                {"name": "regular_tool", "args": {}, "id": "call_1"},
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"reason": "done"},
+                    "id": "call_2",
+                },
+            ],
+        )
+
+        # First tool is regular
+        state_0 = MockAgentGraphState(
+            messages=[HumanMessage(content="query"), ai_message]
+        )
+        assert route_func(state_0) == "regular_tool"
+
+        # After first tool done, next is flow control — terminate
+        state_1 = MockAgentGraphState(
+            messages=[
+                HumanMessage(content="query"),
+                ai_message,
+                ToolMessage(content="done", tool_call_id="call_1"),
+            ]
+        )
+        assert route_func(state_1) == AgentGraphNode.TERMINATE
