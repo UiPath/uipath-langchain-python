@@ -75,7 +75,7 @@ class UiPathToolNode(RunnableCallable):
             inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
             result = self.wrapper(*inputs)
         else:
-            result = self.tool.invoke(call["args"])
+            result = self.tool.invoke(call)
         return self._process_result(call, result)
 
     async def _afunc(self, state: AgentGraphState) -> OutputType:
@@ -86,7 +86,7 @@ class UiPathToolNode(RunnableCallable):
             inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
             result = await self.awrapper(*inputs)
         else:
-            result = await self.tool.ainvoke(call["args"])
+            result = await self.tool.ainvoke(call)
         return self._process_result(call, result)
 
     def _extract_tool_call(self, state: AgentGraphState) -> ToolCall | None:
@@ -110,11 +110,13 @@ class UiPathToolNode(RunnableCallable):
         return latest_ai_message.tool_calls[current_tool_call_index]
 
     def _process_result(
-        self, call: ToolCall, result: dict[str, Any] | Command[Any] | None
+        self, call: ToolCall, result: dict[str, Any] | Command[Any] | ToolMessage | None
     ) -> OutputType:
         """Process the tool result into a message format or return a Command."""
         if isinstance(result, Command):
             return result
+        elif isinstance(result, ToolMessage):
+            return {"messages": [result]}
         else:
             message = ToolMessage(
                 content=str(result), name=call["name"], tool_call_id=call["id"]

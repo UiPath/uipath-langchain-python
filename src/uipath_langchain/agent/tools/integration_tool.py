@@ -179,8 +179,8 @@ def create_integration_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        modified_args = handle_static_args(resource, state, call["args"])
-        return await tool.ainvoke(modified_args)
+        call["args"] = handle_static_args(resource, state, call["args"])
+        return await tool.ainvoke(call)
 
     tool = StructuredToolWithWrapper(
         name=tool_name,
