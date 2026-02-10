@@ -311,7 +311,9 @@ graph = create_agent(
                     ),
                     patch(
                         "langgraph.types.interrupt",
-                        side_effect=lambda x: x,  # Pass through - no escalation expected
+                        side_effect=lambda x: (
+                            x
+                        ),  # Pass through - no escalation expected
                     ),
                 ):
                     # Create runtime context

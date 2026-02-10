@@ -178,6 +178,8 @@ def create_escalation_tool(
             tool.metadata["recipient"] = recipient
             task_title = tool.metadata.get("task_title") or task_title
 
+        serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
+
         @mockable(
             name=tool_name.lower(),
             description=resource.description,
@@ -191,7 +193,7 @@ def create_escalation_tool(
                 client = UiPath()
                 return await client.tasks.create_async(
                     title=task_title,
-                    data=kwargs,
+                    data=serialized_data,
                     app_name=channel.properties.app_name,
                     app_folder_path=channel.properties.folder_name or "",
                     recipient=recipient,
