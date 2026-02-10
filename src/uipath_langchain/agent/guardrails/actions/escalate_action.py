@@ -31,7 +31,6 @@ from ...exceptions import AgentStateException, AgentTerminationException
 from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
 from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
-from ...tools.escalation_tool import resolve_recipient_value
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNodes
@@ -110,9 +109,13 @@ class EscalateAction(GuardrailAction):
         ) -> Dict[str, Any]:
             # If the task was already created (e.g. subgraph replayed this
             # node on resume), skip creation and return as-is.
-            existing_task = state.inner_state.hitl_task_info.get(create_task_node_name)
+            hitl_info = state.inner_state.hitl_task_info
+            existing_task = hitl_info.get(create_task_node_name) if hitl_info else None
             if existing_task is not None:
                 return {}
+
+            # Lazy import to avoid circular dependency with escalation_tool
+            from ...tools.escalation_tool import resolve_recipient_value
 
             # Resolve recipient value (handles both StandardRecipient and AssetRecipient)
             task_recipient = await resolve_recipient_value(self.recipient)
@@ -221,7 +224,8 @@ class EscalateAction(GuardrailAction):
         async def _interrupt_node(
             state: AgentGuardrailsGraphState,
         ) -> Dict[str, Any] | Command[Any]:
-            task_info = state.inner_state.hitl_task_info.get(create_task_node_name)
+            hitl_info = state.inner_state.hitl_task_info
+            task_info = hitl_info.get(create_task_node_name) if hitl_info else None
             if task_info is None:
                 raise AgentTerminationException(
                     code=UiPathErrorCode.EXECUTION_ERROR,
@@ -237,22 +241,14 @@ class EscalateAction(GuardrailAction):
                 else None
             )
 
-            # Store task URL in metadata (also needed on resume path
-            # for observability of the resumed span)
-            # task_id = task_info["task_id"]
-            # task_url = f"{UiPathConfig.base_url}/actions_/tasks/{task_id}"
-            # metadata["escalation_data"]["task_url"] = task_url
-
             escalation_result = interrupt(
                 WaitEscalation(
                     action=created_task,
-                    aapp_name=self.app_name,
+                    app_name=self.app_name,
                     app_folder_path=self.app_folder_path,
                     recipient=task_recipient,
                 )
             )
-
-            print(f"escalation_result: {escalation_result}")
 
             # Store reviewed inputs/outputs in metadata for observability
             if escalation_result.data:

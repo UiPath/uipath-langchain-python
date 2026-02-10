@@ -73,4 +73,7 @@ class TestBlockAction:
             await node(AgentGuardrailsGraphState(messages=[]))
 
         # The exception string is the provided reason
-        assert str(excinfo.value) == "Execution was blocked by guardrail [My Guardrail v1], with reason: Sensitive data detected"
+        assert (
+            str(excinfo.value)
+            == "Execution was blocked by guardrail [My Guardrail v1], with reason: Sensitive data detected"
+        )

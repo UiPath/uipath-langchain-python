@@ -71,7 +71,7 @@ ASSET_GROUP_NAME_RECIPIENT = AssetRecipient(
 MOCK_TASK_RECIPIENT = {"type": "UserEmail", "value": "test@example.com"}
 
 
-def _make_mock_task_info(recipient: dict | None = None) -> dict:
+def _make_mock_task_info(recipient: Dict[str, Any] | None = None) -> Dict[str, Any]:
     """Create a dict that can be passed to Task.model_validate()."""
     info: Dict[str, Any] = {
         "id": 123,
@@ -83,7 +83,7 @@ def _make_mock_task_info(recipient: dict | None = None) -> dict:
     return info
 
 
-def _make_mock_task(recipient: dict | None = None) -> Task:
+def _make_mock_task(recipient: Dict[str, Any] | None = None) -> Task:
     """Create a Task instance for tests."""
     info = _make_mock_task_info(recipient)
     if recipient:
@@ -245,13 +245,9 @@ class TestEscalateAction:
             (GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION, "PreExecution"),
         ],
     )
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig"
-    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_create_task_node_sends_correct_data(
         self,
         mock_resolve_recipient,
@@ -327,13 +323,9 @@ class TestEscalateAction:
         assert create_task_name in result["inner_state"]["hitl_task_info"]
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig"
-    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_create_task_node_post_agent_with_agent_result(
         self,
         mock_resolve_recipient,
@@ -407,9 +399,7 @@ class TestEscalateAction:
             GuardrailScope.TOOL,
         ],
     )
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_create_task_node_post_execution_single_message_raises_error(
         self, mock_resolve_recipient, scope: GuardrailScope
     ):
@@ -441,13 +431,9 @@ class TestEscalateAction:
         )
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig"
-    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_create_task_node_tool_pre_execution_extracts_tool_args(
         self,
         mock_resolve_recipient,
@@ -470,7 +456,10 @@ class TestEscalateAction:
         guardrail = _make_default_guardrail()
 
         _, create_task_fn, _, _ = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.PRE_EXECUTION,
             component_name="test_tool",
         )
 
@@ -502,13 +491,9 @@ class TestEscalateAction:
         assert data["Inputs"] == '{"input": "test"}'
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig"
-    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_create_task_node_tool_post_execution_extracts_tool_content(
         self,
         mock_resolve_recipient,
@@ -531,7 +516,10 @@ class TestEscalateAction:
         guardrail = _make_default_guardrail()
 
         _, create_task_fn, _, _ = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.POST_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.POST_EXECUTION,
             component_name="test_tool",
         )
 
@@ -565,13 +553,9 @@ class TestEscalateAction:
         assert data["Outputs"] == "Tool execution result"
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig"
-    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_create_task_node_post_execution_ai_message_with_tool_calls(
         self,
         mock_resolve_recipient,
@@ -1054,7 +1038,10 @@ class TestEscalateAction:
         mock_interrupt.return_value = mock_escalation_result
 
         create_task_name, _, _, interrupt_fn = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.PRE_EXECUTION,
             component_name="test_tool",
         )
 
@@ -1094,7 +1081,10 @@ class TestEscalateAction:
         mock_interrupt.return_value = mock_escalation_result
 
         create_task_name, _, _, interrupt_fn = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.POST_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.POST_EXECUTION,
             component_name="test_tool",
         )
 
@@ -1140,7 +1130,10 @@ class TestEscalateAction:
         mock_interrupt.return_value = mock_escalation_result
 
         create_task_name, _, _, interrupt_fn = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.PRE_EXECUTION,
             component_name="test_tool",
         )
 
@@ -1170,7 +1163,10 @@ class TestEscalateAction:
         mock_interrupt.return_value = mock_escalation_result
 
         create_task_name, _, _, interrupt_fn = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.POST_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.POST_EXECUTION,
             component_name="test_tool",
         )
 
@@ -1202,7 +1198,10 @@ class TestEscalateAction:
         mock_interrupt.return_value = mock_escalation_result
 
         create_task_name, _, _, interrupt_fn = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.PRE_EXECUTION,
             component_name="test_tool",
         )
 
@@ -1241,7 +1240,10 @@ class TestEscalateAction:
         mock_interrupt.return_value = mock_escalation_result
 
         create_task_name, _, _, interrupt_fn = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.PRE_EXECUTION,
             component_name="test_tool",
         )
 
@@ -1282,7 +1284,10 @@ class TestEscalateAction:
         mock_interrupt.return_value = mock_escalation_result
 
         create_task_name, _, _, interrupt_fn = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.PRE_EXECUTION,
             component_name="test_tool",
         )
 
@@ -1324,7 +1329,10 @@ class TestEscalateAction:
         mock_interrupt.return_value = mock_escalation_result
 
         create_task_name, _, _, interrupt_fn = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.PRE_EXECUTION,
             component_name="tool_1",
         )
 
@@ -1372,7 +1380,10 @@ class TestEscalateAction:
         mock_interrupt.return_value = mock_escalation_result
 
         create_task_name, _, _, interrupt_fn = _get_action_nodes(
-            action, guardrail, GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION,
+            action,
+            guardrail,
+            GuardrailScope.TOOL,
+            ExecutionStage.PRE_EXECUTION,
             component_name="tool_1",
         )
 
@@ -1432,13 +1443,16 @@ class TestEscalateAction:
 
         assert isinstance(result, Command)
         # Cleanup should set the task info to None
+        assert result.update is not None
         assert result.update["inner_state"]["hitl_task_info"][create_task_name] is None
 
     # ── Metadata stored in escalation_data ────────────────────────────────
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
-    async def test_interrupt_node_stores_reviewed_data_in_metadata(self, mock_interrupt):
+    async def test_interrupt_node_stores_reviewed_data_in_metadata(
+        self, mock_interrupt
+    ):
         """Interrupt node stores reviewed inputs/outputs/reason in metadata."""
         action = _make_default_action()
         guardrail = _make_default_guardrail()
@@ -1501,6 +1515,7 @@ class TestEscalateAction:
         await interrupt_fn(state)
 
         metadata = getattr(interrupt_fn, "__metadata__", None)
+        assert metadata is not None
         assert metadata["escalation_data"]["reviewed_by"] == "jane@example.com"
 
     # ── Content extraction (pure function tests – no change needed) ───────
@@ -1714,15 +1729,16 @@ class TestEscalateAction:
             ),
         ],
     )
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig"
-    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_create_task_resolves_recipient_correctly(
-        self, mock_resolve_recipient, mock_uipath_class, mock_config, recipient, expected_value
+        self,
+        mock_resolve_recipient,
+        mock_uipath_class,
+        mock_config,
+        recipient,
+        expected_value,
     ) -> None:
         """Create-task node resolves recipient correctly for different types."""
         mock_resolve_recipient.return_value = expected_value
@@ -1757,9 +1773,7 @@ class TestEscalateAction:
         assert call_kwargs["recipient"] == expected_value
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_create_task_with_asset_recipient_resolution_failure(
         self, mock_resolve_recipient
     ) -> None:
@@ -1834,14 +1848,10 @@ class TestEscalateActionMetadata:
         assert metadata["escalation_data"]["recipient_type"] == "UserEmail"
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig"
-    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_standard_recipient_assigned_to_uses_value(
         self, mock_resolve_recipient, mock_interrupt, mock_uipath_class, mock_config
     ):
@@ -1880,14 +1890,10 @@ class TestEscalateActionMetadata:
         assert metadata["escalation_data"]["assigned_to"] == "user@example.com"
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig"
-    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_standard_recipient_assigned_to_uses_display_name(
         self, mock_resolve_recipient, mock_interrupt, mock_uipath_class, mock_config
     ):
@@ -1926,14 +1932,10 @@ class TestEscalateActionMetadata:
         assert metadata["escalation_data"]["assigned_to"] == "John Doe"
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig"
-    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_asset_recipient_assigned_to_uses_resolved_value(
         self, mock_resolve_recipient, mock_interrupt, mock_uipath_class, mock_config
     ):
@@ -1973,13 +1975,9 @@ class TestEscalateActionMetadata:
         assert metadata["escalation_data"]["assigned_to"] == "resolved@example.com"
 
     @pytest.mark.asyncio
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig"
-    )
+    @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPathConfig")
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.UiPath")
-    @patch(
-        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value"
-    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value")
     async def test_create_task_node_sets_metadata_node_type(
         self, mock_resolve_recipient, mock_uipath_class, mock_config
     ):
@@ -2067,7 +2065,7 @@ class TestHelperFunctions:
 
     def test_parse_reviewed_data_json_array(self):
         """JSON array string is parsed."""
-        result = _parse_reviewed_data('[1, 2, 3]')
+        result = _parse_reviewed_data("[1, 2, 3]")
         assert result == [1, 2, 3]
 
     def test_parse_reviewed_data_json_simple_string(self):
