@@ -21,7 +21,7 @@ from uipath_langchain.agent.tools.base_uipath_structured_tool import (
 )
 
 from ..utils import sanitize_tool_name
-from .mcp_client import McpClient
+from .mcp_client import McpClient, SessionInfoFactory
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -169,6 +169,8 @@ def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
 
 async def create_mcp_tools_from_agent(
     agent: LowCodeAgentDefinition,
+    session_info_factory: SessionInfoFactory | None = None,
+    terminate_on_close: bool = True,
 ) -> tuple[list[BaseTool], list[McpClient]]:
     """Create MCP tools from a LowCodeAgentDefinition.
 
@@ -180,6 +182,9 @@ async def create_mcp_tools_from_agent(
 
     Args:
         agent: The agent definition containing MCP resources.
+        session_info_factory: Factory for creating SessionInfo instances.
+            Defaults to the base ``SessionInfoFactory``.  Pass
+            ``SessionInfoDebugStateFactory()`` for playground mode.
 
     Returns:
         A tuple of (tools, mcp_clients) where:
@@ -203,8 +208,11 @@ async def create_mcp_tools_from_agent(
 
         logger.info(f"Creating MCP tools for resource '{resource.name}'")
 
-        # McpClient will lazily load the MCP server URL on first tool call
-        mcpClient = McpClient(config=resource)
+        mcpClient = McpClient(
+            config=resource,
+            session_info_factory=session_info_factory,
+            terminate_on_close=terminate_on_close,
+        )
         clients.append(mcpClient)
 
         resource_tools = await create_mcp_tools_from_metadata_for_mcp_server(
