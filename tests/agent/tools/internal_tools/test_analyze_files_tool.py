@@ -177,7 +177,7 @@ class TestCreateAnalyzeFileTool:
         with pytest.raises(
             ValueError, match="Argument 'analysisTask' is not available"
         ):
-            await tool.coroutine(config=RunnableConfig(), attachments=[mock_attachment])
+            await tool.coroutine(attachments=[mock_attachment])
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -193,9 +193,7 @@ class TestCreateAnalyzeFileTool:
 
         assert tool.coroutine is not None
         with pytest.raises(ValueError, match="Argument 'attachments' is not available"):
-            await tool.coroutine(
-                config=RunnableConfig(), analysisTask="Summarize the document"
-            )
+            await tool.coroutine(analysisTask="Summarize the document")
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -261,9 +259,7 @@ class TestCreateAnalyzeFileTool:
 
         assert tool.coroutine is not None
         result = await tool.coroutine(
-            config=RunnableConfig(),
-            analysisTask="Compare these documents",
-            attachments=mock_attachments,
+            analysisTask="Compare these documents", attachments=mock_attachments
         )
 
         assert result == "Multiple files analyzed"

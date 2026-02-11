@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -57,7 +57,7 @@ def create_analyze_file_tool(
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def tool_fn(config: RunnableConfig, **kwargs: Any):
+    async def tool_fn(config: Optional[RunnableConfig] = None, **kwargs: Any):
         if "analysisTask" not in kwargs:
             raise ValueError("Argument 'analysisTask' is not available")
         if "attachments" not in kwargs:
