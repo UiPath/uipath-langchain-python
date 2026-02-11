@@ -3,6 +3,7 @@
 from typing import Mapping
 
 import botocore.exceptions
+import urllib3.exceptions
 
 from .base import BaseAsyncRetryer, BaseSyncRetryer, RetryProvider
 
@@ -11,6 +12,7 @@ _BEDROCK_RETRY_EXCEPTIONS = (
     botocore.exceptions.ReadTimeoutError,
     botocore.exceptions.ConnectTimeoutError,
     botocore.exceptions.EndpointConnectionError,
+    urllib3.exceptions.ProtocolError,
 )
 
 

@@ -1,6 +1,7 @@
 """Process tool creation for UiPath process execution."""
 
 import copy
+import time
 from typing import Any
 
 from langchain.tools import BaseTool
@@ -163,6 +164,8 @@ def create_integration_tool(
         example_calls=resource.properties.example_calls,
     )
     async def integration_tool_fn(**kwargs: Any):
+        # Throttle to stay under API rate limits (e.g. 50 req/min for Web Search)
+        time.sleep(2)
         try:
             result = await sdk.connections.invoke_activity_async(
                 activity_metadata=activity_metadata,
