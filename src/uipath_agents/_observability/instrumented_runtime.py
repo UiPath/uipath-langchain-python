@@ -35,8 +35,10 @@ from uipath.runtime import (
     UiPathRuntimeStatus,
     UiPathStreamOptions,
 )
+from uipath.runtime.errors import UiPathErrorContract
 from uipath.runtime.events import UiPathRuntimeEvent
 from uipath.runtime.schema import UiPathRuntimeSchema
+from uipath.tracing import SpanStatus
 
 from ..agent_graph_builder.config import get_execution_type
 from .event_emitter import (
@@ -141,7 +143,13 @@ class InstrumentedRuntime:
         async with self._agent_span_context(
             input, saved_context, start_time
         ) as agent_span:
-            result = await self._delegate.execute(input, options)
+            try:
+                result = await self._delegate.execute(input, options)
+            except Exception as e:
+                if saved_context:
+                    self._handle_resume_error(saved_context, e)
+                raise
+
             duration_ms = int((time.time() - start_time) * 1000)
 
             if result.status == UiPathRuntimeStatus.SUSPENDED:
@@ -152,6 +160,8 @@ class InstrumentedRuntime:
                 self._emit_output_if_successful(result, duration_ms, agent_span)
                 await self._clear_trace_context()
             elif result.status == UiPathRuntimeStatus.FAULTED:
+                if saved_context and result.error:
+                    self._handle_resume_error(saved_context, result.error)
                 await self._clear_trace_context()
             else:
                 raise ValueError(f"Unexpected runtime status: {result.status}")
@@ -182,10 +192,15 @@ class InstrumentedRuntime:
         ) as agent_span:
             final_result: Optional[UiPathRuntimeResult] = None
 
-            async for event in self._delegate.stream(input, options):
-                if isinstance(event, UiPathRuntimeResult):
-                    final_result = event
-                yield event
+            try:
+                async for event in self._delegate.stream(input, options):
+                    if isinstance(event, UiPathRuntimeResult):
+                        final_result = event
+                    yield event
+            except Exception as e:
+                if saved_context:
+                    self._handle_resume_error(saved_context, e)
+                raise
 
             if final_result:
                 duration_ms = int((time.time() - start_time) * 1000)
@@ -200,6 +215,8 @@ class InstrumentedRuntime:
                     )
                     await self._clear_trace_context()
                 elif final_result.status == UiPathRuntimeStatus.FAULTED:
+                    if saved_context and final_result.error:
+                        self._handle_resume_error(saved_context, final_result.error)
                     await self._clear_trace_context()
                 else:
                     raise ValueError(
@@ -566,45 +583,115 @@ class InstrumentedRuntime:
             )
             return
 
+        self._complete_pending_tool_span(saved_context)
+        self._complete_pending_process_span(saved_context)
+
         trace_id = saved_context["trace_id"]
-
-        pending_tool = saved_context.get("pending_tool_span")
-        if pending_tool:
-            self._span_factory.upsert_span_complete_by_data(
-                trace_id=trace_id,
-                span_data=dict(pending_tool),
-            )
-            logger.debug(
-                "Completed pending tool span %s with OK status",
-                pending_tool.get("name", "unknown"),
-            )
-
-        pending_process = saved_context.get("pending_process_span")
-        if pending_process:
-            self._span_factory.upsert_span_complete_by_data(
-                trace_id=trace_id,
-                span_data=dict(pending_process),
-            )
-            logger.debug(
-                "Completed pending process span %s with OK status",
-                pending_process.get("name", "unknown"),
-            )
-
         pending_escalation = saved_context.get("pending_escalation_span")
         if pending_escalation:
-            escalation_attrs = dict(pending_escalation.get("attributes", {}))
-            escalation_attrs["reviewStatus"] = "Completed"
-            escalation_attrs["reviewOutcome"] = "Approved"
-            pending_escalation_data = dict(pending_escalation)
-            pending_escalation_data["attributes"] = escalation_attrs
-
+            pending_escalation["attributes"]["reviewStatus"] = "Completed"
+            pending_escalation["attributes"]["reviewOutcome"] = "Approved"
             self._span_factory.upsert_span_complete_by_data(
                 trace_id=trace_id,
-                span_data=pending_escalation_data,
+                span_data=dict(pending_escalation),
             )
             logger.debug(
                 "Completed pending escalation span %s",
                 pending_escalation.get("name", "unknown"),
+            )
+
+    def _handle_resume_error(
+        self, saved_context: TraceContextData, error: Exception | UiPathErrorContract
+    ) -> None:
+        """Complete pending spans with ERROR status on resume failure.
+
+        Args:
+            saved_context: Previously saved trace context with pending span data
+            error: An exception or error to add to the span
+        """
+        if self._callback.resumed_spans_completed():
+            logger.debug(
+                "Resumed spans already completed by callback, skipping duplicate upsert"
+            )
+            return
+
+        if isinstance(error, UiPathErrorContract):
+            error_dict = {
+                "message": error.title,
+                "detail": error.detail,
+            }
+        else:
+            error_dict = {
+                "message": str(error),
+                "type": type(error).__name__,
+            }
+        error_info = json.dumps(error_dict)
+
+        self._complete_pending_tool_span(saved_context, error_info)
+        self._complete_pending_process_span(saved_context, error_info)
+
+        trace_id = saved_context["trace_id"]
+        pending_escalation = saved_context.get("pending_escalation_span")
+        if pending_escalation:
+            pending_escalation["attributes"]["error"] = error_info
+            self._span_factory.upsert_span_complete_by_data(
+                trace_id=trace_id,
+                span_data=dict(pending_escalation),
+                status=SpanStatus.ERROR,
+            )
+            logger.debug(
+                "Completed pending escalation span %s with ERROR status",
+                pending_escalation.get("name", "unknown"),
+            )
+
+    def _complete_pending_tool_span(
+        self,
+        saved_context: TraceContextData,
+        error_info: str | None = None,
+    ) -> None:
+        """Complete a pending tool span. Status is ERROR if error_info is provided."""
+        pending_tool = saved_context.get("pending_tool_span")
+        if pending_tool:
+            trace_id = saved_context["trace_id"]
+            if error_info:
+                pending_tool["attributes"]["error"] = error_info
+                status = SpanStatus.ERROR
+            else:
+                status = SpanStatus.OK
+            self._span_factory.upsert_span_complete_by_data(
+                trace_id=trace_id,
+                span_data=dict(pending_tool),
+                status=status,
+            )
+            logger.debug(
+                "Completed pending tool span %s with %s status",
+                pending_tool.get("name", "unknown"),
+                "OK" if status == SpanStatus.OK else "ERROR",
+            )
+
+    def _complete_pending_process_span(
+        self,
+        saved_context: TraceContextData,
+        error_info: str | None = None,
+    ) -> None:
+        """Complete a pending process span. Status is ERROR if error_info is provided."""
+        pending_process = saved_context.get("pending_process_span")
+        if pending_process:
+            trace_id = saved_context["trace_id"]
+            if error_info:
+                pending_process["attributes"]["error"] = error_info
+                status = SpanStatus.ERROR
+            else:
+                status = SpanStatus.OK
+            self._span_factory.upsert_span_complete_by_data(
+                trace_id=trace_id,
+                span_data=dict(pending_process),
+                status=status,
+            )
+            logger.debug(
+                "Completed pending process span %s with %s status",
+                pending_process.get("name", "unknown"),
+                "OK" if status == SpanStatus.OK else "ERROR",
             )
 
     async def _load_trace_context_if_resuming(self) -> Optional[TraceContextData]:

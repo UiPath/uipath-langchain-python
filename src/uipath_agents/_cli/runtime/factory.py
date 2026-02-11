@@ -365,8 +365,11 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             agent_definition=agent_definition,
             storage=storage,
         )
+        resumable_runtime = self._wrap_in_resumable_runtime(
+            base_runtime, storage, runtime_id
+        )
         instrumented_runtime = InstrumentedRuntime(
-            base_runtime,
+            resumable_runtime,
             span_factory,
             instrumentation_callback,
             self.context,
@@ -374,11 +377,9 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             agent_definition=agent_definition,
             trace_context_storage=trace_context_storage,
         )
-        return await self._wrap_in_resumable_runtime(
-            instrumented_runtime, storage, runtime_id
-        )
+        return instrumented_runtime
 
-    async def _wrap_in_resumable_runtime(
+    def _wrap_in_resumable_runtime(
         self,
         base_runtime: UiPathRuntimeProtocol,
         storage: SqliteResumableStorage,
