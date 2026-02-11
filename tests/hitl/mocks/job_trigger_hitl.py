@@ -42,7 +42,13 @@ def wait_job_node(state: GraphState) -> Output:
     print("Process output: {}".format(state.process_output))
 
     response = interrupt(
-        WaitJob(job=Job(key="487d9dc7-30fe-4926-b5f0-35a956914042", Id=123))
+        WaitJob(
+            job=Job(
+                key="487d9dc7-30fe-4926-b5f0-35a956914042",
+                id=123,
+                folder_key="test-folder-key",
+            )
+        )
     )
     return Output(message=response["output_arg_2"])
 
