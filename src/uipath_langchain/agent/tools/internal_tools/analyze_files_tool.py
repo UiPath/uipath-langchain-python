@@ -12,6 +12,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from langchain_core.messages.tool import ToolCall
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, StructuredTool
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
@@ -56,7 +57,7 @@ def create_analyze_file_tool(
         input_schema=input_model.model_json_schema(),
         output_schema=output_model.model_json_schema(),
     )
-    async def tool_fn(**kwargs: Any):
+    async def tool_fn(config: RunnableConfig, **kwargs: Any):
         if "analysisTask" not in kwargs:
             raise ValueError("Argument 'analysisTask' is not available")
         if "attachments" not in kwargs:
@@ -79,7 +80,7 @@ def create_analyze_file_tool(
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),
             cast(AnyMessage, human_message_with_files),
         ]
-        result = await llm.ainvoke(messages)
+        result = await llm.ainvoke(messages, config=config)
 
         analysis_result = extract_text_content(result)
         return analysis_result
