@@ -5,8 +5,8 @@ description = "UiPath Agents"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11,<3.14"
 dependencies = [
-  "uipath==2.8.7",
-  "uipath-langchain[vertex,bedrock]==0.5.38",
+  "uipath==2.8.11",
+  "uipath-langchain[vertex,bedrock]==0.5.40",
   "langgraph>=1.0.0,<2.0.0",
   "azure-monitor-opentelemetry-exporter>=1.0.0b46,<2.0.0",
   "opentelemetry-instrumentation-httpx>=0.60b0",
@@ -34,7 +34,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
-  "uipath-robot>=0.0.12",
+  "uipath-robot>=0.0.13",
   "datamodel-code-generator>=0.33.0",
   "debugpy>=1.8.17",
   "mypy>=1.14.1",

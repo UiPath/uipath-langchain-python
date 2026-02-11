@@ -24,14 +24,13 @@ class TestBaseSpanAttributesLicenseRefId:
 
     def test_license_ref_id_serializes_with_alias(self) -> None:
         attrs = ProcessToolSpanAttributes(
-            tool_name="test_tool",
             license_ref_id="abc-123-def",
         )
         data = attrs.model_dump(by_alias=True, exclude_none=True)
         assert data["licenseRefId"] == "abc-123-def"
 
     def test_license_ref_id_none_excluded(self) -> None:
-        attrs = ProcessToolSpanAttributes(tool_name="test_tool")
+        attrs = ProcessToolSpanAttributes()
         data = attrs.model_dump(by_alias=True, exclude_none=True)
         assert "licenseRefId" not in data
 
@@ -152,19 +151,17 @@ class TestProcessToolSpanAttributesJobFields:
     """Tests for job_id, job_details_uri on ProcessToolSpanAttributes."""
 
     def test_job_id_serializes_with_alias(self) -> None:
-        attrs = ProcessToolSpanAttributes(tool_name="proc", job_id="job-123")
+        attrs = ProcessToolSpanAttributes(job_id="job-123")
         data = attrs.model_dump(by_alias=True, exclude_none=True)
         assert data["jobId"] == "job-123"
 
     def test_job_details_uri_serializes_with_alias(self) -> None:
-        attrs = ProcessToolSpanAttributes(
-            tool_name="proc", job_details_uri="https://orch/jobs/123"
-        )
+        attrs = ProcessToolSpanAttributes(job_details_uri="https://orch/jobs/123")
         data = attrs.model_dump(by_alias=True, exclude_none=True)
         assert data["jobDetailsUri"] == "https://orch/jobs/123"
 
     def test_job_fields_optional(self) -> None:
-        attrs = ProcessToolSpanAttributes(tool_name="proc")
+        attrs = ProcessToolSpanAttributes()
         data = attrs.model_dump(by_alias=True, exclude_none=True)
         assert "jobId" not in data
         assert "jobDetailsUri" not in data
@@ -235,7 +232,6 @@ class TestCSharpSchemaCompatibility:
     def test_process_tool_json_matches_csharp_schema(self) -> None:
         """ProcessToolSpanAttributes JSON serialization uses camelCase field names."""
         attrs = ProcessToolSpanAttributes(
-            tool_name="InvoiceProcessor",
             job_id="12345678-abcd-1234-abcd-123456789012",
             job_details_uri="https://cloud.uipath.com/org/tenant/jobs/12345",
             license_ref_id="lic-ref-001",
@@ -245,7 +241,6 @@ class TestCSharpSchemaCompatibility:
         data = attrs.model_dump(by_alias=True, exclude_none=True)
 
         # ProcessToolSpanAttributes expected fields
-        assert "toolName" in data
         assert "jobId" in data
         assert "jobDetailsUri" in data
         assert "licenseRefId" in data
@@ -253,7 +248,6 @@ class TestCSharpSchemaCompatibility:
         assert "result" in data
 
         # Verify no snake_case leaked through
-        assert "tool_name" not in data
         assert "job_id" not in data
         assert "job_details_uri" not in data
         assert "license_ref_id" not in data

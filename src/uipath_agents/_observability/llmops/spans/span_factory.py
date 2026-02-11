@@ -274,11 +274,9 @@ class LlmOpsSpanFactory:
         """Start a process tool span (child of tool call).
 
         Creates a span named after the process for interruptible process calls.
-        This matches the pattern where tool call spans have a child span
-        named after the process (e.g., "InvoiceProcessor").
 
         Args:
-            process_name: Name of the UiPath process (used as span name)
+            process_name: Display name of the UiPath process (used as span name)
             arguments: Arguments passed to the process
             parent_span: Optional parent span. If None, uses current span.
 

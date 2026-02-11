@@ -14,7 +14,6 @@ class ProcessToolSpanAttributes(BaseSpanAttributes):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    tool_name: str = Field(..., alias="toolName")
     arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
     result: Optional[Any] = Field(None, alias="result")
     job_id: Optional[str] = Field(None, alias="jobId")

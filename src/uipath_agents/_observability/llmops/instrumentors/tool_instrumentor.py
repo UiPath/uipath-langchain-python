@@ -154,7 +154,10 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         parent_span=span,
                     )
                     self._state.agent_run_ids.add(run_id)
-                elif tool_type == "process" and tool_display_name:
+                elif (
+                    tool_type in ("process", "api", "processorchestration")
+                    and tool_display_name
+                ):
                     child_span = self._span_factory.start_process_tool(
                         process_name=tool_display_name,
                         arguments=arguments,
@@ -177,8 +180,18 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 if child_span:
                     self._spans[self._interruptible_span_key(run_id)] = child_span
                     SpanHierarchyManager.push(run_id, child_span)
-                    # Track as pending for suspend scenario
-                    if tool_type in ("escalation", "process", "agent", "internal"):
+                    if metadata and "_span_context" in metadata:
+                        metadata["_span_context"]["parent_span_id"] = (
+                            child_span.get_span_context().span_id
+                        )
+                    if tool_type in (
+                        "escalation",
+                        "process",
+                        "agent",
+                        "internal",
+                        "api",
+                        "processorchestration",
+                    ):
                         self._state.pending_tool_name = tool_name
                         self._state.pending_tool_span = span
                         self._state.pending_process_span = child_span
@@ -228,9 +241,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             span = self._spans.pop(run_id, None)
             if span:
                 SpanHierarchyManager.pop(run_id)
-                set_tool_result(
-                    span, output, "output"
-                )  # ugly fix for stupid problem...
+                set_tool_result(span, output, "output")
                 set_span_attachments(
                     span, output, output_schema, AttachmentDirection.OUT
                 )
@@ -337,9 +348,13 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
         child_key = self._interruptible_span_key(run_id)
         child_span = self._spans.get(child_key)
 
-        # Set escalation task attributes from the interrupt payload
+        # Set type-specific attributes from the interrupt payload
         if child_span and run_id in self._state.escalation_run_ids:
             self._set_escalation_interrupt_attrs(child_span, error)
+        elif child_span and (
+            run_id in self._state.process_run_ids or run_id in self._state.agent_run_ids
+        ):
+            self._set_process_interrupt_attrs(child_span, error)
 
         # Upsert both spans as suspended
         if child_span:
@@ -370,6 +385,24 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
         recipient = getattr(value, "recipient", None)
         if recipient and getattr(recipient, "value", None):
             span.set_attribute("assignedTo", recipient.value)
+
+    def _set_process_interrupt_attrs(self, span: Any, error: BaseException) -> None:
+        """Extract job metadata from process interrupt and set span attributes."""
+        interrupts = error.args[0] if error.args else None
+        if not interrupts:
+            return
+
+        value = getattr(interrupts[0], "value", None)
+        if not value:
+            return
+
+        job = getattr(value, "job", None)
+        if not job:
+            return
+
+        job_key = getattr(job, "key", None)
+        if job_key:
+            span.set_attribute("jobId", str(job_key))
 
     def on_tool_error(
         self,

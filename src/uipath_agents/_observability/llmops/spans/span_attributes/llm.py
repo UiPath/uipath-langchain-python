@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from .base import BaseSpanAttributes
 from .types import SpanType
@@ -16,6 +16,15 @@ class ModelSettings(BaseModel):
 
     max_tokens: Optional[int] = Field(None, alias="maxTokens")
     temperature: Optional[float] = Field(None, alias="temperature")
+
+    @field_serializer("temperature")
+    def serialize_temperature(self, v: Optional[float]) -> Optional[int | float]:
+        """Serialize temperature as int when whole number."""
+        if v is None:
+            return None
+        if v == int(v):
+            return int(v)
+        return v
 
 
 class Usage(BaseModel):

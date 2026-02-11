@@ -7,6 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEBUG_FLAG=""
+CLEAR_CACHE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -14,13 +15,26 @@ while [[ $# -gt 0 ]]; do
             DEBUG_FLAG="--debug"
             shift
             ;;
+        --clear-cache)
+            CLEAR_CACHE=true
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--debug]"
+            echo "Usage: $0 [--debug] [--clear-cache]"
             exit 1
             ;;
     esac
 done
+
+if [ "$CLEAR_CACHE" = true ]; then
+    if [ -d "$SCRIPT_DIR/.uipath" ]; then
+        echo "🗑️  Clearing local cache (.uipath)..."
+        rm -rf "$SCRIPT_DIR/.uipath"
+    else
+        echo "ℹ️  No .uipath cache directory found, skipping"
+    fi
+fi
 
 if [ ! -f "$SCRIPT_DIR/uipath.robot.toml" ]; then
     echo "📝 Generating uipath.robot.toml with path: $SCRIPT_DIR"

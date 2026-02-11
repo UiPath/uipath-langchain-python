@@ -223,27 +223,47 @@ def parse_tool_arguments(input_str: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _unwrap_tool_output(output: Any) -> Any:
+    """Extract content from ToolMessage if wrapped by LangChain's BaseTool."""
+    try:
+        from langchain_core.messages import ToolMessage
+    except ImportError:
+        return output
+
+    if not isinstance(output, ToolMessage):
+        return output
+
+    content = output.content
+    if isinstance(content, str):
+        try:
+            return json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return content
+
+
 def set_tool_result(span: Span, output: Any, attribute_name: str = "result") -> None:
     """Set tool result attribute on span."""
     if output is None:
         return
-    if isinstance(output, (dict, list)):
-        span.set_attribute(attribute_name, serialize_json(output))
+    actual = _unwrap_tool_output(output)
+    if isinstance(actual, (dict, list)):
+        span.set_attribute(attribute_name, serialize_json(actual))
     else:
-        span.set_attribute(attribute_name, str(output))
+        span.set_attribute(attribute_name, str(actual))
 
 
 def get_tool_type_value(tool_type: Optional[str]) -> str:
-    """Map tool_type to toolType attribute value."""
-    if tool_type == "agent":
-        return "Agent"
-    elif tool_type == "process":
-        return "Process"
-    elif tool_type == "escalation":
-        return "Escalation"
-    elif tool_type == "internal":
-        return "Internal"
-    return "Integration"
+    """Map tool_type metadata to toolType span attribute value."""
+    mapping = {
+        "process": "Process",
+        "agent": "Agent",
+        "api": "Api",
+        "processorchestration": "agenticProcess",
+        "escalation": "Escalation",
+        "internal": "Internal",
+    }
+    return mapping.get(tool_type or "", "Integration")
 
 
 def build_task_url(task_id: int | str) -> str | None:

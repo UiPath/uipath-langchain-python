@@ -375,6 +375,12 @@ class TestGetToolTypeValue:
     def test_process_returns_process(self) -> None:
         assert get_tool_type_value("process") == "Process"
 
+    def test_api_returns_api(self) -> None:
+        assert get_tool_type_value("api") == "Api"
+
+    def test_processorchestration_returns_agentic_process(self) -> None:
+        assert get_tool_type_value("processorchestration") == "agenticProcess"
+
     def test_none_returns_integration(self) -> None:
         assert get_tool_type_value(None) == "Integration"
 

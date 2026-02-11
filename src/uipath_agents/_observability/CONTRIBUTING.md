@@ -252,6 +252,68 @@ class ToolSpanInstrumentor:
 
 ---
 
+## Passing Data Between Callback Events
+
+LangChain's callback interface is asymmetric: `on_tool_start` receives `metadata`, `tags`, and `serialized` from the tool definition, but `on_tool_end` only receives `output`, `run_id`, and `parent_run_id`. To access tool metadata in `on_tool_end`, use the **`run_id` correlation pattern** via `InstrumentationState`.
+
+### Pattern: Store in `on_tool_start`, Retrieve in `on_tool_end`
+
+This is how the codebase already tracks tool types (`escalation_run_ids`, `process_run_ids`, `agent_run_ids`).
+
+**Step 1: Add storage to `InstrumentationState`**
+
+```python
+# llmops/instrumentors/base.py
+@dataclass
+class InstrumentationState:
+    # ... existing fields ...
+    tool_output_schemas: Dict[UUID, Dict[str, Any]] = field(default_factory=dict)
+```
+
+Clear it in `reset_for_new_run()`.
+
+**Step 2: Add the data to the tool's `metadata` dict (in uipath-langchain-python)**
+
+```python
+# process_tool.py
+tool = StructuredToolWithArgumentProperties(
+    ...
+    metadata={
+        "tool_type": "process",
+        "display_name": process_name,
+        "output_schema": output_model.model_json_schema(),  # new
+    },
+)
+```
+
+**Step 3: Capture in `on_tool_start`**
+
+```python
+# llmops/instrumentors/tool_instrumentor.py - on_tool_start()
+output_schema = metadata.get("output_schema") if metadata else None
+if output_schema:
+    self._state.tool_output_schemas[run_id] = output_schema
+```
+
+**Step 4: Retrieve in `on_tool_end`**
+
+```python
+# llmops/instrumentors/tool_instrumentor.py - on_tool_end()
+output_schema = self._state.tool_output_schemas.pop(run_id, None)
+```
+
+### What data is available in each callback event
+
+| Event | Receives | Source |
+|-------|----------|--------|
+| `on_tool_start` | `serialized`, `input_str`, `metadata`, `tags`, `run_id`, `parent_run_id` | Tool definition |
+| `on_tool_end` | `output`, `run_id`, `parent_run_id` | Tool return value |
+| `on_tool_error` | `error`, `run_id`, `parent_run_id` | Tool exception |
+
+To pass any data from `start` to `end`/`error`, store it in `InstrumentationState` keyed by `run_id` and pop it on completion.
+
+---
+
 ## Attribute Serialization
 
 OTEL only accepts primitives. Complex objects are JSON serialized:
