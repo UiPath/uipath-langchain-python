@@ -269,6 +269,13 @@ class InstrumentedRuntime:
                 self._callback.set_agent_span(
                     agent_span, uuid.UUID(self._agent_run_id), prompts_captured=True
                 )
+
+                # Rebuild enriched properties so post-resume events
+                # (e.g. guardrail escalation approved/rejected) still carry
+                # agent and execution metadata.
+                if self._event_emitter:
+                    self._build_and_set_enriched_properties(agent_span)
+
                 pending_tool = saved_context.get("pending_tool_name")
                 pending_tool_span = saved_context.get("pending_tool_span")
                 if pending_tool:
@@ -350,18 +357,9 @@ class InstrumentedRuntime:
                 if self._event_emitter:
                     self._event_emitter.set_agent_info(agent_name, agent_id)
 
-                    base_properties: Dict[str, Any] = {
-                        "AgentName": agent_name,
-                    }
-
-                    if agent_id:
-                        base_properties["AgentId"] = agent_id
-
-                    enriched_properties = self._get_enriched_properties(
-                        base_properties, agent_span
+                    enriched_properties = self._build_and_set_enriched_properties(
+                        agent_span
                     )
-                    self._callback.set_enriched_properties(enriched_properties)
-
                     self._event_emitter.track_event(
                         AgentRunEvent.STARTED, enriched_properties
                     )
@@ -376,7 +374,7 @@ class InstrumentedRuntime:
                             else None
                         )
 
-                        base_properties = {
+                        base_properties: Dict[str, Any] = {
                             "AgentName": agent_name,
                             "Status": "Failed",
                             "Timestamp": datetime.now(timezone.utc).isoformat(),
@@ -774,6 +772,29 @@ class InstrumentedRuntime:
         if hasattr(self._delegate, "runtime_id"):
             return self._delegate.runtime_id
         return "unknown"
+
+    def _build_and_set_enriched_properties(self, agent_span: Span) -> Dict[str, Any]:
+        """Build enriched telemetry properties and set them on the callback.
+
+        Shared by both the normal and resume branches so that events tracked
+        after an interruption/resume still carry full agent and execution
+        metadata.
+
+        Returns:
+            The enriched properties dict (also set on the callback).
+        """
+        agent_name = self._get_agent_name()
+        agent_id = self._get_agent_id()
+
+        base_properties: Dict[str, Any] = {
+            "AgentName": agent_name,
+        }
+        if agent_id:
+            base_properties["AgentId"] = agent_id
+
+        enriched_properties = self._get_enriched_properties(base_properties, agent_span)
+        self._callback.set_enriched_properties(enriched_properties)
+        return enriched_properties
 
     def _get_enriched_properties(
         self, base_properties: Dict[str, Any], agent_span: Optional[Span] = None

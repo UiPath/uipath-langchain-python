@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
 from uipath.agent.models.agent import AgentDefinition, AgentMetadata, AgentSettings
-from uipath.runtime import UiPathRuntimeContext
+from uipath.runtime import UiPathRuntimeContext, UiPathRuntimeStatus
 
 from uipath_agents._observability.event_emitter import (
     AgentRunEvent,
@@ -14,6 +14,7 @@ from uipath_agents._observability.event_emitter import (
 from uipath_agents._observability.instrumented_runtime import InstrumentedRuntime
 from uipath_agents._observability.llmops.callback import LlmOpsInstrumentationCallback
 from uipath_agents._observability.llmops.spans.span_factory import LlmOpsSpanFactory
+from uipath_agents._observability.llmops.trace_context_storage import TraceContextData
 
 
 @pytest.fixture
@@ -403,3 +404,203 @@ class TestAgentRunIdConsistency:
 
         # Check that different instances have different run IDs
         assert wrapper1._agent_run_id != wrapper2._agent_run_id
+
+
+class TestEnrichedPropertiesOnResume:
+    """Test that enriched properties are available after an interruption and resume."""
+
+    @pytest.fixture
+    def mock_trace_context_storage(self):
+        """Create a mock trace context storage with async methods."""
+        storage = MagicMock()
+        storage.load_trace_context = AsyncMock(return_value=None)
+        storage.save_trace_context = AsyncMock()
+        storage.clear_trace_context = AsyncMock()
+        return storage
+
+    @pytest.fixture
+    def saved_context(self) -> TraceContextData:
+        """Create a saved trace context representing a previously suspended execution."""
+        return TraceContextData(
+            trace_id="abc123def456789012345678901234567890",
+            span_id="1234567890123456",
+            parent_span_id=None,
+            name="Agent run - test-agent",
+            start_time="2024-01-15T10:30:00Z",
+            attributes={"agentId": "test-agent-id"},
+            pending_tool_span_id=None,
+            pending_process_span_id=None,
+            pending_tool_name=None,
+            pending_tool_span=None,
+            pending_process_span=None,
+            pending_escalation_span=None,
+            pending_guardrail_hitl_evaluation_span=None,
+            pending_guardrail_hitl_container_span=None,
+            pending_llm_span=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_resume_sets_enriched_properties_on_callback(
+        self,
+        mock_delegate,
+        tracer,
+        tracing_callback,
+        event_emitter,
+        agent_info,
+        mock_runtime_context,
+        mock_trace_context_storage,
+        saved_context,
+    ):
+        """Test that enriched properties are set on the callback during resume.
+
+        This ensures that events tracked after an interruption/resume
+        (e.g. guardrail escalation approved/rejected) still carry agent
+        and execution metadata.
+        """
+        mock_trace_context_storage.load_trace_context = AsyncMock(
+            return_value=saved_context
+        )
+
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        mock_result.output = {"result": "done"}
+        mock_delegate.execute.return_value = mock_result
+
+        event_emitter.track_event = MagicMock()
+        event_emitter.set_agent_info = MagicMock()
+
+        wrapper = InstrumentedRuntime(
+            mock_delegate,
+            tracer,
+            tracing_callback,
+            mock_runtime_context,
+            event_emitter=event_emitter,
+            agent_definition=agent_info,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        await wrapper.execute({"input": "resume"}, None)
+
+        # After resume, the callback's enriched_properties must be populated
+        enriched = tracing_callback._state.enriched_properties
+        assert enriched, "enriched_properties should not be empty after resume"
+        assert enriched["AgentName"] == "test-agent"
+        assert enriched["AgentId"] == "test-agent-id"
+        assert enriched["Model"] == "gpt-4"
+        assert "AgentRunId" in enriched
+        assert "TraceId" in enriched
+
+    @pytest.mark.asyncio
+    async def test_resume_enriched_properties_match_normal_flow(
+        self,
+        mock_delegate,
+        tracer,
+        agent_info,
+        mock_runtime_context,
+        mock_trace_context_storage,
+        saved_context,
+    ):
+        """Test that enriched properties after resume match those from a normal execution."""
+        event_emitter = MagicMock(spec=TelemetryEventEmitter)
+
+        # --- Normal execution ---
+        normal_callback = LlmOpsInstrumentationCallback(tracer)
+
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        mock_result.output = {"result": "done"}
+        mock_delegate.execute.return_value = mock_result
+
+        normal_wrapper = InstrumentedRuntime(
+            mock_delegate,
+            tracer,
+            normal_callback,
+            mock_runtime_context,
+            event_emitter=event_emitter,
+            agent_definition=agent_info,
+        )
+        await normal_wrapper.execute({"input": "test"}, None)
+        normal_enriched = normal_callback._state.enriched_properties.copy()
+
+        # --- Resume execution ---
+        resume_callback = LlmOpsInstrumentationCallback(tracer)
+
+        mock_trace_context_storage.load_trace_context = AsyncMock(
+            return_value=saved_context
+        )
+
+        resume_wrapper = InstrumentedRuntime(
+            mock_delegate,
+            tracer,
+            resume_callback,
+            mock_runtime_context,
+            event_emitter=event_emitter,
+            agent_definition=agent_info,
+            trace_context_storage=mock_trace_context_storage,
+        )
+        await resume_wrapper.execute({"input": "resume"}, None)
+        resume_enriched = resume_callback._state.enriched_properties.copy()
+
+        # The same set of keys should be present in both
+        assert set(normal_enriched.keys()) == set(resume_enriched.keys()), (
+            f"Key mismatch: normal has {set(normal_enriched.keys()) - set(resume_enriched.keys())} extra, "
+            f"resume has {set(resume_enriched.keys()) - set(normal_enriched.keys())} extra"
+        )
+
+        # Verify shared static properties match
+        static_keys = [
+            "AgentName",
+            "AgentId",
+            "Model",
+            "MaxTokens",
+            "Temperature",
+            "Engine",
+            "MaxIterations",
+            "IsConversational",
+            "AgentRunSource",
+            "ApplicationName",
+            "Runtime",
+            "AgentType",
+        ]
+        for key in static_keys:
+            assert normal_enriched.get(key) == resume_enriched.get(key), (
+                f"Mismatch for '{key}': normal={normal_enriched.get(key)}, resume={resume_enriched.get(key)}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_resume_without_event_emitter_does_not_set_enriched_properties(
+        self,
+        mock_delegate,
+        tracer,
+        tracing_callback,
+        agent_info,
+        mock_runtime_context,
+        mock_trace_context_storage,
+        saved_context,
+    ):
+        """Test that without an event_emitter, enriched properties remain empty on resume
+        (matching the behavior of the normal flow).
+        """
+        mock_trace_context_storage.load_trace_context = AsyncMock(
+            return_value=saved_context
+        )
+
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        mock_result.output = {"result": "done"}
+        mock_delegate.execute.return_value = mock_result
+
+        wrapper = InstrumentedRuntime(
+            mock_delegate,
+            tracer,
+            tracing_callback,
+            mock_runtime_context,
+            agent_definition=agent_info,
+            trace_context_storage=mock_trace_context_storage,
+            # No event_emitter
+        )
+
+        await wrapper.execute({"input": "resume"}, None)
+
+        # Without event_emitter, enriched properties should remain empty
+        assert tracing_callback._state.enriched_properties == {}
