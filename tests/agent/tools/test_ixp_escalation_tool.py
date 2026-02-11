@@ -1,6 +1,6 @@
 """Tests for ixp_escalation_tool.py functionality."""
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import ToolCall
@@ -9,7 +9,12 @@ from uipath.agent.models.agent import (
     AgentEscalationChannelProperties,
     AgentIxpVsEscalationResourceConfig,
 )
-from uipath.platform.documents import ActionPriority, ExtractionResponseIXP
+from uipath.platform.common import WaitDocumentExtractionValidation
+from uipath.platform.documents import (
+    ActionPriority,
+    ExtractionResponseIXP,
+    StartExtractionValidationResponse,
+)
 
 from uipath_langchain.agent.react.types import (
     AgentGraphState,
@@ -18,6 +23,11 @@ from uipath_langchain.agent.react.types import (
 from uipath_langchain.agent.tools.ixp_escalation_tool import (
     create_ixp_escalation_tool,
 )
+
+
+def _passthrough_task(fn):
+    """Replace @task decorator with a passthrough for tests."""
+    return fn
 
 
 class TestIxpEscalationToolCreation:
@@ -90,8 +100,6 @@ class TestIxpEscalationToolWrapper:
                 "ixpToolId": "data_extraction",
                 "storageBucketName": "validation-bucket",
                 "storageBucketFolderPath": "/validations",
-                "actionPriority": "Medium",
-                "actionTitle": "Data Validation",
             },
             channels=[
                 AgentEscalationChannel(
@@ -106,6 +114,8 @@ class TestIxpEscalationToolWrapper:
                         resource_key="test-key",
                     ),
                     recipients=[],
+                    task_title="Data Validation",
+                    priority="Medium",
                 )
             ],
         )
@@ -147,15 +157,28 @@ class TestIxpEscalationToolWrapper:
         return state
 
     @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.task", _passthrough_task)
+    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
     @patch("uipath_langchain.agent.tools.ixp_escalation_tool.interrupt")
     async def test_wrapper_retrieves_extraction_from_state(
         self,
         mock_interrupt,
+        mock_uipath_cls,
         escalation_resource,
         mock_state_with_extraction,
         mock_extraction_response,
     ):
         """Test that wrapper retrieves extraction result from state."""
+        mock_validation_response = StartExtractionValidationResponse(
+            operation_id="test-op-id",
+            document_id="test-doc-id",
+            project_id="test-project-id",
+        )
+        mock_client = MagicMock()
+        mock_client.documents.start_ixp_extraction_validation_async = AsyncMock(
+            return_value=mock_validation_response
+        )
+        mock_uipath_cls.return_value = mock_client
         mock_interrupt.return_value = {"dataProjection": []}
 
         tool = create_ixp_escalation_tool(escalation_resource)
@@ -164,9 +187,18 @@ class TestIxpEscalationToolWrapper:
         assert hasattr(tool, "awrapper")
         await tool.awrapper(tool, call, mock_state_with_extraction)
 
+        # SDK was called with the extraction result from state
+        mock_client.documents.start_ixp_extraction_validation_async.assert_called_once()
+        sdk_kwargs = (
+            mock_client.documents.start_ixp_extraction_validation_async.call_args
+        )
+        assert sdk_kwargs.kwargs["extraction_response"] == mock_extraction_response
+
+        # interrupt was called with WaitDocumentExtractionValidation
         assert mock_interrupt.called
         validation_arg = mock_interrupt.call_args[0][0]
-        assert validation_arg.extraction_response == mock_extraction_response
+        assert isinstance(validation_arg, WaitDocumentExtractionValidation)
+        assert validation_arg.extraction_validation == mock_validation_response
 
     @pytest.mark.asyncio
     async def test_wrapper_raises_error_when_extraction_not_found(
@@ -244,8 +276,6 @@ class TestIxpEscalationToolExecution:
                 "ixpToolId": "invoice_extraction",
                 "storageBucketName": "invoices-bucket",
                 "storageBucketFolderPath": "/validations",
-                "actionPriority": "High",
-                "actionTitle": "Invoice Validation",
             },
             channels=[
                 AgentEscalationChannel(
@@ -260,6 +290,8 @@ class TestIxpEscalationToolExecution:
                         resource_key="test-key",
                     ),
                     recipients=[],
+                    task_title="Invoice Validation",
+                    priority="High",
                 )
             ],
         )
@@ -282,30 +314,54 @@ class TestIxpEscalationToolExecution:
         )
 
     @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.task", _passthrough_task)
+    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
     @patch("uipath_langchain.agent.tools.ixp_escalation_tool.interrupt")
     async def test_tool_calls_interrupt_with_correct_params(
-        self, mock_interrupt, escalation_resource, mock_extraction_response
+        self,
+        mock_interrupt,
+        mock_uipath_cls,
+        escalation_resource,
+        mock_extraction_response,
     ):
-        """Test that tool calls interrupt with correct DocumentExtractionValidation."""
+        """Test that tool calls SDK with correct params and interrupts with WaitDocumentExtractionValidation."""
+        mock_validation_response = StartExtractionValidationResponse(
+            operation_id="test-op-id",
+            document_id="test-doc-id",
+            project_id="test-project-id",
+        )
+        mock_client = MagicMock()
+        mock_client.documents.start_ixp_extraction_validation_async = AsyncMock(
+            return_value=mock_validation_response
+        )
+        mock_uipath_cls.return_value = mock_client
         mock_interrupt.return_value = {"dataProjection": []}
 
         tool = create_ixp_escalation_tool(escalation_resource)
 
         await tool.ainvoke({"extraction_result": mock_extraction_response})
 
+        # SDK was called with correct parameters
+        mock_client.documents.start_ixp_extraction_validation_async.assert_called_once_with(
+            extraction_response=mock_extraction_response,
+            action_title="VS Escalation Task",
+            storage_bucket_name="invoices-bucket",
+            storage_bucket_directory_path="/validations",
+            action_priority=ActionPriority.HIGH,
+        )
+
+        # interrupt was called with WaitDocumentExtractionValidation
         assert mock_interrupt.called
         validation_arg = mock_interrupt.call_args[0][0]
-
-        assert validation_arg.extraction_response == mock_extraction_response
-        assert validation_arg.action_title == "Invoice Validation"
-        assert validation_arg.storage_bucket_name == "invoices-bucket"
-        assert validation_arg.action_folder == "/validations"
-        assert validation_arg.action_priority == ActionPriority.HIGH
+        assert isinstance(validation_arg, WaitDocumentExtractionValidation)
+        assert validation_arg.extraction_validation == mock_validation_response
 
     @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.task", _passthrough_task)
+    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
     @patch("uipath_langchain.agent.tools.ixp_escalation_tool.interrupt")
     async def test_tool_uses_default_action_title_when_not_provided(
-        self, mock_interrupt, mock_extraction_response
+        self, mock_interrupt, mock_uipath_cls, mock_extraction_response
     ):
         """Test that tool uses default action title when not provided."""
         resource = AgentIxpVsEscalationResourceConfig(
@@ -335,18 +391,32 @@ class TestIxpEscalationToolExecution:
             ],
         )
 
+        mock_validation_response = StartExtractionValidationResponse(
+            operation_id="test-op-id",
+            document_id="test-doc-id",
+            project_id="test-project-id",
+        )
+        mock_client = MagicMock()
+        mock_client.documents.start_ixp_extraction_validation_async = AsyncMock(
+            return_value=mock_validation_response
+        )
+        mock_uipath_cls.return_value = mock_client
         mock_interrupt.return_value = {"dataProjection": []}
 
         tool = create_ixp_escalation_tool(resource)
         await tool.ainvoke({"extraction_result": mock_extraction_response})
 
-        validation_arg = mock_interrupt.call_args[0][0]
-        assert validation_arg.action_title == "VS Escalation Task"
+        sdk_kwargs = (
+            mock_client.documents.start_ixp_extraction_validation_async.call_args
+        )
+        assert sdk_kwargs.kwargs["action_title"] == "VS Escalation Task"
 
     @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.task", _passthrough_task)
+    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
     @patch("uipath_langchain.agent.tools.ixp_escalation_tool.interrupt")
     async def test_tool_uses_default_priority_when_not_provided(
-        self, mock_interrupt, mock_extraction_response
+        self, mock_interrupt, mock_uipath_cls, mock_extraction_response
     ):
         """Test that tool uses default priority when not provided."""
         resource = AgentIxpVsEscalationResourceConfig(
@@ -376,13 +446,25 @@ class TestIxpEscalationToolExecution:
             ],
         )
 
+        mock_validation_response = StartExtractionValidationResponse(
+            operation_id="test-op-id",
+            document_id="test-doc-id",
+            project_id="test-project-id",
+        )
+        mock_client = MagicMock()
+        mock_client.documents.start_ixp_extraction_validation_async = AsyncMock(
+            return_value=mock_validation_response
+        )
+        mock_uipath_cls.return_value = mock_client
         mock_interrupt.return_value = {"dataProjection": []}
 
         tool = create_ixp_escalation_tool(resource)
         await tool.ainvoke({"extraction_result": mock_extraction_response})
 
-        validation_arg = mock_interrupt.call_args[0][0]
-        assert validation_arg.action_priority == ActionPriority.MEDIUM
+        sdk_kwargs = (
+            mock_client.documents.start_ixp_extraction_validation_async.call_args
+        )
+        assert sdk_kwargs.kwargs["action_priority"] == ActionPriority.MEDIUM
 
 
 class TestIxpEscalationToolNameSanitization:
