@@ -518,15 +518,34 @@ class InstrumentedRuntime:
                     )
 
                 if guardrail_hitl_container_span:
-                    pending_guardrail_hitl_container_data = (
-                        self._extract_pending_span_data(guardrail_hitl_container_span)
+                    # After a previous resume, the container span in
+                    # guardrail_containers is a NonRecordingSpan.
+                    # _extract_pending_span_data cannot extract rich data from it.
+                    # Prefer the already-stored resumed data when available.
+                    resumed_container_data = (
+                        self._callback.get_resumed_hitl_guardrail_container_data()
                     )
+                    if resumed_container_data:
+                        pending_guardrail_hitl_container_data = resumed_container_data
+                    else:
+                        pending_guardrail_hitl_container_data = (
+                            self._extract_pending_span_data(
+                                guardrail_hitl_container_span
+                            )
+                        )
                     context["pending_guardrail_hitl_container_span"] = (
                         pending_guardrail_hitl_container_data
                     )
 
                 if llm_span:
-                    pending_llm_data = self._extract_pending_span_data(llm_span)
+                    # Same pattern as container span: after a previous resume,
+                    # current_llm_span may be a NonRecordingSpan. Use resumed
+                    # data when available.
+                    resumed_llm_data = self._callback.get_resumed_llm_data()
+                    if resumed_llm_data:
+                        pending_llm_data = resumed_llm_data
+                    else:
+                        pending_llm_data = self._extract_pending_span_data(llm_span)
                     context["pending_llm_span"] = pending_llm_data
 
                 if resumed_tool_span_data:

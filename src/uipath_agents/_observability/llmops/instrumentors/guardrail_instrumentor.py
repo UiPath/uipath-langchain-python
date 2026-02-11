@@ -49,6 +49,12 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
 
     # --- Container Management ---
 
+    def _is_graph_interrupt(self, error: BaseException) -> bool:
+        """Check if the error is a GraphInterrupt (suspend signal)."""
+        error_str = str(error)
+        error_type = type(error).__name__
+        return error_type == "GraphInterrupt" or error_str.startswith("GraphInterrupt(")
+
     def _get_or_create_guardrails_group_span(
         self,
         scope: str,
@@ -185,12 +191,12 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
 
     # --- Action Node Handling ---
 
-    def handle_action_node(
+    def handle_action_end(
         self,
         run_id: UUID,
         metadata: Optional[Dict[str, Any]],
-        error_str: Optional[str] = None,
     ) -> None:
+        """Handle guardrail action node completion (success path)."""
         if metadata is None:
             return
         action = metadata.get("action_type")
@@ -203,27 +209,27 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
         eval_node_name = self._get_guardrail_eval_node_name(node_name)
 
         # Resume scenario: approved HITL task
-        if (
-            eval_node_name not in self._state.upcoming_guardrail_actions_info
-            and error_str is None
-        ):
-            if action == GuardrailAction.ESCALATE:
-                trace_id = self._state.resumed_escalation_trace_id
-                eval_span_data = self._state.resumed_hitl_guardrail_span_data
+        # Because this callback is invoked for both the action node and the create_escalation_task,
+        # we need to also filter by the node that has reviewed_by in the metadata
+        escalation_data = metadata.get("escalation_data") or {}
+        reviewed_by = escalation_data.get("reviewed_by")
+        if action == GuardrailAction.ESCALATE and reviewed_by is not None:
+            trace_id = self._state.resumed_escalation_trace_id
+            eval_span_data = self._state.resumed_hitl_guardrail_span_data
 
-                # Complete Review task span
-                self._complete_resumed_escalation_from_outputs(metadata)
+            # Complete Review task span
+            self._complete_resumed_escalation_from_outputs(metadata)
 
-                # Complete guardrail eval span
-                if trace_id and eval_span_data:
-                    self._span_factory.upsert_span_complete_by_data(
-                        trace_id=trace_id,
-                        span_data=eval_span_data,
-                    )
-
-                self._track_escalation_outcome_event(
-                    GuardrailEvent.ESCALATION_APPROVED, metadata
+            # Complete guardrail eval span
+            if trace_id and eval_span_data:
+                self._span_factory.upsert_span_complete_by_data(
+                    trace_id=trace_id,
+                    span_data=eval_span_data,
                 )
+
+            self._track_escalation_outcome_event(
+                GuardrailEvent.ESCALATION_APPROVED, metadata
+            )
             return
 
         # Normal flow: complete the pending guardrail span
@@ -232,133 +238,144 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
         excluded_fields = metadata.get("excluded_fields")
         updated_data = metadata.get("updated_data")
 
-        if action == GuardrailAction.BLOCK or action == GuardrailAction.ESCALATE:
-            error_message = None
+        if eval_node_name not in self._state.upcoming_guardrail_actions_info.keys():
+            return
 
-            if action == GuardrailAction.BLOCK:
-                eval_span, eval_run_id = (
-                    self._state.upcoming_guardrail_actions_info.pop(eval_node_name)
+        eval_span, eval_run_id = self._state.upcoming_guardrail_actions_info.pop(
+            eval_node_name
+        )
+        # Remove mapping for action node run id
+        SpanHierarchyManager.pop(run_id)
+        # Remove mapping for eval node run id
+        SpanHierarchyManager.pop(eval_run_id)
+        if eval_span:
+            self._span_factory.end_guardrail_evaluation(
+                eval_span,
+                action=action,
+                severity_level=severity_level,
+                reason=reason,
+                excluded_fields=excluded_fields,
+                updated_data=updated_data,
+            )
+
+        # The Guardrails.Escalated event is logged right after the HITL interruption is done
+        if action != GuardrailAction.ESCALATE:
+            self._track_guardrail_event(action, metadata)
+
+    def handle_action_error(
+        self,
+        run_id: UUID,
+        metadata: Optional[Dict[str, Any]],
+        error_str: str,
+    ) -> None:
+        """Handle guardrail action node error (block/reject path)."""
+        if metadata is None:
+            return
+        action = metadata.get("action_type")
+
+        node_name = metadata.get("langgraph_node", "")
+        if not node_name:
+            return
+
+        # Extract evaluation node name by removing the action suffix
+        eval_node_name = self._get_guardrail_eval_node_name(node_name)
+        reason = metadata.get("reason")
+
+        if action == GuardrailAction.BLOCK:
+            eval_span, eval_run_id = self._state.upcoming_guardrail_actions_info.pop(
+                eval_node_name
+            )
+            # Remove mapping for action node run id
+            SpanHierarchyManager.pop(run_id)
+            # Remove mapping for eval node run id
+            SpanHierarchyManager.pop(eval_run_id)
+
+            # End guardrail span
+            if eval_span and error_str:
+                self._span_factory.error_guardrail_evaluation(
+                    eval_span, action=action, reason=reason, error_message=error_str
                 )
-                # Remove mapping for action node run id
-                SpanHierarchyManager.pop(run_id)
-                # Remove mapping for eval node run id
-                SpanHierarchyManager.pop(eval_run_id)
 
-                # End guardrail span
-                if eval_span and error_str:
-                    self._span_factory.error_guardrail_evaluation(
-                        eval_span, action=action, reason=reason, error_message=error_str
-                    )
+            self._track_guardrail_event(action, metadata)
 
-                self._track_guardrail_event(action, metadata)
+        elif action == GuardrailAction.ESCALATE:
+            # Complete Review task span
+            self._complete_resumed_escalation_from_outputs(metadata, error_str)
 
-            elif action == GuardrailAction.ESCALATE:
-                # Complete Review task span
-                self._complete_resumed_escalation_from_outputs(metadata, error_str)
-
-                # Complete guardrail eval span
-                eval_span_data = self._state.resumed_hitl_guardrail_span_data
-                trace_id = self._state.resumed_escalation_trace_id
-                if trace_id and eval_span_data:
-                    self._span_factory.upsert_span_complete_by_data(
-                        trace_id=trace_id,
-                        span_data=eval_span_data,
-                        status=SpanStatus.ERROR,
-                    )
-
-                self._track_escalation_outcome_event(
-                    GuardrailEvent.ESCALATION_REJECTED, metadata
+            # Complete guardrail eval span
+            eval_span_data = self._state.resumed_hitl_guardrail_span_data
+            trace_id = self._state.resumed_escalation_trace_id
+            if trace_id and eval_span_data:
+                eval_span_data["attributes"]["error"] = str(error_str)
+                self._span_factory.upsert_span_complete_by_data(
+                    trace_id=trace_id,
+                    span_data=eval_span_data,
+                    status=SpanStatus.ERROR,
                 )
 
-            # End guardrail group span
-            scope = metadata.get("scope")
-            execution_stage = metadata.get("execution_stage")
-            error = Exception(str(error_str))
+            self._track_escalation_outcome_event(
+                GuardrailEvent.ESCALATION_REJECTED, metadata
+            )
 
-            if scope and execution_stage:
-                container_key = (scope, execution_stage)
-                if container_key in self._state.guardrail_containers:
-                    guardrail_group_span = self._state.guardrail_containers.pop(
-                        container_key
+        # End guardrail group span
+        scope = metadata.get("scope")
+        execution_stage = metadata.get("execution_stage")
+        error = Exception(str(error_str))
+
+        if scope and execution_stage:
+            container_key = (scope, execution_stage)
+            if container_key in self._state.guardrail_containers:
+                guardrail_group_span = self._state.guardrail_containers.pop(
+                    container_key
+                )
+                if isinstance(guardrail_group_span, NonRecordingSpan):
+                    container_data = (
+                        self._state.resumed_hitl_guardrail_container_span_data
                     )
-                    if isinstance(guardrail_group_span, NonRecordingSpan):
-                        container_data = (
-                            self._state.resumed_hitl_guardrail_container_span_data
-                        )
-                        trace_id = self._state.resumed_escalation_trace_id
-                        if container_data and trace_id:
-                            container_data["attributes"]["error"] = str(error_str)
-                            self._span_factory.upsert_span_complete_by_data(
-                                trace_id=trace_id,
-                                span_data=container_data,
-                                status=SpanStatus.ERROR,
-                            )
-                    else:
-                        self._span_factory.end_span_error(guardrail_group_span, error)
-
-            # End LLM call span
-            if scope == GuardrailScope.LLM:
-                if isinstance(self._state.current_llm_span, NonRecordingSpan):
-                    llm_span_data = self._state.resumed_llm_span_data
                     trace_id = self._state.resumed_escalation_trace_id
-                    if llm_span_data and trace_id:
-                        llm_span_data["attributes"]["error"] = str(error_str)
+                    if container_data and trace_id:
+                        container_data["attributes"]["error"] = str(error_str)
                         self._span_factory.upsert_span_complete_by_data(
                             trace_id=trace_id,
-                            span_data=llm_span_data,
+                            span_data=container_data,
                             status=SpanStatus.ERROR,
                         )
-                elif self._state.current_llm_span:
-                    self._span_factory.end_span_error(
-                        self._state.current_llm_span, error
-                    )
+                else:
+                    self._span_factory.end_span_error(guardrail_group_span, error)
 
-                self._state.current_llm_span = None
-                return
-
-            # End Tool call span
-            if scope == GuardrailScope.TOOL:
-                # Use upsert_span_complete_by_data for resumed spans because they are NonRecordingSpan that can't record attributes
-                if self._state.resumed_tool_span_data and self._state.resumed_trace_id:
-                    # Add error attributes to the span data
-                    self._state.resumed_tool_span_data["attributes"]["error"] = (
-                        error_message
-                    )
+        # End LLM call span
+        if scope == GuardrailScope.LLM:
+            if isinstance(self._state.current_llm_span, NonRecordingSpan):
+                llm_span_data = self._state.resumed_llm_span_data
+                trace_id = self._state.resumed_escalation_trace_id
+                if llm_span_data and trace_id:
+                    llm_span_data["attributes"]["error"] = str(error_str)
                     self._span_factory.upsert_span_complete_by_data(
-                        trace_id=self._state.resumed_trace_id,
-                        span_data=self._state.resumed_tool_span_data,
+                        trace_id=trace_id,
+                        span_data=llm_span_data,
                         status=SpanStatus.ERROR,
                     )
-                elif self._state.current_tool_span:
-                    self._span_factory.end_span_error(
-                        self._state.current_tool_span, error
-                    )
-                    self._state.current_tool_span = None
+            elif self._state.current_llm_span:
+                self._span_factory.end_span_error(self._state.current_llm_span, error)
 
-                    # TODO: make sure we mark the agent root as error too
-                return
+            self._state.current_llm_span = None
+            return
 
-        else:
-            if eval_node_name in self._state.upcoming_guardrail_actions_info:
-                eval_span, eval_run_id = (
-                    self._state.upcoming_guardrail_actions_info.pop(eval_node_name)
+        # End Tool call span
+        if scope == GuardrailScope.TOOL:
+            # Use upsert_span_complete_by_data for resumed spans because they are NonRecordingSpan that can't record attributes
+            if self._state.resumed_tool_span_data and self._state.resumed_trace_id:
+                # Add error attributes to the span data
+                self._state.resumed_tool_span_data["attributes"]["error"] = error_str
+                self._span_factory.upsert_span_complete_by_data(
+                    trace_id=self._state.resumed_trace_id,
+                    span_data=self._state.resumed_tool_span_data,
+                    status=SpanStatus.ERROR,
                 )
-                # Remove mapping for action node run id
-                SpanHierarchyManager.pop(run_id)
-                # Remove mapping for eval node run id
-                SpanHierarchyManager.pop(eval_run_id)
-                if eval_span:
-                    self._span_factory.end_guardrail_evaluation(
-                        eval_span,
-                        action=action,
-                        severity_level=severity_level,
-                        reason=reason,
-                        excluded_fields=excluded_fields,
-                        updated_data=updated_data,
-                    )
-
-                self._track_guardrail_event(action, metadata)
-        return
+            elif self._state.current_tool_span:
+                self._span_factory.end_span_error(self._state.current_tool_span, error)
+                self._state.current_tool_span = None
+            return
 
     def _get_guardrail_eval_node_name(self, node_name: str) -> str:
         eval_node_name = node_name
@@ -712,8 +729,6 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                                 self._state.guardrail_containers[container_key]
                             )
 
-                    self._track_guardrail_event(GuardrailAction.ESCALATE, metadata)
-
         except Exception:
             logger.exception("Error in on_chain_start callback (guardrail)")
 
@@ -773,7 +788,7 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                             payload=payload,
                         )
             elif node_type == "guardrail_action":
-                self.handle_action_node(run_id, guardrail_metadata)
+                self.handle_action_end(run_id, guardrail_metadata)
 
         except Exception:
             logger.exception("Error in on_chain_end callback (guardrail)")
@@ -791,30 +806,41 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
             guardrail_metadata = self._state.guardrail_metadata.get(run_id, None)
             if guardrail_metadata is None:
                 return
+            # GraphInterrupt = suspend signal, spans kept open, but add taskUrl attribute
+            if self._is_graph_interrupt(error):
+                self._upsert_suspended_escalation(guardrail_metadata)
+                self._track_guardrail_event(
+                    GuardrailAction.ESCALATE, guardrail_metadata
+                )
+                return
 
-            # Only call _check_and_handle_action_node for BLOCK action
-            reason = guardrail_metadata.get("reason")
-            action = guardrail_metadata.get("action_type")
-            if action == GuardrailAction.BLOCK and reason is not None:
-                # Check if any error arg (as string) contains the reason text
-                error_args_str = " ".join(str(arg) for arg in error.args)
-                if reason in error_args_str:
-                    self.handle_action_node(run_id, guardrail_metadata)
-                    return
-
-            escalate_data = guardrail_metadata.get("escalation_data")
-            reviewed_by = escalate_data.get("reviewed_by") if escalate_data else None
-            if action == GuardrailAction.ESCALATE and reviewed_by is not None:
-                # Check if any error arg (as string) contains the Reject text
-                error_args_str = " ".join(str(arg) for arg in error.args)
-                if "reject" in error_args_str:
-                    self.handle_action_node(run_id, guardrail_metadata, error_args_str)
-                    return
+            error_args_str = " ".join(str(arg) for arg in error.args)
+            self.handle_action_error(run_id, guardrail_metadata, error_args_str)
+            return
 
         except Exception:
             logger.exception("Error in on_chain_error callback (guardrail)")
 
     # --- Escalation Completion ---
+
+    def _upsert_suspended_escalation(
+        self,
+        metadata: Dict[str, Any],
+    ) -> None:
+        review_task_span = self._state.pending_escalation_span
+        if not review_task_span:
+            return
+
+        escalation_data = metadata.get("escalation_data") or {}
+        assigned_to = escalation_data.get("assigned_to")
+        task_url = escalation_data.get("task_url")
+
+        if assigned_to:
+            review_task_span.set_attribute("assignedTo", assigned_to)
+        if task_url:
+            review_task_span.set_attribute("taskUrl", task_url)
+
+        self._span_factory.upsert_span_suspended(review_task_span)
 
     def _complete_resumed_escalation_from_outputs(
         self,
@@ -847,7 +873,8 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
             attrs["reviewedInputs"] = to_json_string(reviewed_inputs)
         if reviewed_outputs:
             attrs["reviewedOutputs"] = to_json_string(reviewed_outputs)
-
+        if error_str:
+            attrs["error"] = str(error_str)
         updated_span_data = dict(review_task_span_data)
         updated_span_data["attributes"] = attrs
 

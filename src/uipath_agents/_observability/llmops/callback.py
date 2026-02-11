@@ -201,6 +201,16 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
     ) -> Optional[Any]:
         return self._state.resumed_tool_span_data
 
+    def get_resumed_hitl_guardrail_container_data(
+        self,
+    ) -> Optional[Any]:
+        return self._state.resumed_hitl_guardrail_container_span_data
+
+    def get_resumed_llm_data(
+        self,
+    ) -> Optional[Any]:
+        return self._state.resumed_llm_span_data
+
     def resumed_spans_completed(self) -> bool:
         """Check if resumed tool spans were already completed."""
         return (

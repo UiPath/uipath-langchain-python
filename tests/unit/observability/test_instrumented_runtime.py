@@ -781,6 +781,278 @@ class TestInterruptibleTraceContext:
                 assert span.attributes["referenceId"] == "test-agent-id-123"
 
 
+class TestSuspendedUsesResumedDataForNonRecordingSpans:
+    """Tests that _handle_suspended prefers already-stored resumed span data
+    over re-extracting from NonRecordingSpan instances (which lack rich data).
+    """
+
+    @pytest.mark.asyncio
+    async def test_suspended_uses_resumed_container_data_instead_of_non_recording_span(
+        self, mock_delegate, tracer, callback, mock_runtime_context
+    ):
+        """After a resume, a second suspend should preserve the original rich
+        guardrail container span data rather than extracting empty data from
+        the NonRecordingSpan."""
+        from opentelemetry import trace as otel_trace
+        from opentelemetry.sdk.trace import ReadableSpan
+        from opentelemetry.trace import SpanContext, TraceFlags
+
+        stored_context = None
+
+        async def mock_save(runtime_id, context):
+            nonlocal stored_context
+            stored_context = context
+
+        async def mock_load(runtime_id):
+            return stored_context
+
+        async def mock_clear(runtime_id):
+            nonlocal stored_context
+            stored_context = None
+
+        storage = MagicMock()
+        storage.save_trace_context = AsyncMock(side_effect=mock_save)
+        storage.load_trace_context = AsyncMock(side_effect=mock_load)
+        storage.clear_trace_context = AsyncMock(side_effect=mock_clear)
+
+        # First execution: SUSPENDED
+        suspended_result = MagicMock()
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = suspended_result
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer,
+            callback,
+            mock_runtime_context,
+            trace_context_storage=storage,
+        )
+
+        # Set up escalation + guardrail HITL spans on callback to trigger
+        # the escalation code path in _handle_suspended
+        mock_escalation_span = MagicMock(spec=ReadableSpan)
+        mock_escalation_span.get_span_context.return_value = MagicMock(
+            span_id=0xAAAA, trace_id=0xBBBB
+        )
+        mock_escalation_span.name = "escalation"
+        mock_escalation_span.attributes = {"escalationType": "Escalate"}
+        mock_escalation_span.start_time = 1000
+        mock_escalation_span.parent = None
+
+        mock_eval_span = MagicMock(spec=ReadableSpan)
+        mock_eval_span.get_span_context.return_value = MagicMock(
+            span_id=0xCCCC, trace_id=0xBBBB
+        )
+        mock_eval_span.name = "guardrail_eval"
+        mock_eval_span.attributes = {"guardrailName": "pii_guard"}
+        mock_eval_span.start_time = 2000
+        mock_eval_span.parent = None
+
+        mock_container_span = MagicMock(spec=ReadableSpan)
+        mock_container_span.get_span_context.return_value = MagicMock(
+            span_id=0xDDDD, trace_id=0xBBBB
+        )
+        mock_container_span.name = "guardrail_container"
+        mock_container_span.attributes = {
+            "containerAttr": "rich_value",
+            "guardrailName": "pii_guard",
+        }
+        mock_container_span.start_time = 3000
+        mock_container_span.parent = MagicMock(span_id=0xEEEE)
+
+        callback.get_pending_escalation = MagicMock(return_value=mock_escalation_span)
+        callback.get_pending_guardrail_hitl_evaluation = MagicMock(
+            return_value=mock_eval_span
+        )
+        callback.get_pending_guardrail_hitl_container = MagicMock(
+            return_value=mock_container_span
+        )
+        callback.get_current_llm = MagicMock(return_value=None)
+        callback.get_current_tool = MagicMock(return_value=None)
+        callback.get_resumed_tool_data = MagicMock(return_value=None)
+        callback.get_resumed_hitl_guardrail_container_data = MagicMock(
+            return_value=None
+        )
+        callback.get_resumed_llm_data = MagicMock(return_value=None)
+
+        # First suspension — extracts rich data from ReadableSpan
+        await instrumented_runtime.execute({"input": "initial"}, None)
+
+        assert stored_context is not None
+        first_container_data = stored_context["pending_guardrail_hitl_container_span"]
+        assert first_container_data is not None
+        assert first_container_data["name"] == "guardrail_container"
+        assert first_container_data["attributes"]["containerAttr"] == "rich_value"
+        assert first_container_data["start_time_ns"] == 3000
+
+        # Now simulate second suspension after a resume: the container span is a
+        # NonRecordingSpan (no rich attributes), but resumed data is available.
+        non_recording_ctx = SpanContext(
+            trace_id=0xBBBB,
+            span_id=0xDDDD,
+            is_remote=True,
+            trace_flags=TraceFlags(0x01),
+        )
+        non_recording_container = otel_trace.NonRecordingSpan(non_recording_ctx)
+
+        callback.get_pending_guardrail_hitl_container = MagicMock(
+            return_value=non_recording_container
+        )
+        # Simulate the resumed data being available from the first cycle
+        callback.get_resumed_hitl_guardrail_container_data = MagicMock(
+            return_value=first_container_data
+        )
+
+        # Reset storage load so it's treated as a fresh execution (not a resume)
+        storage.load_trace_context = AsyncMock(return_value=None)
+
+        # Second suspension
+        await instrumented_runtime.execute({"input": "second_suspend"}, None)
+
+        assert stored_context is not None
+        second_container_data = stored_context["pending_guardrail_hitl_container_span"]
+        assert second_container_data is not None
+        # Should have the ORIGINAL rich data, not empty NonRecordingSpan data
+        assert second_container_data["name"] == "guardrail_container"
+        assert second_container_data["attributes"]["containerAttr"] == "rich_value"
+        assert second_container_data["start_time_ns"] == 3000
+
+    @pytest.mark.asyncio
+    async def test_suspended_uses_resumed_llm_data_instead_of_non_recording_span(
+        self, mock_delegate, tracer, callback, mock_runtime_context
+    ):
+        """After a resume, a second suspend should preserve the original rich
+        LLM span data rather than extracting empty data from the NonRecordingSpan."""
+        from opentelemetry import trace as otel_trace
+        from opentelemetry.sdk.trace import ReadableSpan
+        from opentelemetry.trace import SpanContext, TraceFlags
+
+        stored_context = None
+
+        async def mock_save(runtime_id, context):
+            nonlocal stored_context
+            stored_context = context
+
+        async def mock_load(runtime_id):
+            return stored_context
+
+        async def mock_clear(runtime_id):
+            nonlocal stored_context
+            stored_context = None
+
+        storage = MagicMock()
+        storage.save_trace_context = AsyncMock(side_effect=mock_save)
+        storage.load_trace_context = AsyncMock(side_effect=mock_load)
+        storage.clear_trace_context = AsyncMock(side_effect=mock_clear)
+
+        # First execution: SUSPENDED
+        suspended_result = MagicMock()
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = suspended_result
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer,
+            callback,
+            mock_runtime_context,
+            trace_context_storage=storage,
+        )
+
+        # Set up escalation + guardrail HITL + LLM spans
+        mock_escalation_span = MagicMock(spec=ReadableSpan)
+        mock_escalation_span.get_span_context.return_value = MagicMock(
+            span_id=0xAAAA, trace_id=0xBBBB
+        )
+        mock_escalation_span.name = "escalation"
+        mock_escalation_span.attributes = {}
+        mock_escalation_span.start_time = 1000
+        mock_escalation_span.parent = None
+
+        mock_eval_span = MagicMock(spec=ReadableSpan)
+        mock_eval_span.get_span_context.return_value = MagicMock(
+            span_id=0xCCCC, trace_id=0xBBBB
+        )
+        mock_eval_span.name = "guardrail_eval"
+        mock_eval_span.attributes = {}
+        mock_eval_span.start_time = 2000
+        mock_eval_span.parent = None
+
+        mock_container_span = MagicMock(spec=ReadableSpan)
+        mock_container_span.get_span_context.return_value = MagicMock(
+            span_id=0xDDDD, trace_id=0xBBBB
+        )
+        mock_container_span.name = "container"
+        mock_container_span.attributes = {}
+        mock_container_span.start_time = 3000
+        mock_container_span.parent = None
+
+        mock_llm_span = MagicMock(spec=ReadableSpan)
+        mock_llm_span.get_span_context.return_value = MagicMock(
+            span_id=0xFFFF, trace_id=0xBBBB
+        )
+        mock_llm_span.name = "llm_call"
+        mock_llm_span.attributes = {
+            "llm.model": "gpt-4o",
+            "llm.token_count": 150,
+        }
+        mock_llm_span.start_time = 4000
+        mock_llm_span.parent = MagicMock(span_id=0x1111)
+
+        callback.get_pending_escalation = MagicMock(return_value=mock_escalation_span)
+        callback.get_pending_guardrail_hitl_evaluation = MagicMock(
+            return_value=mock_eval_span
+        )
+        callback.get_pending_guardrail_hitl_container = MagicMock(
+            return_value=mock_container_span
+        )
+        callback.get_current_llm = MagicMock(return_value=mock_llm_span)
+        callback.get_current_tool = MagicMock(return_value=None)
+        callback.get_resumed_tool_data = MagicMock(return_value=None)
+        callback.get_resumed_hitl_guardrail_container_data = MagicMock(
+            return_value=None
+        )
+        callback.get_resumed_llm_data = MagicMock(return_value=None)
+
+        # First suspension — extracts rich data from ReadableSpan
+        await instrumented_runtime.execute({"input": "initial"}, None)
+
+        assert stored_context is not None
+        first_llm_data = stored_context["pending_llm_span"]
+        assert first_llm_data is not None
+        assert first_llm_data["name"] == "llm_call"
+        assert first_llm_data["attributes"]["llm.model"] == "gpt-4o"
+        assert first_llm_data["attributes"]["llm.token_count"] == 150
+        assert first_llm_data["start_time_ns"] == 4000
+
+        # Now simulate second suspension: LLM span is NonRecordingSpan
+        non_recording_ctx = SpanContext(
+            trace_id=0xBBBB,
+            span_id=0xFFFF,
+            is_remote=True,
+            trace_flags=TraceFlags(0x01),
+        )
+        non_recording_llm = otel_trace.NonRecordingSpan(non_recording_ctx)
+
+        callback.get_current_llm = MagicMock(return_value=non_recording_llm)
+        # Simulate resumed data available from first cycle
+        callback.get_resumed_llm_data = MagicMock(return_value=first_llm_data)
+
+        # Reset storage load so it's treated as a fresh execution
+        storage.load_trace_context = AsyncMock(return_value=None)
+
+        # Second suspension
+        await instrumented_runtime.execute({"input": "second_suspend"}, None)
+
+        assert stored_context is not None
+        second_llm_data = stored_context["pending_llm_span"]
+        assert second_llm_data is not None
+        # Should have the ORIGINAL rich data, not empty NonRecordingSpan data
+        assert second_llm_data["name"] == "llm_call"
+        assert second_llm_data["attributes"]["llm.model"] == "gpt-4o"
+        assert second_llm_data["attributes"]["llm.token_count"] == 150
+        assert second_llm_data["start_time_ns"] == 4000
+
+
 class TestUpsertSpanOnSuspend:
     """Tests for upsert span calls during suspend."""
 
