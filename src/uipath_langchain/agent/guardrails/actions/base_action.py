@@ -1,11 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Sequence, Union
 
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 GuardrailActionNode = tuple[str, Any]
+
+# A single node or an ordered sequence of nodes that will be chained with edges.
+# When a sequence is returned the first node is the entry-point (the one the
+# guardrail evaluation node routes to on failure) and the **last** node gets the
+# outgoing edge to `next_node`.
+GuardrailActionNodes = Union[GuardrailActionNode, Sequence[GuardrailActionNode]]
 
 
 class GuardrailAction(ABC):
@@ -25,6 +31,11 @@ class GuardrailAction(ABC):
         scope: GuardrailScope,
         execution_stage: ExecutionStage,
         guarded_component_name: str,
-    ) -> GuardrailActionNode:
-        """Create and return the Action node to execute on validation failure."""
+    ) -> GuardrailActionNodes:
+        """Create and return the Action node(s) to execute on validation failure.
+
+        May return a single ``(name, callable)`` tuple or an ordered sequence of
+        such tuples.  When a sequence is returned the nodes will be chained
+        together with edges in the subgraph (first → second → … → next_node).
+        """
         ...
