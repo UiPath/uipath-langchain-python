@@ -20,6 +20,7 @@ from uipath_langchain.agent.tools.mcp import create_mcp_tools_from_agent
 from .config import AgentExecutionType, get_thinking_messages_limit
 from .llm_utils import create_llm
 from .message_utils import create_message_factory
+from .session_info_debug_state import SessionInfoDebugStateFactory
 
 AGENT_MAX_ITERATIONS_DEFAULT = 25
 
@@ -53,7 +54,16 @@ async def build_agent_graph(
         byo_connection_id=byo_connection_id,
     )
     tools = await create_tools_from_resources(agent_definition, llm)
-    mcp_tools, mcp_clients = await create_mcp_tools_from_agent(agent_definition)
+    session_info_factory = (
+        SessionInfoDebugStateFactory()
+        if execution_type == AgentExecutionType.PLAYGROUND
+        else None
+    )
+    mcp_tools, mcp_clients = await create_mcp_tools_from_agent(
+        agent_definition,
+        session_info_factory=session_info_factory,
+        terminate_on_close=execution_type != AgentExecutionType.PLAYGROUND,
+    )
     tools.extend(mcp_tools)
     input_model = resolve_input_model(agent_definition.input_schema)
     output_model = resolve_output_model(agent_definition.output_schema)
