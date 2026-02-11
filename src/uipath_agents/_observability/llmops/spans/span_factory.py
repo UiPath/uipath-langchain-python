@@ -65,6 +65,7 @@ class LlmOpsSpanFactory:
         self._agent_schema = AgentSpanSchema(
             self._tracer,
             upsert_started_fn=self.upsert_span_started,
+            upsert_complete_fn=self.upsert_span_complete,
         )
         self._llm_schema = LlmSpanSchema(
             self._tracer,

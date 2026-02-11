@@ -814,11 +814,12 @@ class TestUpsertSpanOnSuspend:
 
         await instrumented_runtime.execute({"input": "test"}, None)
 
-        # 2 upserts: agent start + agent suspended
-        assert mock_exporter.upsert_span.call_count == 2
-        # All upserts use UNSET status
-        for call in mock_exporter.upsert_span.call_args_list:
-            assert call[1]["status_override"] == 0  # UNSET
+        # 3 upserts: agent start (UNSET) + agent suspended (UNSET) + agent end (OK)
+        assert mock_exporter.upsert_span.call_count == 3
+        calls = mock_exporter.upsert_span.call_args_list
+        assert calls[0][1]["status_override"] == 0  # UNSET
+        assert calls[1][1]["status_override"] == 0  # UNSET
+        assert calls[2][1]["status_override"] == 1  # OK
 
     @pytest.mark.asyncio
     async def test_handle_suspended_upserts_pending_tool_and_process_spans(
@@ -869,8 +870,8 @@ class TestUpsertSpanOnSuspend:
 
         await instrumented_runtime.execute({"input": "test"}, None)
 
-        # 4 upserts: agent start + process suspended + tool suspended + agent suspended
-        assert mock_exporter.upsert_span.call_count == 4
+        # 5 upserts: agent start + process suspended + tool suspended + agent suspended + agent end
+        assert mock_exporter.upsert_span.call_count == 5
 
 
 class TestGetAgentModel:

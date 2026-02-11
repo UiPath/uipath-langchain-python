@@ -712,6 +712,36 @@ class TestLiveUpdatesUpsert:
             call_args = mock_exporter.upsert_span.call_args
             assert call_args[1]["status_override"] == SpanStatus.UNSET
 
+    def test_start_agent_run_upserts_complete_on_exit(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test agent run upserts with OK status after span ends."""
+        mock_exporter.reset_mock()
+
+        with tracer_with_exporter.start_agent_run(agent_name="TestAgent"):
+            pass
+
+        # 2 calls: UNSET at start, OK at end
+        assert mock_exporter.upsert_span.call_count == 2
+        calls = mock_exporter.upsert_span.call_args_list
+        assert calls[0][1]["status_override"] == SpanStatus.UNSET
+        assert calls[1][1]["status_override"] == SpanStatus.OK
+
+    def test_start_agent_run_upserts_complete_on_error(
+        self, tracer_with_exporter, mock_exporter, span_exporter
+    ):
+        """Test agent run upserts with ERROR status on exception."""
+        mock_exporter.reset_mock()
+
+        with pytest.raises(ValueError):
+            with tracer_with_exporter.start_agent_run(agent_name="FailAgent"):
+                raise ValueError("boom")
+
+        assert mock_exporter.upsert_span.call_count == 2
+        calls = mock_exporter.upsert_span.call_args_list
+        assert calls[0][1]["status_override"] == SpanStatus.UNSET
+        assert calls[1][1]["status_override"] == SpanStatus.ERROR
+
     def test_no_upsert_when_exporter_not_configured(self, tracer, span_exporter):
         """Test no upsert calls when exporter is not configured."""
         span = tracer.start_tool_call("test_tool")

@@ -14,7 +14,7 @@ from opentelemetry.trace import (
     StatusCode,
     Tracer,
 )
-from uipath.tracing import AttachmentDirection
+from uipath.tracing import AttachmentDirection, SpanStatus
 
 from ...instrumentors.attribute_helpers import get_span_attachments
 from ..span_attributes import (
@@ -36,15 +36,18 @@ class AgentSpanSchema:
         self,
         tracer: Tracer,
         upsert_started_fn: Optional[Callable[[Span], bool]] = None,
+        upsert_complete_fn: Optional[Callable[[Span, int], bool]] = None,
     ):
         """Initialize agent span schema.
 
         Args:
             tracer: The OpenTelemetry tracer to use
             upsert_started_fn: Optional function to upsert span on start
+            upsert_complete_fn: Optional function to upsert span on complete
         """
         self._tracer = tracer
         self._upsert_started = upsert_started_fn
+        self._upsert_complete = upsert_complete_fn
 
     @contextmanager
     def start_agent_run(
@@ -102,11 +105,14 @@ class AgentSpanSchema:
             attachments=attachments,
         )
 
+        agent_span: Optional[Span] = None
+        final_status: int = SpanStatus.OK
         try:
             with self._tracer.start_as_current_span(
                 span_name,
                 kind=SpanKind.INTERNAL,
             ) as span:
+                agent_span = span
                 apply_attributes(span, attrs)
                 if self._upsert_started:
                     self._upsert_started(span)
@@ -120,11 +126,16 @@ class AgentSpanSchema:
                         json.dumps({"message": str(e), "type": type(e).__name__}),
                     )
                     span.set_status(Status(StatusCode.ERROR, str(e)))
+                    final_status = SpanStatus.ERROR
                     raise
+            # span.end() called by start_as_current_span exit
         finally:
             # Reset context variables when agent run completes
             reference_id_context.reset(token)
             uipath_source_context.reset(source_token)
+            # Synchronous upsert with correct end_time
+            if self._upsert_complete and agent_span is not None:
+                self._upsert_complete(agent_span, final_status)
 
     def emit_agent_output(
         self, output: Any, output_schema: Optional[Dict[str, Any]] = None
