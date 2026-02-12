@@ -634,12 +634,11 @@ class TestMcpToolInvocation:
         )
 
         # Verify result is returned (content attribute of CallToolResult)
-        # Result is a list of TextContent objects from MCP SDK
+        # Result is a list of dicts (model_dump'd TextContent objects)
         assert result is not None
         assert len(result) == 1
-        # TextContent has .type and .text attributes (not dict subscript)
-        assert result[0].type == "text"
-        assert "Success from search_tool" in result[0].text
+        assert result[0]["type"] == "text"
+        assert "Success from search_tool" in result[0]["text"]
 
         # Verify MCP protocol flow
         assert "initialize" in method_call_sequence
@@ -647,6 +646,73 @@ class TestMcpToolInvocation:
         assert "tools/call" in method_call_sequence
 
         logger.info(f"Method sequence: {method_call_sequence}")
+
+
+class TestMcpToolResultSerialization:
+    """Test that tool_fn properly serializes different result types."""
+
+    @pytest.fixture
+    def mcp_tool(self):
+        return AgentMcpTool(
+            name="test_tool",
+            description="Test tool",
+            input_schema={"type": "object", "properties": {}},
+        )
+
+    @pytest.mark.asyncio
+    async def test_single_object_with_model_dump(self, mcp_tool):
+        """Test that a single result object with model_dump is serialized."""
+        from uipath_langchain.agent.tools.mcp.mcp_tool import build_mcp_tool
+
+        mock_content = MagicMock()
+        mock_content.model_dump.return_value = {"type": "text", "text": "hello"}
+
+        mock_result = MagicMock()
+        mock_result.content = mock_content
+
+        mock_client = MagicMock(spec=McpClient)
+        mock_client.call_tool = AsyncMock(return_value=mock_result)
+
+        tool_fn = build_mcp_tool(mcp_tool, mock_client)
+        result = await tool_fn()
+
+        assert result == {"type": "text", "text": "hello"}
+        mock_content.model_dump.assert_called_once_with(exclude_none=True)
+
+    @pytest.mark.asyncio
+    async def test_list_of_objects_with_model_dump(self, mcp_tool):
+        """Test that a list of result objects with model_dump are serialized."""
+        from uipath_langchain.agent.tools.mcp.mcp_tool import build_mcp_tool
+
+        mock_item = MagicMock()
+        mock_item.model_dump.return_value = {"type": "text", "text": "item1"}
+
+        mock_result = MagicMock()
+        mock_result.content = [mock_item]
+
+        mock_client = MagicMock(spec=McpClient)
+        mock_client.call_tool = AsyncMock(return_value=mock_result)
+
+        tool_fn = build_mcp_tool(mcp_tool, mock_client)
+        result = await tool_fn()
+
+        assert result == [{"type": "text", "text": "item1"}]
+
+    @pytest.mark.asyncio
+    async def test_plain_value_returned_as_is(self, mcp_tool):
+        """Test that a plain value without model_dump is returned as-is."""
+        from uipath_langchain.agent.tools.mcp.mcp_tool import build_mcp_tool
+
+        mock_result = MagicMock()
+        mock_result.content = "plain string"
+
+        mock_client = MagicMock(spec=McpClient)
+        mock_client.call_tool = AsyncMock(return_value=mock_result)
+
+        tool_fn = build_mcp_tool(mcp_tool, mock_client)
+        result = await tool_fn()
+
+        assert result == "plain string"
 
 
 class TestMcpToolNameSanitization:

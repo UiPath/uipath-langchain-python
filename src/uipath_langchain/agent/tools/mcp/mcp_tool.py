@@ -162,7 +162,17 @@ def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
         """
         result = await mcpClient.call_tool(mcp_tool.name, arguments=kwargs)
         logger.info(f"Tool call successful for {mcp_tool.name}")
-        return result.content if hasattr(result, "content") else result
+        content = result.content if hasattr(result, "content") else result
+        if isinstance(content, list):
+            return [
+                item.model_dump(exclude_none=True)
+                if hasattr(item, "model_dump")
+                else item
+                for item in content
+            ]
+        if hasattr(content, "model_dump"):
+            return content.model_dump(exclude_none=True)
+        return content
 
     return tool_fn
 
