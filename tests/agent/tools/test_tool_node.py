@@ -5,6 +5,7 @@ from typing import Any, Dict
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.messages.tool import ToolCall, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import BaseModel
@@ -133,7 +134,7 @@ class TestUiPathToolNode:
         """Test basic tool execution without wrappers."""
         node = UiPathToolNode(mock_tool)
 
-        result = node._func(mock_state)
+        result = node._func(mock_state, RunnableConfig())
 
         assert result is not None
         assert isinstance(result, dict)
@@ -150,7 +151,7 @@ class TestUiPathToolNode:
         """Test asynchronous tool execution without wrappers."""
         node = UiPathToolNode(mock_tool)
 
-        result = await node._afunc(mock_state)
+        result = await node._afunc(mock_state, RunnableConfig())
 
         assert result is not None
         assert isinstance(result, dict)
@@ -167,7 +168,7 @@ class TestUiPathToolNode:
         """Test tool execution with synchronous wrapper."""
         node = UiPathToolNode(mock_tool, wrapper=mock_wrapper)
 
-        result = node._func(mock_state)
+        result = node._func(mock_state, RunnableConfig())
 
         assert result is not None
         assert isinstance(result, dict)
@@ -184,7 +185,7 @@ class TestUiPathToolNode:
         """Test tool execution with asynchronous wrapper."""
         node = UiPathToolNode(mock_tool, awrapper=mock_awrapper)
 
-        result = await node._afunc(mock_state)
+        result = await node._afunc(mock_state, RunnableConfig())
 
         assert result is not None
         assert isinstance(result, dict)
@@ -201,7 +202,7 @@ class TestUiPathToolNode:
         """Test wrapper that returns a Command instead of a dict."""
         node = UiPathToolNode(mock_tool, wrapper=mock_wrapper_with_command)
 
-        result = node._func(mock_state)
+        result = node._func(mock_state, RunnableConfig())
 
         assert isinstance(result, Command)
         assert result.goto == "next_node"
@@ -210,7 +211,7 @@ class TestUiPathToolNode:
         """Test that missing tool calls return None."""
         node = UiPathToolNode(mock_tool)
 
-        result = node._func(empty_state)
+        result = node._func(empty_state, RunnableConfig())
 
         assert result is None
 
@@ -218,7 +219,7 @@ class TestUiPathToolNode:
         """Test that missing AI messages return None."""
         node = UiPathToolNode(mock_tool)
 
-        result = node._func(non_ai_state)
+        result = node._func(non_ai_state, RunnableConfig())
 
         assert result is None
 
@@ -229,7 +230,7 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(mock_tool)
 
-        result = node._func(mock_state)
+        result = node._func(mock_state, RunnableConfig())
 
         assert result is None
 
@@ -239,7 +240,7 @@ class TestUiPathToolNode:
         """Test that sequential execution finds the correct tool call to execute."""
         node = UiPathToolNode(mock_tool)
 
-        result = node._func(sequential_execution_state)
+        result = node._func(sequential_execution_state, RunnableConfig())
 
         assert result is not None
         assert isinstance(result, dict)
@@ -276,7 +277,7 @@ class TestUiPathToolNode:
             ValueError,
             match="Wrapper state parameter must be a pydantic BaseModel subclass",
         ):
-            node._func(mock_state)
+            node._func(mock_state, RunnableConfig())
 
 
 class TestToolWrapperMixin:
