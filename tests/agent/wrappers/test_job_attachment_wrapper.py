@@ -88,7 +88,7 @@ class TestGetJobAttachmentWrapper:
         """Create a mock tool."""
         tool = MagicMock(spec=BaseTool)
 
-        async def ainvoke_side_effect(call, config=None):
+        async def ainvoke_side_effect(call):
             tool_message = ToolMessage(
                 content="{'result': 'success'}", tool_call_id=call.get("id", "call_123")
             )
@@ -138,7 +138,7 @@ class TestGetJobAttachmentWrapper:
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
-        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call, config=None)
+        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call)
 
     @pytest.mark.asyncio
     async def test_tool_with_dict_args_schema(
@@ -152,7 +152,7 @@ class TestGetJobAttachmentWrapper:
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
-        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call, config=None)
+        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call)
 
     @pytest.mark.asyncio
     async def test_tool_with_non_basemodel_schema(
@@ -166,7 +166,7 @@ class TestGetJobAttachmentWrapper:
 
         assert isinstance(result, Command)
         self.assert_command_success(result)
-        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call, config=None)
+        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call)
 
     @pytest.mark.asyncio
     @patch(
@@ -189,7 +189,7 @@ class TestGetJobAttachmentWrapper:
         assert isinstance(result, Command)
         self.assert_command_success(result)
         mock_get_paths.assert_called_once_with(MockAttachmentSchema)
-        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call, config=None)
+        mock_tool.ainvoke.assert_awaited_once_with(mock_tool_call)
 
     @pytest.mark.asyncio
     @patch(

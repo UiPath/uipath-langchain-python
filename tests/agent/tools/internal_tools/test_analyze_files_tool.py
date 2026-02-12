@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field
 from uipath.agent.models.agent import (
     AgentInternalAnalyzeFilesToolProperties,
@@ -126,9 +125,7 @@ class TestCreateAnalyzeFileTool:
         )
 
         assert tool.coroutine is not None
-        config = RunnableConfig()
         result = await tool.coroutine(
-            config=config,
             analysisTask="Summarize the document",
             attachments=[mock_attachment],
         )
@@ -149,13 +146,12 @@ class TestCreateAnalyzeFileTool:
         assert len(files_arg) == 1
         assert files_arg[0].url == "https://example.com/file.pdf"
 
-        # Verify llm.ainvoke was called with config forwarded
+        # Verify llm.ainvoke was called with correct messages
         ainvoke_call_args = mock_llm.ainvoke.call_args
         messages_arg = ainvoke_call_args[0][0]
         assert len(messages_arg) == 2
         assert messages_arg[0].content == ANALYZE_FILES_SYSTEM_MESSAGE
         assert messages_arg[1] == mock_message_with_files
-        assert ainvoke_call_args[1]["config"] is config
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"

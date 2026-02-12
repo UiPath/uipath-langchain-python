@@ -5,8 +5,6 @@ from inspect import signature
 from typing import Any, Awaitable, Callable, Literal
 
 from langchain_core.messages.tool import ToolCall, ToolMessage
-from langchain_core.runnables import RunnableConfig
-from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
@@ -69,36 +67,26 @@ class UiPathToolNode(RunnableCallable):
         self.wrapper = wrapper
         self.awrapper = awrapper
 
-    def _func(self, state: AgentGraphState, config: RunnableConfig) -> OutputType:
+    def _func(self, state: AgentGraphState) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
             return None
         if self.wrapper:
             inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
-            token = var_child_runnable_config.set(config)
-            try:
-                result = self.wrapper(*inputs)
-            finally:
-                var_child_runnable_config.reset(token)
+            result = self.wrapper(*inputs)
         else:
-            result = self.tool.invoke(call, config=config)
+            result = self.tool.invoke(call)
         return self._process_result(call, result)
 
-    async def _afunc(
-        self, state: AgentGraphState, config: RunnableConfig
-    ) -> OutputType:
+    async def _afunc(self, state: AgentGraphState) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
             return None
         if self.awrapper:
             inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
-            token = var_child_runnable_config.set(config)
-            try:
-                result = await self.awrapper(*inputs)
-            finally:
-                var_child_runnable_config.reset(token)
+            result = await self.awrapper(*inputs)
         else:
-            result = await self.tool.ainvoke(call, config=config)
+            result = await self.tool.ainvoke(call)
         return self._process_result(call, result)
 
     def _extract_tool_call(self, state: AgentGraphState) -> ToolCall | None:

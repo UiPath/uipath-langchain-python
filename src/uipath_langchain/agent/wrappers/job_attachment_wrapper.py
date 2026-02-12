@@ -2,7 +2,6 @@ import json
 from typing import Any
 
 from langchain_core.messages.tool import ToolCall
-from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import BaseModel
@@ -86,8 +85,7 @@ def get_job_attachment_wrapper(
             if errors:
                 return {"error": "\n".join(errors)}
         call["args"] = modified_input_args
-        config = var_child_runnable_config.get(None)
-        tool_result = await tool.ainvoke(call, config=config)
+        tool_result = await tool.ainvoke(call)
         job_attachments_dict = {}
         if output_type is not None:
             job_attachments = get_job_attachments(
