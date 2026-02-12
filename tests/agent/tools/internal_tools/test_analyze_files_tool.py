@@ -45,6 +45,7 @@ class TestCreateAnalyzeFileTool:
         """Fixture for mock LLM."""
         llm = AsyncMock()
         llm.ainvoke = AsyncMock(return_value=AIMessage(content="Analyzed result"))
+        llm.model_copy = Mock(return_value=llm)
         return llm
 
     @pytest.fixture
