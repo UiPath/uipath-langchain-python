@@ -15,7 +15,7 @@ from uipath.agent.models.agent import (
 from uipath.platform.context_grounding import (
     BatchTransformResponse,
     CitationMode,
-    DeepRagResponse,
+    DeepRagContent,
 )
 
 from uipath_langchain.agent.tools.context_tool import (
@@ -80,7 +80,10 @@ class TestHandleDeepRag:
         assert result.name == "test_deep_rag"
         assert result.description == "Test Deep RAG tool"
         assert result.args_schema is None
-        assert result.output_type == DeepRagResponse
+        assert issubclass(result.output_type, DeepRagContent)
+        schema = result.output_type.model_json_schema()
+        assert "deepRagId" in schema["properties"]
+        assert schema["properties"]["deepRagId"]["type"] == "string"
 
     def test_missing_query_object_raises_error(self, base_resource_config):
         """Test that missing query object raises ValueError."""
@@ -227,7 +230,7 @@ class TestHandleDeepRag:
         assert result.name == "test_deep_rag"
         assert result.description == "Test Deep RAG tool"
         assert result.args_schema is not None  # Dynamic has input schema
-        assert result.output_type == DeepRagResponse
+        assert issubclass(result.output_type, DeepRagContent)
 
     def test_dynamic_query_deep_rag_has_query_parameter(self, base_resource_config):
         """Test that dynamic Deep RAG tool has query parameter in schema."""
@@ -329,7 +332,7 @@ class TestCreateContextTool:
         assert isinstance(result, StructuredToolWithOutputType)
         assert result.name == "test_deep_rag"
         assert result.args_schema is None  # Deep RAG has no input schema
-        assert result.output_type == DeepRagResponse
+        assert issubclass(result.output_type, DeepRagContent)
 
     def test_case_insensitive_retrieval_mode(self, deep_rag_config):
         """Test that retrieval mode matching is case-insensitive."""
