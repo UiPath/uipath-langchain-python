@@ -2,7 +2,7 @@
 
 > **CLAUDE: UPDATE THIS DOCUMENT**
 >
-> When you modify `mcp_client.py` or `mcp_tool.py` (MCP-related code), you MUST update this document to reflect:
+> When you modify files in this module, you MUST update this document to reflect:
 > - New or changed class attributes/methods (update Architecture section)
 > - Changes to initialization phases (update Two-Phase Initialization section)
 > - New error codes (update Session Error Codes table)
@@ -13,35 +13,153 @@
 
 ## Overview
 
-This document describes the MCP (Model Context Protocol) session management implementation in `mcp_client.py` and tool factory functions in `mcp_tool.py`. Use this as a reference when modifying MCP-related code.
+This module implements MCP (Model Context Protocol) session management and tool
+factory functions.  It connects LangGraph agents to UiPath MCP servers via
+streamable HTTP transport and provides a factory pattern for session ID tracking.
 
 ## Module Structure
 
 ```
 src/uipath_langchain/agent/tools/mcp/
 ├── __init__.py          # Public exports
-├── mcp_client.py        # McpClient class (session management)
-└── mcp_tool.py          # Tool factory functions
+├── mcp_client.py        # SessionInfoFactory, McpClient
+├── mcp_tool.py          # Tool factory functions
+└── streamable_http.py   # SessionInfo, StreamableHTTPTransport (copied from MCP SDK)
 ```
 
 ### Public Exports (`__init__.py`)
 
 ```python
-from .mcp_client import McpClient
+from .mcp_client import McpClient, SessionInfoFactory
 from .mcp_tool import (
-    create_mcp_tools,                           # Context manager for live sessions
-    create_mcp_tools_from_agent,                # Factory from LowCodeAgentDefinition
-    create_mcp_tools_from_metadata_for_mcp_server,  # Factory from config + McpClient
+    create_mcp_tools,
+    create_mcp_tools_from_agent,
+    create_mcp_tools_from_metadata_for_mcp_server,
 )
+from .streamable_http import SessionInfo
 ```
+
+`streamable_http_client` is intentionally **not** exported — it is an internal
+transport helper used only by `McpClient`.
 
 ## Architecture
 
+### streamable_http.py — Local Copy of MCP SDK Transport
+
+This file is a local copy of the **client-side** streamable HTTP transport from
+the MCP Python SDK, adapted for session ID tracking via `SessionInfo`.
+
+**Source**: [`mcp.client.streamable_http`](https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/client/streamable_http.py)
+
+**Why a local copy?**
+
+The upstream SDK transport has no hook for observing or injecting session IDs.
+We need this to support session persistence (e.g. debug state for playground
+mode).  The local copy adds a `SessionInfo` parameter that receives session ID
+updates from the server.
+
+**Key differences from the upstream SDK:**
+
+1. **`SessionInfo` class added** — base class for session ID tracking, defined
+   at the top of the file.  The transport delegates all session ID storage to
+   this object via async methods.
+2. **Transport does not own session state** — `StreamableHTTPTransport` has no
+   `self.session_id`.  All reads/writes go through `self._session_info`.
+3. **`_prepare_headers` is async** — because it calls
+   `await self._session_info.get_session_id()`.
+4. **`_maybe_extract_session_id_from_response` is async** — calls
+   `await self._session_info.set_session_id()` so subclasses can persist.
+5. **`RequestContext` has no `session_id` field** — it was unused upstream
+   (headers are built from `_prepare_headers`, not from the context).
+6. **`streamable_http_client` accepts `session_info` parameter** — passed
+   through to the transport constructor.
+7. **Returns 2 values, not 3** — yields `(read_stream, write_stream)` instead
+   of the SDK's `(read_stream, write_stream, get_session_id_callback)`.
+
+**What was kept identical:**
+
+The overall request/response flow, SSE handling, reconnection logic, POST/GET
+patterns, and error handling are structurally the same as the upstream SDK.
+When updating, diff against the upstream source to understand what changed.
+
+#### SessionInfo
+
+Base class for MCP session ID tracking.  Lives in `streamable_http.py`.
+
+```python
+class SessionInfo:
+    def __init__(self, session_id: str | None = None) -> None:
+        self.session_id = session_id
+
+    async def get_session_id(self) -> str | None: ...
+    async def set_session_id(self, session_id: str) -> None: ...
+```
+
+The base implementation stores session ID in a plain attribute.  Async methods
+exist so subclasses (e.g. `SessionInfoDebugState` in `uipath-agents`) can add
+side-effects like HTTP persistence.
+
+**Important:** The transport calls `set_session_id` during `initialize()` when
+the server assigns a session ID.  `McpClient._initialize_session` then reads
+the value via `get_session_id` — it does not call `set_session_id` again.
+
+#### StreamableHTTPTransport
+
+Handles the MCP streamable HTTP protocol: POST for requests, GET for
+server-initiated SSE streams, reconnection with `Last-Event-ID`, and session
+termination via DELETE.
+
+Key methods:
+
+| Method | Description |
+|--------|-------------|
+| `_prepare_headers()` | **async** — builds headers with session ID from `SessionInfo` |
+| `_maybe_extract_session_id_from_response()` | **async** — extracts session ID from response, calls `set_session_id` |
+| `_handle_post_request()` | POST with JSON or SSE response handling |
+| `handle_get_stream()` | GET SSE listener with auto-reconnect |
+| `_handle_reconnection()` | Recursive reconnect with `Last-Event-ID` |
+| `post_writer()` | Main write loop, dispatches requests to server |
+| `terminate_session()` | Sends DELETE to end the session |
+| `get_session_id()` | **async** — delegates to `SessionInfo.get_session_id` |
+
+#### streamable_http_client (context manager)
+
+Internal async context manager that wires up `StreamableHTTPTransport` with
+memory streams and a task group.  Used by `McpClient._initialize_client`.
+
+```python
+async with streamable_http_client(url, http_client=client, session_info=info) as (read, write):
+    session = ClientSession(read, write)
+```
+
+---
+
+### SessionInfoFactory
+
+Default factory in `mcp_client.py`.  Creates plain `SessionInfo` instances.
+
+```python
+class SessionInfoFactory:
+    def create_session(self, mcp_server: McpServer) -> SessionInfo:
+        logger.info(f"Creating session for server '{mcp_server.slug}' in folder '{mcp_server.folder_key}'")
+        return SessionInfo()
+```
+
+Subclass this to provide custom `SessionInfo` implementations.  The factory
+receives the full `McpServer` model (from `uipath.platform.orchestrator.mcp`)
+so subclasses can extract slug, folder_key, or other metadata.
+
+**Note:** `SessionInfoDebugState` and `SessionInfoDebugStateFactory` live in
+`uipath-agents-python` at
+`uipath_agents.agent_graph_builder.session_info_debug_state`, not in this
+package.  They import `SessionInfo` and `SessionInfoFactory` from here.
+
 ### McpClient Class
 
-`McpClient` implements `UiPathDisposableProtocol` and manages the lifecycle of MCP connections for tool invocations with **two distinct initialization phases**:
+`McpClient` implements `UiPathDisposableProtocol` and manages the lifecycle of
+MCP connections for tool invocations with **two distinct initialization phases**:
 
-1. **Client Initialization** (first call): Retrieves MCP server URL via SDK, then full stack creation
+1. **Client Initialization** (first call): Retrieves MCP server URL via SDK, creates the full stack
 2. **Session Reinitialization** (on 404): Lightweight, reuses existing client
 
 ```
@@ -53,6 +171,7 @@ from .mcp_tool import (
 │  _config: AgentMcpResourceConfig  # Contains slug, folder   │
 │  _timeout: httpx.Timeout                                    │
 │  _max_retries: int                                          │
+│  _session_info_factory: SessionInfoFactory                  │
 ├─────────────────────────────────────────────────────────────┤
 │  Lazy-Resolved State (set during _initialize_client)        │
 │  ───────────────────────────────────────────────────        │
@@ -68,7 +187,7 @@ from .mcp_tool import (
 │  _http_client: httpx.AsyncClient | None                     │
 │  _read_stream: MemoryObjectReceiveStream | None             │
 │  _write_stream: MemoryObjectSendStream | None               │
-│  _get_session_id: GetSessionIdCallback | None               │
+│  _session_info: SessionInfo | None                          │
 │  _stack: AsyncExitStack | None                              │
 │  _client_initialized: bool                                  │
 ├─────────────────────────────────────────────────────────────┤
@@ -94,37 +213,39 @@ from .mcp_tool import (
 └─────────────────────────────────────────────────────────────┘
 ```
 
+#### Session ID Flow
+
+During client initialization, `McpClient`:
+
+1. Retrieves the `McpServer` from the UiPath SDK
+2. Calls `self._session_info_factory.create_session(mcp_server)` to get a `SessionInfo`
+3. Loads any existing session ID via `await session_info.get_session_id()`
+4. Passes the `SessionInfo` to the local `streamable_http_client`
+5. Calls `session.initialize()` — the transport calls `set_session_id` internally
+6. Reads the new session ID via `await session_info.get_session_id()`
+
+On session reinitialization (404 retry), only steps 5-6 repeat.
+
 ### Tool Factory Functions
 
-#### `create_mcp_tools_from_agent(agent)` → `tuple[list[BaseTool], list[McpClient]]`
+#### `create_mcp_tools_from_agent(agent, session_info_factory)` → `tuple[list[BaseTool], list[McpClient]]`
 
 **Primary factory function** for creating MCP tools from a LowCodeAgentDefinition.
 
 ```python
 async def create_mcp_tools_from_agent(
     agent: LowCodeAgentDefinition,
+    session_info_factory: SessionInfoFactory | None = None,
 ) -> tuple[list[BaseTool], list[McpClient]]:
-    """Create MCP tools from a LowCodeAgentDefinition.
-
-    Iterates over all MCP resources in the agent definition and creates tools
-    for each enabled MCP server. Each MCP server gets its own McpClient instance.
-
-    The MCP server URL is loaded lazily on first tool call via the UiPath SDK,
-    using environment variables (UIPATH_URL, UIPATH_ACCESS_TOKEN).
-
-    Returns:
-        A tuple of (tools, mcp_clients) where:
-        - tools: List of BaseTool instances for all MCP resources
-        - mcp_clients: List of McpClient instances that need to be disposed when done
-
-    Note:
-        The caller is responsible for closing the McpClient instances when done.
-    """
 ```
+
+The `session_info_factory` parameter is optional.  When `None`, each `McpClient`
+defaults to the base `SessionInfoFactory`.  Pass a custom factory (e.g.
+`SessionInfoDebugStateFactory()`) to enable session persistence.
 
 **Usage:**
 ```python
-tools, clients = await create_mcp_tools_from_agent(agent)
+tools, clients = await create_mcp_tools_from_agent(agent, session_info_factory=factory)
 try:
     # Use tools...
 finally:
@@ -138,9 +259,11 @@ Creates tools for a single MCP resource config using an existing McpClient.
 
 #### `create_mcp_tools(config)` → Context Manager
 
-Async context manager that creates live MCP sessions (uses langchain-mcp-adapters).
+Async context manager that creates live MCP sessions using the **upstream SDK's**
+`mcp.client.streamable_http.streamable_http_client` (not our local copy).  This
+is a simpler path that does not support `SessionInfo`.
 
-### Two-Phase Initialization
+## Two-Phase Initialization
 
 The key design principle is separating **client initialization** from **session initialization**:
 
@@ -150,6 +273,11 @@ Phase 1: Client Initialization (expensive, done once)
 ┌─────────────────┐
 │ UiPath SDK      │ ─── Retrieves MCP server URL
 │ mcp.retrieve()  │     and auth token (Bearer)
+└─────────────────┘
+
+┌─────────────────┐
+│ SessionInfo     │ ─── Factory creates SessionInfo
+│ Factory         │     (may load existing session ID)
 └─────────────────┘
 
 ┌─────────────────┐
@@ -168,8 +296,12 @@ Phase 1: Client Initialization (expensive, done once)
 Phase 2: Session Initialization (lightweight, can repeat)
 ─────────────────────────────────────────────────────────
 ┌─────────────────┐
-│ session.        │ ─── Just sends initialize request
-│ initialize()    │     and stores new session_id
+│ session.        │ ─── Sends initialize request
+│ initialize()    │     Transport calls set_session_id()
+└─────────────────┘
+┌─────────────────┐
+│ McpClient reads │ ─── await session_info.get_session_id()
+│ new session ID  │
 └─────────────────┘
 ```
 
@@ -189,8 +321,9 @@ Phase 2: Session Initialization (lightweight, can repeat)
            │ (Phase 1)    │
            └──────┬───────┘
                   │ 1. UiPath SDK retrieves MCP URL
-                  │ 2. creates HTTP client, streams, session
-                  │ 3. calls _initialize_session()
+                  │ 2. Factory creates SessionInfo
+                  │ 3. Creates HTTP client, streams, session
+                  │ 4. Calls _initialize_session()
                   ▼
            ┌──────────────┐
            │   Session    │
@@ -198,10 +331,11 @@ Phase 2: Session Initialization (lightweight, can repeat)
            │ (Phase 2)    │                 │
            └──────┬───────┘                 │
                   │ sends initialize,       │
-                  │ gets session_id         │ 404 error
-                  ▼                         │ (only reinit
-           ┌──────────────┐                 │  session,
-           │    Active    │─────────────────┘  not client)
+                  │ transport calls         │ 404 error
+                  │ set_session_id()        │ (only reinit
+                  ▼                         │  session,
+           ┌──────────────┐                 │  not client)
+           │    Active    │─────────────────┘
            │   Session    │
            └──────┬───────┘
                   │ dispose()
@@ -220,7 +354,7 @@ Phase 2: Session Initialization (lightweight, can repeat)
 Client                              Server
    │                                   │
    │──── initialize ──────────────────►│
-   │◄─── result + session-id-1 ────────│
+   │◄─── result + session-id-1 ────────│  ← transport calls set_session_id()
    │                                   │
    │──── notifications/initialized ───►│
    │◄─── 204 No Content ───────────────│
@@ -256,7 +390,7 @@ The following error codes trigger automatic session reinitialization:
 
 | Code | Meaning | Source |
 |------|---------|--------|
-| `32600` | Session terminated | HTTP 404 converted by SDK |
+| `32600` | Session terminated | HTTP 404 converted by transport |
 | `-32000` | Server error | Can indicate session not found |
 
 ## Key Implementation Details
@@ -267,20 +401,17 @@ The MCP server URL and authorization headers are loaded lazily on first tool cal
 
 ```python
 async def _initialize_client(self) -> None:
-    # Lazy import to improve cold start time
     from uipath.platform import UiPath
 
-    # Retrieve MCP server URL from SDK
     sdk = UiPath()
     mcp_server = await sdk.mcp.retrieve_async(
         slug=self._config.slug, folder_path=self._config.folder_path
     )
-
-    if mcp_server.mcp_url is None:
-        raise ValueError(f"MCP server '{self._config.slug}' has no URL configured")
-
     self._url = mcp_server.mcp_url
     self._headers = {"Authorization": f"Bearer {sdk._config.secret}"}
+
+    # Factory creates the right SessionInfo for this server
+    self._session_info = self._session_info_factory.create_session(mcp_server)
 ```
 
 **Why lazy loading is required:**
@@ -289,12 +420,6 @@ The `uipath debug` command loads resource bindings (which can override MCP serve
 **after** the LangGraph agent graph is built. This means bindings are only available at
 execution time, not at graph construction time. By deferring the SDK call to the first
 tool invocation, we ensure the bindings are properly loaded and applied.
-
-**Benefits:**
-- Bindings are correctly applied (loaded after graph construction)
-- No SDK calls during tool creation (only during first use)
-- Faster agent startup time
-- Errors surface only when tools are actually used
 
 ### 2. HTTP Client Configuration
 
@@ -321,10 +446,11 @@ One `asyncio.Lock` protects both client initialization and session reinitializat
 self._lock = asyncio.Lock()
 
 async def _ensure_session(self) -> ClientSession:
-    async with self._lock:
-        if not self._client_initialized:
-            await self._initialize_client()
-        return self._session
+    if not self._client_initialized:
+        async with self._lock:
+            if not self._client_initialized:
+                await self._initialize_client()
+    return self._session
 
 async def _reinitialize_session(self) -> None:
     async with self._lock:
@@ -352,16 +478,29 @@ async with AsyncExitStack() as stack:
 
 ### 5. Reinitialization Reuses Client
 
-The key optimization - on 404, only `_initialize_session()` is called:
+On 404, only `_initialize_session()` is called — the HTTP client, streams,
+and `SessionInfo` instance are all reused.
 
-```python
-async def _reinitialize_session(self) -> None:
-    async with self._lock:
-        if not self._client_initialized:
-            await self._initialize_client()  # Full init if needed
-        else:
-            await self._initialize_session()  # Just handshake!
+## Cross-Package Dependencies
+
 ```
+uipath-langchain (this package)
+├── streamable_http.py  → SessionInfo (base class)
+├── mcp_client.py       → SessionInfoFactory (base factory)
+└── mcp_tool.py         → create_mcp_tools_from_agent(session_info_factory=...)
+
+uipath-agents (consumer)
+├── session_info_debug_state.py
+│   ├── SessionInfoDebugState(SessionInfo)     ← imports from uipath_langchain
+│   └── SessionInfoDebugStateFactory(SessionInfoFactory)
+└── graph.py
+    └── Picks factory based on AgentExecutionType.PLAYGROUND
+```
+
+`SessionInfoDebugState` persists session IDs to the AgentHub debug state
+endpoint (`GET/PUT agenthub_/design/debugstate/{agentId}/{key}`).  It lives
+in `uipath-agents` because it depends on execution-type logic that belongs
+in the agent layer, not in the langchain tools layer.
 
 ## Tests
 
@@ -402,6 +541,15 @@ assert initialize_count[0] == 2
 
 ## Guidelines for Changes
 
+### Updating streamable_http.py
+
+When the upstream MCP SDK changes its transport:
+
+1. Diff the upstream [`mcp/client/streamable_http.py`](https://github.com/modelcontextprotocol/python-sdk/blob/main/src/mcp/client/streamable_http.py) against our local copy
+2. Apply upstream changes while preserving our `SessionInfo` integration
+3. Key areas to watch: `_prepare_headers` (must stay async), `_maybe_extract_session_id_from_response` (must use `set_session_id`), `streamable_http_client` (must accept `session_info` param)
+4. The transport must never own session state directly — always delegate to `_session_info`
+
 ### Adding New Factory Functions
 
 1. Follow the pattern of existing functions
@@ -415,14 +563,15 @@ assert initialize_count[0] == 2
 2. All resources must be added to `_stack` via `enter_async_context()`
 3. Set `_client_initialized = True` before calling `_initialize_session()`
 4. Always use `get_httpx_client_kwargs()` for HTTP client
-5. Update tests if the initialization sequence changes
+5. The `SessionInfo` is created via the factory — do not construct it directly
 
 ### Modifying Session Initialization
 
 1. Changes go in `_initialize_session()`
-2. This should remain lightweight - just the MCP handshake
+2. This should remain lightweight — just the MCP handshake
 3. Don't create new HTTP resources here
-4. Verify tests still show `mock_async_client_class.call_count == 1` on retry
+4. The transport handles `set_session_id` — `_initialize_session` only reads via `get_session_id`
+5. Verify tests still show `mock_async_client_class.call_count == 1` on retry
 
 ### Adding New Methods to McpClient
 
@@ -437,31 +586,41 @@ assert initialize_count[0] == 2
 
 3. If the method modifies session state, acquire `_lock`
 
+### Creating a New SessionInfo Subclass
+
+1. Inherit from `SessionInfo` (imported from `uipath_langchain.agent.tools.mcp`)
+2. Override `get_session_id` and/or `set_session_id` for custom behavior
+3. Create a corresponding factory that inherits `SessionInfoFactory`
+4. The factory receives `McpServer` — use its `slug`, `folder_key`, etc.
+5. Pass the factory to `create_mcp_tools_from_agent(session_info_factory=...)`
+
 ## Related Files
 
-| File | Purpose |
-|------|---------|
-| `mcp_client.py` | McpClient session management |
-| `mcp_tool.py` | Tool factory functions |
-| `__init__.py` | Public exports |
-| `test_mcp_client.py` | Session tests |
-| `test_mcp_tool.py` | Tool factory tests |
+| File | Package | Purpose |
+|------|---------|---------|
+| `streamable_http.py` | uipath-langchain | SessionInfo + transport (local SDK copy) |
+| `mcp_client.py` | uipath-langchain | SessionInfoFactory + McpClient |
+| `mcp_tool.py` | uipath-langchain | Tool factory functions |
+| `__init__.py` | uipath-langchain | Public exports |
+| `session_info_debug_state.py` | uipath-agents | SessionInfoDebugState + factory |
+| `graph.py` | uipath-agents | Wires factory based on execution type |
 
 ## MCP SDK Reference
 
 The implementation uses these MCP SDK components:
 
 - `mcp.ClientSession` - MCP client session (can call `initialize()` multiple times)
-- `mcp.client.streamable_http.streamable_http_client` - HTTP transport
 - `mcp.shared.exceptions.McpError` - Error handling
 - `mcp.types.CallToolResult` - Tool call results
+- `mcp.client._transport.TransportStreams` - Type alias used by `streamable_http_client`
+- `mcp.shared._httpx_utils.create_mcp_http_client` - Default HTTP client factory
+- `mcp.shared.message.SessionMessage` - Message wrapper for JSON-RPC
 
 Key SDK behaviors:
 - `ClientSession.initialize()` sends initialize request + initialized notification
 - `ClientSession.call_tool()` calls `_validate_tool_result()` on success
 - `_validate_tool_result()` calls `list_tools()` if output schema not cached
 - HTTP 404 is converted to `McpError` with code `32600` by `StreamableHTTPTransport`
-- `StreamableHTTPTransport.session_id` is updated on each initialize response
 
 ## Performance Considerations
 
@@ -469,7 +628,8 @@ Session reinitialization is efficient because:
 
 1. **HTTP client reused**: No new TCP connections
 2. **Streamable connection reused**: No new task groups or streams
-3. **Only MCP handshake**: Just 2 HTTP requests (initialize + notification)
+3. **SessionInfo reused**: No new factory calls or debug state loads
+4. **Only MCP handshake**: Just 2 HTTP requests (initialize + notification)
 
 This is significantly faster than full client reinitialization, which would require:
 - Creating new `httpx.AsyncClient`

@@ -5,10 +5,12 @@ from typing import Any
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
+from langgraph.func import task
 from langgraph.types import interrupt
 from uipath.agent.models.agent import AgentProcessToolResourceConfig
 from uipath.eval.mocks import mockable
-from uipath.platform.common import InvokeProcess
+from uipath.platform import UiPath
+from uipath.platform.common import WaitJob
 
 from uipath_langchain.agent.react.job_attachments import get_job_attachments
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
@@ -36,25 +38,37 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
     input_model: Any = create_model(resource.input_schema)
     output_model: Any = create_model(resource.output_schema)
 
-    @mockable(
-        name=resource.name,
-        description=resource.description,
-        input_schema=input_model.model_json_schema(),
-        output_schema=output_model.model_json_schema(),
-        example_calls=resource.properties.example_calls,
-    )
+    _span_context: dict[str, Any] = {}
+
     async def process_tool_fn(**kwargs: Any):
         attachments = get_job_attachments(input_model, kwargs)
         input_arguments = input_model.model_validate(kwargs).model_dump(mode="json")
-        return interrupt(
-            InvokeProcess(
-                name=process_name,
-                input_arguments=input_arguments,
-                process_folder_path=folder_path,
-                process_folder_key=None,
-                attachments=attachments,
-            )
+
+        @mockable(
+            name=tool_name.lower(),
+            description=resource.description,
+            input_schema=input_model.model_json_schema(),
+            output_schema=output_model.model_json_schema(),
+            example_calls=resource.properties.example_calls,
         )
+        async def invoke_process():
+            parent_span_id = _span_context.pop("parent_span_id", None)
+
+            @task
+            async def start_job():
+                client = UiPath()
+                return await client.processes.invoke_async(
+                    name=process_name,
+                    input_arguments=input_arguments,
+                    folder_path=folder_path,
+                    attachments=attachments,
+                    parent_span_id=parent_span_id,
+                )
+
+            job = await start_job()
+            return interrupt(WaitJob(job=job, process_folder_key=job.folder_key))
+
+        return await invoke_process()
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 
@@ -73,11 +87,12 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
         coroutine=process_tool_fn,
         output_type=output_model,
         metadata={
-            "tool_type": "process",
+            "tool_type": resource.type.lower(),
             "display_name": process_name,
             "folder_path": folder_path,
             "args_schema": input_model,
             "output_schema": output_model,
+            "_span_context": _span_context,
         },
         argument_properties=resource.argument_properties,
     )

@@ -357,7 +357,7 @@ class UiPathChatMessagesMapper:
                     tool_call_id=message.tool_call_id,
                     end=UiPathConversationToolCallEndEvent(
                         timestamp=self.get_timestamp(),
-                        output=UiPathInlineValue(inline=content_value),
+                        output=content_value,
                     ),
                 ),
             )
@@ -422,7 +422,7 @@ class UiPathChatMessagesMapper:
                 start=UiPathConversationToolCallStartEvent(
                     tool_name=tool_call["name"],
                     timestamp=self.get_timestamp(),
-                    input=UiPathInlineValue(inline=tool_call["args"]),
+                    input=tool_call["args"],
                 ),
             ),
         )

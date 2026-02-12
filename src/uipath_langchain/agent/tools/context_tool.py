@@ -6,7 +6,7 @@ from typing import Any, Optional, Type
 from langchain_core.documents import Document
 from langchain_core.tools import StructuredTool
 from langgraph.types import interrupt
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
@@ -17,7 +17,7 @@ from uipath.platform.context_grounding import (
     BatchTransformOutputColumn,
     BatchTransformResponse,
     CitationMode,
-    DeepRagResponse,
+    DeepRagContent,
 )
 
 from uipath_langchain.retrievers import ContextGroundingRetriever
@@ -127,7 +127,11 @@ def handle_deep_rag(
         raise ValueError("Citation mode is required for Deep RAG")
     citation_mode = CitationMode(resource.settings.citation_mode.value)
 
-    output_model = DeepRagResponse
+    output_model = create_model(
+        "DeepRagOutputModel",
+        __base__=DeepRagContent,
+        deep_rag_id=(str, Field(alias="deepRagId")),
+    )
 
     if is_static_query(resource):
         # Static query - no input parameter needed

@@ -98,6 +98,12 @@ def create_ixp_extraction_tool(
         args_schema=Attachment,
         coroutine=extraction_tool_fn,
         output_type=ExtractionResponseIXP,
+        metadata={
+            "tool_type": "ixp_extraction",
+            "display_name": resource.name,
+            "project_name": project_name,
+            "version_tag": version_tag,
+        },
     )
     tool.set_tool_wrappers(awrapper=extraction_tool_wrapper)
 

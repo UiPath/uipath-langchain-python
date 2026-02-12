@@ -39,7 +39,7 @@ class BlockAction(GuardrailAction):
             raise AgentTerminationException(
                 code=UiPathErrorCode.EXECUTION_ERROR,
                 title="Guardrail violation",
-                detail=self.reason,
+                detail=f"Execution was blocked by guardrail [{guardrail.name}], with reason: {self.reason}",
                 category=UiPathErrorCategory.USER,
             )
 
