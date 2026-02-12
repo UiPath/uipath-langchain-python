@@ -70,6 +70,7 @@ class SpanType:
     MCP_TOOL = "mcpTool"
     MOCK_TOOL = "mockTool"
     IXP_TOOL = "ixpTool"
+    VS_ESCALATION_TOOL = "vsEscalationTool"
     INTERNAL_TOOL = "internalTool"
 
     # Guardrail types

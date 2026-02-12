@@ -87,6 +87,46 @@ class EscalationToolSpanAttributes(BaseSpanAttributes):
         return SpanType.ESCALATION_TOOL
 
 
+class IxpToolSpanAttributes(BaseSpanAttributes):
+    """Attributes for IXP extraction tool spans.
+
+    Child span under tool call containing extraction details.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
+    project_name: Optional[str] = Field(None, alias="projectName")
+    version_tag: Optional[str] = Field(None, alias="versionTag")
+    extraction_id: Optional[str] = Field(None, alias="extractionId")
+    document_id: Optional[str] = Field(None, alias="documentId")
+    result: Optional[Any] = Field(None, alias="result")
+
+    @property
+    def type(self) -> str:
+        return SpanType.IXP_TOOL
+
+
+class VsEscalationToolSpanAttributes(BaseSpanAttributes):
+    """Attributes for VS escalation (IXP extraction validation) tool spans.
+
+    Child span under tool call containing IXP validation details.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    arguments: Optional[Dict[str, Any]] = Field(None, alias="arguments")
+    ixp_tool_id: Optional[str] = Field(None, alias="ixpToolId")
+    storage_bucket_name: Optional[str] = Field(None, alias="storageBucketName")
+    operation_id: Optional[str] = Field(None, alias="operationId")
+    task_url: Optional[str] = Field(None, alias="taskUrl")
+    result: Optional[Any] = Field(None, alias="result")
+
+    @property
+    def type(self) -> str:
+        return SpanType.VS_ESCALATION_TOOL
+
+
 class IntegrationToolSpanAttributes(BaseSpanAttributes):
     """Attributes for integration tool spans.
 

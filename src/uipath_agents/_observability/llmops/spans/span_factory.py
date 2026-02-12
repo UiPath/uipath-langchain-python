@@ -340,6 +340,64 @@ class LlmOpsSpanFactory:
             parent_span=parent_span,
         )
 
+    def start_vs_escalation_tool(
+        self,
+        tool_name: str,
+        *,
+        arguments: Optional[Dict[str, Any]] = None,
+        ixp_tool_id: Optional[str] = None,
+        storage_bucket_name: Optional[str] = None,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start a VS escalation tool span (child of tool call).
+
+        Args:
+            tool_name: Name of the VS escalation tool (used as span name)
+            arguments: Arguments passed to the tool
+            ixp_tool_id: ID of the IXP extraction tool
+            storage_bucket_name: Name of the storage bucket
+            parent_span: Optional parent span. If None, uses current span.
+
+        Returns:
+            The started Span (caller must call span.end())
+        """
+        return self._tool_schema.start_vs_escalation_tool(
+            tool_name,
+            arguments=arguments,
+            ixp_tool_id=ixp_tool_id,
+            storage_bucket_name=storage_bucket_name,
+            parent_span=parent_span,
+        )
+
+    def start_ixp_tool(
+        self,
+        tool_name: str,
+        *,
+        arguments: Optional[Dict[str, Any]] = None,
+        project_name: Optional[str] = None,
+        version_tag: Optional[str] = None,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start an IXP extraction tool span (child of tool call).
+
+        Args:
+            tool_name: Name of the extraction tool (used as span name)
+            arguments: Arguments passed to the tool
+            project_name: IXP project name
+            version_tag: IXP project version tag
+            parent_span: Optional parent span. If None, uses current span.
+
+        Returns:
+            The started Span (caller must call span.end())
+        """
+        return self._tool_schema.start_ixp_tool(
+            tool_name,
+            arguments=arguments,
+            project_name=project_name,
+            version_tag=version_tag,
+            parent_span=parent_span,
+        )
+
     def start_internal_tool(
         self,
         tool_name: str,

@@ -262,6 +262,8 @@ def get_tool_type_value(tool_type: Optional[str]) -> str:
         "processorchestration": "agenticProcess",
         "escalation": "Escalation",
         "internal": "Internal",
+        "ixp_extraction": "IxpExtraction",
+        "vs_escalation": "Escalation",
     }
     return mapping.get(tool_type or "", "Integration")
 

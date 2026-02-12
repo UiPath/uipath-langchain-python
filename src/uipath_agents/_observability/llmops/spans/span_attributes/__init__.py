@@ -53,7 +53,9 @@ from .tools import (
     EscalationToolSpanAttributes,
     IntegrationToolSpanAttributes,
     InternalToolSpanAttributes,
+    IxpToolSpanAttributes,
     ProcessToolSpanAttributes,
+    VsEscalationToolSpanAttributes,
 )
 from .types import (
     ENV_UIPATH_IS_DEBUG,
@@ -96,6 +98,8 @@ __all__ = [
     "EscalationToolSpanAttributes",
     "IntegrationToolSpanAttributes",
     "InternalToolSpanAttributes",
+    "IxpToolSpanAttributes",
+    "VsEscalationToolSpanAttributes",
     # Guardrails
     "GuardrailEvaluationSpanAttributes",
     "LlmPreGuardrailsSpanAttributes",
@@ -133,6 +137,8 @@ SpanAttributes = Union[
     EscalationToolSpanAttributes,
     IntegrationToolSpanAttributes,
     InternalToolSpanAttributes,
+    IxpToolSpanAttributes,
+    VsEscalationToolSpanAttributes,
     AgentOutputSpanAttributes,
     GuardrailEvaluationSpanAttributes,
     LlmPreGuardrailsSpanAttributes,

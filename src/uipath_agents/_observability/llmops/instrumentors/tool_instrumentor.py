@@ -170,6 +170,30 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         arguments=arguments,
                         parent_span=span,
                     )
+                elif tool_type == "ixp_extraction" and tool_display_name:
+                    project_name = metadata.get("project_name") if metadata else None
+                    version_tag = metadata.get("version_tag") if metadata else None
+                    child_span = self._span_factory.start_ixp_tool(
+                        tool_name=tool_display_name,
+                        arguments=arguments,
+                        project_name=project_name,
+                        version_tag=version_tag,
+                        parent_span=span,
+                    )
+                    self._state.ixp_extraction_run_ids.add(run_id)
+                elif tool_type == "vs_escalation":
+                    ixp_tool_id = metadata.get("ixp_tool_id") if metadata else None
+                    vs_storage_bucket_name = (
+                        metadata.get("storage_bucket_name") if metadata else None
+                    )
+                    child_span = self._span_factory.start_vs_escalation_tool(
+                        tool_name=tool_display_name or tool_name,
+                        arguments=arguments,
+                        ixp_tool_id=ixp_tool_id,
+                        storage_bucket_name=vs_storage_bucket_name,
+                        parent_span=span,
+                    )
+                    self._state.vs_escalation_run_ids.add(run_id)
                 elif tool_type == "internal" and tool_display_name:
                     child_span = self._span_factory.start_internal_tool(
                         tool_name=tool_display_name,
@@ -191,6 +215,8 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         "internal",
                         "api",
                         "processorchestration",
+                        "ixp_extraction",
+                        "vs_escalation",
                     ):
                         self._state.pending_tool_name = tool_name
                         self._state.pending_tool_span = span
@@ -198,6 +224,23 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
 
         except Exception:
             logger.exception("Error in on_tool_start callback")
+
+    def _set_ixp_extraction_result_attrs(self, span: Any, output: Any) -> None:
+        """Set extractionId and documentId on IXP extraction span from completion result."""
+        if not isinstance(output, dict):
+            return
+        extraction_result = output.get("extractionResult") or output.get(
+            "extraction_result"
+        )
+        if isinstance(extraction_result, dict):
+            doc_id = extraction_result.get("DocumentId") or extraction_result.get(
+                "document_id"
+            )
+            if doc_id:
+                span.set_attribute("documentId", str(doc_id))
+        operation_id = output.get("operationId") or output.get("operation_id")
+        if operation_id:
+            span.set_attribute("extractionId", str(operation_id))
 
     def on_tool_end(
         self,
@@ -234,6 +277,11 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 if run_id in self._state.agent_run_ids:
                     set_process_job_info(child_span, output)
                     self._state.agent_run_ids.discard(run_id)
+                if run_id in self._state.ixp_extraction_run_ids:
+                    self._set_ixp_extraction_result_attrs(child_span, output)
+                    self._state.ixp_extraction_run_ids.discard(run_id)
+                if run_id in self._state.vs_escalation_run_ids:
+                    self._state.vs_escalation_run_ids.discard(run_id)
                 self._span_factory.end_span_ok(child_span)
                 if child_span == self._state.pending_process_span:
                     self._state.pending_process_span = None
@@ -336,6 +384,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             )
 
         self._state.resumed_process_span_data = None
+        self._state.resumed_tool_span_data = None
 
     def _is_graph_interrupt(self, error: BaseException) -> bool:
         """Check if the error is a GraphInterrupt (suspend signal)."""
@@ -351,6 +400,8 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
         # Set type-specific attributes from the interrupt payload
         if child_span and run_id in self._state.escalation_run_ids:
             self._set_escalation_interrupt_attrs(child_span, error)
+        elif child_span and run_id in self._state.vs_escalation_run_ids:
+            self._set_vs_escalation_interrupt_attrs(child_span, error)
         elif child_span and (
             run_id in self._state.process_run_ids or run_id in self._state.agent_run_ids
         ):
@@ -385,6 +436,28 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
         recipient = getattr(value, "recipient", None)
         if recipient and getattr(recipient, "value", None):
             span.set_attribute("assignedTo", recipient.value)
+
+    def _set_vs_escalation_interrupt_attrs(
+        self, span: Any, error: BaseException
+    ) -> None:
+        """Extract operation_id and taskUrl from VS escalation interrupt and set span attributes."""
+        interrupts = error.args[0] if error.args else None
+        if not interrupts:
+            return
+
+        value = getattr(interrupts[0], "value", None)
+        if not value:
+            return
+
+        extraction_validation = getattr(value, "extraction_validation", None)
+        if extraction_validation:
+            operation_id = getattr(extraction_validation, "operation_id", None)
+            if operation_id:
+                span.set_attribute("operationId", str(operation_id))
+
+        task_url = getattr(value, "task_url", None)
+        if task_url:
+            span.set_attribute("taskUrl", str(task_url))
 
     def _set_process_interrupt_attrs(self, span: Any, error: BaseException) -> None:
         """Extract job metadata from process interrupt and set span attributes."""
