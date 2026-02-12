@@ -55,7 +55,15 @@ class TestHitlJobTrigger:
                 # Mock UiPath API response for job creation
                 httpx_mock.add_response(
                     url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.StartJobs",
-                    json={"value": [{"key": f"{job_key}", "Id": "123"}]},
+                    json={
+                        "value": [
+                            {
+                                "Key": f"{job_key}",
+                                "Id": 123,
+                                "FolderKey": "test-folder-key",
+                            }
+                        ]
+                    },
                 )
 
                 # First execution: creates job trigger and stores it in database
@@ -125,10 +133,11 @@ class TestHitlJobTrigger:
                 httpx_mock.add_response(
                     url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={trigger_data['item_key']})",
                     json={
-                        "key": f"{job_key}",
-                        "id": 123,
-                        "state": "successful",
-                        "output_arguments": json.dumps(output_args_dict),
+                        "Key": f"{job_key}",
+                        "Id": 123,
+                        "FolderKey": "test-folder-key",
+                        "State": "successful",
+                        "OutputArguments": json.dumps(output_args_dict),
                     },
                 )
 
@@ -200,10 +209,11 @@ class TestHitlJobTrigger:
                 httpx_mock.add_response(
                     url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={trigger_data['item_key']})",
                     json={
-                        "key": f"{job_key}",
-                        "id": 123,
-                        "state": "successful",
-                        "output_arguments": json.dumps(output_args_dict),
+                        "Key": f"{job_key}",
+                        "Id": 123,
+                        "FolderKey": "test-folder-key",
+                        "State": "successful",
+                        "OutputArguments": json.dumps(output_args_dict),
                     },
                 )
 

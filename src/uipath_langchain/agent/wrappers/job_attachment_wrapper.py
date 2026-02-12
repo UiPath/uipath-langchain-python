@@ -1,6 +1,7 @@
+import json
 from typing import Any
 
-from langchain_core.messages.tool import ToolCall, ToolMessage
+from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import BaseModel
@@ -12,6 +13,18 @@ from uipath_langchain.agent.react.job_attachments import (
 )
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import AsyncToolWrapperWithState
+
+
+def _parse(content: str) -> Any:
+    if not content:
+        return content
+
+    try:
+        return json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return content
 
 
 def get_job_attachment_wrapper(
@@ -71,24 +84,20 @@ def get_job_attachment_wrapper(
 
             if errors:
                 return {"error": "\n".join(errors)}
-
-        tool_result = await tool.ainvoke(modified_input_args)
+        call["args"] = modified_input_args
+        tool_result = await tool.ainvoke(call)
         job_attachments_dict = {}
         if output_type is not None:
-            job_attachments = get_job_attachments(output_type, tool_result)
+            job_attachments = get_job_attachments(
+                output_type, _parse(tool_result.content)
+            )
             job_attachments_dict = {
                 str(att.id): att for att in job_attachments if att.id is not None
             }
 
         return Command(
             update={
-                "messages": [
-                    ToolMessage(
-                        content=str(tool_result),
-                        name=call["name"],
-                        tool_call_id=call["id"],
-                    )
-                ],
+                "messages": [tool_result],
                 "inner_state": {"job_attachments": job_attachments_dict},
             }
         )

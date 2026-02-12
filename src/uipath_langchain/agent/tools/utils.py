@@ -3,6 +3,9 @@
 import re
 from typing import Any
 
+from uipath.agent.models.agent import TaskTitle, TextBuilderTaskTitle
+from uipath.agent.utils.text_tokens import build_string_from_tokens
+
 
 def sanitize_tool_name(name: str) -> str:
     """Sanitize tool name for LLM compatibility (alphanumeric, underscore, hyphen only, max 64 chars)."""
@@ -40,3 +43,18 @@ def sanitize_dict_for_serialization(args: dict[str, Any]) -> dict[str, Any]:
         else:
             converted_args[key] = value
     return converted_args
+
+
+def resolve_task_title(
+    task_title: TaskTitle | str | None,
+    agent_input: dict[str, Any],
+    default_title: str = "Escalation Task",
+) -> str:
+    """Resolve task title based on channel configuration."""
+    if isinstance(task_title, TextBuilderTaskTitle):
+        return build_string_from_tokens(task_title.tokens, agent_input)
+
+    if isinstance(task_title, str):
+        return task_title
+
+    return default_title

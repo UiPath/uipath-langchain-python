@@ -210,7 +210,7 @@ class TestCreateDeepRagTool:
         mock_index_pending = ContextGroundingIndex(
             id=pending_id,
             name="ephemeral-index-456",
-            last_ingestion_status="In Progress",  # Space is important!
+            last_ingestion_status="InProgress",
         )
 
         mock_index_complete = {

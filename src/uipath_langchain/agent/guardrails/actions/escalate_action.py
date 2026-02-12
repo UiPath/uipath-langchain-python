@@ -18,7 +18,9 @@ from uipath.agent.models.agent import (
     AssetRecipient,
     StandardRecipient,
 )
-from uipath.platform.common import CreateEscalation, UiPathConfig
+from uipath.platform import UiPath
+from uipath.platform.action_center.tasks import Task, TaskRecipient
+from uipath.platform.common import UiPathConfig, WaitEscalation
 from uipath.platform.guardrails import (
     BaseGuardrail,
     GuardrailScope,
@@ -31,7 +33,7 @@ from ...react.types import AgentGuardrailsGraphState
 from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
-from .base_action import GuardrailAction, GuardrailActionNode
+from .base_action import GuardrailAction, GuardrailActionNodes
 
 
 class EscalateAction(GuardrailAction):
@@ -73,31 +75,46 @@ class EscalateAction(GuardrailAction):
         scope: GuardrailScope,
         execution_stage: ExecutionStage,
         guarded_component_name: str,
-    ) -> GuardrailActionNode:
-        """Create a HITL escalation node for the guardrail.
+    ) -> GuardrailActionNodes:
+        """Create two HITL escalation nodes for the guardrail.
 
-        Args:
-            guardrail: The guardrail that triggered this escalation action.
-            scope: The guardrail scope (LLM/AGENT/TOOL).
-            execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+        Returns an ordered pair of nodes that the subgraph builder will chain:
 
-        Returns:
-            A tuple of (node_name, node_function) where the node function triggers
-            a HITL interruption and processes the escalation response.
+        1. **create-task node** – creates the Action Center task and persists
+           the task id in ``inner_state.hitl_task_info`` so it survives across
+           graph super-steps.  Because this node completes normally its state
+           update *is* committed to the checkpoint.
+        2. **interrupt node** – calls ``interrupt(WaitEscalation(…))`` to pause
+           execution. On resume, it reads the stored task data from state
+           (skipping re-creation) and processes the escalation response.
         """
-        node_name = _get_node_name(execution_stage, guardrail, scope)
+        base_name = _get_node_name(execution_stage, guardrail, scope)
+        create_task_node_name = f"{base_name}_create_task"
+        interrupt_node_name = base_name
 
         metadata: Dict[str, Any] = {
             "guardrail": guardrail,
             "scope": scope,
             "execution_stage": execution_stage,
-            "escalation_data": {},
+            "escalation_data": {
+                "recipient_type": self.recipient.type.value
+                if self.recipient and self.recipient.type
+                else None,
+            },
         }
 
-        async def _node(
+        # Node 1: create the escalation task
+        async def _create_task_node(
             state: AgentGuardrailsGraphState,
-        ) -> Dict[str, Any] | Command[Any]:
-            # Import here to avoid circular dependency
+        ) -> Dict[str, Any]:
+            # If the task was already created (e.g. subgraph replayed this
+            # node on resume), skip creation and return as-is.
+            hitl_info = state.inner_state.hitl_task_info
+            existing_task = hitl_info.get(create_task_node_name) if hitl_info else None
+            if existing_task is not None:
+                return {}
+
+            # Lazy import to avoid circular dependency with escalation_tool
             from ...tools.escalation_tool import resolve_recipient_value
 
             # Resolve recipient value (handles both StandardRecipient and AssetRecipient)
@@ -175,12 +192,60 @@ class EscalateAction(GuardrailAction):
                 data["ToolInputs"] = input_content
                 data["ToolOutputs"] = output_content
 
+            # Create the escalation task via API
+            client = UiPath()
+            created_task = await client.tasks.create_async(
+                title="Agents Guardrail Task",
+                data=data,
+                app_name=self.app_name,
+                app_folder_path=self.app_folder_path,
+                recipient=task_recipient,
+            )
+
+            # Store task URL in metadata for observability — before interrupt
+            task_id = created_task.id
+            task_url = f"{UiPathConfig.base_url}/actions_/tasks/{task_id}"
+            metadata["escalation_data"]["task_url"] = task_url
+            metadata["node_type"] = "create_hitl_task"
+
+            # Persist task info in state so the interrupt node can read it,
+            # and so that on resume this node can detect it already ran.
+            return {
+                "inner_state": {
+                    "hitl_task_info": {
+                        create_task_node_name: created_task.model_dump(mode="json")
+                    },
+                }
+            }
+
+        _create_task_node.__metadata__ = metadata  # type: ignore[attr-defined]
+
+        # ── Node 2: interrupt and wait for escalation result ─────────────
+        async def _interrupt_node(
+            state: AgentGuardrailsGraphState,
+        ) -> Dict[str, Any] | Command[Any]:
+            hitl_info = state.inner_state.hitl_task_info
+            task_info = hitl_info.get(create_task_node_name) if hitl_info else None
+            if task_info is None:
+                raise AgentTerminationException(
+                    code=UiPathErrorCode.EXECUTION_ERROR,
+                    title="Escalation task not found",
+                    detail="The escalation task was not found in state. "
+                    "The create-task node must run before the interrupt node.",
+                )
+
+            created_task = Task.model_validate(task_info)
+            task_recipient = (
+                TaskRecipient.model_validate(task_info["recipient"])
+                if task_info.get("recipient")
+                else None
+            )
+
             escalation_result = interrupt(
-                CreateEscalation(
+                WaitEscalation(
+                    action=created_task,
                     app_name=self.app_name,
                     app_folder_path=self.app_folder_path,
-                    title="Agents Guardrail Task",
-                    data=data,
                     recipient=task_recipient,
                 )
             )
@@ -210,24 +275,49 @@ class EscalateAction(GuardrailAction):
                 if reviewed_by:
                     metadata["escalation_data"]["reviewed_by"] = reviewed_by
 
+            # Clear the stored task data
+            cleanup_update: Dict[str, Any] = {
+                "inner_state": {"hitl_task_info": {create_task_node_name: None}},
+            }
+
             if escalation_result.action == "Approve":
-                return _process_escalation_response(
+                result = _process_escalation_response(
                     state,
                     escalation_result.data,
                     scope,
                     execution_stage,
                     guarded_component_name,
                 )
+                # Merge the cleanup into the response
+                if isinstance(result, Command) and result.update:
+                    _deep_merge(result.update, cleanup_update)
+                elif isinstance(result, dict):
+                    _deep_merge(result, cleanup_update)
+                else:
+                    result = cleanup_update
+                return result
 
             raise AgentTerminationException(
                 code=UiPathErrorCode.EXECUTION_ERROR,
                 title="Escalation rejected",
-                detail=f"Please contact your administrator. Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data.get('Reason', None)}",
+                detail=f"Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data.get('Reason', None)}",
             )
 
-        _node.__metadata__ = metadata  # type: ignore[attr-defined]
+        _interrupt_node.__metadata__ = metadata  # type: ignore[attr-defined]
 
-        return node_name, _node
+        return [
+            (create_task_node_name, _create_task_node),
+            (interrupt_node_name, _interrupt_node),
+        ]
+
+
+def _deep_merge(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    """Recursively merge *source* into *target* in place (dict values are merged, others overwritten)."""
+    for key, value in source.items():
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+            _deep_merge(target[key], value)
+        else:
+            target[key] = value
 
 
 def _parse_reviewed_data(value: Any) -> Any:
