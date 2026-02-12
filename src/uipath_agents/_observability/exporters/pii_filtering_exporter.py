@@ -10,7 +10,7 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
-from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.util.types import Attributes
 
@@ -48,9 +48,19 @@ def _get_preserve_fields() -> frozenset[str]:
     )
 
 
+def _get_redactable_exception_types() -> frozenset[str]:
+    """Get exception type substrings that should trigger redaction."""
+    return frozenset(
+        {
+            "langgraph.errors.GraphInterrupt",
+        }
+    )
+
+
 _PII_ATTRIBUTES = _get_pii_attributes()
 _PII_PATTERNS = _get_pii_patterns()
 _PRESERVE_FIELDS = _get_preserve_fields()
+_REDACTABLE_EXCEPTION_TYPES = _get_redactable_exception_types()
 
 
 def _redact_dict_selectively(data: dict[str, Any]) -> dict[str, Any]:
@@ -210,18 +220,76 @@ def _redact_attributes(attributes: Attributes | None) -> dict[str, Any]:
     return redacted
 
 
-class _RedactedSpan(ReadableSpan):
-    """Wrapper around ReadableSpan that provides redacted attributes."""
+def _should_redact_exception(exception_type: Any) -> bool:
+    if not exception_type or not isinstance(exception_type, str):
+        return False
 
-    def __init__(self, span: ReadableSpan, redacted_attributes: Attributes):
-        """Initialize with original span and redacted attributes.
+    exception_type_lower = exception_type.lower()
+    for redactable_type in _REDACTABLE_EXCEPTION_TYPES:
+        if redactable_type.lower() in exception_type_lower:
+            return True
+
+    return False
+
+
+def _redact_events(events: Sequence[Event] | None) -> list[Event]:
+    """Redact PII from span events for specific exception types."""
+    if not events:
+        return []
+
+    redacted_events = []
+    for event in events:
+        if not event.attributes:
+            redacted_events.append(event)
+            continue
+
+        event_attrs = dict(event.attributes)
+        exception_type = event_attrs.get("exception.type")
+        should_redact = _should_redact_exception(exception_type)
+
+        if should_redact:
+            if "exception.message" in event_attrs:
+                original_msg = event_attrs["exception.message"]
+                if isinstance(original_msg, str):
+                    event_attrs["exception.message"] = (
+                        f"[REDACTED: exception message, length={len(original_msg)}]"
+                    )
+
+            if "exception.stacktrace" in event_attrs:
+                original_trace = event_attrs["exception.stacktrace"]
+                if isinstance(original_trace, str):
+                    line_count = original_trace.count("\n") + 1
+                    event_attrs["exception.stacktrace"] = (
+                        f"[REDACTED: stack trace, lines={line_count}]"
+                    )
+
+        redacted_event = Event(
+            name=event.name, attributes=event_attrs, timestamp=event.timestamp
+        )
+        redacted_events.append(redacted_event)
+
+    return redacted_events
+
+
+class _RedactedSpan(ReadableSpan):
+    """Wrapper around ReadableSpan that provides redacted attributes and events."""
+
+    def __init__(
+        self,
+        span: ReadableSpan,
+        redacted_attributes: Attributes,
+        redacted_events: Sequence[Event],
+    ):
+        """Initialize with original span and redacted data.
 
         Args:
             span: Original span to wrap
             redacted_attributes: Redacted version of attributes
+            redacted_events: Redacted version of events
         """
         self._span = span
         self._redacted_attributes = redacted_attributes
+        self._redacted_events = redacted_events
 
     @property
     def name(self) -> str:
@@ -253,8 +321,9 @@ class _RedactedSpan(ReadableSpan):
         return self._redacted_attributes
 
     @property
-    def events(self):
-        return self._span.events
+    def events(self) -> Sequence[Event]:
+        """Return redacted events instead of original."""
+        return self._redacted_events
 
     @property
     def links(self):
@@ -278,12 +347,12 @@ class _RedactedSpan(ReadableSpan):
 
 
 class PIIFilteringExporter(SpanExporter):
-    """Wraps a SpanExporter to redact PII from attributes before export.
+    """Wraps a SpanExporter to redact PII from attributes and events before export.
 
-    This exporter intercepts spans and removes/redacts sensitive attributes
-    that match configured patterns or exact names (e.g., input.value, output.value,
-    llm.*.message.content) which commonly contain PII in LangGraph/OpenInference
-    instrumentation.
+    This exporter intercepts spans and removes/redacts sensitive data:
+    - Attributes that match configured patterns or exact names (e.g., input.value,
+      output.value, llm.*.message.content) which commonly contain PII
+    - Exception information in events for specific exception types
 
     The exporter supports two redaction modes:
 
@@ -299,6 +368,10 @@ class PIIFilteringExporter(SpanExporter):
 
     The exporter:
     - Only redacts attributes matching configured patterns or exact attribute names
+    - Only redacts exceptions whose type contains configured substrings
+      (e.g., "langgraph.errors.GraphInterrupt")
+    - Redacts exception.message and exception.stacktrace for matching exception types
+    - Preserves exception.type for debugging
     - Preserves span structure, IDs, and timing for correlation
 
     Usage:
@@ -316,11 +389,12 @@ class PIIFilteringExporter(SpanExporter):
         self._delegate = delegate
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
-        """Export spans with PII redacted from attributes."""
+        """Export spans with PII redacted from attributes and events."""
         redacted_spans = []
         for span in spans:
             redacted_attrs = _redact_attributes(span.attributes)
-            redacted_span = _RedactedSpan(span, redacted_attrs)
+            redacted_events = _redact_events(span.events)
+            redacted_span = _RedactedSpan(span, redacted_attrs, redacted_events)
             redacted_spans.append(redacted_span)
 
         return self._delegate.export(redacted_spans)

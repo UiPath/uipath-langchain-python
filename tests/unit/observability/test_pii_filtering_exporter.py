@@ -4,14 +4,16 @@ import json
 from unittest.mock import Mock
 
 import pytest
-from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 
 from uipath_agents._observability.exporters.pii_filtering_exporter import (
     PIIFilteringExporter,
     _redact_attributes,
+    _redact_events,
     _redact_value,
     _RedactedSpan,
+    _should_redact_exception,
 )
 
 
@@ -112,7 +114,7 @@ class TestRedactedSpan:
     """Tests for _RedactedSpan wrapper."""
 
     def test_wrapper_preserves_span_properties(self) -> None:
-        """Test that wrapper preserves all span properties except attributes."""
+        """Test that wrapper preserves all span properties except attributes and events."""
         # Create a mock span
         original_span = Mock(spec=ReadableSpan)
         original_span.name = "test_span"
@@ -120,14 +122,17 @@ class TestRedactedSpan:
             "input.value": "sensitive",
             "llm.model_name": "gpt-4",
         }
+        original_span.events = [Event(name="test", attributes={"key": "value"})]
 
         # Create redacted version
         redacted_attrs = {"input.value": "[REDACTED]", "llm.model_name": "gpt-4"}
-        wrapped = _RedactedSpan(original_span, redacted_attrs)
+        redacted_events = [Event(name="test", attributes={"key": "redacted_value"})]
+        wrapped = _RedactedSpan(original_span, redacted_attrs, redacted_events)
 
         # Verify properties are preserved
         assert wrapped.name == "test_span"
         assert wrapped.attributes == redacted_attrs
+        assert wrapped.events == redacted_events
 
         # Verify other properties are delegated
         assert wrapped.context == original_span.context
@@ -153,11 +158,13 @@ class TestPIIFilteringExporter:
             "output.value": "sensitive response",
             "llm.model_name": "gpt-4",
         }
+        span1.events = []
 
         span2 = Mock(spec=ReadableSpan)
         span2.attributes = {
             "input.value": "more sensitive data",
         }
+        span2.events = []
 
         # Export spans
         result = exporter.export([span1, span2])
@@ -187,6 +194,7 @@ class TestPIIFilteringExporter:
 
         span = Mock(spec=ReadableSpan)
         span.attributes = None
+        span.events = None
 
         result = exporter.export([span])
         assert result == SpanExportResult.SUCCESS
@@ -375,3 +383,309 @@ class TestIntegrationScenarios:
 
         # All should be unchanged (no matches)
         assert redacted == attrs
+
+
+class TestShouldRedactException:
+    """Tests for _should_redact_exception function."""
+
+    def test_exact_match(self) -> None:
+        """Test exact match of exception type."""
+        assert _should_redact_exception("langgraph.errors.GraphInterrupt") is True
+
+    def test_case_insensitive_match(self) -> None:
+        """Test case-insensitive matching."""
+        assert _should_redact_exception("LangGraph.Errors.GraphInterrupt") is True
+        assert _should_redact_exception("LANGGRAPH.ERRORS.GRAPHINTERRUPT") is True
+        assert _should_redact_exception("langgraph.ERRORS.graphinterrupt") is True
+
+    def test_substring_match(self) -> None:
+        """Test substring matching."""
+        assert (
+            _should_redact_exception(
+                "my.custom.langgraph.errors.GraphInterrupt.wrapper"
+            )
+            is True
+        )
+        assert (
+            _should_redact_exception("wrapper.langgraph.errors.GraphInterrupt") is True
+        )
+
+    def test_no_match(self) -> None:
+        """Test non-matching exception types."""
+        assert _should_redact_exception("ValueError") is False
+        assert _should_redact_exception("TypeError") is False
+        assert _should_redact_exception("GraphError") is False
+        assert _should_redact_exception("langgraph.errors.Other") is False
+
+    def test_none_and_empty(self) -> None:
+        """Test handling of None and empty strings."""
+        assert _should_redact_exception(None) is False
+        assert _should_redact_exception("") is False
+
+    def test_non_string_values(self) -> None:
+        """Test handling of non-string values."""
+        assert _should_redact_exception(123) is False
+        assert _should_redact_exception(["exception"]) is False
+        assert _should_redact_exception({"type": "error"}) is False
+
+
+class TestRedactEvents:
+    """Tests for _redact_events function."""
+
+    def test_redact_both_message_and_stacktrace(self) -> None:
+        """Test redacting both message and stacktrace together."""
+        events = [
+            Event(
+                name="exception",
+                attributes={
+                    "exception.type": "langgraph.errors.GraphInterrupt",
+                    "exception.message": "Error with sensitive info",
+                    "exception.stacktrace": "Line 1\nLine 2\nLine 3",
+                },
+            )
+        ]
+
+        redacted = _redact_events(events)
+
+        assert len(redacted) == 1
+        attrs = redacted[0].attributes
+        assert attrs is not None
+        assert attrs["exception.type"] == "langgraph.errors.GraphInterrupt"
+        assert "REDACTED" in str(attrs["exception.message"])
+        assert "REDACTED" in str(attrs["exception.stacktrace"])
+
+    def test_no_redaction_for_non_matching_exception(self) -> None:
+        """Test that non-matching exceptions are not redacted."""
+        events = [
+            Event(
+                name="exception",
+                attributes={
+                    "exception.type": "ValueError",
+                    "exception.message": "Invalid value provided",
+                    "exception.stacktrace": "Traceback...",
+                },
+            )
+        ]
+
+        redacted = _redact_events(events)
+
+        assert len(redacted) == 1
+        attrs = redacted[0].attributes
+        assert attrs is not None
+        assert attrs["exception.type"] == "ValueError"
+        assert attrs["exception.message"] == "Invalid value provided"
+        assert attrs["exception.stacktrace"] == "Traceback..."
+
+    def test_case_insensitive_exception_type_matching(self) -> None:
+        """Test case-insensitive matching in events."""
+        events = [
+            Event(
+                name="exception",
+                attributes={
+                    "exception.type": "LANGGRAPH.ERRORS.GRAPHINTERRUPT",
+                    "exception.message": "Should be redacted",
+                },
+            )
+        ]
+
+        redacted = _redact_events(events)
+
+        assert len(redacted) == 1
+        assert redacted[0].attributes is not None
+        assert "REDACTED" in str(redacted[0].attributes["exception.message"])
+
+    def test_empty_events_list(self) -> None:
+        """Test handling of empty events list."""
+        redacted = _redact_events([])
+        assert redacted == []
+
+    def test_none_events(self) -> None:
+        """Test handling of None events."""
+        redacted = _redact_events(None)
+        assert redacted == []
+
+    def test_event_without_attributes(self) -> None:
+        """Test handling of events without attributes."""
+        events = [Event(name="test_event", attributes=None)]
+
+        redacted = _redact_events(events)
+
+        assert len(redacted) == 1
+        assert redacted[0].attributes is None
+
+    def test_event_without_exception_attributes(self) -> None:
+        """Test handling of events without exception attributes."""
+        events = [
+            Event(
+                name="custom_event",
+                attributes={
+                    "custom.field": "value",
+                },
+            )
+        ]
+
+        redacted = _redact_events(events)
+
+        assert len(redacted) == 1
+        assert redacted[0].attributes == {"custom.field": "value"}
+
+    def test_multiple_events_mixed(self) -> None:
+        """Test redacting multiple events with mixed exception types."""
+        events = [
+            Event(
+                name="exception",
+                attributes={
+                    "exception.type": "langgraph.errors.GraphInterrupt",
+                    "exception.message": "Sensitive interrupt",
+                },
+            ),
+            Event(
+                name="exception",
+                attributes={
+                    "exception.type": "ValueError",
+                    "exception.message": "Not sensitive",
+                },
+            ),
+            Event(
+                name="exception",
+                attributes={
+                    "exception.type": "MyApp.LangGraph.Errors.GraphInterrupt",
+                    "exception.message": "Also sensitive",
+                },
+            ),
+        ]
+
+        redacted = _redact_events(events)
+
+        assert len(redacted) == 3
+        assert redacted[0].attributes is not None
+        assert "REDACTED" in str(redacted[0].attributes["exception.message"])
+        assert redacted[1].attributes is not None
+        assert redacted[1].attributes["exception.message"] == "Not sensitive"
+        assert redacted[2].attributes is not None
+        assert "REDACTED" in str(redacted[2].attributes["exception.message"])
+
+
+class TestExporterWithEventRedaction:
+    """Integration tests for PIIFilteringExporter with event redaction."""
+
+    def test_exporter_redacts_exception_events(self) -> None:
+        """Test that exporter redacts exception events for matching types."""
+        delegate = Mock()
+        delegate.export.return_value = SpanExportResult.SUCCESS
+
+        exporter = PIIFilteringExporter(delegate)
+
+        span = Mock(spec=ReadableSpan)
+        span.attributes = {"span.name": "test"}
+        span.events = [
+            Event(
+                name="exception",
+                attributes={
+                    "exception.type": "langgraph.errors.GraphInterrupt",
+                    "exception.message": "Interrupt with sensitive data",
+                    "exception.stacktrace": "Stack trace line 1\nLine 2",
+                },
+            )
+        ]
+
+        result = exporter.export([span])
+
+        assert result == SpanExportResult.SUCCESS
+        delegate.export.assert_called_once()
+
+        exported_spans = delegate.export.call_args[0][0]
+        assert len(exported_spans) == 1
+
+        exported_events = exported_spans[0].events
+        assert len(exported_events) == 1
+        event_attrs = exported_events[0].attributes
+        assert event_attrs is not None
+        assert event_attrs["exception.type"] == "langgraph.errors.GraphInterrupt"
+        assert "REDACTED" in str(event_attrs["exception.message"])
+        assert "REDACTED" in str(event_attrs["exception.stacktrace"])
+
+    def test_exporter_preserves_non_matching_exceptions(self) -> None:
+        """Test that exporter preserves exceptions that don't match patterns."""
+        delegate = Mock()
+        delegate.export.return_value = SpanExportResult.SUCCESS
+
+        exporter = PIIFilteringExporter(delegate)
+
+        span = Mock(spec=ReadableSpan)
+        span.attributes = {}
+        span.events = [
+            Event(
+                name="exception",
+                attributes={
+                    "exception.type": "ValueError",
+                    "exception.message": "Regular error message",
+                    "exception.stacktrace": "Regular stacktrace",
+                },
+            )
+        ]
+
+        result = exporter.export([span])
+
+        assert result == SpanExportResult.SUCCESS
+
+        exported_spans = delegate.export.call_args[0][0]
+        event_attrs = exported_spans[0].events[0].attributes
+        assert event_attrs is not None
+        assert event_attrs["exception.message"] == "Regular error message"
+        assert event_attrs["exception.stacktrace"] == "Regular stacktrace"
+
+    def test_exporter_handles_spans_without_events(self) -> None:
+        """Test that exporter handles spans without events."""
+        delegate = Mock()
+        delegate.export.return_value = SpanExportResult.SUCCESS
+
+        exporter = PIIFilteringExporter(delegate)
+
+        span = Mock(spec=ReadableSpan)
+        span.attributes = {"test": "value"}
+        span.events = None
+
+        result = exporter.export([span])
+
+        assert result == SpanExportResult.SUCCESS
+        delegate.export.assert_called_once()
+
+    def test_exporter_redacts_both_attributes_and_events(self) -> None:
+        """Test that exporter redacts both attributes and events together."""
+        delegate = Mock()
+        delegate.export.return_value = SpanExportResult.SUCCESS
+
+        exporter = PIIFilteringExporter(delegate)
+
+        span = Mock(spec=ReadableSpan)
+        span.attributes = {
+            "input.value": "Sensitive input data",
+            "output.value": "Sensitive output data",
+            "llm.model_name": "gpt-4",
+        }
+        span.events = [
+            Event(
+                name="exception",
+                attributes={
+                    "exception.type": "langgraph.errors.GraphInterrupt",
+                    "exception.message": "Interrupt occurred",
+                },
+            )
+        ]
+
+        result = exporter.export([span])
+
+        assert result == SpanExportResult.SUCCESS
+
+        exported_spans = delegate.export.call_args[0][0]
+        assert len(exported_spans) == 1
+
+        attrs = exported_spans[0].attributes
+        assert "REDACTED" in str(attrs["input.value"])
+        assert "REDACTED" in str(attrs["output.value"])
+        assert attrs["llm.model_name"] == "gpt-4"
+
+        event_attrs = exported_spans[0].events[0].attributes
+        assert event_attrs is not None
+        assert "REDACTED" in str(event_attrs["exception.message"])
