@@ -7,7 +7,7 @@ from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.func import task
 from langgraph.types import interrupt
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipient,
@@ -202,6 +202,8 @@ def create_escalation_tool(
             )
 
         result = await escalate()
+        if isinstance(result, dict):
+            result = TypeAdapter(EscalationToolOutput).validate_python(result)
 
         # Extract task info before validation
         task_id = result.id
