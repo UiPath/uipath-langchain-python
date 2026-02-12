@@ -444,7 +444,7 @@ class TestMapMessages:
         msg = result[0]
         assert isinstance(msg, HumanMessage)
         assert "<uip:attachments>" not in msg.content
-        assert "attachments" not in msg.metadata
+        assert "attachments" not in msg.metadata  # type: ignore[attr-defined]
 
     def test_map_messages_external_value_normalizes_uppercase_uuid(self):
         """Should normalize uppercase UUID in attachment URI to lowercase."""
