@@ -227,6 +227,118 @@ class TestToolSpanInstrumentorCallId:
         assert call_kwargs.get("arguments") is None
 
 
+class TestToolSpanInstrumentorMcpTools:
+    """Tests for MCP tool name construction with server slug prefix."""
+
+    def test_mcp_tool_name_includes_slug_prefix(self) -> None:
+        """MCP tool with slug should get name 'mcp-{slug}-{tool_name}'."""
+        mock_span_factory = MagicMock()
+        mock_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_span
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = MagicMock()
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        run_id = uuid4()
+        serialized = {"name": "add"}
+        input_str = '{"a": 1, "b": 2}'
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            instrumentor.on_tool_start(
+                serialized=serialized,
+                input_str=input_str,
+                run_id=run_id,
+                parent_run_id=None,
+                metadata={
+                    "tool_type": "mcp",
+                    "display_name": "add",
+                    "slug": "my_mcp_coded-tool",
+                },
+            )
+
+        call_args = mock_span_factory.start_tool_call.call_args
+        # tool_name is first positional arg
+        assert call_args[0][0] == "mcp-my_mcp_coded-tool-add"
+
+    def test_mcp_tool_without_slug_uses_original_name(self) -> None:
+        """MCP tool without slug should keep the original tool name."""
+        mock_span_factory = MagicMock()
+        mock_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_span
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = MagicMock()
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        run_id = uuid4()
+        serialized = {"name": "add"}
+        input_str = '{"a": 1}'
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            instrumentor.on_tool_start(
+                serialized=serialized,
+                input_str=input_str,
+                run_id=run_id,
+                parent_run_id=None,
+                metadata={
+                    "tool_type": "mcp",
+                    "display_name": "add",
+                },
+            )
+
+        call_args = mock_span_factory.start_tool_call.call_args
+        assert call_args[0][0] == "add"
+
+    def test_mcp_tool_type_value_is_mcp(self) -> None:
+        """MCP tool should get toolType='Mcp' via get_tool_type_value."""
+        mock_span_factory = MagicMock()
+        mock_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_span
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = MagicMock()
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        run_id = uuid4()
+        serialized = {"name": "add"}
+        input_str = '{"a": 1}'
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            instrumentor.on_tool_start(
+                serialized=serialized,
+                input_str=input_str,
+                run_id=run_id,
+                parent_run_id=None,
+                metadata={
+                    "tool_type": "mcp",
+                    "display_name": "add",
+                    "slug": "my_server",
+                },
+            )
+
+        call_kwargs = mock_span_factory.start_tool_call.call_args.kwargs
+        assert call_kwargs["tool_type_value"] == "Mcp"
+
+
 class TestToolSpanInstrumentorGuardrailPath:
     """Tests for tool span with pre-existing guardrail span."""
 

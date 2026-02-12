@@ -72,6 +72,13 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             tool_name = serialized.get("name", "unknown")
             tool_type = metadata.get("tool_type") if metadata else None
             tool_display_name = metadata.get("display_name") if metadata else None
+
+            # MCP tools: construct full name with server slug prefix
+            if tool_type == "mcp" and metadata:
+                slug = metadata.get("slug")
+                if slug:
+                    tool_name = f"mcp-{slug}-{tool_name}"
+
             output_schema = metadata.get("output_schema") if metadata else None
             if output_schema is not None:
                 self._state.tool_output_schemas[run_id] = output_schema

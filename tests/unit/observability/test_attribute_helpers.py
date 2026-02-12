@@ -11,6 +11,7 @@ from uipath_agents._observability.llmops.instrumentors.attribute_helpers import 
     build_task_url,
     get_tool_type_value,
     set_span_attachments,
+    set_tool_result,
 )
 
 
@@ -381,9 +382,51 @@ class TestGetToolTypeValue:
     def test_processorchestration_returns_agentic_process(self) -> None:
         assert get_tool_type_value("processorchestration") == "agenticProcess"
 
+    def test_mcp_returns_mcp(self) -> None:
+        assert get_tool_type_value("mcp") == "Mcp"
+
+    def test_internal_returns_internal(self) -> None:
+        assert get_tool_type_value("internal") == "Internal"
+
     def test_none_returns_integration(self) -> None:
         assert get_tool_type_value(None) == "Integration"
 
     def test_unknown_returns_integration(self) -> None:
         assert get_tool_type_value("unknown") == "Integration"
         assert get_tool_type_value("other") == "Integration"
+
+
+class TestSetToolResult:
+    """Tests for set_tool_result function."""
+
+    def test_sets_dict_result_as_json(self) -> None:
+        span = MagicMock()
+        set_tool_result(span, {"key": "value"})
+        span.set_attribute.assert_called_once()
+        name, value = span.set_attribute.call_args[0]
+        assert name == "result"
+        assert json.loads(value) == {"key": "value"}
+
+    def test_sets_list_result_as_json(self) -> None:
+        span = MagicMock()
+        set_tool_result(span, [{"type": "text", "text": "hi"}])
+        span.set_attribute.assert_called_once()
+        name, value = span.set_attribute.call_args[0]
+        assert name == "result"
+        assert json.loads(value) == [{"type": "text", "text": "hi"}]
+
+    def test_sets_string_result_as_str(self) -> None:
+        span = MagicMock()
+        set_tool_result(span, "plain text")
+        span.set_attribute.assert_called_once_with("result", "plain text")
+
+    def test_skips_none_output(self) -> None:
+        span = MagicMock()
+        set_tool_result(span, None)
+        span.set_attribute.assert_not_called()
+
+    def test_custom_attribute_name(self) -> None:
+        span = MagicMock()
+        set_tool_result(span, {"data": 1}, "output")
+        name, _ = span.set_attribute.call_args[0]
+        assert name == "output"
