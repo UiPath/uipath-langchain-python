@@ -16,7 +16,10 @@ from uipath.platform.documents import (
     ActionPriority,
     ExtractionResponseIXP,
     FieldGroupValueProjection,
+    StartExtractionValidationResponse,
+    ValidateExtractionAction,
 )
+from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
@@ -24,6 +27,7 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
 
+from ..exceptions import AgentTerminationException
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import (
     resolve_task_title,
@@ -59,17 +63,19 @@ def create_ixp_escalation_tool(
         output_schema=OutputSchema.model_json_schema(),
         example_calls=[],
     )
-    async def ixp_escalation_tool(
-        extraction_result: ExtractionResponseIXP,
-    ) -> OutputSchema:
-        task_title = "VS Escalation Task"
-        if tool.metadata is not None:
-            task_title = tool.metadata.get("task_title") or task_title
+    async def ixp_escalation_tool() -> dict[str, Any]:
+        if tool.metadata is None:
+            raise RuntimeError("Tool metadata is required")
+        extraction_result = tool.metadata.get("extraction_result")
+        if not isinstance(extraction_result, ExtractionResponseIXP):
+            raise RuntimeError("extraction_result not set in metadata")
+        task_title = tool.metadata.get("task_title") or "VS Escalation Task"
 
         @task
-        async def start_extraction_validation() -> Any:
-            client = UiPath()
-            return await client.documents.start_ixp_extraction_validation_async(
+        async def start_extraction_validation() -> ValidateExtractionAction:
+            uipath = UiPath()
+            # wait for extraction action to be created
+            response = await uipath.documents.create_validate_extraction_action_async(
                 extraction_response=extraction_result,
                 action_title=task_title,
                 storage_bucket_name=storage_bucket_name,
@@ -77,13 +83,29 @@ def create_ixp_escalation_tool(
                 action_priority=action_priority,
             )
 
+            return response
+
         validation_response = await start_extraction_validation()
+
+        start_extraction_validation_response = StartExtractionValidationResponse(
+            operation_id=validation_response.operation_id,
+            document_id=extraction_result.extraction_result.document_id,
+            project_id=extraction_result.project_id,
+            tag=extraction_result.tag,
+        )
+
+        task_url = validation_response.action_data.get("taskUrl")
+
         response = interrupt(
             WaitDocumentExtractionValidation(
-                extraction_validation=validation_response,
+                extraction_validation=start_extraction_validation_response,
+                task_url=task_url,
             )
         )
-        return OutputSchema(data=response["dataProjection"])
+        # store validation response in tool metadata to check for exceptions in the wrapper
+        tool.metadata["_validation_response"] = response
+
+        return OutputSchema(data=response["dataProjection"]).model_dump(by_alias=True)
 
     async def ixp_escalation_tool_wrapper(
         tool: BaseTool,
@@ -99,14 +121,34 @@ def create_ixp_escalation_tool(
             default_title="VS Escalation Task",
         )
 
-        extraction_result = state.inner_state.tools_storage.get(ixp_tool_name)
-        if not extraction_result:
+        extraction_result_dict = state.inner_state.tools_storage.get(ixp_tool_name)
+        if not extraction_result_dict:
             raise RuntimeError(
                 f"Extraction result not found for {ixp_tool_name} ixp extraction tool."
             )
 
-        call["args"]["extraction_result"] = extraction_result
-        return await tool.ainvoke(call["args"])
+        tool.metadata["extraction_result"] = ExtractionResponseIXP(
+            **extraction_result_dict
+        )
+        result = await tool.ainvoke(call["args"])
+
+        validation_response = tool.metadata.get("_validation_response", {})
+        if validation_response and (
+            rejection_details := validation_response["actionData"]["data"].get(
+                "documentRejectionDetails"
+            )
+        ):
+            detail_template = "Vs Escalation Exception: {}"
+            raise AgentTerminationException(
+                code=UiPathErrorCode.EXECUTION_ERROR,
+                title="VS Escalation Exception",
+                detail=detail_template.format(
+                    rejection_details.get("reason")
+                    or "The validation was marked as exception."
+                ),
+            )
+
+        return result
 
     tool = StructuredToolWithWrapper(
         name=tool_name,
