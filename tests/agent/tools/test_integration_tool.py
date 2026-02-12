@@ -184,6 +184,47 @@ class TestConvertToIntegrationServiceMetadata:
         assert "metadata.field2" not in result.parameter_location_info.body_fields
         assert "metadata.nested.field" not in result.parameter_location_info.body_fields
 
+    def test_json_body_section_from_body_structure(self, resource_factory):
+        """Test that jsonBodySection is extracted from body_structure."""
+        param = AgentIntegrationToolParameter(
+            name="prompt", type="string", field_location="body"
+        )
+        resource = resource_factory(parameters=[param])
+        resource.properties.body_structure = {
+            "contentType": "multipart",
+            "jsonBodySection": "RagRequest",
+        }
+
+        result = convert_to_activity_metadata(resource)
+
+        assert result.content_type == "multipart/form-data"
+        assert result.json_body_section == "RagRequest"
+
+    def test_json_body_section_none_when_not_specified(self, resource_factory):
+        """Test that json_body_section is None when bodyStructure has no jsonBodySection."""
+        param = AgentIntegrationToolParameter(
+            name="prompt", type="string", field_location="body"
+        )
+        resource = resource_factory(parameters=[param])
+        resource.properties.body_structure = {"contentType": "multipart"}
+
+        result = convert_to_activity_metadata(resource)
+
+        assert result.content_type == "multipart/form-data"
+        assert result.json_body_section is None
+
+    def test_json_body_section_none_when_no_body_structure(self, resource_factory):
+        """Test that json_body_section is None when body_structure is None."""
+        param = AgentIntegrationToolParameter(
+            name="prompt", type="string", field_location="body"
+        )
+        resource = resource_factory(parameters=[param])
+
+        result = convert_to_activity_metadata(resource)
+
+        assert result.content_type == "application/json"
+        assert result.json_body_section is None
+
     def test_parameter_location_mapping_simple_fields(self, resource_factory):
         """Test parameter mapping for simple field names across different locations."""
         params = [
