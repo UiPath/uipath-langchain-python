@@ -143,12 +143,13 @@ class UiPathChatMessagesMapper:
                     attachment_id = self.parse_attachment_id_from_content_part_uri(
                         data.uri
                     )
-                    if attachment_id:
+                    full_name = getattr(part, "name", None)
+                    if attachment_id and full_name:
                         attachments.append(
                             {
                                 "id": attachment_id,
-                                "full_name": part.name or "",
-                                "mime_type": part.mime_type or "",
+                                "full_name": full_name,
+                                "mime_type": part.mime_type,
                             }
                         )
 
