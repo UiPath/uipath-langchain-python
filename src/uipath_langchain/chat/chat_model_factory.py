@@ -38,6 +38,7 @@ def _create_openai_llm(
     max_tokens: int,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    **kwargs: Any,
 ) -> BaseChatModel:
     """Create UiPathChatOpenAI for OpenAI models via LLMGateway."""
     from uipath_langchain.chat.openai import UiPathChatOpenAI
@@ -55,6 +56,7 @@ def _create_openai_llm(
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
                 output_version="v1",
+                **kwargs,
             )
         case APIFlavor.OPENAI_COMPLETIONS:
             return UiPathChatOpenAI(
@@ -66,6 +68,7 @@ def _create_openai_llm(
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
                 output_version="v1",
+                **kwargs,
             )
         case _:
             raise ValueError(f"Unknown api_flavor={api_flavor} for OpenAI")
@@ -78,6 +81,7 @@ def _create_bedrock_llm(
     max_tokens: int,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    **kwargs: Any,
 ) -> BaseChatModel:
     """Create UiPathChatBedrockConverse for Claude models via LLMGateway."""
     from uipath_langchain.chat.bedrock import (
@@ -94,6 +98,7 @@ def _create_bedrock_llm(
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
                 output_version="v1",
+                **kwargs,
             )
         case APIFlavor.AWS_BEDROCK_INVOKE:
             return UiPathChatBedrock(
@@ -103,6 +108,7 @@ def _create_bedrock_llm(
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
                 output_version="v1",
+                **kwargs,
             )
         case _:
             raise ValueError(f"Unknown api_flavor={api_flavor} for AwsBedrock")
@@ -115,6 +121,7 @@ def _create_vertex_llm(
     max_tokens: int | None,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    **kwargs: Any,
 ) -> BaseChatModel:
     """Create UiPathChatVertex for Gemini models via LLMGateway."""
     from uipath_langchain.chat.vertex import UiPathChatVertex
@@ -128,6 +135,7 @@ def _create_vertex_llm(
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
                 output_version="v1",
+                **kwargs,
             )
         case APIFlavor.VERTEX_ANTHROPIC_CLAUDE:
             raise ValueError(f"api_flavor={api_flavor} is not yet supported for Vertex")
@@ -223,6 +231,7 @@ def get_chat_model(
     max_tokens: int,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    **kwargs: Any,
 ) -> BaseChatModel:
     """Create and configure LLM instance using LLMGateway API.
 
@@ -243,6 +252,7 @@ def get_chat_model(
                 max_tokens,
                 agenthub_config,
                 byo_connection_id,
+                **kwargs,
             )
         case LLMProvider.BEDROCK:
             return _create_bedrock_llm(
@@ -252,6 +262,7 @@ def get_chat_model(
                 max_tokens,
                 agenthub_config,
                 byo_connection_id,
+                **kwargs,
             )
         case LLMProvider.VERTEX:
             return _create_vertex_llm(
@@ -261,4 +272,5 @@ def get_chat_model(
                 max_tokens,
                 agenthub_config,
                 byo_connection_id,
+                **kwargs,
             )
