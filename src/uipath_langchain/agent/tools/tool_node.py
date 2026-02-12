@@ -84,7 +84,9 @@ class UiPathToolNode(RunnableCallable):
             result = self.tool.invoke(call, config=config)
         return self._process_result(call, result)
 
-    async def _afunc(self, state: AgentGraphState, config: RunnableConfig) -> OutputType:
+    async def _afunc(
+        self, state: AgentGraphState, config: RunnableConfig
+    ) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
             return None
