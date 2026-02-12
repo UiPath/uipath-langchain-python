@@ -214,6 +214,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         arguments=arguments,
                         parent_span=span,
                     )
+                    self._state.mcp_run_ids.add(run_id)
 
                 if child_span:
                     self._spans[self._interruptible_span_key(run_id)] = child_span
@@ -285,6 +286,9 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         child_span.update_name(f"Simulated result: {child_span.name}")
                 SpanHierarchyManager.pop(run_id)
                 set_tool_result(child_span, output, "output")
+                if run_id in self._state.mcp_run_ids:
+                    set_tool_result(child_span, output)
+                    self._state.mcp_run_ids.discard(run_id)
                 if run_id in self._state.process_run_ids:
                     set_process_job_info(child_span, output)
                     self._state.process_run_ids.discard(run_id)

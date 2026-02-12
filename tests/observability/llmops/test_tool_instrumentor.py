@@ -421,6 +421,41 @@ class TestToolSpanInstrumentorMcpTools:
             mock_span_factory.start_mcp_tool.call_args.kwargs["tool_name"] == "search"
         )
 
+    def test_mcp_tool_end_sets_result_on_child_span(self) -> None:
+        """on_tool_end should set 'result' attribute on the mcpTool child span."""
+        mock_span_factory = MagicMock()
+        mock_tool_call_span = MagicMock()
+        mock_mcp_child_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_tool_call_span
+        mock_span_factory.start_mcp_tool.return_value = mock_mcp_child_span
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = MagicMock()
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        run_id = uuid4()
+        output = [{"type": "text", "text": "hello"}]
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            instrumentor.on_tool_start(
+                serialized={"name": "search"},
+                input_str='{"query": "test"}',
+                run_id=run_id,
+                parent_run_id=None,
+                metadata={"tool_type": "mcp", "display_name": "search"},
+            )
+            instrumentor.on_tool_end(output=output, run_id=run_id)
+
+        mock_mcp_child_span.set_attribute.assert_any_call(
+            "result", '[{"type": "text", "text": "hello"}]'
+        )
+
 
 class TestToolSpanInstrumentorGuardrailPath:
     """Tests for tool span with pre-existing guardrail span."""
