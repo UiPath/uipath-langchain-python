@@ -187,9 +187,8 @@ class TestIxpEscalationToolWrapper:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.task", _passthrough_task)
     @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.utils.interrupt")
     async def test_wrapper_retrieves_extraction_from_state(
         self,
         mock_interrupt,
@@ -371,9 +370,8 @@ class TestIxpEscalationToolExecution:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.task", _passthrough_task)
     @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.utils.interrupt")
     async def test_tool_calls_interrupt_with_correct_params(
         self,
         mock_interrupt,
@@ -413,9 +411,8 @@ class TestIxpEscalationToolExecution:
         assert validation_arg.task_url == "https://example.com/actions_/tasks/123"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.task", _passthrough_task)
     @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.utils.interrupt")
     async def test_tool_uses_default_action_title_when_not_provided(
         self, mock_interrupt, mock_uipath_cls, mock_extraction_response
     ):
@@ -467,9 +464,8 @@ class TestIxpEscalationToolExecution:
         assert sdk_kwargs.kwargs["action_title"] == "VS Escalation Task"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.task", _passthrough_task)
     @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.utils.interrupt")
     async def test_tool_uses_default_priority_when_not_provided(
         self, mock_interrupt, mock_uipath_cls, mock_extraction_response
     ):

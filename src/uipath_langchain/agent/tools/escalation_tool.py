@@ -5,8 +5,6 @@ from typing import Any, Literal
 
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.func import task
-from langgraph.types import interrupt
 from pydantic import BaseModel, TypeAdapter
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
@@ -34,6 +32,7 @@ from ..exceptions import AgentTerminationException
 from ..react.types import AgentGraphState
 from .tool_node import ToolWrapperReturnType
 from .utils import (
+    durable_interrupt,
     resolve_task_title,
     sanitize_dict_for_serialization,
     sanitize_tool_name,
@@ -176,7 +175,6 @@ def create_escalation_tool(
             example_calls=channel.properties.example_calls,
         )
         async def escalate():
-            @task
             async def create_escalation_task():
                 client = UiPath()
                 return await client.tasks.create_async(
@@ -191,14 +189,14 @@ def create_escalation_tool(
                     actionable_message_metadata=channel.properties.actionable_message_meta_data,
                 )
 
-            created_task = await create_escalation_task()
-            return interrupt(
-                WaitEscalation(
+            return await durable_interrupt(
+                create_escalation_task,
+                lambda created_task: WaitEscalation(
                     action=created_task,
                     app_folder_path=channel.properties.folder_name,
                     app_name=channel.properties.app_name,
                     recipient=recipient,
-                )
+                ),
             )
 
         result = await escalate()

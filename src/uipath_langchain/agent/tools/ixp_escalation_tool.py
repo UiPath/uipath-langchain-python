@@ -1,12 +1,8 @@
 """Ixp escalation tool."""
 
-from typing import Any
-
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
-from langgraph.func import task
-from langgraph.types import interrupt
 from pydantic import BaseModel
 from uipath.agent.models.agent import AgentIxpVsEscalationResourceConfig
 from uipath.eval.mocks import mockable
@@ -30,6 +26,7 @@ from uipath_langchain.agent.tools.tool_node import (
 from ..exceptions import AgentTerminationException
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import (
+    durable_interrupt,
     resolve_task_title,
     sanitize_dict_for_serialization,
     sanitize_tool_name,
@@ -75,6 +72,7 @@ def create_ixp_escalation_tool(
         async def start_extraction_validation() -> ValidateExtractionAction:
             uipath = UiPath()
             # wait for extraction action to be created
+
             response = await uipath.documents.create_validate_extraction_action_async(
                 extraction_response=extraction_result,
                 action_title=task_title,
