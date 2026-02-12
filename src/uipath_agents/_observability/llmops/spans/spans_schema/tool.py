@@ -20,6 +20,7 @@ from ..span_attributes import (
     IntegrationToolSpanAttributes,
     InternalToolSpanAttributes,
     IxpToolSpanAttributes,
+    McpToolSpanAttributes,
     ProcessToolSpanAttributes,
     SpanType,
     ToolCallSpanAttributes,
@@ -322,6 +323,35 @@ class ToolSpanSchema:
             kind=SpanKind.INTERNAL,
         )
         attrs = InternalToolSpanAttributes(tool_name=tool_name, arguments=arguments)
+        apply_attributes(span, attrs)
+        if self._upsert_started:
+            self._upsert_started(span)
+        return span
+
+    def start_mcp_tool(
+        self,
+        tool_name: str,
+        *,
+        arguments: Optional[Dict[str, Any]] = None,
+        parent_span: Optional[Span] = None,
+    ) -> Span:
+        """Start an MCP tool span (child of tool call).
+
+        Args:
+            tool_name: Name of the MCP tool (used as span name)
+            arguments: Arguments passed to the tool
+            parent_span: Optional parent span. If None, uses current span.
+
+        Returns:
+            The started Span (caller must call span.end())
+        """
+        span = create_span(
+            self._tracer,
+            tool_name,
+            parent_span=parent_span,
+            kind=SpanKind.INTERNAL,
+        )
+        attrs = McpToolSpanAttributes(arguments=arguments or {})
         apply_attributes(span, attrs)
         if self._upsert_started:
             self._upsert_started(span)

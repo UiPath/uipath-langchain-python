@@ -231,7 +231,7 @@ class TestToolSpanInstrumentorMcpTools:
     """Tests for MCP tool name construction with server slug prefix."""
 
     def test_mcp_tool_name_includes_slug_prefix(self) -> None:
-        """MCP tool with slug should get name 'mcp-{slug}-{tool_name}'."""
+        """MCP tool with slug should get name 'mcp-{sanitized_slug}-tool-{tool_name}'."""
         mock_span_factory = MagicMock()
         mock_span = MagicMock()
         mock_span_factory.start_tool_call.return_value = mock_span
@@ -265,7 +265,7 @@ class TestToolSpanInstrumentorMcpTools:
 
         call_args = mock_span_factory.start_tool_call.call_args
         # tool_name is first positional arg
-        assert call_args[0][0] == "mcp-my_mcp_coded-tool-add"
+        assert call_args[0][0] == "mcp-my_mcp_coded_tool-tool-add"
 
     def test_mcp_tool_without_slug_uses_original_name(self) -> None:
         """MCP tool without slug should keep the original tool name."""
@@ -337,6 +337,89 @@ class TestToolSpanInstrumentorMcpTools:
 
         call_kwargs = mock_span_factory.start_tool_call.call_args.kwargs
         assert call_kwargs["tool_type_value"] == "Mcp"
+
+    def test_mcp_tool_creates_child_span(self) -> None:
+        """MCP tool should create a mcpTool child span via start_mcp_tool."""
+        mock_span_factory = MagicMock()
+        mock_tool_call_span = MagicMock()
+        mock_mcp_child_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_tool_call_span
+        mock_span_factory.start_mcp_tool.return_value = mock_mcp_child_span
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = MagicMock()
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        run_id = uuid4()
+        serialized = {"name": "search"}
+        input_str = '{"query": "latest iPhone", "max_results": 1}'
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            instrumentor.on_tool_start(
+                serialized=serialized,
+                input_str=input_str,
+                run_id=run_id,
+                parent_run_id=None,
+                metadata={
+                    "tool_type": "mcp",
+                    "display_name": "search",
+                    "slug": "duck-duck-go-search",
+                },
+            )
+
+        mock_span_factory.start_mcp_tool.assert_called_once()
+        call_kwargs = mock_span_factory.start_mcp_tool.call_args.kwargs
+        assert call_kwargs["tool_name"] == "mcp-duck_duck_go_search-tool-search"
+        assert call_kwargs["arguments"] == {
+            "query": "latest iPhone",
+            "max_results": 1,
+        }
+        assert call_kwargs["parent_span"] is mock_tool_call_span
+
+    def test_mcp_tool_without_slug_creates_child_span(self) -> None:
+        """MCP tool without slug should still create mcpTool child span."""
+        mock_span_factory = MagicMock()
+        mock_tool_call_span = MagicMock()
+        mock_mcp_child_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_tool_call_span
+        mock_span_factory.start_mcp_tool.return_value = mock_mcp_child_span
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = MagicMock()
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        run_id = uuid4()
+        serialized = {"name": "search"}
+        input_str = '{"query": "test"}'
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            instrumentor.on_tool_start(
+                serialized=serialized,
+                input_str=input_str,
+                run_id=run_id,
+                parent_run_id=None,
+                metadata={
+                    "tool_type": "mcp",
+                    "display_name": "search",
+                },
+            )
+
+        mock_span_factory.start_mcp_tool.assert_called_once()
+        assert (
+            mock_span_factory.start_mcp_tool.call_args.kwargs["tool_name"] == "search"
+        )
 
 
 class TestToolSpanInstrumentorGuardrailPath:

@@ -73,11 +73,12 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             tool_type = metadata.get("tool_type") if metadata else None
             tool_display_name = metadata.get("display_name") if metadata else None
 
-            # MCP tools: construct full name with server slug prefix
+            # MCP tools: construct full name as mcp-{slug}-tool-{name}
             if tool_type == "mcp" and metadata:
                 slug = metadata.get("slug")
                 if slug:
-                    tool_name = f"mcp-{slug}-{tool_name}"
+                    sanitized_slug = slug.replace("-", "_")
+                    tool_name = f"mcp-{sanitized_slug}-tool-{tool_name}"
 
             output_schema = metadata.get("output_schema") if metadata else None
             if output_schema is not None:
@@ -204,6 +205,12 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 elif tool_type == "internal" and tool_display_name:
                     child_span = self._span_factory.start_internal_tool(
                         tool_name=tool_display_name,
+                        arguments=arguments,
+                        parent_span=span,
+                    )
+                elif tool_type == "mcp":
+                    child_span = self._span_factory.start_mcp_tool(
+                        tool_name=tool_name,
                         arguments=arguments,
                         parent_span=span,
                     )
