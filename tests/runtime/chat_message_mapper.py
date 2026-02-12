@@ -134,8 +134,12 @@ class TestMapMessages:
                     content_part_id="part-1",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="hello world"),
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
                 )
             ],
+            tool_calls=[],
+            interrupts=[],
         )
 
         result = mapper.map_messages([uipath_msg])
@@ -161,8 +165,12 @@ class TestMapMessages:
                     "content_part_id": "part-1",
                     "mime_type": "text/plain",
                     "data": {"inline": "hello from dict"},
+                    "createdAt": "2025-01-15T10:30:00Z",
+                    "updatedAt": "2025-01-15T10:30:00Z",
                 }
             ],
+            "tool_calls": [],
+            "interrupts": [],
         }
 
         result = mapper.map_messages([dict_msg])
@@ -179,6 +187,9 @@ class TestMapMessages:
             role="user",
             created_at=TEST_TIMESTAMP,
             updated_at=TEST_TIMESTAMP,
+            content_parts=[],
+            tool_calls=[],
+            interrupts=[],
         )
 
         with pytest.raises(TypeError, match="Mixed message types not supported"):
@@ -206,13 +217,19 @@ class TestMapMessages:
                     content_part_id="part-1",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="first part"),
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
                 ),
                 UiPathConversationContentPart(
                     content_part_id="part-2",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="second part"),
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
                 ),
             ],
+            tool_calls=[],
+            interrupts=[],
         )
 
         result = mapper.map_messages([uipath_msg])
@@ -235,6 +252,9 @@ class TestMapMessages:
             role="user",
             created_at=TEST_TIMESTAMP,
             updated_at=TEST_TIMESTAMP,
+            content_parts=[],
+            tool_calls=[],
+            interrupts=[],
         )
 
         result = mapper.map_messages([uipath_msg])
@@ -445,7 +465,7 @@ class TestMapEvent:
         assert event.tool_call is not None
         assert event.tool_call.tool_call_id == "tool-1"
         assert event.tool_call.end is not None
-        assert event.tool_call.end.output.inline == {"result": "success"}
+        assert event.tool_call.end.output == {"result": "success"}
 
     @pytest.mark.asyncio
     async def test_map_event_cleans_up_tool_mapping_after_use(self):
@@ -506,7 +526,7 @@ class TestMapEvent:
         event = result[0]
         assert event.tool_call is not None
         assert event.tool_call.end is not None
-        assert event.tool_call.end.output.inline == {"key": "value", "number": 42}
+        assert event.tool_call.end.output == {"key": "value", "number": 42}
 
     @pytest.mark.asyncio
     async def test_map_event_keeps_string_content_when_not_json(self):
@@ -526,7 +546,7 @@ class TestMapEvent:
         event = result[0]
         assert event.tool_call is not None
         assert event.tool_call.end is not None
-        assert event.tool_call.end.output.inline == "not json content"
+        assert event.tool_call.end.output == "not json content"
 
     @pytest.mark.asyncio
     async def test_map_event_returns_none_for_system_message(self):
