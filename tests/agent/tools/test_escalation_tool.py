@@ -23,18 +23,6 @@ from uipath_langchain.agent.tools.escalation_tool import (
 )
 
 
-def _noop_task(fn):
-    """No-op replacement for @task so it works outside Pregel context."""
-    return fn
-
-
-@pytest.fixture(autouse=True)
-def _patch_lg_task():
-    """Patch @task decorator to no-op since unit tests run outside Pregel context."""
-    with patch("uipath_langchain.agent.tools.escalation_tool.task", _noop_task):
-        yield
-
-
 def _make_mock_task(**overrides):
     """Create a Task instance for tests."""
     defaults = {"id": 1, "key": "task-key", "title": "Test Task"}
@@ -671,6 +659,86 @@ class TestGetUserEmail:
         """Test object without emailAddress attribute returns None."""
         user = MagicMock(spec=["name", "id"])
         assert _get_user_email(user) is None
+
+
+class TestEscalationToolTaskInfo:
+    """Test that escalation tool extracts task_id and assigned_to."""
+
+    @pytest.fixture
+    def escalation_resource(self):
+        """Create a minimal escalation tool resource config."""
+        return AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                    ),
+                    recipients=[],
+                )
+            ],
+        )
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    async def test_wrapper_returns_task_id_and_assigned_to(
+        self, mock_interrupt, mock_uipath_class, escalation_resource
+    ):
+        """Test that wrapper result includes task_id and assigned_to from Task."""
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.id = 12345
+        mock_result.key = None
+        mock_result.assigned_to_user = {"emailAddress": "user@example.com"}
+        mock_result.action = "approve"
+        mock_result.data = {"reason": "looks good"}
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        assert result["task_id"] == 12345
+        assert result["assigned_to"] == "user@example.com"
+        assert result["outcome"] == "approve"
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    async def test_wrapper_handles_missing_assigned_to_user(
+        self, mock_interrupt, mock_uipath_class, escalation_resource
+    ):
+        """Test that wrapper handles None assigned_to_user gracefully."""
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.id = 99999
+        mock_result.key = None
+        mock_result.assigned_to_user = None
+        mock_result.action = "reject"
+        mock_result.data = {}
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        assert result["task_id"] == 99999
+        assert result["assigned_to"] is None
 
 
 class TestEscalationToolCreatesTaskBeforeInterrupt:

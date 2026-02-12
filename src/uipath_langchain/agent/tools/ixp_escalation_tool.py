@@ -5,7 +5,6 @@ from typing import Any
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
-from langgraph.func import task
 from langgraph.types import interrupt
 from pydantic import BaseModel
 from uipath.agent.models.agent import AgentIxpVsEscalationResourceConfig
@@ -17,7 +16,6 @@ from uipath.platform.documents import (
     ExtractionResponseIXP,
     FieldGroupValueProjection,
     StartExtractionValidationResponse,
-    ValidateExtractionAction,
 )
 from uipath.runtime.errors import UiPathErrorCode
 
@@ -28,6 +26,7 @@ from uipath_langchain.agent.tools.tool_node import (
 )
 
 from ..exceptions import AgentTerminationException
+from .durable_interrupt import durable_task
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import (
     resolve_task_title,
@@ -71,37 +70,34 @@ def create_ixp_escalation_tool(
             raise RuntimeError("extraction_result not set in metadata")
         task_title = tool.metadata.get("task_title") or "VS Escalation Task"
 
-        @task
-        async def start_extraction_validation() -> ValidateExtractionAction:
+        @durable_task
+        async def start_extraction_validation():
             uipath = UiPath()
-            # wait for extraction action to be created
-            response = await uipath.documents.create_validate_extraction_action_async(
-                extraction_response=extraction_result,
-                action_title=task_title,
-                storage_bucket_name=storage_bucket_name,
-                storage_bucket_directory_path=storage_bucket_folder_path,
-                action_priority=action_priority,
+            validation_response = (
+                await uipath.documents.create_validate_extraction_action_async(
+                    extraction_response=extraction_result,
+                    action_title=task_title,
+                    storage_bucket_name=storage_bucket_name,
+                    storage_bucket_directory_path=storage_bucket_folder_path,
+                    action_priority=action_priority,
+                )
             )
 
-            return response
+            start_response = StartExtractionValidationResponse(
+                operation_id=validation_response.operation_id,
+                document_id=extraction_result.extraction_result.document_id,
+                project_id=extraction_result.project_id,
+                tag=extraction_result.tag,
+            )
+            task_url = validation_response.action_data.get("taskUrl")
 
-        validation_response = await start_extraction_validation()
-
-        start_extraction_validation_response = StartExtractionValidationResponse(
-            operation_id=validation_response.operation_id,
-            document_id=extraction_result.extraction_result.document_id,
-            project_id=extraction_result.project_id,
-            tag=extraction_result.tag,
-        )
-
-        task_url = validation_response.action_data.get("taskUrl")
-
-        response = interrupt(
-            WaitDocumentExtractionValidation(
-                extraction_validation=start_extraction_validation_response,
+            return WaitDocumentExtractionValidation(
+                extraction_validation=start_response,
                 task_url=task_url,
             )
-        )
+
+        wait_obj = await start_extraction_validation()
+        response = interrupt(wait_obj)
         # store validation response in tool metadata to check for exceptions in the wrapper
         tool.metadata["_validation_response"] = response
 

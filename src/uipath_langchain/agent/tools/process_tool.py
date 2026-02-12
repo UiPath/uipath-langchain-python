@@ -5,7 +5,6 @@ from typing import Any
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
-from langgraph.func import task
 from langgraph.types import interrupt
 from uipath.agent.models.agent import AgentProcessToolResourceConfig
 from uipath.eval.mocks import mockable
@@ -23,6 +22,7 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
 
+from .durable_interrupt import durable_task
 from .utils import sanitize_tool_name
 
 
@@ -54,19 +54,19 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
         async def invoke_process():
             parent_span_id = _span_context.pop("parent_span_id", None)
 
-            @task
+            @durable_task
             async def start_job():
                 client = UiPath()
-                return await client.processes.invoke_async(
+                job = await client.processes.invoke_async(
                     name=process_name,
                     input_arguments=input_arguments,
                     folder_path=folder_path,
                     attachments=attachments,
                     parent_span_id=parent_span_id,
                 )
+                return WaitJob(job=job, process_folder_key=job.folder_key)
 
-            job = await start_job()
-            return interrupt(WaitJob(job=job, process_folder_key=job.folder_key))
+            return interrupt(await start_job())
 
         return await invoke_process()
 

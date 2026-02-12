@@ -14,18 +14,6 @@ from uipath.platform.orchestrator import Job
 from uipath_langchain.agent.tools.process_tool import create_process_tool
 
 
-def _noop_task(fn):
-    """No-op replacement for @task so it works outside Pregel context."""
-    return fn
-
-
-@pytest.fixture(autouse=True)
-def _patch_lg_task():
-    """Patch @task decorator to no-op since unit tests run outside Pregel context."""
-    with patch("uipath_langchain.agent.tools.process_tool.task", _noop_task):
-        yield
-
-
 @pytest.fixture
 def process_resource():
     """Create a minimal process tool resource config."""
