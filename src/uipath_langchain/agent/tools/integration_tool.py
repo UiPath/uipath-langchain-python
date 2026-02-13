@@ -119,18 +119,21 @@ def convert_to_activity_metadata(
 
     param_location_info.body_fields = list(body_fields_set)
 
-    # determine content type
+    # determine content type and json body section
     content_type = "application/json"
+    json_body_section = None
     if resource.properties.body_structure is not None:
         shorthand_type = resource.properties.body_structure.get("contentType", "json")
         if shorthand_type == "multipart":
             content_type = "multipart/form-data"
+        json_body_section = resource.properties.body_structure.get("jsonBodySection")
 
     return ActivityMetadata(
         object_path=resource.properties.tool_path,
         method_name=http_method,
         content_type=content_type,
         parameter_location_info=param_location_info,
+        json_body_section=json_body_section,
     )
 
 
