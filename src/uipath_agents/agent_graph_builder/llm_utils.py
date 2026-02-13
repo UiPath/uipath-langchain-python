@@ -23,6 +23,7 @@ def create_llm(
     max_tokens: int,
     execution_type: AgentExecutionType,
     byo_connection_id: str | None = None,
+    disable_streaming: bool = True,
 ) -> BaseChatModel:
     """Create an LLM instance via the UiPath LLM Gateway passthrough API.
 
@@ -33,6 +34,9 @@ def create_llm(
         execution_type: The agent execution context (playground, runtime, or eval).
         byo_connection_id: Optional Integration Service connection ID for
             bring-your-own-model configurations.
+        disable_streaming: Whether to disable streaming responses. Defaults to
+            True because the UiPath LLM Gateway does not support streaming
+            when PII masking is enabled.
 
     Returns:
         A configured BaseChatModel instance for the specified provider.
@@ -45,4 +49,5 @@ def create_llm(
         max_tokens,
         agenthub_config,
         byo_connection_id,
+        disable_streaming=disable_streaming,
     )

@@ -124,6 +124,7 @@ class TestBuildAgentGraph:
                 max_tokens=2048,
                 execution_type=AgentExecutionType.PLAYGROUND,
                 byo_connection_id="test-connection-id",
+                disable_streaming=True,
             )
 
     async def test_handles_input_data_dict(self):
