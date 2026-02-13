@@ -25,6 +25,10 @@ def __getattr__(name):
         from .openai import UiPathChatOpenAI
 
         return UiPathChatOpenAI
+    if name == "hitl_tool":
+        from .hitl import hitl_tool
+
+        return hitl_tool
     if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
         from . import supported_models
 
@@ -46,4 +50,5 @@ __all__ = [
     "GeminiModels",
     "LLMProvider",
     "APIFlavor",
+    "hitl_tool",
 ]
