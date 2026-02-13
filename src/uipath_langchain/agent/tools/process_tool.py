@@ -21,7 +21,8 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
 
-from .utils import durable_interrupt, sanitize_tool_name
+from .durable_interrupt import durable_interrupt
+from .utils import sanitize_tool_name
 
 
 def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredTool:

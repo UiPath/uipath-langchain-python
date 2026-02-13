@@ -30,9 +30,9 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 
 from ..exceptions import AgentTerminationException
 from ..react.types import AgentGraphState
+from .durable_interrupt import durable_interrupt
 from .tool_node import ToolWrapperReturnType
 from .utils import (
-    durable_interrupt,
     resolve_task_title,
     sanitize_dict_for_serialization,
     sanitize_tool_name,
