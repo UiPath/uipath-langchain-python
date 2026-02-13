@@ -23,6 +23,17 @@ class ModelPayloadHandler(ABC):
             - {"type": "any"} for Bedrock Invoke API (dict format required)
         """
 
+    def get_parallel_tool_calls_kwargs(
+        self, parallel_tool_calls: bool
+    ) -> dict[str, Any]:
+        """Get provider-specific bind_tools kwargs for controlling parallel tool calls.
+
+        Returns:
+            Dict of kwargs to spread into model.bind_tools().
+            Empty dict if the provider doesn't support this parameter.
+        """
+        return {}
+
     @abstractmethod
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check response stop reason and raise exception for faulty terminations.
