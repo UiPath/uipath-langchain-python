@@ -125,13 +125,20 @@ class InstrumentationState:
         self.resumed_escalation_span_data = None
 
     def get_span_or_root(self, run_id: Optional[UUID]) -> Optional[Span]:
-        """Get span by run_id or fall back to agent span."""
-        if run_id and run_id in self.spans:
-            return self.spans[run_id]
-        # Try context stack before falling back to root
+        """Get span by run_id or fall back to agent span.
+
+        Checks SpanHierarchyManager first to get the most specific (deepest)
+        parent span, e.g. Analyze_Files child span instead of Tool call outer.
+        """
         from ..callback import _get_current_span
 
-        return _get_current_span() or self.agent_span
+        # Prefer context stack — returns deepest pushed span (e.g. child tool span)
+        ctx_span = _get_current_span()
+        if ctx_span:
+            return ctx_span
+        if run_id and run_id in self.spans:
+            return self.spans[run_id]
+        return self.agent_span
 
 
 class BaseSpanInstrumentor:

@@ -1057,8 +1057,9 @@ class TestNestedLlmCallsInTools:
 
         # LLM span should be child of tool span (not agent span)
         assert llm.parent.span_id == tool.context.span_id
-        # Model span should be child of LLM span
-        assert model.parent.span_id == llm.context.span_id
+        # Model span should be child of tool span (reparented for inner calls
+        # because server may drop the intermediate LLM call span)
+        assert model.parent.span_id == tool.context.span_id
         # Tool span should be child of agent span
         assert tool.parent.span_id == agent.context.span_id
 

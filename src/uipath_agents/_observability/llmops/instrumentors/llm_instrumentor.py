@@ -74,6 +74,7 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
 
         # Check if llmCall was created early by guardrails
         # Only reuse if the flag indicates it was created by guardrails
+        parent = None  # Resolved parent; set in non-guardrail path
         if self._state.current_llm_span and self._state.llm_span_from_guardrail:
             llm_span = self._state.current_llm_span
             if input_text:
@@ -95,11 +96,16 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
         # Close llm_pre container before model span
         self._close_container(GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION)
 
+        # For inner calls (nested inside a tool), parent the model run directly
+        # under the tool span. The LLMOps server may drop the intermediate
+        # "LLM call" span, so this ensures the "Model run" always has a valid
+        # parent in the server trace.
+        is_inner_call = parent is not None and parent is not self._agent_span
         model_span = self._span_factory.start_model_run(
             model_name,
             max_tokens=max_tokens,
             temperature=temperature,
-            parent_span=llm_span,
+            parent_span=parent if is_inner_call else llm_span,
         )
         self._spans[self._model_span_key(run_id)] = model_span
         SpanHierarchyManager.push(run_id, model_span)
