@@ -126,7 +126,8 @@ class TestCreateAnalyzeFileTool:
 
         assert tool.coroutine is not None
         result = await tool.coroutine(
-            analysisTask="Summarize the document", attachments=[mock_attachment]
+            analysisTask="Summarize the document",
+            attachments=[mock_attachment],
         )
 
         # Verify calls

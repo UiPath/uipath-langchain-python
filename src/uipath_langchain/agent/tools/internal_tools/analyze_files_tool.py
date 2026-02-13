@@ -12,6 +12,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from langchain_core.messages.tool import ToolCall
+from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool, StructuredTool
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
@@ -79,7 +80,8 @@ def create_analyze_file_tool(
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),
             cast(AnyMessage, human_message_with_files),
         ]
-        result = await llm.ainvoke(messages)
+        config = var_child_runnable_config.get(None)
+        result = await llm.ainvoke(messages, config=config)
 
         analysis_result = extract_text_content(result)
         return analysis_result
