@@ -102,9 +102,8 @@ def create_deeprag_tool(
             attachments=[attachment_id],
         )
 
-        if ephemeral_index.in_progress_ingestion():
-            ephemeral_index_dict = interrupt(WaitEphemeralIndex(index=ephemeral_index))
-            ephemeral_index = ContextGroundingIndex(**ephemeral_index_dict)
+        ephemeral_index_dict = interrupt(WaitEphemeralIndex(index=ephemeral_index))
+        ephemeral_index = ContextGroundingIndex(**ephemeral_index_dict)
 
         return interrupt(
             CreateDeepRag(

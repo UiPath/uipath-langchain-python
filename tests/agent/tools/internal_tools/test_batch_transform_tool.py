@@ -175,7 +175,10 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"file_path": "/path/to/output.csv"}
+        mock_interrupt.side_effect = [
+            mock_index.model_dump(),
+            {"file_path": "/path/to/output.csv"},
+        ]
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
@@ -206,8 +209,8 @@ class TestCreateBatchTransformTool:
         assert call_kwargs["usage"] == "BatchRAG"
         assert mock_attachment.ID in call_kwargs["attachments"]
 
-        # Verify interrupt was called only once (no WaitEphemeralIndex needed)
-        assert mock_interrupt.call_count == 1
+        # interrupt should be called twice (WaitEphemeralIndex + CreateBatchTransform)
+        assert mock_interrupt.call_count == 2
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -306,7 +309,10 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"output": "Transformation complete"}
+        mock_interrupt.side_effect = [
+            mock_index.model_dump(),
+            {"output": "Transformation complete"},
+        ]
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
@@ -359,7 +365,10 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"file_path": "output.csv"}
+        mock_interrupt.side_effect = [
+            mock_index.model_dump(),
+            {"file_path": "output.csv"},
+        ]
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
@@ -378,8 +387,8 @@ class TestCreateBatchTransformTool:
         # Verify result
         assert result == {"file_path": "output.csv"}
 
-        # Verify CreateBatchTransform was called with default destination_path
-        assert mock_interrupt.call_count == 1
+        # interrupt is called twice (WaitEphemeralIndex + CreateBatchTransform)
+        assert mock_interrupt.call_count == 2
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -413,7 +422,10 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"file_path": "/custom/path/result.csv"}
+        mock_interrupt.side_effect = [
+            mock_index.model_dump(),
+            {"file_path": "/custom/path/result.csv"},
+        ]
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper

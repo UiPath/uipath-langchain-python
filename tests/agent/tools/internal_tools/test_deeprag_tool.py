@@ -150,7 +150,10 @@ class TestCreateDeepRagTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"text": "Deep RAG analysis result"}
+        mock_interrupt.side_effect = [
+            mock_index.model_dump(),
+            {"text": "Deep RAG analysis result"},
+        ]
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
@@ -181,8 +184,8 @@ class TestCreateDeepRagTool:
         assert call_kwargs["usage"] == "DeepRAG"
         assert mock_attachment.ID in call_kwargs["attachments"]
 
-        # Verify interrupt was called only once (no WaitEphemeralIndex needed)
-        assert mock_interrupt.call_count == 1
+        # interrupt is called twice (WaitEphemeralIndex + CreateDeepRag)
+        assert mock_interrupt.call_count == 2
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -281,7 +284,10 @@ class TestCreateDeepRagTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"content": "Dynamic query result"}
+        mock_interrupt.side_effect = [
+            mock_index.model_dump(),
+            {"content": "Dynamic query result"},
+        ]
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
