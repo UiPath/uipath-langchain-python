@@ -9,6 +9,7 @@ from langchain_core.tools import BaseTool
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
 from pydantic import BaseModel
+from uipath.platform.resume_triggers import is_no_content_marker
 
 from uipath_langchain.agent.exceptions import AgentStateException
 from uipath_langchain.agent.react.types import AgentGraphState
@@ -112,16 +113,35 @@ class UiPathToolNode(RunnableCallable):
     def _process_result(
         self, call: ToolCall, result: dict[str, Any] | Command[Any] | ToolMessage | None
     ) -> OutputType:
-        """Process the tool result into a message format or return a Command."""
+        """Process the tool result into a message format or return a Command.
+        Strip NO_CONTENT markers into ToolMessages embedded in a Command.
+        """
         if isinstance(result, Command):
+            self._filter_result(result)
             return result
         elif isinstance(result, ToolMessage):
+            if is_no_content_marker(result.content):
+                result.content = ""
             return {"messages": [result]}
         else:
+            content = "" if is_no_content_marker(result) else str(result)
             message = ToolMessage(
-                content=str(result), name=call["name"], tool_call_id=call["id"]
+                content=content, name=call["name"], tool_call_id=call["id"]
             )
             return {"messages": [message]}
+
+    @staticmethod
+    def _filter_result(command: Command[Any]) -> None:
+        """Strip NO_CONTENT markers from ToolMessages embedded in a Command."""
+        update = getattr(command, "update", None)
+        if not isinstance(update, dict):
+            return
+        messages = update.get("messages")
+        if not messages:
+            return
+        for msg in messages:
+            if isinstance(msg, ToolMessage) and is_no_content_marker(msg.content):
+                msg.content = ""
 
     def _prepare_wrapper_inputs(
         self,
