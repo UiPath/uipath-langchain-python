@@ -100,20 +100,37 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
     """Format entity schemas as markdown for injection into agent system prompt.
 
     The output is optimized for SQL query generation by the LLM.
+    Includes: SQL strategy prompt, constraints, entity schemas, and query patterns.
 
     Args:
         entities: List of Entity objects with schema information.
 
     Returns:
-        Markdown-formatted string describing entity schemas.
+        Markdown-formatted string describing entity schemas and SQL guidance.
     """
     if not entities:
         return ""
 
-    lines = [
-        "## Available Data Fabric Entities",
-        "",
-    ]
+    lines = []
+
+    # Add SQL generation strategy from system_prompt.txt
+    system_prompt = _load_system_prompt()
+    if system_prompt:
+        lines.append("## SQL Query Generation Guidelines")
+        lines.append("")
+        lines.append(system_prompt)
+        lines.append("")
+
+    # Add SQL constraints from sql_constraints.txt
+    sql_constraints = _load_sql_constraints()
+    if sql_constraints:
+        lines.append("## SQL Constraints")
+        lines.append("")
+        lines.append(sql_constraints)
+        lines.append("")
+
+    lines.append("## Available Data Fabric Entities")
+    lines.append("")
 
     for entity in entities:
         display_name = entity.display_name or entity.name
@@ -124,13 +141,44 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
         lines.append("| Field | Type |")
         lines.append("|-------|------|")
 
+        # Collect field info for query pattern examples
+        field_names = []
+        numeric_field = None
+        text_field = None
+
         for field in entity.fields or []:
             if field.is_hidden_field or field.is_system_field:
                 continue
             field_name = field.display_name or field.name
             field_type = format_field_type(field)
+            field_names.append(field_name)
             lines.append(f"| {field_name} | {field_type} |")
 
+            # Track field types for examples
+            sql_type = field.sql_type.name.lower() if field.sql_type else ""
+            if not numeric_field and sql_type in ("int", "decimal", "float", "double", "bigint"):
+                numeric_field = field_name
+            if not text_field and sql_type in ("varchar", "nvarchar", "text", "string", "ntext"):
+                text_field = field_name
+
+        lines.append("")
+
+        # Add entity-specific query pattern examples
+        group_field = text_field or (field_names[0] if field_names else "Category")
+        agg_field = numeric_field or (field_names[1] if len(field_names) > 1 else "Amount")
+        filter_field = text_field or (field_names[0] if field_names else "Name")
+        fields_sample = ", ".join(field_names[:5]) if field_names else "*"
+
+        lines.append(f"**Query Patterns for {display_name}:**")
+        lines.append("")
+        lines.append("| User Intent | SQL Pattern |")
+        lines.append("|-------------|-------------|")
+        lines.append(f"| 'Show all {display_name.lower()}' | `SELECT {fields_sample} FROM {display_name} LIMIT 100` |")
+        lines.append(f"| 'Find by X' | `SELECT {fields_sample} FROM {display_name} WHERE {filter_field} = 'value' LIMIT 100` |")
+        lines.append(f"| 'Top N by Y' | `SELECT {fields_sample} FROM {display_name} ORDER BY {agg_field} DESC LIMIT N` |")
+        lines.append(f"| 'Count by X' | `SELECT {group_field}, COUNT(*) as count FROM {display_name} GROUP BY {group_field}` |")
+        lines.append(f"| 'Top N segments' | `SELECT {group_field}, COUNT(*) as count FROM {display_name} GROUP BY {group_field} ORDER BY count DESC LIMIT N` |")
+        lines.append(f"| 'Sum/Avg of Y' | `SELECT SUM({agg_field}) as total FROM {display_name}` |")
         lines.append("")
 
     return "\n".join(lines)
@@ -317,42 +365,23 @@ def _create_sdk_based_tools(
         if len(field_names) > 10:
             fields_str += f", ... ({len(field_names)} total)"
 
-        # Identify categorical fields for segmentation (text-like, non-PK)
-        categorical_fields = [
-            f.display_name or f.name
-            for f in (entity.fields or [])
-            if not f.is_hidden_field and not f.is_system_field
-            and not f.is_primary_key
-            and f.sql_type and f.sql_type.name.lower() in ("text", "nvarchar", "varchar", "string", "ntext")
-        ]
-        segment_field = categorical_fields[0] if categorical_fields else (field_names[1] if len(field_names) > 1 else "Category")
-        count_field = field_names[0] if field_names else "Id"
-
-        # Build intent-based query examples using actual entity fields
-        intent_examples = (
-            f"QUERY PATTERNS for {entity_display_name}:\n"
-            f"- 'show all' → SELECT {fields_str} FROM {entity_display_name} LIMIT 100\n"
-            f"- 'top N by X' → SELECT {fields_str} FROM {entity_display_name} ORDER BY X DESC LIMIT N\n"
-            f"- 'top N segments/categories/groups' → SELECT {segment_field}, COUNT({count_field}) as count FROM {entity_display_name} GROUP BY {segment_field} ORDER BY count DESC LIMIT N\n"
-            f"- 'filter by X=value' → SELECT {fields_str} FROM {entity_display_name} WHERE X = 'value' LIMIT 100\n"
-            f"- 'average/sum/count of X' → SELECT AVG(X) as avg_x FROM {entity_display_name} LIMIT 1\n"
-            f"RULES: ALWAYS use explicit columns (no SELECT *). ALWAYS include LIMIT. Extract filter values from user message."
-        )
-
         tools.append(
             BaseUiPathStructuredTool(
                 name=tool_name,
                 description=(
                     f"{context.description}. {entity_description}. "
                     f"Available fields: {fields_str}. "
-                    f"Generate SQL based on user's request."
+                    f"Use SQL patterns from system prompt based on user intent."
                 ),
                 args_schema={
                     "type": "object",
                     "properties": {
                         "sql_query": {
                             "type": "string",
-                            "description": intent_examples,
+                            "description": (
+                                f"Complete SQL SELECT statement for {entity_display_name}. "
+                                f"Use exact column names from schema. Include LIMIT unless aggregating."
+                            ),
                         },
                     },
                     "required": ["sql_query"],
