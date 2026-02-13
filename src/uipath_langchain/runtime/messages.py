@@ -124,7 +124,7 @@ class UiPathChatMessagesMapper:
             if uipath_message.content_parts:
                 for uipath_content_part in uipath_message.content_parts:
                     data = uipath_content_part.data
-                    if uipath_content_part.mime_type.startswith("text") and isinstance(
+                    if uipath_content_part.mime_type.startswith("text/") and isinstance(
                         data, UiPathInlineValue
                     ):
                         text = str(data.inline)
@@ -158,33 +158,40 @@ class UiPathChatMessagesMapper:
                 tool_messages: list[ToolMessage] = []
                 if uipath_message.tool_calls:
                     for uipath_tool_call in uipath_message.tool_calls:
-                        # Only keep tool-calls that have finished
-                        if uipath_tool_call.result:
-                            tool_call = ToolCall(
-                                name=uipath_tool_call.name.replace(" ", "_"),
-                                args=uipath_tool_call.input or {},
-                                id=uipath_tool_call.tool_call_id,
-                            )
-                            tool_calls.append(tool_call)
+                        tool_call = ToolCall(
+                            name=uipath_tool_call.name.replace(" ", "_"),
+                            args=uipath_tool_call.input or {},
+                            id=uipath_tool_call.tool_call_id,
+                        )
+                        tool_calls.append(tool_call)
 
-                            # Serialize output to string if needed
-                            output = uipath_tool_call.result.output
-                            if output is None:
-                                content = ""
-                            elif isinstance(output, str):
-                                content = output
-                            else:
-                                content = json.dumps(output)
+                        tool_call_output = (
+                            uipath_tool_call.result.output
+                            if uipath_tool_call.result
+                            else None
+                        )
+                        tool_call_status = (
+                            "success"
+                            if uipath_tool_call.result
+                            and not uipath_tool_call.result.is_error
+                            else "error"
+                        )
 
-                            tool_messages.append(
-                                ToolMessage(
-                                    content=content,
-                                    status="error"
-                                    if uipath_tool_call.result.is_error
-                                    else "success",
-                                    tool_call_id=uipath_tool_call.tool_call_id,
-                                )
+                        # Serialize output to string if needed
+                        if tool_call_output is None:
+                            content = ""
+                        elif isinstance(tool_call_output, str):
+                            content = tool_call_output
+                        else:
+                            content = json.dumps(tool_call_output)
+
+                        tool_messages.append(
+                            ToolMessage(
+                                content=content,
+                                status=tool_call_status,
+                                tool_call_id=uipath_tool_call.tool_call_id,
                             )
+                        )
 
                 # Ideally we pass in content_blocks here rather than string content, but when doing so, OpenAI errors unless a msg_ prefix is used for content-block IDs.
                 # When needed, we can switch to content_blocks but need to work out a common ID strategy across models for the content-block IDs.
