@@ -342,8 +342,7 @@ def create_tool_guardrail_node(
         if execution_stage == ExecutionStage.PRE_EXECUTION:
             last_message = state.messages[-1]
             args_dict = _extract_tool_args_from_message(last_message, tool_name)
-            if args_dict:
-                return json.dumps(args_dict)
+            return json.dumps(args_dict)
 
         return get_message_content(state.messages[-1])
 

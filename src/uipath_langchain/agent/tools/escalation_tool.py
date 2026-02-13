@@ -19,7 +19,7 @@ from uipath.agent.models.agent import (
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
-from uipath.platform.common import UiPathConfig, WaitEscalation
+from uipath.platform.common import WaitEscalation
 from uipath.runtime.errors import UiPathErrorCode
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
@@ -205,11 +205,6 @@ def create_escalation_tool(
         if isinstance(result, dict):
             result = TypeAdapter(EscalationToolOutput).validate_python(result)
 
-        # Extract task info before validation
-        task_id = result.id
-        task_url = f"{UiPathConfig.base_url}/actions_/tasks/{task_id}"
-        assigned_to = _get_user_email(result.assigned_to_user)
-
         outcome = result.action
         escalation_output = _parse_task_data(
             result.data,
@@ -230,9 +225,6 @@ def create_escalation_tool(
             "action": escalation_action,
             "output": escalation_output,
             "outcome": outcome,
-            "task_id": task_id,
-            "task_url": task_url,
-            "assigned_to": assigned_to,
         }
 
     async def escalation_wrapper(
@@ -271,9 +263,6 @@ def create_escalation_tool(
         return {
             "output": result["output"],
             "outcome": result["outcome"],
-            "task_id": result["task_id"],
-            "task_url": result["task_url"],
-            "assigned_to": result["assigned_to"],
         }
 
     tool = StructuredToolWithArgumentProperties(
@@ -288,6 +277,8 @@ def create_escalation_tool(
             "display_name": channel.properties.app_name,
             "channel_type": channel.type,
             "recipient": None,
+            "args_schema": input_model,
+            "output_schema": output_model,
         },
     )
     tool.set_tool_wrappers(awrapper=escalation_wrapper)

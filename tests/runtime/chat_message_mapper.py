@@ -147,10 +147,9 @@ class TestMapMessages:
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
-        assert msg.content == "hello world"
-        assert msg.metadata["message_id"] == "msg-1"  # type: ignore[attr-defined]
-        assert msg.metadata["content_part_id"] == "part-1"  # type: ignore[attr-defined]
-        assert msg.metadata["mime_type"] == "text/plain"  # type: ignore[attr-defined]
+        assert msg.content_blocks[0]["text"] == "hello world"  # type: ignore[typeddict-item]
+        assert msg.content_blocks[0]["id"] == "part-1"
+        assert msg.additional_kwargs["message_id"] == "msg-1"
 
     def test_map_messages_converts_dict_messages(self):
         """Should convert dict messages to HumanMessages."""
@@ -177,7 +176,7 @@ class TestMapMessages:
 
         assert len(result) == 1
         assert isinstance(result[0], HumanMessage)
-        assert result[0].content == "hello from dict"
+        assert result[0].content_blocks[0]["text"] == "hello from dict"  # type: ignore[typeddict-item]
 
     def test_map_messages_raises_on_mixed_uipath_types(self):
         """Should raise TypeError for mixed UiPath message types."""
@@ -204,8 +203,8 @@ class TestMapMessages:
 
         assert result == unknown
 
-    def test_map_messages_handles_multiple_content_parts(self):
-        """Should create separate HumanMessages for each content part."""
+    def test_map_messages_handles_user_message_with_multiple_content_parts(self):
+        """Should create single HumanMessage with multiple content blocks."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         uipath_msg = UiPathConversationMessage(
             message_id="msg-1",
@@ -234,17 +233,17 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        assert len(result) == 2
-        msg0 = result[0]
-        msg1 = result[1]
-        assert isinstance(msg0, HumanMessage)
-        assert isinstance(msg1, HumanMessage)
-        assert msg0.content == "first part"
-        assert msg0.metadata["content_part_id"] == "part-1"  # type: ignore[attr-defined]
-        assert msg1.content == "second part"
-        assert msg1.metadata["content_part_id"] == "part-2"  # type: ignore[attr-defined]
+        # Should create ONE HumanMessage with 2 content blocks
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, HumanMessage)
+        assert len(msg.content_blocks) == 2
+        assert msg.content_blocks[0]["text"] == "first part"  # type: ignore[typeddict-item]
+        assert msg.content_blocks[0]["id"] == "part-1"
+        assert msg.content_blocks[1]["text"] == "second part"  # type: ignore[typeddict-item]
+        assert msg.content_blocks[1]["id"] == "part-2"
 
-    def test_map_messages_handles_message_without_content_parts(self):
+    def test_map_messages_handles_user_message_without_content_parts(self):
         """Should handle UiPath message without content parts."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         uipath_msg = UiPathConversationMessage(
@@ -262,9 +261,493 @@ class TestMapMessages:
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
+        assert msg.content == []  # Empty content_blocks list
+        assert msg.additional_kwargs["message_id"] == "msg-1"
+
+    def test_map_messages_handles_assistant_message_without_tool_calls(self):
+        """Should convert assistant role to AIMessage."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-1",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="I can help with that!"),
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, AIMessage)
+        assert msg.content == "I can help with that!"
+        assert msg.id == "msg-1"
+        assert msg.additional_kwargs["message_id"] == "msg-1"
+
+    def test_map_messages_handles_tool_calls_without_results(self):
+        """Should include tool calls without results with empty content and error status."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        from uipath.core.chat import UiPathConversationToolCall
+
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-1",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="Let me search for that."),
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            tool_calls=[
+                UiPathConversationToolCall(
+                    tool_call_id="call-123",
+                    name="search database",
+                    input={"query": "test query"},
+                    timestamp=TEST_TIMESTAMP,
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        # AIMessage + ToolMessage
+        assert len(result) == 2
+        ai_msg = result[0]
+        assert isinstance(ai_msg, AIMessage)
+        assert len(ai_msg.tool_calls) == 1
+        assert ai_msg.tool_calls[0]["id"] == "call-123"
+        assert ai_msg.tool_calls[0]["name"] == "search_database"
+
+        tool_msg = result[1]
+        assert isinstance(tool_msg, ToolMessage)
+        assert tool_msg.tool_call_id == "call-123"
+        assert tool_msg.content == ""  # Empty content for tool without result
+        assert tool_msg.status == "error"  # Error status for tool without result
+
+    def test_map_messages_includes_tool_calls_with_results(self):
+        """Should create AIMessage with tool_calls AND ToolMessage for completed tool calls."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        from uipath.core.chat import (
+            UiPathConversationToolCall,
+            UiPathConversationToolCallResult,
+        )
+
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-1",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="Let me search for that."),
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            tool_calls=[
+                UiPathConversationToolCall(
+                    tool_call_id="call-123",
+                    name="search database",
+                    input={"query": "test query"},
+                    result=UiPathConversationToolCallResult(
+                        output={"results": ["item1", "item2"]},
+                        is_error=False,
+                    ),
+                    timestamp=TEST_TIMESTAMP,
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        # Should have AIMessage + ToolMessage
+        assert len(result) == 2
+
+        # Check AIMessage
+        ai_msg = result[0]
+        assert isinstance(ai_msg, AIMessage)
+        assert ai_msg.content == "Let me search for that."
+        assert len(ai_msg.tool_calls) == 1
+        tool_call = ai_msg.tool_calls[0]
+        assert (
+            tool_call["name"] == "search_database"
+        )  # Spaces replaced with underscores
+        assert tool_call["args"] == {"query": "test query"}
+        assert tool_call["id"] == "call-123"
+
+        # Check ToolMessage
+        tool_msg = result[1]
+        assert isinstance(tool_msg, ToolMessage)
+        assert tool_msg.tool_call_id == "call-123"
+        assert tool_msg.content == '{"results": ["item1", "item2"]}'
+        assert tool_msg.status == "success"
+
+    def test_map_messages_includes_tool_calls_with_error_results(self):
+        """Should create ToolMessage with error status for failed tool calls."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        from uipath.core.chat import (
+            UiPathConversationToolCall,
+            UiPathConversationToolCallResult,
+        )
+
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[],
+            tool_calls=[
+                UiPathConversationToolCall(
+                    tool_call_id="call-456",
+                    name="failing tool",
+                    input={"param": "value"},
+                    result=UiPathConversationToolCallResult(
+                        output="Tool execution failed",
+                        is_error=True,
+                    ),
+                    timestamp=TEST_TIMESTAMP,
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 2
+        tool_msg = result[1]
+        assert isinstance(tool_msg, ToolMessage)
+        assert tool_msg.status == "error"
+        assert tool_msg.content == "Tool execution failed"
+
+    def test_map_messages_includes_tool_calls_with_string_output(self):
+        """Should handle string output in tool results without JSON serialization."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        from uipath.core.chat import (
+            UiPathConversationToolCall,
+            UiPathConversationToolCallResult,
+        )
+
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[],
+            tool_calls=[
+                UiPathConversationToolCall(
+                    tool_call_id="call-789",
+                    name="string tool",
+                    input={},
+                    result=UiPathConversationToolCallResult(
+                        output="plain text result",
+                        is_error=False,
+                    ),
+                    timestamp=TEST_TIMESTAMP,
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 2
+        tool_msg = result[1]
+        assert isinstance(tool_msg, ToolMessage)
+        assert tool_msg.content == "plain text result"
+
+    def test_map_messages_includes_tool_calls_with_none_output(self):
+        """Should handle None output in tool results as empty string."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        from uipath.core.chat import (
+            UiPathConversationToolCall,
+            UiPathConversationToolCallResult,
+        )
+
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[],
+            tool_calls=[
+                UiPathConversationToolCall(
+                    tool_call_id="call-999",
+                    name="none tool",
+                    input={},
+                    result=UiPathConversationToolCallResult(
+                        output=None,
+                        is_error=False,
+                    ),
+                    timestamp=TEST_TIMESTAMP,
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 2
+        tool_msg = result[1]
+        assert isinstance(tool_msg, ToolMessage)
+        assert tool_msg.content == ""
+
+    def test_map_messages_includes_multiple_tool_calls_with_mixed_results(self):
+        """Should handle multiple tool calls, some with results and some without."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        from uipath.core.chat import (
+            UiPathConversationToolCall,
+            UiPathConversationToolCallResult,
+        )
+
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[],
+            tool_calls=[
+                # Tool call with result
+                UiPathConversationToolCall(
+                    tool_call_id="call-1",
+                    name="tool with result",
+                    input={"a": 1},
+                    result=UiPathConversationToolCallResult(
+                        output={"status": "done"},
+                        is_error=False,
+                    ),
+                    timestamp=TEST_TIMESTAMP,
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+                # Tool call without result
+                UiPathConversationToolCall(
+                    tool_call_id="call-2",
+                    name="tool without result",
+                    input={"b": 2},
+                    timestamp=TEST_TIMESTAMP,
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+            ],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        # Should have AIMessage + 2 ToolMessages (for both tool calls)
+        assert len(result) == 3
+
+        ai_msg = result[0]
+        assert isinstance(ai_msg, AIMessage)
+        # All tool calls are included
+        assert len(ai_msg.tool_calls) == 2
+        assert ai_msg.tool_calls[0]["id"] == "call-1"
+        assert ai_msg.tool_calls[0]["name"] == "tool_with_result"  # Spaces replaced
+        assert ai_msg.tool_calls[1]["id"] == "call-2"
+        assert ai_msg.tool_calls[1]["name"] == "tool_without_result"
+
+        # First ToolMessage (with result)
+        tool_msg_1 = result[1]
+        assert isinstance(tool_msg_1, ToolMessage)
+        assert tool_msg_1.tool_call_id == "call-1"
+        assert tool_msg_1.content == '{"status": "done"}'
+        assert tool_msg_1.status == "success"
+
+        # Second ToolMessage (without result)
+        tool_msg_2 = result[2]
+        assert isinstance(tool_msg_2, ToolMessage)
+        assert tool_msg_2.tool_call_id == "call-2"
+        assert tool_msg_2.content == ""  # Empty content for tool without result
+        assert tool_msg_2.status == "error"  # Error status for tool without result
+
+    def test_map_messages_handles_tool_calls_without_input(self):
+        """Should handle tool call with None input and with result."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        from uipath.core.chat import (
+            UiPathConversationToolCall,
+            UiPathConversationToolCallResult,
+        )
+
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[],
+            tool_calls=[
+                UiPathConversationToolCall(
+                    tool_call_id="call-123",
+                    name="simple tool",
+                    input=None,
+                    result=UiPathConversationToolCallResult(
+                        output="success",
+                        is_error=False,
+                    ),
+                    timestamp=TEST_TIMESTAMP,
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 2
+        msg = result[0]
+        assert isinstance(msg, AIMessage)
+        assert len(msg.tool_calls) == 1
+        # Should default to empty dict when input is None
+        assert msg.tool_calls[0]["args"] == {}
+
+    def test_map_messages_handles_mixed_user_and_assistant_messages(self):
+        """Should handle realistic conversation with mixed message types."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        messages = [
+            UiPathConversationMessage(
+                message_id="msg-1",
+                role="user",
+                created_at=TEST_TIMESTAMP,
+                updated_at=TEST_TIMESTAMP,
+                content_parts=[
+                    UiPathConversationContentPart(
+                        content_part_id="part-1",
+                        mime_type="text/plain",
+                        data=UiPathInlineValue(inline="Hello"),
+                        created_at=TEST_TIMESTAMP,
+                        updated_at=TEST_TIMESTAMP,
+                    )
+                ],
+                tool_calls=[],
+                interrupts=[],
+            ),
+            UiPathConversationMessage(
+                message_id="msg-2",
+                role="assistant",
+                created_at=TEST_TIMESTAMP,
+                updated_at=TEST_TIMESTAMP,
+                content_parts=[
+                    UiPathConversationContentPart(
+                        content_part_id="part-2",
+                        mime_type="text/plain",
+                        data=UiPathInlineValue(inline="Hi there!"),
+                        created_at=TEST_TIMESTAMP,
+                        updated_at=TEST_TIMESTAMP,
+                    )
+                ],
+                tool_calls=[],
+                interrupts=[],
+            ),
+            UiPathConversationMessage(
+                message_id="msg-3",
+                role="user",
+                created_at=TEST_TIMESTAMP,
+                updated_at=TEST_TIMESTAMP,
+                content_parts=[
+                    UiPathConversationContentPart(
+                        content_part_id="part-3",
+                        mime_type="text/plain",
+                        data=UiPathInlineValue(inline="How are you?"),
+                        created_at=TEST_TIMESTAMP,
+                        updated_at=TEST_TIMESTAMP,
+                    )
+                ],
+                tool_calls=[],
+                interrupts=[],
+            ),
+        ]
+
+        result = mapper.map_messages(messages)
+
+        assert len(result) == 3
+        assert isinstance(result[0], HumanMessage)
+        assert isinstance(result[1], AIMessage)
+        assert isinstance(result[2], HumanMessage)
+
+    def test_map_messages_handles_assistant_with_multiple_content_parts(self):
+        """Should combine multiple content parts into single AIMessage content string."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-1",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="First part. "),
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+                UiPathConversationContentPart(
+                    content_part_id="part-2",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="Second part."),
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        # Should create ONE AIMessage with combined content
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, AIMessage)
+        assert msg.content == "First part. Second part."
+
+    def test_map_messages_handles_empty_content_parts_for_ai_message(self):
+        """Should create valid AIMessage with no content parts."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, AIMessage)
         assert msg.content == ""
-        assert msg.metadata["message_id"] == "msg-1"  # type: ignore[attr-defined]
-        assert msg.metadata["role"] == "user"  # type: ignore[attr-defined]
 
 
 class TestMapEvent:

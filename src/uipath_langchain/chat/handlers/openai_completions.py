@@ -35,6 +35,11 @@ class OpenAICompletionsPayloadHandler(ModelPayloadHandler):
         """Get tool_choice value for OpenAI Completions API."""
         return "required"
 
+    def get_parallel_tool_calls_kwargs(
+        self, parallel_tool_calls: bool
+    ) -> dict[str, Any]:
+        return {"parallel_tool_calls": parallel_tool_calls}
+
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check OpenAI finish_reason and raise exception for faulty terminations.
 

@@ -5,13 +5,16 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from langchain_core.messages import (
+    AIMessage,
     AIMessageChunk,
     BaseMessage,
+    ContentBlock,
     HumanMessage,
     TextContentBlock,
     ToolCall,
     ToolMessage,
 )
+from langchain_core.messages.content import create_text_block
 from pydantic import ValidationError
 from uipath.core.chat import (
     UiPathConversationContentPartChunkEvent,
@@ -66,7 +69,7 @@ class UiPathChatMessagesMapper:
         """Normalize any 'messages' list into LangChain messages.
 
         - If already BaseMessage instances: return as-is.
-        - If UiPathConversationMessage: convert to HumanMessage.
+        - If UiPathConversationMessage: convert to LangChain message
         """
         if not isinstance(messages, list):
             raise TypeError("messages must be a list")
@@ -104,46 +107,108 @@ class UiPathChatMessagesMapper:
 
     def _map_messages_internal(
         self, messages: list[UiPathConversationMessage]
-    ) -> list[HumanMessage]:
+    ) -> list[BaseMessage]:
         """
-        Converts a UiPathConversationMessage into a list of HumanMessages for LangGraph.
-        Supports multimodal content parts (text, external content) and preserves metadata.
+        Converts UiPathConversationMessage list to LangChain messages (UserMessage/AIMessage/ToolMessage list).
+        - All content parts are combined into content_blocks
+        - Tool calls are converted to LangChain ToolCall format, with results stored as ToolMessage
+        - Metadata includes message_id, role, timestamps
         """
-        human_messages: list[HumanMessage] = []
+        converted_messages: list[BaseMessage] = []
 
-        for uipath_msg in messages:
-            # Loop over each content part
-            if uipath_msg.content_parts:
-                for part in uipath_msg.content_parts:
-                    data = part.data
-                    content = ""
-                    metadata: dict[str, Any] = {
-                        "message_id": uipath_msg.message_id,
-                        "content_part_id": part.content_part_id,
-                        "mime_type": part.mime_type,
-                        "created_at": uipath_msg.created_at,
-                        "updated_at": uipath_msg.updated_at,
-                    }
+        for uipath_message in messages:
+            content_blocks: list[ContentBlock] = []
 
-                    if isinstance(data, UiPathInlineValue):
-                        content = str(data.inline)
+            # Convert content_parts to content_blocks
+            # TODO: Convert file-attachment content-parts to content_blocks as well
+            if uipath_message.content_parts:
+                for uipath_content_part in uipath_message.content_parts:
+                    data = uipath_content_part.data
+                    if uipath_content_part.mime_type.startswith("text/") and isinstance(
+                        data, UiPathInlineValue
+                    ):
+                        text = str(data.inline)
+                        if text:
+                            content_blocks.append(
+                                create_text_block(
+                                    text, id=uipath_content_part.content_part_id
+                                )
+                            )
 
-                    # Append a HumanMessage for this content part
-                    human_messages.append(
-                        HumanMessage(content=content, metadata=metadata)
+            # Metadata for the user/assistant message
+            metadata = {
+                "message_id": uipath_message.message_id,
+                "created_at": uipath_message.created_at,
+                "updated_at": uipath_message.updated_at,
+            }
+
+            role = uipath_message.role
+            if role == "user":
+                converted_messages.append(
+                    HumanMessage(
+                        id=uipath_message.message_id,
+                        content_blocks=content_blocks,
+                        additional_kwargs=metadata,
                     )
+                )
 
-            # Handle the case where there are no content parts
-            else:
-                metadata = {
-                    "message_id": uipath_msg.message_id,
-                    "role": uipath_msg.role,
-                    "created_at": uipath_msg.created_at,
-                    "updated_at": uipath_msg.updated_at,
-                }
-                human_messages.append(HumanMessage(content="", metadata=metadata))
+            elif role == "assistant":
+                # Convert tool calls to LangChain format
+                tool_calls: list[ToolCall] = []
+                tool_messages: list[ToolMessage] = []
+                if uipath_message.tool_calls:
+                    for uipath_tool_call in uipath_message.tool_calls:
+                        tool_call = ToolCall(
+                            name=uipath_tool_call.name.replace(" ", "_"),
+                            args=uipath_tool_call.input or {},
+                            id=uipath_tool_call.tool_call_id,
+                        )
+                        tool_calls.append(tool_call)
 
-        return human_messages
+                        tool_call_output = (
+                            uipath_tool_call.result.output
+                            if uipath_tool_call.result
+                            else None
+                        )
+                        tool_call_status = (
+                            "success"
+                            if uipath_tool_call.result
+                            and not uipath_tool_call.result.is_error
+                            else "error"
+                        )
+
+                        # Serialize output to string if needed
+                        if tool_call_output is None:
+                            content = ""
+                        elif isinstance(tool_call_output, str):
+                            content = tool_call_output
+                        else:
+                            content = json.dumps(tool_call_output)
+
+                        tool_messages.append(
+                            ToolMessage(
+                                content=content,
+                                status=tool_call_status,
+                                tool_call_id=uipath_tool_call.tool_call_id,
+                            )
+                        )
+
+                # Ideally we pass in content_blocks here rather than string content, but when doing so, OpenAI errors unless a msg_ prefix is used for content-block IDs.
+                # When needed, we can switch to content_blocks but need to work out a common ID strategy across models for the content-block IDs.
+                converted_messages.append(
+                    AIMessage(
+                        id=uipath_message.message_id,
+                        # content_blocks=content_blocks,
+                        content=self._extract_text(content_blocks)
+                        if content_blocks
+                        else "",
+                        tool_calls=tool_calls,
+                        additional_kwargs=metadata,
+                    )
+                )
+                converted_messages.extend(tool_messages)
+
+        return converted_messages
 
     async def map_event(
         self,
