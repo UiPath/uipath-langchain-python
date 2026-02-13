@@ -79,3 +79,7 @@ class AgentGraphConfig(BaseModel):
     is_conversational: bool = Field(
         default=False, description="If set, creates a graph for conversational agents"
     )
+    enable_openai_parallel_tool_calls: bool = Field(
+        default=True,
+        description="Allow the LLM to return multiple tool calls in a single response.",
+    )
