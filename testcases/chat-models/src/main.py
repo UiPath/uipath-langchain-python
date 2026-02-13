@@ -1,16 +1,22 @@
 import logging
 from typing import Any, Callable, Literal, Optional
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, StateGraph, MessagesState
+from langgraph.graph import END, START, MessagesState, StateGraph
 from pydantic import BaseModel, Field
-from langchain_core.language_models import BaseChatModel
 
-from uipath_langchain.chat.bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
-from uipath_langchain.chat.vertex import UiPathChatVertex
-from uipath_langchain.chat import UiPathChatOpenAI, UiPathChat, UiPathAzureChatOpenAI
+from uipath_langchain.chat import (
+    UiPathAzureChatOpenAI,
+    UiPathChat,
+    UiPathChatAnthropic,
+    UiPathChatAnthropicVertex,
+    UiPathChatBedrock,
+    UiPathChatBedrockConverse,
+    UiPathChatGoogleGenerativeAI,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +24,28 @@ logger = logging.getLogger(__name__)
 def create_test_models(max_tokens: int = 100) -> list[tuple[str, Any]]:
     """Create all test chat models with the specified max_tokens."""
     return [
-        ("UiPathChatOpenAI", UiPathChatOpenAI(use_responses_api=True)),
-        ("UiPathChatVertex", UiPathChatVertex()),
-        ("UiPathChatBedrockConverse", UiPathChatBedrockConverse()),
-        ("UiPathChatBedrock", UiPathChatBedrock()),
-        ("UiPathChat", UiPathChat()),
-        ("UiPathAzureChatOpenAI", UiPathAzureChatOpenAI())
+        ("UiPathChat", UiPathChat(model="gpt-4o-2024-11-20")),
+        ("UiPathAzureChatOpenAI", UiPathAzureChatOpenAI(model="gpt-4o-2024-11-20")),
+        (
+            "UiPathChatBedrock",
+            UiPathChatBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0"),
+        ),
+        (
+            "UiPathChatBedrockConverse",
+            UiPathChatBedrockConverse(model="anthropic.claude-haiku-4-5-20251001-v1:0"),
+        ),
+        (
+            "UiPathChatGoogleGenerativeAI",
+            UiPathChatGoogleGenerativeAI(model="gemini-2.5-flash"),
+        ),
+        (
+            "UiPathChatAnthropic",
+            UiPathChatAnthropic(model="anthropic.claude-haiku-4-5-20251001-v1:0"),
+        ),
+        (
+            "UiPathChatAnthropicVertex",
+            UiPathChatAnthropicVertex(model="claude-haiku-4-5@20251001"),
+        ),
     ]
 
 
@@ -42,7 +64,9 @@ def format_error_message(error: str, max_length: int = 60) -> str:
 
 
 @tool
-def get_weather(location: str, unit: Literal["celsius", "fahrenheit"] = "celsius") -> str:
+def get_weather(
+    location: str, unit: Literal["celsius", "fahrenheit"] = "celsius"
+) -> str:
     """Get the current weather for a location.
 
     Args:
@@ -68,6 +92,7 @@ def calculate(expression: str) -> str:
 
 class PersonInfo(BaseModel):
     """Information about a person."""
+
     name: str = Field(description="The person's full name")
     age: int = Field(description="The person's age in years")
     city: str = Field(description="The city where the person lives")
@@ -75,15 +100,16 @@ class PersonInfo(BaseModel):
 
 class TestResult:
     """Accumulates test metrics across all test runs."""
+
     def __init__(self):
         self.chunks = 0
         self.content_length = 0
         self.tool_calls = 0
 
     def add_response(self, response: Any) -> None:
-        if hasattr(response, 'content') and response.content:
+        if hasattr(response, "content") and response.content:
             self.content_length += len(response.content)
-        if hasattr(response, 'tool_calls') and response.tool_calls:
+        if hasattr(response, "tool_calls") and response.tool_calls:
             self.tool_calls += len(response.tool_calls)
 
     def add_chunks(self, count: int) -> None:
@@ -121,14 +147,15 @@ async def run_test_method(
 
 class GraphInput(BaseModel):
     """Input model for the testing graph."""
+
     prompt: str = Field(
-        default="Count from 1 to 5.",
-        description="The prompt to send to the LLM"
+        default="Count from 1 to 5.", description="The prompt to send to the LLM"
     )
 
 
 class GraphOutput(BaseModel):
     """Output model for the testing graph."""
+
     success: bool
     result_summary: str
     chunks_received: Optional[int] = None
@@ -138,6 +165,7 @@ class GraphOutput(BaseModel):
 
 class GraphState(MessagesState):
     """State model for the testing workflow."""
+
     prompt: str
     success: bool
     result_summary: str
@@ -178,7 +206,7 @@ async def test_single_model_all(
         ("invoke", False, False),
         ("ainvoke", True, False),
         ("stream", False, True),
-        ("astream", True, True)
+        ("astream", True, True),
     ]
 
     for method_name, is_async, is_streaming in test_methods:
@@ -193,7 +221,7 @@ async def test_single_model_all(
             model_results[method_name] = "✓"
 
     # Test tool calling
-    logger.info(f"  Testing tool_calling...")
+    logger.info("  Testing tool_calling...")
     try:
         llm_with_tools = model.bind_tools(tools)
         chunks = []
@@ -204,20 +232,24 @@ async def test_single_model_all(
         for chunk in chunks:
             accumulated = chunk if accumulated is None else accumulated + chunk
 
-        if accumulated and hasattr(accumulated, 'tool_calls') and accumulated.tool_calls:
+        if (
+            accumulated
+            and hasattr(accumulated, "tool_calls")
+            and accumulated.tool_calls
+        ):
             tool_calls_count = len(accumulated.tool_calls)
             result.add_tool_calls(tool_calls_count)
             logger.info(f"     Tool calls detected: {tool_calls_count}")
             model_results["tool_calling"] = f"✓ ({tool_calls_count} calls)"
         else:
-            logger.warning(f"     No tool calls detected")
+            logger.warning("     No tool calls detected")
             model_results["tool_calling"] = "✗ No tool calls detected"
     except Exception as e:
         logger.error(f"     Tool calling failed: {e}")
         model_results["tool_calling"] = f"✗ {format_error_message(str(e))}"
 
     # Test structured output
-    logger.info(f"  Testing structured_output...")
+    logger.info("  Testing structured_output...")
     try:
         llm_with_structure = model.with_structured_output(PersonInfo)
         response = await llm_with_structure.ainvoke(structured_messages)
@@ -248,18 +280,28 @@ async def run_all_tests(state: GraphState) -> dict:
     """Run all tests for all chat models in parallel."""
     import asyncio
 
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info("Running All Tests")
-    logger.info("="*80)
+    logger.info("=" * 80)
 
     models = create_test_models(max_tokens=2000)
     tools = [get_weather, calculate]
-    tool_messages = [HumanMessage(content="What's the weather in San Francisco? Also calculate 15 * 23.")]
-    structured_messages = [HumanMessage(content="Tell me about John Smith, a 35 year old software engineer living in New York.")]
+    tool_messages = [
+        HumanMessage(
+            content="What's the weather in San Francisco? Also calculate 15 * 23."
+        )
+    ]
+    structured_messages = [
+        HumanMessage(
+            content="Tell me about John Smith, a 35 year old software engineer living in New York."
+        )
+    ]
 
     # Run all models in parallel
     tasks = [
-        test_single_model_all(name, model, state["messages"], tools, tool_messages, structured_messages)
+        test_single_model_all(
+            name, model, state["messages"], tools, tool_messages, structured_messages
+        )
         for name, model in models
     ]
     results_list = await asyncio.gather(*tasks)
@@ -275,17 +317,34 @@ async def run_all_tests(state: GraphState) -> dict:
         total_result.tool_calls += result.tool_calls
 
     # Build summary
-    logger.info("="*80)
+    logger.info("=" * 80)
     summary_lines = []
-    for model_name in ["UiPathChatOpenAI", "UiPathChatVertex", "UiPathChatBedrockConverse", "UiPathChatBedrock", "UiPathChat", "UiPathAzureChatOpenAI"]:
+    for model_name in [
+        "UiPathChat",
+        "UiPathAzureChatOpenAI",
+        "UiPathChatBedrock",
+        "UiPathChatBedrockConverse",
+        "UiPathChatGoogleGenerativeAI",
+        "UiPathChatAnthropic",
+        "UiPathChatAnthropicVertex",
+    ]:
         if model_name in all_model_results:
             summary_lines.append(f"{model_name}:")
             results = all_model_results[model_name]
-            for test_name in ["invoke", "ainvoke", "stream", "astream", "tool_calling", "structured_output"]:
+            for test_name in [
+                "invoke",
+                "ainvoke",
+                "stream",
+                "astream",
+                "tool_calling",
+                "structured_output",
+            ]:
                 if test_name in results:
                     summary_lines.append(f"  {test_name}: {results[test_name]}")
 
-    has_failures = any("✗" in str(v) for r in all_model_results.values() for v in r.values())
+    has_failures = any(
+        "✗" in str(v) for r in all_model_results.values() for v in r.values()
+    )
 
     return {
         "success": not has_failures,
@@ -299,16 +358,16 @@ async def run_all_tests(state: GraphState) -> dict:
 
 async def return_results(state: GraphState) -> GraphOutput:
     """Return final test results."""
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info("TEST RESULTS")
-    logger.info("="*80)
+    logger.info("=" * 80)
     logger.info(f"Success: {state['success']}")
     logger.info(f"Summary: {state['result_summary']}")
-    if state.get('chunks_received'):
+    if state.get("chunks_received"):
         logger.info(f"Chunks Received: {state['chunks_received']}")
-    if state.get('content_length'):
+    if state.get("content_length"):
         logger.info(f"Content Length: {state['content_length']}")
-    if state.get('tool_calls_count'):
+    if state.get("tool_calls_count"):
         logger.info(f"Tool Calls: {state['tool_calls_count']}")
 
     return GraphOutput(
