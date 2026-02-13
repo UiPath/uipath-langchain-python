@@ -277,6 +277,8 @@ def create_escalation_tool(
             "display_name": channel.properties.app_name,
             "channel_type": channel.type,
             "recipient": None,
+            "args_schema": input_model,
+            "output_schema": output_model,
         },
     )
     tool.set_tool_wrappers(awrapper=escalation_wrapper)
