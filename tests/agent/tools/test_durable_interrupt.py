@@ -1,5 +1,6 @@
 """Tests for the durable_interrupt module."""
 
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -31,10 +32,10 @@ PATCH_INTERRUPT = "uipath_langchain.agent.tools.durable_interrupt.interrupt"
 
 
 @pytest.fixture(autouse=True)
-def _reset_durable_state() -> None:
+def _reset_durable_state() -> Generator[None]:
     """Reset per-node counter between tests for isolation."""
     token = _durable_state.set(None)
-    yield  # type: ignore[misc]
+    yield
     _durable_state.reset(token)
 
 
