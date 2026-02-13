@@ -167,12 +167,13 @@ class UiPathLangGraphRuntime:
                         for node_name, agent_data in data.items():
                             if node_name in ("__metadata__",):
                                 continue
-                            if isinstance(agent_data, dict):
-                                state_event = UiPathRuntimeStateEvent(
-                                    payload=serialize_output(agent_data),
-                                    node_name=node_name,
-                                )
-                                yield state_event
+                            state_event = UiPathRuntimeStateEvent(
+                                payload=serialize_output(agent_data)
+                                if isinstance(agent_data, dict)
+                                else {},
+                                node_name=node_name,
+                            )
+                            yield state_event
 
             # Extract output from final chunk
             graph_output = self._extract_graph_result(final_chunk)
