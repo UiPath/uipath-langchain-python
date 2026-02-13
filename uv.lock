@@ -3287,7 +3287,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.60b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.60b0" },
     { name = "uipath", specifier = "==2.8.21" },
-    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.5.49" },
+    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.5.51" },
 ]
 
 [package.metadata.requires-dev]
@@ -3338,7 +3338,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.5.49"
+version = "0.5.51"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -3357,9 +3357,9 @@ dependencies = [
     { name = "uipath" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f9/94/4e7f1e642c25670644986957bbe4c2b4acdcfb25198e3f9491235fc91fe8/uipath_langchain-0.5.49.tar.gz", hash = "sha256:b70354c0a7058e10365dc648d89e712e4f0d6845312741bafd81a9807c5f396b", size = 9005138, upload-time = "2026-02-12T19:57:16.272Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f6/34/5f8fcdc97806feb89cd70c4770f8cb782cc30dfb9868b23e00529ff66dfb/uipath_langchain-0.5.51.tar.gz", hash = "sha256:67d5d674e3bb7c97f481ba2ac1ee1a1d8b469751229d25016f8c89c8c0a230c3", size = 9006007, upload-time = "2026-02-13T08:35:30.997Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4f/ad/e2a03ebca31cc4f13a19c7c0853c223e7519085a49517b2aaa058f429dd3/uipath_langchain-0.5.49-py3-none-any.whl", hash = "sha256:796405da7ff945b89d4ce789d84bc62a0931cc18c37a1b1ecfd3044a57e234e8", size = 199920, upload-time = "2026-02-12T19:57:14.751Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/0a/298433101c63dae5814beb17f13775767ca8480f33035a17d0045f59068c/uipath_langchain-0.5.51-py3-none-any.whl", hash = "sha256:1d46df5d3819e0c11aaa44b599084897588cdd670f9911a8f6c1cf3fda74b9bc", size = 200290, upload-time = "2026-02-13T08:35:28.959Z" },
 ]
 
 [package.optional-dependencies]

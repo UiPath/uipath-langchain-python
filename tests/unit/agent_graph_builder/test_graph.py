@@ -14,6 +14,9 @@ from uipath.agent.models.agent import (
 
 from uipath_agents.agent_graph_builder import build_agent_graph
 from uipath_agents.agent_graph_builder.config import AgentExecutionType
+from uipath_agents.agent_graph_builder.version import (
+    supports_openai_parallel_tool_calls,
+)
 
 
 def create_test_agent_definition(**overrides: Any) -> LowCodeAgentDefinition:
@@ -741,3 +744,94 @@ class TestBuildAgentGraph:
             from langchain_core.messages import SystemMessage
 
             assert isinstance(messages[0], SystemMessage)
+
+
+class TestSupportsParallelToolCalls:
+    """Test _supports_parallel_tool_calls version check."""
+
+    def test_version_1_0_0_is_false(self) -> None:
+        assert supports_openai_parallel_tool_calls("1.0.0") is False
+
+    def test_version_1_0_9_is_false(self) -> None:
+        assert supports_openai_parallel_tool_calls("1.0.9") is False
+
+    def test_version_1_1_0_is_true(self) -> None:
+        assert supports_openai_parallel_tool_calls("1.1.0") is True
+
+    def test_version_1_2_0_is_true(self) -> None:
+        assert supports_openai_parallel_tool_calls("1.2.0") is True
+
+    def test_version_2_0_0_is_true(self) -> None:
+        assert supports_openai_parallel_tool_calls("2.0.0") is True
+
+    def test_invalid_version_is_false(self) -> None:
+        assert supports_openai_parallel_tool_calls("invalid") is True
+
+    def test_empty_string_is_false(self) -> None:
+        assert supports_openai_parallel_tool_calls("") is True
+
+
+@pytest.mark.asyncio
+class TestBuildAgentGraphParallelToolCalls:
+    """Test that build_agent_graph sets parallel_tool_calls based on agent version."""
+
+    @pytest.fixture(autouse=True)
+    def mock_mcp_tools(self):
+        with patch(
+            "uipath_agents.agent_graph_builder.graph.create_mcp_tools_from_agent",
+            new_callable=AsyncMock,
+            return_value=([], []),
+        ):
+            yield
+
+    async def test_old_version_disables_parallel_tool_calls(self) -> None:
+        agent_def = create_test_agent_definition(version="1.0.0")
+
+        with (
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_agent"
+            ) as mock_create,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=0,
+            ),
+        ):
+            mock_llm.return_value = MagicMock()
+            mock_create.return_value = MagicMock()
+
+            await build_agent_graph(agent_def)
+
+            config = mock_create.call_args.kwargs["config"]
+            assert config.enable_openai_parallel_tool_calls is False
+
+    async def test_new_version_enables_parallel_tool_calls(self) -> None:
+        agent_def = create_test_agent_definition(version="1.1.0")
+
+        with (
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_agent"
+            ) as mock_create,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=0,
+            ),
+        ):
+            mock_llm.return_value = MagicMock()
+            mock_create.return_value = MagicMock()
+
+            await build_agent_graph(agent_def)
+
+            config = mock_create.call_args.kwargs["config"]
+            assert config.enable_openai_parallel_tool_calls is True

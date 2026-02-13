@@ -21,6 +21,7 @@ from .config import AgentExecutionType, get_thinking_messages_limit
 from .llm_utils import create_llm
 from .message_utils import create_message_factory
 from .session_info_debug_state import SessionInfoDebugStateFactory
+from .version import supports_openai_parallel_tool_calls
 
 AGENT_MAX_ITERATIONS_DEFAULT = 25
 
@@ -80,6 +81,9 @@ async def build_agent_graph(
             agent_definition.settings.model
         ),
         is_conversational=agent_definition.is_conversational,
+        enable_openai_parallel_tool_calls=supports_openai_parallel_tool_calls(
+            agent_definition.version
+        ),
     )
 
     graph = create_agent(
