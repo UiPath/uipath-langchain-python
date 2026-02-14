@@ -77,6 +77,7 @@ def handle_semantic_search(
             input_schema=input_model,
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for context.
+            recording=False,
         )
         async def context_tool_fn() -> dict[str, Any]:
             return {"documents": await retriever.ainvoke(static_query_value)}
@@ -96,6 +97,7 @@ def handle_semantic_search(
             input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for context.
+            recording=False,
         )
         async def context_tool_fn(query: str) -> dict[str, Any]:
             return {"documents": await retriever.ainvoke(query)}
@@ -107,8 +109,15 @@ def handle_semantic_search(
         coroutine=context_tool_fn,
         output_type=output_model,
         metadata={
-            "tool_type": "context",
+            "tool_type": "context_grounding",
             "display_name": resource.name,
+            "retrieval_mode": "SemanticSearch",
+            "number_of_results": resource.settings.result_count,
+            **(
+                {"static_query": static_query_value}
+                if is_static_query(resource)
+                else {}
+            ),
         },
     )
 
@@ -145,6 +154,7 @@ def handle_deep_rag(
             input_schema=input_model,
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for context.
+            recording=False,
         )
         async def context_tool_fn() -> dict[str, Any]:
             # TODO: add glob pattern support
@@ -173,6 +183,7 @@ def handle_deep_rag(
             input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for context.
+            recording=False,
         )
         async def context_tool_fn(query: str) -> dict[str, Any]:
             # TODO: add glob pattern support
@@ -192,8 +203,11 @@ def handle_deep_rag(
         coroutine=context_tool_fn,
         output_type=output_model,
         metadata={
-            "tool_type": "context",
+            "tool_type": "context_grounding",
             "display_name": resource.name,
+            "retrieval_mode": "DeepRag",
+            "citation_mode": citation_mode.value,
+            **({"static_query": static_prompt} if is_static_query(resource) else {}),
         },
     )
 
@@ -254,6 +268,7 @@ def handle_batch_transform(
             input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for context.
+            recording=False,
         )
         async def context_tool_fn(
             destination_path: str = "output.csv",
@@ -291,6 +306,7 @@ def handle_batch_transform(
             input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for context.
+            recording=False,
         )
         async def context_tool_fn(
             query: str, destination_path: str = "output.csv"
@@ -315,8 +331,15 @@ def handle_batch_transform(
         coroutine=context_tool_fn,
         output_type=output_model,
         metadata={
-            "tool_type": "context",
+            "tool_type": "context_grounding",
             "display_name": resource.name,
+            "retrieval_mode": "BatchTransform",
+            "output_columns": [
+                {"name": col.name, "description": col.description}
+                for col in batch_transform_output_columns
+            ],
+            "web_search_grounding": enable_web_search_grounding,
+            **({"static_query": static_prompt} if is_static_query(resource) else {}),
         },
     )
 
