@@ -78,6 +78,18 @@ class UiPathLangGraphRuntime:
                 interrupt_before=options.breakpoints if options else None,
             )
 
+            schema = await self.get_schema()
+            is_conversational = False
+
+            if schema.metadata and isinstance(schema.metadata, dict):
+                engine = schema.metadata.get("settings").get("engine")
+                is_conversational = "conversational" in engine
+
+            if is_conversational:
+                graph_state = await self._get_graph_state(graph_config)
+                messages = graph_state.values['messages']
+                graph_output = {'messages': messages}
+
             # Get final state and create result
             result = await self._create_runtime_result(graph_config, graph_output)
 
