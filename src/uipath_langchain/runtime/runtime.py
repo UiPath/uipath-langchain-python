@@ -134,7 +134,7 @@ class UiPathLangGraphRuntime:
                 stream_mode=["messages", "updates"],
                 subgraphs=True,
             ):
-                _, chunk_type, data = stream_chunk
+                namespace, chunk_type, data = stream_chunk
 
                 # Emit UiPathRuntimeMessageEvent for messages
                 if chunk_type == "messages":
@@ -172,6 +172,10 @@ class UiPathLangGraphRuntime:
                                 if isinstance(agent_data, dict)
                                 else {},
                                 node_name=node_name,
+                                qualified_node_name=self._build_node_name(
+                                    namespace,
+                                    node_name,
+                                ),
                             )
                             yield state_event
 
@@ -453,6 +457,47 @@ class UiPathLangGraphRuntime:
     def _is_middleware_node(self, node_name: str) -> bool:
         """Check if a node name represents a middleware node."""
         return node_name in self._middleware_node_names
+
+    def _build_node_name(self, namespace: Any, node_name: str) -> str:
+        """Build a fully qualified node name with subgraph prefix from the namespace.
+
+        When streaming with ``subgraphs=True``, LangGraph provides a namespace
+        tuple that identifies the subgraph hierarchy a node belongs to. This
+        method extracts the subgraph names and prepends them to the node name.
+
+        Args:
+            namespace: A tuple representing the subgraph hierarchy.
+                - () for the root graph.
+                - ("subgraph_name:node_id",) for a single-level subgraph.
+                - ("subgraph_name:node_id", "nested:node_id") for nested subgraphs.
+            node_name: The name of the node within its graph.
+
+        Returns:
+            The fully qualified node name. For example:
+                - "agent" when called from the root graph.
+                - "coder:generate" when called from the *coder* subgraph.
+                - "coder:debugger:analyze" when called from *debugger* nested inside *coder*.
+        """
+        if not namespace:
+            return node_name
+        if not isinstance(namespace, (tuple, list)):
+            return node_name
+        parts = []
+        for ns in namespace:
+            if not isinstance(ns, str):
+                continue
+            if not ns:
+                continue
+            # Extract subgraph name (part before ':'), fall back to full string
+            part = ns.split(":")[0] if ":" in ns else ns
+            if part:
+                parts.append(part)
+
+        if not parts:
+            return node_name
+
+        prefix = ":".join(parts)
+        return f"{prefix}:{node_name}"
 
     async def dispose(self) -> None:
         """Cleanup runtime resources."""
