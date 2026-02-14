@@ -11,7 +11,7 @@ from langchain_core.callbacks import (
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
-from uipath._utils import resource_override
+from uipath._utils import resolve_endpoint_override, resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
@@ -183,8 +183,9 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
                 "UIPATH_ACCESS_TOKEN environment variable or token parameter is required"
             )
 
-        uipath_url = self._build_base_url(model_name)
+        uipath_url, override_headers = self._build_base_url(model_name)
         headers = self._build_headers(token, agenthub_config, byo_connection_id)
+        headers.update(override_headers)
 
         header_capture = HeaderCapture(name=f"vertex_headers_{id(self)}")
         client_kwargs = get_httpx_client_kwargs()
@@ -269,19 +270,28 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         return headers
 
     @staticmethod
-    def _build_base_url(model_name: str) -> str:
-        """Build the full URL for the UiPath LLM Gateway."""
-        env_uipath_url = os.getenv("UIPATH_URL")
+    def _build_base_url(model_name: str) -> tuple[str, dict[str, str]]:
+        """Build the full URL for the UiPath LLM Gateway.
 
-        if not env_uipath_url:
-            raise ValueError("UIPATH_URL environment variable is required")
-
+        Returns:
+            A tuple of (url, extra_headers). extra_headers contains routing
+            headers when a local service URL override is active.
+        """
         vendor_endpoint = EndpointManager.get_vendor_endpoint()
         formatted_endpoint = vendor_endpoint.format(
             vendor="vertexai",
             model=model_name,
         )
-        return f"{env_uipath_url.rstrip('/')}/{formatted_endpoint}"
+
+        override_url, override_headers = resolve_endpoint_override(formatted_endpoint)
+        if override_url:
+            return override_url, override_headers
+
+        env_uipath_url = os.getenv("UIPATH_URL")
+        if not env_uipath_url:
+            raise ValueError("UIPATH_URL environment variable is required")
+
+        return f"{env_uipath_url.rstrip('/')}/{formatted_endpoint}", {}
 
     def invoke(self, *args, **kwargs):
         retryer = self._retryer or _get_default_retryer()

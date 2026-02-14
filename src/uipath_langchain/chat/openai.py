@@ -5,7 +5,7 @@ from typing import Optional
 import httpx
 from langchain_openai import AzureChatOpenAI
 from pydantic import PrivateAttr
-from uipath._utils import resource_override
+from uipath._utils import resolve_endpoint_override, resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.utils import EndpointManager
 
@@ -177,11 +177,15 @@ class UiPathChatOpenAI(AzureChatOpenAI):
 
     def _build_base_url(self) -> str:
         if not self._url:
-            env_uipath_url = os.getenv("UIPATH_URL")
-
-            if env_uipath_url:
-                self._url = f"{env_uipath_url.rstrip('/')}/{self.endpoint}"
+            override_url, override_headers = resolve_endpoint_override(self.endpoint)
+            if override_url:
+                self._url = override_url
+                self._extra_headers.update(override_headers)
             else:
-                raise ValueError("UIPATH_URL environment variable is required")
+                env_uipath_url = os.getenv("UIPATH_URL")
+                if env_uipath_url:
+                    self._url = f"{env_uipath_url.rstrip('/')}/{self.endpoint}"
+                else:
+                    raise ValueError("UIPATH_URL environment variable is required")
 
         return self._url
