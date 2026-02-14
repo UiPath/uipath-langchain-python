@@ -10,6 +10,7 @@ from langchain_core.outputs import ChatGeneration, LLMResult
 from opentelemetry.trace import Span
 from pydantic import BaseModel
 from uipath.core.serialization import serialize_json
+from uipath.platform.resume_triggers import is_no_content_marker
 from uipath.tracing import AttachmentDirection, AttachmentProvider, SpanAttachment
 
 from uipath_agents._observability.llmops.spans.span_attributes import Usage
@@ -242,11 +243,18 @@ def _unwrap_tool_output(output: Any) -> Any:
     return content
 
 
+def filter_output(output: Any) -> Any:
+    """Return None if output is a NO_CONTENT trigger marker, otherwise return unchanged."""
+    if output is None or is_no_content_marker(output):
+        return None
+    return output
+
+
 def set_tool_result(span: Span, output: Any, attribute_name: str = "result") -> None:
     """Set tool result attribute on span."""
-    if output is None:
+    actual = filter_output(_unwrap_tool_output(output))
+    if actual is None:
         return
-    actual = _unwrap_tool_output(output)
     if isinstance(actual, (dict, list)):
         span.set_attribute(attribute_name, serialize_json(actual))
     else:

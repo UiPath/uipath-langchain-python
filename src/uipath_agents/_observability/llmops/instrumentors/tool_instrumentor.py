@@ -15,6 +15,7 @@ from ..span_hierarchy import SpanHierarchyManager
 from ..spans import SpanKeys
 from .attribute_helpers import (
     build_task_url,
+    filter_output,
     get_tool_type_value,
     parse_tool_arguments,
     set_process_job_info,
@@ -327,6 +328,8 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
         """Upsert resumed tool/process spans when tool completes."""
         if not self._state.resumed_trace_id:
             return
+
+        output = filter_output(output)
 
         # Upsert process span first (inner)
         is_escalation = False

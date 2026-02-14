@@ -1,5 +1,6 @@
 """Tests for tool instrumentor callId and arguments capture."""
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -533,3 +534,92 @@ class TestToolSpanInstrumentorGuardrailPath:
         mock_existing_span.set_attribute.assert_any_call(
             "input", '{"validated": true, "score": 0.95}'
         )
+
+
+class TestUpsertResumedSpansNoContent:
+    """Tests for NO_CONTENT filtering in _upsert_resumed_spans_on_completion."""
+
+    NO_CONTENT_MARKER: dict[str, Any] = {
+        "status": "completed",
+        "__internal": "NO_CONTENT",
+    }
+
+    def _create_instrumentor(
+        self,
+    ) -> tuple[ToolSpanInstrumentor, InstrumentationState, MagicMock]:
+        mock_span_factory = MagicMock()
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.resumed_trace_id = "trace-123"
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+        return instrumentor, state, mock_span_factory
+
+    def test_no_content_skips_process_span_result(self) -> None:
+        """Process span should not get a result attribute for NO_CONTENT output."""
+        instrumentor, state, mock_factory = self._create_instrumentor()
+        state.resumed_process_span_data = {"attributes": {"type": "processTool"}}
+        state.resumed_tool_span_data = None
+
+        instrumentor._upsert_resumed_spans_on_completion(self.NO_CONTENT_MARKER, None)
+
+        mock_factory.upsert_span_complete_by_data.assert_called_once()
+        span_data = mock_factory.upsert_span_complete_by_data.call_args.kwargs[
+            "span_data"
+        ]
+        assert "result" not in span_data["attributes"]
+
+    def test_no_content_skips_tool_span_output(self) -> None:
+        """Tool span should not get an output attribute for NO_CONTENT output."""
+        instrumentor, state, mock_factory = self._create_instrumentor()
+        state.resumed_process_span_data = None
+        state.resumed_tool_span_data = {"attributes": {}}
+
+        instrumentor._upsert_resumed_spans_on_completion(self.NO_CONTENT_MARKER, None)
+
+        mock_factory.upsert_span_complete_by_data.assert_called_once()
+        span_data = mock_factory.upsert_span_complete_by_data.call_args.kwargs[
+            "span_data"
+        ]
+        assert "output" not in span_data["attributes"]
+
+    def test_no_content_skips_both_spans(self) -> None:
+        """Both process and tool spans should skip output for NO_CONTENT."""
+        instrumentor, state, mock_factory = self._create_instrumentor()
+        state.resumed_process_span_data = {"attributes": {"type": "processTool"}}
+        state.resumed_tool_span_data = {"attributes": {}}
+
+        instrumentor._upsert_resumed_spans_on_completion(self.NO_CONTENT_MARKER, None)
+
+        assert mock_factory.upsert_span_complete_by_data.call_count == 2
+        for call in mock_factory.upsert_span_complete_by_data.call_args_list:
+            span_data = call.kwargs["span_data"]
+            assert "result" not in span_data["attributes"]
+            assert "output" not in span_data["attributes"]
+
+    def test_normal_output_sets_process_span_result(self) -> None:
+        """Normal output should be set as result on process span."""
+        instrumentor, state, mock_factory = self._create_instrumentor()
+        state.resumed_process_span_data = {"attributes": {"type": "processTool"}}
+        state.resumed_tool_span_data = None
+
+        instrumentor._upsert_resumed_spans_on_completion({"answer": 42}, None)
+
+        span_data = mock_factory.upsert_span_complete_by_data.call_args.kwargs[
+            "span_data"
+        ]
+        assert span_data["attributes"]["result"] == '{"answer": 42}'
+
+    def test_normal_output_sets_tool_span_output(self) -> None:
+        """Normal output should be set as output on tool span."""
+        instrumentor, state, mock_factory = self._create_instrumentor()
+        state.resumed_process_span_data = None
+        state.resumed_tool_span_data = {"attributes": {}}
+
+        instrumentor._upsert_resumed_spans_on_completion({"answer": 42}, None)
+
+        span_data = mock_factory.upsert_span_complete_by_data.call_args.kwargs[
+            "span_data"
+        ]
+        assert span_data["attributes"]["output"] == '{"answer": 42}'

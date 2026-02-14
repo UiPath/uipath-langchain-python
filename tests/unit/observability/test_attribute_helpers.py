@@ -9,6 +9,7 @@ from uipath.tracing import AttachmentDirection, AttachmentProvider, SpanAttachme
 
 from uipath_agents._observability.llmops.instrumentors.attribute_helpers import (
     build_task_url,
+    filter_output,
     get_tool_type_value,
     set_span_attachments,
     set_tool_result,
@@ -430,3 +431,43 @@ class TestSetToolResult:
         set_tool_result(span, {"data": 1}, "output")
         name, _ = span.set_attribute.call_args[0]
         assert name == "output"
+
+    def test_skips_no_content_dict(self) -> None:
+        span = MagicMock()
+        set_tool_result(span, {"status": "completed", "__internal": "NO_CONTENT"})
+        span.set_attribute.assert_not_called()
+
+    def test_skips_no_content_string(self) -> None:
+        span = MagicMock()
+        set_tool_result(span, '{"status": "completed", "__internal": "NO_CONTENT"}')
+        span.set_attribute.assert_not_called()
+
+
+class TestFilterOutput:
+    """Tests for filter_output function."""
+
+    def test_returns_none_for_none(self) -> None:
+        assert filter_output(None) is None
+
+    def test_returns_none_for_no_content_dict(self) -> None:
+        marker = {"status": "completed", "__internal": "NO_CONTENT"}
+        assert filter_output(marker) is None
+
+    def test_returns_none_for_no_content_string(self) -> None:
+        marker = '{"status": "completed", "__internal": "NO_CONTENT"}'
+        assert filter_output(marker) is None
+
+    def test_passes_through_normal_dict(self) -> None:
+        output = {"key": "value"}
+        assert filter_output(output) == {"key": "value"}
+
+    def test_passes_through_normal_string(self) -> None:
+        assert filter_output("hello") == "hello"
+
+    def test_passes_through_list(self) -> None:
+        output = [1, 2, 3]
+        assert filter_output(output) == [1, 2, 3]
+
+    def test_passes_through_dict_with_internal_key_but_different_value(self) -> None:
+        output = {"__internal": "SOME_OTHER_VALUE"}
+        assert filter_output(output) == {"__internal": "SOME_OTHER_VALUE"}
