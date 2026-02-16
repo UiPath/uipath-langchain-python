@@ -149,6 +149,10 @@ class TestCreateBatchTransformTool:
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
     @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.task",
+        lambda f: f,
+    )
+    @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
@@ -215,6 +219,10 @@ class TestCreateBatchTransformTool:
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
     @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.task",
+        lambda f: f,
+    )
+    @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
@@ -280,6 +288,10 @@ class TestCreateBatchTransformTool:
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
     @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.task",
+        lambda f: f,
+    )
+    @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
@@ -332,6 +344,10 @@ class TestCreateBatchTransformTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.task",
+        lambda f: f,
+    )
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -386,6 +402,10 @@ class TestCreateBatchTransformTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.task",
+        lambda f: f,
+    )
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
