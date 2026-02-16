@@ -79,7 +79,13 @@ def handle_semantic_search(
             example_calls=[],  # Examples cannot be provided for context.
         )
         async def context_tool_fn() -> dict[str, Any]:
-            return {"documents": await retriever.ainvoke(static_query_value)}
+            docs = await retriever.ainvoke(static_query_value)
+            return {
+                "documents": [
+                    {"metadata": doc.metadata, "page_content": doc.page_content}
+                    for doc in docs
+                ]
+            }
 
     else:
         # Dynamic query - requires query parameter
@@ -98,7 +104,13 @@ def handle_semantic_search(
             example_calls=[],  # Examples cannot be provided for context.
         )
         async def context_tool_fn(query: str) -> dict[str, Any]:
-            return {"documents": await retriever.ainvoke(query)}
+            docs = await retriever.ainvoke(query)
+            return {
+                "documents": [
+                    {"metadata": doc.metadata, "page_content": doc.page_content}
+                    for doc in docs
+                ]
+            }
 
     return StructuredToolWithOutputType(
         name=tool_name,
