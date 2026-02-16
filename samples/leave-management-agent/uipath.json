@@ -1,0 +1,161 @@
+{
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "28c5ddb9-ffa3-44e3-9a23-eb265d6f10c1",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "leave_request": {
+                        "type": "string"
+                    },
+                    "employee_email": {
+                        "type": "string"
+                    },
+                    "employee_id": {
+                        "type": "string"
+                    },
+                    "employee_name": {
+                        "type": "string"
+                    },
+                    "leave_start": {
+                        "type": "string"
+                    },
+                    "leave_end": {
+                        "type": "string"
+                    },
+                    "leave_reason": {
+                        "type": "string"
+                    },
+                    "leave_category": {
+                        "type": "string"
+                    },
+                    "leave_days_requested": {
+                        "type": "integer"
+                    },
+                    "available_leave_balance": {
+                        "additionalProperties": {
+                            "type": "integer"
+                        },
+                        "type": "object"
+                    },
+                    "policy_compliant": {
+                        "type": "boolean"
+                    },
+                    "policy_violations": {
+                        "items": {},
+                        "type": "array"
+                    },
+                    "applicable_policies": {
+                        "items": {},
+                        "type": "array"
+                    },
+                    "hr_approval_required": {
+                        "default": false,
+                        "title": "Hr Approval Required",
+                        "type": "boolean"
+                    },
+                    "hr_approved": {
+                        "type": "boolean"
+                    },
+                    "hr_comments": {
+                        "type": "string"
+                    },
+                    "final_status": {
+                        "type": "string"
+                    },
+                    "hitl_required": {
+                        "default": false,
+                        "title": "Hitl Required",
+                        "type": "boolean"
+                    },
+                    "validation_complete": {
+                        "default": false,
+                        "title": "Validation Complete",
+                        "type": "boolean"
+                    }
+                },
+                "required": []
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "leave_request": {
+                        "type": "string"
+                    },
+                    "employee_email": {
+                        "type": "string"
+                    },
+                    "employee_id": {
+                        "type": "string"
+                    },
+                    "employee_name": {
+                        "type": "string"
+                    },
+                    "leave_start": {
+                        "type": "string"
+                    },
+                    "leave_end": {
+                        "type": "string"
+                    },
+                    "leave_reason": {
+                        "type": "string"
+                    },
+                    "leave_category": {
+                        "type": "string"
+                    },
+                    "leave_days_requested": {
+                        "type": "integer"
+                    },
+                    "available_leave_balance": {
+                        "additionalProperties": {
+                            "type": "integer"
+                        },
+                        "type": "object"
+                    },
+                    "policy_compliant": {
+                        "type": "boolean"
+                    },
+                    "policy_violations": {
+                        "items": {},
+                        "type": "array"
+                    },
+                    "applicable_policies": {
+                        "items": {},
+                        "type": "array"
+                    },
+                    "hr_approval_required": {
+                        "default": null,
+                        "title": "Hr Approval Required",
+                        "type": "boolean"
+                    },
+                    "hr_approved": {
+                        "type": "boolean"
+                    },
+                    "hr_comments": {
+                        "type": "string"
+                    },
+                    "final_status": {
+                        "type": "string"
+                    },
+                    "hitl_required": {
+                        "default": null,
+                        "title": "Hitl Required",
+                        "type": "boolean"
+                    },
+                    "validation_complete": {
+                        "default": null,
+                        "title": "Validation Complete",
+                        "type": "boolean"
+                    }
+                },
+                "required": []
+            }
+        }
+    ],
+    "bindings": {
+        "version": "2.0",
+        "resources": []
+    }
+}
