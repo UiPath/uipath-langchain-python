@@ -415,7 +415,9 @@ class TestGraphInterruptHandling:
             def __init__(self) -> None:
                 self.action = MockAction()
                 self.recipient = TaskRecipient(
-                    type=TaskRecipientType.EMAIL, value="user@example.com"
+                    type=TaskRecipientType.EMAIL,
+                    value="user@example.com",
+                    displayName="user@example.com",
                 )
 
         class GraphInterrupt(Exception):

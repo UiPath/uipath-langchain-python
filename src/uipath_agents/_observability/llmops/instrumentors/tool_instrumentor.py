@@ -456,8 +456,8 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                     span.set_attribute("taskUrl", task_url)
 
         recipient = getattr(value, "recipient", None)
-        if recipient and getattr(recipient, "value", None):
-            span.set_attribute("assignedTo", recipient.value)
+        if recipient and getattr(recipient, "display_name", None):
+            span.set_attribute("assignedTo", recipient.display_name)
 
     def _set_vs_escalation_interrupt_attrs(
         self, span: Any, error: BaseException
