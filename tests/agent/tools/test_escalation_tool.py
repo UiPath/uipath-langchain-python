@@ -137,7 +137,9 @@ class TestResolveRecipientValue:
         result = await resolve_recipient_value(recipient)
 
         assert result == TaskRecipient(
-            value="resolved@example.com", type=TaskRecipientType.EMAIL
+            value="resolved@example.com",
+            type=TaskRecipientType.EMAIL,
+            displayName="resolved@example.com",
         )
         mock_resolve_asset.assert_called_once_with("email_asset", "/Test/Folder")
 
@@ -156,7 +158,9 @@ class TestResolveRecipientValue:
         result = await resolve_recipient_value(recipient)
 
         assert result == TaskRecipient(
-            value="ResolvedGroup", type=TaskRecipientType.GROUP_NAME
+            value="ResolvedGroup",
+            type=TaskRecipientType.GROUP_NAME,
+            displayName="ResolvedGroup",
         )
         mock_resolve_asset.assert_called_once_with("group_asset", "/Test/Folder")
 
@@ -171,7 +175,9 @@ class TestResolveRecipientValue:
         result = await resolve_recipient_value(recipient)
 
         assert result == TaskRecipient(
-            value="direct@example.com", type=TaskRecipientType.EMAIL
+            value="direct@example.com",
+            type=TaskRecipientType.EMAIL,
+            displayName="direct@example.com",
         )
 
     @pytest.mark.asyncio
@@ -312,7 +318,9 @@ class TestEscalationToolMetadata:
 
         assert tool.metadata is not None
         assert tool.metadata["recipient"] == TaskRecipient(
-            value="user@example.com", type=TaskRecipientType.EMAIL
+            value="user@example.com",
+            type=TaskRecipientType.EMAIL,
+            displayName="user@example.com",
         )
 
     @pytest.mark.asyncio
