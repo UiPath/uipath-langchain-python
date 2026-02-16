@@ -1,0 +1,14 @@
+[
+  {
+    "query": "What are maintenance organization approval requirements?",
+    "expected_behavior": "The agent retrieves and summarizes the EASA Part-145 regulation section describing the approval requirements for maintenance organizations."
+  },
+  {
+    "query": "How can an organization renew its maintenance approval?",
+    "expected_behavior": "The agent should return the renewal process steps and reference to the applicable regulatory clauses."
+  },
+  {
+    "query": "What documentation is needed for a new maintenance approval application?",
+    "expected_behavior": "The agent should outline required forms, procedures, and compliance statements for the initial approval request."
+  }
+]
