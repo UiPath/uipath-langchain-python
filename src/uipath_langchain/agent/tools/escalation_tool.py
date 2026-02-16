@@ -211,7 +211,7 @@ def create_escalation_tool(
         escalation_output = _parse_task_data(
             result.data,
             input_schema=input_model.model_json_schema(),
-            output_schema=EscalationToolOutput.model_json_schema(),
+            output_schema=output_model.model_json_schema(),
         )
 
         outcome_str = (
