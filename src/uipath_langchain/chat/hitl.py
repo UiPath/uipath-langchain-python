@@ -52,7 +52,7 @@ def _request_approval(
     return confirmation.get("input") or tool_args
 
 
-def hitl_tool(
+def requires_approval(
     func: Callable[..., Any] | None = None,
     *,
     name: str | None = None,
