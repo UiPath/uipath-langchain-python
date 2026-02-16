@@ -58,13 +58,15 @@ async def resolve_recipient_value(
             type = TaskRecipientType.EMAIL
         elif recipient.type == AgentEscalationRecipientType.ASSET_GROUP_NAME:
             type = TaskRecipientType.GROUP_NAME
-        return TaskRecipient(value=value, type=type)
+        return TaskRecipient(value=value, type=type, displayName=value)
 
     if isinstance(recipient, StandardRecipient):
         type = TaskRecipientType(recipient.type)
         if recipient.type == AgentEscalationRecipientType.USER_EMAIL:
             type = TaskRecipientType.EMAIL
-        return TaskRecipient(value=recipient.value, type=type)
+        return TaskRecipient(
+            value=recipient.value, type=type, displayName=recipient.value
+        )
 
     return None
 
@@ -209,7 +211,7 @@ def create_escalation_tool(
         escalation_output = _parse_task_data(
             result.data,
             input_schema=input_model.model_json_schema(),
-            output_schema=EscalationToolOutput.model_json_schema(),
+            output_schema=output_model.model_json_schema(),
         )
 
         outcome_str = (

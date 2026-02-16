@@ -8,6 +8,7 @@ import uuid
 import pytest
 from click.testing import CliRunner
 from pytest_httpx import HTTPXMock
+from uipath.platform.orchestrator.job import JobState
 from uipath.runtime import (
     UiPathExecuteOptions,
     UiPathRuntimeContext,
@@ -66,6 +67,16 @@ class TestHitlJobTrigger:
                     },
                 )
 
+                # mock fired triggers check
+                httpx_mock.add_response(
+                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={job_key})",
+                    json={
+                        "Key": f"{job_key}",
+                        "Id": 123,
+                        "FolderKey": "test-folder-key",
+                        "State": JobState.RUNNING.value,
+                    },
+                )
                 # First execution: creates job trigger and stores it in database
                 context = UiPathRuntimeContext.with_defaults(
                     entrypoint="agent",
@@ -147,6 +158,16 @@ class TestHitlJobTrigger:
                     input="{}",
                     output_file="__uipath/output.json",
                     resume=True,
+                )
+
+                httpx_mock.add_response(
+                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier=487d9dc7-30fe-4926-b5f0-35a956914042)",
+                    json={
+                        "Key": f"{job_key}",
+                        "Id": 123,
+                        "FolderKey": "test-folder-key",
+                        "State": JobState.RUNNING.value,
+                    },
                 )
 
                 resume_factory_1 = UiPathRuntimeFactoryRegistry.get(

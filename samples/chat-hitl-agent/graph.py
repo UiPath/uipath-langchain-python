@@ -1,12 +1,12 @@
 from langchain_anthropic import ChatAnthropic
 from langchain_tavily import TavilySearch
 from langchain.agents import create_agent
-from uipath_langchain.chat import hitl_tool
+from uipath_langchain.chat import requires_approval
 
 tavily_tool = TavilySearch(max_results=5)
 
 
-@hitl_tool
+@requires_approval
 def search_web(query: str) -> str:
     """Search the web for information using Tavily."""
     return tavily_tool.invoke({"query": query})

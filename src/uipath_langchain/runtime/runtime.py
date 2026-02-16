@@ -21,6 +21,7 @@ from uipath.runtime.events import (
     UiPathRuntimeEvent,
     UiPathRuntimeMessageEvent,
     UiPathRuntimeStateEvent,
+    UiPathRuntimeStatePhase,
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
@@ -143,7 +144,7 @@ class UiPathLangGraphRuntime:
                 graph_input,
                 graph_config,
                 interrupt_before=options.breakpoints if options else None,
-                stream_mode=["messages", "updates"],
+                stream_mode=["messages", "updates", "tasks"],
                 subgraphs=True,
             ):
                 namespace, chunk_type, data = stream_chunk
@@ -188,6 +189,32 @@ class UiPathLangGraphRuntime:
                                     namespace,
                                     node_name,
                                 ),
+                            )
+                            yield state_event
+                elif chunk_type == "tasks":
+                    if isinstance(data, dict):
+                        task_name = data.get("name", "")
+
+                        if "input" in data:
+                            phase = UiPathRuntimeStatePhase.STARTED
+                        elif "result" in data:
+                            phase = (
+                                UiPathRuntimeStatePhase.FAULTED
+                                if data.get("error")
+                                else UiPathRuntimeStatePhase.COMPLETED
+                            )
+                        else:
+                            phase = None
+
+                        if phase is not None:
+                            state_event = UiPathRuntimeStateEvent(
+                                payload=serialize_output(data),
+                                node_name=task_name,
+                                qualified_node_name=self._build_node_name(
+                                    namespace,
+                                    task_name,
+                                ),
+                                phase=phase,
                             )
                             yield state_event
 
