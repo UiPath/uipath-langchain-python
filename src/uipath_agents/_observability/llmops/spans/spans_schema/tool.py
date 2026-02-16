@@ -105,6 +105,7 @@ class ToolSpanSchema:
         channel_type: Optional[str] = None,
         assignee: Optional[str] = None,
         parent_span: Optional[Span] = None,
+        args_schema: Optional[Type[BaseModel]] = None,
     ) -> Span:
         """Start an escalation tool span (child of tool call).
 
@@ -127,10 +128,14 @@ class ToolSpanSchema:
             parent_span=parent_span,
             kind=SpanKind.INTERNAL,
         )
+        attachments = get_span_attachments(
+            arguments, args_schema, direction=AttachmentDirection.IN
+        )
         attrs = EscalationToolSpanAttributes(
             arguments=arguments,
             channel_type=channel_type,
             assigned_to=assignee,
+            attachments=attachments,
         )
         apply_attributes(span, attrs)
         if self._upsert_started:

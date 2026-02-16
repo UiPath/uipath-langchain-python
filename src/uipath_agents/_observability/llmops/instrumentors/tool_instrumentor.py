@@ -154,6 +154,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         arguments=arguments,
                         channel_type=channel_type,
                         parent_span=span,
+                        args_schema=args_schema,
                     )
                     self._state.escalation_run_ids.add(run_id)
                 elif tool_type == "agent" and tool_display_name:

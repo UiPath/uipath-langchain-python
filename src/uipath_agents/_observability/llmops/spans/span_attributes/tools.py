@@ -1,8 +1,9 @@
 """Tool-specific span attribute classes."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import ConfigDict, Field
+from uipath.tracing import SpanAttachment
 
 from .base import BaseSpanAttributes
 from .tool_call import ToolCallSpanAttributes
@@ -81,6 +82,7 @@ class EscalationToolSpanAttributes(BaseSpanAttributes):
     result: Optional[Any] = Field(None, alias="result")
     from_memory: Optional[bool] = Field(None, alias="fromMemory")
     saved_to_memory: Optional[bool] = Field(None, alias="savedToMemory")
+    attachments: Optional[List[SpanAttachment]] = Field(None, alias="attachments")
 
     @property
     def type(self) -> str:

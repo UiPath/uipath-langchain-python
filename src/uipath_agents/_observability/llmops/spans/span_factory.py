@@ -240,6 +240,7 @@ class LlmOpsSpanFactory:
         channel_type: Optional[str] = None,
         assignee: Optional[str] = None,
         parent_span: Optional[Span] = None,
+        args_schema: Optional[Type[BaseModel]] = None,
     ) -> Span:
         """Start an escalation tool span (child of tool call).
 
@@ -262,6 +263,7 @@ class LlmOpsSpanFactory:
             channel_type=channel_type,
             assignee=assignee,
             parent_span=parent_span,
+            args_schema=args_schema,
         )
 
     def start_process_tool(
