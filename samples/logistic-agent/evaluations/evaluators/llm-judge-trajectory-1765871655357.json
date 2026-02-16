@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "fileName": "llm-judge-trajectory-1765871655357.json",
+  "id": "evaluator-llm-judge-trajectory-1765871655357",
+  "description": "Use LLM to judge agent trajectory and behavior",
+  "evaluatorTypeId": "uipath-llm-judge-trajectory-similarity",
+  "evaluatorConfig": {
+    "model": "gpt-4.1-2025-04-14",
+    "prompt": "As an expert evaluator, determine how well the agent performed on a scale of 0-100. Focus on whether the agent's actions and outputs matched the expected behavior, while allowing for alternative valid expressions and reasonable variations in language. Maintain high standards for accuracy and completeness. Provide your score with a brief and clear justification explaining your reasoning.\n----\nAgentInput:\n{{UserOrSyntheticInput}}\n----\nExpectedAgentBehavior:\n{{ExpectedAgentBehavior}}\n----\nAgentRunHistory:\n{{AgentRunHistory}}",
+    "temperature": 0,
+    "maxTokens": 8000,
+    "name": "Complaint Trajectory Evaluator",
+    "defaultEvaluationCriteria": {
+      "expectedAgentBehavior": "the agent should correctly identify that the customer is issuing a complaint and should route to handle_complaint"
+    }
+  },
+  "createdAt": "2025-12-16T07:54:15.357Z",
+  "updatedAt": "2025-12-16T07:54:18.417Z"
+}
