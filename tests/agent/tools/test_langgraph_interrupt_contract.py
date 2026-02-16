@@ -157,19 +157,19 @@ class TestInterruptResumeContract:
         assert counter() == 2
 
 
-class TestDurableTaskInterruptAlignment:
-    """Verify that durable_task's index stays in sync with interrupt()'s counter.
+class TestDurableInterruptAlignment:
+    """Verify that durable_interrupt's index stays in sync with interrupt()'s counter.
 
-    This is the critical invariant: when durable_task skips body execution on
-    resume, the subsequent interrupt() call must consume the correct resume
-    value at the same index position.
+    durable_interrupt calls interrupt() internally. On resume it calls
+    interrupt(None) which consumes the resume value at the matching index.
+    The decorated function returns the resume value directly.
     """
 
-    def test_single_durable_task_interrupt_pair(self) -> None:
-        """One @durable_task + interrupt() pair: resume returns correct value."""
+    def test_single_durable_interrupt_returns_resume_value(self) -> None:
+        """On resume, durable_interrupt returns the resume value directly."""
         from uipath_langchain.agent.tools.durable_interrupt import (
             _durable_state,
-            durable_task,
+            durable_interrupt,
         )
 
         sp = _make_scratchpad(resume=["job-result"])
@@ -179,26 +179,23 @@ class TestDurableTaskInterruptAlignment:
         config_token = var_child_runnable_config.set(config)
         try:
 
-            @durable_task
+            @durable_interrupt
             def create_job() -> dict[str, str]:
                 raise AssertionError("body should not run on resume")
 
-            # durable_task skips body, returns None (consumes idx=0 internally)
-            task_result = create_job()
-            assert task_result is None
-
-            # interrupt() at idx=0 returns resume[0]
-            resume_result = interrupt(None)
-            assert resume_result == "job-result"
+            # durable_interrupt skips body, calls interrupt(None) internally,
+            # returns resume[0]
+            result = create_job()
+            assert result == "job-result"
         finally:
             var_child_runnable_config.reset(config_token)
             _durable_state.reset(state_token)
 
-    def test_two_durable_task_interrupt_pairs(self) -> None:
-        """Two @durable_task + interrupt() pairs: each gets correct resume value."""
+    def test_two_durable_interrupts_return_sequential_resume_values(self) -> None:
+        """Two @durable_interrupt calls return resume values by index."""
         from uipath_langchain.agent.tools.durable_interrupt import (
             _durable_state,
-            durable_task,
+            durable_interrupt,
         )
 
         sp = _make_scratchpad(resume=["result-A", "result-B"])
@@ -208,30 +205,25 @@ class TestDurableTaskInterruptAlignment:
         config_token = var_child_runnable_config.set(config)
         try:
 
-            @durable_task
+            @durable_interrupt
             def task_a() -> str:
                 raise AssertionError("task_a body should not run")
 
-            @durable_task
+            @durable_interrupt
             def task_b() -> str:
                 raise AssertionError("task_b body should not run")
 
-            # Pair 1: durable_task skips (idx=0), interrupt returns resume[0]
-            assert task_a() is None
-            assert interrupt(None) == "result-A"
-
-            # Pair 2: durable_task skips (idx=1), interrupt returns resume[1]
-            assert task_b() is None
-            assert interrupt(None) == "result-B"
+            assert task_a() == "result-A"
+            assert task_b() == "result-B"
         finally:
             var_child_runnable_config.reset(config_token)
             _durable_state.reset(state_token)
 
-    def test_partial_resume_first_skipped_second_runs(self) -> None:
-        """One resume value: first pair skips, second pair executes + interrupts."""
+    def test_partial_resume_first_returns_value_second_raises(self) -> None:
+        """One resume value: first returns it, second runs body and raises GraphInterrupt."""
         from uipath_langchain.agent.tools.durable_interrupt import (
             _durable_state,
-            durable_task,
+            durable_interrupt,
         )
 
         sp = _make_scratchpad(resume=["result-A"])
@@ -241,32 +233,29 @@ class TestDurableTaskInterruptAlignment:
         config_token = var_child_runnable_config.set(config)
         try:
 
-            @durable_task
+            @durable_interrupt
             def task_a() -> str:
                 raise AssertionError("task_a body should not run")
 
-            @durable_task
+            @durable_interrupt
             def task_b() -> str:
                 return "new-job-B"
 
-            # Pair 1: resumed — durable_task skips, interrupt returns resume[0]
-            assert task_a() is None
-            assert interrupt(None) == "result-A"
+            # First: resumed — returns resume value
+            assert task_a() == "result-A"
 
-            # Pair 2: not resumed — durable_task runs body, interrupt raises
-            result_b = task_b()
-            assert result_b == "new-job-B"
+            # Second: not resumed — runs body, interrupt("new-job-B") raises
             with pytest.raises(GraphInterrupt):
-                interrupt(result_b)
+                task_b()
         finally:
             var_child_runnable_config.reset(config_token)
             _durable_state.reset(state_token)
 
-    async def test_async_durable_task_interrupt_alignment(self) -> None:
-        """Async variant: durable_task + interrupt indices stay aligned."""
+    async def test_async_durable_interrupt_returns_resume_value(self) -> None:
+        """Async variant: durable_interrupt returns resume value directly."""
         from uipath_langchain.agent.tools.durable_interrupt import (
             _durable_state,
-            durable_task,
+            durable_interrupt,
         )
 
         sp = _make_scratchpad(resume=["async-result"])
@@ -276,15 +265,12 @@ class TestDurableTaskInterruptAlignment:
         config_token = var_child_runnable_config.set(config)
         try:
 
-            @durable_task
+            @durable_interrupt
             async def create_job() -> str:
                 raise AssertionError("body should not run on resume")
 
-            task_result = await create_job()
-            assert task_result is None
-
-            resume_result = interrupt(None)
-            assert resume_result == "async-result"
+            result = await create_job()
+            assert result == "async-result"
         finally:
             var_child_runnable_config.reset(config_token)
             _durable_state.reset(state_token)

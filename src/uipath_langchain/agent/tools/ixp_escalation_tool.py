@@ -5,7 +5,6 @@ from typing import Any
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
-from langgraph.types import interrupt
 from pydantic import BaseModel
 from uipath.agent.models.agent import AgentIxpVsEscalationResourceConfig
 from uipath.eval.mocks import mockable
@@ -26,7 +25,7 @@ from uipath_langchain.agent.tools.tool_node import (
 )
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
-from .durable_interrupt import durable_task
+from .durable_interrupt import durable_interrupt
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import (
     resolve_task_title,
@@ -70,7 +69,7 @@ def create_ixp_escalation_tool(
             raise RuntimeError("extraction_result not set in metadata")
         task_title = tool.metadata.get("task_title") or "VS Escalation Task"
 
-        @durable_task
+        @durable_interrupt
         async def start_extraction_validation():
             uipath = UiPath()
             validation_response = (
@@ -96,8 +95,7 @@ def create_ixp_escalation_tool(
                 task_url=task_url,
             )
 
-        wait_obj = await start_extraction_validation()
-        response = interrupt(wait_obj)
+        response = await start_extraction_validation()
         # store validation response in tool metadata to check for exceptions in the wrapper
         tool.metadata["_validation_response"] = response
 

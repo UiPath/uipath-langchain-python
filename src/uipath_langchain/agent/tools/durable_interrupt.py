@@ -1,4 +1,4 @@
-"""Durable task: side-effect-safe interrupt/resume for LangGraph subgraphs.
+"""Durable interrupt: side-effect-safe interrupt/resume for LangGraph subgraphs.
 
 LangGraph's ``@task`` + ``interrupt()`` pattern ensures that a side-effecting
 operation (starting a process, creating an escalation task, etc.) runs exactly
@@ -7,15 +7,27 @@ checkpoint-based caching breaks when the tool node is wrapped in a **subgraph**
 (e.g. guardrails), because the subgraph's Pregel context does not reliably
 preserve per-task checkpoints across interrupt/resume boundaries.
 
-``@durable_task`` is a drop-in replacement for ``@task``.  Decorate a sync or
-async function that performs a side-effecting operation.  On first execution the
-body runs normally and returns its result.  On resume the body is skipped
-and ``None`` is returned (the caller's ``interrupt()`` call will consume
-the resume value regardless of its argument).
+``@durable_interrupt`` replaces the ``@task`` + ``interrupt()`` two-step
+pattern with a single decorator that guarantees exactly-once execution and
+correct interrupt/resume semantics::
 
-Multiple ``@durable_task`` calls in the same node are supported.  An internal
-per-node counter (auto-reset via scratchpad identity) keeps our index in sync
-with LangGraph's own ``interrupt_counter``.
+    @durable_interrupt
+    async def start_job():
+        client = UiPath()
+        job = await client.processes.invoke_async(...)
+        return WaitJob(job=job, ...)
+
+    # First run:  body executes → interrupt(WaitJob(...)) → GraphInterrupt
+    # Resume:     body skipped  → interrupt(None) → returns resume value
+    result = await start_job()
+
+The decorated function's return value is passed directly to ``interrupt()``.
+On resume, the body is skipped and ``interrupt(None)`` returns the resume
+value from the runtime.
+
+Multiple ``@durable_interrupt`` calls in the same node are supported.  An
+internal per-node counter (auto-reset via scratchpad identity) keeps our
+index in sync with LangGraph's own ``interrupt_counter``.
 """
 
 import asyncio
@@ -25,6 +37,7 @@ from typing import Any, Callable, TypeVar
 
 from langgraph._internal._constants import CONFIG_KEY_SCRATCHPAD
 from langgraph.config import get_config
+from langgraph.types import interrupt
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -36,7 +49,7 @@ _durable_state: contextvars.ContextVar[tuple[int, int] | None] = contextvars.Con
 
 
 def _next_durable_index() -> tuple[Any, int]:
-    """Return (scratchpad, index) for the current durable_task call.
+    """Return (scratchpad, index) for the current durable_interrupt call.
 
     The index auto-resets when the scratchpad object changes, which happens
     at the start of each node execution.  This keeps our counter in sync with
@@ -64,31 +77,32 @@ def _is_resumed(scratchpad: Any, idx: int) -> bool:
     return scratchpad is not None and scratchpad.resume and idx < len(scratchpad.resume)
 
 
-def durable_task(fn: F) -> F:
-    """Decorator that runs the function body exactly once across interrupt/resume cycles.
+def durable_interrupt(fn: F) -> F:
+    """Decorator that executes a side-effecting function exactly once and interrupts.
 
-    On first execution the body runs normally and returns its result.
-    On resume the body is skipped and ``None`` is returned.
+    On first execution the body runs and its return value is passed to
+    ``interrupt()`` (which raises ``GraphInterrupt``).  On resume the body
+    is skipped and ``interrupt(None)`` returns the resume value from the
+    runtime.
 
-    Drop-in replacement for ``@task`` that works correctly in both parent
-    graphs and subgraphs (e.g. guardrails).  The caller is responsible for
-    calling ``interrupt()`` with the return value.
+    Replaces the ``@task`` + ``interrupt()`` two-step pattern with a single
+    decorator that enforces the pairing contract.  Works correctly in both
+    parent graphs and subgraphs (e.g. guardrails).
 
     Supports both sync and async functions::
 
-        @durable_task
+        @durable_interrupt
         async def create_task():
             return await client.tasks.create_async(...)
 
-        created_task = await create_task()
-        return interrupt(WaitEscalation(action=created_task, ...))
+        # Returns resume value on resume, raises GraphInterrupt on first run
+        result = await create_task()
 
-        @durable_task
+        @durable_interrupt
         def create_task_sync():
             return client.tasks.create(...)
 
-        created_task = create_task_sync()
-        return interrupt(WaitEscalation(action=created_task, ...))
+        result = create_task_sync()
     """
 
     if asyncio.iscoroutinefunction(fn):
@@ -97,8 +111,8 @@ def durable_task(fn: F) -> F:
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             scratchpad, idx = _next_durable_index()
             if _is_resumed(scratchpad, idx):
-                return None
-            return await fn(*args, **kwargs)
+                return interrupt(None)
+            return interrupt(await fn(*args, **kwargs))
 
         return async_wrapper  # type: ignore[return-value]
 
@@ -106,7 +120,7 @@ def durable_task(fn: F) -> F:
     def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
         scratchpad, idx = _next_durable_index()
         if _is_resumed(scratchpad, idx):
-            return None
-        return fn(*args, **kwargs)
+            return interrupt(None)
+        return interrupt(fn(*args, **kwargs))
 
     return sync_wrapper  # type: ignore[return-value]

@@ -285,7 +285,7 @@ class TestEscalationToolMetadata:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_escalation_tool_metadata_has_recipient(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
@@ -313,7 +313,7 @@ class TestEscalationToolMetadata:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_escalation_tool_metadata_recipient_none_when_no_recipients(
         self, mock_interrupt, mock_uipath_class, escalation_resource_no_recipient
     ):
@@ -337,7 +337,7 @@ class TestEscalationToolMetadata:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_escalation_tool_with_string_task_title(
         self, mock_interrupt, mock_uipath_class
     ):
@@ -386,7 +386,7 @@ class TestEscalationToolMetadata:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_escalation_tool_with_text_builder_task_title(
         self, mock_interrupt, mock_uipath_class
     ):
@@ -443,7 +443,7 @@ class TestEscalationToolMetadata:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_escalation_tool_with_empty_task_title_defaults_to_escalation_task(
         self, mock_interrupt, mock_uipath_class
     ):
@@ -540,7 +540,7 @@ class TestEscalationToolOutputSchema:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_escalation_tool_result_validation(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
@@ -567,7 +567,7 @@ class TestEscalationToolOutputSchema:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_escalation_tool_extracts_action_from_result(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
@@ -590,7 +590,7 @@ class TestEscalationToolOutputSchema:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_escalation_tool_with_outcome_mapping_end(
         self, mock_interrupt, mock_uipath_class
     ):
@@ -697,7 +697,7 @@ class TestEscalationToolTaskInfo:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_wrapper_returns_task_id_and_assigned_to(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
@@ -724,7 +724,7 @@ class TestEscalationToolTaskInfo:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_wrapper_handles_missing_assigned_to_user(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
@@ -776,7 +776,7 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     async def test_creates_task_then_interrupts_with_wait_escalation(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
