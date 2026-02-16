@@ -7,12 +7,9 @@ from typing import Any, NoReturn
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
-from ..exceptions import (
-    AgentNodeRoutingException,
-    AgentTerminationException,
-)
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .types import AgentGraphState
 
 
@@ -29,10 +26,11 @@ def _handle_raise_error(args: dict[str, Any]) -> NoReturn:
     """Handle LLM-initiated error via RAISE_ERROR_TOOL."""
     error_message = args.get("message", "The LLM did not set the error message")
     detail = args.get("details", "")
-    raise AgentTerminationException(
-        code=UiPathErrorCode.EXECUTION_ERROR,
+    raise AgentRuntimeError(
+        code=AgentRuntimeErrorCode.TERMINATION_LLM_RAISED_ERROR,
         title=error_message,
         detail=detail,
+        category=UiPathErrorCategory.USER,
     )
 
 
@@ -50,8 +48,11 @@ def create_terminate_node(
         if not is_conversational:
             last_message = state.messages[-1]
             if not isinstance(last_message, AIMessage):
-                raise AgentNodeRoutingException(
-                    f"Expected last message to be AIMessage, got {type(last_message).__name__}"
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.ROUTING_ERROR,
+                    title=f"Expected last message to be AIMessage, got {type(last_message).__name__}.",
+                    detail="The terminate node requires the last message to be an AIMessage with control flow tool calls.",
+                    category=UiPathErrorCategory.SYSTEM,
                 )
 
             for tool_call in last_message.tool_calls:
@@ -63,8 +64,11 @@ def create_terminate_node(
                 if tool_name == RAISE_ERROR_TOOL.name:
                     _handle_raise_error(tool_call["args"])
 
-            raise AgentNodeRoutingException(
-                "No control flow tool call found in terminate node. Unexpected state."
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.ROUTING_ERROR,
+                title="No control flow tool call found in terminate node.",
+                detail="The terminate node was reached but no end_execution or raise_error tool call was found.",
+                category=UiPathErrorCategory.SYSTEM,
             )
 
     return terminate_node

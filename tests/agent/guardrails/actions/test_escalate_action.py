@@ -16,9 +16,12 @@ from uipath.agent.models.agent import (
 )
 from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
 from uipath.platform.guardrails import GuardrailScope
-from uipath.runtime.errors import UiPathErrorCode
 
-from uipath_langchain.agent.exceptions import AgentTerminationException
+from tests.agent.helpers.error_helpers import agent_runtime_code
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.guardrails.actions.escalate_action import (
     EscalateAction,
     _deep_merge,
@@ -403,7 +406,7 @@ class TestEscalateAction:
     async def test_create_task_node_post_execution_single_message_raises_error(
         self, mock_resolve_recipient, scope: GuardrailScope
     ):
-        """Create-task for PostExecution with only 1 message: raises AgentTerminationException."""
+        """Create-task for PostExecution with only 1 message: raises AgentRuntimeError."""
         mock_resolve_recipient.return_value = TaskRecipient(
             value="test@example.com", type=TaskRecipientType.EMAIL
         )
@@ -419,15 +422,14 @@ class TestEscalateAction:
             messages=[AIMessage(content="Only one message")],
         )
 
-        with pytest.raises(AgentTerminationException) as excinfo:
+        with pytest.raises(AgentRuntimeError) as excinfo:
             await create_task_fn(state)
 
         assert excinfo.value.error_info.title == "Invalid state for POST_EXECUTION"
         assert "requires at least 2 messages" in excinfo.value.error_info.detail
         assert "found 1" in excinfo.value.error_info.detail
-        assert (
-            excinfo.value.error_info.code
-            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        assert excinfo.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.TERMINATION_ESCALATION_ERROR
         )
 
     @pytest.mark.asyncio
@@ -618,7 +620,7 @@ class TestEscalateAction:
 
     @pytest.mark.asyncio
     async def test_interrupt_node_raises_if_no_task_info(self) -> None:
-        """Interrupt node raises AgentTerminationException when no task in state."""
+        """Interrupt node raises AgentRuntimeError when no task in state."""
         action = _make_default_action()
         guardrail = _make_default_guardrail()
 
@@ -631,7 +633,7 @@ class TestEscalateAction:
             messages=[HumanMessage(content="Test")],
         )
 
-        with pytest.raises(AgentTerminationException) as excinfo:
+        with pytest.raises(AgentRuntimeError) as excinfo:
             await interrupt_fn(state)
 
         assert excinfo.value.error_info.title == "Escalation task not found"
@@ -769,7 +771,7 @@ class TestEscalateAction:
     async def test_node_rejection_raises_exception(
         self, mock_interrupt, scope: GuardrailScope, stage: ExecutionStage
     ):
-        """When escalation is rejected, raises AgentTerminationException."""
+        """When escalation is rejected, raises AgentRuntimeError."""
         action = _make_default_action()
         guardrail = _make_default_guardrail()
 
@@ -796,7 +798,7 @@ class TestEscalateAction:
                 create_task_name=create_task_name,
             )
 
-        with pytest.raises(AgentTerminationException) as excinfo:
+        with pytest.raises(AgentRuntimeError) as excinfo:
             await interrupt_fn(state)
 
         assert excinfo.value.error_info.title == "Escalation rejected"
@@ -804,9 +806,8 @@ class TestEscalateAction:
             excinfo.value.error_info.detail
             == "Action was rejected after reviewing the task created by guardrail [Test Guardrail], with reason: Incorrect data"
         )
-        assert (
-            excinfo.value.error_info.code
-            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        assert excinfo.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED
         )
 
     # ── Reviewed inputs / outputs processing ──────────────────────────────
@@ -993,7 +994,7 @@ class TestEscalateAction:
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
     async def test_json_parsing_error_raises_exception(self, mock_interrupt):
-        """JSON parsing error: raises AgentTerminationException with execution error."""
+        """JSON parsing error: raises AgentRuntimeError with execution error."""
         action = _make_default_action()
         guardrail = _make_default_guardrail()
 
@@ -1013,12 +1014,11 @@ class TestEscalateAction:
             create_task_name=create_task_name,
         )
 
-        with pytest.raises(AgentTerminationException) as excinfo:
+        with pytest.raises(AgentRuntimeError) as excinfo:
             await interrupt_fn(state)
 
-        assert (
-            excinfo.value.error_info.code
-            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        assert excinfo.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED
         )
         assert excinfo.value.error_info.title == "Escalation rejected"
 
@@ -1262,19 +1262,18 @@ class TestEscalateAction:
             create_task_name=create_task_name,
         )
 
-        with pytest.raises(AgentTerminationException) as excinfo:
+        with pytest.raises(AgentRuntimeError) as excinfo:
             await interrupt_fn(state)
 
-        assert (
-            excinfo.value.error_info.code
-            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        assert excinfo.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED
         )
         assert excinfo.value.error_info.title == "Escalation rejected"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
     async def test_tool_pre_execution_json_error_raises_exception(self, mock_interrupt):
-        """TOOL PreExecution with invalid JSON: raises AgentTerminationException."""
+        """TOOL PreExecution with invalid JSON: raises AgentRuntimeError."""
         action = _make_default_action()
         guardrail = _make_default_guardrail()
 
@@ -1306,12 +1305,11 @@ class TestEscalateAction:
             create_task_name=create_task_name,
         )
 
-        with pytest.raises(AgentTerminationException) as excinfo:
+        with pytest.raises(AgentRuntimeError) as excinfo:
             await interrupt_fn(state)
 
-        assert (
-            excinfo.value.error_info.code
-            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        assert excinfo.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED
         )
         assert excinfo.value.error_info.title == "Escalation rejected"
 
@@ -1678,29 +1676,27 @@ class TestEscalateAction:
 
     @pytest.mark.asyncio
     async def test_validate_message_count_empty_messages_raises_exception(self):
-        """Validate message count with empty messages: raises AgentTerminationException."""
+        """Validate message count with empty messages: raises AgentRuntimeError."""
         from uipath_langchain.agent.guardrails.actions.escalate_action import (
             _validate_message_count,
         )
 
         state = AgentGuardrailsGraphState(messages=[])
 
-        with pytest.raises(AgentTerminationException) as excinfo:
+        with pytest.raises(AgentRuntimeError) as excinfo:
             _validate_message_count(state, ExecutionStage.PRE_EXECUTION)
 
-        assert (
-            excinfo.value.error_info.code
-            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        assert excinfo.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.TERMINATION_ESCALATION_ERROR
         )
         assert excinfo.value.error_info.title == "Invalid state for PRE_EXECUTION"
         assert "requires at least 1 message" in excinfo.value.error_info.detail
 
-        with pytest.raises(AgentTerminationException) as excinfo:
+        with pytest.raises(AgentRuntimeError) as excinfo:
             _validate_message_count(state, ExecutionStage.POST_EXECUTION)
 
-        assert (
-            excinfo.value.error_info.code
-            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        assert excinfo.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.TERMINATION_ESCALATION_ERROR
         )
         assert excinfo.value.error_info.title == "Invalid state for POST_EXECUTION"
         assert "requires at least 2 messages" in excinfo.value.error_info.detail

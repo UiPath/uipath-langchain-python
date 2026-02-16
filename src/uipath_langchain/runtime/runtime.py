@@ -16,7 +16,11 @@ from uipath.runtime import (
     UiPathRuntimeStorageProtocol,
     UiPathStreamOptions,
 )
-from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
+from uipath.runtime.errors import (
+    UiPathBaseRuntimeError,
+    UiPathErrorCategory,
+    UiPathErrorCode,
+)
 from uipath.runtime.events import (
     UiPathRuntimeEvent,
     UiPathRuntimeMessageEvent,
@@ -85,7 +89,7 @@ class UiPathLangGraphRuntime:
             return result
 
         except Exception as e:
-            raise self._create_runtime_error(e) from e
+            raise self.create_runtime_error(e) from e
 
     async def stream(
         self,
@@ -216,7 +220,7 @@ class UiPathLangGraphRuntime:
             yield result
 
         except Exception as e:
-            raise self._create_runtime_error(e) from e
+            raise self.create_runtime_error(e) from e
 
     async def get_schema(self) -> UiPathRuntimeSchema:
         """Get schema for this LangGraph runtime."""
@@ -229,6 +233,45 @@ class UiPathLangGraphRuntime:
             input=schema_details.schema["input"],
             output=schema_details.schema["output"],
             graph=get_graph_schema(self.graph, xray=1),
+        )
+
+    # This can be overriden by subclasses working with custom exception hierarchies
+    def create_runtime_error(self, e: Exception) -> UiPathBaseRuntimeError:
+        """Handle execution errors and create appropriate LangGraphRuntimeError."""
+        if isinstance(e, LangGraphRuntimeError):
+            return e
+
+        detail = f"Error: {str(e)}"
+
+        if isinstance(e, GraphRecursionError):
+            return LangGraphRuntimeError(
+                LangGraphErrorCode.GRAPH_LOAD_ERROR,
+                "Graph recursion limit exceeded",
+                detail,
+                UiPathErrorCategory.USER,
+            )
+
+        if isinstance(e, InvalidUpdateError):
+            return LangGraphRuntimeError(
+                LangGraphErrorCode.GRAPH_INVALID_UPDATE,
+                str(e),
+                detail,
+                UiPathErrorCategory.USER,
+            )
+
+        if isinstance(e, EmptyInputError):
+            return LangGraphRuntimeError(
+                LangGraphErrorCode.GRAPH_EMPTY_INPUT,
+                "The input data is empty",
+                detail,
+                UiPathErrorCategory.USER,
+            )
+
+        return LangGraphRuntimeError(
+            UiPathErrorCode.EXECUTION_ERROR,
+            "Graph execution failed",
+            detail,
+            UiPathErrorCategory.USER,
         )
 
     def _get_graph_config(self) -> RunnableConfig:
@@ -422,44 +465,6 @@ class UiPathLangGraphRuntime:
         return UiPathRuntimeResult(
             output=serialize_output(output),
             status=UiPathRuntimeStatus.SUCCESSFUL,
-        )
-
-    def _create_runtime_error(self, e: Exception) -> LangGraphRuntimeError:
-        """Handle execution errors and create appropriate LangGraphRuntimeError."""
-        if isinstance(e, LangGraphRuntimeError):
-            return e
-
-        detail = f"Error: {str(e)}"
-
-        if isinstance(e, GraphRecursionError):
-            return LangGraphRuntimeError(
-                LangGraphErrorCode.GRAPH_LOAD_ERROR,
-                "Graph recursion limit exceeded",
-                detail,
-                UiPathErrorCategory.USER,
-            )
-
-        if isinstance(e, InvalidUpdateError):
-            return LangGraphRuntimeError(
-                LangGraphErrorCode.GRAPH_INVALID_UPDATE,
-                str(e),
-                detail,
-                UiPathErrorCategory.USER,
-            )
-
-        if isinstance(e, EmptyInputError):
-            return LangGraphRuntimeError(
-                LangGraphErrorCode.GRAPH_EMPTY_INPUT,
-                "The input data is empty",
-                detail,
-                UiPathErrorCategory.USER,
-            )
-
-        return LangGraphRuntimeError(
-            UiPathErrorCode.EXECUTION_ERROR,
-            "Graph execution failed",
-            detail,
-            UiPathErrorCategory.USER,
         )
 
     def _detect_middleware_nodes(self) -> set[str]:

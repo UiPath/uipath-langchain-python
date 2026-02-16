@@ -19,7 +19,7 @@ from uipath.platform.documents import (
     StartExtractionValidationResponse,
     ValidateExtractionAction,
 )
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
@@ -27,7 +27,7 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
 
-from ..exceptions import AgentTerminationException
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import (
     resolve_task_title,
@@ -139,13 +139,14 @@ def create_ixp_escalation_tool(
             )
         ):
             detail_template = "Vs Escalation Exception: {}"
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
                 title="VS Escalation Exception",
                 detail=detail_template.format(
                     rejection_details.get("reason")
                     or "The validation was marked as exception."
                 ),
+                category=UiPathErrorCategory.USER,
             )
 
         return result

@@ -7,7 +7,11 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMes
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL
 
-from uipath_langchain.agent.exceptions import AgentNodeRoutingException
+from tests.agent.helpers.error_helpers import agent_runtime_code
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.router import create_route_agent
 from uipath_langchain.agent.react.types import AgentGraphNode
 
@@ -205,11 +209,12 @@ class TestRouteAgentThinkingMessages:
         self, route_function_with_limit, state_excessive_thinking
     ):
         """Should raise exception when exceeding thinking messages limit."""
-        with pytest.raises(
-            AgentNodeRoutingException,
-            match="Agent exceeded consecutive completions limit",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             route_function_with_limit(state_excessive_thinking)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED
+        )
 
     def test_thinking_messages_limit_zero_forbids_thinking(self):
         """Should not allow any thinking messages when limit is 0."""
@@ -219,11 +224,12 @@ class TestRouteAgentThinkingMessages:
             messages=[HumanMessage(content="query"), ai_message]
         )
 
-        with pytest.raises(
-            AgentNodeRoutingException,
-            match="Agent exceeded consecutive completions limit",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             route_func(state)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED
+        )
 
     def test_thinking_messages_after_tool_execution_resets_count(self):
         """Should reset thinking count after tool execution."""
@@ -250,21 +256,23 @@ class TestRouteAgentErrorHandling:
         self, route_function_no_limit, empty_state
     ):
         """Should raise exception for empty messages."""
-        with pytest.raises(
-            AgentNodeRoutingException,
-            match="No AIMessage found in messages for routing",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             route_function_no_limit(empty_state)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )
 
     def test_no_ai_messages_raises_exception(
         self, route_function_no_limit, state_no_ai_messages
     ):
         """Should raise exception when no AI messages found."""
-        with pytest.raises(
-            AgentNodeRoutingException,
-            match="No AIMessage found in messages for routing",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             route_function_no_limit(state_no_ai_messages)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )
 
     def test_empty_ai_response_raises_exception(self, route_function_no_limit):
         """Should raise exception for empty AI response without tool calls."""
@@ -273,8 +281,9 @@ class TestRouteAgentErrorHandling:
             messages=[HumanMessage(content="query"), ai_message]
         )
 
-        with pytest.raises(
-            AgentNodeRoutingException,
-            match="Agent produced empty response without tool calls",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             route_function_no_limit(state)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )
