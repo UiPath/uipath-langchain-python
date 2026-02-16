@@ -54,6 +54,7 @@ def mock_runtime_context():
     context.org_id = "test-org-id"
     context.tenant_id = "test-tenant-id"
     context.job_id = "test-job-id"
+    context.resume = False
     return context
 
 

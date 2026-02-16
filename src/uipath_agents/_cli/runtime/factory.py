@@ -377,6 +377,14 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             agent_definition=agent_definition,
             trace_context_storage=trace_context_storage,
         )
+
+        if not self.context.resume:
+            from uipath_agents._services import register_licensing_async
+
+            await register_licensing_async(
+                agent_definition, job_key=UiPathConfig.job_key
+            )
+
         return instrumented_runtime
 
     def _wrap_in_resumable_runtime(

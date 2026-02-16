@@ -1,7 +1,7 @@
 """Tests for InstrumentedRuntime."""
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from uipath.agent.models.agent import (
@@ -70,6 +70,7 @@ def mock_runtime_context():
     context.org_id = "test-org-id"
     context.tenant_id = "test-tenant-id"
     context.job_id = "test-job-id"
+    context.resume = False
     return context
 
 
@@ -1190,3 +1191,105 @@ class TestGetAgentModel:
         model = instrumented_runtime.get_agent_model()
 
         assert model is None
+
+
+class TestRegisterLicensing:
+    """Tests for the register_licensing_async helper."""
+
+    @pytest.fixture
+    def agent_definition(self) -> AgentDefinition:
+        return AgentDefinition(
+            name="cost-agent",
+            messages=[],
+            settings=AgentSettings(
+                model="gpt-4o",
+                engine="v1",
+                max_tokens=1000,
+                temperature=0.7,
+            ),
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_registers_with_model_and_job_key(
+        self,
+        agent_definition: AgentDefinition,
+    ) -> None:
+        from uipath_agents._services import register_licensing_async
+
+        mock_service = AsyncMock()
+
+        with (
+            patch("uipath.platform.UiPath") as mock_uipath_cls,
+            patch(
+                "uipath_agents._services.licensing_service.LicensingService",
+                return_value=mock_service,
+            ),
+        ):
+            mock_uipath_cls.return_value = MagicMock()
+            await register_licensing_async(agent_definition, job_key="job-123")
+
+        mock_service.register_consumption_async.assert_awaited_once_with(
+            "gpt-4o", job_key="job-123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_failure_does_not_raise(
+        self,
+        agent_definition: AgentDefinition,
+    ) -> None:
+        from uipath_agents._services import register_licensing_async
+
+        mock_service = AsyncMock()
+        mock_service.register_consumption_async.side_effect = RuntimeError("network")
+
+        with (
+            patch("uipath.platform.UiPath", return_value=MagicMock()),
+            patch(
+                "uipath_agents._services.licensing_service.LicensingService",
+                return_value=mock_service,
+            ),
+        ):
+            await register_licensing_async(agent_definition, job_key="job-123")
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_agent_definition(self) -> None:
+        from uipath_agents._services import register_licensing_async
+
+        mock_service_cls = MagicMock()
+
+        with patch(
+            "uipath_agents._services.licensing_service.LicensingService",
+            mock_service_cls,
+        ):
+            await register_licensing_async(None)
+
+        mock_service_cls.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_model(self) -> None:
+        from uipath_agents._services import register_licensing_async
+
+        agent_def = AgentDefinition(
+            name="no-model-agent",
+            messages=[],
+            settings=AgentSettings(
+                model="",
+                engine="v1",
+                max_tokens=1000,
+                temperature=0.7,
+            ),
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+        )
+
+        mock_service_cls = MagicMock()
+
+        with patch(
+            "uipath_agents._services.licensing_service.LicensingService",
+            mock_service_cls,
+        ):
+            await register_licensing_async(agent_def)
+
+        mock_service_cls.assert_not_called()
