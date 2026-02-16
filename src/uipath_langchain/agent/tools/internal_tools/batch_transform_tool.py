@@ -6,6 +6,7 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
+from langgraph.func import task
 from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentInternalBatchTransformToolProperties,
@@ -85,13 +86,6 @@ def create_batch_transform_tool(
     input_model = create_model(input_schema)
     output_model = create_model(resource.output_schema)
 
-    @mockable(
-        name=resource.name,
-        description=resource.description,
-        input_schema=input_model.model_json_schema() if input_model else None,
-        output_schema=output_model.model_json_schema(),
-        example_calls=[],  # Examples cannot be provided for internal tools
-    )
     async def batch_transform_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query
         if not query:
@@ -110,29 +104,47 @@ def create_batch_transform_tool(
 
         destination_path = kwargs.get("destination_path", "output.csv")
 
-        uipath = UiPath()
-        ephemeral_index = await uipath.context_grounding.create_ephemeral_index_async(
-            usage=EphemeralIndexUsage.BATCH_RAG,
-            attachments=[attachment_id],
+        @mockable(
+            name=resource.name,
+            description=resource.description,
+            input_schema=input_model.model_json_schema() if input_model else None,
+            output_schema=output_model.model_json_schema(),
+            example_calls=[],  # Examples cannot be provided for internal tools
         )
+        async def invoke_batch_transform():
+            @task
+            async def create_ephemeral_index():
+                uipath = UiPath()
+                ephemeral_index = (
+                    await uipath.context_grounding.create_ephemeral_index_async(
+                        usage=EphemeralIndexUsage.BATCH_RAG,
+                        attachments=[attachment_id],
+                    )
+                )
+                if ephemeral_index.in_progress_ingestion():
+                    ephemeral_index_dict = interrupt(
+                        WaitEphemeralIndex(index=ephemeral_index)
+                    )
+                    return ContextGroundingIndex(**ephemeral_index_dict)
+                return ephemeral_index
 
-        if ephemeral_index.in_progress_ingestion():
-            ephemeral_index_dict = interrupt(WaitEphemeralIndex(index=ephemeral_index))
-            ephemeral_index = ContextGroundingIndex(**ephemeral_index_dict)
+            ephemeral_index = await create_ephemeral_index()
 
-        return interrupt(
-            CreateBatchTransform(
-                name=f"task-{uuid.uuid4()}",
-                index_name=ephemeral_index.name,
-                index_id=ephemeral_index.id,
-                prompt=query,
-                output_columns=batch_transform_output_columns,
-                storage_bucket_folder_path_prefix=static_folder_path_prefix,
-                enable_web_search_grounding=static_web_search,
-                destination_path=destination_path,
-                is_ephemeral_index=True,
+            return interrupt(
+                CreateBatchTransform(
+                    name=f"task-{uuid.uuid4()}",
+                    index_name=ephemeral_index.name,
+                    index_id=ephemeral_index.id,
+                    prompt=query,
+                    output_columns=batch_transform_output_columns,
+                    storage_bucket_folder_path_prefix=static_folder_path_prefix,
+                    enable_web_search_grounding=static_web_search,
+                    destination_path=destination_path,
+                    is_ephemeral_index=True,
+                )
             )
-        )
+
+        return await invoke_batch_transform()
 
     # Import here to avoid circular dependency
     from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
