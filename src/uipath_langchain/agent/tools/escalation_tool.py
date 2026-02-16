@@ -263,6 +263,8 @@ def create_escalation_tool(
         return {
             "output": result["output"],
             "outcome": result["outcome"],
+            "task_id": result.get("task_id"),
+            "assigned_to": result.get("assigned_to"),
         }
 
     tool = StructuredToolWithArgumentProperties(

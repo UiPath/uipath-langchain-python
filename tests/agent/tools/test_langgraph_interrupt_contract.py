@@ -15,7 +15,8 @@ Verified assumptions:
 
 import dataclasses
 import itertools
-from typing import Any
+import operator
+from typing import Annotated, Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,9 +26,11 @@ from langchain_core.runnables.config import (
 )
 from langgraph._internal._constants import CONFIG_KEY_SCRATCHPAD
 from langgraph._internal._scratchpad import PregelScratchpad
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.config import get_config
 from langgraph.errors import GraphInterrupt
-from langgraph.types import interrupt
+from langgraph.graph import StateGraph
+from langgraph.types import Send, interrupt
 
 
 class TestScratchpadContract:
@@ -274,6 +277,89 @@ class TestDurableInterruptAlignment:
         finally:
             var_child_runnable_config.reset(config_token)
             _durable_state.reset(state_token)
+
+
+class TestParallelNodesSeparateScratchpads:
+    """Parallel fan-out via Send gives each branch its own scratchpad.
+
+    This is critical for durable_interrupt: when the same node runs in
+    parallel branches, each branch must get an independent scratchpad so
+    that interrupt_counter indexing stays correct per-branch.
+    """
+
+    def test_parallel_branches_get_different_scratchpads(self) -> None:
+        """Fan-out the same node via Send; each branch sees a unique scratchpad."""
+        captured_scratchpad_ids: list[int] = []
+
+        class State(dict[str, Any]):
+            results: Annotated[list[str], operator.add]
+
+        def router(state: State) -> list[Send]:
+            return [
+                Send("worker", {"task": "A"}),
+                Send("worker", {"task": "B"}),
+            ]
+
+        def worker(state: dict[str, Any]) -> dict[str, list[str]]:
+            conf = get_config()
+            sp = conf["configurable"][CONFIG_KEY_SCRATCHPAD]
+            captured_scratchpad_ids.append(id(sp))
+            return {"results": [f"done-{state['task']}"]}
+
+        # StateGraph typing is restrictive with dict subclasses
+        graph = StateGraph(State)  # type: ignore[type-var]
+        graph.add_node("worker", worker)  # type: ignore[type-var]
+        graph.set_conditional_entry_point(router)
+        graph.add_edge("worker", "__end__")
+
+        app = graph.compile(checkpointer=MemorySaver())
+        result = app.invoke(
+            {"results": []},  # type: ignore[arg-type]
+            config={"configurable": {"thread_id": "test-parallel"}},
+        )
+
+        assert len(captured_scratchpad_ids) == 2
+        assert captured_scratchpad_ids[0] != captured_scratchpad_ids[1], (
+            "Parallel branches must receive different scratchpad instances"
+        )
+        assert sorted(result["results"]) == ["done-A", "done-B"]
+
+    def test_parallel_branches_have_independent_interrupt_counters(self) -> None:
+        """Each parallel branch's interrupt_counter starts at 0 independently."""
+        captured_counters: list[int] = []
+
+        class State(dict[str, Any]):
+            results: Annotated[list[str], operator.add]
+
+        def router(state: State) -> list[Send]:
+            return [
+                Send("worker", {"task": "A"}),
+                Send("worker", {"task": "B"}),
+            ]
+
+        def worker(state: dict[str, Any]) -> dict[str, list[str]]:
+            conf = get_config()
+            sp = conf["configurable"][CONFIG_KEY_SCRATCHPAD]
+            # Read the current counter value (before any interrupt call)
+            captured_counters.append(sp.interrupt_counter())
+            return {"results": [f"done-{state['task']}"]}
+
+        # StateGraph typing is restrictive with dict subclasses
+        graph = StateGraph(State)  # type: ignore[type-var]
+        graph.add_node("worker", worker)  # type: ignore[type-var]
+        graph.set_conditional_entry_point(router)
+        graph.add_edge("worker", "__end__")
+
+        app = graph.compile(checkpointer=MemorySaver())
+        app.invoke(
+            {"results": []},  # type: ignore[arg-type]
+            config={"configurable": {"thread_id": "test-counters"}},
+        )
+
+        assert len(captured_counters) == 2
+        # Both branches should start their interrupt counter at 0
+        assert captured_counters[0] == 0
+        assert captured_counters[1] == 0
 
 
 # -- Helpers ------------------------------------------------------------------

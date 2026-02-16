@@ -87,7 +87,7 @@ def durable_interrupt(fn: F) -> F:
 
     Replaces the ``@task`` + ``interrupt()`` two-step pattern with a single
     decorator that enforces the pairing contract.  Works correctly in both
-    parent graphs and subgraphs (e.g. guardrails).
+    parent graphs and subgraphs.
 
     Supports both sync and async functions::
 

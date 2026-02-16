@@ -696,54 +696,48 @@ class TestEscalationToolTaskInfo:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
-    async def test_wrapper_returns_task_id_and_assigned_to(
-        self, mock_interrupt, mock_uipath_class, escalation_resource
-    ):
+    async def test_wrapper_returns_task_id_and_assigned_to(self, escalation_resource):
         """Test that wrapper result includes task_id and assigned_to from Task."""
-        mock_client = MagicMock()
-        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
-        mock_uipath_class.return_value = mock_client
-
-        mock_result = MagicMock()
-        mock_result.id = 12345
-        mock_result.key = None
-        mock_result.assigned_to_user = {"emailAddress": "user@example.com"}
-        mock_result.action = "approve"
-        mock_result.data = {"reason": "looks good"}
-        mock_interrupt.return_value = mock_result
-
         tool = create_escalation_tool(escalation_resource)
+
+        # Mock ainvoke on the class to test the wrapper in isolation
+        mock_ainvoke = AsyncMock(
+            return_value={
+                "action": "continue",
+                "output": {"reason": "looks good"},
+                "outcome": "approve",
+                "task_id": 12345,
+                "assigned_to": "user@example.com",
+            }
+        )
+
         call = ToolCall(args={}, id="test-call", name=tool.name)
-        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+        with patch.object(type(tool), "ainvoke", mock_ainvoke):
+            result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert result["task_id"] == 12345
         assert result["assigned_to"] == "user@example.com"
         assert result["outcome"] == "approve"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
-    async def test_wrapper_handles_missing_assigned_to_user(
-        self, mock_interrupt, mock_uipath_class, escalation_resource
-    ):
+    async def test_wrapper_handles_missing_assigned_to_user(self, escalation_resource):
         """Test that wrapper handles None assigned_to_user gracefully."""
-        mock_client = MagicMock()
-        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
-        mock_uipath_class.return_value = mock_client
-
-        mock_result = MagicMock()
-        mock_result.id = 99999
-        mock_result.key = None
-        mock_result.assigned_to_user = None
-        mock_result.action = "reject"
-        mock_result.data = {}
-        mock_interrupt.return_value = mock_result
-
         tool = create_escalation_tool(escalation_resource)
+
+        # Mock ainvoke on the class to test the wrapper in isolation
+        mock_ainvoke = AsyncMock(
+            return_value={
+                "action": "continue",
+                "output": {},
+                "outcome": "reject",
+                "task_id": 99999,
+                "assigned_to": None,
+            }
+        )
+
         call = ToolCall(args={}, id="test-call", name=tool.name)
-        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+        with patch.object(type(tool), "ainvoke", mock_ainvoke):
+            result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert result["task_id"] == 99999
         assert result["assigned_to"] is None
