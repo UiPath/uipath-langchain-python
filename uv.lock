@@ -899,11 +899,11 @@ wheels = [
 
 [[package]]
 name = "graphtty"
-version = "0.1.6"
+version = "0.1.8"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8e/06/96130c4d3e2cdaf965f1060143bea276905b7050adf324a00ed705a84617/graphtty-0.1.6.tar.gz", hash = "sha256:1d989baf901d2bfe125f1e2aee730fd4b143c0dd4b4640fef9dcf42535430386", size = 549561, upload-time = "2026-02-09T13:20:16.293Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/b3/0756e1b1e46b61a4db4a463a76ca113e62113742f97ac6cf383dd05d6a97/graphtty-0.1.8.tar.gz", hash = "sha256:069cd84764cc64d414928451071fc9c97c05becbf564c2f0278691a6451a8240", size = 638011, upload-time = "2026-02-15T12:47:17.994Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ed/69/d3e359238c1846aead328c7efcf6875028b326e54253d3d7d65645943d5e/graphtty-0.1.6-py3-none-any.whl", hash = "sha256:163e0f8a35ebab9bd37d834619088aa2aa36a112a3c1f9577030cef1b9be8663", size = 22853, upload-time = "2026-02-09T13:20:15.011Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/a9/66d01580a4a92b576c056e9967d552a28ed836540eaf73b436474c514bc2/graphtty-0.1.8-py3-none-any.whl", hash = "sha256:4e19e6d66b9ef79e2715377163f61a6542b5b9ee00d50406b80a40d0ba094f67", size = 25474, upload-time = "2026-02-15T12:47:16.377Z" },
 ]
 
 [[package]]
@@ -3270,7 +3270,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.8.27"
+version = "2.8.31"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -3292,9 +3292,9 @@ dependencies = [
     { name = "uipath-core" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/25/38/3495815a81c0da492257ae57bf834856915f5c1f38fd8052bcd12e20861d/uipath-2.8.27.tar.gz", hash = "sha256:468fbc8f1ed268ca83632d874493023056cf63a8a04fe9cbc137c63bddf5093e", size = 4080830, upload-time = "2026-02-14T08:40:46.593Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2b/f6/ad43878b6142c73f49653df3d4ab433174042eae0d6c24e5708c281c49aa/uipath-2.8.31.tar.gz", hash = "sha256:33cad91b3542594b32ee32b17e14ceb3546cc542cc5a48db22b30b83db048c20", size = 4223946, upload-time = "2026-02-15T13:01:44.381Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/33/91c2e3583d91a5d356c8dc06a468342df4dbb2ffc38965929bdcc1ce3540/uipath-2.8.27-py3-none-any.whl", hash = "sha256:1caae6cb120a588029eed2f1180fb11402d8c39013362df7d98be98f619cd0ea", size = 475450, upload-time = "2026-02-14T08:40:44.151Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/f5/c0922baf3b3ee6770c028a2e05c2c5d26592b7175956a97103815f730a93/uipath-2.8.31-py3-none-any.whl", hash = "sha256:f129b6ec77963905e4fb0e3443f4e8e242fdc4c960e67864b93362a0018e1fab", size = 480852, upload-time = "2026-02-15T13:01:42.831Z" },
 ]
 
 [[package]]
@@ -3378,7 +3378,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.56" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.8.27,<2.9.0" },
+    { name = "uipath", specifier = ">=2.8.31,<2.9.0" },
     { name = "uipath-runtime", specifier = ">=0.8.2,<0.9.0" },
 ]
 provides-extras = ["vertex", "bedrock"]
