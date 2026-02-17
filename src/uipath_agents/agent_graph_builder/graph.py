@@ -53,7 +53,7 @@ async def build_agent_graph(
         max_tokens=agent_definition.settings.max_tokens,
         execution_type=execution_type,
         byo_connection_id=byo_connection_id,
-        disable_streaming=True,
+        disable_streaming=(not agent_definition.is_conversational),
     )
     tools = await create_tools_from_resources(agent_definition, llm)
     session_info_factory = (

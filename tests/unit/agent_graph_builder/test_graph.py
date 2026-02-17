@@ -130,6 +130,45 @@ class TestBuildAgentGraph:
                 disable_streaming=True,
             )
 
+    async def test_conversational_agent_enables_streaming(self):
+        """Test that conversational agents have streaming enabled."""
+        agent_def = create_test_agent_definition()
+
+        with (
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_tools_from_resources",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch("uipath_agents.agent_graph_builder.graph.create_llm") as mock_llm,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.create_agent"
+            ) as mock_create,
+            patch(
+                "uipath_agents.agent_graph_builder.graph.get_thinking_messages_limit",
+                return_value=0,
+            ),
+            patch.object(
+                type(agent_def),
+                "is_conversational",
+                new_callable=PropertyMock,
+                return_value=True,
+            ),
+        ):
+            mock_llm.return_value = MagicMock()
+            mock_create.return_value = MagicMock()
+
+            await build_agent_graph(agent_def)
+
+            mock_llm.assert_called_once_with(
+                model="gpt-4",
+                temperature=0.7,
+                max_tokens=1024,
+                execution_type=AgentExecutionType.RUNTIME,
+                byo_connection_id=None,
+                disable_streaming=False,
+            )
+
     async def test_handles_input_data_dict(self):
         """Test building graph with dict input data."""
         agent_def = create_test_agent_definition(
