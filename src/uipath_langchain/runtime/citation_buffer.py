@@ -5,16 +5,14 @@ from __future__ import annotations
 from uuid import uuid4
 
 from uipath.core.chat import (
-    ParsedCitation,
     UiPathConversationCitationEndEvent,
     UiPathConversationCitationEvent,
     UiPathConversationCitationSourceMedia,
     UiPathConversationCitationSourceUrl,
     UiPathConversationCitationStartEvent,
     UiPathConversationContentPartChunkEvent,
-    find_partial_tag_start,
-    parse_citations,
 )
+from .citation_parser import ParsedCitation, find_partial_tag_start, parse_citations
 
 
 class CitationStreamBuffer:
