@@ -146,7 +146,6 @@ def create_batch_transform_tool(
             )
 
             # create attachment with output and return attachment info
-            @task
             async def upload_result_attachment():
                 uipath = UiPath()
                 return await uipath.jobs.create_attachment_async(
