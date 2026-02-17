@@ -17,6 +17,7 @@ from langchain_core.messages import (
 from langchain_core.messages.content import create_text_block
 from pydantic import ValidationError
 from uipath.core.chat import (
+    UiPathConversationContentPartChunkEvent,
     UiPathConversationContentPartEndEvent,
     UiPathConversationContentPartEvent,
     UiPathConversationContentPartStartEvent,
@@ -268,18 +269,26 @@ class UiPathChatMessagesMapper:
                 match block_type:
                     case "text":
                         text = cast(TextContentBlock, block)["text"]
-                        events.extend(self.map_chunk_to_content_part_chunk_events(message.id, text))
+                        for chunk in self._citation_buffer.add_chunk(text):
+                            events.append(
+                                self._wrap_chunk(message.id, chunk)
+                            )
                     case "tool_call_chunk":
                         # Accumulate the message chunk
                         self.current_message = self.current_message + message
 
         elif isinstance(message.content, str) and message.content:
             # Fallback: raw string content on the chunk (rare when using content_blocks)
-            events.extend(self.map_chunk_to_content_part_chunk_events(message.id, message.content))
+            for chunk in self._citation_buffer.add_chunk(message.content):
+                events.append(self._wrap_chunk(message.id, chunk))
 
         # Check if this is the last chunk by examining chunk_position, send end message event only if there are no pending tool calls
         if message.chunk_position == "last":
-            events.extend(self._finalize_citations(message.id))
+            # Finalize the citation buffer — flush any remaining text
+            if self._citation_buffer is not None:
+                for chunk in self._citation_buffer.finalize():
+                    events.append(self._wrap_chunk(message.id, chunk))
+                self._citation_buffer = None
 
             if (
                 self.current_message.tool_calls is not None
@@ -435,39 +444,16 @@ class UiPathChatMessagesMapper:
             ),
         )
 
-    def map_chunk_to_content_part_chunk_events(
-        self, message_id: str, text: str
-    ) -> list[UiPathConversationMessageEvent]:
-        """Map a text chunk to content part chunk events, parsing any citation tags."""
-        content_part_id = self.get_content_part_id(message_id)
-        return [
-            UiPathConversationMessageEvent(
-                message_id=message_id,
-                content_part=UiPathConversationContentPartEvent(
-                    content_part_id=content_part_id, chunk=chunk
-                ),
-            )
-            for chunk in self._citation_buffer.add_chunk(text)
-        ]
-
-    def _finalize_citations(
-        self, message_id: str
-    ) -> list[UiPathConversationMessageEvent]:
-        """Flush remaining citation buffer text and wrap as message events."""
-        if self._citation_buffer is None:
-            return []
-        content_part_id = self.get_content_part_id(message_id)
-        events = [
-            UiPathConversationMessageEvent(
-                message_id=message_id,
-                content_part=UiPathConversationContentPartEvent(
-                    content_part_id=content_part_id, chunk=chunk
-                ),
-            )
-            for chunk in self._citation_buffer.finalize()
-        ]
-        self._citation_buffer = None
-        return events
+    def _wrap_chunk(
+        self, message_id: str, chunk: UiPathConversationContentPartChunkEvent
+    ) -> UiPathConversationMessageEvent:
+        return UiPathConversationMessageEvent(
+            message_id=message_id,
+            content_part=UiPathConversationContentPartEvent(
+                content_part_id=self.get_content_part_id(message_id),
+                chunk=chunk,
+            ),
+        )
 
     def map_to_message_start_event(
         self, message_id: str
