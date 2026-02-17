@@ -14,8 +14,6 @@ from uipath.core.chat import (
     UiPathConversationCitationSourceUrl,
     UiPathConversationCitationStartEvent,
     UiPathConversationContentPartChunkEvent,
-    UiPathConversationContentPartEvent,
-    UiPathConversationMessageEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,9 +141,7 @@ class CitationStreamBuffer:
     Maintains state per message stream for source dedup and partial tag buffering.
     """
 
-    def __init__(self, message_id: str, content_part_id: str) -> None:
-        self._message_id = message_id
-        self._content_part_id = content_part_id
+    def __init__(self) -> None:
         self._buffer: str = ""
         self._source_numbers: dict[_ParsedCitation, int] = {}
         self._next_number: int = 1
@@ -176,17 +172,6 @@ class CitationStreamBuffer:
             page_number=citation.page_number,
         )
 
-    def _wrap(
-        self, chunk: UiPathConversationContentPartChunkEvent
-    ) -> UiPathConversationMessageEvent:
-        return UiPathConversationMessageEvent(
-            message_id=self._message_id,
-            content_part=UiPathConversationContentPartEvent(
-                content_part_id=self._content_part_id,
-                chunk=chunk,
-            ),
-        )
-
     def _make_chunk(
         self,
         text: str,
@@ -208,10 +193,10 @@ class CitationStreamBuffer:
             ),
         )
 
-    def add_chunk(self, text: str) -> list[UiPathConversationMessageEvent]:
+    def add_chunk(self, text: str) -> list[UiPathConversationContentPartChunkEvent]:
         """Process a new text chunk from the LLM stream.
 
-        Returns message events to emit. Tags are parsed and stripped,
+        Returns chunk events to emit. Tags are parsed and stripped,
         partial tags at the end are held back until more data arrives.
         """
         self._buffer += text
@@ -246,9 +231,9 @@ class CitationStreamBuffer:
                 else:
                     chunks.append(self._make_chunk(segment_text))
 
-        return [self._wrap(c) for c in chunks]
+        return chunks
 
-    def finalize(self) -> list[UiPathConversationMessageEvent]:
+    def finalize(self) -> list[UiPathConversationContentPartChunkEvent]:
         """Flush remaining buffer as plain text.
 
         Any partial tag at end of stream becomes literal text (graceful degradation).
@@ -258,4 +243,4 @@ class CitationStreamBuffer:
 
         remaining = self._buffer
         self._buffer = ""
-        return [self._wrap(self._make_chunk(remaining))]
+        return [self._make_chunk(remaining)]

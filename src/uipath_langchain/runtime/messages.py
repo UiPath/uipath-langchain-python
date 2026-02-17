@@ -258,9 +258,7 @@ class UiPathChatMessagesMapper:
         if message.id not in self.seen_message_ids:
             self.current_message = message
             self.seen_message_ids.add(message.id)
-            self._citation_buffer = CitationStreamBuffer(
-                message.id, self.get_content_part_id(message.id)
-            )
+            self._citation_buffer = CitationStreamBuffer()
             events.append(self.map_to_message_start_event(message.id))
 
         if message.content_blocks:
@@ -270,21 +268,18 @@ class UiPathChatMessagesMapper:
                 match block_type:
                     case "text":
                         text = cast(TextContentBlock, block)["text"]
-                        events.extend(self._citation_buffer.add_chunk(text))
+                        events.extend(self._map_text_to_events(message.id, text))
                     case "tool_call_chunk":
                         # Accumulate the message chunk
                         self.current_message = self.current_message + message
 
         elif isinstance(message.content, str) and message.content:
             # Fallback: raw string content on the chunk (rare when using content_blocks)
-            events.extend(self._citation_buffer.add_chunk(message.content))
+            events.extend(self._map_text_to_events(message.id, message.content))
 
         # Check if this is the last chunk by examining chunk_position, send end message event only if there are no pending tool calls
         if message.chunk_position == "last":
-            # Finalize the citation buffer — flush any remaining text
-            if self._citation_buffer is not None:
-                events.extend(self._citation_buffer.finalize())
-                self._citation_buffer = None
+            events.extend(self._finalize_citations(message.id))
 
             if (
                 self.current_message.tool_calls is not None
@@ -439,6 +434,40 @@ class UiPathChatMessagesMapper:
                 ),
             ),
         )
+
+    def _map_text_to_events(
+        self, message_id: str, text: str
+    ) -> list[UiPathConversationMessageEvent]:
+        """Process text through the citation buffer and wrap as message events."""
+        content_part_id = self.get_content_part_id(message_id)
+        return [
+            UiPathConversationMessageEvent(
+                message_id=message_id,
+                content_part=UiPathConversationContentPartEvent(
+                    content_part_id=content_part_id, chunk=chunk
+                ),
+            )
+            for chunk in self._citation_buffer.add_chunk(text)
+        ]
+
+    def _finalize_citations(
+        self, message_id: str
+    ) -> list[UiPathConversationMessageEvent]:
+        """Flush remaining citation buffer text and wrap as message events."""
+        if self._citation_buffer is None:
+            return []
+        content_part_id = self.get_content_part_id(message_id)
+        events = [
+            UiPathConversationMessageEvent(
+                message_id=message_id,
+                content_part=UiPathConversationContentPartEvent(
+                    content_part_id=content_part_id, chunk=chunk
+                ),
+            )
+            for chunk in self._citation_buffer.finalize()
+        ]
+        self._citation_buffer = None
+        return events
 
     def map_to_message_start_event(
         self, message_id: str
