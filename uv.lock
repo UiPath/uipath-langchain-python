@@ -3323,7 +3323,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.5.65"
+version = "0.5.66"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

@@ -65,16 +65,21 @@ def handle_semantic_search(
         )
 
     output_model = ContextOutputSchemaModel
+    input_model: Type[BaseModel]
 
     if is_static_query(resource):
         static_query_value = resource.settings.query.value
         assert static_query_value is not None
-        input_model = None
+
+        class SemanticSearchStaticInputModel(BaseModel):
+            pass
+
+        input_model = SemanticSearchStaticInputModel
 
         @mockable(
             name=resource.name,
             description=resource.description,
-            input_schema=input_model,
+            input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for context.
         )
@@ -144,17 +149,22 @@ def handle_deep_rag(
         __base__=DeepRagContent,
         deep_rag_id=(str, Field(alias="deepRagId")),
     )
+    input_model: Type[BaseModel]
 
     if is_static_query(resource):
         # Static query - no input parameter needed
         static_prompt = resource.settings.query.value
         assert static_prompt is not None
-        input_model = None
+
+        class DeepRagStaticInputModel(BaseModel):
+            pass
+
+        input_model = DeepRagStaticInputModel
 
         @mockable(
             name=resource.name,
             description=resource.description,
-            input_schema=input_model,
+            input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for context.
         )

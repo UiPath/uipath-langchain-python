@@ -79,7 +79,8 @@ class TestHandleDeepRag:
         assert isinstance(result, StructuredToolWithOutputType)
         assert result.name == "test_deep_rag"
         assert result.description == "Test Deep RAG tool"
-        assert result.args_schema is None
+        assert hasattr(result.args_schema, "model_json_schema")
+        assert result.args_schema.model_json_schema()["properties"] == {}
         assert issubclass(result.output_type, DeepRagContent)
         schema = result.output_type.model_json_schema()
         assert "deepRagId" in schema["properties"]
@@ -331,7 +332,8 @@ class TestCreateContextTool:
 
         assert isinstance(result, StructuredToolWithOutputType)
         assert result.name == "test_deep_rag"
-        assert result.args_schema is None  # Deep RAG has no input schema
+        assert hasattr(result.args_schema, "model_json_schema")
+        assert result.args_schema.model_json_schema()["properties"] == {}
         assert issubclass(result.output_type, DeepRagContent)
 
     def test_case_insensitive_retrieval_mode(self, deep_rag_config):
@@ -444,7 +446,8 @@ class TestHandleSemanticSearch:
         assert isinstance(result, StructuredToolWithOutputType)
         assert result.name == "semantic_tool"
         assert result.description == "Semantic search tool"
-        assert result.args_schema is None  # Static has no input schema
+        assert hasattr(result.args_schema, "model_json_schema")
+        assert result.args_schema.model_json_schema()["properties"] == {}
 
     @pytest.mark.asyncio
     async def test_static_query_uses_predefined_query(self):
