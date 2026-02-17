@@ -179,7 +179,7 @@ def create_batch_transform_tool(
                         is_ephemeral_index=True,
                     )
                 )
-            
+
             await create_batch_transform()
 
             # create job attachment with output
