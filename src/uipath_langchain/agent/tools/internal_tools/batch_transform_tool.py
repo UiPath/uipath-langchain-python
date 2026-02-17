@@ -14,7 +14,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateBatchTransform
+from uipath.platform.common import CreateBatchTransform, UiPathConfig
 from uipath.platform.common.interrupt_models import WaitEphemeralIndex
 from uipath.platform.context_grounding import (
     BatchTransformOutputColumn,
@@ -144,6 +144,7 @@ def create_batch_transform_tool(
             example_calls=[],  # Examples cannot be provided for internal tools
         )
         async def invoke_batch_transform():
+            # create ephemeral index for the input attachment
             @task
             async def create_ephemeral_index():
                 uipath = UiPath()
@@ -163,26 +164,32 @@ def create_batch_transform_tool(
             ephemeral_index = await create_ephemeral_index()
 
             # create the batch transform and wait for completion
-            interrupt(
-                CreateBatchTransform(
-                    name=f"task-{uuid.uuid4()}",
-                    index_name=ephemeral_index.name,
-                    index_id=ephemeral_index.id,
-                    prompt=query,
-                    output_columns=batch_transform_output_columns,
-                    storage_bucket_folder_path_prefix=static_folder_path_prefix,
-                    enable_web_search_grounding=static_web_search,
-                    destination_path=destination_path,
-                    is_ephemeral_index=True,
+            @task
+            async def create_batch_transform():
+                interrupt(
+                    CreateBatchTransform(
+                        name=f"task-{uuid.uuid4()}",
+                        index_name=ephemeral_index.name,
+                        index_id=ephemeral_index.id,
+                        prompt=query,
+                        output_columns=batch_transform_output_columns,
+                        storage_bucket_folder_path_prefix=static_folder_path_prefix,
+                        enable_web_search_grounding=static_web_search,
+                        destination_path=destination_path,
+                        is_ephemeral_index=True,
+                    )
                 )
-            )
 
-            # create attachment with output and return attachment info
+            await create_batch_transform()
+
+            # create job attachment with output
+            @task
             async def upload_result_attachment():
                 uipath = UiPath()
-                return await uipath.attachments.upload_async(
+                return await uipath.jobs.create_attachment_async(
                     name=destination_path,
                     source_path=destination_path,
+                    job_key=UiPathConfig.job_key,
                 )
 
             result_attachment_id = await upload_result_attachment()
