@@ -607,7 +607,7 @@ class TestEscalationToolOutputSchema:
         self, mock_interrupt, mock_uipath_class
     ):
         """Test escalation tool with outcome mapping that ends agent."""
-        from uipath_langchain.agent.exceptions import AgentTerminationException
+        from uipath_langchain.agent.exceptions import AgentRuntimeError
 
         mock_client = MagicMock()
         mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
@@ -646,8 +646,8 @@ class TestEscalationToolOutputSchema:
         tool = create_escalation_tool(resource)
         call = ToolCall(args={}, id="test-call", name=tool.name)
 
-        # Invoke through the wrapper - should raise AgentTerminationException
-        with pytest.raises(AgentTerminationException):
+        # Invoke through the wrapper - should raise AgentRuntimeError
+        with pytest.raises(AgentRuntimeError):
             await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert mock_interrupt.called

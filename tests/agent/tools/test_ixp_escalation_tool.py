@@ -16,9 +16,8 @@ from uipath.platform.documents import (
     ExtractionResponseIXP,
     ValidateExtractionAction,
 )
-from uipath.runtime.errors import UiPathErrorCode
 
-from uipath_langchain.agent.exceptions import AgentTerminationException
+from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.agent.react.types import (
     AgentGraphState,
     InnerAgentGraphState,
@@ -298,7 +297,7 @@ class TestIxpEscalationToolWrapper:
         escalation_resource,
         mock_state_with_extraction,
     ):
-        """Test that wrapper raises AgentTerminationException on document rejection."""
+        """Test that wrapper raises AgentRuntimeError on document rejection."""
         mock_validation_response = _make_mock_validation_response()
         mock_client = MagicMock()
         mock_client.documents.create_validate_extraction_action_async = AsyncMock(
@@ -310,13 +309,12 @@ class TestIxpEscalationToolWrapper:
         tool = create_ixp_escalation_tool(escalation_resource)
         call = ToolCall(id="call-1", name="validate_data", args={})
 
-        with pytest.raises(AgentTerminationException) as exc_info:
+        with pytest.raises(AgentRuntimeError) as exc_info:
             assert hasattr(tool, "awrapper")
             await tool.awrapper(tool, call, mock_state_with_extraction)
 
-        exception = exc_info.value.as_dict
-        assert UiPathErrorCode.EXECUTION_ERROR.value in exception["code"]
-        assert "Invalid document" in exception["detail"]
+        assert "TERMINATION_ESCALATION_REJECTED" in exc_info.value.error_info.code
+        assert "Invalid document" in exc_info.value.error_info.detail
 
 
 class TestIxpEscalationToolExecution:

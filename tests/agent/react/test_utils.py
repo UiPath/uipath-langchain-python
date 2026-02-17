@@ -3,7 +3,11 @@
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 
-from uipath_langchain.agent.exceptions import AgentStateException
+from tests.agent.helpers.error_helpers import agent_runtime_code
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.utils import (
     count_consecutive_thinking_messages,
     extract_current_tool_call_index,
@@ -202,33 +206,36 @@ class TestExtractCurrentToolCallIndex:
     """Test extracting current tool call index from message history."""
 
     def test_empty_messages(self):
-        """Should raise AgentStateException for empty message list."""
-        with pytest.raises(
-            AgentStateException,
-            match="No AIMessage found in messages - cannot extract current tool call index",
-        ):
+        """Should raise AgentRuntimeError for empty message list."""
+        with pytest.raises(AgentRuntimeError) as exc_info:
             extract_current_tool_call_index([])
 
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.STATE_ERROR
+        )
+
     def test_no_ai_messages(self):
-        """Should raise AgentStateException when no AI messages exist."""
+        """Should raise AgentRuntimeError when no AI messages exist."""
         messages: list[AnyMessage] = [HumanMessage(content="test")]
-        with pytest.raises(
-            AgentStateException,
-            match="Unexpected message type .* encountered while extracting tool call index",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             extract_current_tool_call_index(messages)
 
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.STATE_ERROR
+        )
+
     def test_ai_message_no_tool_calls(self):
-        """Should raise AgentStateException when AI message has no tool calls."""
+        """Should raise AgentRuntimeError when AI message has no tool calls."""
         messages: list[AnyMessage] = [
             HumanMessage(content="query"),
             AIMessage(content="response"),
         ]
-        with pytest.raises(
-            AgentStateException,
-            match="No tool calls found in latest AIMessage while extracting tool call index",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             extract_current_tool_call_index(messages)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.STATE_ERROR
+        )
 
     def test_single_tool_call_not_executed(self):
         """Should return 0 for first tool call when none executed."""
@@ -380,7 +387,7 @@ class TestExtractCurrentToolCallIndex:
         assert extract_current_tool_call_index(messages) == 1
 
     def test_unexpected_message_type(self):
-        """Should raise AgentStateException for unexpected message types."""
+        """Should raise AgentRuntimeError for unexpected message types."""
         from unittest.mock import Mock
 
         # Create a mock message that's not AI, Tool, or Human
@@ -389,8 +396,9 @@ class TestExtractCurrentToolCallIndex:
 
         messages: list[AnyMessage] = [unexpected_message]
 
-        with pytest.raises(
-            AgentStateException,
-            match="Unexpected message type .* encountered while extracting tool call index",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             extract_current_tool_call_index(messages)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.STATE_ERROR
+        )

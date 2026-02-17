@@ -16,7 +16,7 @@ from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
     GuardrailScope,
 )
-from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.guardrails.utils import (
@@ -27,7 +27,7 @@ from uipath_langchain.agent.guardrails.utils import (
 )
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
 
-from ..exceptions import AgentTerminationException
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ def _create_validation_command(
         Command to update state and route to appropriate node.
 
     Raises:
-        AgentTerminationException: If the result is neither PASSED nor VALIDATION_FAILED.
+        AgentRuntimeError: If the result is neither PASSED nor VALIDATION_FAILED.
     """
     if guardrail_result.result == GuardrailValidationResultType.PASSED:
         return Command(
@@ -128,8 +128,8 @@ def _create_validation_command(
         )
 
     # For other results (FEATURE_DISABLED, ENTITLEMENTS_MISSING, etc.), interrupt execution
-    raise AgentTerminationException(
-        code=UiPathErrorCode.EXECUTION_ERROR,
+    raise AgentRuntimeError(
+        code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION,
         title="Guardrail validation error",
         detail=guardrail_result.reason
         or f"Guardrail validation returned unexpected result: {guardrail_result.result.value}",
@@ -210,19 +210,21 @@ def _create_guardrail_node(
             else:
                 # Provide specific error message for DeterministicGuardrails with wrong scope
                 if isinstance(guardrail, DeterministicGuardrail):
-                    raise AgentTerminationException(
-                        code=UiPathErrorCode.EXECUTION_ERROR,
+                    raise AgentRuntimeError(
+                        code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_ERROR,
                         title="Invalid guardrail scope",
                         detail=f"DeterministicGuardrail '{guardrail.name}' can only be used with TOOL scope. "
                         f"Current scope: {scope.name}. "
                         f"Please configure this guardrail to use only TOOL scope.",
+                        category=UiPathErrorCategory.USER,
                     )
                 else:
-                    raise AgentTerminationException(
-                        code=UiPathErrorCode.EXECUTION_ERROR,
+                    raise AgentRuntimeError(
+                        code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_ERROR,
                         title="Unsupported guardrail type",
                         detail=f"Guardrail type '{type(guardrail).__name__}' is not supported. "
                         f"Expected DeterministicGuardrail (TOOL scope only) or BuiltInValidatorGuardrail.",
+                        category=UiPathErrorCategory.USER,
                     )
 
             return _create_validation_command(result, success_node, failure_node)

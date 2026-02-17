@@ -44,5 +44,5 @@ class ModelPayloadHandler(ABC):
             response: The AIMessage response from the model
 
         Raises:
-            AgentTerminationException: If stop reason indicates a faulty termination
+            ChatModelError: If stop reason indicates a faulty termination
         """

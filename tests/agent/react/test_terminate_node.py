@@ -7,9 +7,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
+from tests.agent.helpers.error_helpers import agent_runtime_code
 from uipath_langchain.agent.exceptions import (
-    AgentNodeRoutingException,
-    AgentTerminationException,
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
 )
 from uipath_langchain.agent.react.terminate_node import create_terminate_node
 
@@ -158,7 +159,7 @@ class TestTerminateNodeNonConversational:
         self, terminate_node, state_with_raise_error
     ):
         """Non-conversational mode should process RAISE_ERROR tool and raise exception."""
-        with pytest.raises(AgentTerminationException) as exc_info:
+        with pytest.raises(AgentRuntimeError) as exc_info:
             terminate_node(state_with_raise_error)
 
         assert "Something went wrong" in exc_info.value.error_info.title
@@ -167,21 +168,23 @@ class TestTerminateNodeNonConversational:
         self, terminate_node, state_with_human_last
     ):
         """Non-conversational mode should raise if last message is not AIMessage."""
-        with pytest.raises(
-            AgentNodeRoutingException,
-            match="Expected last message to be AIMessage, got HumanMessage",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             terminate_node(state_with_human_last)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )
 
     def test_non_conversational_raises_on_no_control_flow_tool(
         self, terminate_node, state_with_no_control_flow_tool
     ):
         """Non-conversational mode should raise if no control flow tool found."""
-        with pytest.raises(
-            AgentNodeRoutingException,
-            match="No control flow tool call found in terminate node",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             terminate_node(state_with_no_control_flow_tool)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )
 
 
 class TestTerminateNodeWithResponseSchema:
@@ -231,5 +234,5 @@ class TestTerminateNodeFactory:
         # Should behave as non-conversational (raise on non-AI last message)
         state = MockAgentGraphState(messages=[HumanMessage(content="test")])
 
-        with pytest.raises(AgentNodeRoutingException):
+        with pytest.raises(AgentRuntimeError):
             terminate_node(state)

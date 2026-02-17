@@ -9,6 +9,11 @@ from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import BaseModel
 
+from tests.agent.helpers.error_helpers import agent_runtime_code
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
     UiPathToolNode,
@@ -263,7 +268,7 @@ class TestUiPathToolNode:
         assert filtered_state.session_id == "test_session"
 
     def test_invalid_wrapper_state_type_raises_error(self, mock_tool, mock_state):
-        """Test that invalid wrapper state parameter types raise ValueError."""
+        """Test that invalid wrapper state parameter types raise AgentRuntimeError."""
 
         def invalid_wrapper(
             tool: BaseTool, call: ToolCall, state: str
@@ -272,11 +277,12 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(mock_tool, wrapper=invalid_wrapper)
 
-        with pytest.raises(
-            ValueError,
-            match="Wrapper state parameter must be a pydantic BaseModel subclass",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             node._func(mock_state)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.TOOL_INVALID_WRAPPER_STATE
+        )
 
 
 class TestToolWrapperMixin:
