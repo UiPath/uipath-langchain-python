@@ -206,9 +206,11 @@ class TestCreateBatchTransformTool:
 
         # Verify result contains attachment info
         assert result == {
-            "ID": str(mock_attachment_uuid),
-            "FullName": "output.csv",
-            "MimeType": "text/csv",
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
         }
 
         # Verify ephemeral index was created
@@ -298,9 +300,11 @@ class TestCreateBatchTransformTool:
 
         # Verify result contains attachment info
         assert result == {
-            "ID": str(mock_attachment_uuid),
-            "FullName": "output.csv",
-            "MimeType": "text/csv",
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
         }
 
         # Verify interrupt was called twice (WaitEphemeralIndex + CreateBatchTransform)
@@ -367,9 +371,11 @@ class TestCreateBatchTransformTool:
 
         # Verify result contains attachment info
         assert result == {
-            "ID": str(mock_attachment_uuid),
-            "FullName": "output.csv",
-            "MimeType": "text/csv",
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
         }
 
     @patch(
@@ -431,9 +437,11 @@ class TestCreateBatchTransformTool:
 
         # Verify result contains attachment info with default destination_path
         assert result == {
-            "ID": str(mock_attachment_uuid),
-            "FullName": "output.csv",
-            "MimeType": "text/csv",
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
         }
 
         # Verify CreateBatchTransform was called with default destination_path
@@ -506,9 +514,11 @@ class TestCreateBatchTransformTool:
 
         # Verify result contains attachment info with custom path
         assert result == {
-            "ID": str(mock_attachment_uuid),
-            "FullName": "/custom/path/result.csv",
-            "MimeType": "text/csv",
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "/custom/path/result.csv",
+                "MimeType": "text/csv",
+            }
         }
 
         # Verify attachment was uploaded with custom path
