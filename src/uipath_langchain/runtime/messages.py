@@ -32,6 +32,8 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
+from .citation_buffer import CitationStreamBuffer
+
 logger = logging.getLogger(__name__)
 
 STORAGE_NAMESPACE_EVENT_MAPPER = "chat-event-mapper"
@@ -52,6 +54,7 @@ class UiPathChatMessagesMapper:
         self.current_message: AIMessageChunk
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
+        self._citation_buffer: CitationStreamBuffer | None = None
 
     def _extract_text(self, content: Any) -> str:
         """Normalize LangGraph message.content to plain text."""
@@ -244,6 +247,20 @@ class UiPathChatMessagesMapper:
     def get_content_part_id(self, message_id: str) -> str:
         return f"chunk-{message_id}-0"
 
+    def _wrap_chunk_event(
+        self,
+        message_id: str,
+        chunk: UiPathConversationContentPartChunkEvent,
+    ) -> UiPathConversationMessageEvent:
+        """Wrap a content part chunk event into a full message event."""
+        return UiPathConversationMessageEvent(
+            message_id=message_id,
+            content_part=UiPathConversationContentPartEvent(
+                content_part_id=self.get_content_part_id(message_id),
+                chunk=chunk,
+            ),
+        )
+
     async def map_ai_message_chunk_to_events(
         self, message: AIMessageChunk
     ) -> list[UiPathConversationMessageEvent]:
@@ -256,6 +273,7 @@ class UiPathChatMessagesMapper:
         if message.id not in self.seen_message_ids:
             self.current_message = message
             self.seen_message_ids.add(message.id)
+            self._citation_buffer = CitationStreamBuffer()
             events.append(self.map_to_message_start_event(message.id))
 
         if message.content_blocks:
@@ -264,25 +282,28 @@ class UiPathChatMessagesMapper:
                 block_type = block.get("type")
                 match block_type:
                     case "text":
-                        events.append(
-                            self.map_chunk_to_content_part_chunk_event(
-                                message.id, cast(TextContentBlock, block)
+                        text = cast(TextContentBlock, block)["text"]
+                        for chunk_event in self._citation_buffer.add_chunk(text):
+                            events.append(
+                                self._wrap_chunk_event(message.id, chunk_event)
                             )
-                        )
                     case "tool_call_chunk":
                         # Accumulate the message chunk
                         self.current_message = self.current_message + message
 
         elif isinstance(message.content, str) and message.content:
             # Fallback: raw string content on the chunk (rare when using content_blocks)
-            events.append(
-                self.map_content_to_content_part_chunk_event(
-                    message.id, message.content
-                )
-            )
+            for chunk_event in self._citation_buffer.add_chunk(message.content):
+                events.append(self._wrap_chunk_event(message.id, chunk_event))
 
         # Check if this is the last chunk by examining chunk_position, send end message event only if there are no pending tool calls
         if message.chunk_position == "last":
+            # Finalize the citation buffer — flush any remaining text
+            if self._citation_buffer is not None:
+                for chunk_event in self._citation_buffer.finalize():
+                    events.append(self._wrap_chunk_event(message.id, chunk_event))
+                self._citation_buffer = None
+
             if (
                 self.current_message.tool_calls is not None
                 and len(self.current_message.tool_calls) > 0
