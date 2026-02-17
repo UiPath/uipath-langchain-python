@@ -417,7 +417,7 @@ class TestHandleSemanticSearch:
 
             assert "documents" in result
             assert len(result["documents"]) == 2
-            assert result["documents"][0].page_content == "Test content 1"
+            assert result["documents"][0]["page_content"] == "Test content 1"
 
     def test_static_query_semantic_search_creation(self):
         """Test successful creation of semantic search tool with static query."""
