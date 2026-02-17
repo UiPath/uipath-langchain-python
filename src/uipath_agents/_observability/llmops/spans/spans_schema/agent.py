@@ -22,7 +22,12 @@ from ..span_attributes import (
     AgentRunSpanAttributes,
 )
 from ..span_name import SpanName
-from .base import apply_attributes, reference_id_context, uipath_source_context
+from .base import (
+    apply_attributes,
+    format_span_error,
+    reference_id_context,
+    uipath_source_context,
+)
 
 __all__ = [
     "AgentSpanSchema",
@@ -109,8 +114,7 @@ class AgentSpanSchema:
         final_status: int = SpanStatus.OK
         try:
             with self._tracer.start_as_current_span(
-                span_name,
-                kind=SpanKind.INTERNAL,
+                span_name, kind=SpanKind.INTERNAL, set_status_on_exception=False
             ) as span:
                 agent_span = span
                 apply_attributes(span, attrs)
@@ -121,11 +125,9 @@ class AgentSpanSchema:
                     yield span
                     span.set_status(Status(StatusCode.OK))
                 except Exception as e:
-                    span.set_attribute(
-                        "error",
-                        json.dumps({"message": str(e), "type": type(e).__name__}),
-                    )
-                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    # May be overridden by _SpanUtils.otel_span_to_uipath_span during export
+                    span.set_attribute("error", format_span_error(e))
+                    span.set_status(Status(StatusCode.ERROR, format_span_error(e)))
                     final_status = SpanStatus.ERROR
                     raise
             # span.end() called by start_as_current_span exit

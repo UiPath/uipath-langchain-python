@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import time
+import traceback
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -39,6 +40,8 @@ from uipath.runtime.errors import UiPathErrorContract
 from uipath.runtime.events import UiPathRuntimeEvent
 from uipath.runtime.schema import UiPathRuntimeSchema
 from uipath.tracing import SpanStatus
+
+from uipath_agents._errors import ExceptionMapper
 
 from ..agent_graph_builder.config import get_execution_type
 from .event_emitter import (
@@ -374,14 +377,23 @@ class InstrumentedRuntime:
                             else None
                         )
 
+                        mapped_exc = ExceptionMapper.map_runtime(e)
+                        error_info = mapped_exc.error_info
+
+                        # Capture full traceback for telemetry debugging
+                        # Most exceptions have include_traceback=False, so we manually capture it here
+                        error_traceback = traceback.format_exc()
+
                         base_properties: Dict[str, Any] = {
                             "AgentName": agent_name,
                             "Status": "Failed",
                             "Timestamp": datetime.now(timezone.utc).isoformat(),
-                            "ErrorMessage": str(e)[
-                                :500
-                            ],  # Truncate long error messages
+                            "ErrorMessage": str(e)[:500],
                             "ErrorType": type(e).__name__,
+                            "ErrorCode": error_info.code,
+                            "ErrorTitle": error_info.title,
+                            "ErrorCategory": error_info.category.value,
+                            "ErrorTraceback": error_traceback,
                         }
 
                         if agent_id:

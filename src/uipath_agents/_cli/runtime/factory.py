@@ -25,10 +25,14 @@ from uipath.runtime import (
 from uipath.runtime.base import UiPathDisposableProtocol
 from uipath.runtime.errors import UiPathErrorCategory
 from uipath.tracing import LlmOpsHttpExporter
-from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
+from uipath_langchain.agent.exceptions import (
+    AgentStartupError,
+    AgentStartupErrorCode,
+)
 from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
 from uipath_langchain.runtime.storage import SqliteResumableStorage
 
+from uipath_agents._errors import ExceptionMapper
 from uipath_agents.agent_graph_builder import build_agent_graph
 from uipath_agents.agent_graph_builder.config import get_execution_type
 
@@ -91,26 +95,29 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         Returns:
             Configured runtime instance with compiled graph
         """
-        # Extract settings override from kwargs to pass through method chain
-        settings = kwargs.get("settings")
+        try:
+            # Extract settings override from kwargs to pass through method chain
+            settings = kwargs.get("settings")
 
-        agent_definition = self._load_agent_definition(entrypoint, settings)
+            agent_definition = self._load_agent_definition(entrypoint, settings)
 
-        # Get shared memory instance
-        memory = await self._get_memory()
+            # Get shared memory instance
+            memory = await self._get_memory()
 
-        # Pass definition to graph loading
-        compiled_graph = await self._resolve_and_compile_graph(
-            entrypoint, memory, agent_definition=agent_definition, **kwargs
-        )
+            # Pass definition to graph loading
+            compiled_graph = await self._resolve_and_compile_graph(
+                entrypoint, memory, agent_definition=agent_definition, **kwargs
+            )
 
-        return await self._create_runtime(
-            compiled_graph=compiled_graph,
-            runtime_id=runtime_id,
-            entrypoint=entrypoint,
-            memory=memory,
-            agent_definition=agent_definition,
-        )
+            return await self._create_runtime(
+                compiled_graph=compiled_graph,
+                runtime_id=runtime_id,
+                entrypoint=entrypoint,
+                memory=memory,
+                agent_definition=agent_definition,
+            )
+        except Exception as e:
+            raise ExceptionMapper.map_config(e) from e
 
     async def get_settings(self) -> UiPathRuntimeFactorySettings | None:
         """Return factory settings with low-code specific trace filtering."""
@@ -154,7 +161,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             Prepared AgentDefinition
 
         Raises:
-            LangGraphRuntimeError: If definition cannot be loaded
+            AgentStartupError: If definition cannot be loaded
         """
         try:
             agent_json_path = Path.cwd() / entrypoint
@@ -177,17 +184,10 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             return agent_definition
 
         except FileNotFoundError as e:
-            raise LangGraphRuntimeError(
-                LangGraphErrorCode.GRAPH_NOT_FOUND,
+            raise AgentStartupError(
+                AgentStartupErrorCode.FILE_NOT_FOUND,
                 "Agent configuration not found",
                 f"Agent file '{entrypoint}' not found: {str(e)}",
-                UiPathErrorCategory.DEPLOYMENT,
-            ) from e
-        except Exception as e:
-            raise LangGraphRuntimeError(
-                LangGraphErrorCode.GRAPH_LOAD_ERROR,
-                "Failed to load agent configuration",
-                f"Unexpected error loading agent '{entrypoint}': {str(e)}",
                 UiPathErrorCategory.USER,
             ) from e
 
@@ -286,22 +286,14 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             Compiled StateGraph for the agent
 
         Raises:
-            LangGraphRuntimeError: If graph cannot be loaded
+            AgentStartupError: If graph cannot be loaded
         """
         agent_definition = cast(AgentDefinition, kwargs.get("agent_definition"))
-        try:
-            graph, disposables = await build_agent_graph(
-                agent_definition, execution_type=get_execution_type(self.context)
-            )
-            self._disposables.extend(disposables)
-            return graph
-        except Exception as e:
-            raise LangGraphRuntimeError(
-                LangGraphErrorCode.GRAPH_LOAD_ERROR,
-                "Failed to build agent graph",
-                f"Unexpected error building agent '{entrypoint}': {str(e)}",
-                UiPathErrorCategory.USER,
-            ) from e
+        graph, disposables = await build_agent_graph(
+            agent_definition, execution_type=get_execution_type(self.context)
+        )
+        self._disposables.extend(disposables)
+        return graph
 
     async def _create_runtime(
         self,

@@ -4,7 +4,6 @@ Creates typed OpenTelemetry spans matching UiPath schema.
 Used by LlmOpsInstrumentationCallback to instrument LangGraph agents.
 """
 
-import json
 import logging
 import time
 from contextlib import contextmanager
@@ -24,6 +23,7 @@ from .spans_schema import (
     SpanUpsertProtocol,
     SyntheticReadableSpan,
     ToolSpanSchema,
+    format_span_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -604,11 +604,9 @@ class LlmOpsSpanFactory:
 
     def end_span_error(self, span: Span, error: Exception) -> None:
         """End a span with ERROR status and upsert final state."""
-        span.set_attribute(
-            "error",
-            json.dumps({"message": str(error), "type": type(error).__name__}),
-        )
-        span.set_status(Status(StatusCode.ERROR, str(error)))
+        # May be overridden by _SpanUtils.otel_span_to_uipath_span during export
+        span.set_attribute("error", format_span_error(error))
+        span.set_status(Status(StatusCode.ERROR, format_span_error(error)))
         span.end()
         self.upsert_span_complete(span, status=SpanStatus.ERROR)
 

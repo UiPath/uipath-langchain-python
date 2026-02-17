@@ -21,6 +21,8 @@ from opentelemetry.trace import (
 )
 from uipath.tracing import SpanStatus
 
+from uipath_agents._errors import ExceptionMapper
+
 from ..span_attributes import (
     BaseSpanAttributes,
     get_agent_version,
@@ -37,6 +39,7 @@ __all__ = [
     "create_span",
     "end_span_ok",
     "end_span_error",
+    "format_span_error",
 ]
 
 # Context variable to propagate reference_id to all spans in a trace
@@ -197,6 +200,14 @@ def end_span_ok(
         upsert_fn(span, status=SpanStatus.OK)
 
 
+def format_span_error(error: Exception) -> str:
+    """Format an exception into a span error message via ExceptionMapper."""
+    error_info = ExceptionMapper.map_runtime(error).error_info
+    return (
+        f"{error_info.title}\nDetails:\n{error_info.detail}\nCode: {error_info.code}\n"
+    )
+
+
 def end_span_error(
     span: Span,
     error: Exception,
@@ -209,11 +220,9 @@ def end_span_error(
         error: The exception that caused the error
         upsert_fn: Optional function to call for upsert
     """
-    span.set_attribute(
-        "error",
-        json.dumps({"message": str(error), "type": type(error).__name__}),
-    )
-    span.set_status(Status(StatusCode.ERROR, str(error)))
+    # May be overridden by _SpanUtils.otel_span_to_uipath_span during export
+    span.set_attribute("error", format_span_error(error))
+    span.set_status(Status(StatusCode.ERROR, format_span_error(error)))
     span.end()
     if upsert_fn:
         upsert_fn(span, status=SpanStatus.ERROR)

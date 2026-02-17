@@ -7,8 +7,11 @@ from uipath.runtime import (
     UiPathRuntimeResult,
     UiPathStreamOptions,
 )
+from uipath.runtime.errors import UiPathBaseRuntimeError
 from uipath.runtime.schema import UiPathRuntimeSchema
 from uipath_langchain.runtime import UiPathLangGraphRuntime
+
+from uipath_agents._errors import ExceptionMapper
 
 from .utils import validate_json_against_json_schema
 
@@ -107,3 +110,12 @@ class AgentsLangGraphRuntime(UiPathLangGraphRuntime):
             output=self._agent_definition.output_schema or {},
             metadata=metadata,
         )
+
+    def create_runtime_error(self, e: Exception) -> UiPathBaseRuntimeError:
+        """Handle execution errors using ExceptionTranslator for all exceptions.
+
+        Completely overrides parent implementation to use ExceptionTranslator
+        for proper classification and user-actionable error messages.
+        """
+        mapped_exc = ExceptionMapper.map_runtime(e)
+        return mapped_exc
