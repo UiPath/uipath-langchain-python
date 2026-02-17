@@ -96,6 +96,7 @@ def create_deeprag_tool(
             input_schema=input_model.model_json_schema() if input_model else None,
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for internal tools
+            recording=False,
         )
         async def invoke_deeprag():
             @task
@@ -150,10 +151,13 @@ def create_deeprag_tool(
         output_type=output_model,
         argument_properties=resource.argument_properties,
         metadata={
-            "tool_type": resource.type.lower(),
+            "tool_type": "context_grounding",
             "display_name": tool_name,
             "args_schema": input_model,
             "output_schema": output_model,
+            "retrieval_mode": "DeepRag",
+            "citation_mode": citation_mode.value,
+            **({"static_query": static_query} if is_query_static else {}),
         },
     )
     tool.set_tool_wrappers(awrapper=deeprag_tool_wrapper)
