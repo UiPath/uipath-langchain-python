@@ -14,7 +14,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateBatchTransform
+from uipath.platform.common import CreateBatchTransform, UiPathConfig
 from uipath.platform.common.interrupt_models import WaitEphemeralIndex
 from uipath.platform.context_grounding import (
     BatchTransformOutputColumn,
@@ -28,6 +28,7 @@ from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_mo
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     add_query_field_to_schema,
+    override_array_output_schema,
 )
 from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
@@ -84,7 +85,9 @@ def create_batch_transform_tool(
 
     # Create input model from modified schema
     input_model = create_model(input_schema)
-    output_model = create_model(resource.output_schema)
+
+    output_schema = override_array_output_schema(dict(resource.output_schema))
+    output_model = create_model(output_schema)
 
     async def batch_transform_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query
@@ -130,7 +133,7 @@ def create_batch_transform_tool(
 
             ephemeral_index = await create_ephemeral_index()
 
-            return interrupt(
+            interrupt(
                 CreateBatchTransform(
                     name=f"task-{uuid.uuid4()}",
                     index_name=ephemeral_index.name,
@@ -143,6 +146,22 @@ def create_batch_transform_tool(
                     is_ephemeral_index=True,
                 )
             )
+
+            uipath = UiPath()
+            output_attachment_id = await uipath.jobs.create_attachment_async(
+                name=destination_path,
+                source_path=destination_path,
+                folder_key=UiPathConfig.folder_key,
+                job_key=UiPathConfig.job_key,
+            )
+
+            return {
+                "outputAttachment": {
+                    "ID": str(output_attachment_id),
+                    "FullName": destination_path,
+                    "MimeType": "text/csv",
+                },
+            }
 
         return await invoke_batch_transform()
 

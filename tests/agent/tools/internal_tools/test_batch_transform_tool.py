@@ -179,6 +179,11 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
+        output_attachment_id = str(uuid.uuid4())
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=output_attachment_id
+        )
+
         mock_interrupt.return_value = {"file_path": "/path/to/output.csv"}
 
         mock_wrapper = Mock()
@@ -200,7 +205,13 @@ class TestCreateBatchTransformTool:
         result = await tool.coroutine(attachment=mock_attachment)
 
         # Verify result
-        assert result == {"file_path": "/path/to/output.csv"}
+        assert result == {
+            "outputAttachment": {
+                "ID": output_attachment_id,
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
+        }
 
         # Verify ephemeral index was created
         mock_uipath.context_grounding.create_ephemeral_index_async.assert_called_once()
@@ -256,6 +267,11 @@ class TestCreateBatchTransformTool:
             return_value=mock_index_pending
         )
 
+        output_attachment_id = str(uuid.uuid4())
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=output_attachment_id
+        )
+
         # First interrupt returns completed index, second returns Batch Transform result
         mock_interrupt.side_effect = [
             mock_index_complete,
@@ -277,7 +293,13 @@ class TestCreateBatchTransformTool:
         result = await tool.coroutine(attachment=mock_attachment)
 
         # Verify result
-        assert result == {"file_path": "/path/to/transformed.csv"}
+        assert result == {
+            "outputAttachment": {
+                "ID": output_attachment_id,
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
+        }
 
         # Verify interrupt was called twice (WaitEphemeralIndex + CreateBatchTransform)
         assert mock_interrupt.call_count == 2
@@ -318,6 +340,11 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
+        output_attachment_id = str(uuid.uuid4())
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=output_attachment_id
+        )
+
         mock_interrupt.return_value = {"output": "Transformation complete"}
 
         mock_wrapper = Mock()
@@ -337,7 +364,13 @@ class TestCreateBatchTransformTool:
         )
 
         # Verify result
-        assert result == {"output": "Transformation complete"}
+        assert result == {
+            "outputAttachment": {
+                "ID": output_attachment_id,
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
+        }
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -375,6 +408,11 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
+        output_attachment_id = str(uuid.uuid4())
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=output_attachment_id
+        )
+
         mock_interrupt.return_value = {"file_path": "output.csv"}
 
         mock_wrapper = Mock()
@@ -392,7 +430,13 @@ class TestCreateBatchTransformTool:
         result = await tool.coroutine(attachment=mock_attachment)
 
         # Verify result
-        assert result == {"file_path": "output.csv"}
+        assert result == {
+            "outputAttachment": {
+                "ID": output_attachment_id,
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
+        }
 
         # Verify CreateBatchTransform was called with default destination_path
         assert mock_interrupt.call_count == 1
@@ -433,6 +477,11 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
+        output_attachment_id = str(uuid.uuid4())
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=output_attachment_id
+        )
+
         mock_interrupt.return_value = {"file_path": "/custom/path/result.csv"}
 
         mock_wrapper = Mock()
@@ -452,7 +501,13 @@ class TestCreateBatchTransformTool:
         )
 
         # Verify result
-        assert result == {"file_path": "/custom/path/result.csv"}
+        assert result == {
+            "outputAttachment": {
+                "ID": output_attachment_id,
+                "FullName": "/custom/path/result.csv",
+                "MimeType": "text/csv",
+            }
+        }
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
