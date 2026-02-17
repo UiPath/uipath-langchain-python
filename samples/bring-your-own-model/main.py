@@ -1,7 +1,8 @@
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph import START, StateGraph, END
-from uipath_langchain.chat import UiPathChatOpenAI
+from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
+
+from uipath_langchain.chat import UiPathChatOpenAI
 
 
 class GraphState(BaseModel):
@@ -11,11 +12,11 @@ class GraphState(BaseModel):
 class GraphOutput(BaseModel):
     report: str
 
+
 async def generate_report(state: GraphState) -> GraphOutput:
     system_prompt = "You are a report generator. Please provide a brief report based on the given topic."
     llm = UiPathChatOpenAI(
-        byo_connection_id="my-custom-model",
-        model_name="gpt-4o-2024-11-20"
+        byo_connection_id="my-custom-model", model_name="gpt-4o-2024-11-20"
     )
     output = await llm.ainvoke(
         [SystemMessage(system_prompt), HumanMessage(state.topic)]

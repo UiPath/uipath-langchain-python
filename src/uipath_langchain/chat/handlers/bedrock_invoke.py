@@ -1,7 +1,5 @@
 """Bedrock Invoke payload handler."""
 
-from typing import Any
-
 from langchain_core.messages import AIMessage
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -35,10 +33,6 @@ STOP_REASON_MESSAGES: dict[str, tuple[str, str]] = {
 
 class BedrockInvokePayloadHandler(ModelPayloadHandler):
     """Payload handler for AWS Bedrock Invoke API."""
-
-    def get_required_tool_choice(self) -> str | dict[str, Any]:
-        """Get tool_choice value for Bedrock Invoke API."""
-        return {"type": "any"}
 
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check Bedrock Invoke stop_reason and raise exception for faulty terminations.

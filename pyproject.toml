@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "0.5.66"
+version = "1.0.0"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -10,7 +10,6 @@ dependencies = [
     "langgraph>=1.0.0, <2.0.0",
     "langchain-core>=1.2.11, <2.0.0",
     "langgraph-checkpoint-sqlite>=3.0.3, <4.0.0",
-    "langchain-openai>=1.0.0, <2.0.0",
     "langchain>=1.0.0, <2.0.0",
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.0.1",
@@ -20,6 +19,7 @@ dependencies = [
     "jsonpath-ng>=1.7.0",
     "mcp==1.26.0",
     "langchain-mcp-adapters==0.2.1",
+    "uipath-langchain-client[openai]>=1.1.7",
 ]
 
 classifiers = [
@@ -35,8 +35,10 @@ maintainers = [
 ]
 
 [project.optional-dependencies]
-vertex = ["langchain-google-genai>=2.0.0", "google-generativeai>=0.8.0"]
-bedrock = ["langchain-aws>=0.2.35", "boto3-stubs>=1.41.4"]
+bedrock = ["uipath-langchain-client[aws]>=1.1.7"]
+anthropic = ["uipath-langchain-client[anthropic]>=1.1.7"]
+vertex = ["uipath-langchain-client[google,vertexai]>=1.1.7"]
+all = ["uipath-langchain-client[all]>=1.1.7"]
 
 [project.entry-points."uipath.middlewares"]
 register = "uipath_langchain.middlewares:register_middleware"
@@ -82,8 +84,6 @@ select = ["E", "F", "B", "I"]
 
 [tool.ruff.lint.per-file-ignores]
 "*" = ["E501"]
-"src/uipath_langchain/chat/bedrock.py" = ["E402"]
-"src/uipath_langchain/chat/vertex.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"
