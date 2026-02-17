@@ -74,17 +74,6 @@ def create_deeprag_tool(
     input_model = create_model(input_schema)
     output_model = create_model(resource.output_schema)
 
-<<<<<<< HEAD
-=======
-    @mockable(
-        name=resource.name,
-        description=resource.description,
-        input_schema=input_model.model_json_schema() if input_model else None,
-        output_schema=output_model.model_json_schema(),
-        example_calls=[],  # Examples cannot be provided for internal tools
-        recording=False,
-    )
->>>>>>> a408e9c (feat: add context grounding metadata to tool spans)
     async def deeprag_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query
         if not query:
@@ -107,6 +96,7 @@ def create_deeprag_tool(
             input_schema=input_model.model_json_schema() if input_model else None,
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for internal tools
+            recording=False,
         )
         async def invoke_deeprag():
             @task
