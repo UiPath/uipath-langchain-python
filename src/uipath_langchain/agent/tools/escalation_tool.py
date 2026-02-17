@@ -20,7 +20,7 @@ from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 from uipath.platform.common import WaitEscalation
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.static_args import (
@@ -30,7 +30,7 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 
-from ..exceptions import AgentTerminationException
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..react.types import AgentGraphState
 from .tool_node import ToolWrapperReturnType
 from .utils import (
@@ -256,10 +256,11 @@ def create_escalation_tool(
                 f"with directive {result['outcome']}"
             )
 
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
                 title=termination_title,
                 detail=output_detail,
+                category=UiPathErrorCategory.USER,
             )
 
         return {

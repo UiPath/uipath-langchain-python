@@ -3,7 +3,12 @@
 import logging
 from typing import Literal
 
-from uipath_langchain.agent.exceptions import AgentNodeRoutingException
+from uipath.runtime.errors import UiPathErrorCategory
+
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
@@ -41,8 +46,11 @@ def create_route_agent_conversational():
         """
         last_message = find_latest_ai_message(state.messages)
         if last_message is None:
-            raise AgentNodeRoutingException(
-                "No AIMessage found in messages for routing."
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.ROUTING_ERROR,
+                title="No AIMessage found in messages for routing.",
+                detail="The agent state contains no AIMessage, which is required for routing decisions.",
+                category=UiPathErrorCategory.SYSTEM,
             )
         if last_message.tool_calls:
             current_index = extract_current_tool_call_index(state.messages)

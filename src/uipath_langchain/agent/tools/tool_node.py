@@ -10,8 +10,12 @@ from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
 from pydantic import BaseModel
 from uipath.platform.resume_triggers import is_no_content_marker
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentStateException
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
@@ -101,7 +105,7 @@ class UiPathToolNode(RunnableCallable):
             current_tool_call_index = extract_current_tool_call_index(
                 state.messages, self.tool.name
             )
-        except AgentStateException:
+        except AgentRuntimeError:
             # Handle cases where AIMessage has no tool calls or other invalid states
             return None
 
@@ -162,8 +166,11 @@ class UiPathToolNode(RunnableCallable):
         """Filter the state to the expected model type."""
         model_type = list(signature(wrapper).parameters.values())[2].annotation
         if not issubclass(model_type, BaseModel):
-            raise ValueError(
-                "Wrapper state parameter must be a pydantic BaseModel subclass."
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TOOL_INVALID_WRAPPER_STATE,
+                title="Wrapper state parameter must be a pydantic BaseModel subclass.",
+                detail=f"Got {model_type.__name__} instead of BaseModel for wrapper state parameter.",
+                category=UiPathErrorCategory.SYSTEM,
             )
         return model_type.model_validate(state, from_attributes=True)
 

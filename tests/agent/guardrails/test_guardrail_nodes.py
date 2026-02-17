@@ -610,10 +610,10 @@ class TestGuardrailHelperFunctions:
         }
 
     def test_create_validation_command_feature_disabled_raises_exception(self):
-        """Test that FEATURE_DISABLED result raises AgentTerminationException."""
+        """Test that FEATURE_DISABLED result raises AgentRuntimeError."""
         from uipath.runtime.errors import UiPathErrorCategory
 
-        from uipath_langchain.agent.exceptions import AgentTerminationException
+        from uipath_langchain.agent.exceptions import AgentRuntimeError
         from uipath_langchain.agent.guardrails.guardrail_nodes import (
             _create_validation_command,
         )
@@ -623,7 +623,7 @@ class TestGuardrailHelperFunctions:
             reason="Guardrail feature is disabled",
         )
 
-        with pytest.raises(AgentTerminationException) as exc_info:
+        with pytest.raises(AgentRuntimeError) as exc_info:
             _create_validation_command(result, "success_node", "failure_node")
 
         assert exc_info.value.error_info.title == "Guardrail validation error"
@@ -631,10 +631,10 @@ class TestGuardrailHelperFunctions:
         assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
 
     def test_create_validation_command_entitlements_missing_raises_exception(self):
-        """Test that ENTITLEMENTS_MISSING result raises AgentTerminationException."""
+        """Test that ENTITLEMENTS_MISSING result raises AgentRuntimeError."""
         from uipath.runtime.errors import UiPathErrorCategory
 
-        from uipath_langchain.agent.exceptions import AgentTerminationException
+        from uipath_langchain.agent.exceptions import AgentRuntimeError
         from uipath_langchain.agent.guardrails.guardrail_nodes import (
             _create_validation_command,
         )
@@ -644,7 +644,7 @@ class TestGuardrailHelperFunctions:
             reason="Guardrail entitlement is missing",
         )
 
-        with pytest.raises(AgentTerminationException) as exc_info:
+        with pytest.raises(AgentRuntimeError) as exc_info:
             _create_validation_command(result, "success_node", "failure_node")
 
         assert exc_info.value.error_info.title == "Guardrail validation error"
@@ -654,7 +654,7 @@ class TestGuardrailHelperFunctions:
     @pytest.mark.asyncio
     async def test_unsupported_guardrail_type_raises_error(self):
         """Test that unsupported guardrail types raise an error."""
-        from uipath_langchain.agent.exceptions import AgentTerminationException
+        from uipath_langchain.agent.exceptions import AgentRuntimeError
         from uipath_langchain.agent.guardrails.guardrail_nodes import (
             create_llm_guardrail_node,
         )
@@ -672,7 +672,7 @@ class TestGuardrailHelperFunctions:
 
         state = AgentGuardrailsGraphState(messages=[HumanMessage("test")])
 
-        with pytest.raises(AgentTerminationException) as exc_info:
+        with pytest.raises(AgentRuntimeError) as exc_info:
             await node(state)
 
         error_message = str(exc_info.value)

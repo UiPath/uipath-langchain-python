@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.types import Command
 from uipath.core.guardrails.guardrails import FieldReference, FieldSource
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
-from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.react.utils import (
@@ -15,7 +15,7 @@ from uipath_langchain.agent.react.utils import (
     find_latest_ai_message,
 )
 
-from ...exceptions import AgentStateException, AgentTerminationException
+from ...exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
 from .base_action import GuardrailAction, GuardrailActionNode
@@ -96,11 +96,11 @@ class FilterAction(GuardrailAction):
                 metadata["updated_data"]["output"] = result.updated_output
                 return result.command
 
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_ERROR,
                 title="Guardrail filter action not supported",
                 detail=f"FilterAction is not supported for scope [{scope.name}] at this time.",
-                category=UiPathErrorCategory.USER,
+                category=UiPathErrorCategory.SYSTEM,
             )
 
         _node.__metadata__ = metadata  # type: ignore[attr-defined]
@@ -130,7 +130,7 @@ def _filter_tool_fields(
         FilterResult containing the command and updated input/output data.
 
     Raises:
-        AgentTerminationException: If filtering fails.
+        AgentRuntimeError: If filtering fails.
     """
     try:
         if not fields_to_filter:
@@ -142,11 +142,11 @@ def _filter_tool_fields(
             return _filter_tool_output_fields(state, fields_to_filter)
 
     except Exception as e:
-        raise AgentTerminationException(
-            code=UiPathErrorCode.EXECUTION_ERROR,
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_ERROR,
             title="Filter action failed",
             detail=f"Failed to filter tool fields: {str(e)}",
-            category=UiPathErrorCategory.USER,
+            category=UiPathErrorCategory.SYSTEM,
         ) from e
 
 
@@ -231,8 +231,11 @@ def _filter_tool_input_fields(
             else:
                 tool_call.args = filtered_args
     else:
-        raise AgentStateException(
-            f"Tool call name [{call_name}] does not match expected tool name [{tool_name}]."
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.STATE_ERROR,
+            title=f"Tool call name [{call_name}] does not match expected tool name [{tool_name}].",
+            detail=f"Expected tool call for '{tool_name}' but found '{call_name}' at the current index.",
+            category=UiPathErrorCategory.SYSTEM,
         )
 
     if modified:

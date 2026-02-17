@@ -3,10 +3,9 @@
 from typing import Any
 
 from langchain_core.messages import AIMessage
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentTerminationException
-
+from ..exceptions import ChatModelError, ChatModelErrorCode
 from .base import ModelPayloadHandler
 
 FAULTY_STOP_REASONS: set[str] = {
@@ -55,7 +54,7 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
             response: The AIMessage response from the model
 
         Raises:
-            AgentTerminationException: If stopReason indicates a faulty termination
+            ChatModelError: If stopReason indicates a faulty termination
         """
         stop_reason = response.response_metadata.get("stopReason")
         if not stop_reason:
@@ -69,8 +68,9 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
                     f"The model terminated with stop reason '{stop_reason}'.",
                 ),
             )
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise ChatModelError(
+                code=ChatModelErrorCode.UNSUCCESSFUL_STOP_REASON,
                 title=title,
                 detail=detail,
+                category=UiPathErrorCategory.USER,
             )
