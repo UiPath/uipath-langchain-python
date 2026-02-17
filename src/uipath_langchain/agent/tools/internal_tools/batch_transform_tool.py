@@ -36,6 +36,38 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
+# Define the output schema with job-attachment
+BATCH_TRANSFORM_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "result": {
+            "$ref": "#/definitions/job-attachment",
+            "description": "The transformed result file as an attachment",
+        }
+    },
+    "required": ["result"],
+    "definitions": {
+        "job-attachment": {
+            "type": "object",
+            "properties": {
+                "ID": {"type": "string", "description": "Orchestrator attachment key"},
+                "FullName": {"type": "string", "description": "File name"},
+                "MimeType": {
+                    "type": "string",
+                    "description": "The MIME type of the content",
+                },
+                "Metadata": {
+                    "type": "object",
+                    "description": "Dictionary<string, string> of metadata",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            "required": ["ID", "FullName", "MimeType"],
+            "x-uipath-resource-kind": "JobAttachment",
+        }
+    },
+}
+
 
 def create_batch_transform_tool(
     resource: AgentInternalToolResourceConfig, llm: BaseChatModel
@@ -84,7 +116,7 @@ def create_batch_transform_tool(
 
     # Create input model from modified schema
     input_model = create_model(input_schema)
-    output_model = create_model(resource.output_schema)
+    output_model = create_model(BATCH_TRANSFORM_OUTPUT_SCHEMA)
 
     async def batch_transform_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query
@@ -130,7 +162,8 @@ def create_batch_transform_tool(
 
             ephemeral_index = await create_ephemeral_index()
 
-            return interrupt(
+            # create the batch transform and wait for completion
+            interrupt(
                 CreateBatchTransform(
                     name=f"task-{uuid.uuid4()}",
                     index_name=ephemeral_index.name,
@@ -144,7 +177,25 @@ def create_batch_transform_tool(
                 )
             )
 
-        return await invoke_batch_transform()
+            # create attachment with output and return attachment info
+            async def upload_result_attachment():
+                uipath = UiPath()
+                return await uipath.attachments.upload_async(
+                    name=destination_path,
+                    source_path=destination_path,
+                )
+
+            result_attachment_id = await upload_result_attachment()
+
+            return {
+                "ID": str(result_attachment_id),
+                "FullName": destination_path,
+                "MimeType": "text/csv",
+            }
+
+        result_attachment = await invoke_batch_transform()
+
+        return {"result": result_attachment}
 
     # Import here to avoid circular dependency
     from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
@@ -167,10 +218,17 @@ def create_batch_transform_tool(
         output_type=output_model,
         argument_properties=resource.argument_properties,
         metadata={
-            "tool_type": resource.type.lower(),
+            "tool_type": "context_grounding",
             "display_name": tool_name,
             "args_schema": input_model,
             "output_schema": output_model,
+            "retrieval_mode": "BatchTransform",
+            "output_columns": [
+                {"name": col.name, "description": col.description}
+                for col in batch_transform_output_columns
+            ],
+            "web_search_grounding": static_web_search,
+            **({"static_query": static_query} if is_query_static else {}),
         },
     )
     tool.set_tool_wrappers(awrapper=batch_transform_tool_wrapper)
