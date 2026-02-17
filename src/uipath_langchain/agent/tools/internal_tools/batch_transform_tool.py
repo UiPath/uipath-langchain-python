@@ -14,7 +14,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateBatchTransform
+from uipath.platform.common import CreateBatchTransform, UiPathConfig
 from uipath.platform.common.interrupt_models import WaitEphemeralIndex
 from uipath.platform.context_grounding import (
     BatchTransformOutputColumn,
@@ -130,7 +130,8 @@ def create_batch_transform_tool(
 
             ephemeral_index = await create_ephemeral_index()
 
-            return interrupt(
+            # create the batch transform and wait for completion
+            interrupt(
                 CreateBatchTransform(
                     name=f"task-{uuid.uuid4()}",
                     index_name=ephemeral_index.name,
@@ -143,6 +144,24 @@ def create_batch_transform_tool(
                     is_ephemeral_index=True,
                 )
             )
+
+            # create attachment with output and return attachment info
+            @task
+            async def upload_result_attachment():
+                uipath = UiPath()
+                return await uipath.jobs.create_attachment_async(
+                    name=destination_path,
+                    source_path=destination_path,
+                    job_key=UiPathConfig.job_key,
+                )
+
+            result_attachment_id = await upload_result_attachment()
+
+            return {
+                "ID": str(result_attachment_id),
+                "FullName": destination_path,
+                "MimeType": "text/csv",
+            }
 
         return await invoke_batch_transform()
 
