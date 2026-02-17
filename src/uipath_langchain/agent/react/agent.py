@@ -7,7 +7,12 @@ from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from uipath.platform.guardrails import BaseGuardrail
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentStartupError,
+    AgentStartupErrorCode,
+)
 from uipath_langchain.chat.types import UiPathPassthroughChatModel
 
 from ..guardrails.actions import GuardrailAction
@@ -66,9 +71,11 @@ def create_agent(
     from ..tools import create_tool_node
 
     if not isinstance(model, UiPathPassthroughChatModel):
-        raise TypeError(
-            f"Model {type(model).__name__} does not implement UiPathPassthroughChatModel. "
-            "The model must have llm_provider and api_flavor properties."
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.LLM_INVALID_MODEL,
+            title=f"Model {type(model).__name__} does not implement UiPathPassthroughChatModel.",
+            detail="The model must have llm_provider and api_flavor properties.",
+            category=UiPathErrorCategory.SYSTEM,
         )
 
     agent_settings = AgentSettings(
@@ -128,6 +135,7 @@ def create_agent(
         is_conversational=config.is_conversational,
         llm_messages_limit=config.llm_messages_limit,
         thinking_messages_limit=config.thinking_messages_limit,
+        enable_openai_parallel_tool_calls=config.enable_openai_parallel_tool_calls,
     )
     llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
         (AgentGraphNode.LLM, llm_node), guardrails, input_schema=input_schema

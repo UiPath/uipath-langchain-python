@@ -65,21 +65,32 @@ def handle_semantic_search(
         )
 
     output_model = ContextOutputSchemaModel
+    input_model: Type[BaseModel]
 
     if is_static_query(resource):
         static_query_value = resource.settings.query.value
         assert static_query_value is not None
-        input_model = None
+
+        class SemanticSearchStaticInputModel(BaseModel):
+            pass
+
+        input_model = SemanticSearchStaticInputModel
 
         @mockable(
             name=resource.name,
             description=resource.description,
-            input_schema=input_model,
+            input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for context.
         )
         async def context_tool_fn() -> dict[str, Any]:
-            return {"documents": await retriever.ainvoke(static_query_value)}
+            docs = await retriever.ainvoke(static_query_value)
+            return {
+                "documents": [
+                    {"metadata": doc.metadata, "page_content": doc.page_content}
+                    for doc in docs
+                ]
+            }
 
     else:
         # Dynamic query - requires query parameter
@@ -98,7 +109,13 @@ def handle_semantic_search(
             example_calls=[],  # Examples cannot be provided for context.
         )
         async def context_tool_fn(query: str) -> dict[str, Any]:
-            return {"documents": await retriever.ainvoke(query)}
+            docs = await retriever.ainvoke(query)
+            return {
+                "documents": [
+                    {"metadata": doc.metadata, "page_content": doc.page_content}
+                    for doc in docs
+                ]
+            }
 
     return StructuredToolWithOutputType(
         name=tool_name,
@@ -132,17 +149,22 @@ def handle_deep_rag(
         __base__=DeepRagContent,
         deep_rag_id=(str, Field(alias="deepRagId")),
     )
+    input_model: Type[BaseModel]
 
     if is_static_query(resource):
         # Static query - no input parameter needed
         static_prompt = resource.settings.query.value
         assert static_prompt is not None
-        input_model = None
+
+        class DeepRagStaticInputModel(BaseModel):
+            pass
+
+        input_model = DeepRagStaticInputModel
 
         @mockable(
             name=resource.name,
             description=resource.description,
-            input_schema=input_model,
+            input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for context.
         )

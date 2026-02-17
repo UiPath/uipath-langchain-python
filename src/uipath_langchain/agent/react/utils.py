@@ -5,8 +5,12 @@ from typing import Any, Sequence, TypeVar, cast
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentStateException
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import (
     AgentGraphState,
@@ -157,8 +161,11 @@ def extract_current_tool_call_index(
             completed_tool_call_ids.add(message.tool_call_id)
         elif isinstance(message, AIMessage):
             if not message.tool_calls:
-                raise AgentStateException(
-                    "No tool calls found in latest AIMessage while extracting tool call index."
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.STATE_ERROR,
+                    title="No tool calls found in latest AIMessage.",
+                    detail="Cannot extract tool call index from an AIMessage that has no tool calls.",
+                    category=UiPathErrorCategory.SYSTEM,
                 )
 
             # find the first tool call that hasn't been completed
@@ -170,10 +177,16 @@ def extract_current_tool_call_index(
             # all tool calls completed
             return None
         else:
-            raise AgentStateException(
-                f"Unexpected message type {type(message)} encountered while extracting tool call index. Expected AIMessage or ToolMessage."
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.STATE_ERROR,
+                title=f"Unexpected message type {type(message).__name__} encountered.",
+                detail="Expected AIMessage or ToolMessage while extracting tool call index.",
+                category=UiPathErrorCategory.SYSTEM,
             )
 
-    raise AgentStateException(
-        "No AIMessage found in messages - cannot extract current tool call index"
+    raise AgentRuntimeError(
+        code=AgentRuntimeErrorCode.STATE_ERROR,
+        title="No AIMessage found in messages.",
+        detail="Cannot extract current tool call index without an AIMessage in the message history.",
+        category=UiPathErrorCategory.SYSTEM,
     )

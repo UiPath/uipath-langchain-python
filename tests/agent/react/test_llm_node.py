@@ -14,6 +14,84 @@ from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.chat.types import APIFlavor, LLMProvider
 
 
+class TestLLMNodeParallelToolCalls:
+    """Test that enable_openai_parallel_tool_calls parameter flows to model.bind_tools()."""
+
+    def setup_method(self):
+        self.mock_model = Mock(spec=BaseChatModel)
+        self.mock_model.bind_tools.return_value = self.mock_model
+        self.mock_model.bind.return_value = self.mock_model
+        self.mock_model.llm_provider = LLMProvider.OPENAI
+        self.mock_model.api_flavor = APIFlavor.OPENAI_COMPLETIONS
+
+        self.regular_tool = Mock(spec=BaseTool)
+        self.regular_tool.name = "regular_tool"
+
+        self.test_state = AgentGraphState(messages=[HumanMessage(content="Test")])
+
+    @pytest.mark.asyncio
+    async def test_parallel_true_passes_kwarg(self):
+        mock_response = AIMessage(content="done", tool_calls=[])
+        self.mock_model.ainvoke = AsyncMock(return_value=mock_response)
+
+        llm_node = create_llm_node(
+            self.mock_model, [self.regular_tool], enable_openai_parallel_tool_calls=True
+        )
+        await llm_node(self.test_state)
+
+        self.mock_model.bind_tools.assert_called_once()
+        _, kwargs = self.mock_model.bind_tools.call_args
+        assert kwargs["parallel_tool_calls"] is True
+
+    @pytest.mark.asyncio
+    async def test_parallel_false_passes_kwarg(self):
+        mock_response = AIMessage(content="done", tool_calls=[])
+        self.mock_model.ainvoke = AsyncMock(return_value=mock_response)
+
+        llm_node = create_llm_node(
+            self.mock_model,
+            [self.regular_tool],
+            enable_openai_parallel_tool_calls=False,
+        )
+        await llm_node(self.test_state)
+
+        self.mock_model.bind_tools.assert_called_once()
+        _, kwargs = self.mock_model.bind_tools.call_args
+        assert kwargs["parallel_tool_calls"] is False
+
+    @pytest.mark.asyncio
+    async def test_default_is_true(self):
+        mock_response = AIMessage(content="done", tool_calls=[])
+        self.mock_model.ainvoke = AsyncMock(return_value=mock_response)
+
+        llm_node = create_llm_node(self.mock_model, [self.regular_tool])
+        await llm_node(self.test_state)
+
+        self.mock_model.bind_tools.assert_called_once()
+        _, kwargs = self.mock_model.bind_tools.call_args
+        assert kwargs["parallel_tool_calls"] is True
+
+    @pytest.mark.asyncio
+    async def test_unsupported_provider_no_kwarg(self):
+        """Bedrock handler returns empty dict, so no parallel kwarg is passed."""
+        self.mock_model.llm_provider = LLMProvider.BEDROCK
+        self.mock_model.api_flavor = APIFlavor.AWS_BEDROCK_CONVERSE
+
+        mock_response = AIMessage(content="done", tool_calls=[])
+        self.mock_model.ainvoke = AsyncMock(return_value=mock_response)
+
+        llm_node = create_llm_node(
+            self.mock_model,
+            [self.regular_tool],
+            enable_openai_parallel_tool_calls=False,
+        )
+        await llm_node(self.test_state)
+
+        self.mock_model.bind_tools.assert_called_once()
+        _, kwargs = self.mock_model.bind_tools.call_args
+        assert "parallel_tool_calls" not in kwargs
+
+
 class TestLLMNodeToolCallFiltering:
     """Test cases for LLM node tool call filtering integration."""
 

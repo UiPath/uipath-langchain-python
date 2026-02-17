@@ -6,6 +6,7 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
+from langgraph.func import task
 from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentInternalBatchTransformToolProperties,
@@ -34,6 +35,38 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 )
 from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
+
+# Define the output schema with job-attachment
+BATCH_TRANSFORM_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "result": {
+            "$ref": "#/definitions/job-attachment",
+            "description": "The transformed result file as an attachment",
+        }
+    },
+    "required": ["result"],
+    "definitions": {
+        "job-attachment": {
+            "type": "object",
+            "properties": {
+                "ID": {"type": "string", "description": "Orchestrator attachment key"},
+                "FullName": {"type": "string", "description": "File name"},
+                "MimeType": {
+                    "type": "string",
+                    "description": "The MIME type of the content",
+                },
+                "Metadata": {
+                    "type": "object",
+                    "description": "Dictionary<string, string> of metadata",
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            "required": ["ID", "FullName", "MimeType"],
+            "x-uipath-resource-kind": "JobAttachment",
+        }
+    },
+}
 
 
 def create_batch_transform_tool(
@@ -83,15 +116,8 @@ def create_batch_transform_tool(
 
     # Create input model from modified schema
     input_model = create_model(input_schema)
-    output_model = create_model(resource.output_schema)
+    output_model = create_model(BATCH_TRANSFORM_OUTPUT_SCHEMA)
 
-    @mockable(
-        name=resource.name,
-        description=resource.description,
-        input_schema=input_model.model_json_schema() if input_model else None,
-        output_schema=output_model.model_json_schema(),
-        example_calls=[],  # Examples cannot be provided for internal tools
-    )
     async def batch_transform_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query
         if not query:
@@ -110,29 +136,66 @@ def create_batch_transform_tool(
 
         destination_path = kwargs.get("destination_path", "output.csv")
 
-        uipath = UiPath()
-        ephemeral_index = await uipath.context_grounding.create_ephemeral_index_async(
-            usage=EphemeralIndexUsage.BATCH_RAG,
-            attachments=[attachment_id],
+        @mockable(
+            name=resource.name,
+            description=resource.description,
+            input_schema=input_model.model_json_schema() if input_model else None,
+            output_schema=output_model.model_json_schema(),
+            example_calls=[],  # Examples cannot be provided for internal tools
         )
+        async def invoke_batch_transform():
+            @task
+            async def create_ephemeral_index():
+                uipath = UiPath()
+                ephemeral_index = (
+                    await uipath.context_grounding.create_ephemeral_index_async(
+                        usage=EphemeralIndexUsage.BATCH_RAG,
+                        attachments=[attachment_id],
+                    )
+                )
+                if ephemeral_index.in_progress_ingestion():
+                    ephemeral_index_dict = interrupt(
+                        WaitEphemeralIndex(index=ephemeral_index)
+                    )
+                    return ContextGroundingIndex(**ephemeral_index_dict)
+                return ephemeral_index
 
-        if ephemeral_index.in_progress_ingestion():
-            ephemeral_index_dict = interrupt(WaitEphemeralIndex(index=ephemeral_index))
-            ephemeral_index = ContextGroundingIndex(**ephemeral_index_dict)
+            ephemeral_index = await create_ephemeral_index()
 
-        return interrupt(
-            CreateBatchTransform(
-                name=f"task-{uuid.uuid4()}",
-                index_name=ephemeral_index.name,
-                index_id=ephemeral_index.id,
-                prompt=query,
-                output_columns=batch_transform_output_columns,
-                storage_bucket_folder_path_prefix=static_folder_path_prefix,
-                enable_web_search_grounding=static_web_search,
-                destination_path=destination_path,
-                is_ephemeral_index=True,
+            # create the batch transform and wait for completion
+            interrupt(
+                CreateBatchTransform(
+                    name=f"task-{uuid.uuid4()}",
+                    index_name=ephemeral_index.name,
+                    index_id=ephemeral_index.id,
+                    prompt=query,
+                    output_columns=batch_transform_output_columns,
+                    storage_bucket_folder_path_prefix=static_folder_path_prefix,
+                    enable_web_search_grounding=static_web_search,
+                    destination_path=destination_path,
+                    is_ephemeral_index=True,
+                )
             )
-        )
+
+            # create attachment with output and return attachment info
+            async def upload_result_attachment():
+                uipath = UiPath()
+                return await uipath.attachments.upload_async(
+                    name=destination_path,
+                    source_path=destination_path,
+                )
+
+            result_attachment_id = await upload_result_attachment()
+
+            return {
+                "ID": str(result_attachment_id),
+                "FullName": destination_path,
+                "MimeType": "text/csv",
+            }
+
+        result_attachment = await invoke_batch_transform()
+
+        return {"result": result_attachment}
 
     # Import here to avoid circular dependency
     from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
@@ -155,10 +218,17 @@ def create_batch_transform_tool(
         output_type=output_model,
         argument_properties=resource.argument_properties,
         metadata={
-            "tool_type": resource.type.lower(),
+            "tool_type": "context_grounding",
             "display_name": tool_name,
             "args_schema": input_model,
             "output_schema": output_model,
+            "retrieval_mode": "BatchTransform",
+            "output_columns": [
+                {"name": col.name, "description": col.description}
+                for col in batch_transform_output_columns
+            ],
+            "web_search_grounding": static_web_search,
+            **({"static_query": static_query} if is_query_static else {}),
         },
     )
     tool.set_tool_wrappers(awrapper=batch_transform_tool_wrapper)

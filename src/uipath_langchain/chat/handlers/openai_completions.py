@@ -3,10 +3,9 @@
 from typing import Any
 
 from langchain_core.messages import AIMessage
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentTerminationException
-
+from ..exceptions import ChatModelError, ChatModelErrorCode
 from .base import ModelPayloadHandler
 
 FAULTY_FINISH_REASONS: set[str] = {
@@ -35,6 +34,11 @@ class OpenAICompletionsPayloadHandler(ModelPayloadHandler):
         """Get tool_choice value for OpenAI Completions API."""
         return "required"
 
+    def get_parallel_tool_calls_kwargs(
+        self, parallel_tool_calls: bool
+    ) -> dict[str, Any]:
+        return {"parallel_tool_calls": parallel_tool_calls}
+
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check OpenAI finish_reason and raise exception for faulty terminations.
 
@@ -44,7 +48,7 @@ class OpenAICompletionsPayloadHandler(ModelPayloadHandler):
             response: The AIMessage response from the model
 
         Raises:
-            AgentTerminationException: If finish_reason indicates a faulty termination
+            ChatModelError: If finish_reason indicates a faulty termination
         """
         finish_reason = response.response_metadata.get("finish_reason")
         if not finish_reason:
@@ -58,8 +62,9 @@ class OpenAICompletionsPayloadHandler(ModelPayloadHandler):
                     f"The model terminated with finish reason '{finish_reason}'.",
                 ),
             )
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise ChatModelError(
+                code=ChatModelErrorCode.UNSUCCESSFUL_STOP_REASON,
                 title=title,
                 detail=detail,
+                category=UiPathErrorCategory.USER,
             )

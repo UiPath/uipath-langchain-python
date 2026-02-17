@@ -3,17 +3,21 @@
 from typing import Sequence, TypeVar
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, ToolCall
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    ToolCall,
+)
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
-from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.tools.static_args import (
     apply_static_argument_properties_to_schema,
 )
 from uipath_langchain.chat.handlers import get_payload_handler
 
-from ..exceptions import AgentTerminationException
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..messages.message_utils import replace_tool_calls
 from .constants import (
     DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
@@ -44,6 +48,7 @@ def create_llm_node(
     is_conversational: bool = False,
     llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
     thinking_messages_limit: int = DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
+    enable_openai_parallel_tool_calls: bool = True,
 ):
     """Create LLM node with dynamic tool_choice enforcement.
 
@@ -66,8 +71,8 @@ def create_llm_node(
         messages: list[AnyMessage] = state.messages
         agent_ai_messages = sum(1 for msg in messages if isinstance(msg, AIMessage))
         if agent_ai_messages >= llm_messages_limit:
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_MAX_ITERATIONS,
                 title=f"Maximum iterations of '{llm_messages_limit}' reached.",
                 detail="Verify the agent's trajectory or consider increasing the max iterations in the agent's settings.",
                 category=UiPathErrorCategory.USER,
@@ -78,7 +83,10 @@ def create_llm_node(
         static_schema_tools = _apply_tool_argument_properties(
             bindable_tools, state, input_schema
         )
-        base_llm = model.bind_tools(static_schema_tools)
+        parallel_kwargs = payload_handler.get_parallel_tool_calls_kwargs(
+            enable_openai_parallel_tool_calls
+        )
+        base_llm = model.bind_tools(static_schema_tools, **parallel_kwargs)
 
         if (
             not is_conversational
@@ -91,8 +99,12 @@ def create_llm_node(
 
         response = await llm.ainvoke(messages)
         if not isinstance(response, AIMessage):
-            raise TypeError(
-                f"LLM returned {type(response).__name__} instead of AIMessage"
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
+                title=f"LLM returned {type(response).__name__} invalid response.",
+                detail="The language model returned an unexpected response type."
+                "If you are using a BYOM configuration, verify your model deployment.",
+                category=UiPathErrorCategory.SYSTEM,
             )
 
         payload_handler.check_stop_reason(response)

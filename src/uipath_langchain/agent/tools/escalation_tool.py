@@ -19,8 +19,8 @@ from uipath.agent.models.agent import (
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
-from uipath.platform.common import UiPathConfig, WaitEscalation
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.platform.common import WaitEscalation
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.static_args import (
@@ -30,7 +30,7 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 
-from ..exceptions import AgentTerminationException
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..react.types import AgentGraphState
 from .tool_node import ToolWrapperReturnType
 from .utils import (
@@ -58,13 +58,15 @@ async def resolve_recipient_value(
             type = TaskRecipientType.EMAIL
         elif recipient.type == AgentEscalationRecipientType.ASSET_GROUP_NAME:
             type = TaskRecipientType.GROUP_NAME
-        return TaskRecipient(value=value, type=type)
+        return TaskRecipient(value=value, type=type, displayName=value)
 
     if isinstance(recipient, StandardRecipient):
         type = TaskRecipientType(recipient.type)
         if recipient.type == AgentEscalationRecipientType.USER_EMAIL:
             type = TaskRecipientType.EMAIL
-        return TaskRecipient(value=recipient.value, type=type)
+        return TaskRecipient(
+            value=recipient.value, type=type, displayName=recipient.value
+        )
 
     return None
 
@@ -205,16 +207,11 @@ def create_escalation_tool(
         if isinstance(result, dict):
             result = TypeAdapter(EscalationToolOutput).validate_python(result)
 
-        # Extract task info before validation
-        task_id = result.id
-        task_url = f"{UiPathConfig.base_url}/actions_/tasks/{task_id}"
-        assigned_to = _get_user_email(result.assigned_to_user)
-
         outcome = result.action
         escalation_output = _parse_task_data(
             result.data,
             input_schema=input_model.model_json_schema(),
-            output_schema=EscalationToolOutput.model_json_schema(),
+            output_schema=output_model.model_json_schema(),
         )
 
         outcome_str = (
@@ -230,9 +227,6 @@ def create_escalation_tool(
             "action": escalation_action,
             "output": escalation_output,
             "outcome": outcome,
-            "task_id": task_id,
-            "task_url": task_url,
-            "assigned_to": assigned_to,
         }
 
     async def escalation_wrapper(
@@ -262,18 +256,16 @@ def create_escalation_tool(
                 f"with directive {result['outcome']}"
             )
 
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
                 title=termination_title,
                 detail=output_detail,
+                category=UiPathErrorCategory.USER,
             )
 
         return {
             "output": result["output"],
             "outcome": result["outcome"],
-            "task_id": result["task_id"],
-            "task_url": result["task_url"],
-            "assigned_to": result["assigned_to"],
         }
 
     tool = StructuredToolWithArgumentProperties(
@@ -288,6 +280,8 @@ def create_escalation_tool(
             "display_name": channel.properties.app_name,
             "channel_type": channel.type,
             "recipient": None,
+            "args_schema": input_model,
+            "output_schema": output_model,
         },
     )
     tool.set_tool_wrappers(awrapper=escalation_wrapper)

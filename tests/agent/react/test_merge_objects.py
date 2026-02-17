@@ -3,6 +3,11 @@ from typing import Annotated
 import pytest
 from pydantic import BaseModel
 
+from tests.agent.helpers.error_helpers import agent_runtime_code
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.reducers import merge_objects
 
 
@@ -50,17 +55,23 @@ class TestMergeObjects:
         assert result is right
 
     def test_left_not_basemodel_raises_error(self):
-        """Should raise TypeError when left is not a BaseModel."""
-        with pytest.raises(TypeError, match="Left object must be a Pydantic BaseModel"):
+        """Should raise AgentRuntimeError when left is not a BaseModel."""
+        with pytest.raises(AgentRuntimeError) as exc_info:
             merge_objects({"key": "value"}, {"some": "data"})
 
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.STATE_ERROR
+        )
+
     def test_right_not_basemodel_or_dict_raises_error(self):
-        """Should raise TypeError when right is not a BaseModel or dict."""
+        """Should raise AgentRuntimeError when right is not a BaseModel or dict."""
         left = SimpleModel()
-        with pytest.raises(
-            TypeError, match="Right object must be a Pydantic BaseModel or dict"
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             merge_objects(left, "invalid")
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.STATE_ERROR
+        )
 
     def test_simple_field_override_with_dict(self):
         """Should override simple fields when merging with dict."""

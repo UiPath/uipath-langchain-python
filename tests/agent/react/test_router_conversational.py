@@ -6,7 +6,11 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
 
-from uipath_langchain.agent.exceptions import AgentNodeRoutingException
+from tests.agent.helpers.error_helpers import agent_runtime_code
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.router_conversational import (
     create_route_agent_conversational,
 )
@@ -132,21 +136,23 @@ class TestCreateRouteAgentConversational:
 
     def test_empty_messages_raises_exception(self, route_function, empty_state):
         """Should raise AgentNodeRoutingException for empty messages."""
-        with pytest.raises(
-            AgentNodeRoutingException,
-            match="No AIMessage found in messages for routing",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             route_function(empty_state)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )
 
     def test_no_ai_message_raises_exception(
         self, route_function, state_with_no_ai_messages
     ):
         """Should raise AgentNodeRoutingException when no AIMessage is found."""
-        with pytest.raises(
-            AgentNodeRoutingException,
-            match="No AIMessage found in messages for routing",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             route_function(state_with_no_ai_messages)
+
+        assert exc_info.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )
 
     def test_human_message_after_ai_routes_to_terminate(
         self, route_function, state_with_human_last

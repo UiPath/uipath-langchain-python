@@ -26,6 +26,24 @@ except ImportError:
 
 T = TypeVar("T")
 
+# Known attribute names on LangChain/LangGraph runnables that typically
+# hold nested Runnable instances.  Scanning only these avoids the cost of
+# iterating over *every* attribute returned by vars().
+_KNOWN_RUNNABLE_ATTRS = (
+    "bound",
+    "first",
+    "middle",
+    "last",
+    "steps",
+    "runnable",
+    "default",
+    "fallbacks",
+    "branches",
+)
+
+# Attribute names used to find the wrapped function inside runnables.
+_FUNC_ATTR_NAMES = ("func", "_func", "afunc", "_afunc")
+
 
 @dataclass
 class SchemaDetails:
@@ -66,7 +84,7 @@ def _unwrap_runnable_callable(
 
     # 2) Generic LangChain function-wrapping runnables
     if func is None:
-        for attr_name in ("func", "_func", "afunc", "_afunc"):
+        for attr_name in _FUNC_ATTR_NAMES:
             maybe = getattr(runnable, attr_name, None)
             if callable(maybe):
                 func = maybe
@@ -84,116 +102,108 @@ def _unwrap_runnable_callable(
                 if found is not None:
                     return found
 
-    # 4) Deep-scan attributes, including nested runnables / containers
-    def _scan_value(value: Any) -> T | None:
-        if isinstance(value, target_type):
-            return value
-        if isinstance(value, Runnable):
-            return _unwrap_runnable_callable(value, target_type, _seen)
-        if isinstance(value, dict):
-            for v in value.values():
-                found = _scan_value(v)
-                if found is not None:
-                    return found
-        # Handle lists, tuples, sets, etc. but avoid strings/bytes
-        if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-            for item in value:
-                found = _scan_value(item)
-                if found is not None:
-                    return found
-        return None
-
-    try:
-        attrs = vars(runnable)
-    except TypeError:
-        attrs = {}
-
-    for value in attrs.values():
-        found = _scan_value(value)
+    # 4) Scan only known runnable-holding attributes instead of all vars()
+    for attr_name in _KNOWN_RUNNABLE_ATTRS:
+        value = getattr(runnable, attr_name, None)
+        if value is None:
+            continue
+        found = _scan_value(value, target_type, _seen)
         if found is not None:
             return found
 
     return None
 
 
-def _get_node_type(node: Node) -> str:
-    """Determine the type of a LangGraph node using strongly-typed isinstance checks.
+def _scan_value(
+    value: Any,
+    target_type: type[T],
+    _seen: set[int],
+) -> T | None:
+    """Recursively scan a value for an instance of target_type."""
+    if isinstance(value, target_type):
+        return value
+    if isinstance(value, Runnable):
+        return _unwrap_runnable_callable(value, target_type, _seen)
+    if isinstance(value, dict):
+        for v in value.values():
+            found = _scan_value(v, target_type, _seen)
+            if found is not None:
+                return found
+    # Handle lists, tuples, sets, etc. but avoid strings/bytes
+    elif isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        for item in value:
+            found = _scan_value(item, target_type, _seen)
+            if found is not None:
+                return found
+    return None
+
+
+def _extract_model_metadata(model: BaseLanguageModel[Any]) -> dict[str, Any]:
+    """Extract metadata from a language model instance.
 
     Args:
-        node: A Node object from the graph
+        model: A language model instance
 
     Returns:
-        String representing the node type
+        Dictionary containing model metadata
     """
-    if node.id in ("__start__", "__end__"):
-        return node.id
-
-    if node.data is None:
-        return "node"
-
-    if not isinstance(node.data, Runnable):
-        return "node"
-
-    tool_node = _unwrap_runnable_callable(node.data, ToolNode)
-    if tool_node is not None:
-        return "tool"
-
-    chat_model = _unwrap_runnable_callable(node.data, BaseChatModel)  # type: ignore[type-abstract]
-    if chat_model is not None:
-        return "model"
-
-    language_model = _unwrap_runnable_callable(node.data, BaseLanguageModel)  # type: ignore[type-abstract]
-    if language_model is not None:
-        return "model"
-
-    return "node"
-
-
-def _get_node_metadata(node: Node) -> dict[str, Any]:
-    """Extract metadata from a node in a type-safe manner.
-
-    Args:
-        node: A Node object from the graph
-
-    Returns:
-        Dictionary containing node metadata
-    """
-    if node.data is None:
-        return {}
-
-    # Early return if data is not a Runnable
-    if not isinstance(node.data, Runnable):
-        return {}
-
     metadata: dict[str, Any] = {}
 
+    if hasattr(model, "model") and isinstance(model.model, str):
+        metadata["model_name"] = model.model
+    elif hasattr(model, "model_name") and model.model_name:
+        metadata["model_name"] = model.model_name
+
+    if hasattr(model, "temperature") and model.temperature is not None:
+        metadata["temperature"] = model.temperature
+
+    if hasattr(model, "max_tokens") and model.max_tokens is not None:
+        metadata["max_tokens"] = model.max_tokens
+    elif (
+        hasattr(model, "max_completion_tokens")
+        and model.max_completion_tokens is not None
+    ):
+        metadata["max_tokens"] = model.max_completion_tokens
+
+    return metadata
+
+
+def _get_node_info(node: Node) -> tuple[str, dict[str, Any]]:
+    """Determine the type and metadata of a LangGraph node in a single pass.
+
+    Args:
+        node: A Node object from the graph
+
+    Returns:
+        Tuple of (node_type string, metadata dict)
+    """
+    if node.id in ("__start__", "__end__"):
+        return node.id, {}
+
+    if node.data is None or not isinstance(node.data, Runnable):
+        return "node", {}
+
+    # Check for ToolNode
     tool_node = _unwrap_runnable_callable(node.data, ToolNode)
     if tool_node is not None:
+        metadata: dict[str, Any] = {}
         if hasattr(tool_node, "_tools_by_name"):
             tools_by_name = tool_node._tools_by_name
             metadata["tool_names"] = list(tools_by_name.keys())
             metadata["tool_count"] = len(tools_by_name)
-        return metadata
+        return "tool", metadata
 
+    # Check for ChatModel (subclass of BaseLanguageModel, check first)
     chat_model = _unwrap_runnable_callable(node.data, BaseChatModel)  # type: ignore[type-abstract]
     if chat_model is not None:
-        if hasattr(chat_model, "model") and isinstance(chat_model.model, str):
-            metadata["model_name"] = chat_model.model
-        elif hasattr(chat_model, "model_name") and chat_model.model_name:
-            metadata["model_name"] = chat_model.model_name
+        return "model", _extract_model_metadata(chat_model)
 
-        if hasattr(chat_model, "temperature") and chat_model.temperature is not None:
-            metadata["temperature"] = chat_model.temperature
+    # Check for other language models
+    language_model = _unwrap_runnable_callable(node.data, BaseLanguageModel)  # type: ignore[type-abstract]
+    if language_model is not None:
+        return "model", _extract_model_metadata(language_model)
 
-        if hasattr(chat_model, "max_tokens") and chat_model.max_tokens is not None:
-            metadata["max_tokens"] = chat_model.max_tokens
-        elif (
-            hasattr(chat_model, "max_completion_tokens")
-            and chat_model.max_completion_tokens is not None
-        ):
-            metadata["max_tokens"] = chat_model.max_completion_tokens
-
-    return metadata
+    return "node", {}
 
 
 def _convert_graph_to_uipath(graph: Graph) -> UiPathRuntimeGraph:
@@ -207,12 +217,13 @@ def _convert_graph_to_uipath(graph: Graph) -> UiPathRuntimeGraph:
     """
     nodes: list[UiPathRuntimeNode] = []
     for _, node in graph.nodes.items():
+        node_type, metadata = _get_node_info(node)
         nodes.append(
             UiPathRuntimeNode(
                 id=node.id,
                 name=node.name or node.id,
-                type=_get_node_type(node),
-                metadata=_get_node_metadata(node),
+                type=node_type,
+                metadata=metadata,
                 subgraph=None,
             )
         )
@@ -253,13 +264,14 @@ def get_graph_schema(
 
     nodes: list[UiPathRuntimeNode] = []
     for node_id, node in graph.nodes.items():
+        node_type, metadata = _get_node_info(node)
         subgraph: UiPathRuntimeGraph | None = subgraphs_dict.get(node_id)
         nodes.append(
             UiPathRuntimeNode(
                 id=node.id,
                 name=node.name or node.id,
-                type=_get_node_type(node),
-                metadata=_get_node_metadata(node),
+                type=node_type,
+                metadata=metadata,
                 subgraph=subgraph,
             )
         )

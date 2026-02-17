@@ -16,9 +16,12 @@ from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.types import Command
 from uipath.core.guardrails.guardrails import FieldReference, FieldSource
 from uipath.platform.guardrails import GuardrailScope
-from uipath.runtime.errors import UiPathErrorCode
 
-from uipath_langchain.agent.exceptions import AgentTerminationException
+from tests.agent.helpers.error_helpers import agent_runtime_code
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.guardrails.actions.filter_action import FilterAction
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
@@ -71,7 +74,7 @@ class TestFilterAction:
     async def test_node_name_and_exception_for_unsupported_scopes(
         self, scope: GuardrailScope, stage: ExecutionStage, expected_node_name: str
     ) -> None:
-        """AGENT/LLM scopes raise AgentTerminationException and node name is sanitized."""
+        """AGENT/LLM scopes raise AgentRuntimeError and node name is sanitized."""
         action = FilterAction()
         guardrail = MagicMock()
         guardrail.name = "My Guardrail v1"
@@ -85,18 +88,17 @@ class TestFilterAction:
 
         assert node_name == expected_node_name
 
-        with pytest.raises(AgentTerminationException) as excinfo:
+        with pytest.raises(AgentRuntimeError) as excinfo:
             await node(AgentGuardrailsGraphState(messages=[]))
 
         # Validate rich error info
-        assert (
-            excinfo.value.error_info.code
-            == f"Python.{UiPathErrorCode.EXECUTION_ERROR.value}"
+        assert excinfo.value.error_info.code == agent_runtime_code(
+            AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_ERROR
         )
         assert excinfo.value.error_info.title == "Guardrail filter action not supported"
         assert (
-            excinfo.value.error_info.detail
-            == f"FilterAction is not supported for scope [{scope.name}] at this time."
+            f"FilterAction is not supported for scope [{scope.name}] at this time."
+            in excinfo.value.error_info.detail
         )
 
     @pytest.mark.asyncio

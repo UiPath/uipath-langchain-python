@@ -3,10 +3,9 @@
 from typing import Any
 
 from langchain_core.messages import AIMessage
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentTerminationException
-
+from ..exceptions import ChatModelError, ChatModelErrorCode
 from .base import ModelPayloadHandler
 
 FAULTY_INCOMPLETE_REASONS: set[str] = {
@@ -39,6 +38,11 @@ class OpenAIResponsesPayloadHandler(ModelPayloadHandler):
         """Get tool_choice value for OpenAI Responses API."""
         return "required"
 
+    def get_parallel_tool_calls_kwargs(
+        self, parallel_tool_calls: bool
+    ) -> dict[str, Any]:
+        return {"parallel_tool_calls": parallel_tool_calls}
+
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check OpenAI Responses API status and raise exception for faulty terminations.
 
@@ -50,7 +54,7 @@ class OpenAIResponsesPayloadHandler(ModelPayloadHandler):
             response: The AIMessage response from the model
 
         Raises:
-            AgentTerminationException: If status indicates a faulty termination
+            ChatModelError: If status indicates a faulty termination
         """
         status = response.response_metadata.get("status")
 
@@ -60,10 +64,11 @@ class OpenAIResponsesPayloadHandler(ModelPayloadHandler):
             title, detail = STOP_REASON_MESSAGES["failed"]
             if error_message:
                 detail = f"{detail} Error: {error_message}"
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise ChatModelError(
+                code=ChatModelErrorCode.UNSUCCESSFUL_STOP_REASON,
                 title=title,
                 detail=detail,
+                category=UiPathErrorCategory.USER,
             )
 
         if status == "incomplete":
@@ -83,8 +88,9 @@ class OpenAIResponsesPayloadHandler(ModelPayloadHandler):
                         f"The model response was incomplete due to '{reason}'.",
                     ),
                 )
-                raise AgentTerminationException(
-                    code=UiPathErrorCode.EXECUTION_ERROR,
+                raise ChatModelError(
+                    code=ChatModelErrorCode.UNSUCCESSFUL_STOP_REASON,
                     title=title,
                     detail=detail,
+                    category=UiPathErrorCategory.USER,
                 )

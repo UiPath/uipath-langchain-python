@@ -16,11 +16,16 @@ from uipath.runtime import (
     UiPathRuntimeStorageProtocol,
     UiPathStreamOptions,
 )
-from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
+from uipath.runtime.errors import (
+    UiPathBaseRuntimeError,
+    UiPathErrorCategory,
+    UiPathErrorCode,
+)
 from uipath.runtime.events import (
     UiPathRuntimeEvent,
     UiPathRuntimeMessageEvent,
     UiPathRuntimeStateEvent,
+    UiPathRuntimeStatePhase,
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
@@ -84,7 +89,7 @@ class UiPathLangGraphRuntime:
             return result
 
         except Exception as e:
-            raise self._create_runtime_error(e) from e
+            raise self.create_runtime_error(e) from e
 
     async def stream(
         self,
@@ -131,10 +136,10 @@ class UiPathLangGraphRuntime:
                 graph_input,
                 graph_config,
                 interrupt_before=options.breakpoints if options else None,
-                stream_mode=["messages", "updates"],
+                stream_mode=["messages", "updates", "tasks"],
                 subgraphs=True,
             ):
-                _, chunk_type, data = stream_chunk
+                namespace, chunk_type, data = stream_chunk
 
                 # Emit UiPathRuntimeMessageEvent for messages
                 if chunk_type == "messages":
@@ -167,12 +172,43 @@ class UiPathLangGraphRuntime:
                         for node_name, agent_data in data.items():
                             if node_name in ("__metadata__",):
                                 continue
-                            if isinstance(agent_data, dict):
-                                state_event = UiPathRuntimeStateEvent(
-                                    payload=serialize_output(agent_data),
-                                    node_name=node_name,
-                                )
-                                yield state_event
+                            state_event = UiPathRuntimeStateEvent(
+                                payload=serialize_output(agent_data)
+                                if isinstance(agent_data, dict)
+                                else {},
+                                node_name=node_name,
+                                qualified_node_name=self._build_node_name(
+                                    namespace,
+                                    node_name,
+                                ),
+                            )
+                            yield state_event
+                elif chunk_type == "tasks":
+                    if isinstance(data, dict):
+                        task_name = data.get("name", "")
+
+                        if "input" in data:
+                            phase = UiPathRuntimeStatePhase.STARTED
+                        elif "result" in data:
+                            phase = (
+                                UiPathRuntimeStatePhase.FAULTED
+                                if data.get("error")
+                                else UiPathRuntimeStatePhase.COMPLETED
+                            )
+                        else:
+                            phase = None
+
+                        if phase is not None:
+                            state_event = UiPathRuntimeStateEvent(
+                                payload=serialize_output(data),
+                                node_name=task_name,
+                                qualified_node_name=self._build_node_name(
+                                    namespace,
+                                    task_name,
+                                ),
+                                phase=phase,
+                            )
+                            yield state_event
 
             # Extract output from final chunk
             graph_output = self._extract_graph_result(final_chunk)
@@ -184,7 +220,7 @@ class UiPathLangGraphRuntime:
             yield result
 
         except Exception as e:
-            raise self._create_runtime_error(e) from e
+            raise self.create_runtime_error(e) from e
 
     async def get_schema(self) -> UiPathRuntimeSchema:
         """Get schema for this LangGraph runtime."""
@@ -197,6 +233,45 @@ class UiPathLangGraphRuntime:
             input=schema_details.schema["input"],
             output=schema_details.schema["output"],
             graph=get_graph_schema(self.graph, xray=1),
+        )
+
+    # This can be overriden by subclasses working with custom exception hierarchies
+    def create_runtime_error(self, e: Exception) -> UiPathBaseRuntimeError:
+        """Handle execution errors and create appropriate LangGraphRuntimeError."""
+        if isinstance(e, LangGraphRuntimeError):
+            return e
+
+        detail = f"Error: {str(e)}"
+
+        if isinstance(e, GraphRecursionError):
+            return LangGraphRuntimeError(
+                LangGraphErrorCode.GRAPH_LOAD_ERROR,
+                "Graph recursion limit exceeded",
+                detail,
+                UiPathErrorCategory.USER,
+            )
+
+        if isinstance(e, InvalidUpdateError):
+            return LangGraphRuntimeError(
+                LangGraphErrorCode.GRAPH_INVALID_UPDATE,
+                str(e),
+                detail,
+                UiPathErrorCategory.USER,
+            )
+
+        if isinstance(e, EmptyInputError):
+            return LangGraphRuntimeError(
+                LangGraphErrorCode.GRAPH_EMPTY_INPUT,
+                "The input data is empty",
+                detail,
+                UiPathErrorCategory.USER,
+            )
+
+        return LangGraphRuntimeError(
+            UiPathErrorCode.EXECUTION_ERROR,
+            "Graph execution failed",
+            detail,
+            UiPathErrorCategory.USER,
         )
 
     def _get_graph_config(self) -> RunnableConfig:
@@ -392,44 +467,6 @@ class UiPathLangGraphRuntime:
             status=UiPathRuntimeStatus.SUCCESSFUL,
         )
 
-    def _create_runtime_error(self, e: Exception) -> LangGraphRuntimeError:
-        """Handle execution errors and create appropriate LangGraphRuntimeError."""
-        if isinstance(e, LangGraphRuntimeError):
-            return e
-
-        detail = f"Error: {str(e)}"
-
-        if isinstance(e, GraphRecursionError):
-            return LangGraphRuntimeError(
-                LangGraphErrorCode.GRAPH_LOAD_ERROR,
-                "Graph recursion limit exceeded",
-                detail,
-                UiPathErrorCategory.USER,
-            )
-
-        if isinstance(e, InvalidUpdateError):
-            return LangGraphRuntimeError(
-                LangGraphErrorCode.GRAPH_INVALID_UPDATE,
-                str(e),
-                detail,
-                UiPathErrorCategory.USER,
-            )
-
-        if isinstance(e, EmptyInputError):
-            return LangGraphRuntimeError(
-                LangGraphErrorCode.GRAPH_EMPTY_INPUT,
-                "The input data is empty",
-                detail,
-                UiPathErrorCategory.USER,
-            )
-
-        return LangGraphRuntimeError(
-            UiPathErrorCode.EXECUTION_ERROR,
-            "Graph execution failed",
-            detail,
-            UiPathErrorCategory.USER,
-        )
-
     def _detect_middleware_nodes(self) -> set[str]:
         """
         Detect middleware nodes by their naming pattern.
@@ -452,6 +489,47 @@ class UiPathLangGraphRuntime:
     def _is_middleware_node(self, node_name: str) -> bool:
         """Check if a node name represents a middleware node."""
         return node_name in self._middleware_node_names
+
+    def _build_node_name(self, namespace: Any, node_name: str) -> str:
+        """Build a fully qualified node name with subgraph prefix from the namespace.
+
+        When streaming with ``subgraphs=True``, LangGraph provides a namespace
+        tuple that identifies the subgraph hierarchy a node belongs to. This
+        method extracts the subgraph names and prepends them to the node name.
+
+        Args:
+            namespace: A tuple representing the subgraph hierarchy.
+                - () for the root graph.
+                - ("subgraph_name:node_id",) for a single-level subgraph.
+                - ("subgraph_name:node_id", "nested:node_id") for nested subgraphs.
+            node_name: The name of the node within its graph.
+
+        Returns:
+            The fully qualified node name. For example:
+                - "agent" when called from the root graph.
+                - "coder:generate" when called from the *coder* subgraph.
+                - "coder:debugger:analyze" when called from *debugger* nested inside *coder*.
+        """
+        if not namespace:
+            return node_name
+        if not isinstance(namespace, (tuple, list)):
+            return node_name
+        parts = []
+        for ns in namespace:
+            if not isinstance(ns, str):
+                continue
+            if not ns:
+                continue
+            # Extract subgraph name (part before ':'), fall back to full string
+            part = ns.split(":")[0] if ":" in ns else ns
+            if part:
+                parts.append(part)
+
+        if not parts:
+            return node_name
+
+        prefix = ":".join(parts)
+        return f"{prefix}:{node_name}"
 
     async def dispose(self) -> None:
         """Cleanup runtime resources."""

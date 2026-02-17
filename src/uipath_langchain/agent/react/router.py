@@ -2,7 +2,9 @@
 
 from typing import Literal
 
-from ..exceptions import AgentNodeRoutingException
+from uipath.runtime.errors import UiPathErrorCategory
+
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .types import FLOW_CONTROL_TOOLS, AgentGraphNode, AgentGraphState
 from .utils import (
     count_consecutive_thinking_messages,
@@ -43,8 +45,11 @@ def create_route_agent(thinking_messages_limit: int = 0):
         messages = state.messages
         last_message = find_latest_ai_message(messages)
         if last_message is None:
-            raise AgentNodeRoutingException(
-                "No AIMessage found in messages for routing."
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.ROUTING_ERROR,
+                title="No AIMessage found in messages.",
+                detail="The agent state contains no AIMessage, which is required for routing decisions.",
+                category=UiPathErrorCategory.SYSTEM,
             )
 
         if not last_message.tool_calls:
@@ -53,18 +58,24 @@ def create_route_agent(thinking_messages_limit: int = 0):
             )
 
             if consecutive_thinking_messages > thinking_messages_limit:
-                raise AgentNodeRoutingException(
-                    f"Agent exceeded consecutive completions limit without producing tool calls "
-                    f"(completions: {consecutive_thinking_messages}, max: {thinking_messages_limit}). "
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED,
+                    title="Agent exceeded consecutive completions limit without producing tool calls.",
+                    detail=f"Completions: {consecutive_thinking_messages}, max: {thinking_messages_limit}. "
                     f"This should not happen as tool_choice='required' is enforced at the limit."
+                    "If you are using a BYOM configuration, verify your model deployment respects tool_choice or equivalent.",
+                    category=UiPathErrorCategory.SYSTEM,
                 )
 
             if last_message.content:
                 return AgentGraphNode.AGENT
 
-            raise AgentNodeRoutingException(
-                f"Agent produced empty response without tool calls "
-                f"(completions: {consecutive_thinking_messages}, has_content: False)"
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.ROUTING_ERROR,
+                title="Agent produced empty response without tool calls.",
+                detail=f"Consecutive completions: {consecutive_thinking_messages}, has_content: False."
+                "If you are using a BYOM configuration, verify your model deployment",
+                category=UiPathErrorCategory.SYSTEM,
             )
 
         current_index = extract_current_tool_call_index(messages)

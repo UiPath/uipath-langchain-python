@@ -124,6 +124,10 @@ class TestCreateDeepRagTool:
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
     @patch(
+        "uipath_langchain.agent.tools.internal_tools.deeprag_tool.task",
+        lambda f: f,
+    )
+    @patch(
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
@@ -190,6 +194,10 @@ class TestCreateDeepRagTool:
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
     @patch(
+        "uipath_langchain.agent.tools.internal_tools.deeprag_tool.task",
+        lambda f: f,
+    )
+    @patch(
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
@@ -254,6 +262,10 @@ class TestCreateDeepRagTool:
     )
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.deeprag_tool.task",
+        lambda f: f,
+    )
     @patch(
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,

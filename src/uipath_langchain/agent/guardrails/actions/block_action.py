@@ -1,11 +1,11 @@
 import re
 
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
-from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
-from ...exceptions import AgentTerminationException
+from ...exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ...react.types import AgentGuardrailsGraphState
 from .base_action import GuardrailAction, GuardrailActionNode
 
@@ -36,8 +36,8 @@ class BlockAction(GuardrailAction):
         node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
 
         async def _node(_state: AgentGuardrailsGraphState):
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION,
                 title="Guardrail violation",
                 detail=f"Execution was blocked by guardrail [{guardrail.name}], with reason: {self.reason}",
                 category=UiPathErrorCategory.USER,

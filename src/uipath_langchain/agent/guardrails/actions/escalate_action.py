@@ -25,9 +25,9 @@ from uipath.platform.guardrails import (
     BaseGuardrail,
     GuardrailScope,
 )
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
-from ...exceptions import AgentStateException, AgentTerminationException
+from ...exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
 from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
@@ -227,11 +227,12 @@ class EscalateAction(GuardrailAction):
             hitl_info = state.inner_state.hitl_task_info
             task_info = hitl_info.get(create_task_node_name) if hitl_info else None
             if task_info is None:
-                raise AgentTerminationException(
-                    code=UiPathErrorCode.EXECUTION_ERROR,
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_ERROR,
                     title="Escalation task not found",
                     detail="The escalation task was not found in state. "
                     "The create-task node must run before the interrupt node.",
+                    category=UiPathErrorCategory.SYSTEM,
                 )
 
             created_task = Task.model_validate(task_info)
@@ -297,10 +298,11 @@ class EscalateAction(GuardrailAction):
                     result = cleanup_update
                 return result
 
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
                 title="Escalation rejected",
                 detail=f"Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data.get('Reason', None)}",
+                category=UiPathErrorCategory.USER,
             )
 
         _interrupt_node.__metadata__ = metadata  # type: ignore[attr-defined]
@@ -348,7 +350,7 @@ def _validate_message_count(
         execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
 
     Raises:
-        AgentTerminationException: If the state doesn't have enough messages.
+        AgentRuntimeError: If the state doesn't have enough messages.
     """
     required_messages = 1 if execution_stage == ExecutionStage.PRE_EXECUTION else 2
     actual_messages = len(state.messages)
@@ -363,10 +365,11 @@ def _validate_message_count(
         if execution_stage == ExecutionStage.POST_EXECUTION:
             detail += " Cannot extract Inputs from previous message."
 
-        raise AgentTerminationException(
-            code=UiPathErrorCode.EXECUTION_ERROR,
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_ERROR,
             title=f"Invalid state for {stage_name}",
             detail=detail,
+            category=UiPathErrorCategory.SYSTEM,
         )
 
 
@@ -432,7 +435,7 @@ def _process_agent_escalation_response(
         Command to update state, or empty dict if no updates are needed.
 
     Raises:
-        AgentTerminationException: If escalation response processing fails.
+        AgentRuntimeError: If escalation response processing fails.
     """
     try:
         reviewed_field = get_reviewed_field_name(execution_stage)
@@ -458,10 +461,11 @@ def _process_agent_escalation_response(
         # POST_EXECUTION: update agent_result
         return Command(update={"inner_state": {"agent_result": parsed}})
     except Exception as e:
-        raise AgentTerminationException(
-            code=UiPathErrorCode.EXECUTION_ERROR,
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
             title="Escalation rejected",
             detail=str(e),
+            category=UiPathErrorCategory.SYSTEM,
         ) from e
 
 
@@ -491,7 +495,7 @@ def _process_llm_escalation_response(
         Command to update messages with reviewed inputs/outputs, or empty dict if no updates needed.
 
     Raises:
-        AgentTerminationException: If escalation response processing fails.
+        AgentRuntimeError: If escalation response processing fails.
     """
     try:
         reviewed_field = get_reviewed_field_name(execution_stage)
@@ -569,10 +573,11 @@ def _process_llm_escalation_response(
 
         return Command(update={"messages": msgs})
     except Exception as e:
-        raise AgentTerminationException(
-            code=UiPathErrorCode.EXECUTION_ERROR,
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
             title="Escalation rejected",
             detail=str(e),
+            category=UiPathErrorCategory.SYSTEM,
         ) from e
 
 
@@ -599,7 +604,7 @@ def _process_tool_escalation_response(
         Command to update messages with reviewed tool call args or content, or empty dict if no updates needed.
 
     Raises:
-        AgentTerminationException: If escalation response processing fails.
+        AgentRuntimeError: If escalation response processing fails.
     """
     try:
         reviewed_field = get_reviewed_field_name(execution_stage)
@@ -649,8 +654,11 @@ def _process_tool_escalation_response(
                         ai_message = replace_tool_calls(ai_message, tool_calls)
                         return Command(update={"messages": [ai_message]})
                     else:
-                        raise AgentStateException(
-                            f"Tool call name [{call_name}] does not match expected tool name [{tool_name}]."
+                        raise AgentRuntimeError(
+                            code=AgentRuntimeErrorCode.STATE_ERROR,
+                            title=f"Tool call name [{call_name}] does not match expected tool name [{tool_name}].",
+                            detail=f"Expected tool call for '{tool_name}' but found '{call_name}' at the current index.",
+                            category=UiPathErrorCategory.SYSTEM,
                         )
                 else:
                     return {}
@@ -668,10 +676,11 @@ def _process_tool_escalation_response(
 
         return Command(update={"messages": msgs})
     except Exception as e:
-        raise AgentTerminationException(
-            code=UiPathErrorCode.EXECUTION_ERROR,
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
             title="Escalation rejected",
             detail=str(e),
+            category=UiPathErrorCategory.SYSTEM,
         ) from e
 
 
