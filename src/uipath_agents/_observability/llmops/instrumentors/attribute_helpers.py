@@ -383,6 +383,26 @@ def get_span_attachments(
         return None
 
 
+def _coerce_to_dict(output: Any) -> Optional[Dict[str, Any]]:
+    """Coerce output to a dict, deserializing from JSON string if needed.
+
+    Args:
+        output: The output data (dict, JSON string, or other)
+
+    Returns:
+        Dict if output is or contains a dict, None otherwise
+    """
+    if isinstance(output, dict):
+        return output
+    if isinstance(output, str):
+        try:
+            parsed = json.loads(output)
+            return parsed if isinstance(parsed, dict) else None
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
 def _get_existing_attachments(
     existing_json: Optional[str],
 ) -> Optional[List[Dict[str, Any]]]:
@@ -441,7 +461,7 @@ def set_span_attachments(
     if not output or not output_schema:
         return
 
-    output_data = output if isinstance(output, dict) else None
+    output_data = _coerce_to_dict(output)
     if not output_data:
         return
 
