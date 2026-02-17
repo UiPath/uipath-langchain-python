@@ -268,14 +268,14 @@ class UiPathChatMessagesMapper:
                 match block_type:
                     case "text":
                         text = cast(TextContentBlock, block)["text"]
-                        events.extend(self._map_text_to_events(message.id, text))
+                        events.extend(self.map_chunk_to_content_part_chunk_events(message.id, text))
                     case "tool_call_chunk":
                         # Accumulate the message chunk
                         self.current_message = self.current_message + message
 
         elif isinstance(message.content, str) and message.content:
             # Fallback: raw string content on the chunk (rare when using content_blocks)
-            events.extend(self._map_text_to_events(message.id, message.content))
+            events.extend(self.map_chunk_to_content_part_chunk_events(message.id, message.content))
 
         # Check if this is the last chunk by examining chunk_position, send end message event only if there are no pending tool calls
         if message.chunk_position == "last":
@@ -435,10 +435,10 @@ class UiPathChatMessagesMapper:
             ),
         )
 
-    def _map_text_to_events(
+    def map_chunk_to_content_part_chunk_events(
         self, message_id: str, text: str
     ) -> list[UiPathConversationMessageEvent]:
-        """Process text through the citation buffer and wrap as message events."""
+        """Map a text chunk to content part chunk events, parsing any citation tags."""
         content_part_id = self.get_content_part_id(message_id)
         return [
             UiPathConversationMessageEvent(
