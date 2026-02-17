@@ -17,7 +17,6 @@ from langchain_core.messages import (
 from langchain_core.messages.content import create_text_block
 from pydantic import ValidationError
 from uipath.core.chat import (
-    UiPathConversationContentPartChunkEvent,
     UiPathConversationContentPartEndEvent,
     UiPathConversationContentPartEvent,
     UiPathConversationContentPartStartEvent,
@@ -32,7 +31,7 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
-from .citation_buffer import CitationStreamBuffer
+from ._citations import CitationStreamBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -247,20 +246,6 @@ class UiPathChatMessagesMapper:
     def get_content_part_id(self, message_id: str) -> str:
         return f"chunk-{message_id}-0"
 
-    def _wrap_chunk_event(
-        self,
-        message_id: str,
-        chunk: UiPathConversationContentPartChunkEvent,
-    ) -> UiPathConversationMessageEvent:
-        """Wrap a content part chunk event into a full message event."""
-        return UiPathConversationMessageEvent(
-            message_id=message_id,
-            content_part=UiPathConversationContentPartEvent(
-                content_part_id=self.get_content_part_id(message_id),
-                chunk=chunk,
-            ),
-        )
-
     async def map_ai_message_chunk_to_events(
         self, message: AIMessageChunk
     ) -> list[UiPathConversationMessageEvent]:
@@ -273,7 +258,9 @@ class UiPathChatMessagesMapper:
         if message.id not in self.seen_message_ids:
             self.current_message = message
             self.seen_message_ids.add(message.id)
-            self._citation_buffer = CitationStreamBuffer()
+            self._citation_buffer = CitationStreamBuffer(
+                message.id, self.get_content_part_id(message.id)
+            )
             events.append(self.map_to_message_start_event(message.id))
 
         if message.content_blocks:
@@ -283,25 +270,20 @@ class UiPathChatMessagesMapper:
                 match block_type:
                     case "text":
                         text = cast(TextContentBlock, block)["text"]
-                        for chunk_event in self._citation_buffer.add_chunk(text):
-                            events.append(
-                                self._wrap_chunk_event(message.id, chunk_event)
-                            )
+                        events.extend(self._citation_buffer.add_chunk(text))
                     case "tool_call_chunk":
                         # Accumulate the message chunk
                         self.current_message = self.current_message + message
 
         elif isinstance(message.content, str) and message.content:
             # Fallback: raw string content on the chunk (rare when using content_blocks)
-            for chunk_event in self._citation_buffer.add_chunk(message.content):
-                events.append(self._wrap_chunk_event(message.id, chunk_event))
+            events.extend(self._citation_buffer.add_chunk(message.content))
 
         # Check if this is the last chunk by examining chunk_position, send end message event only if there are no pending tool calls
         if message.chunk_position == "last":
             # Finalize the citation buffer — flush any remaining text
             if self._citation_buffer is not None:
-                for chunk_event in self._citation_buffer.finalize():
-                    events.append(self._wrap_chunk_event(message.id, chunk_event))
+                events.extend(self._citation_buffer.finalize())
                 self._citation_buffer = None
 
             if (
@@ -454,33 +436,6 @@ class UiPathChatMessagesMapper:
                     tool_name=tool_call["name"],
                     timestamp=self.get_timestamp(),
                     input=tool_call["args"],
-                ),
-            ),
-        )
-
-    def map_chunk_to_content_part_chunk_event(
-        self, message_id: str, block: TextContentBlock
-    ) -> UiPathConversationMessageEvent:
-        text = block["text"]
-        return UiPathConversationMessageEvent(
-            message_id=message_id,
-            content_part=UiPathConversationContentPartEvent(
-                content_part_id=self.get_content_part_id(message_id),
-                chunk=UiPathConversationContentPartChunkEvent(
-                    data=text,
-                ),
-            ),
-        )
-
-    def map_content_to_content_part_chunk_event(
-        self, message_id: str, content: str
-    ) -> UiPathConversationMessageEvent:
-        return UiPathConversationMessageEvent(
-            message_id=message_id,
-            content_part=UiPathConversationContentPartEvent(
-                content_part_id=self.get_content_part_id(message_id),
-                chunk=UiPathConversationContentPartChunkEvent(
-                    data=content,
                 ),
             ),
         )
