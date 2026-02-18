@@ -84,9 +84,8 @@ def create_analyze_file_tool(
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),
             cast(AnyMessage, human_message_with_files),
         ]
-        # result = await non_streaming_llm.ainvoke(messages)
         config = var_child_runnable_config.get(None)
-        result = await llm.ainvoke(messages, config=config)
+        result = await non_streaming_llm.ainvoke(messages, config=config)
 
         analysis_result = extract_text_content(result)
         return analysis_result

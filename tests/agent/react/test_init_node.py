@@ -221,7 +221,7 @@ class TestCreateInitNodeInnerState:
         old_system_message = SystemMessage(content="Old system")
         preserved_human_message = HumanMessage(
             content="File here",
-            metadata={
+            additional_kwargs={
                 "attachments": [
                     {
                         "id": attachment_id,

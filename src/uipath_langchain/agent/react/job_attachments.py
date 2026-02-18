@@ -131,9 +131,9 @@ def _create_job_attachment_error_message(attachment_id_str: str) -> str:
 def parse_attachments_from_conversation_messages(
     messages: Sequence[BaseMessage],
 ) -> dict[str, Attachment]:
-    """Parse attachments from HumanMessage metadata.
+    """Parse attachments from HumanMessage additional_kwargs.
 
-    Extracts attachment information from HumanMessages where metadata
+    Extracts attachment information from HumanMessages where additional_kwargs
     contains an 'attachments' list with attachment details.
 
     Args:
@@ -148,12 +148,12 @@ def parse_attachments_from_conversation_messages(
         if not isinstance(message, HumanMessage):
             continue
 
-        metadata = getattr(message, "metadata", None)
-        if not metadata:
+        kwargs = getattr(message, "additional_kwargs", None)
+        if not kwargs:
             continue
 
-        # Handle attachments list in metadata
-        attachment_list = metadata.get("attachments", [])
+        # Handle attachments list in additional_kwargs
+        attachment_list = kwargs.get("attachments", [])
         for att in attachment_list:
             id = att.get("id")
             full_name = att.get("full_name")

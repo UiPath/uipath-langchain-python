@@ -148,13 +148,11 @@ class TestMapMessages:
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
-        assert msg.content == "hello world"
-        assert msg.metadata["message_id"] == "msg-1"  # type: ignore[attr-defined]
-        assert msg.metadata["created_at"] == TEST_TIMESTAMP  # type: ignore[attr-defined]
-        assert msg.metadata["updated_at"] == TEST_TIMESTAMP  # type: ignore[attr-defined]
         assert msg.content_blocks[0]["text"] == "hello world"  # type: ignore[typeddict-item]
         assert msg.content_blocks[0]["id"] == "part-1"
         assert msg.additional_kwargs["message_id"] == "msg-1"
+        assert msg.additional_kwargs["created_at"] == TEST_TIMESTAMP
+        assert msg.additional_kwargs["updated_at"] == TEST_TIMESTAMP
 
     def test_map_messages_converts_dict_messages(self):
         """Should convert dict messages to HumanMessages."""
@@ -242,7 +240,7 @@ class TestMapMessages:
         # msg = result[0]
         # assert isinstance(msg, HumanMessage)
         # assert msg.content == "first part second part"
-        # assert msg.metadata["message_id"] == "msg-1"  # type: ignore[attr-defined]
+        # assert msg.additional_kwargs["message_id"] == "msg-1"
         # Should create ONE HumanMessage with 2 content blocks
         assert len(result) == 1
         msg = result[0]
@@ -758,9 +756,9 @@ class TestMapMessages:
         msg = result[0]
         assert isinstance(msg, AIMessage)
         assert msg.content == ""
-        assert msg.metadata["message_id"] == "msg-1"  # type: ignore[attr-defined]
-        assert msg.metadata["created_at"] == TEST_TIMESTAMP  # type: ignore[attr-defined]
-        assert msg.metadata["updated_at"] == TEST_TIMESTAMP  # type: ignore[attr-defined]
+        assert msg.additional_kwargs["message_id"] == "msg-1"
+        assert msg.additional_kwargs["created_at"] == TEST_TIMESTAMP
+        assert msg.additional_kwargs["updated_at"] == TEST_TIMESTAMP
 
     def test_map_messages_assistant_role_produces_ai_message(self):
         """Should convert assistant role messages to AIMessage."""
@@ -789,7 +787,7 @@ class TestMapMessages:
         msg = result[0]
         assert isinstance(msg, AIMessage)
         assert msg.content == "I can help with that"
-        assert msg.metadata["message_id"] == "msg-1"  # type: ignore[attr-defined]
+        assert msg.additional_kwargs["message_id"] == "msg-1"
 
     def test_map_messages_external_value_produces_attachment_content(self):
         """Should include attachment metadata in content for external value content parts."""
@@ -827,11 +825,13 @@ class TestMapMessages:
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
-        assert "Check this file" in msg.content
-        assert "<uip:attachments>" in msg.content
-        assert "a940a416-b97b-4146-3089-08de5f4d0a87" in msg.content
-        assert "attachments" in msg.metadata  # type: ignore[attr-defined]
-        assert msg.metadata["attachments"] == [  # type: ignore[attr-defined]
+        # Text content block + attachment text block
+        assert len(msg.content_blocks) == 2
+        assert msg.content_blocks[0]["text"] == "Check this file"  # type: ignore[typeddict-item]
+        assert "<uip:attachments>" in msg.content_blocks[1]["text"]  # type: ignore[typeddict-item]
+        assert "a940a416-b97b-4146-3089-08de5f4d0a87" in msg.content_blocks[1]["text"]  # type: ignore[typeddict-item]
+        assert "attachments" in msg.additional_kwargs
+        assert msg.additional_kwargs["attachments"] == [
             {
                 "id": "a940a416-b97b-4146-3089-08de5f4d0a87",
                 "full_name": "test.pdf",
@@ -872,9 +872,10 @@ class TestMapMessages:
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
-        assert msg.content == "Check this file"
-        assert "<uip:attachments>" not in msg.content
-        assert "attachments" not in msg.metadata  # type: ignore[attr-defined]
+        # Only the text block, no attachment block
+        assert len(msg.content_blocks) == 1
+        assert msg.content_blocks[0]["text"] == "Check this file"  # type: ignore[typeddict-item]
+        assert "attachments" not in msg.additional_kwargs
 
     def test_map_messages_external_value_with_invalid_uri_skips_attachment(self):
         """Should skip attachment when URI has no valid UUID."""
@@ -909,9 +910,10 @@ class TestMapMessages:
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
-        assert msg.content == "Check this file"
-        assert "<uip:attachments>" not in msg.content
-        assert "attachments" not in msg.metadata  # type: ignore[attr-defined]
+        # Only the text block, no attachment block
+        assert len(msg.content_blocks) == 1
+        assert msg.content_blocks[0]["text"] == "Check this file"  # type: ignore[typeddict-item]
+        assert "attachments" not in msg.additional_kwargs
 
     def test_map_messages_external_value_without_name_skips_attachment(self):
         """Should skip attachment when external value has no name."""
@@ -941,8 +943,9 @@ class TestMapMessages:
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
-        assert "<uip:attachments>" not in msg.content
-        assert "attachments" not in msg.metadata  # type: ignore[attr-defined]
+        # No content blocks at all (external value without name is skipped)
+        assert len(msg.content_blocks) == 0
+        assert "attachments" not in msg.additional_kwargs
 
     def test_map_messages_external_value_normalizes_uppercase_uuid(self):
         """Should normalize uppercase UUID in attachment URI to lowercase."""
@@ -973,9 +976,11 @@ class TestMapMessages:
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
-        assert "a940a416-b97b-4146-3089-08de5f4d0a87" in msg.content
-        assert "A940A416" not in msg.content
-        assert msg.metadata["attachments"] == [  # type: ignore[attr-defined]
+        # Only the attachment text block (no inline text part)
+        assert len(msg.content_blocks) == 1
+        assert "a940a416-b97b-4146-3089-08de5f4d0a87" in msg.content_blocks[0]["text"]  # type: ignore[typeddict-item]
+        assert "A940A416" not in msg.content_blocks[0]["text"]  # type: ignore[typeddict-item]
+        assert msg.additional_kwargs["attachments"] == [
             {
                 "id": "a940a416-b97b-4146-3089-08de5f4d0a87",
                 "full_name": "test.pdf",

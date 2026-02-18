@@ -106,68 +106,6 @@ class UiPathChatMessagesMapper:
         # Fallback: unknown type – just pass through
         return messages
 
-    # def _convert_uipath_message(
-    #     self, uipath_msg: UiPathConversationMessage
-    # ) -> BaseMessage:
-    #     """Convert a single UiPathConversationMessage into a LangChain message.
-
-    #     Supports multimodal content parts (text, external content) and preserves metadata.
-    #     Creates appropriate message type based on role (AIMessage for assistant, HumanMessage for user).
-
-    #     All content parts are combined into one LangChain message so the LLM sees text and attachments together.
-    #     Format: "text content\n<uip:attachments>[{...},{...}]</uip:attachments>"
-    #     """
-
-    #     # Store text content and attachments separately, and join in the end
-    #     text_content: str = ""
-    #     attachments: list[dict[str, Any]] = []
-
-    #     metadata: dict[str, Any] = {
-    #         "message_id": uipath_msg.message_id,
-    #         "created_at": uipath_msg.created_at,
-    #         "updated_at": uipath_msg.updated_at,
-    #     }
-
-    #     if uipath_msg.content_parts:
-    #         for part in uipath_msg.content_parts:
-    #             data = part.data
-
-    #             if isinstance(data, UiPathInlineValue):
-    #                 if text_content:
-    #                     text_content += " "
-    #                 text_content += str(data.inline)
-
-    #             elif isinstance(data, UiPathExternalValue):
-    #                 attachment_id = self.parse_attachment_id_from_content_part_uri(
-    #                     data.uri
-    #                 )
-    #                 full_name = getattr(part, "name", None)
-    #                 if attachment_id and full_name:
-    #                     attachments.append(
-    #                         {
-    #                             "id": attachment_id,
-    #                             "full_name": full_name,
-    #                             "mime_type": part.mime_type,
-    #                         }
-    #                     )
-
-    #         if attachments:
-    #             metadata["attachments"] = attachments
-
-    #     content_parts: list[str] = []
-    #     if text_content:
-    #         content_parts.append(text_content)
-
-    #     if attachments:
-    #         content_parts.append(
-    #             f"<uip:attachments>{json.dumps(attachments)}</uip:attachments>"
-    #         )
-    #     combined_content = "\n".join(content_parts)
-
-    #     if uipath_msg.role == "assistant":
-    #         return AIMessage(content=combined_content, metadata=metadata)
-    #     else:
-    #         return HumanMessage(content=combined_content, metadata=metadata)
     def _map_messages_internal(
         self, messages: list[UiPathConversationMessage]
     ) -> list[BaseMessage]:
@@ -181,9 +119,9 @@ class UiPathChatMessagesMapper:
 
         for uipath_message in messages:
             content_blocks: list[ContentBlock] = []
+            attachments: list[dict[str, Any]] = []
 
             # Convert content_parts to content_blocks
-            # TODO: Convert file-attachment content-parts to content_blocks as well
             if uipath_message.content_parts:
                 for uipath_content_part in uipath_message.content_parts:
                     data = uipath_content_part.data
@@ -197,13 +135,36 @@ class UiPathChatMessagesMapper:
                                     text, id=uipath_content_part.content_part_id
                                 )
                             )
+                    elif isinstance(data, UiPathExternalValue):
+                        attachment_id = (
+                            self.parse_attachment_id_from_content_part_uri(data.uri)
+                        )
+                        full_name = getattr(uipath_content_part, "name", None)
+                        if attachment_id and full_name:
+                            attachments.append(
+                                {
+                                    "id": attachment_id,
+                                    "full_name": full_name,
+                                    "mime_type": uipath_content_part.mime_type,
+                                }
+                            )
+
+            # Add attachment references as a text block for LLM visibility
+            if attachments:
+                content_blocks.append(
+                    create_text_block(
+                        f"<uip:attachments>{json.dumps(attachments)}</uip:attachments>"
+                    )
+                )
 
             # Metadata for the user/assistant message
-            metadata = {
+            metadata: dict[str, Any] = {
                 "message_id": uipath_message.message_id,
                 "created_at": uipath_message.created_at,
                 "updated_at": uipath_message.updated_at,
             }
+            if attachments:
+                metadata["attachments"] = attachments
 
             role = uipath_message.role
             if role == "user":

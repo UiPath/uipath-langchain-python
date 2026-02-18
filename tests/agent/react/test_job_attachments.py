@@ -732,7 +732,7 @@ class TestParseAttachmentsFromConversationMessages:
         messages = [
             HumanMessage(
                 content="Check this file",
-                metadata={
+                additional_kwargs={
                     "attachments": [
                         {
                             "id": attachment_id,
@@ -757,7 +757,7 @@ class TestParseAttachmentsFromConversationMessages:
         messages = [
             HumanMessage(
                 content="Check this",
-                metadata={
+                additional_kwargs={
                     "attachments": [
                         {
                             "id": "a940a416-b97b-4146-3089-08de5f4d0a87",
@@ -777,7 +777,7 @@ class TestParseAttachmentsFromConversationMessages:
         messages = [
             HumanMessage(
                 content="Check this",
-                metadata={
+                additional_kwargs={
                     "attachments": [
                         {
                             "full_name": "file.pdf",
@@ -800,7 +800,7 @@ class TestParseAttachmentsFromConversationMessages:
             SystemMessage(content="System"),
             HumanMessage(
                 content="First file",
-                metadata={
+                additional_kwargs={
                     "attachments": [
                         {
                             "id": id1,
@@ -813,7 +813,7 @@ class TestParseAttachmentsFromConversationMessages:
             AIMessage(content="Got it"),
             HumanMessage(
                 content="Second file",
-                metadata={
+                additional_kwargs={
                     "attachments": [
                         {
                             "id": id2,
@@ -840,7 +840,7 @@ class TestParseAttachmentsFromConversationMessages:
         messages = [
             HumanMessage(
                 content="Check these files",
-                metadata={
+                additional_kwargs={
                     "attachments": [
                         {
                             "id": id1,
@@ -868,7 +868,7 @@ class TestParseAttachmentsFromConversationMessages:
         messages = [
             HumanMessage(
                 content="Hello",
-                metadata={"attachments": []},
+                additional_kwargs={"attachments": []},
             ),
         ]
 
