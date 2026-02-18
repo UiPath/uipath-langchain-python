@@ -236,12 +236,6 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        # assert len(result) == 1
-        # msg = result[0]
-        # assert isinstance(msg, HumanMessage)
-        # assert msg.content == "first part second part"
-        # assert msg.additional_kwargs["message_id"] == "msg-1"
-        # Should create ONE HumanMessage with 2 content blocks
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
