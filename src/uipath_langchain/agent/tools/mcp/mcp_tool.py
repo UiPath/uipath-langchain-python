@@ -15,7 +15,9 @@ from uipath.agent.models.agent import (
     LowCodeAgentDefinition,
 )
 from uipath.eval.mocks import mockable
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
 )
@@ -52,9 +54,19 @@ async def create_mcp_tools(
 ) -> AsyncGenerator[list[BaseTool], None]:
     """Connect to UiPath MCP server(s) and yield LangChain-compatible tools."""
     if not (base_url := os.getenv("UIPATH_URL")):
-        raise ValueError("UIPATH_URL environment variable is not set")
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing UIPATH_URL",
+            detail="UIPATH_URL environment variable is not set.",
+            category=UiPathErrorCategory.SYSTEM,
+        )
     if not (access_token := os.getenv("UIPATH_ACCESS_TOKEN")):
-        raise ValueError("UIPATH_ACCESS_TOKEN environment variable is not set")
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing UIPATH_ACCESS_TOKEN",
+            detail="UIPATH_ACCESS_TOKEN environment variable is not set.",
+            category=UiPathErrorCategory.SYSTEM,
+        )
 
     configs = config if isinstance(config, list) else [config]
     enabled = [c for c in configs if c.is_enabled is not False]

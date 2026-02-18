@@ -17,7 +17,6 @@ from langgraph.types import Command
 from uipath.core.guardrails.guardrails import FieldReference, FieldSource
 from uipath.platform.guardrails import GuardrailScope
 
-from tests.agent.helpers.error_helpers import agent_runtime_code
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -92,7 +91,7 @@ class TestFilterAction:
             await node(AgentGuardrailsGraphState(messages=[]))
 
         # Validate rich error info
-        assert excinfo.value.error_info.code == agent_runtime_code(
+        assert excinfo.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_ERROR
         )
         assert excinfo.value.error_info.title == "Guardrail filter action not supported"

@@ -9,7 +9,6 @@ from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import BaseModel
 
-from tests.agent.helpers.error_helpers import agent_runtime_code
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -280,7 +279,7 @@ class TestUiPathToolNode:
         with pytest.raises(AgentRuntimeError) as exc_info:
             node._func(mock_state)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TOOL_INVALID_WRAPPER_STATE
         )
 

@@ -7,7 +7,6 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMes
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL
 
-from tests.agent.helpers.error_helpers import agent_runtime_code
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -212,7 +211,7 @@ class TestRouteAgentThinkingMessages:
         with pytest.raises(AgentRuntimeError) as exc_info:
             route_function_with_limit(state_excessive_thinking)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED
         )
 
@@ -227,7 +226,7 @@ class TestRouteAgentThinkingMessages:
         with pytest.raises(AgentRuntimeError) as exc_info:
             route_func(state)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.THINKING_LIMIT_EXCEEDED
         )
 
@@ -259,7 +258,7 @@ class TestRouteAgentErrorHandling:
         with pytest.raises(AgentRuntimeError) as exc_info:
             route_function_no_limit(empty_state)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.ROUTING_ERROR
         )
 
@@ -270,7 +269,7 @@ class TestRouteAgentErrorHandling:
         with pytest.raises(AgentRuntimeError) as exc_info:
             route_function_no_limit(state_no_ai_messages)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.ROUTING_ERROR
         )
 
@@ -284,6 +283,6 @@ class TestRouteAgentErrorHandling:
         with pytest.raises(AgentRuntimeError) as exc_info:
             route_function_no_limit(state)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.ROUTING_ERROR
         )

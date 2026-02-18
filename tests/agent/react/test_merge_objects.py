@@ -3,7 +3,6 @@ from typing import Annotated
 import pytest
 from pydantic import BaseModel
 
-from tests.agent.helpers.error_helpers import agent_runtime_code
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -59,7 +58,7 @@ class TestMergeObjects:
         with pytest.raises(AgentRuntimeError) as exc_info:
             merge_objects({"key": "value"}, {"some": "data"})
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.STATE_ERROR
         )
 
@@ -69,7 +68,7 @@ class TestMergeObjects:
         with pytest.raises(AgentRuntimeError) as exc_info:
             merge_objects(left, "invalid")
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.STATE_ERROR
         )
 

@@ -42,6 +42,7 @@ from uipath.core.guardrails import (
     WordRule,
 )
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.guardrails.actions.block_action import BlockAction
 from uipath_langchain.agent.guardrails.actions.escalate_action import EscalateAction
 from uipath_langchain.agent.guardrails.actions.filter_action import FilterAction
@@ -226,7 +227,7 @@ class TestGuardrailsFactory:
     def test_deterministic_guardrail_with_invalid_scope_raises_value_error(
         self, scope: str, scope_lower: str
     ) -> None:
-        """DeterministicGuardrails with LLM or AGENT scope should raise ValueError."""
+        """DeterministicGuardrails with LLM or AGENT scope should raise AgentStartupError."""
         guardrail = AgentCustomGuardrail.model_validate(
             {
                 "$guardrailType": "custom",
@@ -254,11 +255,11 @@ class TestGuardrailsFactory:
             }
         )
 
-        with pytest.raises(
-            ValueError,
-            match=rf"Deterministic guardrail 'test-guardrail-{scope_lower}' can only be used with TOOL scope.*Found invalid scopes.*{scope.upper()}",
-        ):
+        with pytest.raises(AgentStartupError) as exc_info:
             build_guardrails_with_actions([guardrail], [])
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
 
     def test_deterministic_guardrail_with_tool_scope_succeeds(self) -> None:
         """DeterministicGuardrails with TOOL scope should be accepted."""
@@ -298,7 +299,7 @@ class TestGuardrailsFactory:
         assert isinstance(action, BlockAction)
 
     def test_deterministic_guardrail_with_mixed_scopes_raises_value_error(self) -> None:
-        """DeterministicGuardrails with mixed scopes including non-TOOL should raise ValueError."""
+        """DeterministicGuardrails with mixed scopes including non-TOOL should raise AgentStartupError."""
         guardrail = AgentCustomGuardrail.model_validate(
             {
                 "$guardrailType": "custom",
@@ -326,11 +327,11 @@ class TestGuardrailsFactory:
             }
         )
 
-        with pytest.raises(
-            ValueError,
-            match=r"Deterministic guardrail 'test-guardrail-mixed' can only be used with TOOL scope.*Found invalid scopes.*LLM",
-        ):
+        with pytest.raises(AgentStartupError) as exc_info:
             build_guardrails_with_actions([guardrail], [])
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
 
     def test_filter_action_is_mapped_with_fields(self) -> None:
         """FILTER action is mapped to FilterAction with correct fields."""
@@ -543,9 +544,11 @@ class TestCreateWordRuleFunc:
             _create_word_rule_func(AgentWordOperator.STARTS_WITH, None)
 
     def test_unsupported_operator_raises_value_error(self) -> None:
-        # Create a mock operator that's not in the supported list
-        with pytest.raises(ValueError, match="Unsupported word operator"):
+        with pytest.raises(AgentStartupError) as exc_info:
             _create_word_rule_func(cast(AgentWordOperator, "INVALID"), "value")
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
 
 
 class TestCreateNumberRuleFunc:
@@ -586,8 +589,11 @@ class TestCreateNumberRuleFunc:
         assert func(15.0) is False
 
     def test_unsupported_operator_raises_value_error(self) -> None:
-        with pytest.raises(ValueError, match="Unsupported number operator"):
+        with pytest.raises(AgentStartupError) as exc_info:
             _create_number_rule_func(cast(AgentNumberOperator, "INVALID"), 10.0)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
 
 
 class TestCreateBooleanRuleFunc:
@@ -604,8 +610,11 @@ class TestCreateBooleanRuleFunc:
         assert func(True) is False
 
     def test_unsupported_operator_raises_value_error(self) -> None:
-        with pytest.raises(ValueError, match="Unsupported boolean operator"):
+        with pytest.raises(AgentStartupError) as exc_info:
             _create_boolean_rule_func(cast(AgentBooleanOperator, "INVALID"), True)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
 
 
 class TestBuildRuleDescription:
@@ -847,9 +856,7 @@ class TestConvertAgentRuleToDeterministic:
         )
 
     def test_unsupported_rule_type_raises_value_error(self) -> None:
-        # Create a mock rule that's not a supported type
         invalid_rule = cast(AgentWordRule, types.SimpleNamespace())
-        # Create a minimal guardrail for testing
         guardrail = AgentCustomGuardrail.model_validate(
             {
                 "$guardrailType": "custom",
@@ -862,8 +869,11 @@ class TestConvertAgentRuleToDeterministic:
                 "action": {"$actionType": "block", "reason": "test"},
             }
         )
-        with pytest.raises(ValueError, match="Unsupported agent rule type"):
+        with pytest.raises(AgentStartupError) as exc_info:
             _convert_agent_rule_to_deterministic(invalid_rule, guardrail, [])
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
 
 
 class TestConvertAgentCustomGuardrailToDeterministic:
@@ -1095,7 +1105,7 @@ class TestConvertAgentCustomGuardrailToDeterministic:
         assert word_rule.field_selector.sources == [FieldSource.OUTPUT]
 
     def test_convert_with_empty_match_names_raises_error(self) -> None:
-        """When match_names is empty, should raise ValueError."""
+        """When match_names is empty, should raise AgentStartupError."""
         agent_guardrail = AgentCustomGuardrail.model_validate(
             {
                 "$guardrailType": "custom",
@@ -1120,18 +1130,16 @@ class TestConvertAgentCustomGuardrailToDeterministic:
             }
         )
 
-        # Should raise ValueError when match_names is empty
-        with pytest.raises(
-            ValueError,
-            match="match_names is empty or not specified",
-        ):
+        with pytest.raises(AgentStartupError) as exc_info:
             _convert_agent_custom_guardrail_to_deterministic(agent_guardrail, [])
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
 
     def test_convert_with_nonexistent_tool_raises_error(self) -> None:
-        """When match_names specifies a tool that doesn't exist, should raise ValueError."""
+        """When match_names specifies a tool that doesn't exist, should raise AgentStartupError."""
         from unittest.mock import Mock
 
-        # Create a mock tool with a different name
         mock_tool = Mock(spec=BaseTool)
         mock_tool.name = "different_tool"
 
@@ -1161,14 +1169,13 @@ class TestConvertAgentCustomGuardrailToDeterministic:
             }
         )
 
-        # Should raise ValueError when tool is not found
-        with pytest.raises(
-            ValueError,
-            match="not found in available tools",
-        ):
+        with pytest.raises(AgentStartupError) as exc_info:
             _convert_agent_custom_guardrail_to_deterministic(
                 agent_guardrail, [mock_tool]
             )
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG
+        )
 
     def test_convert_custom_guardrail_with_word_rules(self) -> None:
         agent_guardrail = AgentCustomGuardrail.model_validate(

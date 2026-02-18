@@ -10,7 +10,9 @@ from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.static_args import handle_static_args
@@ -143,7 +145,12 @@ def create_integration_tool(
     """Creates a StructuredTool for invoking an Integration Service connector activity."""
     tool_name: str = sanitize_tool_name(resource.name)
     if resource.properties.connection.id is None:
-        raise ValueError("Connection ID cannot be None for integration tool.")
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing connection ID",
+            detail="Connection ID cannot be None for integration tool.",
+            category=UiPathErrorCategory.SYSTEM,
+        )
     connection_id: str = resource.properties.connection.id
 
     activity_metadata = convert_to_activity_metadata(resource)
