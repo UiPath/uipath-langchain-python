@@ -136,8 +136,8 @@ class UiPathChatMessagesMapper:
                                 )
                             )
                     elif isinstance(data, UiPathExternalValue):
-                        attachment_id = (
-                            self.parse_attachment_id_from_content_part_uri(data.uri)
+                        attachment_id = self.parse_attachment_id_from_content_part_uri(
+                            data.uri
                         )
                         full_name = getattr(uipath_content_part, "name", None)
                         if attachment_id and full_name:
