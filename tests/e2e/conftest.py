@@ -194,7 +194,7 @@ def _get_access_token(base_url: str, client_id: str, client_secret: str) -> str:
             "grant_type": "client_credentials",
             "client_id": client_id,
             "client_secret": client_secret,
-            "scope": "OR.Execution OR.Users.Read OR.Folders.Read",
+            "scope": "OR.Execution OR.Users.Read OR.Folders.Read Traces.Api",
         },
     )
 

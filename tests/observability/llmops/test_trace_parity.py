@@ -56,12 +56,12 @@ class TestSpanTypeCoverage:
 class TestSpanTypeField:
     """Tests that span type field values match C# SDK format."""
 
-    def test_llm_call_type_is_completion(self) -> None:
-        """LlmCallSpanAttributes.type is 'completion'."""
+    def test_llm_call_type_is_llm_call(self) -> None:
+        """LlmCallSpanAttributes.type is 'llmCall'."""
         attrs = LlmCallSpanAttributes(input="Test")
-        assert attrs.type == "completion"
+        assert attrs.type == "llmCall"
         otel = attrs.to_otel_attributes()
-        assert otel["type"] == "completion"
+        assert otel["type"] == "llmCall"
 
     def test_completion_type_is_completion(self) -> None:
         """CompletionSpanAttributes.type must be 'completion'."""

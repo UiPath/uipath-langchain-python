@@ -91,4 +91,4 @@ class LlmCallSpanAttributes(BaseSpanAttributes):
 
     @property
     def type(self) -> str:
-        return SpanType.COMPLETION
+        return SpanType.LLM_CALL

@@ -1,0 +1,43 @@
+{
+  "description": "Calculator agent trace parity config",
+  "ignore_spans": [],
+  "fields": {
+    "format": {
+      "Id": "hex_id",
+      "TraceId": "hex_id",
+      "ParentId": "hex_id",
+      "*Time*": "iso_datetime",
+      "UpdatedAt": "iso_datetime",
+      "*Key": "uuid",
+      "ReferenceId": "uuid"
+    },
+    "ignore": [
+      "OrganizationId",
+      "TenantId",
+      "ProcessKey",
+      "JobKey",
+      "VerbosityLevel"
+    ]
+  },
+  "attributes": {
+    "format": {
+      "*Id": "uuid"
+    },
+    "ignore": [
+      "output",
+      "output.value",
+      "output.mime_type",
+      "input",
+      "input.value",
+      "input.mime_type",
+      "toolCalls",
+      "usage",
+      "error",
+      "licenseRefId",
+      "attributes",
+      "model",
+      "source",
+      "isConversational"
+    ]
+  }
+}

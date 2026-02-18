@@ -60,10 +60,9 @@ class TestLlmCallbackEvents:
         span_names = {s.name for s in spans}
         assert "LLM call" in span_names
         assert "Model run" in span_names
-        # Both LLM call and Model run have type "completion"
         llm_span = next(s for s in spans if s.name == "LLM call")
         model_span = next(s for s in spans if s.name == "Model run")
-        assert llm_span.attributes["type"] == SpanType.COMPLETION
+        assert llm_span.attributes["type"] == SpanType.LLM_CALL
         assert model_span.attributes["type"] == SpanType.COMPLETION
 
     def test_on_llm_error_closes_spans_with_error(self, callback, span_exporter):

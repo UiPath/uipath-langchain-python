@@ -9,16 +9,16 @@ from uipath_agents._observability.llmops.spans.span_attributes.types import Span
 
 
 class TestLlmCallSpanAttributes:
-    def test_type_is_completion(self) -> None:
-        """LlmCallSpanAttributes.type is 'completion'."""
+    def test_type_is_llm_call(self) -> None:
+        """LlmCallSpanAttributes.type is 'llmCall'."""
         attrs = LlmCallSpanAttributes(input="Hello")
-        assert attrs.type == SpanType.COMPLETION
-        assert attrs.type == "completion"
+        assert attrs.type == SpanType.LLM_CALL
+        assert attrs.type == "llmCall"
 
     def test_to_otel_attributes_has_correct_type(self) -> None:
         attrs = LlmCallSpanAttributes(input="Hello")
         otel = attrs.to_otel_attributes()
-        assert otel["type"] == "completion"
+        assert otel["type"] == "llmCall"
 
     def test_license_ref_id_field(self) -> None:
         """LlmCallSpanAttributes should support licenseRefId from BaseSpanAttributes."""

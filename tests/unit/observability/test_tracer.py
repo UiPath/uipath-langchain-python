@@ -309,13 +309,13 @@ class TestLlmCallSpan:
     """Tests for LLM call span creation."""
 
     def test_creates_span_with_correct_type(self, tracer, span_exporter):
-        """Test LLM call span has correct type attribute (completion)."""
+        """Test LLM call span has correct type attribute (llmCall)."""
         span = tracer.start_llm_call()
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
-        assert spans[0].attributes["type"] == SpanType.COMPLETION
+        assert spans[0].attributes["type"] == SpanType.LLM_CALL
 
     def test_span_name(self, tracer, span_exporter):
         """Test LLM call span has correct name."""
