@@ -146,6 +146,9 @@ class TestCreateBatchTransformTool:
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
+    )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
     @patch(
@@ -160,6 +163,7 @@ class TestCreateBatchTransformTool:
         self,
         mock_interrupt,
         mock_uipath_class,
+        mock_uipath_config,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
@@ -168,6 +172,7 @@ class TestCreateBatchTransformTool:
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
 
         mock_index = ContextGroundingIndex(
             id=str(uuid.uuid4()),
@@ -182,7 +187,7 @@ class TestCreateBatchTransformTool:
         mock_interrupt.return_value = {"file_path": "/path/to/output.csv"}
 
         mock_attachment_uuid = uuid.uuid4()
-        mock_uipath.attachments.upload_async = AsyncMock(
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
             return_value=mock_attachment_uuid
         )
 
@@ -225,13 +230,17 @@ class TestCreateBatchTransformTool:
         assert mock_interrupt.call_count == 1
 
         # Verify attachment was uploaded
-        mock_uipath.attachments.upload_async.assert_called_once_with(
+        mock_uipath.jobs.create_attachment_async.assert_called_once_with(
             name="output.csv",
             source_path="output.csv",
+            job_key="test-job-key",
         )
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
@@ -247,6 +256,7 @@ class TestCreateBatchTransformTool:
         self,
         mock_interrupt,
         mock_uipath_class,
+        mock_uipath_config,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
@@ -255,6 +265,7 @@ class TestCreateBatchTransformTool:
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
 
         pending_id = str(uuid.uuid4())
         mock_index_pending = ContextGroundingIndex(
@@ -280,7 +291,7 @@ class TestCreateBatchTransformTool:
         ]
 
         mock_attachment_uuid = uuid.uuid4()
-        mock_uipath.attachments.upload_async = AsyncMock(
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
             return_value=mock_attachment_uuid
         )
 
@@ -313,6 +324,9 @@ class TestCreateBatchTransformTool:
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
+    )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
     @patch(
@@ -327,6 +341,7 @@ class TestCreateBatchTransformTool:
         self,
         mock_interrupt,
         mock_uipath_class,
+        mock_uipath_config,
         mock_get_wrapper,
         resource_config_dynamic,
         mock_llm,
@@ -335,6 +350,7 @@ class TestCreateBatchTransformTool:
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
 
         mock_index = ContextGroundingIndex(
             id=str(uuid.uuid4()),
@@ -349,7 +365,7 @@ class TestCreateBatchTransformTool:
         mock_interrupt.return_value = {"output": "Transformation complete"}
 
         mock_attachment_uuid = uuid.uuid4()
-        mock_uipath.attachments.upload_async = AsyncMock(
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
             return_value=mock_attachment_uuid
         )
 
@@ -381,6 +397,9 @@ class TestCreateBatchTransformTool:
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
+    )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
     @patch(
@@ -395,6 +414,7 @@ class TestCreateBatchTransformTool:
         self,
         mock_interrupt,
         mock_uipath_class,
+        mock_uipath_config,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
@@ -403,6 +423,7 @@ class TestCreateBatchTransformTool:
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
 
         mock_index = ContextGroundingIndex(
             id=str(uuid.uuid4()),
@@ -417,7 +438,7 @@ class TestCreateBatchTransformTool:
         mock_interrupt.return_value = {"file_path": "output.csv"}
 
         mock_attachment_uuid = uuid.uuid4()
-        mock_uipath.attachments.upload_async = AsyncMock(
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
             return_value=mock_attachment_uuid
         )
 
@@ -448,13 +469,17 @@ class TestCreateBatchTransformTool:
         assert mock_interrupt.call_count == 1
 
         # Verify attachment was uploaded with default path
-        mock_uipath.attachments.upload_async.assert_called_once_with(
+        mock_uipath.jobs.create_attachment_async.assert_called_once_with(
             name="output.csv",
             source_path="output.csv",
+            job_key="test-job-key",
         )
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
@@ -470,6 +495,7 @@ class TestCreateBatchTransformTool:
         self,
         mock_interrupt,
         mock_uipath_class,
+        mock_uipath_config,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
@@ -478,6 +504,7 @@ class TestCreateBatchTransformTool:
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
 
         mock_index = ContextGroundingIndex(
             id=str(uuid.uuid4()),
@@ -492,7 +519,7 @@ class TestCreateBatchTransformTool:
         mock_interrupt.return_value = {"file_path": "/custom/path/result.csv"}
 
         mock_attachment_uuid = uuid.uuid4()
-        mock_uipath.attachments.upload_async = AsyncMock(
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
             return_value=mock_attachment_uuid
         )
 
@@ -522,9 +549,10 @@ class TestCreateBatchTransformTool:
         }
 
         # Verify attachment was uploaded with custom path
-        mock_uipath.attachments.upload_async.assert_called_once_with(
+        mock_uipath.jobs.create_attachment_async.assert_called_once_with(
             name="/custom/path/result.csv",
             source_path="/custom/path/result.csv",
+            job_key="test-job-key",
         )
 
     @patch(

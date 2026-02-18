@@ -6,7 +6,6 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
 
-from tests.agent.helpers.error_helpers import agent_runtime_code
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -139,7 +138,7 @@ class TestCreateRouteAgentConversational:
         with pytest.raises(AgentRuntimeError) as exc_info:
             route_function(empty_state)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.ROUTING_ERROR
         )
 
@@ -150,7 +149,7 @@ class TestCreateRouteAgentConversational:
         with pytest.raises(AgentRuntimeError) as exc_info:
             route_function(state_with_no_ai_messages)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.ROUTING_ERROR
         )
 

@@ -7,7 +7,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
-from tests.agent.helpers.error_helpers import agent_runtime_code
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -171,7 +170,7 @@ class TestTerminateNodeNonConversational:
         with pytest.raises(AgentRuntimeError) as exc_info:
             terminate_node(state_with_human_last)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.ROUTING_ERROR
         )
 
@@ -182,7 +181,7 @@ class TestTerminateNodeNonConversational:
         with pytest.raises(AgentRuntimeError) as exc_info:
             terminate_node(state_with_no_control_flow_tool)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.ROUTING_ERROR
         )
 

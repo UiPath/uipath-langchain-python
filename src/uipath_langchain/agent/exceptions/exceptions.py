@@ -64,6 +64,12 @@ class AgentStartupErrorCode(str, Enum):
     # LLM configuration errors
     LLM_INVALID_MODEL = "LLM_INVALID_MODEL"
 
+    # Tool configuration errors
+    INVALID_TOOL_CONFIG = "INVALID_TOOL_CONFIG"
+
+    # Guardrail configuration errors
+    INVALID_GUARDRAIL_CONFIG = "INVALID_GUARDRAIL_CONFIG"
+
 
 class AgentRuntimeError(UiPathBaseRuntimeError):
     """Custom exception for agent loop runtime errors with structured error information.
@@ -86,6 +92,12 @@ class AgentRuntimeError(UiPathBaseRuntimeError):
     """
 
     _WRAP_PREFIX = "An unexpected error occurred during agent execution, please try again later or contact your Administrator."
+    _PREFIX = "AGENT_RUNTIME"
+
+    @staticmethod
+    def full_code(code: AgentRuntimeErrorCode) -> str:
+        """Return the prefixed error code string, e.g. ``'AGENT_RUNTIME.ROUTING_ERROR'``."""
+        return f"AGENT_RUNTIME.{code.value}"
 
     def __init__(
         self,
@@ -130,6 +142,12 @@ class AgentStartupError(UiPathBaseRuntimeError):
     """
 
     _WRAP_PREFIX = "An unexpected error occurred during agent startup, please try again later or contact your Administrator."
+    _PREFIX = "AGENT_STARTUP"
+
+    @staticmethod
+    def full_code(code: AgentStartupErrorCode) -> str:
+        """Return the prefixed error code string, e.g. ``'AGENT_STARTUP.LLM_INVALID_MODEL'``."""
+        return f"AGENT_STARTUP.{code.value}"
 
     def __init__(
         self,

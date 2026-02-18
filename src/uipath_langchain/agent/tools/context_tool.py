@@ -19,7 +19,9 @@ from uipath.platform.context_grounding import (
     CitationMode,
     DeepRagContent,
 )
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
 from .structured_tool_with_output_type import StructuredToolWithOutputType
@@ -141,7 +143,12 @@ def handle_deep_rag(
 
     index_name = resource.index_name
     if not resource.settings.citation_mode:
-        raise ValueError("Citation mode is required for Deep RAG")
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing citation mode",
+            detail="Citation mode is required for Deep RAG. Please set the citation_mode field in context settings.",
+            category=UiPathErrorCategory.USER,
+        )
     citation_mode = CitationMode(resource.settings.citation_mode.value)
 
     output_model = create_model(
@@ -232,7 +239,12 @@ def handle_batch_transform(
     index_name = resource.index_name
     index_folder_path = resource.folder_path
     if not resource.settings.web_search_grounding:
-        raise ValueError("Web search grounding field is required for Batch Transform")
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing web search grounding",
+            detail="Web search grounding field is required for Batch Transform. Please set the web_search_grounding field in context settings.",
+            category=UiPathErrorCategory.USER,
+        )
     enable_web_search_grounding = (
         resource.settings.web_search_grounding.value.lower() == "enabled"
     )
@@ -241,8 +253,11 @@ def handle_batch_transform(
     if (output_columns := resource.settings.output_columns) is None or not len(
         output_columns
     ):
-        raise ValueError(
-            "Batch transform requires at least one output column to be specified in settings.output_columns"
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing output columns",
+            detail="Batch transform requires at least one output column to be specified in settings.output_columns. Please add output columns to the context configuration.",
+            category=UiPathErrorCategory.USER,
         )
 
     for column in output_columns:
@@ -345,10 +360,25 @@ def handle_batch_transform(
 
 def ensure_valid_fields(resource_config: AgentContextResourceConfig):
     if not resource_config.settings.query:
-        raise ValueError("Query object is required")
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing query object",
+            detail="Query object is required. Please set the query field in context settings.",
+            category=UiPathErrorCategory.USER,
+        )
 
     if not resource_config.settings.query.variant:
-        raise ValueError("Query variant is required")
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing query variant",
+            detail="Query variant is required. Please set the query variant in context settings.",
+            category=UiPathErrorCategory.USER,
+        )
 
     if is_static_query(resource_config) and not resource_config.settings.query.value:
-        raise ValueError("Static query requires a query value to be set")
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing static query value",
+            detail="Static query requires a query value to be set. Please provide a value for the static query in context settings.",
+            category=UiPathErrorCategory.USER,
+        )

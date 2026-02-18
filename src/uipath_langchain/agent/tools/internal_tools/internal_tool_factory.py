@@ -22,6 +22,9 @@ from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
 )
+from uipath.runtime.errors import UiPathErrorCategory
+
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 
 from .analyze_files_tool import create_analyze_file_tool
 from .batch_transform_tool import create_batch_transform_tool
@@ -43,16 +46,19 @@ def create_internal_tool(
     """Create an internal tool based on the resource configuration.
 
     Raises:
-        ValueError: If the tool type is not supported (no handler exists for it).
+        AgentStartupError: If the tool type is not supported (no handler exists for it).
 
     """
     tool_type = resource.properties.tool_type
 
     handler = _INTERNAL_TOOL_HANDLERS.get(tool_type)
     if handler is None:
-        raise ValueError(
-            f"Unsupported internal tool type: {tool_type}. "
-            f"Supported types: {list[AgentInternalToolType](_INTERNAL_TOOL_HANDLERS.keys())}"
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Unsupported internal tool type",
+            detail=f"Unsupported internal tool type: {tool_type}. "
+            f"Supported types: {list[AgentInternalToolType](_INTERNAL_TOOL_HANDLERS.keys())}.",
+            category=UiPathErrorCategory.USER,
         )
 
     return handler(resource, llm)

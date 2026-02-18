@@ -10,7 +10,9 @@ from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.static_args import handle_static_args
@@ -119,18 +121,21 @@ def convert_to_activity_metadata(
 
     param_location_info.body_fields = list(body_fields_set)
 
-    # determine content type
+    # determine content type and json body section
     content_type = "application/json"
+    json_body_section = None
     if resource.properties.body_structure is not None:
         shorthand_type = resource.properties.body_structure.get("contentType", "json")
         if shorthand_type == "multipart":
             content_type = "multipart/form-data"
+        json_body_section = resource.properties.body_structure.get("jsonBodySection")
 
     return ActivityMetadata(
         object_path=resource.properties.tool_path,
         method_name=http_method,
         content_type=content_type,
         parameter_location_info=param_location_info,
+        json_body_section=json_body_section,
     )
 
 
@@ -140,7 +145,12 @@ def create_integration_tool(
     """Creates a StructuredTool for invoking an Integration Service connector activity."""
     tool_name: str = sanitize_tool_name(resource.name)
     if resource.properties.connection.id is None:
-        raise ValueError("Connection ID cannot be None for integration tool.")
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing connection ID",
+            detail="Connection ID cannot be None for integration tool.",
+            category=UiPathErrorCategory.SYSTEM,
+        )
     connection_id: str = resource.properties.connection.id
 
     activity_metadata = convert_to_activity_metadata(resource)

@@ -17,7 +17,6 @@ from uipath.agent.models.agent import (
 from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
 from uipath.platform.guardrails import GuardrailScope
 
-from tests.agent.helpers.error_helpers import agent_runtime_code
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -428,7 +427,7 @@ class TestEscalateAction:
         assert excinfo.value.error_info.title == "Invalid state for POST_EXECUTION"
         assert "requires at least 2 messages" in excinfo.value.error_info.detail
         assert "found 1" in excinfo.value.error_info.detail
-        assert excinfo.value.error_info.code == agent_runtime_code(
+        assert excinfo.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TERMINATION_ESCALATION_ERROR
         )
 
@@ -806,7 +805,7 @@ class TestEscalateAction:
             excinfo.value.error_info.detail
             == "Action was rejected after reviewing the task created by guardrail [Test Guardrail], with reason: Incorrect data"
         )
-        assert excinfo.value.error_info.code == agent_runtime_code(
+        assert excinfo.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED
         )
 
@@ -1017,7 +1016,7 @@ class TestEscalateAction:
         with pytest.raises(AgentRuntimeError) as excinfo:
             await interrupt_fn(state)
 
-        assert excinfo.value.error_info.code == agent_runtime_code(
+        assert excinfo.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED
         )
         assert excinfo.value.error_info.title == "Escalation rejected"
@@ -1265,7 +1264,7 @@ class TestEscalateAction:
         with pytest.raises(AgentRuntimeError) as excinfo:
             await interrupt_fn(state)
 
-        assert excinfo.value.error_info.code == agent_runtime_code(
+        assert excinfo.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED
         )
         assert excinfo.value.error_info.title == "Escalation rejected"
@@ -1308,7 +1307,7 @@ class TestEscalateAction:
         with pytest.raises(AgentRuntimeError) as excinfo:
             await interrupt_fn(state)
 
-        assert excinfo.value.error_info.code == agent_runtime_code(
+        assert excinfo.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED
         )
         assert excinfo.value.error_info.title == "Escalation rejected"
@@ -1686,7 +1685,7 @@ class TestEscalateAction:
         with pytest.raises(AgentRuntimeError) as excinfo:
             _validate_message_count(state, ExecutionStage.PRE_EXECUTION)
 
-        assert excinfo.value.error_info.code == agent_runtime_code(
+        assert excinfo.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TERMINATION_ESCALATION_ERROR
         )
         assert excinfo.value.error_info.title == "Invalid state for PRE_EXECUTION"
@@ -1695,7 +1694,7 @@ class TestEscalateAction:
         with pytest.raises(AgentRuntimeError) as excinfo:
             _validate_message_count(state, ExecutionStage.POST_EXECUTION)
 
-        assert excinfo.value.error_info.code == agent_runtime_code(
+        assert excinfo.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.TERMINATION_ESCALATION_ERROR
         )
         assert excinfo.value.error_info.title == "Invalid state for POST_EXECUTION"
