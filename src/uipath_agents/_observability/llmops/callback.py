@@ -115,6 +115,16 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
         self._state.resumed_tool_span_data = tool_span_data
         self._state.resumed_process_span_data = process_span_data
 
+        # Restore current_tool_span so post-execution guardrails can parent to it
+        if tool_span_data and trace_id:
+            restored_span_context = SpanContext(
+                trace_id=int(trace_id, 16),
+                span_id=int(tool_span_data["span_id"], 16),
+                is_remote=True,
+                trace_flags=TraceFlags(0x01),
+            )
+            self._state.current_tool_span = NonRecordingSpan(restored_span_context)
+
     def set_escalation_resume_context(
         self,
         trace_id: str,

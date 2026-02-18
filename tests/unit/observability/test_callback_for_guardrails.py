@@ -1052,6 +1052,81 @@ class TestToolGuardrailRealExecutionOrder:
         assert tool_span.attributes.get("toolType") == "Escalation"
 
 
+class TestToolGuardrailResumeFlow:
+    """Tests for tool guardrail spans after interrupt/resume (HITL)."""
+
+    def test_tool_post_guardrail_parents_to_tool_span_after_resume(
+        self, callback, tracer, span_exporter
+    ):
+        """After tool interrupt+resume, post guardrails should still parent to tool span.
+
+        Flow: set_resume_context → tool re-invokes (skipped) → tool completes
+        (upserts resumed spans, clears resumed_tool_span_data) → post guardrail fires.
+        The post guardrail must parent to the tool span, not the root/agent span.
+        """
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # Simulate resume: provide saved tool span data
+            tool_span_id = "abcdef1234567890"
+            trace_id_hex = format(agent_span.get_span_context().trace_id, "032x")
+            callback.set_resume_context(
+                tool_name="my_tool",
+                trace_id=trace_id_hex,
+                tool_span_data={"span_id": tool_span_id, "name": "Tool call - my_tool"},
+            )
+
+            # Verify current_tool_span was restored
+            assert callback._state.current_tool_span is not None
+            restored_tool_span = callback._state.current_tool_span
+
+            # Tool re-invokes (skipped in resume mode)
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+            # Tool completes — clears resumed_tool_span_data
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+            # resumed_tool_span_data should be cleared
+            assert callback._state.resumed_tool_span_data is None
+            # current_tool_span should still be set
+            assert callback._state.current_tool_span is not None
+
+            # Post-guardrail fires AFTER tool completes
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "output_guard"
+            mock_guardrail.description = "Output Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
+
+            guard_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=guard_run_id,
+                metadata={
+                    "langgraph_node": "tool_post_execution_output_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.POST_EXECUTION,
+                    "action_type": "Skip",
+                    "tool_type": "integration",
+                },
+            )
+
+            # The guardrail container should be parented to the restored tool span
+            container_key = (GuardrailScope.TOOL, ExecutionStage.POST_EXECUTION)
+            assert container_key in callback._state.guardrail_containers
+            container = callback._state.guardrail_containers[container_key]
+            assert (
+                container.parent.span_id
+                == restored_tool_span.get_span_context().span_id
+            )
+
+
 class TestEscalationReviewedData:
     """Tests for escalation span completion with reviewed data on resume."""
 
