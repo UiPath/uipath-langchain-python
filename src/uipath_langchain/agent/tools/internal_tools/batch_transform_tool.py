@@ -23,7 +23,9 @@ from uipath.platform.context_grounding import (
 from uipath.platform.context_grounding.context_grounding_index import (
     ContextGroundingIndex,
 )
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
@@ -74,8 +76,11 @@ def create_batch_transform_tool(
 ) -> StructuredTool:
     """Create a Batch Transform internal tool from resource configuration."""
     if not isinstance(resource.properties, AgentInternalBatchTransformToolProperties):
-        raise ValueError(
-            f"Expected AgentInternalBatchTransformToolProperties, got {type(resource.properties)}"
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Invalid Batch Transform tool properties",
+            detail=f"Expected AgentInternalBatchTransformToolProperties, got {type(resource.properties)}.",
+            category=UiPathErrorCategory.SYSTEM,
         )
 
     tool_name = sanitize_tool_name(resource.name)

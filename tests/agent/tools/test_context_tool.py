@@ -18,6 +18,7 @@ from uipath.platform.context_grounding import (
     DeepRagContent,
 )
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.tools.context_tool import (
     create_context_tool,
     handle_batch_transform,
@@ -87,39 +88,49 @@ class TestHandleDeepRag:
         assert schema["properties"]["deepRagId"]["type"] == "string"
 
     def test_missing_query_object_raises_error(self, base_resource_config):
-        """Test that missing query object raises ValueError."""
+        """Test that missing query object raises AgentStartupError."""
         resource = base_resource_config(query_value=None)
         resource.settings.query = None
 
-        with pytest.raises(ValueError, match="Query object is required"):
+        with pytest.raises(AgentStartupError) as exc_info:
             handle_deep_rag("test_deep_rag", resource)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
 
     def test_missing_static_query_value_raises_error(self, base_resource_config):
-        """Test that missing query.value for static variant raises ValueError."""
+        """Test that missing query.value for static variant raises AgentStartupError."""
         resource = base_resource_config(query_variant="static", query_value=None)
 
-        with pytest.raises(
-            ValueError, match="Static query requires a query value to be set"
-        ):
+        with pytest.raises(AgentStartupError) as exc_info:
             handle_deep_rag("test_deep_rag", resource)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
 
     def test_missing_query_variant_raises_error(self, base_resource_config):
-        """Test that missing query.variant raises ValueError."""
+        """Test that missing query.variant raises AgentStartupError."""
         resource = base_resource_config(query_value="some query")
         resource.settings.query.variant = None
 
-        with pytest.raises(ValueError, match="Query variant is required"):
+        with pytest.raises(AgentStartupError) as exc_info:
             handle_deep_rag("test_deep_rag", resource)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
 
     def test_missing_citation_mode_raises_error(self, base_resource_config):
-        """Test that missing citation_mode raises ValueError."""
+        """Test that missing citation_mode raises AgentStartupError."""
         resource = base_resource_config(
             query_value="some query", citation_mode_value=None
         )
         resource.settings.citation_mode = None
 
-        with pytest.raises(ValueError, match="Citation mode is required for Deep RAG"):
+        with pytest.raises(AgentStartupError) as exc_info:
             handle_deep_rag("test_deep_rag", resource)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
 
     @pytest.mark.parametrize(
         "citation_mode_value,expected_enum",

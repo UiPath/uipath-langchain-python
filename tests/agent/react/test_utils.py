@@ -3,7 +3,6 @@
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 
-from tests.agent.helpers.error_helpers import agent_runtime_code
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
@@ -210,7 +209,7 @@ class TestExtractCurrentToolCallIndex:
         with pytest.raises(AgentRuntimeError) as exc_info:
             extract_current_tool_call_index([])
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.STATE_ERROR
         )
 
@@ -220,7 +219,7 @@ class TestExtractCurrentToolCallIndex:
         with pytest.raises(AgentRuntimeError) as exc_info:
             extract_current_tool_call_index(messages)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.STATE_ERROR
         )
 
@@ -233,7 +232,7 @@ class TestExtractCurrentToolCallIndex:
         with pytest.raises(AgentRuntimeError) as exc_info:
             extract_current_tool_call_index(messages)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.STATE_ERROR
         )
 
@@ -399,6 +398,6 @@ class TestExtractCurrentToolCallIndex:
         with pytest.raises(AgentRuntimeError) as exc_info:
             extract_current_tool_call_index(messages)
 
-        assert exc_info.value.error_info.code == agent_runtime_code(
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.STATE_ERROR
         )
