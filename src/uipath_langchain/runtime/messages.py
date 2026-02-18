@@ -7,6 +7,7 @@ from typing import Any, cast
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
+    AnyMessage,
     BaseMessage,
     ContentBlock,
     HumanMessage,
@@ -18,15 +19,19 @@ from langchain_core.messages.content import create_text_block
 from pydantic import ValidationError
 from uipath.core.chat import (
     UiPathConversationContentPartChunkEvent,
+    UiPathConversationContentPartData,
     UiPathConversationContentPartEndEvent,
     UiPathConversationContentPartEvent,
     UiPathConversationContentPartStartEvent,
     UiPathConversationMessage,
+    UiPathConversationMessageData,
     UiPathConversationMessageEndEvent,
     UiPathConversationMessageEvent,
     UiPathConversationMessageStartEvent,
+    UiPathConversationToolCallData,
     UiPathConversationToolCallEndEvent,
     UiPathConversationToolCallEvent,
+    UiPathConversationToolCallResult,
     UiPathConversationToolCallStartEvent,
     UiPathInlineValue,
 )
@@ -53,7 +58,8 @@ class UiPathChatMessagesMapper:
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
 
-    def _extract_text(self, content: Any) -> str:
+    @staticmethod
+    def _extract_text(content: Any) -> str:
         """Normalize LangGraph message.content to plain text."""
         if isinstance(content, str):
             return content
@@ -199,7 +205,7 @@ class UiPathChatMessagesMapper:
                     AIMessage(
                         id=uipath_message.message_id,
                         # content_blocks=content_blocks,
-                        content=self._extract_text(content_blocks)
+                        content=UiPathChatMessagesMapper._extract_text(content_blocks)
                         if content_blocks
                         else "",
                         tool_calls=tool_calls,
@@ -488,6 +494,132 @@ class UiPathChatMessagesMapper:
                 content_part_id=self.get_content_part_id(message_id),
                 end=UiPathConversationContentPartEndEvent(),
             ),
+        )
+
+    # Static methods for mapping langchain messages to uipath message types
+
+    @staticmethod
+    def map_langchain_messages_to_uipath_message_data_list(
+        messages: list[AnyMessage], include_tool_results: bool = True
+    ) -> list[UiPathConversationMessageData]:
+        """Convert LangChain messages to UiPathConversationMessageData format. include_tool_results controls whether to include tool call results from ToolMessage instances in the output agent-messages."""
+
+        # Build map of tool_call_id -> ToolMessage lookup, if tool-results should be included
+        tool_messages_map = (
+            UiPathChatMessagesMapper._build_langchain_tool_messages_map(messages)
+            if include_tool_results
+            else None
+        )
+
+        converted_messages: list[UiPathConversationMessageData] = []
+
+        for message in messages:
+            if isinstance(message, HumanMessage):
+                converted_messages.append(
+                    UiPathChatMessagesMapper._map_langchain_human_message_to_uipath_message_data(
+                        message
+                    )
+                )
+            elif isinstance(message, AIMessage):
+                converted_messages.append(
+                    UiPathChatMessagesMapper._map_langchain_ai_message_to_uipath_message_data(
+                        message, tool_messages_map
+                    )
+                )
+
+        return converted_messages
+
+    @staticmethod
+    def _build_langchain_tool_messages_map(
+        messages: list[AnyMessage],
+    ) -> dict[str, ToolMessage]:
+        """Create mapping of tool_call_id -> ToolMessage for efficient lookup."""
+        tool_map: dict[str, ToolMessage] = {}
+        for msg in messages:
+            if isinstance(msg, ToolMessage) and msg.tool_call_id:
+                tool_map[msg.tool_call_id] = msg
+        return tool_map
+
+    @staticmethod
+    def _parse_langchain_tool_result(content: Any) -> Any:
+        """Attempt to parse JSON result back to dict (reverse of json.dumps)."""
+        if not content or not isinstance(content, str):
+            return content
+
+        try:
+            return json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            # Not valid JSON, return as string
+            return content
+
+    @staticmethod
+    def _map_langchain_human_message_to_uipath_message_data(
+        message: HumanMessage,
+    ) -> UiPathConversationMessageData:
+        """Convert HumanMessage to UiPathConversationMessageData."""
+
+        text_content = UiPathChatMessagesMapper._extract_text(message.content)
+        content_parts: list[UiPathConversationContentPartData] = []
+        if text_content:
+            content_parts.append(
+                UiPathConversationContentPartData(
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline=text_content),
+                    citations=[],
+                )
+            )
+
+        return UiPathConversationMessageData(
+            role="user", content_parts=content_parts, tool_calls=[], interrupts=[]
+        )
+
+    @staticmethod
+    def _map_langchain_ai_message_to_uipath_message_data(
+        message: AIMessage, tool_message_map: dict[str, ToolMessage] | None
+    ) -> UiPathConversationMessageData:
+        """Convert AIMessage to UiPathConversationMessageData with embedded tool-calls. When tool_message_map is passed in, tool results are matched by tool-call ID and included."""
+
+        content_parts: list[UiPathConversationContentPartData] = []
+        text_content = UiPathChatMessagesMapper._extract_text(message.content)
+        if text_content:
+            content_parts.append(
+                UiPathConversationContentPartData(
+                    mime_type="text/markdown",
+                    data=UiPathInlineValue(inline=text_content),
+                    citations=[],  # TODO: Citations
+                )
+            )
+
+        # Convert tool_calls
+        uipath_tool_calls: list[UiPathConversationToolCallData] = []
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                uipath_tool_call = UiPathConversationToolCallData(
+                    name=tool_call["name"], input=tool_call.get("args", {})
+                )
+
+                if tool_message_map and tool_call["id"]:
+                    # Find corresponding ToolMessage and build tool-call result if found
+                    tool_message = tool_message_map.get(tool_call["id"])
+                    result = None
+                    if tool_message:
+                        # Parse JSON result back to dict
+                        output = UiPathChatMessagesMapper._parse_langchain_tool_result(
+                            tool_message.content
+                        )
+                        result = UiPathConversationToolCallResult(
+                            output=output,
+                            is_error=tool_message.status == "error",
+                        )
+                        uipath_tool_call.result = result
+
+                uipath_tool_calls.append(uipath_tool_call)
+
+        return UiPathConversationMessageData(
+            role="assistant",
+            content_parts=content_parts,
+            tool_calls=uipath_tool_calls,
+            interrupts=[],  # TODO: Interrupts
         )
 
 

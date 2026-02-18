@@ -26,6 +26,7 @@ class AgentSettings(BaseModel):
 class InnerAgentGraphState(BaseModel):
     job_attachments: Annotated[dict[str, Attachment], merge_dicts] = {}
     agent_settings: AgentSettings | None = None
+    initial_message_count: int | None = None
     tools_storage: Annotated[dict[Hashable, Any], merge_dicts] = {}
 
 

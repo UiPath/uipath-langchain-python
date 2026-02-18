@@ -44,11 +44,19 @@ def create_init_node(
             str(att.id): att for att in job_attachments if att.id is not None
         }
 
+        # Calculate initial message count for tracking new messages
+        initial_message_count = (
+            len(resolved_messages.value)
+            if isinstance(resolved_messages, Overwrite)
+            else len(resolved_messages)
+        )
+
         return {
             "messages": resolved_messages,
             "inner_state": {
                 "job_attachments": job_attachments_dict,
                 "agent_settings": agent_settings,
+                "initial_message_count": initial_message_count,
             },
         }
 

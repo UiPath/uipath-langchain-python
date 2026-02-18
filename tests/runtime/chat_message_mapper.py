@@ -134,6 +134,7 @@ class TestMapMessages:
                     content_part_id="part-1",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="hello world"),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 )
@@ -216,6 +217,7 @@ class TestMapMessages:
                     content_part_id="part-1",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="first part"),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
@@ -223,6 +225,7 @@ class TestMapMessages:
                     content_part_id="part-2",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="second part"),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
@@ -277,6 +280,7 @@ class TestMapMessages:
                     content_part_id="part-1",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="I can help with that!"),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 )
@@ -309,6 +313,7 @@ class TestMapMessages:
                     content_part_id="part-1",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="Let me search for that."),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 )
@@ -360,6 +365,7 @@ class TestMapMessages:
                     content_part_id="part-1",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="Let me search for that."),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 )
@@ -643,6 +649,7 @@ class TestMapMessages:
                         content_part_id="part-1",
                         mime_type="text/plain",
                         data=UiPathInlineValue(inline="Hello"),
+                        citations=[],
                         created_at=TEST_TIMESTAMP,
                         updated_at=TEST_TIMESTAMP,
                     )
@@ -660,6 +667,7 @@ class TestMapMessages:
                         content_part_id="part-2",
                         mime_type="text/plain",
                         data=UiPathInlineValue(inline="Hi there!"),
+                        citations=[],
                         created_at=TEST_TIMESTAMP,
                         updated_at=TEST_TIMESTAMP,
                     )
@@ -677,6 +685,7 @@ class TestMapMessages:
                         content_part_id="part-3",
                         mime_type="text/plain",
                         data=UiPathInlineValue(inline="How are you?"),
+                        citations=[],
                         created_at=TEST_TIMESTAMP,
                         updated_at=TEST_TIMESTAMP,
                     )
@@ -706,6 +715,7 @@ class TestMapMessages:
                     content_part_id="part-1",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="First part. "),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
@@ -713,6 +723,7 @@ class TestMapMessages:
                     content_part_id="part-2",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="Second part."),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),

@@ -7,8 +7,10 @@ from typing import Any, NoReturn
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
+from uipath.core.chat import UiPathConversationMessageData
 from uipath.runtime.errors import UiPathErrorCategory
 
+from ...runtime.messages import UiPathChatMessagesMapper
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .types import AgentGraphState
 
@@ -34,18 +36,65 @@ def _handle_raise_error(args: dict[str, Any]) -> NoReturn:
     )
 
 
+def _handle_end_conversational(
+    state: AgentGraphState, response_schema: type[BaseModel] | None
+) -> dict[str, Any]:
+    """Handle conversational agent termination by returning converted messages."""
+    if state.inner_state.initial_message_count is None:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.STATE_ERROR,
+            title="No initial message count in state for conversational agent execution.",
+            detail="Initial message count must be set in inner_state for conversational agent execution.",
+            category=UiPathErrorCategory.SYSTEM,
+        )
+
+    if response_schema is None:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.STATE_ERROR,
+            title="No response schema for conversational agent termination.",
+            detail="Response schema must be provided for termination of conversational agent execution.",
+            category=UiPathErrorCategory.SYSTEM,
+        )
+
+    initial_count = state.inner_state.initial_message_count
+    new_messages = state.messages[initial_count:]
+
+    converted_messages: list[UiPathConversationMessageData] = []
+
+    # For the agent-output messages, don't include tool-results. Just include agent's response choices (LLM outputs and tool-calls).
+    # This is for simpler agent output and because evaluations don't check for tool-results.
+    if new_messages:
+        converted_messages = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages=new_messages, include_tool_results=False
+            )
+        )
+
+    output = {
+        "uipath__agent_response_messages": [
+            msg.model_dump(by_alias=True) for msg in converted_messages
+        ]
+    }
+    validated = response_schema.model_validate(output)
+    return validated.model_dump()
+
+
 def create_terminate_node(
-    response_schema: type[BaseModel] | None = None, is_conversational: bool = False
+    response_schema: type[BaseModel] | None = None,
+    is_conversational: bool = False,
 ):
     """Handles Agent Graph termination for multiple sources and output or error propagation to Orchestrator.
 
     Termination scenarios:
     1. LLM-initiated termination (END_EXECUTION_TOOL)
     2. LLM-initiated error (RAISE_ERROR_TOOL)
+    3. End of Conversational Agent loop
     """
 
     def terminate_node(state: AgentGraphState):
-        if not is_conversational:
+        if is_conversational:
+            return _handle_end_conversational(state, response_schema)
+        else:
             last_message = state.messages[-1]
             if not isinstance(last_message, AIMessage):
                 raise AgentRuntimeError(
