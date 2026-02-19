@@ -206,7 +206,7 @@ def create_escalation_tool(
 
         outcome = result.action
         escalation_output = _parse_task_data(
-            result.data,
+            result.data.model_dump() if isinstance(result.data, BaseModel) else result.data,
             input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
         )
