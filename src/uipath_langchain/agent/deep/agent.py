@@ -1,6 +1,7 @@
 """Deep agent builder."""
 
 from collections.abc import Sequence
+from typing import Any
 
 from deepagents import CompiledSubAgent, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
@@ -17,7 +18,7 @@ def create_deep_agent(
     tools: Sequence[BaseTool] = (),
     subagents: Sequence[SubAgent | CompiledSubAgent] = (),
     backend: BackendProtocol | BackendFactory | None = None,
-) -> CompiledStateGraph:
+) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Create a deep agent.
 
     Deep agents provide built-in capabilities for:
