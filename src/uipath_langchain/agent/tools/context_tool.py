@@ -91,7 +91,9 @@ def handle_semantic_search(
         example_calls=[],  # Examples cannot be provided for context.
     )
     async def context_tool_fn(query: Optional[str] = None) -> dict[str, Any]:
-        docs = await retriever.ainvoke(prompt or query)
+        actual_query = prompt or query
+        assert actual_query is not None
+        docs = await retriever.ainvoke(actual_query)
         return {
             "documents": [
                 {"metadata": doc.metadata, "page_content": doc.page_content}
