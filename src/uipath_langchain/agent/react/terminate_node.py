@@ -61,8 +61,8 @@ def _handle_end_conversational(
 
     converted_messages: list[UiPathConversationMessageData] = []
 
-    # For the agent-output messages, don't include tool-results. Just include agent's response choices (LLM outputs and tool-calls).
-    # This is for simpler agent output and because evaluations don't check for tool-results.
+    # For the agent-output messages, don't include tool-results. Just include agent's LLM outputs and tool-calls + inputs.
+    # This is primarily since evaluations don't check for tool-results; this output represents the agent's actual choices rather than tool-results.
     if new_messages:
         converted_messages = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
