@@ -3,6 +3,7 @@
 from unittest.mock import Mock, patch
 
 import pytest
+from uipath.core.feature_flags import FeatureFlags
 
 from uipath_agents._config.feature_flags import _fetch_flags, get_flags
 from uipath_agents._services.flags_service import FeatureFlagsResponse
@@ -10,10 +11,12 @@ from uipath_agents._services.flags_service import FeatureFlagsResponse
 
 @pytest.fixture(autouse=True)
 def clear_cache():
-    """Clear lru_cache before each test."""
+    """Clear lru_cache and core registry before each test."""
     _fetch_flags.cache_clear()
+    FeatureFlags.reset_flags()
     yield
     _fetch_flags.cache_clear()
+    FeatureFlags.reset_flags()
 
 
 class TestGetFlags:
@@ -107,3 +110,26 @@ class TestGetFlags:
         get_flags(["A", "B"])
 
         mock_service.get_feature_flags.assert_called_once()
+
+    @patch("uipath_agents._config.feature_flags.FlagsService")
+    @patch("uipath_agents._config.feature_flags.UiPath")
+    def test_configures_core_registry(
+        self, mock_uipath_class: Mock, mock_service_class: Mock
+    ) -> None:
+        """Test fetched flags are pushed into the core feature flag registry."""
+        mock_uipath = Mock()
+        mock_uipath._config = Mock()
+        mock_uipath._execution_context = Mock()
+        mock_uipath_class.return_value = mock_uipath
+
+        mock_service = Mock()
+        mock_response = FeatureFlagsResponse(
+            flags={"EnableNewFeature": True, "ModelOverride": "gpt-4"}
+        )
+        mock_service.get_feature_flags.return_value = mock_response
+        mock_service_class.return_value = mock_service
+
+        get_flags(["EnableNewFeature", "ModelOverride"])
+
+        assert FeatureFlags.is_flag_enabled("EnableNewFeature") is True
+        assert FeatureFlags.get_flag("ModelOverride") == "gpt-4"
