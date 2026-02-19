@@ -150,11 +150,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
-    @patch(
-        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.task",
-        lambda f: f,
-    )
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -184,7 +180,11 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"file_path": "/path/to/output.csv"}
+        # durable_interrupt always calls interrupt(); first for index, second for transform
+        mock_interrupt.side_effect = [
+            mock_index,
+            {"file_path": "/path/to/output.csv"},
+        ]
 
         mock_attachment_uuid = uuid.uuid4()
         mock_uipath.jobs.create_attachment_async = AsyncMock(
@@ -226,8 +226,8 @@ class TestCreateBatchTransformTool:
         assert call_kwargs["usage"] == "BatchRAG"
         assert mock_attachment.ID in call_kwargs["attachments"]
 
-        # Verify interrupt was called only once (no WaitEphemeralIndex needed)
-        assert mock_interrupt.call_count == 1
+        # Both durable_interrupts call interrupt()
+        assert mock_interrupt.call_count == 2
 
         # Verify attachment was uploaded
         mock_uipath.jobs.create_attachment_async.assert_called_once_with(
@@ -243,11 +243,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
-    @patch(
-        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.task",
-        lambda f: f,
-    )
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -328,11 +324,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
-    @patch(
-        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.task",
-        lambda f: f,
-    )
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -362,7 +354,11 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"output": "Transformation complete"}
+        # durable_interrupt always calls interrupt(); first for index, second for transform
+        mock_interrupt.side_effect = [
+            mock_index,
+            {"output": "Transformation complete"},
+        ]
 
         mock_attachment_uuid = uuid.uuid4()
         mock_uipath.jobs.create_attachment_async = AsyncMock(
@@ -401,11 +397,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
-    @patch(
-        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.task",
-        lambda f: f,
-    )
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -435,7 +427,11 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"file_path": "output.csv"}
+        # durable_interrupt always calls interrupt(); first for index, second for transform
+        mock_interrupt.side_effect = [
+            mock_index,
+            {"file_path": "output.csv"},
+        ]
 
         mock_attachment_uuid = uuid.uuid4()
         mock_uipath.jobs.create_attachment_async = AsyncMock(
@@ -465,8 +461,8 @@ class TestCreateBatchTransformTool:
             }
         }
 
-        # Verify CreateBatchTransform was called with default destination_path
-        assert mock_interrupt.call_count == 1
+        # Both durable_interrupts call interrupt()
+        assert mock_interrupt.call_count == 2
 
         # Verify attachment was uploaded with default path
         mock_uipath.jobs.create_attachment_async.assert_called_once_with(
@@ -482,11 +478,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
-    @patch(
-        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.task",
-        lambda f: f,
-    )
+    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -516,7 +508,11 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"file_path": "/custom/path/result.csv"}
+        # durable_interrupt always calls interrupt(); first for index, second for transform
+        mock_interrupt.side_effect = [
+            mock_index,
+            {"file_path": "/custom/path/result.csv"},
+        ]
 
         mock_attachment_uuid = uuid.uuid4()
         mock_uipath.jobs.create_attachment_async = AsyncMock(
