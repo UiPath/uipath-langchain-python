@@ -88,7 +88,7 @@ def create_terminate_node(
     Termination scenarios:
     1. LLM-initiated termination (END_EXECUTION_TOOL)
     2. LLM-initiated error (RAISE_ERROR_TOOL)
-    3. End of Conversational Agent loop
+    3. End of conversational loop
     """
 
     def terminate_node(state: AgentGraphState):
