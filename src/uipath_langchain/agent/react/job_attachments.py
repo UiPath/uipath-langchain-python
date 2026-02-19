@@ -2,9 +2,10 @@
 
 import copy
 import uuid
-from typing import Any
+from typing import Any, Sequence
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
+from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel
 from uipath.platform.attachments import Attachment
 
@@ -125,3 +126,44 @@ def _create_job_attachment_error_message(attachment_id_str: str) -> str:
         f"Try invoking the tool again and please make sure that you pass "
         f"valid JobAttachment IDs associated with existing JobAttachments in the current context."
     )
+
+
+def parse_attachments_from_conversation_messages(
+    messages: Sequence[BaseMessage],
+) -> dict[str, Attachment]:
+    """Parse attachments from HumanMessage additional_kwargs.
+
+    Extracts attachment information from HumanMessages where additional_kwargs
+    contains an 'attachments' list with attachment details.
+
+    Args:
+        messages: Sequence of messages to parse
+
+    Returns:
+        Dictionary mapping attachment ID to Attachment objects
+    """
+    attachments: dict[str, Attachment] = {}
+
+    for message in messages:
+        if not isinstance(message, HumanMessage):
+            continue
+
+        kwargs = getattr(message, "additional_kwargs", None)
+        if not kwargs:
+            continue
+
+        # Handle attachments list in additional_kwargs
+        attachment_list = kwargs.get("attachments", [])
+        for att in attachment_list:
+            id = att.get("id")
+            full_name = att.get("full_name")
+            mime_type = att.get("mime_type")
+
+            if id and full_name:
+                attachments[str(id)] = Attachment(
+                    id=id,
+                    full_name=full_name,
+                    mime_type=mime_type,
+                )
+
+    return attachments

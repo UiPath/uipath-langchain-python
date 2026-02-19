@@ -13,6 +13,7 @@ from langchain_core.messages import (
 from uipath.core.chat import (
     UiPathConversationContentPart,
     UiPathConversationMessage,
+    UiPathExternalValue,
     UiPathInlineValue,
 )
 
@@ -151,6 +152,8 @@ class TestMapMessages:
         assert msg.content_blocks[0]["text"] == "hello world"  # type: ignore[typeddict-item]
         assert msg.content_blocks[0]["id"] == "part-1"
         assert msg.additional_kwargs["message_id"] == "msg-1"
+        assert msg.additional_kwargs["created_at"] == TEST_TIMESTAMP
+        assert msg.additional_kwargs["updated_at"] == TEST_TIMESTAMP
 
     def test_map_messages_converts_dict_messages(self):
         """Should convert dict messages to HumanMessages."""
@@ -236,7 +239,6 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        # Should create ONE HumanMessage with 2 content blocks
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
@@ -759,6 +761,246 @@ class TestMapMessages:
         msg = result[0]
         assert isinstance(msg, AIMessage)
         assert msg.content == ""
+        assert msg.additional_kwargs["message_id"] == "msg-1"
+        assert msg.additional_kwargs["created_at"] == TEST_TIMESTAMP
+        assert msg.additional_kwargs["updated_at"] == TEST_TIMESTAMP
+
+    def test_map_messages_assistant_role_produces_ai_message(self):
+        """Should convert assistant role messages to AIMessage."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-1",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="I can help with that"),
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, AIMessage)
+        assert msg.content == "I can help with that"
+        assert msg.additional_kwargs["message_id"] == "msg-1"
+
+    def test_map_messages_external_value_produces_attachment_content(self):
+        """Should include attachment metadata in content for external value content parts."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="user",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-text",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="Check this file"),
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+                UiPathConversationContentPart(
+                    content_part_id="part-file",
+                    mime_type="application/pdf",
+                    data=UiPathExternalValue(
+                        uri="urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+                    ),
+                    name="test.pdf",
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, HumanMessage)
+        # Text content block + attachment text block
+        assert len(msg.content_blocks) == 2
+        assert msg.content_blocks[0]["text"] == "Check this file"  # type: ignore[typeddict-item]
+        assert "<uip:attachments>" in msg.content_blocks[1]["text"]  # type: ignore[typeddict-item]
+        assert "a940a416-b97b-4146-3089-08de5f4d0a87" in msg.content_blocks[1]["text"]  # type: ignore[typeddict-item]
+        assert "attachments" in msg.additional_kwargs
+        assert msg.additional_kwargs["attachments"] == [
+            {
+                "id": "a940a416-b97b-4146-3089-08de5f4d0a87",
+                "full_name": "test.pdf",
+                "mime_type": "application/pdf",
+            }
+        ]
+
+    def test_map_messages_external_value_with_empty_uri_skips_attachment(self):
+        """Should skip attachment when external value has an empty URI."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="user",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-text",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="Check this file"),
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+                UiPathConversationContentPart(
+                    content_part_id="part-file",
+                    mime_type="application/pdf",
+                    data=UiPathExternalValue(uri=""),
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, HumanMessage)
+        # Only the text block, no attachment block
+        assert len(msg.content_blocks) == 1
+        assert msg.content_blocks[0]["text"] == "Check this file"  # type: ignore[typeddict-item]
+        assert "attachments" not in msg.additional_kwargs
+
+    def test_map_messages_external_value_with_invalid_uri_skips_attachment(self):
+        """Should skip attachment when URI has no valid UUID."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="user",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-text",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="Check this file"),
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+                UiPathConversationContentPart(
+                    content_part_id="part-file",
+                    mime_type="application/pdf",
+                    data=UiPathExternalValue(uri="urn:uipath:cas:file:orchestrator:"),
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, HumanMessage)
+        # Only the text block, no attachment block
+        assert len(msg.content_blocks) == 1
+        assert msg.content_blocks[0]["text"] == "Check this file"  # type: ignore[typeddict-item]
+        assert "attachments" not in msg.additional_kwargs
+
+    def test_map_messages_external_value_without_name_skips_attachment(self):
+        """Should skip attachment when external value has no name."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="user",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-file",
+                    mime_type="application/pdf",
+                    data=UiPathExternalValue(
+                        uri="urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+                    ),
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, HumanMessage)
+        # No content blocks at all (external value without name is skipped)
+        assert len(msg.content_blocks) == 0
+        assert "attachments" not in msg.additional_kwargs
+
+    def test_map_messages_external_value_normalizes_uppercase_uuid(self):
+        """Should normalize uppercase UUID in attachment URI to lowercase."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="user",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-file",
+                    mime_type="application/pdf",
+                    data=UiPathExternalValue(
+                        uri="urn:uipath:cas:file:orchestrator:A940A416-B97B-4146-3089-08DE5F4D0A87"
+                    ),
+                    name="test.pdf",
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, HumanMessage)
+        # Only the attachment text block (no inline text part)
+        assert len(msg.content_blocks) == 1
+        assert "a940a416-b97b-4146-3089-08de5f4d0a87" in msg.content_blocks[0]["text"]  # type: ignore[typeddict-item]
+        assert "A940A416" not in msg.content_blocks[0]["text"]  # type: ignore[typeddict-item]
+        assert msg.additional_kwargs["attachments"] == [
+            {
+                "id": "a940a416-b97b-4146-3089-08de5f4d0a87",
+                "full_name": "test.pdf",
+                "mime_type": "application/pdf",
+            }
+        ]
 
 
 class TestMapEvent:

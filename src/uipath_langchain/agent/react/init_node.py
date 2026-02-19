@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from .job_attachments import (
     get_job_attachments,
+    parse_attachments_from_conversation_messages,
 )
 from .types import AgentSettings
 
@@ -43,6 +44,12 @@ def create_init_node(
         job_attachments_dict = {
             str(att.id): att for att in job_attachments if att.id is not None
         }
+        # Merge attachments from preserved messages for conversational agents
+        if is_conversational:
+            message_attachments = parse_attachments_from_conversation_messages(
+                preserved_messages
+            )
+            job_attachments_dict.update(message_attachments)
 
         return {
             "messages": resolved_messages,

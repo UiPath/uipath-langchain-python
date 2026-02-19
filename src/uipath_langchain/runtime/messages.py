@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any, cast
 
@@ -28,6 +29,7 @@ from uipath.core.chat import (
     UiPathConversationToolCallEndEvent,
     UiPathConversationToolCallEvent,
     UiPathConversationToolCallStartEvent,
+    UiPathExternalValue,
     UiPathInlineValue,
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
@@ -90,7 +92,6 @@ class UiPathChatMessagesMapper:
             return self._map_messages_internal(
                 cast(list[UiPathConversationMessage], messages)
             )
-
         # Case3: List[dict] -> parse to List[UiPathConversationMessage]
         if isinstance(first, dict):
             try:
@@ -118,9 +119,9 @@ class UiPathChatMessagesMapper:
 
         for uipath_message in messages:
             content_blocks: list[ContentBlock] = []
+            attachments: list[dict[str, Any]] = []
 
             # Convert content_parts to content_blocks
-            # TODO: Convert file-attachment content-parts to content_blocks as well
             if uipath_message.content_parts:
                 for uipath_content_part in uipath_message.content_parts:
                     data = uipath_content_part.data
@@ -134,13 +135,36 @@ class UiPathChatMessagesMapper:
                                     text, id=uipath_content_part.content_part_id
                                 )
                             )
+                    elif isinstance(data, UiPathExternalValue):
+                        attachment_id = self.parse_attachment_id_from_content_part_uri(
+                            data.uri
+                        )
+                        full_name = uipath_content_part.name
+                        if attachment_id and full_name:
+                            attachments.append(
+                                {
+                                    "id": attachment_id,
+                                    "full_name": full_name,
+                                    "mime_type": uipath_content_part.mime_type,
+                                }
+                            )
+
+            # Add attachment references as a text block for LLM visibility
+            if attachments:
+                content_blocks.append(
+                    create_text_block(
+                        f"<uip:attachments>{json.dumps(attachments)}</uip:attachments>"
+                    )
+                )
 
             # Metadata for the user/assistant message
-            metadata = {
+            metadata: dict[str, Any] = {
                 "message_id": uipath_message.message_id,
                 "created_at": uipath_message.created_at,
                 "updated_at": uipath_message.updated_at,
             }
+            if attachments:
+                metadata["attachments"] = attachments
 
             role = uipath_message.role
             if role == "user":
@@ -243,6 +267,36 @@ class UiPathChatMessagesMapper:
 
     def get_content_part_id(self, message_id: str) -> str:
         return f"chunk-{message_id}-0"
+
+    def parse_attachment_id_from_content_part_uri(self, uri: str) -> str | None:
+        """Parse attachment ID from a URI.
+
+        Extracts the UUID from URIs like:
+        "urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+
+        Args:
+            uri: The URI to parse
+
+        Returns:
+            The attachment ID if found, None otherwise
+        """
+        if not uri:
+            return None
+
+        # The UUID is the last segment after the final colon
+        parts = uri.rsplit(":", 1)
+        if len(parts) != 2:
+            return None
+
+        potential_uuid = parts[1]
+        if not potential_uuid:
+            return None
+
+        # Validate it's a proper UUID and normalize to lowercase
+        try:
+            return str(uuid.UUID(potential_uuid))
+        except (ValueError, AttributeError):
+            return None
 
     async def map_ai_message_chunk_to_events(
         self, message: AIMessageChunk
