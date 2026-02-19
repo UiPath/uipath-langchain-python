@@ -7,6 +7,7 @@ import pytest
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
+    AnyMessage,
     HumanMessage,
     SystemMessage,
     ToolMessage,
@@ -1370,7 +1371,7 @@ class TestMapLangChainMessagesToUiPathMessageData:
 
     def test_converts_human_message_to_user_role(self):
         """Should convert HumanMessage to user role message."""
-        messages = [HumanMessage(content="Hello")]
+        messages: list[AnyMessage] = [HumanMessage(content="Hello")]
 
         result = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
@@ -1382,11 +1383,12 @@ class TestMapLangChainMessagesToUiPathMessageData:
         assert result[0].role == "user"
         assert len(result[0].content_parts) == 1
         assert result[0].content_parts[0].mime_type == "text/plain"
+        assert isinstance(result[0].content_parts[0].data, UiPathInlineValue)
         assert result[0].content_parts[0].data.inline == "Hello"
 
     def test_converts_ai_message_to_assistant_role(self):
         """Should convert AIMessage to assistant role message."""
-        messages = [AIMessage(content="Hi there")]
+        messages: list[AnyMessage] = [AIMessage(content="Hi there")]
 
         result = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
@@ -1398,11 +1400,12 @@ class TestMapLangChainMessagesToUiPathMessageData:
         assert result[0].role == "assistant"
         assert len(result[0].content_parts) == 1
         assert result[0].content_parts[0].mime_type == "text/markdown"
+        assert isinstance(result[0].content_parts[0].data, UiPathInlineValue)
         assert result[0].content_parts[0].data.inline == "Hi there"
 
     def test_converts_ai_message_with_tool_calls(self):
         """Should include tool calls in converted AI message."""
-        messages = [
+        messages: list[AnyMessage] = [
             AIMessage(
                 content="Let me search",
                 tool_calls=[
@@ -1425,7 +1428,7 @@ class TestMapLangChainMessagesToUiPathMessageData:
 
     def test_includes_tool_results_when_enabled(self):
         """Should include tool results in tool calls when include_tool_results=True."""
-        messages = [
+        messages: list[AnyMessage] = [
             AIMessage(
                 content="Using tool",
                 tool_calls=[{"name": "test_tool", "args": {}, "id": "call1"}],
@@ -1450,7 +1453,7 @@ class TestMapLangChainMessagesToUiPathMessageData:
 
     def test_excludes_tool_results_when_disabled(self):
         """Should exclude tool results when include_tool_results=False."""
-        messages = [
+        messages: list[AnyMessage] = [
             AIMessage(
                 content="Using tool",
                 tool_calls=[{"name": "test_tool", "args": {}, "id": "call1"}],
@@ -1474,7 +1477,7 @@ class TestMapLangChainMessagesToUiPathMessageData:
 
     def test_handles_tool_error_status(self):
         """Should mark tool result as error when status is error."""
-        messages = [
+        messages: list[AnyMessage] = [
             AIMessage(
                 content="Trying tool",
                 tool_calls=[{"name": "failing_tool", "args": {}, "id": "call1"}],
@@ -1495,7 +1498,7 @@ class TestMapLangChainMessagesToUiPathMessageData:
 
     def test_parses_json_tool_results(self):
         """Should parse JSON string results back to dict."""
-        messages = [
+        messages: list[AnyMessage] = [
             AIMessage(
                 content="Using tool",
                 tool_calls=[{"name": "test_tool", "args": {}, "id": "call1"}],
@@ -1511,11 +1514,12 @@ class TestMapLangChainMessagesToUiPathMessageData:
             )
         )
 
+        assert result[0].tool_calls[0].result is not None
         assert result[0].tool_calls[0].result.output == {"data": [1, 2, 3], "count": 3}
 
     def test_keeps_non_json_tool_results_as_string(self):
         """Should keep non-JSON results as strings."""
-        messages = [
+        messages: list[AnyMessage] = [
             AIMessage(
                 content="Using tool",
                 tool_calls=[{"name": "test_tool", "args": {}, "id": "call1"}],
@@ -1529,11 +1533,12 @@ class TestMapLangChainMessagesToUiPathMessageData:
             )
         )
 
+        assert result[0].tool_calls[0].result is not None
         assert result[0].tool_calls[0].result.output == "plain text result"
 
     def test_handles_mixed_message_types(self):
         """Should handle conversation with mixed message types including tools."""
-        messages = [
+        messages: list[AnyMessage] = [
             HumanMessage(content="Hello"),
             AIMessage(content="Hi there"),
             HumanMessage(content="Search for data"),
@@ -1575,7 +1580,7 @@ class TestMapLangChainMessagesToUiPathMessageData:
 
     def test_handles_empty_content_messages(self):
         """Should handle messages with empty content."""
-        messages = [
+        messages: list[AnyMessage] = [
             HumanMessage(content=""),
             AIMessage(content=""),
         ]
@@ -1593,7 +1598,7 @@ class TestMapLangChainMessagesToUiPathMessageData:
 
     def test_extracts_text_from_content_blocks(self):
         """Should extract text from complex content block structures."""
-        messages = [
+        messages: list[AnyMessage] = [
             HumanMessage(
                 content=[
                     {"type": "text", "text": "first part"},
@@ -1610,4 +1615,5 @@ class TestMapLangChainMessagesToUiPathMessageData:
 
         assert len(result) == 1
         assert len(result[0].content_parts) == 1
+        assert isinstance(result[0].content_parts[0].data, UiPathInlineValue)
         assert result[0].content_parts[0].data.inline == "first part second part"
