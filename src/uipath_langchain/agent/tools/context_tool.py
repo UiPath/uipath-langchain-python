@@ -12,10 +12,10 @@ from uipath.agent.models.agent import (
     AgentContextRetrievalMode,
 )
 from uipath.eval.mocks import mockable
-from uipath.platform.common import CreateBatchTransform, CreateDeepRag
+from uipath.platform import UiPath
+from uipath.platform.common import CreateBatchTransform, CreateDeepRag, UiPathConfig
 from uipath.platform.context_grounding import (
     BatchTransformOutputColumn,
-    BatchTransformResponse,
     CitationMode,
     DeepRagContent,
 )
@@ -24,6 +24,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
+from .durable_interrupt import durable_interrupt
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_tool_name
 
@@ -268,7 +269,17 @@ def handle_batch_transform(
             )
         )
 
-    output_model = BatchTransformResponse
+    class JobAttachmentModel(BaseModel):
+        ID: str = Field(description="Orchestrator attachment key")
+        FullName: str = Field(description="File name")
+        MimeType: str = Field(description="The MIME type of the content")
+
+    class BatchTransformAttachmentOutput(BaseModel):
+        result: JobAttachmentModel = Field(
+            description="The transformed result file as an attachment"
+        )
+
+    output_model = BatchTransformAttachmentOutput
 
     input_model: Optional[Type[BaseModel]]
 
@@ -296,8 +307,9 @@ def handle_batch_transform(
             destination_path: str = "output.csv",
         ) -> dict[str, Any]:
             # TODO: storage_bucket_folder_path_prefix  support
-            return interrupt(
-                CreateBatchTransform(
+            @durable_interrupt
+            async def create_batch_transform():
+                return CreateBatchTransform(
                     name=f"task-{uuid.uuid4()}",
                     index_name=index_name,
                     prompt=static_prompt,
@@ -306,7 +318,23 @@ def handle_batch_transform(
                     enable_web_search_grounding=enable_web_search_grounding,
                     output_columns=batch_transform_output_columns,
                 )
+
+            await create_batch_transform()
+
+            uipath = UiPath()
+            result_attachment_id = await uipath.jobs.create_attachment_async(
+                name=destination_path,
+                source_path=destination_path,
+                job_key=UiPathConfig.job_key,
             )
+
+            return {
+                "result": {
+                    "ID": str(result_attachment_id),
+                    "FullName": destination_path,
+                    "MimeType": "text/csv",
+                }
+            }
 
     else:
         # Dynamic query - requires both query and destination_path parameters
@@ -333,8 +361,9 @@ def handle_batch_transform(
             query: str, destination_path: str = "output.csv"
         ) -> dict[str, Any]:
             # TODO: storage_bucket_folder_path_prefix  support
-            return interrupt(
-                CreateBatchTransform(
+            @durable_interrupt
+            async def create_batch_transform():
+                return CreateBatchTransform(
                     name=f"task-{uuid.uuid4()}",
                     index_name=index_name,
                     prompt=query,
@@ -343,7 +372,23 @@ def handle_batch_transform(
                     enable_web_search_grounding=enable_web_search_grounding,
                     output_columns=batch_transform_output_columns,
                 )
+
+            await create_batch_transform()
+
+            uipath = UiPath()
+            result_attachment_id = await uipath.jobs.create_attachment_async(
+                name=destination_path,
+                source_path=destination_path,
+                job_key=UiPathConfig.job_key,
             )
+
+            return {
+                "result": {
+                    "ID": str(result_attachment_id),
+                    "FullName": destination_path,
+                    "MimeType": "text/csv",
+                }
+            }
 
     return StructuredToolWithOutputType(
         name=tool_name,
