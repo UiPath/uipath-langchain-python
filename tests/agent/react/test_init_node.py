@@ -266,7 +266,7 @@ class TestCreateInitNodeInnerState:
 
     def test_initial_message_count_in_conversational_mode(self):
         """Conversational mode should set initial_message_count based on Overwrite."""
-        messages = [
+        messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content="System"),
             HumanMessage(content="Query"),
             HumanMessage(content="Query2"),
