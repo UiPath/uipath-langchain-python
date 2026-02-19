@@ -78,9 +78,16 @@ def handle_semantic_search(
 
     output_model = ContextOutputSchemaModel
 
-    schema_fields: dict[str, Any] = {} if static else {
-        "query": (str, Field(..., description="The query to search for in the knowledge base")),
-    }
+    schema_fields: dict[str, Any] = (
+        {}
+        if static
+        else {
+            "query": (
+                str,
+                Field(..., description="The query to search for in the knowledge base"),
+            ),
+        }
+    )
     input_model = create_model("SemanticSearchInput", **schema_fields)
 
     @mockable(
@@ -143,15 +150,19 @@ def handle_deep_rag(
         deep_rag_id=(str, Field(alias="deepRagId")),
     )
 
-    schema_fields: dict[str, Any] = {} if static else {
-        "query": (
-            str,
-            Field(
-                ...,
-                description="Describe the task: what to research across documents, what to synthesize, and how to cite sources",
+    schema_fields: dict[str, Any] = (
+        {}
+        if static
+        else {
+            "query": (
+                str,
+                Field(
+                    ...,
+                    description="Describe the task: what to research across documents, what to synthesize, and how to cite sources",
+                ),
             ),
-        ),
-    }
+        }
+    )
     input_model = create_model("DeepRagInput", **schema_fields)
 
     @mockable(
