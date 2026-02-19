@@ -6,8 +6,6 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.func import task
-from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentInternalDeepRagToolProperties,
     AgentInternalToolResourceConfig,
@@ -28,6 +26,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     add_query_field_to_schema,
 )
@@ -103,7 +102,7 @@ def create_deeprag_tool(
             example_calls=[],  # Examples cannot be provided for internal tools
         )
         async def invoke_deeprag():
-            @task
+            @durable_interrupt
             async def create_ephemeral_index():
                 uipath = UiPath()
                 ephemeral_index = (
@@ -113,16 +112,18 @@ def create_deeprag_tool(
                     )
                 )
                 if ephemeral_index.in_progress_ingestion():
-                    ephemeral_index_dict = interrupt(
-                        WaitEphemeralIndex(index=ephemeral_index)
-                    )
-                    return ContextGroundingIndex(**ephemeral_index_dict)
+                    return WaitEphemeralIndex(index=ephemeral_index)
                 return ephemeral_index
 
-            ephemeral_index = await create_ephemeral_index()
+            index_result = await create_ephemeral_index()
+            if isinstance(index_result, dict):
+                ephemeral_index = ContextGroundingIndex(**index_result)
+            else:
+                ephemeral_index = index_result
 
-            return interrupt(
-                CreateDeepRag(
+            @durable_interrupt
+            async def create_deeprag():
+                return CreateDeepRag(
                     name=f"task-{uuid.uuid4()}",
                     index_name=ephemeral_index.name,
                     index_id=ephemeral_index.id,
@@ -130,7 +131,8 @@ def create_deeprag_tool(
                     citation_mode=citation_mode,
                     is_ephemeral_index=True,
                 )
-            )
+
+            return await create_deeprag()
 
         return await invoke_deeprag()
 
