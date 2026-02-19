@@ -3,7 +3,7 @@
 from typing import Any
 
 import pytest
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.types import Overwrite
 from pydantic import BaseModel
 
@@ -246,3 +246,39 @@ class TestCreateInitNodeInnerState:
         assert attachment_id in job_attachments
         assert job_attachments[attachment_id].full_name == "document.pdf"
         assert job_attachments[attachment_id].mime_type == "application/pdf"
+
+    def test_initial_message_count_in_non_conversational_mode(self):
+        """Non-conversational mode should set initial_message_count."""
+        messages: list[SystemMessage | HumanMessage] = [
+            SystemMessage(content="System"),
+            HumanMessage(content="Query"),
+        ]
+        init_node = create_init_node(
+            messages, input_schema=None, is_conversational=False
+        )
+        state = MockState(messages=[])
+
+        result = init_node(state)
+
+        assert "initial_message_count" in result["inner_state"]
+        # In non-conversational mode, messages is a list
+        assert result["inner_state"]["initial_message_count"] == 2
+
+    def test_initial_message_count_in_conversational_mode(self):
+        """Conversational mode should set initial_message_count based on Overwrite."""
+        messages: list[SystemMessage | HumanMessage] = [
+            SystemMessage(content="System"),
+            HumanMessage(content="Query"),
+            AIMessage(content="Response"),
+            HumanMessage(content="Query"),
+            AIMessage(content="Response"),
+        ]
+        init_node = create_init_node(
+            messages, input_schema=None, is_conversational=True
+        )
+        state = MockState(messages=[])
+
+        result = init_node(state)
+
+        assert "initial_message_count" in result["inner_state"]
+        assert result["inner_state"]["initial_message_count"] == 5

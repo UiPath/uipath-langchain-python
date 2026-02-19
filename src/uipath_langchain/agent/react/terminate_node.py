@@ -76,7 +76,7 @@ def _handle_end_conversational(
         ]
     }
     validated = response_schema.model_validate(output)
-    return validated.model_dump()
+    return validated.model_dump(by_alias=True)
 
 
 def create_terminate_node(

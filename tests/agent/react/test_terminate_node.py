@@ -3,7 +3,8 @@
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from uipath.core.chat import UiPathConversationMessageData
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
@@ -18,6 +19,7 @@ class MockInnerState(BaseModel):
     """Mock inner state for testing."""
 
     job_attachments: dict[str, Any] = {}
+    initial_message_count: int | None = None
 
 
 class MockAgentGraphState(BaseModel):
@@ -30,44 +32,154 @@ class MockAgentGraphState(BaseModel):
 class TestTerminateNodeConversational:
     """Test cases for create_terminate_node with is_conversational=True."""
 
-    @pytest.fixture
-    def terminate_node(self):
-        """Fixture for conversational terminate node."""
-        return create_terminate_node(response_schema=None, is_conversational=True)
+    def test_conversational_requires_response_schema(self):
+        """Conversational mode should raise error if no response_schema provided."""
 
-    @pytest.fixture
-    def state_with_ai_message(self):
-        """Fixture for state with AI message (no tool calls)."""
-        return MockAgentGraphState(
-            messages=[AIMessage(content="Here is my response to your question.")]
+        terminate_node_no_schema = create_terminate_node(
+            response_schema=None, is_conversational=True
+        )
+        state = MockAgentGraphState(
+            messages=[
+                HumanMessage(content="Initial message"),
+                AIMessage(content="Response"),
+            ],
+            inner_state=MockInnerState(initial_message_count=1),
         )
 
-    @pytest.fixture
-    def state_with_human_message(self):
-        """Fixture for state with human message as last."""
-        return MockAgentGraphState(messages=[HumanMessage(content="User message")])
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            terminate_node_no_schema(state)
 
-    def test_conversational_returns_none_no_tool_calls(
-        self, terminate_node, state_with_ai_message
-    ):
-        """Conversational mode should return None when AI has no tool calls."""
-        result = terminate_node(state_with_ai_message)
+        assert "No response schema" in exc_info.value.error_info.title
 
-        assert result is None
+    def test_conversational_requires_initial_message_count(self):
+        """Conversational mode should raise error if initial_message_count not set."""
 
-    def test_conversational_skips_ai_message_validation(
-        self, terminate_node, state_with_human_message
-    ):
-        """Conversational mode should not validate that last message is AIMessage."""
-        # This should not raise, unlike non-conversational mode
-        result = terminate_node(state_with_human_message)
+        class ResponseSchema(BaseModel):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
 
-        assert result is None
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+        state = MockAgentGraphState(
+            messages=[AIMessage(content="Response")],
+            inner_state=MockInnerState(initial_message_count=None),
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            terminate_node(state)
+
+        assert "No initial message count" in exc_info.value.error_info.title
+
+    def test_conversational_returns_converted_messages(self):
+        """Conversational mode should return converted new messages."""
+
+        class ResponseSchema(BaseModel):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
+
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+
+        # Create state with initial message count of 2, and 3 total messages
+        # So only the last message should be converted
+        state = MockAgentGraphState(
+            messages=[
+                HumanMessage(content="Initial user message"),
+                AIMessage(content="Initial AI response"),
+                AIMessage(content="New AI response"),
+            ],
+            inner_state=MockInnerState(initial_message_count=2),
+        )
+
+        result = terminate_node(state)
+
+        assert "uipath__agent_response_messages" in result
+        messages = result["uipath__agent_response_messages"]
+
+        # Should have 1 message (only the new one after initial_message_count)
+        assert len(messages) == 1
+        assert messages[0]["role"] == "assistant"
+        assert len(messages[0]["contentParts"]) == 1
+        assert messages[0]["contentParts"][0]["mimeType"] == "text/markdown"
+        assert "New AI response" in str(messages[0]["contentParts"][0]["data"])
+
+    def test_conversational_handles_multiple_new_messages(self):
+        """Conversational mode should convert all messages after initial count."""
+
+        class ResponseSchema(BaseModel):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
+
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+
+        # Initial count is 1, so messages at index 1+ are new
+        state = MockAgentGraphState(
+            messages=[
+                HumanMessage(content="Initial message"),
+                AIMessage(content="First new response"),
+                AIMessage(content="Second new response"),
+            ],
+            inner_state=MockInnerState(initial_message_count=1),
+        )
+
+        result = terminate_node(state)
+
+        messages = result["uipath__agent_response_messages"]
+        assert len(messages) == 2
+        assert messages[0]["role"] == "assistant"
+        assert "First new response" in str(messages[0]["contentParts"][0]["data"])
+        assert messages[1]["role"] == "assistant"
+        assert "Second new response" in str(messages[1]["contentParts"][0]["data"])
+
+    def test_conversational_with_tool_calls_excludes_tool_results(self):
+        """Conversational mode should exclude tool results in output."""
+
+        class ResponseSchema(BaseModel):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
+
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+
+        # Initial count is 1
+        state = MockAgentGraphState(
+            messages=[
+                HumanMessage(content="Initial"),
+                AIMessage(
+                    content="Using tool",
+                    tool_calls=[
+                        {"name": "test_tool", "args": {"param": "value"}, "id": "call1"}
+                    ],
+                ),
+                ToolMessage(content="Tool result", tool_call_id="call1"),
+            ],
+            inner_state=MockInnerState(initial_message_count=1),
+        )
+
+        result = terminate_node(state)
+
+        print(result)
+
+        messages = result["uipath__agent_response_messages"]
+        # Should have AI message with tool calls, but NOT the ToolMessage
+        # The mapper with include_tool_results=False should only return AI messages
+        assert len(messages) == 1
+        assert messages[0]["role"] == "assistant"
+        assert "Using tool" in str(messages[0]["contentParts"][0]["data"])
+        # Verify tool calls are present in the message
+        assert len(messages[0]["toolCalls"]) == 1
+        assert messages[0]["toolCalls"][0]["name"] == "test_tool"
+        assert messages[0]["toolCalls"][0]["input"] == {"param": "value"}
 
     def test_conversational_ignores_end_execution_tool(self):
         """Conversational mode should ignore END_EXECUTION tool calls."""
+
+        class ResponseSchema(BaseModel):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
+
         terminate_node = create_terminate_node(
-            response_schema=None, is_conversational=True
+            response_schema=ResponseSchema, is_conversational=True
         )
         ai_message = AIMessage(
             content="Done",
@@ -79,12 +191,19 @@ class TestTerminateNodeConversational:
                 }
             ],
         )
-        state = MockAgentGraphState(messages=[ai_message])
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="Initial"), ai_message],
+            inner_state=MockInnerState(initial_message_count=1),
+        )
 
-        # Should return None, not process the tool call
+        # Should process normally, not treat as special
         result = terminate_node(state)
 
-        assert result is None
+        assert "uipath__agent_response_messages" in result
+        messages = result["uipath__agent_response_messages"]
+        assert len(messages) == 1
+        assert messages[0]["role"] == "assistant"
+        assert "Done" in str(messages[0]["contentParts"][0]["data"])
 
 
 class TestTerminateNodeNonConversational:

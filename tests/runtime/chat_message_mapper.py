@@ -1,5 +1,6 @@
 """Tests for UiPathChatMessagesMapper."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -1352,3 +1353,261 @@ class TestMapEvent:
         assert len(result2) == 2  # Tool call end + message end
         assert result2[0].tool_call is not None
         assert result2[1].end is not None
+
+
+class TestMapLangChainMessagesToUiPathMessageData:
+    """Tests for map_langchain_messages_to_uipath_message_data_list static method."""
+
+    def test_converts_empty_messages_correctly(self):
+        """Should return empty list when input messages list is empty."""
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                []
+            )
+        )
+
+        assert result == []
+
+    def test_converts_human_message_to_user_role(self):
+        """Should convert HumanMessage to user role message."""
+        messages = [HumanMessage(content="Hello")]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages
+            )
+        )
+
+        assert len(result) == 1
+        assert result[0].role == "user"
+        assert len(result[0].content_parts) == 1
+        assert result[0].content_parts[0].mime_type == "text/plain"
+        assert result[0].content_parts[0].data.inline == "Hello"
+
+    def test_converts_ai_message_to_assistant_role(self):
+        """Should convert AIMessage to assistant role message."""
+        messages = [AIMessage(content="Hi there")]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages
+            )
+        )
+
+        assert len(result) == 1
+        assert result[0].role == "assistant"
+        assert len(result[0].content_parts) == 1
+        assert result[0].content_parts[0].mime_type == "text/markdown"
+        assert result[0].content_parts[0].data.inline == "Hi there"
+
+    def test_converts_ai_message_with_tool_calls(self):
+        """Should include tool calls in converted AI message."""
+        messages = [
+            AIMessage(
+                content="Let me search",
+                tool_calls=[
+                    {"name": "search", "args": {"query": "test"}, "id": "call1"}
+                ],
+            )
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages, include_tool_results=False
+            )
+        )
+
+        assert len(result) == 1
+        assert result[0].role == "assistant"
+        assert len(result[0].tool_calls) == 1
+        assert result[0].tool_calls[0].name == "search"
+        assert result[0].tool_calls[0].input == {"query": "test"}
+
+    def test_includes_tool_results_when_enabled(self):
+        """Should include tool results in tool calls when include_tool_results=True."""
+        messages = [
+            AIMessage(
+                content="Using tool",
+                tool_calls=[{"name": "test_tool", "args": {}, "id": "call1"}],
+            ),
+            ToolMessage(
+                content='{"status": "success"}', tool_call_id="call1", status="success"
+            ),
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages, include_tool_results=True
+            )
+        )
+
+        assert len(result) == 1  # Only AI message, tool message merged in
+        assert result[0].role == "assistant"
+        assert len(result[0].tool_calls) == 1
+        assert result[0].tool_calls[0].result is not None
+        assert result[0].tool_calls[0].result.output == {"status": "success"}
+        assert result[0].tool_calls[0].result.is_error is False
+
+    def test_excludes_tool_results_when_disabled(self):
+        """Should exclude tool results when include_tool_results=False."""
+        messages = [
+            AIMessage(
+                content="Using tool",
+                tool_calls=[{"name": "test_tool", "args": {}, "id": "call1"}],
+            ),
+            ToolMessage(
+                content='{"status": "success"}', tool_call_id="call1", status="success"
+            ),
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages, include_tool_results=False
+            )
+        )
+
+        assert len(result) == 1
+        assert result[0].role == "assistant"
+        assert len(result[0].tool_calls) == 1
+        # Tool call should not have result when include_tool_results=False
+        assert result[0].tool_calls[0].result is None
+
+    def test_handles_tool_error_status(self):
+        """Should mark tool result as error when status is error."""
+        messages = [
+            AIMessage(
+                content="Trying tool",
+                tool_calls=[{"name": "failing_tool", "args": {}, "id": "call1"}],
+            ),
+            ToolMessage(content="Error occurred", tool_call_id="call1", status="error"),
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages, include_tool_results=True
+            )
+        )
+
+        assert len(result) == 1
+        assert result[0].tool_calls[0].result is not None
+        assert result[0].tool_calls[0].result.is_error is True
+        assert result[0].tool_calls[0].result.output == "Error occurred"
+
+    def test_parses_json_tool_results(self):
+        """Should parse JSON string results back to dict."""
+        messages = [
+            AIMessage(
+                content="Using tool",
+                tool_calls=[{"name": "test_tool", "args": {}, "id": "call1"}],
+            ),
+            ToolMessage(
+                content='{"data": [1, 2, 3], "count": 3}', tool_call_id="call1"
+            ),
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages, include_tool_results=True
+            )
+        )
+
+        assert result[0].tool_calls[0].result.output == {"data": [1, 2, 3], "count": 3}
+
+    def test_keeps_non_json_tool_results_as_string(self):
+        """Should keep non-JSON results as strings."""
+        messages = [
+            AIMessage(
+                content="Using tool",
+                tool_calls=[{"name": "test_tool", "args": {}, "id": "call1"}],
+            ),
+            ToolMessage(content="plain text result", tool_call_id="call1"),
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages, include_tool_results=True
+            )
+        )
+
+        assert result[0].tool_calls[0].result.output == "plain text result"
+
+    def test_handles_mixed_message_types(self):
+        """Should handle conversation with mixed message types including tools."""
+        messages = [
+            HumanMessage(content="Hello"),
+            AIMessage(content="Hi there"),
+            HumanMessage(content="Search for data"),
+            AIMessage(
+                content="Let me search",
+                tool_calls=[
+                    {"name": "search_tool", "args": {"query": "data"}, "id": "call1"}
+                ],
+            ),
+            ToolMessage(content='{"results": ["item1", "item2"]}', tool_call_id="call1"),
+            AIMessage(content="I found the data"),
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages, include_tool_results=True
+            )
+        )
+
+        # Should skip ToolMessages, only convert Human and AI messages
+        assert len(result) == 5
+        assert result[0].role == "user"
+        assert result[1].role == "assistant"
+        assert result[2].role == "user"
+        assert result[3].role == "assistant"
+        assert len(result[3].tool_calls) == 1
+        assert result[3].tool_calls[0].result is not None
+        assert result[4].role == "assistant"
+
+    def test_handles_empty_message_list(self):
+        """Should return empty list for empty input."""
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                []
+            )
+        )
+
+        assert result == []
+
+    def test_handles_empty_content_messages(self):
+        """Should handle messages with empty content."""
+        messages = [
+            HumanMessage(content=""),
+            AIMessage(content=""),
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages
+            )
+        )
+
+        assert len(result) == 2
+        # Empty content should result in no text content-parts
+        assert len(result[0].content_parts) == 0
+        assert len(result[1].content_parts) == 0
+
+    def test_extracts_text_from_content_blocks(self):
+        """Should extract text from complex content block structures."""
+        messages = [
+            HumanMessage(
+                content=[
+                    {"type": "text", "text": "first part"},
+                    {"type": "text", "text": " second part"},
+                ]
+            )
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages
+            )
+        )
+
+        assert len(result) == 1
+        assert len(result[0].content_parts) == 1
+        assert result[0].content_parts[0].data.inline == "first part second part"
