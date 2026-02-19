@@ -4,7 +4,8 @@ import uuid
 from typing import Any, Optional, Type
 
 from langchain_core.documents import Document
-from langchain_core.tools import StructuredTool
+from langchain_core.messages import ToolCall
+from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field, create_model
 from uipath.agent.models.agent import (
@@ -22,10 +23,15 @@ from uipath.platform.context_grounding import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
 from .durable_interrupt import durable_interrupt
+from .structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
+)
 from .structured_tool_with_output_type import StructuredToolWithOutputType
+from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
 
 
@@ -390,17 +396,31 @@ def handle_batch_transform(
                 }
             }
 
-    return StructuredToolWithOutputType(
+    from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
+
+    job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
+
+    async def context_batch_transform_wrapper(
+        tool: BaseTool,
+        call: ToolCall,
+        state: AgentGraphState,
+    ) -> ToolWrapperReturnType:
+        return await job_attachment_wrapper(tool, call, state)
+
+    tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
         coroutine=context_tool_fn,
         output_type=output_model,
+        argument_properties={},
         metadata={
             "tool_type": "context",
             "display_name": resource.name,
         },
     )
+    tool.set_tool_wrappers(awrapper=context_batch_transform_wrapper)
+    return tool
 
 
 def ensure_valid_fields(resource_config: AgentContextResourceConfig):
