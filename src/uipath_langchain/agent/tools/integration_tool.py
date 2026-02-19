@@ -201,6 +201,8 @@ def create_integration_tool(
         metadata={
             "tool_type": "integration",
             "display_name": resource.name,
+            "connector_key": resource.properties.connection.id,
+            "connector_name": resource.properties.connection.name,
         },
     )
     tool.set_tool_wrappers(awrapper=integration_tool_wrapper)
