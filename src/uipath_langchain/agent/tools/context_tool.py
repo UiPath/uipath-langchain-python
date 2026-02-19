@@ -123,6 +123,8 @@ def handle_semantic_search(
         metadata={
             "tool_type": "context",
             "display_name": resource.name,
+            "index_name": resource.index_name,
+            "context_retrieval_mode": resource.settings.retrieval_mode,
         },
     )
 
@@ -202,6 +204,8 @@ def handle_deep_rag(
         metadata={
             "tool_type": "context",
             "display_name": resource.name,
+            "index_name": resource.index_name,
+            "context_retrieval_mode": resource.settings.retrieval_mode,
         },
     )
 
@@ -335,6 +339,8 @@ def handle_batch_transform(
         metadata={
             "tool_type": "context",
             "display_name": resource.name,
+            "index_name": resource.index_name,
+            "context_retrieval_mode": resource.settings.retrieval_mode,
         },
     )
     tool.set_tool_wrappers(awrapper=context_batch_transform_wrapper)
