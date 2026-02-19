@@ -1,6 +1,5 @@
 """Tests for UiPathChatMessagesMapper."""
 
-import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -1548,7 +1547,9 @@ class TestMapLangChainMessagesToUiPathMessageData:
                     {"name": "search_tool", "args": {"query": "data"}, "id": "call1"}
                 ],
             ),
-            ToolMessage(content='{"results": ["item1", "item2"]}', tool_call_id="call1"),
+            ToolMessage(
+                content='{"results": ["item1", "item2"]}', tool_call_id="call1"
+            ),
             AIMessage(content="I found the data"),
         ]
 

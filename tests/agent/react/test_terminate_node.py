@@ -4,9 +4,9 @@ from typing import Any
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from uipath.core.chat import UiPathConversationMessageData
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
+from uipath.core.chat import UiPathConversationMessageData
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,

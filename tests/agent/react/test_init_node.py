@@ -3,7 +3,7 @@
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.types import Overwrite
 from pydantic import BaseModel
 
