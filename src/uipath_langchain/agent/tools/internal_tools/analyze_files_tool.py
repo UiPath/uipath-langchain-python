@@ -51,6 +51,10 @@ def create_analyze_file_tool(
     input_model = create_model(resource.input_schema)
     output_model = create_model(resource.output_schema)
 
+    # Disable streaming so for conversational loops, the internal LLM call doesn't leak
+    # AIMessageChunk events into the graph stream.
+    non_streaming_llm = llm.model_copy(update={"disable_streaming": True})
+
     @mockable(
         name=resource.name,
         description=resource.description,
@@ -81,7 +85,7 @@ def create_analyze_file_tool(
             cast(AnyMessage, human_message_with_files),
         ]
         config = var_child_runnable_config.get(None)
-        result = await llm.ainvoke(messages, config=config)
+        result = await non_streaming_llm.ainvoke(messages, config=config)
 
         analysis_result = extract_text_content(result)
         return analysis_result

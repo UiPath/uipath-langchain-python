@@ -214,3 +214,35 @@ class TestCreateInitNodeInnerState:
 
         assert "inner_state" in result
         assert "job_attachments" in result["inner_state"]
+
+    def test_conversational_merges_attachments_from_preserved_messages(self):
+        """Conversational mode should merge attachments from preserved message metadata."""
+        attachment_id = "a940a416-b97b-4146-3089-08de5f4d0a87"
+        old_system_message = SystemMessage(content="Old system")
+        preserved_human_message = HumanMessage(
+            content="File here",
+            additional_kwargs={
+                "attachments": [
+                    {
+                        "id": attachment_id,
+                        "full_name": "document.pdf",
+                        "mime_type": "application/pdf",
+                    }
+                ],
+            },
+        )
+        state = MockState(messages=[old_system_message, preserved_human_message])
+
+        new_messages: list[SystemMessage | HumanMessage] = [
+            SystemMessage(content="New system"),
+        ]
+        init_node = create_init_node(
+            new_messages, input_schema=None, is_conversational=True
+        )
+
+        result = init_node(state)
+
+        job_attachments = result["inner_state"]["job_attachments"]
+        assert attachment_id in job_attachments
+        assert job_attachments[attachment_id].full_name == "document.pdf"
+        assert job_attachments[attachment_id].mime_type == "application/pdf"
