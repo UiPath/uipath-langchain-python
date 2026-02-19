@@ -1,12 +1,15 @@
 """Tests for LLM instrumentor span parenting and get_span_or_root priority."""
 
-from unittest.mock import MagicMock, patch
-from uuid import uuid4
+from unittest.mock import ANY, MagicMock, patch
+from uuid import UUID, uuid4
+
+from opentelemetry.trace import INVALID_SPAN
 
 from uipath_agents._observability.llmops.instrumentors.base import InstrumentationState
 from uipath_agents._observability.llmops.instrumentors.llm_instrumentor import (
     LlmSpanInstrumentor,
 )
+from uipath_agents._observability.llmops.spans import SpanKeys
 
 # --- get_span_or_root priority ---
 
@@ -180,3 +183,81 @@ class TestModelRunParenting:
 
         model_call = mock_span_factory.start_model_run.call_args
         assert model_call.kwargs["parent_span"] is guardrail_llm_span
+
+
+# --- on_llm_end span lifecycle ---
+
+_PATCH_HIERARCHY = "uipath_agents._observability.llmops.instrumentors.llm_instrumentor.SpanHierarchyManager"
+_PATCH_USAGE = "uipath_agents._observability.llmops.instrumentors.llm_instrumentor.set_usage_attributes"
+_PATCH_TOOL_CALLS = "uipath_agents._observability.llmops.instrumentors.llm_instrumentor.set_tool_calls_attributes"
+
+
+def _setup_on_llm_end() -> tuple[
+    LlmSpanInstrumentor, MagicMock, InstrumentationState, UUID, MagicMock, MagicMock
+]:
+    """Create instrumentor with pre-populated spans ready for on_llm_end."""
+    agent_span = MagicMock(name="agent_span")
+    instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+    run_id = uuid4()
+    model_span = MagicMock(name="model_span")
+    llm_span = MagicMock(name="llm_span")
+    state.spans[run_id] = llm_span
+    state.spans[SpanKeys.model(run_id)] = model_span
+    return instrumentor, mock_factory, state, run_id, model_span, llm_span
+
+
+class TestOnLlmEnd:
+    """on_llm_end always closes spans, even if attribute-setting throws."""
+
+    def test_happy_path_ends_both_spans_ok(self) -> None:
+        instrumentor, mock_factory, state, run_id, model_span, llm_span = (
+            _setup_on_llm_end()
+        )
+
+        with patch(_PATCH_HIERARCHY), patch(_PATCH_USAGE), patch(_PATCH_TOOL_CALLS):
+            instrumentor.on_llm_end(MagicMock(), run_id=run_id)
+
+        mock_factory.end_span_ok.assert_any_call(model_span)
+        mock_factory.end_span_ok.assert_any_call(llm_span)
+        mock_factory.end_span_error.assert_not_called()
+        assert run_id not in state.spans
+        assert SpanKeys.model(run_id) not in state.spans
+
+    def test_usage_attributes_throws_still_closes_both_spans(self) -> None:
+        instrumentor, mock_factory, state, run_id, model_span, llm_span = (
+            _setup_on_llm_end()
+        )
+
+        with (
+            patch(_PATCH_HIERARCHY),
+            patch(_PATCH_USAGE, side_effect=RuntimeError("boom")),
+        ):
+            instrumentor.on_llm_end(MagicMock(), run_id=run_id)
+
+        mock_factory.end_span_ok.assert_not_called()
+        mock_factory.end_span_error.assert_any_call(model_span, ANY)
+        mock_factory.end_span_error.assert_any_call(llm_span, ANY)
+
+    def test_end_span_ok_model_throws_llm_span_still_closed(self) -> None:
+        instrumentor, mock_factory, state, run_id, model_span, llm_span = (
+            _setup_on_llm_end()
+        )
+        mock_factory.end_span_ok.side_effect = RuntimeError("end failed")
+
+        with patch(_PATCH_HIERARCHY), patch(_PATCH_USAGE), patch(_PATCH_TOOL_CALLS):
+            instrumentor.on_llm_end(MagicMock(), run_id=run_id)
+
+        mock_factory.end_span_error.assert_any_call(llm_span, ANY)
+
+    def test_non_recording_span_not_error_closed_on_exception(self) -> None:
+        instrumentor, mock_factory, state, run_id, model_span, _ = _setup_on_llm_end()
+        state.spans[run_id] = INVALID_SPAN  # replace llm_span with NonRecordingSpan
+
+        with (
+            patch(_PATCH_HIERARCHY),
+            patch(_PATCH_USAGE, side_effect=RuntimeError("boom")),
+        ):
+            instrumentor.on_llm_end(MagicMock(), run_id=run_id)
+
+        for call in mock_factory.end_span_error.call_args_list:
+            assert call.args[0] is not INVALID_SPAN

@@ -181,19 +181,22 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
         **kwargs: Any,
     ) -> None:
         """Handle LLM end event."""
+        model_span = None
+        llm_span = None
         try:
             SpanHierarchyManager.pop(run_id)
+            model_span = self._spans.pop(self._model_span_key(run_id), None)
+            llm_span = self._spans.pop(run_id, None)
 
             # Close inner span first, then outer
-            model_span = self._spans.pop(self._model_span_key(run_id), None)
             if model_span:
                 set_usage_attributes(model_span, response)
                 set_tool_calls_attributes(model_span, response)
                 self._span_factory.end_span_ok(model_span)
+                model_span = None
 
-            llm_span = self._spans.pop(run_id, None)
             if llm_span:
-                # Handle NonRecordingSpan (resumed LLM span) - use upsert_span_complete_by_data
+                # NonRecordingSpan = resumed LLM span from HITL; complete via upsert
                 if isinstance(llm_span, NonRecordingSpan):
                     llm_span_data = self._state.resumed_llm_span_data
                     trace_id = (
@@ -207,11 +210,21 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
                         )
                 else:
                     self._span_factory.end_span_ok(llm_span)
+                llm_span = None
 
             self._close_container(GuardrailScope.LLM, ExecutionStage.POST_EXECUTION)
 
         except Exception:
             logger.exception("Error in on_llm_end callback")
+        finally:
+            if model_span:
+                self._span_factory.end_span_error(
+                    model_span, Exception("on_llm_end failed")
+                )
+            if llm_span and not isinstance(llm_span, NonRecordingSpan):
+                self._span_factory.end_span_error(
+                    llm_span, Exception("on_llm_end failed")
+                )
 
     def on_llm_error(
         self,
