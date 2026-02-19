@@ -16,7 +16,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "httpx>=0.27.0",
     "openinference-instrumentation-langchain>=0.1.56",
-    "jsonschema-pydantic-converter>=0.1.8",
+    "jsonschema-pydantic-converter>=0.1.9",
     "jsonpath-ng>=1.7.0",
     "mcp==1.26.0",
     "langchain-mcp-adapters==0.2.1",
@@ -116,4 +116,3 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
-
