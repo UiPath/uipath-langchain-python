@@ -259,7 +259,7 @@ class TestCreateAnalyzeFileTool:
             analysisTask="Compare these documents", attachments=mock_attachments
         )
 
-        assert result == "Multiple files analyzed"
+        assert result == {"analysisResult": "Multiple files analyzed"}
         mock_resolve_attachments.assert_called_once()
 
         # Verify add_files_to_message received both files
