@@ -132,7 +132,7 @@ class TestCreateAnalyzeFileTool:
         )
 
         # Verify calls
-        assert result == "Analyzed result"
+        assert result == {"analysisResult": "Analyzed result"}
         mock_resolve_attachments.assert_called_once()
         mock_add_files.assert_called_once()
         mock_llm.ainvoke.assert_called_once()
