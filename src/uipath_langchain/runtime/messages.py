@@ -139,7 +139,7 @@ class UiPathChatMessagesMapper:
                         attachment_id = self.parse_attachment_id_from_content_part_uri(
                             data.uri
                         )
-                        full_name = getattr(uipath_content_part, "name", None)
+                        full_name = uipath_content_part.name
                         if attachment_id and full_name:
                             attachments.append(
                                 {
