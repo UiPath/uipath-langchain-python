@@ -5,8 +5,6 @@ from typing import Any, Literal
 
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.func import task
-from langgraph.types import interrupt
 from pydantic import BaseModel, TypeAdapter
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
@@ -32,6 +30,7 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..react.types import AgentGraphState
+from .durable_interrupt import durable_interrupt
 from .tool_node import ToolWrapperReturnType
 from .utils import (
     resolve_task_title,
@@ -178,10 +177,10 @@ def create_escalation_tool(
             example_calls=channel.properties.example_calls,
         )
         async def escalate():
-            @task
+            @durable_interrupt
             async def create_escalation_task():
                 client = UiPath()
-                return await client.tasks.create_async(
+                created_task = await client.tasks.create_async(
                     title=task_title,
                     data=serialized_data,
                     app_name=channel.properties.app_name,
@@ -192,16 +191,14 @@ def create_escalation_tool(
                     is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
                     actionable_message_metadata=channel.properties.actionable_message_meta_data,
                 )
-
-            created_task = await create_escalation_task()
-            return interrupt(
-                WaitEscalation(
+                return WaitEscalation(
                     action=created_task,
                     app_folder_path=channel.properties.folder_name,
                     app_name=channel.properties.app_name,
                     recipient=recipient,
                 )
-            )
+
+            return await create_escalation_task()
 
         result = await escalate()
         if isinstance(result, dict):
@@ -209,7 +206,9 @@ def create_escalation_tool(
 
         outcome = result.action
         escalation_output = _parse_task_data(
-            result.data,
+            result.data.model_dump()
+            if isinstance(result.data, BaseModel)
+            else result.data,
             input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
         )
@@ -266,6 +265,8 @@ def create_escalation_tool(
         return {
             "output": result["output"],
             "outcome": result["outcome"],
+            "task_id": result.get("task_id"),
+            "assigned_to": result.get("assigned_to"),
         }
 
     tool = StructuredToolWithArgumentProperties(
