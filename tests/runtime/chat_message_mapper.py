@@ -778,6 +778,7 @@ class TestMapMessages:
                     content_part_id="part-1",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="I can help with that"),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 )
@@ -807,6 +808,7 @@ class TestMapMessages:
                     content_part_id="part-text",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="Check this file"),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
@@ -817,6 +819,7 @@ class TestMapMessages:
                         uri="urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
                     ),
                     name="test.pdf",
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
@@ -857,6 +860,7 @@ class TestMapMessages:
                     content_part_id="part-text",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="Check this file"),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
@@ -864,6 +868,7 @@ class TestMapMessages:
                     content_part_id="part-file",
                     mime_type="application/pdf",
                     data=UiPathExternalValue(uri=""),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
@@ -895,6 +900,7 @@ class TestMapMessages:
                     content_part_id="part-text",
                     mime_type="text/plain",
                     data=UiPathInlineValue(inline="Check this file"),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
@@ -902,6 +908,7 @@ class TestMapMessages:
                     content_part_id="part-file",
                     mime_type="application/pdf",
                     data=UiPathExternalValue(uri="urn:uipath:cas:file:orchestrator:"),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
@@ -935,6 +942,7 @@ class TestMapMessages:
                     data=UiPathExternalValue(
                         uri="urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
                     ),
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
@@ -968,6 +976,7 @@ class TestMapMessages:
                         uri="urn:uipath:cas:file:orchestrator:A940A416-B97B-4146-3089-08DE5F4D0A87"
                     ),
                     name="test.pdf",
+                    citations=[],
                     created_at=TEST_TIMESTAMP,
                     updated_at=TEST_TIMESTAMP,
                 ),
