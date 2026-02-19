@@ -7,7 +7,7 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
-from uipath._utils import resource_override
+from uipath._utils import resolve_endpoint_override, resource_override
 from uipath.utils import EndpointManager
 
 from .header_capture import HeaderCapture
@@ -72,6 +72,7 @@ class AwsBedrockCompletionsPassthroughClient:
         self.byo_connection_id = byo_connection_id
         self._vendor = "awsbedrock"
         self._url: Optional[str] = None
+        self._override_headers: dict[str, str] = {}
         self.header_capture = header_capture
 
     @property
@@ -85,12 +86,17 @@ class AwsBedrockCompletionsPassthroughClient:
 
     def _build_base_url(self) -> str:
         if not self._url:
-            env_uipath_url = os.getenv("UIPATH_URL")
-
-            if env_uipath_url:
-                self._url = f"{env_uipath_url.rstrip('/')}/{self.endpoint}"
+            override_url, self._override_headers = resolve_endpoint_override(
+                self.endpoint
+            )
+            if override_url:
+                self._url = override_url
             else:
-                raise ValueError("UIPATH_URL environment variable is required")
+                env_uipath_url = os.getenv("UIPATH_URL")
+                if env_uipath_url:
+                    self._url = f"{env_uipath_url.rstrip('/')}/{self.endpoint}"
+                else:
+                    raise ValueError("UIPATH_URL environment variable is required")
 
         return self._url
 
@@ -145,6 +151,7 @@ class AwsBedrockCompletionsPassthroughClient:
         if process_key:
             headers["X-UiPath-ProcessKey"] = process_key
 
+        headers.update(self._override_headers)
         request.headers.update(headers)
 
 
