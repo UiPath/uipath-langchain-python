@@ -190,7 +190,7 @@ class TestHandleDeepRag:
             tool = handle_deep_rag("test_tool", resource)
 
             with patch(
-                "uipath_langchain.agent.tools.context_tool.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
             ) as mock_interrupt:
                 mock_interrupt.return_value = {"mocked": "response"}
                 assert tool.coroutine is not None
@@ -212,7 +212,7 @@ class TestHandleDeepRag:
 
         task_names = []
         with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
 
@@ -273,7 +273,7 @@ class TestHandleDeepRag:
         tool = handle_deep_rag("test_tool", resource)
 
         with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
@@ -634,7 +634,7 @@ class TestHandleBatchTransform:
         tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
 
         with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
@@ -674,7 +674,7 @@ class TestHandleBatchTransform:
         tool = handle_batch_transform("batch_transform_tool", resource)
 
         with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
@@ -694,7 +694,7 @@ class TestHandleBatchTransform:
         tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
 
         with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
@@ -735,7 +735,7 @@ class TestHandleBatchTransform:
         tool = handle_batch_transform("batch_transform_tool", resource)
 
         with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
