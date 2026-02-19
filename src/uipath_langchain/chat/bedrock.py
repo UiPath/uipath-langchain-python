@@ -109,7 +109,8 @@ class AwsBedrockCompletionsPassthroughClient:
             config=botocore.config.Config(
                 retries={
                     "total_max_attempts": 1,
-                }
+                },
+                read_timeout=600,
             ),
         )
         client.meta.events.register(

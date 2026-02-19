@@ -20,6 +20,7 @@ dependencies = [
     "jsonpath-ng>=1.7.0",
     "mcp==1.26.0",
     "langchain-mcp-adapters==0.2.1",
+    "deepagents>=0.4.1",
 ]
 
 classifiers = [
