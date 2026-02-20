@@ -1,7 +1,7 @@
 from langchain_anthropic import ChatAnthropic
 from langchain_tavily import TavilySearch
 from langchain.agents import create_agent
-from uipath_langchain.chat import requires_approval
+from uipath_langchain.chat.tools import requires_approval
 
 tavily_tool = TavilySearch(max_results=5)
 

@@ -26,9 +26,13 @@ def __getattr__(name):
 
         return UiPathChatOpenAI
     if name == "requires_approval":
-        from .hitl import requires_approval
+        from .tools.hitl import requires_approval
 
         return requires_approval
+    if name == "AnalyzeAttachmentsTool":
+        from .tools.attachments import AnalyzeAttachmentsTool
+
+        return AnalyzeAttachmentsTool
     if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
         from . import supported_models
 
@@ -50,4 +54,6 @@ __all__ = [
     "requires_approval",
     "LLMProvider",
     "APIFlavor",
+    "requires_approval",
+    "AnalyzeAttachmentsTool",
 ]
