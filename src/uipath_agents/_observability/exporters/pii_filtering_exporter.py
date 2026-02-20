@@ -37,15 +37,15 @@ def _get_pii_patterns() -> list[str]:
         "*.messages.*.content",  # Generic message content patterns
         "llm.*.message_content.text",
         "llm.*.function.arguments",
+        "*.invocation_parameters",
+        "*.json_schema",
     ]
 
 
 def _get_preserve_fields() -> frozenset[str]:
     """Get the set of JSON fields to preserve."""
     # Default fields to preserve (commonly non-PII)
-    return frozenset(
-        {"inner_state", "job_attachments", "graph", "resume", "goto", "type"}
-    )
+    return frozenset({"inner_state", "job_attachments", "graph", "goto", "type"})
 
 
 def _get_redactable_exception_types() -> frozenset[str]:
