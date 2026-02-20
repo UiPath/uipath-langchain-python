@@ -7,8 +7,9 @@ from uuid import UUID
 
 from pydantic import BaseModel
 from uipath.core.guardrails import GuardrailScope
+from uipath.core.serialization import serialize_json
 from uipath.eval.mocks.mockable import MOCKED_ANNOTATION_KEY
-from uipath.tracing import AttachmentDirection
+from uipath.tracing import AttachmentDirection, AttachmentProvider, SpanAttachment
 from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ..span_hierarchy import SpanHierarchyManager
@@ -18,6 +19,7 @@ from .attribute_helpers import (
     filter_output,
     get_tool_type_value,
     parse_tool_arguments,
+    set_context_grounding_results,
     set_process_job_info,
     set_span_attachments,
     set_tool_result,
@@ -124,7 +126,9 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 self._close_container(GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION)
                 self._span_factory.upsert_span_started(span)
             else:
-                parent = self._state.get_span_or_root(parent_run_id)
+                parent = self._state.current_llm_span or self._state.get_span_or_root(
+                    parent_run_id
+                )
                 span = self._span_factory.start_tool_call(
                     tool_name,
                     tool_type_value=tool_type_value,
@@ -204,6 +208,46 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         parent_span=span,
                     )
                     self._state.vs_escalation_run_ids.add(run_id)
+                elif tool_type == "context_grounding":
+                    assert metadata is not None  # tool_type came from metadata
+                    query = (
+                        (arguments or {}).get("query")
+                        or metadata.get("static_query")
+                        or ""
+                    )
+                    input_attachments = None
+                    file_extension = None
+                    att_raw = (arguments or {}).get("attachment")
+                    if isinstance(att_raw, dict) and att_raw.get("ID"):
+                        mime_type = att_raw.get("MimeType")
+
+                        input_attachments = [
+                            SpanAttachment.model_validate(
+                                {
+                                    "id": str(att_raw["ID"]),
+                                    "file_name": att_raw.get("FullName", ""),
+                                    "mime_type": mime_type,
+                                    "provider": AttachmentProvider.ORCHESTRATOR,
+                                    "direction": AttachmentDirection.IN,
+                                }
+                            )
+                        ]
+
+                        file_extension = mime_type
+
+                    child_span = self._span_factory.start_context_grounding_tool(
+                        tool_name=tool_display_name or tool_name,
+                        retrieval_mode=metadata.get("retrieval_mode", "SemanticSearch"),
+                        query=query,
+                        output_columns=metadata.get("output_columns"),
+                        web_search_grounding=metadata.get("web_search_grounding"),
+                        citation_mode=metadata.get("citation_mode"),
+                        number_of_results=metadata.get("number_of_results"),
+                        file_extension=file_extension,
+                        parent_span=span,
+                        input_attachments=input_attachments,
+                    )
+                    self._state.context_grounding_run_ids.add(run_id)
                 elif tool_type == "internal" and tool_display_name:
                     child_span = self._span_factory.start_internal_tool(
                         tool_name=tool_display_name,
@@ -234,6 +278,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         "processorchestration",
                         "ixp_extraction",
                         "vs_escalation",
+                        "context_grounding",
                     ):
                         self._state.pending_tool_name = tool_name
                         self._state.pending_tool_span = span
@@ -278,6 +323,8 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 self._upsert_resumed_spans_on_completion(output, output_schema)
                 return
 
+            is_cg = run_id in self._state.context_grounding_run_ids
+
             # Close child span first (inner), then tool span (outer)
             child_span = self._spans.pop(self._interruptible_span_key(run_id), None)
             if child_span:
@@ -302,6 +349,21 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                     self._state.ixp_extraction_run_ids.discard(run_id)
                 if run_id in self._state.vs_escalation_run_ids:
                     self._state.vs_escalation_run_ids.discard(run_id)
+                if run_id in self._state.context_grounding_run_ids:
+                    set_context_grounding_results(child_span, output)
+                    output_schema = self._state.tool_output_schemas.get(run_id)
+                    if isinstance(output, str) and output_schema:
+                        try:
+                            parsed_output = json.loads(output)
+                            set_span_attachments(
+                                child_span,
+                                parsed_output,
+                                output_schema,
+                                AttachmentDirection.OUT,
+                            )
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    self._state.context_grounding_run_ids.discard(run_id)
                 self._span_factory.end_span_ok(child_span)
                 if child_span == self._state.pending_process_span:
                     self._state.pending_process_span = None
@@ -309,7 +371,22 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             span = self._spans.pop(run_id, None)
             if span:
                 SpanHierarchyManager.pop(run_id)
-                set_tool_result(span, output, "output")
+                if is_cg:
+                    raw = output.get("result") if isinstance(output, dict) else None
+                    if isinstance(raw, dict):
+                        result_info = {}
+                        if "ID" in raw:
+                            result_info["id"] = raw["ID"]
+                        if "FullName" in raw:
+                            result_info["fileName"] = raw["FullName"]
+                        if "MimeType" in raw:
+                            result_info["mimeType"] = raw["MimeType"]
+                        if result_info:
+                            span.set_attribute("result", serialize_json(result_info))
+                else:
+                    set_tool_result(
+                        span, output, "output"
+                    )  # ugly fix for stupid problem...
                 set_span_attachments(
                     span, output, output_schema, AttachmentDirection.OUT
                 )
@@ -404,6 +481,57 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 "Upserted resumed tool span %s on tool completion",
                 self._state.resumed_tool_span_data.get("name", "unknown"),
             )
+
+        # End original OTEL spans (preserved across suspend/resume) so file
+        # exporter sees the result. These were saved during cleanup() before
+        # the first execution returned SUSPENDED.
+        is_cg = False
+        if self._state.resumed_process_span_data:
+            cg_type = self._state.resumed_process_span_data.get("attributes", {}).get(
+                "span_type", ""
+            ) or self._state.resumed_process_span_data.get("attributes", {}).get(
+                "type", ""
+            )
+            is_cg = cg_type == "contextGroundingTool"
+
+        suspended_process = self._state.suspended_process_span
+        if suspended_process:
+            set_tool_result(suspended_process, output, "output")
+            if is_cg:
+                set_context_grounding_results(suspended_process, output)
+                if output_schema:
+                    set_span_attachments(
+                        suspended_process,
+                        output,
+                        output_schema,
+                        AttachmentDirection.OUT,
+                    )
+            self._span_factory.end_span_ok(suspended_process)
+            self._state.suspended_process_span = None
+
+        suspended_tool = self._state.suspended_tool_span
+        if suspended_tool:
+            if is_cg:
+                raw = output.get("result") if isinstance(output, dict) else None
+                if isinstance(raw, dict):
+                    result_info = {}
+                    if "ID" in raw:
+                        result_info["id"] = raw["ID"]
+                    if "FullName" in raw:
+                        result_info["fileName"] = raw["FullName"]
+                    if "MimeType" in raw:
+                        result_info["mimeType"] = raw["MimeType"]
+                    if result_info:
+                        suspended_tool.set_attribute(
+                            "result", serialize_json(result_info)
+                        )
+            else:
+                set_tool_result(suspended_tool, output, "output")
+            set_span_attachments(
+                suspended_tool, output, output_schema, AttachmentDirection.OUT
+            )
+            self._span_factory.end_span_ok(suspended_tool)
+            self._state.suspended_tool_span = None
 
         self._state.resumed_process_span_data = None
         self._state.resumed_tool_span_data = None

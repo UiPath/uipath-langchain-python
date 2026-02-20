@@ -3,7 +3,7 @@
 Handles tool call, escalation, process, agent, and integration tool spans.
 """
 
-from typing import Any, Callable, Dict, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 
 from opentelemetry.trace import (
     Span,
@@ -11,11 +11,13 @@ from opentelemetry.trace import (
     Tracer,
 )
 from pydantic import BaseModel
-from uipath.tracing import AttachmentDirection
+from uipath.core.serialization import serialize_json
+from uipath.tracing import AttachmentDirection, SpanAttachment
 
 from ...instrumentors.attribute_helpers import get_span_attachments
 from ..span_attributes import (
     AgentToolSpanAttributes,
+    ContextGroundingToolSpanAttributes,
     EscalationToolSpanAttributes,
     IntegrationToolSpanAttributes,
     InternalToolSpanAttributes,
@@ -358,6 +360,48 @@ class ToolSpanSchema:
         )
         attrs = McpToolSpanAttributes(arguments=arguments or {})
         apply_attributes(span, attrs)
+        if self._upsert_started:
+            self._upsert_started(span)
+        return span
+
+    def start_context_grounding_tool(
+        self,
+        tool_name: str,
+        *,
+        retrieval_mode: str,
+        query: str,
+        output_columns: Optional[List[Dict[str, str]]] = None,
+        web_search_grounding: Optional[bool] = None,
+        citation_mode: Optional[str] = None,
+        number_of_results: Optional[int] = None,
+        file_extension: Optional[str] = None,
+        parent_span: Optional[Span] = None,
+        input_attachments: Optional[List[SpanAttachment]] = None,
+    ) -> Span:
+        span = create_span(
+            self._tracer,
+            tool_name,
+            parent_span=parent_span,
+            kind=SpanKind.INTERNAL,
+        )
+
+        attrs = ContextGroundingToolSpanAttributes(
+            retrieval_mode=retrieval_mode,
+            query=query,
+            output_columns=output_columns,
+            web_search_grounding=web_search_grounding,
+            citation_mode=citation_mode,
+            number_of_results=number_of_results,
+            file_extension=file_extension,
+        )
+        apply_attributes(span, attrs)
+        if input_attachments:
+            span.set_attribute(
+                "attachments",
+                serialize_json(
+                    [att.model_dump(by_alias=True) for att in input_attachments]
+                ),
+            )
         if self._upsert_started:
             self._upsert_started(span)
         return span

@@ -7,14 +7,14 @@ Used by LlmOpsInstrumentationCallback to instrument LangGraph agents.
 import logging
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, Optional, Type, cast
+from typing import Any, Dict, Generator, List, Optional, Type, cast
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExportResult
 from opentelemetry.trace import Span, Status, StatusCode
 from pydantic import BaseModel
-from uipath.tracing import SpanStatus
+from uipath.tracing import SpanAttachment, SpanStatus
 
 from .spans_schema import (
     AgentSpanSchema,
@@ -426,6 +426,34 @@ class LlmOpsSpanFactory:
             tool_name,
             arguments=arguments,
             parent_span=parent_span,
+        )
+
+    def start_context_grounding_tool(
+        self,
+        tool_name: str,
+        *,
+        retrieval_mode: str,
+        query: str,
+        output_columns: Optional[List[Dict[str, str]]] = None,
+        web_search_grounding: Optional[bool] = None,
+        citation_mode: Optional[str] = None,
+        number_of_results: Optional[int] = None,
+        file_extension: Optional[str] = None,
+        parent_span: Optional[Span] = None,
+        input_attachments: Optional[List[SpanAttachment]] = None,
+    ) -> Span:
+        """Start a context grounding tool span (child of tool call)."""
+        return self._tool_schema.start_context_grounding_tool(
+            tool_name,
+            retrieval_mode=retrieval_mode,
+            query=query,
+            output_columns=output_columns,
+            web_search_grounding=web_search_grounding,
+            citation_mode=citation_mode,
+            number_of_results=number_of_results,
+            file_extension=file_extension,
+            parent_span=parent_span,
+            input_attachments=input_attachments,
         )
 
     # -------------------------------------------------------------------------

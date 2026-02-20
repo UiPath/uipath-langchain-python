@@ -273,6 +273,7 @@ def get_tool_type_value(tool_type: Optional[str]) -> str:
         "ixp_extraction": "IxpExtraction",
         "mcp": "Mcp",
         "vs_escalation": "Escalation",
+        "context_grounding": "ContextGrounding",
     }
     return mapping.get(tool_type or "", "Integration")
 
@@ -486,3 +487,53 @@ def set_span_attachments(
         existing = _get_existing_attachments(existing_json)
         merged = _merge_attachments(existing, new_attachments_list)
         span.set_attribute("attachments", serialize_json(merged))
+
+
+def set_context_grounding_results(span: Span, output: Any) -> None:
+    """Set results, index_id, and output attachments on a context grounding span."""
+    content = _unwrap_tool_output(output)
+
+    if isinstance(content, str):
+        try:
+            content = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if not content or not isinstance(content, dict):
+        return
+
+    raw = content.get("result") if isinstance(content, dict) else {}
+    raw = raw if isinstance(raw, dict) else {}
+    result_info: Dict[str, Any] = {}
+    if "ID" in raw:
+        result_info["id"] = raw["ID"]
+    if "FullName" in raw:
+        result_info["fileName"] = raw["FullName"]
+    if "MimeType" in raw:
+        result_info["mimeType"] = raw["MimeType"]
+    if result_info:
+        span.set_attribute("results", serialize_json(result_info))
+
+    index_id = content.get("index_id") or content.get("indexId")
+    if index_id:
+        span.set_attribute("index_id", str(index_id))
+
+    if not (result_info.get("id") and result_info.get("fileName")):
+        return
+
+    att = SpanAttachment.model_validate(
+        {
+            "id": str(result_info["id"]),
+            "file_name": result_info.get("fileName", ""),
+            "mime_type": result_info.get("mimeType", ""),
+            "provider": AttachmentProvider.ORCHESTRATOR,
+            "direction": AttachmentDirection.OUT,
+        }
+    )
+    new_attachments = [att.model_dump(by_alias=True)]
+    existing_json = (
+        span.attributes.get("attachments") if hasattr(span, "attributes") else None
+    )
+    existing = _get_existing_attachments(existing_json)
+    merged = _merge_attachments(existing, new_attachments)
+    span.set_attribute("attachments", serialize_json(merged))

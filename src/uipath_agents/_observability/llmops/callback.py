@@ -432,6 +432,12 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
                 logger.debug("Failed to end span during cleanup: %s", e)
         self._state.spans.clear()
 
+        # Preserve pending OTEL spans for file exporter on resume
+        if self._state.pending_tool_span is not None:
+            self._state.suspended_tool_span = self._state.pending_tool_span
+        if self._state.pending_process_span is not None:
+            self._state.suspended_process_span = self._state.pending_process_span
+
         # Clear pending references
         self._state.pending_tool_span = None
         self._state.pending_process_span = None

@@ -41,12 +41,18 @@ class InstrumentationState:
     ixp_extraction_run_ids: Set[UUID] = field(default_factory=set)
     vs_escalation_run_ids: Set[UUID] = field(default_factory=set)
     mcp_run_ids: Set[UUID] = field(default_factory=set)
+    context_grounding_run_ids: Set[UUID] = field(default_factory=set)
     tool_output_schemas: Dict[UUID, Any] = field(default_factory=dict)
 
     # Pending interruptible tool spans (for suspend/resume)
     pending_tool_name: Optional[str] = None
     pending_tool_span: Optional[Span] = None
     pending_process_span: Optional[Span] = None
+
+    # Preserved OTEL spans across suspend/resume (survives cleanup/reset)
+    # Used by file exporter which needs the real OTEL span object to export
+    suspended_tool_span: Optional[Span] = None
+    suspended_process_span: Optional[Span] = None
 
     # Resume state
     resume_tool_name: Optional[str] = None
@@ -99,6 +105,7 @@ class InstrumentationState:
         self.ixp_extraction_run_ids.clear()
         self.vs_escalation_run_ids.clear()
         self.mcp_run_ids.clear()
+        self.context_grounding_run_ids.clear()
         self.tool_output_schemas.clear()
 
         # Resume state

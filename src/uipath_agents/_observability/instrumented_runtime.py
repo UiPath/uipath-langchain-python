@@ -56,6 +56,7 @@ from .llmops import (
     TraceContextStorage,
     reference_id_context,
 )
+from .llmops.spans.spans_schema.base import uipath_source_context
 
 logger = logging.getLogger(__name__)
 
@@ -452,14 +453,15 @@ class InstrumentedRuntime:
             ref_id = saved_context["attributes"].get("referenceId")
 
         reference_id_token = reference_id_context.set(ref_id) if ref_id else None
+        source_token = uipath_source_context.set(1)
 
         with trace.use_span(restored_span, end_on_exit=False):
             try:
                 yield restored_span
             finally:
-                # Reset ContextVar when done
                 if reference_id_token is not None:
                     reference_id_context.reset(reference_id_token)
+                uipath_source_context.reset(source_token)
 
     async def _handle_suspended(self, agent_span: Span) -> None:
         """Handle suspended state: upsert spans and save trace context.
