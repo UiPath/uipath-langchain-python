@@ -116,7 +116,7 @@ def create_batch_transform_tool(
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for internal tools
         )
-        async def invoke_batch_transform():
+        async def invoke_batch_transform(**_tool_kwargs: Any):
             @durable_interrupt
             async def create_ephemeral_index():
                 uipath = UiPath()
@@ -169,7 +169,7 @@ def create_batch_transform_tool(
                 "MimeType": "text/csv",
             }
 
-        result_attachment = await invoke_batch_transform()
+        result_attachment = await invoke_batch_transform(**kwargs)
 
         return {"result": result_attachment}
 

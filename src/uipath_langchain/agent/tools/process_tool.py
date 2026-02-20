@@ -50,7 +50,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             output_schema=output_model.model_json_schema(),
             example_calls=resource.properties.example_calls,
         )
-        async def invoke_process():
+        async def invoke_process(**_tool_kwargs: Any):
             parent_span_id = _span_context.pop("parent_span_id", None)
 
             @durable_interrupt
@@ -67,7 +67,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
 
             return await start_job()
 
-        return await invoke_process()
+        return await invoke_process(**kwargs)
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 

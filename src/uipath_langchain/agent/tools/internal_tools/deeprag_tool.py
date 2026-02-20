@@ -101,7 +101,7 @@ def create_deeprag_tool(
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for internal tools
         )
-        async def invoke_deeprag():
+        async def invoke_deeprag(**_tool_kwargs: Any):
             @durable_interrupt
             async def create_ephemeral_index():
                 uipath = UiPath()
@@ -134,7 +134,7 @@ def create_deeprag_tool(
 
             return await create_deeprag()
 
-        return await invoke_deeprag()
+        return await invoke_deeprag(**kwargs)
 
     # Import here to avoid circular dependency
     from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
