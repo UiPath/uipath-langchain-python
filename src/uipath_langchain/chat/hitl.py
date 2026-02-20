@@ -100,7 +100,6 @@ def requires_approval(
     args_schema: type | None = None,
     return_direct: bool = False,
 ) -> BaseTool | Callable[..., BaseTool]:
-
     def decorator(fn: Callable[..., Any]) -> BaseTool:
         _created_tool: list[BaseTool] = []
 
