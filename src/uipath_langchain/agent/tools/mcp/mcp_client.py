@@ -6,15 +6,16 @@ including automatic reconnection on session disconnect errors.
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import httpx
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp import ClientSession
 from mcp.shared.exceptions import McpError
 from mcp.shared.message import SessionMessage
-from mcp.types import CallToolResult
+from mcp.types import CallToolResult, ListToolsResult
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.runtime.base import UiPathDisposableProtocol
 
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
     from uipath.platform.orchestrator.mcp import McpServer
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 class SessionInfoFactory:
@@ -286,25 +289,27 @@ class McpClient(UiPathDisposableProtocol):
             and error.error.code in self.SESSION_ERROR_CODES
         )
 
-    async def call_tool(
+    async def _execute_with_retry(
         self,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-    ) -> CallToolResult:
-        """Call an MCP tool with automatic retry on session disconnect.
+        operation: Callable[[ClientSession], Awaitable[T]],
+        operation_name: str,
+    ) -> T:
+        """Execute a session operation with automatic retry on session disconnect.
 
         On first call, initializes the full client stack. On session
-        disconnect (404/32600), reinitializes only the session and retries.
+        disconnect, reinitializes only the session and retries up to
+        ``_max_retries`` times.
 
         Args:
-            name: The name of the tool to call.
-            arguments: Optional arguments to pass to the tool.
+            operation: An async callable that receives the ``ClientSession``
+                and returns the desired result.
+            operation_name: A label used in log messages.
 
         Returns:
-            The tool call result.
+            The result of *operation*.
 
         Raises:
-            McpError: If the tool call fails after all retries.
+            McpError: If the operation fails after all retries.
         """
         retry_count = 0
 
@@ -312,14 +317,12 @@ class McpClient(UiPathDisposableProtocol):
             try:
                 session = await self._ensure_session()
                 logger.debug(
-                    f"Calling tool {name} (attempt {retry_count + 1}/{self._max_retries + 1})"
+                    f"{operation_name} (attempt {retry_count + 1}/{self._max_retries + 1})"
                 )
-                result = await session.call_tool(name, arguments=arguments)
-                logger.info(f"Tool call successful: {name}")
-                return result
+                return await operation(session)
 
             except McpError as e:
-                logger.info(f"McpError during tool call: {e}")
+                logger.info(f"McpError during {operation_name}: {e}")
 
                 if self._is_session_error(e) and retry_count < self._max_retries:
                     logger.warning(
@@ -336,8 +339,33 @@ class McpClient(UiPathDisposableProtocol):
                         logger.error(f"Non-retryable MCP error: {e}")
                     raise
 
-        # Should not reach here, but just in case
         raise RuntimeError("Exited retry loop unexpectedly")
+
+    async def list_tools(self) -> ListToolsResult:
+        """List available tools from the MCP server."""
+        return await self._execute_with_retry(
+            lambda session: session.list_tools(),
+            "list_tools",
+        )
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> CallToolResult:
+        """Call an MCP tool by name.
+
+        Args:
+            name: The name of the tool to call.
+            arguments: Optional arguments to pass to the tool.
+
+        Returns:
+            The tool call result.
+        """
+        return await self._execute_with_retry(
+            lambda session: session.call_tool(name, arguments=arguments),
+            f"call_tool({name})",
+        )
 
     async def dispose(self) -> None:
         """Dispose of the client and release all resources.

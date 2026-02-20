@@ -6,11 +6,13 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from mcp.types import ListToolsResult, Tool
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
     AgentResourceType,
     AgentSettings,
+    DynamicToolsMode,
     LowCodeAgentDefinition,
 )
 
@@ -770,3 +772,239 @@ class TestMcpToolNameSanitization:
         # Tool name should be sanitized
         assert tools[0].name is not None
         assert len(tools[0].name) > 0
+
+
+class TestDynamicToolsMode:
+    """Test dynamic_tools mode behavior in create_mcp_tools_from_metadata_for_mcp_server."""
+
+    @pytest.fixture
+    def server_tools(self):
+        """MCP server tools returned by list_tools."""
+        return [
+            Tool(
+                name="tool_a",
+                description="Tool A from server",
+                inputSchema={"type": "object", "properties": {"x": {"type": "string"}}},
+                outputSchema={
+                    "type": "object",
+                    "properties": {"r": {"type": "string"}},
+                },
+            ),
+            Tool(
+                name="tool_b",
+                description="Tool B from server",
+                inputSchema={
+                    "type": "object",
+                    "properties": {"y": {"type": "integer"}},
+                },
+            ),
+            Tool(
+                name="tool_c",
+                description="Tool C from server",
+                inputSchema={"type": "object", "properties": {}},
+                outputSchema={"type": "string"},
+            ),
+        ]
+
+    @pytest.fixture
+    def mcp_resource_schema(self):
+        """Resource config with dynamic_tools=schema."""
+        return AgentMcpResourceConfig(
+            name="schema_server",
+            description="Schema mode server",
+            folder_path="/Shared",
+            slug="schema-server",
+            dynamic_tools=DynamicToolsMode.SCHEMA,
+            available_tools=[
+                AgentMcpTool(
+                    name="tool_a",
+                    description="Tool A (stale)",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+                AgentMcpTool(
+                    name="tool_b",
+                    description="Tool B (stale)",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+            ],
+        )
+
+    @pytest.fixture
+    def mcp_resource_all(self):
+        """Resource config with dynamic_tools=all."""
+        return AgentMcpResourceConfig(
+            name="all_server",
+            description="All mode server",
+            folder_path="/Shared",
+            slug="all-server",
+            dynamic_tools=DynamicToolsMode.ALL,
+            available_tools=[
+                AgentMcpTool(
+                    name="tool_a",
+                    description="Tool A (stale)",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+            ],
+        )
+
+    @pytest.fixture
+    def mock_mcp_client(self, server_tools):
+        """McpClient mock that returns server_tools from list_tools."""
+        client = MagicMock(spec=McpClient)
+        client.list_tools = AsyncMock(return_value=ListToolsResult(tools=server_tools))
+        return client
+
+    @pytest.mark.asyncio
+    async def test_schema_mode_calls_list_tools(
+        self, mcp_resource_schema, mock_mcp_client
+    ):
+        """Test that schema mode calls mcpClient.list_tools()."""
+        await create_mcp_tools_from_metadata_for_mcp_server(
+            mcp_resource_schema, mock_mcp_client
+        )
+
+        mock_mcp_client.list_tools.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_schema_mode_filters_to_available_tools(
+        self, mcp_resource_schema, mock_mcp_client
+    ):
+        """Test that schema mode only includes tools listed in available_tools."""
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(
+            mcp_resource_schema, mock_mcp_client
+        )
+
+        tool_names = [t.name for t in tools]
+        assert "tool_a" in tool_names
+        assert "tool_b" in tool_names
+        assert "tool_c" not in tool_names
+        assert len(tools) == 2
+
+    @pytest.mark.asyncio
+    async def test_schema_mode_uses_server_schemas(
+        self, mcp_resource_schema, mock_mcp_client
+    ):
+        """Test that schema mode uses input/output schemas from the server, not the resource."""
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(
+            mcp_resource_schema, mock_mcp_client
+        )
+
+        tool_a = next(t for t in tools if t.name == "tool_a")
+        # Should have the server's schema (with "x" property), not the stale empty one
+        assert isinstance(tool_a.args_schema, dict)
+        assert "x" in tool_a.args_schema["properties"]
+
+    @pytest.mark.asyncio
+    async def test_schema_mode_uses_server_descriptions(
+        self, mcp_resource_schema, mock_mcp_client
+    ):
+        """Test that schema mode uses descriptions from the server."""
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(
+            mcp_resource_schema, mock_mcp_client
+        )
+
+        tool_a = next(t for t in tools if t.name == "tool_a")
+        assert tool_a.description == "Tool A from server"
+
+    @pytest.mark.asyncio
+    async def test_all_mode_calls_list_tools(self, mcp_resource_all, mock_mcp_client):
+        """Test that all mode calls mcpClient.list_tools()."""
+        await create_mcp_tools_from_metadata_for_mcp_server(
+            mcp_resource_all, mock_mcp_client
+        )
+
+        mock_mcp_client.list_tools.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_all_mode_returns_all_server_tools(
+        self, mcp_resource_all, mock_mcp_client
+    ):
+        """Test that all mode returns every tool from the server."""
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(
+            mcp_resource_all, mock_mcp_client
+        )
+
+        tool_names = [t.name for t in tools]
+        assert "tool_a" in tool_names
+        assert "tool_b" in tool_names
+        assert "tool_c" in tool_names
+        assert len(tools) == 3
+
+    @pytest.mark.asyncio
+    async def test_all_mode_ignores_available_tools(
+        self, mcp_resource_all, mock_mcp_client
+    ):
+        """Test that all mode ignores the available_tools list in the resource config."""
+        # Resource only lists tool_a, but all 3 server tools should be returned
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(
+            mcp_resource_all, mock_mcp_client
+        )
+
+        assert len(tools) == 3
+
+    @pytest.mark.asyncio
+    async def test_all_mode_preserves_output_schema(
+        self, mcp_resource_all, mock_mcp_client
+    ):
+        """Test that all mode preserves output_schema from the server."""
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(
+            mcp_resource_all, mock_mcp_client
+        )
+
+        # tool_a has outputSchema on the server
+        tool_a = next(t for t in tools if t.name == "tool_a")
+        assert tool_a.description == "Tool A from server"
+
+    @pytest.mark.asyncio
+    async def test_none_mode_does_not_call_list_tools(self):
+        """Test that none mode (default) does not call mcpClient.list_tools()."""
+        resource = AgentMcpResourceConfig(
+            name="default_server",
+            description="Default mode",
+            folder_path="/Shared",
+            slug="default",
+            available_tools=[
+                AgentMcpTool(
+                    name="local_tool",
+                    description="Local tool",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+            ],
+        )
+
+        client = MagicMock(spec=McpClient)
+        client.list_tools = AsyncMock()
+
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(resource, client)
+
+        client.list_tools.assert_not_awaited()
+        assert len(tools) == 1
+        assert tools[0].name == "local_tool"
+
+    @pytest.mark.asyncio
+    async def test_none_mode_uses_resource_schemas(self):
+        """Test that none mode uses schemas from available_tools, not the server."""
+        resource = AgentMcpResourceConfig(
+            name="default_server",
+            description="Default mode",
+            folder_path="/Shared",
+            slug="default",
+            available_tools=[
+                AgentMcpTool(
+                    name="my_tool",
+                    description="My local description",
+                    input_schema={
+                        "type": "object",
+                        "properties": {"local_param": {"type": "boolean"}},
+                    },
+                ),
+            ],
+        )
+
+        client = MagicMock(spec=McpClient)
+
+        tools = await create_mcp_tools_from_metadata_for_mcp_server(resource, client)
+
+        assert tools[0].description == "My local description"
+        assert isinstance(tools[0].args_schema, dict)
+        assert "local_param" in tools[0].args_schema["properties"]

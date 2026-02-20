@@ -702,3 +702,81 @@ class TestMcpClient:
         # After reinitialize, session_info.session_id is None because
         # the mocked initialize() doesn't set a new one
         assert await session.get_session_id() is None
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_list_tools_initializes_session_and_returns_result(
+        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
+    ):
+        """Test that list_tools lazily initializes session and returns tools."""
+        method_call_sequence: list[str] = []
+        initialize_count = [0]
+        tool_call_count = [0]
+
+        MockStreamResponse = self.create_mock_stream_response(
+            method_call_sequence, initialize_count, tool_call_count
+        )
+
+        mock_http_client = self.create_mock_http_client(MockStreamResponse)
+        mock_async_client_class.return_value = mock_http_client
+
+        client = McpClient(config=mcp_resource_config)
+
+        assert not client.is_client_initialized
+
+        with patch(
+            "uipath.platform.UiPath",
+            return_value=mock_uipath_sdk,
+        ):
+            result = await client.list_tools()
+
+        # Session should have been initialized
+        assert initialize_count[0] == 1
+        assert client.is_client_initialized
+
+        # Should return the tools from the mock server
+        assert result is not None
+        assert len(result.tools) == 1
+        assert result.tools[0].name == "test_tool"
+
+        # Verify protocol flow includes tools/list
+        assert "initialize" in method_call_sequence
+        assert "tools/list" in method_call_sequence
+        # tools/call should NOT have been called
+        assert "tools/call" not in method_call_sequence
+
+        await client.dispose()
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_list_tools_reuses_session(
+        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
+    ):
+        """Test that list_tools reuses existing session on subsequent calls."""
+        method_call_sequence: list[str] = []
+        initialize_count = [0]
+        tool_call_count = [0]
+
+        MockStreamResponse = self.create_mock_stream_response(
+            method_call_sequence, initialize_count, tool_call_count
+        )
+
+        mock_http_client = self.create_mock_http_client(MockStreamResponse)
+        mock_async_client_class.return_value = mock_http_client
+
+        client = McpClient(config=mcp_resource_config)
+
+        with patch(
+            "uipath.platform.UiPath",
+            return_value=mock_uipath_sdk,
+        ):
+            await client.list_tools()
+            assert initialize_count[0] == 1
+
+            await client.list_tools()
+            assert initialize_count[0] == 1  # Still only one initialization
+
+        list_tools_count = method_call_sequence.count("tools/list")
+        assert list_tools_count == 2
+
+        await client.dispose()
