@@ -1,0 +1,39 @@
+%% LTL Claims Processing Agent - Simplified Workflow
+%% High-level view of the main processing flow
+
+graph TB
+    START([Claim Input]) --> INIT[1. Initialize Input<br/>Load Historical Context]
+    
+    INIT --> PLAN[2. Create Plan<br/>Orchestrator Agent<br/>GPT-4o]
+    
+    PLAN --> VALIDATE[3. Validate Data<br/>Query Data Fabric]
+    
+    VALIDATE --> DOCS[4. Process Documents<br/>Document Processor Agent<br/>GPT-4o-mini<br/>Download & Extract via IXP]
+    
+    DOCS --> RISK[5. Assess Risk<br/>Risk Assessor Agent<br/>GPT-4o-mini<br/>Calculate Risk Score]
+    
+    RISK --> POLICY[6. Validate Policy<br/>Compliance Validator Agent<br/>GPT-4o-mini<br/>Search Knowledge Base]
+    
+    POLICY --> EVALUATE[7. Evaluate Progress<br/>Check Confidence & Risk]
+    
+    EVALUATE --> ESCALATE_CHECK{Requires<br/>Human Review?}
+    
+    ESCALATE_CHECK -->|Yes| ESCALATE[8a. Escalate to Human<br/>Create Action Center Task]
+    ESCALATE_CHECK -->|No| DECIDE
+    
+    ESCALATE --> DECIDE[9. Make Decision<br/>Decision Strategy<br/>GPT-4o<br/>LLM + Rule-Based]
+    
+    DECIDE --> UPDATE[10. Update Systems<br/>Queue & Data Fabric]
+    
+    UPDATE --> FINALIZE[11. Finalize Output<br/>Store in Memory<br/>Build Response]
+    
+    FINALIZE --> END([Processing Complete])
+    
+    %% Styling
+    classDef agentNode fill:#e1f5ff,stroke:#0288d1,stroke-width:3px
+    classDef decisionNode fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef startEnd fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    
+    class PLAN,DOCS,RISK,POLICY,DECIDE agentNode
+    class ESCALATE_CHECK decisionNode
+    class START,END startEnd
