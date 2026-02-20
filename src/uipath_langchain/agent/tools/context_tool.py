@@ -36,7 +36,6 @@ from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
 
-
 # Output schema for batch transform — for `job-attachment` convention
 _BATCH_TRANSFORM_OUTPUT_SCHEMA = {
     "type": "object",
