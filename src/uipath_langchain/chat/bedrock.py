@@ -7,8 +7,7 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
-from uipath._utils import resource_override
-from uipath.utils import EndpointManager
+from uipath.platform.common import EndpointManager, resource_override
 
 from .header_capture import HeaderCapture
 from .retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
