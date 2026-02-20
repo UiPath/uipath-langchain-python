@@ -28,6 +28,7 @@ from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_mo
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
+    BATCH_TRANSFORM_OUTPUT_SCHEMA,
     add_query_field_to_schema,
 )
 from uipath_langchain.agent.tools.static_args import handle_static_args
@@ -36,38 +37,6 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 )
 from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
-
-# Define the output schema with job-attachment
-BATCH_TRANSFORM_OUTPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "result": {
-            "$ref": "#/definitions/job-attachment",
-            "description": "The transformed result file as an attachment",
-        }
-    },
-    "required": ["result"],
-    "definitions": {
-        "job-attachment": {
-            "type": "object",
-            "properties": {
-                "ID": {"type": "string", "description": "Orchestrator attachment key"},
-                "FullName": {"type": "string", "description": "File name"},
-                "MimeType": {
-                    "type": "string",
-                    "description": "The MIME type of the content",
-                },
-                "Metadata": {
-                    "type": "object",
-                    "description": "Dictionary<string, string> of metadata",
-                    "additionalProperties": {"type": "string"},
-                },
-            },
-            "required": ["ID", "FullName", "MimeType"],
-            "x-uipath-resource-kind": "JobAttachment",
-        }
-    },
-}
 
 
 def create_batch_transform_tool(
