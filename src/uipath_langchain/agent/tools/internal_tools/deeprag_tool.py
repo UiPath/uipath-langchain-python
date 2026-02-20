@@ -12,8 +12,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateDeepRag
-from uipath.platform.common.interrupt_models import WaitEphemeralIndex
+from uipath.platform.common import CreateDeepRag, WaitEphemeralIndex
 from uipath.platform.context_grounding import (
     CitationMode,
     EphemeralIndexUsage,

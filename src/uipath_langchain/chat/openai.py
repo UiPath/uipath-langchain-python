@@ -5,9 +5,11 @@ from typing import Optional
 import httpx
 from langchain_openai import AzureChatOpenAI
 from pydantic import PrivateAttr
-from uipath._utils import resource_override
-from uipath._utils._ssl_context import get_httpx_client_kwargs
-from uipath.utils import EndpointManager
+from uipath.platform.common import (
+    EndpointManager,
+    get_httpx_client_kwargs,
+    resource_override,
+)
 
 from .supported_models import OpenAIModels
 from .types import APIFlavor, LLMProvider
