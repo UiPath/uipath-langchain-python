@@ -1,0 +1,10 @@
+{
+    "document_id": "DOC-2025-002",
+    "document_type": "leave_request",
+    "title": "Annual Leave Request - John Smith",
+    "content": "Employee John Smith (ID: EMP-4521) is requesting annual leave from March 15-29, 2025. This request is for vacation purposes. The employee has 15 days of leave balance remaining. Manager approval required.",
+    "sender_email": "john.smith@company.com",
+    "sender_department": "hr",
+    "urgency_level": "medium",
+    "tags": ["leave", "vacation", "hr"]
+}
