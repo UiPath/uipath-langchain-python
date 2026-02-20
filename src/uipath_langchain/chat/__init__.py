@@ -29,6 +29,14 @@ def __getattr__(name):
         from .hitl import requires_approval
 
         return requires_approval
+    if name == "resolve_attachments":
+        from .attachments import resolve_attachments
+
+        return resolve_attachments
+    if name == "ReadAttachmentsTool":
+        from .attachments import ReadAttachmentsTool
+
+        return ReadAttachmentsTool
     if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
         from . import supported_models
 
@@ -51,4 +59,6 @@ __all__ = [
     "LLMProvider",
     "APIFlavor",
     "requires_approval",
+    "resolve_attachments",
+    "ReadAttachmentsTool",
 ]
