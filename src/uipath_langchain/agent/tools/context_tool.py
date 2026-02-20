@@ -1,30 +1,43 @@
 """Context tool creation for semantic index retrieval."""
 
 import uuid
-from typing import Any, Optional, Type
+from typing import Any, Optional
 
 from langchain_core.documents import Document
-from langchain_core.tools import StructuredTool
-from langgraph.types import interrupt
+from langchain_core.messages import ToolCall
+from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
 )
 from uipath.eval.mocks import mockable
-from uipath.platform.common import CreateBatchTransform, CreateDeepRag
+from uipath.platform import UiPath
+from uipath.platform.common import CreateBatchTransform, CreateDeepRag, UiPathConfig
 from uipath.platform.context_grounding import (
     BatchTransformOutputColumn,
-    BatchTransformResponse,
     CitationMode,
     DeepRagContent,
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    create_model as create_model_from_schema,
+)
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.internal_tools.schema_utils import (
+    BATCH_TRANSFORM_OUTPUT_SCHEMA,
+)
+from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
+from .durable_interrupt import durable_interrupt
+from .structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
+)
 from .structured_tool_with_output_type import StructuredToolWithOutputType
+from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
 
 
@@ -51,7 +64,6 @@ def handle_semantic_search(
 ) -> StructuredTool:
     ensure_valid_fields(resource)
 
-    # needed for type checking
     assert resource.settings.query is not None
     assert resource.settings.query.variant is not None
 
@@ -61,63 +73,47 @@ def handle_semantic_search(
         number_of_results=resource.settings.result_count,
     )
 
+    static = is_static_query(resource)
+    prompt = resource.settings.query.value if static else None
+    if static:
+        assert prompt is not None
+
     class ContextOutputSchemaModel(BaseModel):
         documents: list[Document] = Field(
             ..., description="List of retrieved documents."
         )
 
     output_model = ContextOutputSchemaModel
-    input_model: Type[BaseModel]
 
-    if is_static_query(resource):
-        static_query_value = resource.settings.query.value
-        assert static_query_value is not None
+    schema_fields: dict[str, Any] = (
+        {}
+        if static
+        else {
+            "query": (
+                str,
+                Field(..., description="The query to search for in the knowledge base"),
+            ),
+        }
+    )
+    input_model = create_model("SemanticSearchInput", **schema_fields)
 
-        class SemanticSearchStaticInputModel(BaseModel):
-            pass
-
-        input_model = SemanticSearchStaticInputModel
-
-        @mockable(
-            name=resource.name,
-            description=resource.description,
-            input_schema=input_model.model_json_schema(),
-            output_schema=output_model.model_json_schema(),
-            example_calls=[],  # Examples cannot be provided for context.
-        )
-        async def context_tool_fn() -> dict[str, Any]:
-            docs = await retriever.ainvoke(static_query_value)
-            return {
-                "documents": [
-                    {"metadata": doc.metadata, "page_content": doc.page_content}
-                    for doc in docs
-                ]
-            }
-
-    else:
-        # Dynamic query - requires query parameter
-        class ContextInputSchemaModel(BaseModel):
-            query: str = Field(
-                ..., description="The query to search for in the knowledge base"
-            )
-
-        input_model = ContextInputSchemaModel
-
-        @mockable(
-            name=resource.name,
-            description=resource.description,
-            input_schema=input_model.model_json_schema(),
-            output_schema=output_model.model_json_schema(),
-            example_calls=[],  # Examples cannot be provided for context.
-        )
-        async def context_tool_fn(query: str) -> dict[str, Any]:
-            docs = await retriever.ainvoke(query)
-            return {
-                "documents": [
-                    {"metadata": doc.metadata, "page_content": doc.page_content}
-                    for doc in docs
-                ]
-            }
+    @mockable(
+        name=resource.name,
+        description=resource.description,
+        input_schema=input_model.model_json_schema(),
+        output_schema=output_model.model_json_schema(),
+        example_calls=[],  # Examples cannot be provided for context.
+    )
+    async def context_tool_fn(query: Optional[str] = None) -> dict[str, Any]:
+        actual_query = prompt or query
+        assert actual_query is not None
+        docs = await retriever.ainvoke(actual_query)
+        return {
+            "documents": [
+                {"metadata": doc.metadata, "page_content": doc.page_content}
+                for doc in docs
+            ]
+        }
 
     return StructuredToolWithOutputType(
         name=tool_name,
@@ -137,7 +133,6 @@ def handle_deep_rag(
 ) -> StructuredTool:
     ensure_valid_fields(resource)
 
-    # needed for type checking
     assert resource.settings.query is not None
     assert resource.settings.query.variant is not None
 
@@ -151,68 +146,53 @@ def handle_deep_rag(
         )
     citation_mode = CitationMode(resource.settings.citation_mode.value)
 
+    static = is_static_query(resource)
+    prompt = resource.settings.query.value if static else None
+    if static:
+        assert prompt is not None
+
     output_model = create_model(
         "DeepRagOutputModel",
         __base__=DeepRagContent,
         deep_rag_id=(str, Field(alias="deepRagId")),
     )
-    input_model: Type[BaseModel]
 
-    if is_static_query(resource):
-        # Static query - no input parameter needed
-        static_prompt = resource.settings.query.value
-        assert static_prompt is not None
+    schema_fields: dict[str, Any] = (
+        {}
+        if static
+        else {
+            "query": (
+                str,
+                Field(
+                    ...,
+                    description="Describe the task: what to research across documents, what to synthesize, and how to cite sources",
+                ),
+            ),
+        }
+    )
+    input_model = create_model("DeepRagInput", **schema_fields)
 
-        class DeepRagStaticInputModel(BaseModel):
-            pass
+    @mockable(
+        name=resource.name,
+        description=resource.description,
+        input_schema=input_model.model_json_schema(),
+        output_schema=output_model.model_json_schema(),
+        example_calls=[],  # Examples cannot be provided for context.
+    )
+    async def context_tool_fn(query: Optional[str] = None) -> dict[str, Any]:
+        actual_prompt = prompt or query
 
-        input_model = DeepRagStaticInputModel
-
-        @mockable(
-            name=resource.name,
-            description=resource.description,
-            input_schema=input_model.model_json_schema(),
-            output_schema=output_model.model_json_schema(),
-            example_calls=[],  # Examples cannot be provided for context.
-        )
-        async def context_tool_fn() -> dict[str, Any]:
+        @durable_interrupt
+        async def create_deep_rag():
             # TODO: add glob pattern support
-            return interrupt(
-                CreateDeepRag(
-                    name=f"task-{uuid.uuid4()}",
-                    index_name=index_name,
-                    prompt=static_prompt,
-                    citation_mode=citation_mode,
-                )
+            return CreateDeepRag(
+                name=f"task-{uuid.uuid4()}",
+                index_name=index_name,
+                prompt=actual_prompt,
+                citation_mode=citation_mode,
             )
 
-    else:
-        # Dynamic query - requires query parameter
-        class DeepRagInputSchemaModel(BaseModel):
-            query: str = Field(
-                ...,
-                description="Describe the task: what to research across documents, what to synthesize, and how to cite sources",
-            )
-
-        input_model = DeepRagInputSchemaModel
-
-        @mockable(
-            name=resource.name,
-            description=resource.description,
-            input_schema=input_model.model_json_schema(),
-            output_schema=output_model.model_json_schema(),
-            example_calls=[],  # Examples cannot be provided for context.
-        )
-        async def context_tool_fn(query: str) -> dict[str, Any]:
-            # TODO: add glob pattern support
-            return interrupt(
-                CreateDeepRag(
-                    name=f"task-{uuid.uuid4()}",
-                    index_name=index_name,
-                    prompt=query,
-                    citation_mode=citation_mode,
-                )
-            )
+        return await create_deep_rag()
 
     return StructuredToolWithOutputType(
         name=tool_name,
@@ -232,7 +212,6 @@ def handle_batch_transform(
 ) -> StructuredTool:
     ensure_valid_fields(resource)
 
-    # needed for type checking
     assert resource.settings.query is not None
     assert resource.settings.query.variant is not None
 
@@ -268,94 +247,99 @@ def handle_batch_transform(
             )
         )
 
-    output_model = BatchTransformResponse
+    static = is_static_query(resource)
+    prompt = resource.settings.query.value if static else None
+    if static:
+        assert prompt is not None
 
-    input_model: Optional[Type[BaseModel]]
+    output_model = create_model_from_schema(BATCH_TRANSFORM_OUTPUT_SCHEMA)
 
-    if is_static_query(resource):
-        # Static query - only destination_path parameter needed
-        static_prompt = resource.settings.query.value
-        assert static_prompt is not None
-
-        class StaticBatchTransformSchemaModel(BaseModel):
-            destination_path: str = Field(
-                default="output.csv",
-                description="The relative file path destination for the modified csv file",
-            )
-
-        input_model = StaticBatchTransformSchemaModel
-
-        @mockable(
-            name=resource.name,
-            description=resource.description,
-            input_schema=input_model.model_json_schema(),
-            output_schema=output_model.model_json_schema(),
-            example_calls=[],  # Examples cannot be provided for context.
-        )
-        async def context_tool_fn(
-            destination_path: str = "output.csv",
-        ) -> dict[str, Any]:
-            # TODO: storage_bucket_folder_path_prefix  support
-            return interrupt(
-                CreateBatchTransform(
-                    name=f"task-{uuid.uuid4()}",
-                    index_name=index_name,
-                    prompt=static_prompt,
-                    destination_path=destination_path,
-                    index_folder_path=index_folder_path,
-                    enable_web_search_grounding=enable_web_search_grounding,
-                    output_columns=batch_transform_output_columns,
-                )
-            )
-
-    else:
-        # Dynamic query - requires both query and destination_path parameters
-        class DynamicBatchTransformSchemaModel(BaseModel):
-            query: str = Field(
+    schema_fields: dict[str, Any] = {}
+    if not static:
+        schema_fields["query"] = (
+            str,
+            Field(
                 ...,
                 description="Describe the task for each row: what to analyze, what to extract, and how to populate the output columns",
-            )
-            destination_path: str = Field(
-                default="output.csv",
-                description="The relative file path destination for the modified csv file",
-            )
-
-        input_model = DynamicBatchTransformSchemaModel
-
-        @mockable(
-            name=resource.name,
-            description=resource.description,
-            input_schema=input_model.model_json_schema(),
-            output_schema=output_model.model_json_schema(),
-            example_calls=[],  # Examples cannot be provided for context.
+            ),
         )
-        async def context_tool_fn(
-            query: str, destination_path: str = "output.csv"
-        ) -> dict[str, Any]:
-            # TODO: storage_bucket_folder_path_prefix  support
-            return interrupt(
-                CreateBatchTransform(
-                    name=f"task-{uuid.uuid4()}",
-                    index_name=index_name,
-                    prompt=query,
-                    destination_path=destination_path,
-                    index_folder_path=index_folder_path,
-                    enable_web_search_grounding=enable_web_search_grounding,
-                    output_columns=batch_transform_output_columns,
-                )
+    schema_fields["destination_path"] = (
+        str,
+        Field(
+            default="output.csv",
+            description="The relative file path destination for the modified csv file",
+        ),
+    )
+    input_model = create_model("BatchTransformInput", **schema_fields)
+
+    @mockable(
+        name=resource.name,
+        description=resource.description,
+        input_schema=input_model.model_json_schema(),
+        output_schema=output_model.model_json_schema(),
+        example_calls=[],  # Examples cannot be provided for context.
+    )
+    async def context_tool_fn(
+        query: Optional[str] = None, destination_path: str = "output.csv"
+    ) -> dict[str, Any]:
+        actual_prompt = prompt or query
+
+        @durable_interrupt
+        async def create_batch_transform():
+            # TODO: storage_bucket_folder_path_prefix support
+            return CreateBatchTransform(
+                name=f"task-{uuid.uuid4()}",
+                index_name=index_name,
+                prompt=actual_prompt,
+                destination_path=destination_path,
+                index_folder_path=index_folder_path,
+                enable_web_search_grounding=enable_web_search_grounding,
+                output_columns=batch_transform_output_columns,
             )
 
-    return StructuredToolWithOutputType(
+        await create_batch_transform()
+
+        uipath = UiPath()
+        result_attachment_id = await uipath.jobs.create_attachment_async(
+            name=destination_path,
+            source_path=destination_path,
+            job_key=UiPathConfig.job_key,
+        )
+
+        return {
+            "result": {
+                "ID": str(result_attachment_id),
+                "FullName": destination_path,
+                "MimeType": "text/csv",
+            }
+        }
+
+    from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
+
+    job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
+
+    async def context_batch_transform_wrapper(
+        tool: BaseTool,
+        call: ToolCall,
+        state: AgentGraphState,
+    ) -> ToolWrapperReturnType:
+        call["args"] = handle_static_args(resource, state, call["args"])
+        return await job_attachment_wrapper(tool, call, state)
+
+    tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
         coroutine=context_tool_fn,
         output_type=output_model,
+        argument_properties={},
         metadata={
             "tool_type": "context",
             "display_name": resource.name,
         },
     )
+    tool.set_tool_wrappers(awrapper=context_batch_transform_wrapper)
+    return tool
 
 
 def ensure_valid_fields(resource_config: AgentContextResourceConfig):
