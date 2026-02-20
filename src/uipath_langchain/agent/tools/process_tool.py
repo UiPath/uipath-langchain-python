@@ -44,7 +44,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
         input_arguments = input_model.model_validate(kwargs).model_dump(mode="json")
 
         @mockable(
-            name=tool_name.lower(),
+            name=resource.name,
             description=resource.description,
             input_schema=input_model.model_json_schema(),
             output_schema=output_model.model_json_schema(),
