@@ -26,6 +26,10 @@ from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model as create_model_from_schema,
 )
 from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.internal_tools.schema_utils import (
+    BATCH_TRANSFORM_OUTPUT_SCHEMA,
+)
+from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
 from .durable_interrupt import durable_interrupt
@@ -35,33 +39,6 @@ from .structured_tool_with_argument_properties import (
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
-
-# Output schema for batch transform — for `job-attachment` convention
-_BATCH_TRANSFORM_OUTPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "result": {
-            "$ref": "#/definitions/job-attachment",
-            "description": "The transformed result file as an attachment",
-        }
-    },
-    "required": ["result"],
-    "definitions": {
-        "job-attachment": {
-            "type": "object",
-            "properties": {
-                "ID": {"type": "string", "description": "Orchestrator attachment key"},
-                "FullName": {"type": "string", "description": "File name"},
-                "MimeType": {
-                    "type": "string",
-                    "description": "The MIME type of the content",
-                },
-            },
-            "required": ["ID", "FullName", "MimeType"],
-            "x-uipath-resource-kind": "JobAttachment",
-        }
-    },
-}
 
 
 def is_static_query(resource: AgentContextResourceConfig) -> bool:
@@ -275,7 +252,7 @@ def handle_batch_transform(
     if static:
         assert prompt is not None
 
-    output_model = create_model_from_schema(_BATCH_TRANSFORM_OUTPUT_SCHEMA)
+    output_model = create_model_from_schema(BATCH_TRANSFORM_OUTPUT_SCHEMA)
 
     schema_fields: dict[str, Any] = {}
     if not static:
@@ -346,6 +323,7 @@ def handle_batch_transform(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
+        call["args"] = handle_static_args(resource, state, call["args"])
         return await job_attachment_wrapper(tool, call, state)
 
     tool = StructuredToolWithArgumentProperties(
