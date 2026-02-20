@@ -13,7 +13,6 @@ from uipath.agent.models.agent import (
     AgentContextValueSetting,
 )
 from uipath.platform.context_grounding import (
-    BatchTransformResponse,
     CitationMode,
     DeepRagContent,
 )
@@ -543,7 +542,10 @@ class TestHandleBatchTransform:
         assert result.name == "batch_transform_tool"
         assert result.description == "Batch transform tool"
         assert result.args_schema is not None  # Has destination_path parameter
-        assert result.output_type == BatchTransformResponse
+        # Output model is built from the job-attachment schema so that the
+        # job_attachment_wrapper can locate and register the attachment.
+        output_schema = result.output_type.model_json_schema()
+        assert "result" in output_schema.get("properties", {})
 
     def test_static_query_batch_transform_has_destination_path_only(
         self, batch_transform_config
@@ -589,7 +591,8 @@ class TestHandleBatchTransform:
         assert isinstance(result, StructuredToolWithOutputType)
         assert result.name == "batch_transform_tool"
         assert result.args_schema is not None
-        assert result.output_type == BatchTransformResponse
+        output_schema = result.output_type.model_json_schema()
+        assert "result" in output_schema.get("properties", {})
 
     def test_dynamic_query_batch_transform_has_both_parameters(self):
         """Test that dynamic batch transform has both query and destination_path."""
@@ -633,9 +636,17 @@ class TestHandleBatchTransform:
         """Test that static query variant uses the predefined query value."""
         tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
 
-        with patch(
-            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
-        ) as mock_interrupt:
+        mock_uipath = AsyncMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-1")
+        with (
+            patch(
+                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
             await tool.coroutine(destination_path="/output/result.csv")
@@ -673,9 +684,17 @@ class TestHandleBatchTransform:
 
         tool = handle_batch_transform("batch_transform_tool", resource)
 
-        with patch(
-            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
-        ) as mock_interrupt:
+        mock_uipath = AsyncMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-2")
+        with (
+            patch(
+                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
             await tool.coroutine(
@@ -693,9 +712,17 @@ class TestHandleBatchTransform:
         """Test that static batch transform uses default destination_path when not provided."""
         tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
 
-        with patch(
-            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
-        ) as mock_interrupt:
+        mock_uipath = AsyncMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-3")
+        with (
+            patch(
+                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
             # Call without providing destination_path
@@ -734,9 +761,17 @@ class TestHandleBatchTransform:
 
         tool = handle_batch_transform("batch_transform_tool", resource)
 
-        with patch(
-            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
-        ) as mock_interrupt:
+        mock_uipath = AsyncMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-4")
+        with (
+            patch(
+                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
             # Call with only query, no destination_path
