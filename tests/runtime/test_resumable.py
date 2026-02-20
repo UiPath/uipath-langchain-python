@@ -7,12 +7,14 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from uipath.core.errors import ErrorCategory, UiPathPendingTriggerError
-from uipath.runtime import (
-    UiPathExecuteOptions,
-    UiPathResumableRuntime,
+from uipath.core.triggers import (
     UiPathResumeTrigger,
     UiPathResumeTriggerName,
     UiPathResumeTriggerType,
+)
+from uipath.runtime import (
+    UiPathExecuteOptions,
+    UiPathResumableRuntime,
     UiPathRuntimeStatus,
 )
 

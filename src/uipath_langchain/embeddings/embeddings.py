@@ -4,8 +4,7 @@ from typing import Any
 import httpx
 from langchain_openai.embeddings import AzureOpenAIEmbeddings, OpenAIEmbeddings
 from pydantic import Field
-from uipath._utils._ssl_context import get_httpx_client_kwargs
-from uipath.utils import EndpointManager
+from uipath.platform.common import EndpointManager, get_httpx_client_kwargs
 
 from uipath_langchain._utils._request_mixin import UiPathRequestMixin
 
