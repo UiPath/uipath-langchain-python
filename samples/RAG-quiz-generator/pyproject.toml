@@ -9,12 +9,12 @@ dependencies = [
     "langchain-anthropic>=1.2.0",
     "langchain-experimental>=0.4.0",
     "langchain-tavily>=0.2.13",
-    "uipath-langchain>=0.2.0, <0.3.0",
-    "uipath>=2.3.0, <2.4.0",
+    "uipath-langchain",
+    "uipath",
 ]
 requires-python = ">=3.11"
 
 [dependency-groups]
 dev = [
-    "uipath-dev>=0.0.14",
+    "uipath-dev",
 ]
