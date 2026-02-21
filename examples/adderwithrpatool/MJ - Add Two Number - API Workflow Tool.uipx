@@ -1,0 +1,17 @@
+{
+  "DocVersion": "1.0.0",
+  "StudioMinVersion": "2025.04.0",
+  "SolutionId": "c4fb597e-80f9-40b6-96bf-ca1015ab87bf",
+  "Projects": [
+    {
+      "Type": "Api",
+      "ProjectRelativePath": "API Workflow/project.uiproj",
+      "Id": "9a514225-1937-4b81-9988-bc149209d01c"
+    },
+    {
+      "Type": "Agent",
+      "ProjectRelativePath": "Agent/project.uiproj",
+      "Id": "4a08dcb8-1cff-4938-98bb-81616c87e063"
+    }
+  ]
+}

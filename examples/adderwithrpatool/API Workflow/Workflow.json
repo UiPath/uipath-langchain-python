@@ -1,0 +1,106 @@
+{
+  "document": {
+    "dsl": "1.0.0",
+    "name": "Workflow",
+    "tags": {
+      "projectId": "cafa20d0-c7b6-430f-8344-578b2259a16e",
+      "solutionId": "c4fb597e-80f9-40b6-96bf-ca1015ab87bf"
+    },
+    "version": "0.0.1",
+    "namespace": "default",
+    "metadata": {
+      "variables": []
+    }
+  },
+  "input": {
+    "schema": {
+      "format": "json",
+      "document": {
+        "type": "object",
+        "properties": {
+          "number1": {
+            "type": "number"
+          },
+          "number2": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "number1",
+          "number2"
+        ]
+      }
+    }
+  },
+  "do": [
+    {
+      "sequence_1": {
+        "do": [
+          {
+            "WorkflowStart": {
+              "set": "${Object.entries($workflow.definition?.document?.metadata?.variables?.schema?.document?.properties || {}).reduce((acc, [name, def]) => ({ ...acc, [name]: def?.default }), {}) }",
+              "output": {
+                "as": "${$input}"
+              },
+              "export": {
+                "as": "{ ...$context, variables: { ...$context.variables, ...$output } }"
+              },
+              "metadata": {
+                "activityType": "Assign",
+                "displayName": "Workflow start",
+                "fullName": "Assign",
+                "isTransparent": true
+              }
+            }
+          },
+          {
+            "AddNumbers_1": {
+              "run": {
+                "script": {
+                  "code": "const num1 = $workflow.input.number1;\nconst num2 = $workflow.input.number2;\nreturn num1 + num2;",
+                  "language": "javascript",
+                  "arguments": "${{\n                        \"$context\": $context,\n                        \"$workflow\": $workflow,\n                        \"$input\": $input,\n                    }}"
+                }
+              },
+              "export": {
+                "as": "{ ...$context, outputs: { ...$context?.outputs, \"AddNumbers_1\": $output } }"
+              },
+              "metadata": {
+                "activityType": "JsInvoke",
+                "displayName": "Add the two input numbers",
+                "fullName": "JsInvoke",
+                "outputName": "AddNumbers_1"
+              }
+            }
+          },
+          {
+            "Response_1": {
+              "response": "${{\n    result: $context.outputs.AddNumbers_1\n}\n}",
+              "markJobAsFailed": false,
+              "then": "end",
+              "export": {
+                "as": "{ ...$context, outputs: { ...$context?.outputs, \"Response_1\": $output } }"
+              },
+              "metadata": {
+                "activityType": "Response",
+                "displayName": "Return the sum of the two numbers",
+                "fullName": "Response",
+                "outputName": "Response_1"
+              }
+            }
+          }
+        ],
+        "metadata": {
+          "activityType": "Sequence",
+          "displayName": "Sequence",
+          "fullName": "Sequence",
+          "outputName": "sequence_1"
+        }
+      }
+    }
+  ],
+  "evaluate": {
+    "mode": "strict",
+    "language": "javascript"
+  }
+}

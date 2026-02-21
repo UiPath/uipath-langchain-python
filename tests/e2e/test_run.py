@@ -72,6 +72,33 @@ class TestUiPathRun:
         assert result.returncode == 0, f"Run failed: {result.stderr}"
 
     @pytest.mark.e2e
+    def test_run_simulated_rpa_tool(self, authenticated_session: dict[str, str]):
+        """Test running adder agent with simulated RPA tool that adds two numbers."""
+        example_dir = EXAMPLES_DIR / "adderwithrpatool" / "Agent"
+
+        input_data = json.dumps({"number1": 5, "number2": 17})
+
+        # Remove UIPATH_PROJECT_ID so debug skips the Studio API call
+        # (ResourceOverwritesContext) which the CI service account can't access
+        env = {
+            k: v for k, v in authenticated_session.items() if k != "UIPATH_PROJECT_ID"
+        }
+
+        result = run_uipath_command(
+            command=["debug", "agent.json", input_data],
+            cwd=example_dir,
+            env=env,
+            timeout=120,
+            stdin_input="c\n",
+        )
+
+        assert result.returncode == 0, f"Debug failed: {result.stderr}"
+
+        output = result.stdout
+        assert output, "No output from debug command"
+        assert "22" in output, f"Expected sum of 22 in output, got: {output}"
+
+    @pytest.mark.e2e
     def test_run_with_invalid_input(self, authenticated_session: dict[str, str]):
         """Test that invalid input returns non-zero exit code (negative test)."""
         example_dir = EXAMPLES_DIR / "calculator"

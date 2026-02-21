@@ -1,0 +1,1 @@
+{"version":"2.0","resources":[{"resource":"process","key":"API Workflow","value":{"name":{"defaultValue":"API Workflow","isExpression":false,"displayName":"Process name"}},"metadata":{"subType":"api","bindingsVersion":"2.2","solutionsSupport":"true"}}]}

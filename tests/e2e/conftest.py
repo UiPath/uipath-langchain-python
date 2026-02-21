@@ -35,6 +35,7 @@ AVAILABLE_EXAMPLES = [
     "calculator_same_as_agent",
     "basic",
     "basic_with_ootb_guardrails",
+    "adderwithrpatool/Agent",
 ]
 
 # Examples with evaluations configured
@@ -249,6 +250,7 @@ def run_uipath_command(
     cwd: Path,
     env: dict[str, str],
     timeout: int = 120,
+    stdin_input: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """
     Run a uipath CLI command.
@@ -258,6 +260,7 @@ def run_uipath_command(
         cwd: Working directory
         env: Environment variables
         timeout: Command timeout in seconds
+        stdin_input: Optional string to pass to stdin
 
     Returns:
         CompletedProcess with stdout, stderr, and returncode
@@ -278,6 +281,7 @@ def run_uipath_command(
         env=env,
         cwd=cwd,
         timeout=timeout,
+        input=stdin_input,
     )
 
     # Print output for debugging

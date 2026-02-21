@@ -1,0 +1,6 @@
+{
+  "ProjectType": "Api",
+  "Name": "API Workflow",
+  "Description": null,
+  "MainFile": "Workflow.json"
+}

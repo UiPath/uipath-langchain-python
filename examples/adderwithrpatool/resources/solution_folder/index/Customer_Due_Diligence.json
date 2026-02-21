@@ -1,0 +1,36 @@
+{
+  "docVersion": "1.0.0",
+  "resource": {
+    "name": "Customer Due Diligence",
+    "kind": "index",
+    "apiVersion": "ecs.uipath.com/v2",
+    "isOverridable": true,
+    "dependencies": [
+      {
+        "name": "Customer Due Diligence",
+        "kind": "bucket"
+      }
+    ],
+    "runtimeDependencies": [],
+    "files": [],
+    "folders": [
+      {
+        "fullyQualifiedName": "solution_folder"
+      }
+    ],
+    "spec": {
+      "name": "Customer Due Diligence",
+      "description": "",
+      "storageBucketReference": {
+        "name": "Customer Due Diligence",
+        "key": "2c6cf23f-b7c5-4cd7-bd28-5697273879cb"
+      },
+      "fileNameGlob": "All",
+      "dataSourceType": "StorageBucket",
+      "includeSubfolders": true,
+      "ingestionType": "Advanced"
+    },
+    "locks": [],
+    "key": "0224a9f6-2b7d-40e7-2fed-08de5e87e7df"
+  }
+}

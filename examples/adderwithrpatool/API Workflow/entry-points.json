@@ -1,0 +1,27 @@
+{
+  "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+  "$id": "entry-points.json",
+  "entryPoints": [
+    {
+      "filePath": "content/Workflow.json",
+      "uniqueId": "0446868d-9481-4468-ac0d-0aa27c4300e4",
+      "type": "Api",
+      "input": {
+        "type": "object",
+        "properties": {
+          "number1": {
+            "type": "number"
+          },
+          "number2": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "number1",
+          "number2"
+        ]
+      },
+      "output": null
+    }
+  ]
+}
