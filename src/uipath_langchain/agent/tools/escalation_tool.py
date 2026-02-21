@@ -170,13 +170,13 @@ def create_escalation_tool(
         serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
 
         @mockable(
-            name=tool_name.lower(),
+            name=resource.name,
             description=resource.description,
             input_schema=input_model.model_json_schema(),
             output_schema=EscalationToolOutput.model_json_schema(),
             example_calls=channel.properties.example_calls,
         )
-        async def escalate():
+        async def escalate(**_tool_kwargs: Any):
             @durable_interrupt
             async def create_escalation_task():
                 client = UiPath()
@@ -200,7 +200,7 @@ def create_escalation_tool(
 
             return await create_escalation_task()
 
-        result = await escalate()
+        result = await escalate(**kwargs)
         if isinstance(result, dict):
             result = TypeAdapter(EscalationToolOutput).validate_python(result)
 
