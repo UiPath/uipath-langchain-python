@@ -56,10 +56,60 @@ The return value of the interrupt is the task output. If the task did not produc
 
 ---
 
+### 3. CreateEscalation
+
+The `CreateEscalation` model is used to create an escalation action within the UiPath Action Center as part of an interrupt context.
+It is the escalation-specific variant of `CreateTask`, intended for agent-to-human escalation workflows.
+After the escalation is resolved, the current agent will resume execution.
+
+#### Attributes:
+
+-   **title** (str): The title of the escalation action to create.
+-   **app_name** (Optional[str]): The name of the app.
+-   **app_folder_path** (Optional[str]): The folder path of the app.
+-   **app_key** (Optional[str]): The key of the app.
+-   **data** (Optional[Dict[str, Any]]): Values that the escalation action will be populated with.
+-   **assignee** (Optional[str]): The username or email of the person assigned to handle the escalation.
+
+#### Example:
+
+```python
+from uipath.platform.common import CreateEscalation
+escalation_output = interrupt(CreateEscalation(app_name="AppName", app_folder_path="MyFolderPath", title="Escalate Issue", data={"key": "value"}, assignee="user@example.com"))
+```
+/// info
+The return value of the interrupt is the escalation output. If the escalation did not produce any output, the return value will be the task status, e.g., `{"status": "completed"}`.
+///
+
+---
+
+### 4. WaitEscalation
+
+The `WaitEscalation` model is used to wait for an escalation task to be handled. It is the escalation-specific variant of `WaitTask`,
+intended for scenarios where the escalation task has already been created.
+
+#### Attributes:
+
+-   **action** (Task): The instance of the escalation task (a `Task` object) to wait for.
+-   **app_folder_path** (Optional[str]): The folder path of the app.
+-   **app_name** (Optional[str]): The name of the app.
+
+#### Example:
+
+```python
+from uipath.platform.common import WaitEscalation
+escalation_output = interrupt(WaitEscalation(action=my_task_instance, app_folder_path="MyFolderPath"))
+```
+/// info
+The return value of the interrupt is the escalation output. If the escalation did not produce any output, the return value will be the task status, e.g., `{"status": "completed"}`.
+///
+
+---
+
 > 💡The UiPath-LangChain SDK also supports **Robot/Agent-in-the-loop** scenarios. In this context, the execution of one agent
 > can be suspended until another robot or agent finishes its execution.
 
-### 3. InvokeProcess
+### 5. InvokeProcess
 
 The `InvokeProcess` model is utilized to invoke a process within the UiPath cloud platform.
 This process can be of various types, including API workflows, Agents or RPA automation.
@@ -90,7 +140,7 @@ For a practical implementation of the `InvokeProcess` model, refer to the [multi
 
 ---
 
-### 4. WaitJob
+### 6. WaitJob
 
 The `WaitJob` model is used to wait for a job completion. Unlike `InvokeProcess`, which automatically creates a job, this model is intended for scenarios where
 the job has already been created.
