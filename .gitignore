@@ -191,3 +191,5 @@ samples/**/.agent/
 samples/**/.vscode/
 samples/**/entry-points.json
 samples/**/uv.lock
+
+testcases/**/uv.lock
