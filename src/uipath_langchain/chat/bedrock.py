@@ -101,6 +101,7 @@ class AwsBedrockCompletionsPassthroughClient:
                 self.header_capture.set(dict(headers))
 
     def get_client(self):
+        read_timeout = int(os.getenv("UIPATH_TIMEOUT_SECONDS", "120"))
         client = boto3.client(
             "bedrock-runtime",
             region_name="none",
@@ -110,7 +111,7 @@ class AwsBedrockCompletionsPassthroughClient:
                 retries={
                     "total_max_attempts": 1,
                 },
-                read_timeout=600,
+                read_timeout=read_timeout,
             ),
         )
         client.meta.events.register(
