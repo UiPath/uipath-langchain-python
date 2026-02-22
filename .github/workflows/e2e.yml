@@ -307,7 +307,7 @@ jobs:
   publish-test-results:
     name: Publish Test Results
     runs-on: ubuntu-latest
-    needs: [e2e-run-tests, e2e-telemetry-tests, e2e-eval-tests, integration-trace-tests]
+    needs: [e2e-validation, e2e-run-tests, e2e-telemetry-tests, e2e-eval-tests, integration-trace-tests]
     if: always()
 
     steps:
@@ -363,31 +363,148 @@ jobs:
           path: eval-summaries
           pattern: eval-summary-*
 
-      - name: Post evaluation results to PR
+      - name: Generate test summary and post to PR
         if: always() && github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Combine all eval summaries into one file
-          COMBINED_SUMMARY=""
+          # Generate test summary from JUnit XML results
+          python3 << 'PYEOF'
+          import xml.etree.ElementTree as ET
+          import glob
+          import os
+
+          suites = [
+              ("Validation", "test-results/validation-results/*.xml"),
+              ("Run Tests", "test-results/run-*-results/*.xml"),
+              ("Telemetry Tests", "test-results/telemetry-*-results/*.xml"),
+              ("Eval Tests", "test-results/eval-*-results/*.xml"),
+              ("Integration Trace Tests", "test-results/integration-trace-results/*.xml"),
+          ]
+
+          lines = []
+          lines.append("### Test Suite Summary\n")
+          lines.append("| Suite | Tests | Passed | Failed | Skipped | Status |")
+          lines.append("|-------|------:|-------:|-------:|--------:|--------|")
+
+          total_tests = 0
+          total_passed = 0
+          total_failed = 0
+          total_skipped = 0
+
+          # (label, test_name, status_icon, detail) per test case
+          all_cases: list[tuple[str, str, str, str]] = []
+
+          for label, pattern in suites:
+              files = glob.glob(pattern)
+              if not files:
+                  lines.append(f"| {label} | - | - | - | - | No results |")
+                  continue
+
+              tests = 0
+              failures = 0
+              errors = 0
+              skipped = 0
+
+              for f in files:
+                  try:
+                      tree = ET.parse(f)
+                      root = tree.getroot()
+                      for ts in (root.findall("testsuite") if root.tag == "testsuites" else [root]):
+                          tests += int(ts.get("tests", 0))
+                          failures += int(ts.get("failures", 0))
+                          errors += int(ts.get("errors", 0))
+                          skipped += int(ts.get("skipped", 0))
+
+                          for tc in ts.findall("testcase"):
+                              name = tc.get("name", "unknown")
+                              failure = tc.find("failure")
+                              error = tc.find("error")
+                              skip = tc.find("skipped")
+                              if failure is not None or error is not None:
+                                  msg = (failure if failure is not None else error).get("message", "")
+                                  all_cases.append((label, name, "Failed", msg[:120]))
+                              elif skip is not None:
+                                  reason = skip.get("message", "")
+                                  all_cases.append((label, name, "Skipped", reason[:120]))
+                              else:
+                                  duration = tc.get("time", "")
+                                  detail = f"{float(duration):.1f}s" if duration else ""
+                                  all_cases.append((label, name, "Passed", detail))
+                  except Exception as e:
+                      print(f"Warning: Could not parse {f}: {e}")
+
+              failed = failures + errors
+              passed = tests - failed - skipped
+              status = "Pass" if failed == 0 else "Fail"
+
+              total_tests += tests
+              total_passed += passed
+              total_failed += failed
+              total_skipped += skipped
+
+              lines.append(f"| {label} | {tests} | {passed} | {failed} | {skipped} | {status} |")
+
+          total_status = "Pass" if total_failed == 0 else "Fail"
+          lines.append(f"| **Total** | **{total_tests}** | **{total_passed}** | **{total_failed}** | **{total_skipped}** | **{total_status}** |")
+          lines.append("")
+
+          # Per-suite breakdown with individual test cases
+          current_suite = None
+          for suite, name, status, detail in all_cases:
+              if suite != current_suite:
+                  if current_suite is not None:
+                      lines.append("\n</details>\n")
+                  suite_cases = [c for c in all_cases if c[0] == suite]
+                  suite_failed = sum(1 for c in suite_cases if c[2] == "Failed")
+                  icon = "Pass" if suite_failed == 0 else "Fail"
+                  lines.append(f"<details>")
+                  lines.append(f"<summary><b>{suite}</b> — {icon}</summary>\n")
+                  lines.append("| Test | Status | Detail |")
+                  lines.append("|------|--------|--------|")
+                  current_suite = suite
+              lines.append(f"| {name} | {status} | {detail} |")
+          if current_suite is not None:
+              lines.append("\n</details>\n")
+
+          with open("test-summary.md", "w") as f:
+              f.write("\n".join(lines))
+          PYEOF
+
+          # Combine eval summaries
+          EVAL_SUMMARY=""
           for dir in eval-summaries/eval-summary-*/; do
             if [ -f "${dir}eval-summary.md" ]; then
-              COMBINED_SUMMARY="${COMBINED_SUMMARY}$(cat "${dir}eval-summary.md")"$'\n'
+              EVAL_SUMMARY="${EVAL_SUMMARY}$(cat "${dir}eval-summary.md")"$'\n'
             fi
           done
 
-          if [ -z "$COMBINED_SUMMARY" ]; then
-            COMBINED_SUMMARY="No evaluation results available."
-          fi
+          TEST_SUMMARY=$(cat test-summary.md)
 
-          # Build the full comment with header and footer
+          # Build the full comment
           COMMENT_BODY=$(cat <<EOF
           ## 🤖 E2E Test Results
 
-          $COMBINED_SUMMARY
+          ${TEST_SUMMARY}
 
+          EOF
+          )
+
+          if [ -n "$EVAL_SUMMARY" ]; then
+            COMMENT_BODY=$(cat <<EOF
+          ${COMMENT_BODY}
+          ### Evaluation Details
+
+          ${EVAL_SUMMARY}
+
+          EOF
+            )
+          fi
+
+          COMMENT_BODY=$(cat <<EOF
+          ${COMMENT_BODY}
           ---
-          <sub>📊 Generated by E2E workflow | [View full run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})</sub>
+          <sub>Generated by E2E workflow | [View full run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})</sub>
           EOF
           )
 
@@ -396,13 +513,11 @@ jobs:
             --jq '.[] | select(.body | contains("## 🤖 E2E Test Results")) | .id' | head -1)
 
           if [ -n "$COMMENT_ID" ]; then
-            # Update existing comment
             gh api repos/${{ github.repository }}/issues/comments/$COMMENT_ID \
               -X PATCH \
               -f body="$COMMENT_BODY"
             echo "Updated existing comment $COMMENT_ID"
           else
-            # Create new comment
             gh pr comment ${{ github.event.pull_request.number }} --body "$COMMENT_BODY"
             echo "Created new comment"
           fi
