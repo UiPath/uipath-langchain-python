@@ -13,7 +13,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
 from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
-from uipath.utils import EndpointManager
+from uipath.platform.common import EndpointManager
 
 from .header_capture import HeaderCapture
 from .retryers.vertex import AsyncVertexRetryer, VertexRetryer
