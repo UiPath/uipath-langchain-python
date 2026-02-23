@@ -6,6 +6,7 @@ from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from uipath.core.guardrails import DeterministicGuardrail
+from uipath.eval._execution_context import execution_id_context
 from uipath.platform.guardrails import (
     BaseGuardrail,
     BuiltInValidatorGuardrail,
@@ -52,6 +53,24 @@ def _filter_guardrails_by_stage(
             continue
         filtered_guardrails.append((guardrail, action))
     return filtered_guardrails
+
+
+def _filter_guardrails_for_evals(
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+) -> list[tuple[BaseGuardrail, GuardrailAction]]:
+    """Filter out guardrails that are disabled for evaluations.
+
+    When running inside an evaluation (execution_id_context is set),
+    guardrails with ``enabled_for_evals=False`` are excluded so that
+    their nodes are never created in the subgraph.
+    """
+    if execution_id_context.get() is None:
+        return list(guardrails or [])
+    return [
+        (guardrail, action)
+        for guardrail, action in (guardrails or [])
+        if guardrail.enabled_for_evals
+    ]
 
 
 def _create_guardrails_subgraph(
@@ -258,6 +277,7 @@ def create_llm_guardrails_subgraph(
         if GuardrailScope.LLM in guardrail.selector.scopes
         and not isinstance(guardrail, DeterministicGuardrail)
     ]
+    applicable_guardrails = _filter_guardrails_for_evals(applicable_guardrails)
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
         return llm_node[1]
 
@@ -343,6 +363,7 @@ def create_agent_init_guardrails_subgraph(
         if GuardrailScope.AGENT in guardrail.selector.scopes
         and not isinstance(guardrail, DeterministicGuardrail)
     ]
+    applicable_guardrails = _filter_guardrails_for_evals(applicable_guardrails)
     applicable_guardrails = _filter_guardrails_by_stage(
         applicable_guardrails, ExecutionStage.PRE_EXECUTION
     )
@@ -387,6 +408,7 @@ def create_agent_terminate_guardrails_subgraph(
         if GuardrailScope.AGENT in guardrail.selector.scopes
         and not isinstance(guardrail, DeterministicGuardrail)
     ]
+    applicable_guardrails = _filter_guardrails_for_evals(applicable_guardrails)
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
         return terminate_node[1]
 
@@ -436,6 +458,7 @@ def create_tool_guardrails_subgraph(
         and guardrail.selector.match_names is not None
         and tool_name in guardrail.selector.match_names
     ]
+    applicable_guardrails = _filter_guardrails_for_evals(applicable_guardrails)
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
         return tool_node[1]
 
