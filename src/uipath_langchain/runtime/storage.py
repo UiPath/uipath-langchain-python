@@ -6,7 +6,7 @@ from typing import Any, cast
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import BaseModel
 from uipath.core.serialization import serialize_json
-from uipath.runtime import UiPathResumeTrigger
+from uipath.core.triggers import UiPathResumeTrigger
 
 
 class SqliteResumableStorage:
