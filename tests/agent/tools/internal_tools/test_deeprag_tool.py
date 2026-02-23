@@ -150,9 +150,8 @@ class TestCreateDeepRagTool:
             return_value=mock_index
         )
 
-        # durable_interrupt always calls interrupt(); first for index, second for DeepRag
+        # Index is ready (200): only create_deeprag fires interrupt(), not wait_for_ephemeral_index
         mock_interrupt.side_effect = [
-            mock_index,
             {"text": "Deep RAG analysis result"},
         ]
 
@@ -185,8 +184,8 @@ class TestCreateDeepRagTool:
         assert call_kwargs["usage"] == "DeepRAG"
         assert mock_attachment.ID in call_kwargs["attachments"]
 
-        # Both durable_interrupts call interrupt()
-        assert mock_interrupt.call_count == 2
+        # Only create_deeprag calls interrupt() — wait_for_ephemeral_index is skipped
+        assert mock_interrupt.call_count == 1
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
@@ -285,9 +284,8 @@ class TestCreateDeepRagTool:
             return_value=mock_index
         )
 
-        # durable_interrupt always calls interrupt(); first for index, second for DeepRag
+        # Index is ready (200): only create_deeprag fires interrupt(), not wait_for_ephemeral_index
         mock_interrupt.side_effect = [
-            mock_index,
             {"content": "Dynamic query result"},
         ]
 
