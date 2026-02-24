@@ -40,7 +40,7 @@ DO NOT do any math as specified in your instructions.
 
 def create_llm() -> UiPathChat:
     """Create and configure the language model."""
-    return UiPathChat(streaming=False)
+    return UiPathChat(model="gpt-4o", streaming=False)
 
 
 def create_research_agent():

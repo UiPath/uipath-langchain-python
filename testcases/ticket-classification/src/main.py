@@ -114,7 +114,7 @@ def decide_next_node(state: GraphState) -> NextNode:
 
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    llm = UiPathChat()
+    llm = UiPathChat(model="gpt-4o")
 
     # Add rejection message if there was a previous prediction
     if state.get("last_predicted_category"):
