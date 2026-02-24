@@ -12,7 +12,10 @@ from uipath._cli._utils._folders import get_personal_workspace_key_async
 from uipath.agent.models.agent import AgentDefinition
 from uipath.agent.react.conversational_prompts import PromptUserSettings
 from uipath.core import UiPathSpanUtils, UiPathTraceManager
-from uipath.core.chat import UiPathConversationMessage
+from uipath.core.chat import (
+    UiPathConversationMessage,
+    UiPathConversationMessageData,
+)
 from uipath.core.tracing import UiPathTraceSettings
 from uipath.platform.common import UiPathConfig
 from uipath.platform.resume_triggers import UiPathResumeTriggerHandler
@@ -173,12 +176,19 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
                     agent_definition, settings
                 )
 
-            # Conversational agents agent definition does not contain 'messages' and 'uipath__user_settings' input fields, which we manually add to the input-schema here.
+            # Low-code Conversational Agents (agent.json with isConversational=true) implicitly are given:
+            # - 'messages' and 'uipath__user_settings' input fields
+            # - 'uipath__agent_response_messages' output field
             if agent_definition.is_conversational:
                 agent_definition.input_schema = (
                     self._get_conversational_agent_input_schema(
                         agent_definition.input_schema
                     )
+                )
+                agent_definition.output_schema = self._get_conversational_agent_output_schema(
+                    # Currently, the output_schema from conversational agent.jsons has just a default 'content' field and is ignored.
+                    # When user-defined outputs are supported, pass in agent_definition.output_schema here instead.
+                    None
                 )
 
             return agent_definition
@@ -227,6 +237,35 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         # Reconstruct the agent definition
         return AgentDefinition.model_validate(agent_dict)
 
+    def _merge_system_model_into_existing_schema(
+        self, existing_schema: dict[str, Any] | None, system_model: type[BaseModel]
+    ) -> dict[str, Any]:
+        """Helper function to merge an internal model's fields into existing schema, if any. Merges in properties, defs, and required fields from the system model."""
+        system_schema = system_model.model_json_schema()
+
+        # If no existing schema, return system schema as-is
+        if not existing_schema:
+            return system_schema
+
+        schema = deepcopy(existing_schema)
+
+        if "properties" not in schema:
+            schema["properties"] = {}
+
+        schema["properties"].update(system_schema["properties"])
+
+        if "$defs" in system_schema:
+            if "$defs" not in schema:
+                schema["$defs"] = {}
+            schema["$defs"].update(system_schema["$defs"])
+
+        if "required" in system_schema:
+            system_required = set(system_schema["required"])
+            current_required = set(schema.get("required", []))
+            schema["required"] = list(current_required | system_required)
+
+        return schema
+
     def _get_conversational_agent_input_schema(
         self, existing_input_schema: dict[str, Any] | None
     ) -> dict[str, Any]:
@@ -241,38 +280,27 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             uipath__user_settings: PromptUserSettings | None = Field(default=None)
             model_config = ConfigDict(extra="allow")
 
-        default_low_code_conversational_input_schema = (
-            DefaultLowCodeConversationalInput.model_json_schema()
+        return self._merge_system_model_into_existing_schema(
+            existing_input_schema, DefaultLowCodeConversationalInput
         )
 
-        # If no existing schema, return system schema as-is
-        if not existing_input_schema:
-            return default_low_code_conversational_input_schema
+    def _get_conversational_agent_output_schema(
+        self, existing_output_schema: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        """Generate output schema for conversational agents.
 
-        schema = deepcopy(existing_input_schema)
+        Merges default low-code conversational-agent system fields (uipath__agent_response_messages)
+        into user-defined fields from existing_output_schema
+        """
 
-        if "properties" not in schema:
-            schema["properties"] = {}
+        class DefaultLowCodeConversationalOutput(BaseModel):
+            uipath__agent_response_messages: list[UiPathConversationMessageData] = (
+                Field(default=[])
+            )
 
-        schema["properties"].update(
-            default_low_code_conversational_input_schema["properties"]
+        return self._merge_system_model_into_existing_schema(
+            existing_output_schema, DefaultLowCodeConversationalOutput
         )
-
-        if "$defs" in default_low_code_conversational_input_schema:
-            if "$defs" not in schema:
-                schema["$defs"] = {}
-            schema["$defs"].update(
-                default_low_code_conversational_input_schema["$defs"]
-            )
-
-        if "required" in default_low_code_conversational_input_schema:
-            system_required = set(
-                default_low_code_conversational_input_schema["required"]
-            )
-            current_required = set(schema.get("required", []))
-            schema["required"] = list(current_required | system_required)
-
-        return schema
 
     async def _load_graph(
         self, entrypoint: str, **kwargs: Any
