@@ -120,8 +120,8 @@ class GeminiPayloadHandler(ModelPayloadHandler):
         self,
         tools: Sequence[BaseTool],
         tool_choice: Literal["auto", "any"],
-        parallel_tool_calls: bool = True,
-        strict_mode: bool = False,
+        parallel_tool_calls: bool | None = None,
+        strict_mode: bool | None = None,
     ) -> dict[str, Any]:
         mode = tool_choice.upper()
         if strict_mode:

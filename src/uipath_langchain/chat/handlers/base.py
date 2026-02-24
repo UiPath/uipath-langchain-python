@@ -22,8 +22,8 @@ class ModelPayloadHandler(ABC):
         self,
         tools: Sequence[BaseTool],
         tool_choice: Literal["auto", "any"],
-        parallel_tool_calls: bool = True,
-        strict_mode: bool = False,
+        parallel_tool_calls: bool | None = None,
+        strict_mode: bool | None = None,
     ) -> dict[str, Any]: ...
 
     @abstractmethod
@@ -47,8 +47,8 @@ class DefaultModelPayloadHandler(ModelPayloadHandler):
         self,
         tools: Sequence[BaseTool],
         tool_choice: Literal["auto", "any"],
-        parallel_tool_calls: bool = True,
-        strict_mode: bool = False,
+        parallel_tool_calls: bool | None = None,
+        strict_mode: bool | None = None,
     ) -> dict[str, Any]:
         return {"tool_choice": tool_choice}
 

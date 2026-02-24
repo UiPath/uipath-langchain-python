@@ -12,9 +12,7 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 
 from uipath.platform import UiPath
-from uipath.platform.common import CreateTask
 from uipath_langchain.chat import UiPathChat
-
 # Configuration
 logger = logging.getLogger(__name__)
 uipath = UiPath()
@@ -114,7 +112,7 @@ def decide_next_node(state: GraphState) -> NextNode:
 
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    llm = UiPathChat()
+    llm = UiPathChat(model="gpt-4o-2024-11-20")
 
     # Add rejection message if there was a previous prediction
     if state.get("last_predicted_category"):
