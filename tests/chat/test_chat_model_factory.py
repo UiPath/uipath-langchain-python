@@ -2,12 +2,12 @@
 
 import pytest
 
-from uipath_langchain.chat.chat_model_factory import (
+from uipath_langchain.chat._legacy.chat_model_factory import (
     _API_FLAVOR_TO_PROVIDER,
     _DEFAULT_API_FLAVOR,
     _compute_vendor_and_api_flavor,
 )
-from uipath_langchain.chat.types import APIFlavor, LLMProvider
+from uipath_langchain.chat._legacy.types import APIFlavor, LLMProvider
 
 
 class TestComputeVendorAndApiFlavor:

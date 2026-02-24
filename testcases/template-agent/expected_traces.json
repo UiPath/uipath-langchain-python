@@ -9,9 +9,10 @@
     },
     {
       "name": [
-        "UiPathChatBedrockConverse",
-        "UiPathChatOpenAI",
-        "UiPathChatVertex"
+        "UiPathChat",
+        "UiPathAzureChatOpenAI",
+        "UiPathChatAnthropicBedrock",
+        "UiPathChatGoogleGenerativeAI"
       ],
       "attributes": {
         "openinference.span.kind": "LLM"

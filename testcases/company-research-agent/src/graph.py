@@ -1,3 +1,5 @@
+import asyncio
+
 from langchain.agents import create_agent
 from langchain_community.tools import DuckDuckGoSearchResults
 from langgraph.graph import END, START, MessagesState, StateGraph
@@ -5,12 +7,23 @@ from pydantic import BaseModel
 
 from uipath_langchain.chat import UiPathChat
 
-# Configuration constants
+# ddgs is not thread-safe — its lazy proxy + primp.Client deadlock when
+# LangGraph dispatches parallel tool calls via run_in_executor.
+# Adding _arun with a lock serializes execution in the async path instead.
+_ddg_lock = asyncio.Lock()
+
+
+class SafeDuckDuckGoSearch(DuckDuckGoSearchResults):
+    """DuckDuckGoSearchResults with async serialization to avoid ddgs deadlock."""
+
+    async def _arun(self, query: str, **kwargs):
+        async with _ddg_lock:
+            return await super()._arun(query, **kwargs)
 
 
 def get_search_tool() -> DuckDuckGoSearchResults:
     """Get the appropriate search tool based on available API keys."""
-    return DuckDuckGoSearchResults()
+    return SafeDuckDuckGoSearch()
 
 
 # System prompt for the research agent
@@ -40,7 +53,7 @@ DO NOT do any math as specified in your instructions.
 
 def create_llm() -> UiPathChat:
     """Create and configure the language model."""
-    return UiPathChat(streaming=False)
+    return UiPathChat(model="gpt-4o-2024-11-20")
 
 
 def create_research_agent():

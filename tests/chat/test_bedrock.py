@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.messages.content import create_file_block
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from uipath_langchain.chat.bedrock import (
+from uipath_langchain.chat._legacy.bedrock import (
     AwsBedrockCompletionsPassthroughClient,
     UiPathChatBedrock,
     UiPathChatBedrockConverse,
@@ -131,7 +131,7 @@ class TestGenerate:
             "UIPATH_ACCESS_TOKEN": "token",
         },
     )
-    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    @patch("uipath_langchain.chat._legacy.bedrock.boto3.Session")
     def test_generate_converts_file_blocks(self, mock_session_cls):
         chat = UiPathChatBedrock()
 
@@ -177,7 +177,7 @@ class TestBedrockSslConfiguration:
             api_flavor="converse",
         )
 
-    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    @patch("uipath_langchain.chat._legacy.bedrock.boto3.Session")
     @patch.dict(os.environ, {"SSL_CERT_FILE": "/tmp/test-ca-bundle.pem"}, clear=False)
     def test_get_client_uses_ssl_cert_file(self, mock_session_cls):
         os.environ.pop("REQUESTS_CA_BUNDLE", None)
@@ -190,7 +190,7 @@ class TestBedrockSslConfiguration:
         _, kwargs = mock_session.client.call_args
         assert kwargs["verify"] == "/tmp/test-ca-bundle.pem"
 
-    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    @patch("uipath_langchain.chat._legacy.bedrock.boto3.Session")
     @patch.dict(os.environ, {"SSL_CERT_FILE": "/tmp/test-ca-bundle.pem"}, clear=False)
     def test_get_bedrock_client_uses_ssl_cert_file(self, mock_session_cls):
         os.environ.pop("REQUESTS_CA_BUNDLE", None)
@@ -203,7 +203,7 @@ class TestBedrockSslConfiguration:
         _, kwargs = mock_session.client.call_args
         assert kwargs["verify"] == "/tmp/test-ca-bundle.pem"
 
-    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    @patch("uipath_langchain.chat._legacy.bedrock.boto3.Session")
     @patch.dict(
         os.environ,
         {
@@ -223,7 +223,7 @@ class TestBedrockSslConfiguration:
         _, kwargs = mock_session.client.call_args
         assert kwargs["verify"] == "/tmp/ssl-cert.pem"
 
-    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    @patch("uipath_langchain.chat._legacy.bedrock.boto3.Session")
     @patch.dict(os.environ, {"UIPATH_DISABLE_SSL_VERIFY": "true"}, clear=False)
     def test_disable_ssl_verify(self, mock_session_cls):
         mock_session = mock_session_cls.return_value
@@ -233,7 +233,7 @@ class TestBedrockSslConfiguration:
         _, kwargs = mock_session.client.call_args
         assert kwargs["verify"] is False
 
-    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    @patch("uipath_langchain.chat._legacy.bedrock.boto3.Session")
     def test_default_uses_certifi(self, mock_session_cls):
         import certifi
 

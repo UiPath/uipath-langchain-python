@@ -34,7 +34,10 @@ from uipath_langchain._utils._settings import (
     get_uipath_token_header,
 )
 from uipath_langchain._utils._sleep_policy import before_sleep_log
-from uipath_langchain.chat.http_client import build_uipath_headers, resolve_gateway_url
+from uipath_langchain.chat._legacy.http_client import (
+    build_uipath_headers,
+    resolve_gateway_url,
+)
 from uipath_langchain.runtime.errors import (
     LangGraphErrorCode,
     LangGraphRuntimeError,

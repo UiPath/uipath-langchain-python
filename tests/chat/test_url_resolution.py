@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from uipath_langchain.chat.http_client.url import resolve_gateway_url
+from uipath_langchain.chat._legacy.http_client.url import resolve_gateway_url
 
 ENDPOINT = "agenthub_/llm/raw/vendor/openai/model/gpt-4/completions"
 
@@ -35,7 +35,7 @@ class TestResolveGatewayUrl:
     def test_service_override_used_when_available(self) -> None:
         """When resolve_service_url returns a URL, it's used with is_override=True."""
         with patch(
-            "uipath_langchain.chat.http_client.url._resolve_service_url",
+            "uipath_langchain.chat._legacy.http_client.url._resolve_service_url",
             return_value="http://localhost:8080/llm/raw/vendor/openai/model/gpt-4/completions",
         ):
             env = {"UIPATH_URL": "https://cloud.uipath.com/org/tenant"}
@@ -49,7 +49,7 @@ class TestResolveGatewayUrl:
     def test_service_override_returns_none_falls_back(self) -> None:
         """When resolve_service_url returns None, fall back to UIPATH_URL."""
         with patch(
-            "uipath_langchain.chat.http_client.url._resolve_service_url",
+            "uipath_langchain.chat._legacy.http_client.url._resolve_service_url",
             return_value=None,
         ):
             env = {"UIPATH_URL": "https://cloud.uipath.com/org/tenant"}
@@ -71,7 +71,7 @@ class TestRoutingHeadersInjection:
     """Verify build_uipath_headers injects routing headers when inject_routing=True."""
 
     def test_no_routing_headers_by_default(self) -> None:
-        from uipath_langchain.chat.http_client import build_uipath_headers
+        from uipath_langchain.chat._legacy.http_client import build_uipath_headers
 
         env = {
             "UIPATH_TENANT_ID": "tenant-abc",
@@ -83,7 +83,7 @@ class TestRoutingHeadersInjection:
         assert "x-uipath-internal-accountid" not in headers
 
     def test_routing_headers_injected_when_override(self) -> None:
-        from uipath_langchain.chat.http_client import build_uipath_headers
+        from uipath_langchain.chat._legacy.http_client import build_uipath_headers
 
         env = {
             "UIPATH_TENANT_ID": "tenant-abc",
@@ -95,7 +95,7 @@ class TestRoutingHeadersInjection:
         assert headers["x-uipath-internal-accountid"] == "org-xyz"
 
     def test_routing_headers_omitted_when_env_missing(self) -> None:
-        from uipath_langchain.chat.http_client import build_uipath_headers
+        from uipath_langchain.chat._legacy.http_client import build_uipath_headers
 
         with patch.dict(os.environ, {}, clear=True):
             headers = build_uipath_headers(inject_routing=True)
@@ -103,7 +103,7 @@ class TestRoutingHeadersInjection:
         assert "x-uipath-internal-accountid" not in headers
 
     def test_partial_routing_headers(self) -> None:
-        from uipath_langchain.chat.http_client import build_uipath_headers
+        from uipath_langchain.chat._legacy.http_client import build_uipath_headers
 
         env = {"UIPATH_ORGANIZATION_ID": "org-only"}
         with patch.dict(os.environ, env, clear=True):

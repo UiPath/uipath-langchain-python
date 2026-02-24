@@ -25,8 +25,7 @@
       "parent_name": "model",
       "attributes": {
         "openinference.span.kind": "LLM",
-        "llm.provider": "azure",
-        "llm.system": "openai",
+        "llm.provider": "uipath",
         "llm.model_name": "*",
         "llm.input_messages.0.message.role": "system",
         "llm.input_messages.1.message.role": "user",
@@ -71,8 +70,7 @@
       "count": 2,
       "attributes": {
         "openinference.span.kind": "LLM",
-        "llm.provider": "azure",
-        "llm.system": "openai",
+        "llm.provider": "uipath",
         "llm.model_name": "*",
         "llm.output_messages.0.message.role": "assistant",
         "session.id": "default"
