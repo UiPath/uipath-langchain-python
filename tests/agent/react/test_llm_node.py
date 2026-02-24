@@ -1,5 +1,6 @@
 """Tests for LLM node tool call filtering functionality."""
 
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -7,22 +8,33 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.messages.content import create_text_block, create_tool_call
 from langchain_core.tools import BaseTool
+from langchain_openai import AzureChatOpenAI
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 
 from uipath_langchain.agent.react.llm_node import create_llm_node
 from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.chat.types import APIFlavor, LLMProvider
+
+
+class _StubAzureChatOpenAI(AzureChatOpenAI):
+    """AzureChatOpenAI subclass that bypasses Pydantic validation for testing.
+
+    Keeps AzureChatOpenAI in the MRO for handler resolution while allowing
+    arbitrary attribute assignment (e.g. setting Mock methods).
+    """
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        object.__setattr__(self, name, value)
 
 
 class TestLLMNodeParallelToolCalls:
-    """Test that enable_openai_parallel_tool_calls parameter flows to model.bind_tools()."""
+    """Test that parallel_tool_calls parameter flows to model.bind_tools()."""
+
+    mock_model: Any
 
     def setup_method(self):
-        self.mock_model = Mock(spec=BaseChatModel)
-        self.mock_model.bind_tools.return_value = self.mock_model
-        self.mock_model.bind.return_value = self.mock_model
-        self.mock_model.llm_provider = LLMProvider.OPENAI
-        self.mock_model.api_flavor = APIFlavor.OPENAI_COMPLETIONS
+        self.mock_model = _StubAzureChatOpenAI.model_construct()
+        self.mock_model.bind_tools = Mock(return_value=self.mock_model)
+        self.mock_model.bind = Mock(return_value=self.mock_model)
 
         self.regular_tool = Mock(spec=BaseTool)
         self.regular_tool.name = "regular_tool"
@@ -35,7 +47,7 @@ class TestLLMNodeParallelToolCalls:
         self.mock_model.ainvoke = AsyncMock(return_value=mock_response)
 
         llm_node = create_llm_node(
-            self.mock_model, [self.regular_tool], enable_openai_parallel_tool_calls=True
+            self.mock_model, [self.regular_tool], parallel_tool_calls=True
         )
         await llm_node(self.test_state)
 
@@ -51,7 +63,7 @@ class TestLLMNodeParallelToolCalls:
         llm_node = create_llm_node(
             self.mock_model,
             [self.regular_tool],
-            enable_openai_parallel_tool_calls=False,
+            parallel_tool_calls=False,
         )
         await llm_node(self.test_state)
 
@@ -72,44 +84,41 @@ class TestLLMNodeParallelToolCalls:
         assert kwargs["parallel_tool_calls"] is True
 
     @pytest.mark.asyncio
-    async def test_unsupported_provider_no_kwarg(self):
-        """Bedrock handler returns empty dict, so no parallel kwarg is passed."""
-        self.mock_model.llm_provider = LLMProvider.BEDROCK
-        self.mock_model.api_flavor = APIFlavor.AWS_BEDROCK_CONVERSE
+    async def test_non_openai_provider_no_parallel_kwarg(self):
+        """Default handler does not include parallel_tool_calls in binding kwargs."""
+        mock_model = Mock(spec=BaseChatModel)
+        mock_model.bind_tools.return_value = mock_model
+        mock_model.bind.return_value = mock_model
 
         mock_response = AIMessage(content="done", tool_calls=[])
-        self.mock_model.ainvoke = AsyncMock(return_value=mock_response)
+        mock_model.ainvoke = AsyncMock(return_value=mock_response)
 
         llm_node = create_llm_node(
-            self.mock_model,
+            mock_model,
             [self.regular_tool],
-            enable_openai_parallel_tool_calls=False,
+            parallel_tool_calls=False,
         )
         await llm_node(self.test_state)
 
-        self.mock_model.bind_tools.assert_called_once()
-        _, kwargs = self.mock_model.bind_tools.call_args
+        mock_model.bind_tools.assert_called_once()
+        _, kwargs = mock_model.bind_tools.call_args
         assert "parallel_tool_calls" not in kwargs
 
 
 class TestLLMNodeToolCallFiltering:
     """Test cases for LLM node tool call filtering integration."""
 
+    mock_model: Any
+
     def setup_method(self):
         """Set up test fixtures."""
-        # Create mock tools
         self.regular_tool = Mock(spec=BaseTool)
         self.regular_tool.name = "regular_tool"
 
-        # Create mock chat model that implements UiPathPassthroughChatModel
-        self.mock_model = Mock(spec=BaseChatModel)
-        self.mock_model.bind_tools.return_value = self.mock_model
-        self.mock_model.bind.return_value = self.mock_model
-        # Add UiPath protocol properties
-        self.mock_model.llm_provider = LLMProvider.OPENAI
-        self.mock_model.api_flavor = APIFlavor.OPENAI_RESPONSES
+        self.mock_model = _StubAzureChatOpenAI.model_construct()
+        self.mock_model.bind_tools = Mock(return_value=self.mock_model)
+        self.mock_model.bind = Mock(return_value=self.mock_model)
 
-        # Create test state
         self.test_state = AgentGraphState(messages=[HumanMessage(content="Test query")])
 
     @pytest.mark.asyncio

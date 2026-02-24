@@ -1,9 +1,10 @@
 """Abstract base class for model payload handlers."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Literal, Sequence
 
 from langchain_core.messages import AIMessage
+from langchain_core.tools import BaseTool
 
 
 class ModelPayloadHandler(ABC):
@@ -13,26 +14,13 @@ class ModelPayloadHandler(ABC):
     """
 
     @abstractmethod
-    def get_required_tool_choice(self) -> str | dict[str, Any]:
-        """Get the tool_choice value that enforces tool usage.
-
-        Returns:
-            Provider-specific value to force tool usage:
-            - "required" for OpenAI-compatible models
-            - "any" for Bedrock Converse and Vertex models (string format)
-            - {"type": "any"} for Bedrock Invoke API (dict format required)
-        """
-
-    def get_parallel_tool_calls_kwargs(
-        self, parallel_tool_calls: bool
-    ) -> dict[str, Any]:
-        """Get provider-specific bind_tools kwargs for controlling parallel tool calls.
-
-        Returns:
-            Dict of kwargs to spread into model.bind_tools().
-            Empty dict if the provider doesn't support this parameter.
-        """
-        return {}
+    def get_tool_binding_kwargs(
+        self,
+        tools: Sequence[BaseTool],
+        tool_choice: Literal["auto", "any"],
+        parallel_tool_calls: bool = True,
+        strict_mode: bool = False,
+    ) -> dict[str, Any]: ...
 
     @abstractmethod
     def check_stop_reason(self, response: AIMessage) -> None:
@@ -46,3 +34,19 @@ class ModelPayloadHandler(ABC):
         Raises:
             ChatModelError: If stop reason indicates a faulty termination
         """
+
+
+class DefaultModelPayloadHandler(ModelPayloadHandler):
+    """Default model payload handler."""
+
+    def get_tool_binding_kwargs(
+        self,
+        tools: Sequence[BaseTool],
+        tool_choice: Literal["auto", "any"],
+        parallel_tool_calls: bool = True,
+        strict_mode: bool = False,
+    ) -> dict[str, Any]:
+        return {"tool_choice": tool_choice}
+
+    def check_stop_reason(self, response: AIMessage) -> None:
+        return

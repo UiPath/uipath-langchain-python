@@ -1,6 +1,6 @@
 """LLM node for ReAct Agent graph."""
 
-from typing import Sequence, TypeVar
+from typing import Literal, Sequence, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -48,7 +48,9 @@ def create_llm_node(
     is_conversational: bool = False,
     llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
     thinking_messages_limit: int = DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
-    enable_openai_parallel_tool_calls: bool = True,
+    tool_choice: Literal["auto", "any"] = "auto",
+    parallel_tool_calls: bool = True,
+    strict_mode: bool = False,
 ):
     """Create LLM node with dynamic tool_choice enforcement.
 
@@ -65,7 +67,6 @@ def create_llm_node(
     """
     bindable_tools = list(tools) if tools else []
     payload_handler = get_payload_handler(model)
-    tool_choice_required_value = payload_handler.get_required_tool_choice()
 
     async def llm_node(state: StateT):
         messages: list[AnyMessage] = state.messages
@@ -78,24 +79,25 @@ def create_llm_node(
                 category=UiPathErrorCategory.USER,
             )
 
-        consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
-
         static_schema_tools = _apply_tool_argument_properties(
             bindable_tools, state, input_schema
         )
-        parallel_kwargs = payload_handler.get_parallel_tool_calls_kwargs(
-            enable_openai_parallel_tool_calls
-        )
-        base_llm = model.bind_tools(static_schema_tools, **parallel_kwargs)
-
-        if (
+        current_tool_choice: Literal["auto", "any"] = tool_choice
+        if current_tool_choice == "auto" and (
             not is_conversational
             and bindable_tools
-            and consecutive_thinking_messages >= thinking_messages_limit
+            and count_consecutive_thinking_messages(messages) >= thinking_messages_limit
         ):
-            llm = base_llm.bind(tool_choice=tool_choice_required_value)
-        else:
-            llm = base_llm
+            current_tool_choice = "any"
+
+        binding_kwargs = payload_handler.get_tool_binding_kwargs(
+            tools=static_schema_tools,
+            tool_choice=current_tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+            strict_mode=strict_mode,
+        )
+
+        llm = model.bind_tools(static_schema_tools, **binding_kwargs)
 
         response = await llm.ainvoke(messages)
         if not isinstance(response, AIMessage):

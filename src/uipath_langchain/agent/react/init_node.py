@@ -10,7 +10,6 @@ from .job_attachments import (
     get_job_attachments,
     parse_attachments_from_conversation_messages,
 )
-from .types import AgentSettings
 
 
 def create_init_node(
@@ -18,7 +17,6 @@ def create_init_node(
     | Callable[[Any], Sequence[SystemMessage | HumanMessage]],
     input_schema: type[BaseModel] | None,
     is_conversational: bool = False,
-    agent_settings: AgentSettings | None = None,
 ):
     def graph_state_init(state: Any) -> Any:
         resolved_messages: Sequence[SystemMessage | HumanMessage] | Overwrite
@@ -62,7 +60,6 @@ def create_init_node(
             "messages": resolved_messages,
             "inner_state": {
                 "job_attachments": job_attachments_dict,
-                "agent_settings": agent_settings,
                 "initial_message_count": initial_message_count,
             },
         }
