@@ -266,7 +266,7 @@ class GuardrailSpanSchema:
     def error_guardrail_evaluation(
         self,
         span: Span,
-        error_message: str,
+        error: BaseException,
         validation_result: Optional[str] = None,
         action: Optional[str] = None,
         reason: Optional[str] = None,
@@ -280,7 +280,7 @@ class GuardrailSpanSchema:
             action: The action taken ("allow", "block", "log", "escalate")
             reason: Reason for block/skip actions (for Block action)
             payload: Data was validated against the guardrail rule
-            error_message: Error message
+            error: Exception object
         """
         if validation_result:
             span.set_attribute("validationResult", validation_result)
@@ -293,7 +293,6 @@ class GuardrailSpanSchema:
             if formatted_payload:
                 span.set_attribute("payload", formatted_payload)
 
-        error = Exception(str(error_message))
         end_span_error(span, error, self._upsert_complete)
 
     def start_guardrail_escalation(

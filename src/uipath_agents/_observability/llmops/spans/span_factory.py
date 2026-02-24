@@ -570,7 +570,7 @@ class LlmOpsSpanFactory:
     def error_guardrail_evaluation(
         self,
         span: Span,
-        error_message: str,
+        error: BaseException,
         validation_result: Optional[str] = None,
         payload: Optional[Any] = None,
         action: Optional[str] = None,
@@ -584,7 +584,7 @@ class LlmOpsSpanFactory:
             action: The action taken ("allow", "block", "log", "escalate")
             reason: Reason for block/skip actions (for Block action)
             payload: Data was validated against the guardrail rule
-            error_message: Span error message
+            error: Exception object
         """
         self._guardrail_schema.error_guardrail_evaluation(
             span=span,
@@ -592,7 +592,7 @@ class LlmOpsSpanFactory:
             action=action,
             reason=reason,
             payload=payload,
-            error_message=error_message,
+            error=error,
         )
 
     def start_guardrail_escalation(
@@ -630,7 +630,7 @@ class LlmOpsSpanFactory:
         span.end()
         self.upsert_span_complete(span, status=SpanStatus.OK)
 
-    def end_span_error(self, span: Span, error: Exception) -> None:
+    def end_span_error(self, span: Span, error: BaseException) -> None:
         """End a span with ERROR status and upsert final state."""
         # May be overridden by _SpanUtils.otel_span_to_uipath_span during export
         span.set_attribute("error", format_span_error(error))

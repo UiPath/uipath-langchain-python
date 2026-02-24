@@ -34,7 +34,7 @@ class ExceptionMapper:
     """
 
     @staticmethod
-    def map_runtime(e: Exception) -> UiPathBaseRuntimeError:
+    def map_runtime(e: BaseException) -> UiPathBaseRuntimeError:
         """Maps runtime exceptions (during graph execution).
 
         Args:
@@ -59,7 +59,7 @@ class ExceptionMapper:
         )
 
     @staticmethod
-    def map_config(e: Exception) -> UiPathBaseRuntimeError:
+    def map_config(e: BaseException) -> UiPathBaseRuntimeError:
         """Maps config exceptions (during initialization/setup).
 
         Args:
@@ -88,7 +88,7 @@ class ExceptionMapper:
 
 
 def _classify_runtime(
-    e: Exception,
+    e: BaseException,
 ) -> tuple[AgentRuntimeErrorCode, str, str, UiPathErrorCategory, int | None]:
     """Classify runtime exceptions into error code, title, detail, category, and status."""
     if isinstance(e, EnrichedException):
@@ -106,7 +106,7 @@ def _classify_runtime(
 
 
 def _classify_config(
-    e: Exception,
+    e: BaseException,
 ) -> tuple[AgentStartupErrorCode, str, str, UiPathErrorCategory, int | None]:
     """Classify config exceptions into error code, title, detail, category, and status."""
     if isinstance(e, EnrichedException):
@@ -124,7 +124,7 @@ def _classify_config(
 
 
 def _classify_http_error(
-    e: Exception,
+    e: BaseException,
     status_code: int | str | None,
     code_type: type[C],
 ) -> tuple[C, str, str, UiPathErrorCategory, int | None]:

@@ -200,7 +200,7 @@ def end_span_ok(
         upsert_fn(span, status=SpanStatus.OK)
 
 
-def format_span_error(error: Exception) -> str:
+def format_span_error(error: BaseException) -> str:
     """Format an exception into a span error message via ExceptionMapper."""
     error_info = ExceptionMapper.map_runtime(error).error_info
     return (
@@ -210,7 +210,7 @@ def format_span_error(error: Exception) -> str:
 
 def end_span_error(
     span: Span,
-    error: Exception,
+    error: BaseException,
     upsert_fn: Optional[Any] = None,
 ) -> None:
     """End a span with ERROR status.

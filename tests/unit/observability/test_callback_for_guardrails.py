@@ -1318,7 +1318,7 @@ class TestGuardrailInstrumentorEdgeCases:
             callback.set_agent_span(agent_span, agent_run_id)
             # Should not raise — just returns
             callback._guardrail_instrumentor.handle_action_error(
-                run_id=uuid4(), metadata=None, error_str="some error"
+                run_id=uuid4(), metadata=None, error=Exception("some error")
             )
 
     def test_handle_action_error_returns_early_when_node_name_empty(
@@ -1331,7 +1331,7 @@ class TestGuardrailInstrumentorEdgeCases:
             callback._guardrail_instrumentor.handle_action_error(
                 run_id=uuid4(),
                 metadata={"action_type": "Block", "langgraph_node": ""},
-                error_str="some error",
+                error=Exception("some error"),
             )
 
     def test_handle_action_end_returns_early_when_eval_node_not_in_upcoming(
@@ -1419,7 +1419,7 @@ class TestGuardrailActionErrorWithNonRecordingSpans:
                         "execution_stage": ExecutionStage.PRE_EXECUTION,
                         "escalation_data": {"reviewed_by": "user@test.com"},
                     },
-                    error_str="User rejected",
+                    error=Exception("User rejected"),
                 )
 
                 # Verify upsert was called for the container span with ERROR
@@ -1498,7 +1498,7 @@ class TestGuardrailActionErrorWithNonRecordingSpans:
                         "execution_stage": ExecutionStage.PRE_EXECUTION,
                         "escalation_data": {"reviewed_by": "user@test.com"},
                     },
-                    error_str="User rejected the LLM output",
+                    error=Exception("User rejected the LLM output"),
                 )
 
                 # Verify upsert was called for the LLM span with ERROR

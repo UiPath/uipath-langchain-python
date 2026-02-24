@@ -266,7 +266,7 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
         self,
         run_id: UUID,
         metadata: Optional[Dict[str, Any]],
-        error_str: str,
+        error: BaseException,
     ) -> None:
         """Handle guardrail action node error (block/reject path)."""
         if metadata is None:
@@ -281,6 +281,8 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
         eval_node_name = self._get_guardrail_eval_node_name(node_name)
         reason = metadata.get("reason")
 
+        error_str = " ".join(str(arg) for arg in error.args)
+
         if action == GuardrailAction.BLOCK:
             eval_span, eval_run_id = self._state.upcoming_guardrail_actions_info.pop(
                 eval_node_name
@@ -291,9 +293,9 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
             SpanHierarchyManager.pop(eval_run_id)
 
             # End guardrail span
-            if eval_span and error_str:
+            if eval_span and error:
                 self._span_factory.error_guardrail_evaluation(
-                    eval_span, action=action, reason=reason, error_message=error_str
+                    eval_span, action=action, reason=reason, error=error
                 )
 
             self._track_guardrail_event(action, metadata)
@@ -320,7 +322,6 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
         # End guardrail group span
         scope = metadata.get("scope")
         execution_stage = metadata.get("execution_stage")
-        error = Exception(str(error_str))
 
         if scope and execution_stage:
             container_key = (scope, execution_stage)
@@ -814,8 +815,7 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                 )
                 return
 
-            error_args_str = " ".join(str(arg) for arg in error.args)
-            self.handle_action_error(run_id, guardrail_metadata, error_args_str)
+            self.handle_action_error(run_id, guardrail_metadata, error)
             return
 
         except Exception:
