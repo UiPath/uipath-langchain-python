@@ -3,7 +3,7 @@ import os
 from typing import Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
+from uipath_langchain_client import UiPathChat
 from langchain_core.output_parsers import PydanticOutputParser
 from langgraph.graph import START, END, StateGraph, MessagesState
 from langgraph.types import interrupt, Command
@@ -78,7 +78,7 @@ def decide_next_node(state: GraphState) -> Literal["classify", "notify_team"]:
 
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = UiPathChat(model="gpt-4o-2024-11-20", temperature=0)
 
     if state.get("last_predicted_category", None):
         predicted_category = state["last_predicted_category"]

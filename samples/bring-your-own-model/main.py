@@ -1,6 +1,6 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import START, StateGraph, END
-from uipath_langchain.chat import UiPathChatOpenAI
+from uipath_langchain_client.clients.openai.chat_models import UiPathChatOpenAI
 from pydantic import BaseModel
 
 

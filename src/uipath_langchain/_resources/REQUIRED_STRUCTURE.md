@@ -30,7 +30,7 @@ class Output(BaseModel):
 Unless the user explicitly requests a different LLM provider, always use `UiPathChat`:
 
 ```python
-from uipath_langchain.chat import UiPathChat
+from uipath_langchain_client import UiPathChat
 
 llm = UiPathChat(model="gpt-4.1-mini-2025-04-14", temperature=0.7)
 ```
@@ -47,7 +47,7 @@ Every agent should follow this basic structure:
 ```python
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import START, StateGraph, END
-from uipath_langchain.chat import UiPathChat
+from uipath_langchain_client import UiPathChat
 from pydantic import BaseModel
 
 # 1. Define Input, State, and Output models

@@ -1,5 +1,5 @@
 from langchain.agents import create_agent
-from uipath_langchain.chat import UiPathChatOpenAI
+from uipath_langchain_client.clients.openai.chat_models import UiPathChatOpenAI
 from langchain_community.tools import DuckDuckGoSearchResults
 
 search_tool = DuckDuckGoSearchResults()
