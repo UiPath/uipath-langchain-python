@@ -313,8 +313,8 @@ class TestParallelNodesSeparateScratchpads:
         graph.add_edge("worker", "__end__")
 
         app = graph.compile(checkpointer=MemorySaver())
-        result = app.invoke(
-            {"results": []},  # type: ignore[arg-type]
+        result = app.invoke(  # type: ignore[call-overload]
+            {"results": []},
             config={"configurable": {"thread_id": "test-parallel"}},
         )
 
@@ -351,8 +351,8 @@ class TestParallelNodesSeparateScratchpads:
         graph.add_edge("worker", "__end__")
 
         app = graph.compile(checkpointer=MemorySaver())
-        app.invoke(
-            {"results": []},  # type: ignore[arg-type]
+        app.invoke(  # type: ignore[call-overload]
+            {"results": []},
             config={"configurable": {"thread_id": "test-counters"}},
         )
 

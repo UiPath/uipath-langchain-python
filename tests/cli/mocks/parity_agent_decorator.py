@@ -190,7 +190,12 @@ Keep jokes appropriate for children, free from offensive language."""
 )
 def create_llm():
     """Create LLM instance with guardrails."""
-    return UiPathChatOpenAI(temperature=0.7, max_tokens=500, use_responses_api=True)
+    return UiPathChatOpenAI(
+        model="gpt-4o-2024-11-20",
+        temperature=0.7,
+        max_tokens=500,
+        use_responses_api=True,
+    )
 
 
 llm = create_llm()
