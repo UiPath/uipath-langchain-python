@@ -12,6 +12,8 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from uipath.core.chat import (
+    UiPathConversationCitationSourceMedia,
+    UiPathConversationCitationSourceUrl,
     UiPathConversationContentPart,
     UiPathConversationMessage,
     UiPathExternalValue,
@@ -1618,3 +1620,73 @@ class TestMapLangChainMessagesToUiPathMessageData:
         assert len(result[0].content_parts) == 1
         assert isinstance(result[0].content_parts[0].data, UiPathInlineValue)
         assert result[0].content_parts[0].data.inline == "first part second part"
+
+
+class TestMapLangChainAIMessageCitations:
+    """Tests for citation extraction in _map_langchain_ai_message_to_uipath_message_data."""
+
+    def test_ai_message_with_citation_tags_populates_citations(self):
+        """AIMessage with inline citation tags should have citations populated and text cleaned."""
+        messages: list[AnyMessage] = [
+            AIMessage(
+                content='Some fact<uip:cite title="Doc" url="https://doc.com" /> and more.'
+            )
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages
+            )
+        )
+
+        assert len(result) == 1
+        part = result[0].content_parts[0]
+        assert isinstance(part.data, UiPathInlineValue)
+        assert part.data.inline == "Some fact and more."
+        assert len(part.citations) == 1
+        assert part.citations[0].offset == 0
+        assert part.citations[0].length == 9  # "Some fact"
+        source = part.citations[0].sources[0]
+        assert isinstance(source, UiPathConversationCitationSourceUrl)
+        assert source.url == "https://doc.com"
+        assert source.title == "Doc"
+
+    def test_ai_message_without_citation_tags_has_empty_citations(self):
+        """AIMessage without citation tags should have empty citations list."""
+        messages: list[AnyMessage] = [AIMessage(content="Plain text response")]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages
+            )
+        )
+
+        assert len(result) == 1
+        part = result[0].content_parts[0]
+        assert isinstance(part.data, UiPathInlineValue)
+        assert part.data.inline == "Plain text response"
+        assert part.citations == []
+
+    def test_ai_message_with_media_citation(self):
+        """AIMessage with reference/media citation tag should produce media source."""
+        messages: list[AnyMessage] = [
+            AIMessage(
+                content='A finding<uip:cite title="Report.pdf" reference="https://r.com" page_number="3" />'
+            )
+        ]
+
+        result = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages
+            )
+        )
+
+        assert len(result) == 1
+        part = result[0].content_parts[0]
+        assert isinstance(part.data, UiPathInlineValue)
+        assert part.data.inline == "A finding"
+        assert len(part.citations) == 1
+        source = part.citations[0].sources[0]
+        assert isinstance(source, UiPathConversationCitationSourceMedia)
+        assert source.download_url == "https://r.com"
+        assert source.page_number == "3"

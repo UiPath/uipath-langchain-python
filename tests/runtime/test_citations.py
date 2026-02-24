@@ -1,6 +1,11 @@
 """Tests for the CitationStreamProcessor and citation parsing utilities."""
 # mypy: disable-error-code="union-attr,operator"
 
+import json
+from unittest.mock import AsyncMock
+
+import pytest
+from langchain_core.messages.tool import ToolCall, ToolMessage
 from uipath.core.chat import (
     UiPathConversationCitationSourceMedia,
     UiPathConversationCitationSourceUrl,
@@ -9,6 +14,9 @@ from uipath.core.chat import (
 from uipath_langchain.runtime._citations import (
     CitationStreamProcessor,
     _find_partial_tag_start,
+    cas_deep_rag_citation_wrapper,
+    convert_citations_to_inline_tags,
+    extract_citations_from_text,
 )
 
 
@@ -533,3 +541,427 @@ class TestCitationStreamProcessor:
         assert len(cited) == 1
         assert cited[0].data == "<uip "
         assert cited[0].citation.end.sources[0].url == "https://example.com"
+
+
+class TestExtractCitationsFromText:
+    """Test cases for extract_citations_from_text function."""
+
+    def test_no_citation_tags(self):
+        """Text with no citation tags returns unchanged text and empty citations."""
+        text = "This is plain text with no citations."
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == text
+        assert citations == []
+
+    def test_url_citation(self):
+        """Text with a URL citation returns cleaned text and CitationData with URL source."""
+        text = 'Some fact<uip:cite title="Doc" url="https://doc.com" />'
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "Some fact"
+        assert len(citations) == 1
+        assert citations[0].offset == 0
+        assert citations[0].length == 9  # len("Some fact")
+        source = citations[0].sources[0]
+        assert isinstance(source, UiPathConversationCitationSourceUrl)
+        assert source.url == "https://doc.com"
+        assert source.title == "Doc"
+        assert source.number == 1
+
+    def test_reference_media_citation(self):
+        """Text with a reference citation returns CitationData with media source."""
+        text = 'A finding<uip:cite title="Report.pdf" reference="https://r.com" page_number="5" />'
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "A finding"
+        assert len(citations) == 1
+        source = citations[0].sources[0]
+        assert isinstance(source, UiPathConversationCitationSourceMedia)
+        assert source.download_url == "https://r.com"
+        assert source.page_number == "5"
+        assert source.title == "Report.pdf"
+
+    def test_multiple_citations_correct_offsets(self):
+        """Multiple citations on different spans get correct offsets and lengths."""
+        text = (
+            'First<uip:cite title="A" url="https://a.com" />'
+            ' and second<uip:cite title="B" url="https://b.com" />'
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "First and second"
+        assert len(citations) == 2
+        # First citation: "First" at offset 0, length 5
+        assert citations[0].offset == 0
+        assert citations[0].length == 5
+        assert citations[0].sources[0].url == "https://a.com"
+        # Second citation: " and second" at offset 5, length 11
+        assert citations[1].offset == 5
+        assert citations[1].length == 11
+        assert citations[1].sources[0].url == "https://b.com"
+
+    def test_duplicate_sources_same_number(self):
+        """Duplicate sources (same title+url) get the same number."""
+        text = (
+            'A<uip:cite title="Doc" url="https://doc.com" />'
+            'B<uip:cite title="Doc" url="https://doc.com" />'
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "AB"
+        assert len(citations) == 2
+        assert citations[0].sources[0].number == citations[1].sources[0].number
+
+    def test_back_to_back_citations_merged_into_previous(self):
+        """Back-to-back citations merge the second source into the previous citation."""
+        text = (
+            'Text<uip:cite title="A" url="https://a.com" />'
+            '<uip:cite title="B" url="https://b.com" />'
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "Text"
+        assert len(citations) == 1
+        assert len(citations[0].sources) == 2
+        assert citations[0].sources[0].url == "https://a.com"
+        assert citations[0].sources[1].url == "https://b.com"
+
+    def test_three_back_to_back_citations(self):
+        """Three back-to-back citations all merge into one citation with three sources."""
+        text = (
+            'Answer<uip:cite title="A" reference="https://a.com" page_number="1" />'
+            '<uip:cite title="B" reference="https://b.com" page_number="2" />'
+            '<uip:cite title="C" reference="https://c.com" page_number="3" />'
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "Answer"
+        assert len(citations) == 1
+        assert len(citations[0].sources) == 3
+        assert citations[0].sources[0].title == "A"
+        assert citations[0].sources[1].title == "B"
+        assert citations[0].sources[2].title == "C"
+
+    def test_back_to_back_citations_at_start_with_no_preceding_text(self):
+        """Back-to-back citations at the very start (no preceding text) are all dropped."""
+        text = (
+            '<uip:cite title="A" url="https://a.com" />'
+            '<uip:cite title="B" url="https://b.com" />'
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == ""
+        # First citation has no preceding text and no previous citation to merge into
+        # Second citation also has no preceding text but merges into the first
+        # Both end up dropped since neither has a text span
+        assert len(citations) == 0
+
+    def test_empty_text(self):
+        """Empty string returns empty text and no citations."""
+        cleaned, citations = extract_citations_from_text("")
+        assert cleaned == ""
+        assert citations == []
+
+    def test_text_with_trailing_content(self):
+        """Citation in middle of text, trailing text preserved."""
+        text = 'A fact<uip:cite title="S" url="https://s.com" /> and more text.'
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "A fact and more text."
+        assert len(citations) == 1
+        assert citations[0].offset == 0
+        assert citations[0].length == 6  # len("A fact")
+
+    def test_different_sources_get_different_numbers(self):
+        """Different sources get incrementing numbers."""
+        text = (
+            'A<uip:cite title="Doc1" url="https://doc1.com" />'
+            'B<uip:cite title="Doc2" url="https://doc2.com" />'
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert citations[0].sources[0].number == 1
+        assert citations[1].sources[0].number == 2
+
+
+class TestConvertCitationsToInlineTags:
+    """Test cases for convert_citations_to_inline_tags function."""
+
+    def test_basic_replacement(self):
+        """Test basic [1] and [2] replacement with <uip:cite/> tags."""
+        content = {
+            "text": "Fact A [1] and fact B [2].",
+            "citations": [
+                {
+                    "ordinal": 1,
+                    "pageNumber": 3,
+                    "source": "Report.pdf",
+                    "reference": "https://example.com/ref1",
+                },
+                {
+                    "ordinal": 2,
+                    "pageNumber": 7,
+                    "source": "Manual.pdf",
+                    "reference": "https://example.com/ref2",
+                },
+            ],
+        }
+
+        result = convert_citations_to_inline_tags(content)
+
+        assert "[1]" not in result
+        assert "[2]" not in result
+        assert (
+            '<uip:cite title="Report.pdf" reference="https://example.com/ref1" page_number="3" />'
+            in result
+        )
+        assert (
+            '<uip:cite title="Manual.pdf" reference="https://example.com/ref2" page_number="7" />'
+            in result
+        )
+
+    def test_same_ordinal_used_twice(self):
+        """Test that the same ordinal appearing twice in text is replaced in both places."""
+        content = {
+            "text": "First mention [1] and second mention [1].",
+            "citations": [
+                {
+                    "ordinal": 1,
+                    "pageNumber": 5,
+                    "source": "Doc.pdf",
+                    "reference": "https://example.com/doc",
+                },
+            ],
+        }
+
+        result = convert_citations_to_inline_tags(content)
+
+        assert "[1]" not in result
+        assert result.count('<uip:cite title="Doc.pdf"') == 2
+
+    def test_missing_citation_for_ordinal(self):
+        """Test that ordinals without matching citations are left as-is."""
+        content = {
+            "text": "Has citation [1] and missing [3].",
+            "citations": [
+                {
+                    "ordinal": 1,
+                    "pageNumber": 1,
+                    "source": "A.pdf",
+                    "reference": "https://example.com/a",
+                },
+            ],
+        }
+
+        result = convert_citations_to_inline_tags(content)
+
+        assert "[1]" not in result
+        assert "[3]" in result
+        assert '<uip:cite title="A.pdf"' in result
+
+    def test_empty_citations_list(self):
+        """Test that text is returned as-is when citations list is empty."""
+        content = {
+            "text": "No citations here [1].",
+            "citations": [],
+        }
+
+        result = convert_citations_to_inline_tags(content)
+
+        assert result == "No citations here [1]."
+
+    def test_missing_text_field(self):
+        """Test graceful handling when text field is missing."""
+        content = {
+            "citations": [
+                {"ordinal": 1, "source": "A.pdf", "reference": "https://example.com"}
+            ]
+        }
+
+        result = convert_citations_to_inline_tags(content)
+
+        assert result == ""
+
+    def test_missing_citations_field(self):
+        """Test graceful handling when citations field is missing."""
+        content = {"text": "Some text [1]."}
+
+        result = convert_citations_to_inline_tags(content)
+
+        assert result == "Some text [1]."
+
+    def test_empty_content(self):
+        """Test graceful handling of empty dict."""
+        result = convert_citations_to_inline_tags({})
+
+        assert result == ""
+
+    def test_page_number_fallback_to_snake_case(self):
+        """Test that page_number key is used as fallback when pageNumber is missing."""
+        content = {
+            "text": "Fact [1].",
+            "citations": [
+                {
+                    "ordinal": 1,
+                    "page_number": 10,
+                    "source": "Guide.pdf",
+                    "reference": "https://example.com/guide",
+                },
+            ],
+        }
+
+        result = convert_citations_to_inline_tags(content)
+
+        assert 'page_number="10"' in result
+
+    def test_missing_optional_fields_default_to_empty(self):
+        """Test that missing source/reference default to empty strings."""
+        content = {
+            "text": "Fact [1].",
+            "citations": [{"ordinal": 1}],
+        }
+
+        result = convert_citations_to_inline_tags(content)
+
+        assert '<uip:cite title="" reference="" page_number="" />' in result
+
+    def test_back_to_back_ordinals(self):
+        """Test [1][2] back-to-back at end of text are both converted."""
+        content = {
+            "text": "Answer [1][2]",
+            "citations": [
+                {
+                    "ordinal": 1,
+                    "pageNumber": 1,
+                    "source": "A.pdf",
+                    "reference": "https://a.com",
+                },
+                {
+                    "ordinal": 2,
+                    "pageNumber": 5,
+                    "source": "B.pdf",
+                    "reference": "https://b.com",
+                },
+            ],
+        }
+
+        result = convert_citations_to_inline_tags(content)
+
+        assert "[1]" not in result
+        assert "[2]" not in result
+        assert '<uip:cite title="A.pdf"' in result
+        assert '<uip:cite title="B.pdf"' in result
+
+    def test_back_to_back_ordinals_roundtrip_with_extract(self):
+        """End-to-end: [1][2] converted to inline tags then extracted as merged sources."""
+        content = {
+            "text": "Answer [1][2]",
+            "citations": [
+                {
+                    "ordinal": 1,
+                    "pageNumber": 1,
+                    "source": "A.pdf",
+                    "reference": "https://a.com",
+                },
+                {
+                    "ordinal": 2,
+                    "pageNumber": 5,
+                    "source": "B.pdf",
+                    "reference": "https://b.com",
+                },
+            ],
+        }
+
+        inline_text = convert_citations_to_inline_tags(content)
+        cleaned, citations = extract_citations_from_text(inline_text)
+
+        assert cleaned == "Answer "
+        assert len(citations) == 1
+        assert len(citations[0].sources) == 2
+        assert citations[0].sources[0].title == "A.pdf"
+        assert citations[0].sources[1].title == "B.pdf"
+
+
+class TestDeepRagCitationWrapper:
+    """Test cases for cas_deep_rag_citation_wrapper function."""
+
+    @pytest.mark.asyncio
+    async def test_wrapper_transforms_result(self):
+        """Test that the wrapper calls tool.ainvoke and transforms the JSON result."""
+        raw_data = {
+            "text": "Answer [1].",
+            "citations": [
+                {
+                    "ordinal": 1,
+                    "pageNumber": 3,
+                    "source": "Report.pdf",
+                    "reference": "https://example.com/ref",
+                },
+            ],
+            "deepRagId": "task-123",
+        }
+        tool_message = ToolMessage(
+            content=json.dumps(raw_data),
+            name="test_tool",
+            tool_call_id="call-1",
+        )
+
+        mock_tool = AsyncMock()
+        mock_tool.ainvoke = AsyncMock(return_value=tool_message)
+        mock_call = ToolCall(name="test_tool", args={}, id="call-1")
+
+        result = await cas_deep_rag_citation_wrapper(mock_tool, mock_call)
+
+        mock_tool.ainvoke.assert_called_once_with(mock_call)
+        parsed = json.loads(result.content)
+        assert "[1]" not in parsed["text"]
+        assert '<uip:cite title="Report.pdf"' in parsed["text"]
+
+    @pytest.mark.asyncio
+    async def test_wrapper_replaces_all_ordinals(self):
+        """Test that all ordinal references are replaced with inline cite tags."""
+        raw_data = {
+            "text": "Fact [1] and [2].",
+            "citations": [
+                {
+                    "ordinal": 1,
+                    "pageNumber": 1,
+                    "source": "A.pdf",
+                    "reference": "https://a.com",
+                },
+                {
+                    "ordinal": 2,
+                    "pageNumber": 2,
+                    "source": "B.pdf",
+                    "reference": "https://b.com",
+                },
+            ],
+            "deepRagId": "task-456",
+        }
+        tool_message = ToolMessage(
+            content=json.dumps(raw_data),
+            name="test_tool",
+            tool_call_id="call-2",
+        )
+
+        mock_tool = AsyncMock()
+        mock_tool.ainvoke = AsyncMock(return_value=tool_message)
+        mock_call = ToolCall(name="test_tool", args={}, id="call-2")
+
+        result = await cas_deep_rag_citation_wrapper(mock_tool, mock_call)
+
+        parsed = json.loads(result.content)
+        assert "[1]" not in parsed["text"]
+        assert "[2]" not in parsed["text"]
+        assert '<uip:cite title="A.pdf"' in parsed["text"]
+        assert '<uip:cite title="B.pdf"' in parsed["text"]
+
+    @pytest.mark.asyncio
+    async def test_wrapper_passthrough_on_invalid_json(self):
+        """Test that the wrapper returns unmodified content when JSON parsing fails."""
+        original_content = "not valid json"
+        tool_message = ToolMessage(
+            content=original_content,
+            name="test_tool",
+            tool_call_id="call-3",
+        )
+
+        mock_tool = AsyncMock()
+        mock_tool.ainvoke = AsyncMock(return_value=tool_message)
+        mock_call = ToolCall(name="test_tool", args={}, id="call-3")
+
+        result = await cas_deep_rag_citation_wrapper(mock_tool, mock_call)
+
+        assert result.content == original_content
+        assert result.artifact is None
