@@ -9,18 +9,17 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel
 
 from uipath_langchain.chat import (
-    BedrockModels,
-    GeminiModels,
-    OpenAIModels,
-    UiPathChatBedrockConverse,
-    UiPathChatOpenAI,
-    UiPathChatVertex,
+    UiPathAzureChatOpenAI,
+    UiPathChat,
+    UiPathChatAnthropicBedrock,
+    UiPathChatGoogleGenerativeAI,
 )
 
 # Choose your LLM provider by uncommenting one of the following:
-llm = UiPathChatBedrockConverse(model_name=BedrockModels.anthropic_claude_haiku_4_5)
-# llm = UiPathChatVertex(model_name=GeminiModels.gemini_2_5_flash)
-# llm = UiPathChatOpenAI(model_name=OpenAIModels.gpt_4_1_mini_2025_04_14)
+llm = UiPathChat(model="gpt-4.1-mini-2025-04-14")
+# llm = UiPathAzureChatOpenAI(model="gpt-4.1-mini-2025-04-14")
+# llm = UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
+# llm = UiPathChatGoogleGenerativeAI(model="gemini-2.5-flash")
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant. "

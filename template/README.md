@@ -19,13 +19,14 @@ A quickstart UiPath LangGraph agent. It answers user queries using live tools an
 
 ### LLM Providers
 
-The template defaults to **Bedrock (Claude Haiku 4.5)**. To switch providers, edit `main.py`:
+The template defaults to **GPT-4.1 Mini** via `UiPathChat`. To switch providers, edit `main.py`:
 
 ```python
 # Choose your LLM provider by uncommenting one of the following:
-llm = UiPathChatBedrock(model_name=BedrockModels.anthropic_claude_haiku_4_5)
-# llm = UiPathChatOpenAI(model_name=OpenAIModels.gpt_4_1_mini_2025_04_14)
-# llm = UiPathChatVertex(model_name=GeminiModels.gemini_2_5_flash)
+llm = UiPathChat(model="gpt-4.1-mini-2025-04-14")
+# llm = UiPathAzureChatOpenAI(model="gpt-4.1-mini-2025-04-14")
+# llm = UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
+# llm = UiPathChatGoogleGenerativeAI(model="gemini-2.5-flash")
 ```
 
 ## Graph

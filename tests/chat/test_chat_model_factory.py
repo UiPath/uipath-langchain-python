@@ -2,13 +2,13 @@
 
 import pytest
 
-from uipath_langchain.chat.chat_model_factory import (
+from uipath_langchain.chat._legacy.chat_model_factory import (
     _API_FLAVOR_TO_PROVIDER,
     _DEFAULT_API_FLAVOR,
     _compute_vendor_and_api_flavor,
     get_chat_model,
 )
-from uipath_langchain.chat.types import APIFlavor, LLMProvider
+from uipath_langchain.chat._legacy.types import APIFlavor, LLMProvider
 
 
 class TestComputeVendorAndApiFlavor:
@@ -337,7 +337,7 @@ class TestGetChatModelTemperatureGating:
         instantiated without a ``temperature`` kwarg."""
         pytest.importorskip("langchain_aws")
         mocker.patch(
-            "uipath_langchain.chat.chat_model_factory._get_model_info",
+            "uipath_langchain.chat._legacy.chat_model_factory._get_model_info",
             return_value={
                 "modelName": "anthropic.claude-opus-4-7",
                 "vendor": "AwsBedrock",
@@ -346,7 +346,7 @@ class TestGetChatModelTemperatureGating:
             },
         )
         mock_cls = mocker.patch(
-            "uipath_langchain.chat.bedrock.UiPathChatBedrockConverse"
+            "uipath_langchain.chat._legacy.bedrock.UiPathChatBedrockConverse"
         )
 
         get_chat_model(
@@ -364,7 +364,7 @@ class TestGetChatModelTemperatureGating:
         temperature."""
         pytest.importorskip("langchain_aws")
         mocker.patch(
-            "uipath_langchain.chat.chat_model_factory._get_model_info",
+            "uipath_langchain.chat._legacy.chat_model_factory._get_model_info",
             return_value={
                 "modelName": "anthropic.claude-sonnet-4-5-20250929-v1:0",
                 "vendor": "AwsBedrock",
@@ -373,7 +373,7 @@ class TestGetChatModelTemperatureGating:
             },
         )
         mock_cls = mocker.patch(
-            "uipath_langchain.chat.bedrock.UiPathChatBedrockConverse"
+            "uipath_langchain.chat._legacy.bedrock.UiPathChatBedrockConverse"
         )
 
         get_chat_model(
@@ -392,7 +392,7 @@ class TestGetChatModelTemperatureGating:
         caller temperature."""
         pytest.importorskip("langchain_openai")
         mocker.patch(
-            "uipath_langchain.chat.chat_model_factory._get_model_info",
+            "uipath_langchain.chat._legacy.chat_model_factory._get_model_info",
             return_value={
                 "modelName": "gpt-5-2025-08-07",
                 "vendor": "OpenAi",
@@ -400,7 +400,7 @@ class TestGetChatModelTemperatureGating:
                 "modelDetails": None,
             },
         )
-        mock_cls = mocker.patch("uipath_langchain.chat.openai.UiPathChatOpenAI")
+        mock_cls = mocker.patch("uipath_langchain.chat._legacy.openai.UiPathChatOpenAI")
 
         get_chat_model(
             model="gpt-5-2025-08-07",
@@ -418,7 +418,7 @@ class TestGetChatModelTemperatureGating:
         and the leaf client must be built without a temperature kwarg."""
         pytest.importorskip("langchain_aws")
         mocker.patch(
-            "uipath_langchain.chat.chat_model_factory._get_model_info",
+            "uipath_langchain.chat._legacy.chat_model_factory._get_model_info",
             return_value={
                 "modelName": "Custom BYOM Opus 4.7",
                 "vendor": "AwsBedrock",
@@ -427,7 +427,7 @@ class TestGetChatModelTemperatureGating:
             },
         )
         mock_cls = mocker.patch(
-            "uipath_langchain.chat.bedrock.UiPathChatBedrockConverse"
+            "uipath_langchain.chat._legacy.bedrock.UiPathChatBedrockConverse"
         )
 
         get_chat_model(
@@ -446,7 +446,7 @@ class TestGetChatModelTemperatureGating:
         pytest.importorskip("langchain_google_genai")
         pytest.importorskip("google.genai")
         mocker.patch(
-            "uipath_langchain.chat.chat_model_factory._get_model_info",
+            "uipath_langchain.chat._legacy.chat_model_factory._get_model_info",
             return_value={
                 "modelName": "gemini-2.5-pro",
                 "vendor": "VertexAi",
@@ -454,7 +454,7 @@ class TestGetChatModelTemperatureGating:
                 "modelDetails": {"shouldSkipTemperature": False},
             },
         )
-        mock_cls = mocker.patch("uipath_langchain.chat.vertex.UiPathChatVertex")
+        mock_cls = mocker.patch("uipath_langchain.chat._legacy.vertex.UiPathChatVertex")
 
         get_chat_model(
             model="gemini-2.5-pro",
