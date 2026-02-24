@@ -34,6 +34,8 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
+from ._citations import CitationStreamProcessor
+
 logger = logging.getLogger(__name__)
 
 STORAGE_NAMESPACE_EVENT_MAPPER = "chat-event-mapper"
@@ -54,6 +56,7 @@ class UiPathChatMessagesMapper:
         self.current_message: AIMessageChunk
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
+        self._citation_stream_processor = CitationStreamProcessor()
 
     def _extract_text(self, content: Any) -> str:
         """Normalize LangGraph message.content to plain text."""
@@ -310,6 +313,7 @@ class UiPathChatMessagesMapper:
         if message.id not in self.seen_message_ids:
             self.current_message = message
             self.seen_message_ids.add(message.id)
+            self._citation_stream_processor = CitationStreamProcessor()
             events.append(self.map_to_message_start_event(message.id))
 
         if message.content_blocks:
@@ -318,25 +322,27 @@ class UiPathChatMessagesMapper:
                 block_type = block.get("type")
                 match block_type:
                     case "text":
-                        events.append(
-                            self.map_chunk_to_content_part_chunk_event(
-                                message.id, cast(TextContentBlock, block)
+                        text = cast(TextContentBlock, block)["text"]
+                        for chunk in self._citation_stream_processor.add_chunk(text):
+                            events.append(
+                                self._chunk_to_message_event(message.id, chunk)
                             )
-                        )
                     case "tool_call_chunk":
                         # Accumulate the message chunk
                         self.current_message = self.current_message + message
 
         elif isinstance(message.content, str) and message.content:
             # Fallback: raw string content on the chunk (rare when using content_blocks)
-            events.append(
-                self.map_content_to_content_part_chunk_event(
-                    message.id, message.content
-                )
-            )
+            for chunk in self._citation_stream_processor.add_chunk(message.content):
+                events.append(self._chunk_to_message_event(message.id, chunk))
 
         # Check if this is the last chunk by examining chunk_position, send end message event only if there are no pending tool calls
         if message.chunk_position == "last":
+            # Flush remaining text
+            for chunk in self._citation_stream_processor.finalize():
+                events.append(self._chunk_to_message_event(message.id, chunk))
+            self._citation_stream_processor = CitationStreamProcessor()
+
             if (
                 self.current_message.tool_calls is not None
                 and len(self.current_message.tool_calls) > 0
@@ -491,30 +497,14 @@ class UiPathChatMessagesMapper:
             ),
         )
 
-    def map_chunk_to_content_part_chunk_event(
-        self, message_id: str, block: TextContentBlock
-    ) -> UiPathConversationMessageEvent:
-        text = block["text"]
-        return UiPathConversationMessageEvent(
-            message_id=message_id,
-            content_part=UiPathConversationContentPartEvent(
-                content_part_id=self.get_content_part_id(message_id),
-                chunk=UiPathConversationContentPartChunkEvent(
-                    data=text,
-                ),
-            ),
-        )
-
-    def map_content_to_content_part_chunk_event(
-        self, message_id: str, content: str
+    def _chunk_to_message_event(
+        self, message_id: str, chunk: UiPathConversationContentPartChunkEvent
     ) -> UiPathConversationMessageEvent:
         return UiPathConversationMessageEvent(
             message_id=message_id,
             content_part=UiPathConversationContentPartEvent(
                 content_part_id=self.get_content_part_id(message_id),
-                chunk=UiPathConversationContentPartChunkEvent(
-                    data=content,
-                ),
+                chunk=chunk,
             ),
         )
 
