@@ -1,0 +1,43 @@
+{
+  "docVersion": "1.0.0",
+  "resource": {
+    "name": "HITL App",
+    "kind": "app",
+    "type": "workflow Action",
+    "apiVersion": "apps.uipath.com/v1",
+    "projectKey": "b3cd3e9d-9867-40d4-9617-d7ecf54519b5",
+    "dependencies": [
+      {
+        "name": "HITL App",
+        "kind": "appVersion"
+      },
+      {
+        "name": "HITL App",
+        "kind": "process"
+      }
+    ],
+    "runtimeDependencies": [],
+    "files": [],
+    "folders": [
+      {
+        "fullyQualifiedName": "solution_folder"
+      }
+    ],
+    "spec": {
+      "name": "HITL App",
+      "description": null,
+      "type": "workflow Action",
+      "version": null,
+      "appSystemName": null,
+      "appVersionRef": {
+        "key": "154e35d3-9d2e-421d-bd9d-43c9d16e837c"
+      },
+      "codeBehindProcess": {
+        "key": "1e325d31-374f-4d15-8f46-9ed6b4da5f0f"
+      },
+      "actionSchema": null
+    },
+    "locks": [],
+    "key": "f0e3aeeb-06d6-44c5-8f8a-197956650666"
+  }
+}

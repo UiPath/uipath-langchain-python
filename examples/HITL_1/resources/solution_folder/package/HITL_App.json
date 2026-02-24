@@ -1,0 +1,25 @@
+{
+  "docVersion": "1.0.0",
+  "resource": {
+    "name": "HITL App",
+    "kind": "package",
+    "apiVersion": "orchestrator.uipath.com/v1",
+    "projectKey": "b3cd3e9d-9867-40d4-9617-d7ecf54519b5",
+    "dependencies": [],
+    "runtimeDependencies": [],
+    "files": [],
+    "folders": [
+      {
+        "fullyQualifiedName": "solution_folder"
+      }
+    ],
+    "spec": {
+      "fileName": null,
+      "fileReference": null,
+      "name": "HITL App",
+      "description": null
+    },
+    "locks": [],
+    "key": "221da8cf-14e4-4e05-9b31-6cf7c8760174"
+  }
+}

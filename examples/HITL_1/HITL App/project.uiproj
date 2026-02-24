@@ -1,0 +1,10 @@
+{
+  "ProjectType": "WebApp",
+  "WebAppSettings": {
+    "AppId": "ID3f0c812eb7cc4dccb900f0fe2c6ca9a2",
+    "IsCoreProject": true
+  },
+  "Name": "HITL App",
+  "Description": null,
+  "MainFile": "Main.xaml"
+}

@@ -1,0 +1,17 @@
+{
+  "DocVersion": "1.0.0",
+  "StudioMinVersion": "2025.04.0",
+  "SolutionId": "659fcb65-ebad-4e99-59fe-08de636f4348",
+  "Projects": [
+    {
+      "Type": "WebApp",
+      "ProjectRelativePath": "HITL App/project.uiproj",
+      "Id": "b3cd3e9d-9867-40d4-9617-d7ecf54519b5"
+    },
+    {
+      "Type": "Agent",
+      "ProjectRelativePath": "Agent/project.uiproj",
+      "Id": "f0ad3939-410a-4e5a-a357-abcb883543af"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "docVersion": "1.0.0",
+  "resource": {
+    "name": "Agent",
+    "kind": "package",
+    "apiVersion": "orchestrator.uipath.com/v1",
+    "projectKey": "f0ad3939-410a-4e5a-a357-abcb883543af",
+    "dependencies": [],
+    "runtimeDependencies": [],
+    "files": [],
+    "folders": [
+      {
+        "fullyQualifiedName": "solution_folder"
+      }
+    ],
+    "spec": {
+      "fileName": null,
+      "fileReference": null,
+      "name": "Agent",
+      "description": null
+    },
+    "locks": [],
+    "key": "739ae375-e059-42f3-b3cb-c533b52966f5"
+  }
+}

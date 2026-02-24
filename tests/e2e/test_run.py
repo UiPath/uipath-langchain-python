@@ -99,6 +99,43 @@ class TestUiPathRun:
         assert "22" in output, f"Expected sum of 22 in output, got: {output}"
 
     @pytest.mark.e2e
+    def test_run_simulated_hitl_escalation(self, authenticated_session: dict[str, str]):
+        """Test running HITL agent with simulated escalation tool.
+
+        The HITL_1 agent sends a color approval request via an escalation tool.
+        With simulation.json (instructions: "always approve"), the escalation
+        tool is mocked by an LLM instead of calling Action Center.
+        """
+        example_dir = EXAMPLES_DIR / "HITL_1" / "Agent"
+
+        input_data = json.dumps({"color": "Red"})
+
+        # Remove UIPATH_PROJECT_ID so debug skips the Studio API call
+        # (ResourceOverwritesContext) which the CI service account can't access
+        env = {
+            k: v for k, v in authenticated_session.items() if k != "UIPATH_PROJECT_ID"
+        }
+
+        result = run_uipath_command(
+            command=["debug", "agent.json", input_data],
+            cwd=example_dir,
+            env=env,
+            timeout=120,
+            stdin_input="c\n",
+        )
+
+        assert result.returncode == 0, f"Debug failed: {result.stderr}"
+
+        output = result.stdout
+        assert output, "No output from debug command"
+
+        output_lower = output.lower()
+        assert "red" in output_lower, f"Expected color 'red' in output, got: {output}"
+        assert "confirm" in output_lower or "approv" in output_lower, (
+            f"Expected confirmation/approval language in output, got: {output}"
+        )
+
+    @pytest.mark.e2e
     def test_run_with_invalid_input(self, authenticated_session: dict[str, str]):
         """Test that invalid input returns non-zero exit code (negative test)."""
         example_dir = EXAMPLES_DIR / "calculator"

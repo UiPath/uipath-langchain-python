@@ -1,0 +1,62 @@
+{
+  "name": "HITL App",
+  "projectId": "69dc1649-0a73-4c52-b264-89d24b8d2cdf",
+  "previousProjectId": "",
+  "main": "Main.xaml",
+  "dependencies": {
+    "UiPath.DataService.Activities": "25.7.0",
+    "UiPath.IntegrationService.Activities": "1.24.0-alpha.20260202.8",
+    "UiPath.System.Activities": "25.8.0",
+    "UiPath.WebAPI.Activities": "1.21.1",
+    "UiPath.WorkflowEvents.Activities": "3.23.0-alpha.9888680"
+  },
+  "webServices": [],
+  "entitiesStores": [],
+  "schemaVersion": "4.0",
+  "studioVersion": "23.10.0.0",
+  "projectVersion": "3.72.771",
+  "runtimeOptions": {
+    "autoDispose": false,
+    "netFrameworkLazyLoading": false,
+    "isPausable": false,
+    "isAttended": false,
+    "requiresUserInteraction": false,
+    "supportsPersistence": false,
+    "workflowSerialization": "DataContract",
+    "excludedLoggedData": [
+      "Private:*",
+      "*password*"
+    ],
+    "executionType": "Workflow",
+    "readyForPiP": false,
+    "startsInPiP": false,
+    "mustRestoreAllDependencies": true,
+    "pipType": "ChildSession"
+  },
+  "designOptions": {
+    "projectProfile": "Developement",
+    "outputType": "Process",
+    "libraryOptions": {
+      "privateWorkflows": []
+    },
+    "processOptions": {
+      "ignoredFiles": []
+    },
+    "fileInfoCollection": [],
+    "modernBehavior": false,
+    "saveToCloud": false
+  },
+  "expressionLanguage": "VisualBasic",
+  "entryPoints": [
+    {
+      "filePath": "Main.xaml",
+      "uniqueId": "0f541980-dea1-4136-b44b-05a1491725f0",
+      "input": [],
+      "output": []
+    }
+  ],
+  "isTemplate": false,
+  "templateProjectData": {},
+  "publishData": {},
+  "targetFramework": "Portable"
+}

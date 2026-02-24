@@ -36,6 +36,7 @@ AVAILABLE_EXAMPLES = [
     "basic",
     "basic_with_ootb_guardrails",
     "adderwithrpatool/Agent",
+    "HITL_1/Agent",
 ]
 
 # Examples with evaluations configured
