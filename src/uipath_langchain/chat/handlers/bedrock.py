@@ -83,8 +83,8 @@ class BedrockInvokePayloadHandler(ModelPayloadHandler):
         self,
         tools: Sequence[BaseTool],
         tool_choice: Literal["auto", "any"],
-        parallel_tool_calls: bool = True,
-        strict_mode: bool = False,
+        parallel_tool_calls: bool | None = None,
+        strict_mode: bool | None = None,
     ) -> dict[str, Any]:
         _thinking = (getattr(self.model, "model_kwargs", None) or {}).get("thinking")
         thinking_enabled = (
@@ -98,7 +98,7 @@ class BedrockInvokePayloadHandler(ModelPayloadHandler):
             )
             tool_choice = "auto"
         kwargs: dict[str, Any] = {"tool_choice": tool_choice}
-        if not parallel_tool_calls:
+        if parallel_tool_calls is False:
             kwargs["disable_parallel_tool_use"] = True
         return kwargs
 
@@ -139,8 +139,8 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         self,
         tools: Sequence[BaseTool],
         tool_choice: Literal["auto", "any"],
-        parallel_tool_calls: bool = True,
-        strict_mode: bool = False,
+        parallel_tool_calls: bool | None = None,
+        strict_mode: bool | None = None,
     ) -> dict[str, Any]:
         _thinking = (
             getattr(self.model, "additional_model_request_fields", None) or {}
@@ -156,7 +156,7 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
             )
             tool_choice = "auto"
         kwargs: dict[str, Any] = {"tool_choice": tool_choice}
-        if strict_mode:
+        if strict_mode is True:
             kwargs["strict"] = True
         return kwargs
 

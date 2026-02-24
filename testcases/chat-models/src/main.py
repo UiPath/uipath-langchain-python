@@ -8,10 +8,12 @@ from langgraph.graph import END, START, StateGraph, MessagesState
 from pydantic import BaseModel, Field
 from langchain_core.language_models import BaseChatModel
 
-from uipath_langchain.chat.bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
-from uipath_langchain.chat.vertex import UiPathChatVertex
-from uipath_langchain.chat import UiPathChatOpenAI, UiPathChat, UiPathAzureChatOpenAI
-from uipath_langchain.embeddings import UiPathOpenAIEmbeddings, UiPathAzureOpenAIEmbeddings
+from uipath_langchain_client import UiPathChat
+from uipath_langchain_client.clients.openai.chat_models import UiPathAzureChatOpenAI
+from uipath_langchain_client.clients.bedrock.chat_models import UiPathChatBedrock, UiPathChatBedrockConverse
+from uipath_langchain_client.clients.anthropic.chat_models import UiPathChatAnthropic
+from uipath_langchain_client.clients.google.chat_models import UiPathChatGoogleGenerativeAI
+from uipath_langchain_client.clients.openai.embeddings import UiPathAzureOpenAIEmbeddings
 
 logger = logging.getLogger(__name__)
 
@@ -19,20 +21,21 @@ logger = logging.getLogger(__name__)
 def create_test_embeddings() -> list[tuple[str, Any]]:
     """Create all test embedding models."""
     return [
-        ("UiPathOpenAIEmbeddings", UiPathOpenAIEmbeddings(model="text-embedding-3-large")),
         ("UiPathAzureOpenAIEmbeddings", UiPathAzureOpenAIEmbeddings(model="text-embedding-3-large")),
+        # ("UiPathEmbeddings", UiPathEmbeddings(model="text-embedding-3-large")),
     ]
 
 
 def create_test_models(max_tokens: int = 100) -> list[tuple[str, Any]]:
     """Create all test chat models with the specified max_tokens."""
     return [
-        ("UiPathChatOpenAI", UiPathChatOpenAI(use_responses_api=True)),
-        ("UiPathChatVertex", UiPathChatVertex()),
-        ("UiPathChatBedrockConverse", UiPathChatBedrockConverse()),
-        ("UiPathChatBedrock", UiPathChatBedrock()),
-        ("UiPathChat", UiPathChat()),
-        ("UiPathAzureChatOpenAI", UiPathAzureChatOpenAI())
+        ("UiPathChat", UiPathChat(model="gpt-4o-2024-11-20", max_tokens=max_tokens)),
+        ("UiPathAzureChatOpenAI", UiPathAzureChatOpenAI(model="gpt-4o-2024-11-20", max_tokens=max_tokens)),
+        ("UiPathChatBedrockConverse", UiPathChatBedrockConverse(model="anthropic.claude-haiku-4-5-20251001-v1:0", max_tokens=max_tokens)),
+        ("UiPathChatBedrock", UiPathChatBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0", max_tokens=max_tokens)),
+        ("UiPathChatAnthropic", UiPathChatAnthropic(model="anthropic.claude-haiku-4-5-20251001-v1:0", vendor_type="awsbedrock", max_tokens=max_tokens)),
+        # ("UiPathChatAnthropic", UiPathChatAnthropic(model="claude-haiku-4-5@20251001", vendor_type="vertexai", max_tokens=max_tokens)),
+        ("UiPathChatGoogleGenerativeAI", UiPathChatGoogleGenerativeAI(model="gemini-2.5-flash", max_tokens=max_tokens)),
     ]
 
 
@@ -327,21 +330,10 @@ async def run_all_tests(state: GraphState) -> dict:
     # Build summary
     logger.info("="*80)
     summary_lines = []
-    for model_name in ["UiPathChatOpenAI", "UiPathChatVertex", "UiPathChatBedrockConverse", "UiPathChatBedrock", "UiPathChat", "UiPathAzureChatOpenAI"]:
-        if model_name in all_model_results:
-            summary_lines.append(f"{model_name}:")
-            results = all_model_results[model_name]
-            for test_name in ["invoke", "ainvoke", "stream", "astream", "tool_calling", "structured_output"]:
-                if test_name in results:
-                    summary_lines.append(f"  {test_name}: {results[test_name]}")
-
-    for model_name in ["UiPathOpenAIEmbeddings", "UiPathAzureOpenAIEmbeddings"]:
-        if model_name in all_model_results:
-            summary_lines.append(f"{model_name}:")
-            results = all_model_results[model_name]
-            for test_name in ["embed_documents", "aembed_documents"]:
-                if test_name in results:
-                    summary_lines.append(f"  {test_name}: {results[test_name]}")
+    for model_name, results in all_model_results.items():
+        summary_lines.append(f"{model_name}:")
+        for test_name, result in results.items():
+            summary_lines.append(f"  {test_name}: {result}")
 
     has_failures = any("✗" in str(v) for r in all_model_results.values() for v in r.values())
 
