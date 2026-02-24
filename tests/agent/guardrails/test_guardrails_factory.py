@@ -551,6 +551,43 @@ class TestCreateWordRuleFunc:
         )
 
 
+class TestWordRuleFuncNoneCoalesce:
+    """Tests that word rule functions handle None input by treating it as empty string."""
+
+    @pytest.mark.parametrize(
+        "operator,value,expected",
+        [
+            (AgentWordOperator.CONTAINS, "test", False),
+            (AgentWordOperator.DOES_NOT_CONTAIN, "test", True),
+            (AgentWordOperator.EQUALS, "test", False),
+            (AgentWordOperator.DOES_NOT_EQUAL, "test", True),
+            (AgentWordOperator.STARTS_WITH, "test", False),
+            (AgentWordOperator.DOES_NOT_START_WITH, "test", True),
+            (AgentWordOperator.ENDS_WITH, "test", False),
+            (AgentWordOperator.DOES_NOT_END_WITH, "test", True),
+            (AgentWordOperator.IS_EMPTY, None, True),
+            (AgentWordOperator.IS_NOT_EMPTY, None, False),
+            (AgentWordOperator.MATCHES_REGEX, r"^\d+$", False),
+        ],
+        ids=[
+            "contains",
+            "does_not_contain",
+            "equals",
+            "does_not_equal",
+            "starts_with",
+            "does_not_start_with",
+            "ends_with",
+            "does_not_end_with",
+            "is_empty",
+            "is_not_empty",
+            "matches_regex",
+        ],
+    )
+    def test_none_input_does_not_raise(self, operator, value, expected) -> None:
+        func = _create_word_rule_func(operator, value)
+        assert func(None) is expected
+
+
 class TestCreateNumberRuleFunc:
     """Tests for _create_number_rule_func."""
 

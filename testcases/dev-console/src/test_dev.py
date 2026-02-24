@@ -25,7 +25,7 @@ from testcases.common import ConsoleTest
 
 
 # The command to run for all tests
-COMMAND = "uv run uipath dev"
+COMMAND = "uv run uipath dev terminal"
 # Timeout for expect operations
 TIMEOUT = 60
 

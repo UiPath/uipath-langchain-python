@@ -88,7 +88,7 @@ def create_analyze_file_tool(
         result = await non_streaming_llm.ainvoke(messages, config=config)
 
         analysis_result = extract_text_content(result)
-        return analysis_result
+        return {"analysisResult": analysis_result}
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 

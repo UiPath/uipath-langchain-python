@@ -12,6 +12,7 @@ from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
+    DynamicToolsMode,
     LowCodeAgentDefinition,
 )
 from uipath.eval.mocks import mockable
@@ -131,10 +132,62 @@ async def create_mcp_tools_from_metadata_for_mcp_server(
     Returns:
         List of BaseTool instances, one for each tool in the config.
         Returns empty list if config.is_enabled is False.
+
+    Behavior depends on config.dynamic_tools:
+        - none: Uses tool schemas from config.available_tools (default).
+        - schema: Lists tools from the MCP server via mcpClient, but only
+          includes tools whose names appear in config.available_tools.
+        - all: Lists all tools from the MCP server via mcpClient, ignoring
+          config.available_tools entirely.
     """
 
     if config.is_enabled is False:
         return []
+
+    dynamic_tools = config.dynamic_tools
+    logger.info(
+        f"Loading MCP tools for server '{config.slug}' "
+        f"(dynamic_tools={dynamic_tools.value})"
+    )
+
+    if dynamic_tools in (DynamicToolsMode.SCHEMA, DynamicToolsMode.ALL):
+        logger.info(f"Fetching tools from MCP server '{config.slug}' via list_tools")
+        result = await mcpClient.list_tools()
+        server_tools = result.tools
+        logger.info(
+            f"MCP server '{config.slug}' returned {len(server_tools)} tools: "
+            f"{[t.name for t in server_tools]}"
+        )
+
+        if dynamic_tools == DynamicToolsMode.SCHEMA:
+            allowed_names = {t.name for t in config.available_tools}
+            server_tool_names = {t.name for t in server_tools}
+            missing = allowed_names - server_tool_names
+            for name in missing:
+                logger.warning(
+                    f"Tool '{name}' is in availableTools for server "
+                    f"'{config.slug}' but was not found on the MCP server"
+                )
+            server_tools = [t for t in server_tools if t.name in allowed_names]
+            logger.info(
+                f"Filtered to {len(server_tools)} tools matching availableTools"
+            )
+
+        mcp_tools = [
+            AgentMcpTool(
+                name=tool.name,
+                description=tool.description or "",
+                input_schema=tool.inputSchema,
+                output_schema=tool.outputSchema,
+            )
+            for tool in server_tools
+        ]
+    else:
+        mcp_tools = config.available_tools
+        logger.info(
+            f"Using {len(mcp_tools)} tools from resource config for "
+            f"server '{config.slug}'"
+        )
 
     return [
         BaseUiPathStructuredTool(
@@ -149,7 +202,7 @@ async def create_mcp_tools_from_metadata_for_mcp_server(
                 "slug": config.slug,
             },
         )
-        for mcp_tool in config.available_tools
+        for mcp_tool in mcp_tools
     ]
 
 

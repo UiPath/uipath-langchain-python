@@ -12,8 +12,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateDeepRag
-from uipath.platform.common.interrupt_models import WaitEphemeralIndex
+from uipath.platform.common import CreateDeepRag, WaitEphemeralIndex
 from uipath.platform.context_grounding import (
     CitationMode,
     EphemeralIndexUsage,
@@ -101,8 +100,7 @@ def create_deeprag_tool(
             output_schema=output_model.model_json_schema(),
             example_calls=[],  # Examples cannot be provided for internal tools
         )
-        async def invoke_deeprag():
-            @durable_interrupt
+        async def invoke_deeprag(**_tool_kwargs: Any):
             async def create_ephemeral_index():
                 uipath = UiPath()
                 ephemeral_index = (
@@ -111,8 +109,20 @@ def create_deeprag_tool(
                         attachments=[attachment_id],
                     )
                 )
+
+                # TODO this will not resume on concurrent runs for the same attachment
                 if ephemeral_index.in_progress_ingestion():
-                    return WaitEphemeralIndex(index=ephemeral_index)
+
+                    @durable_interrupt
+                    async def wait_for_ephemeral_index():
+                        return WaitEphemeralIndex(index=ephemeral_index)
+
+                    index_result = await wait_for_ephemeral_index()
+                    if isinstance(index_result, dict):
+                        ephemeral_index = ContextGroundingIndex(**index_result)
+                    else:
+                        ephemeral_index = index_result
+
                 return ephemeral_index
 
             index_result = await create_ephemeral_index()
@@ -134,7 +144,7 @@ def create_deeprag_tool(
 
             return await create_deeprag()
 
-        return await invoke_deeprag()
+        return await invoke_deeprag(**kwargs)
 
     # Import here to avoid circular dependency
     from uipath_langchain.agent.wrappers import get_job_attachment_wrapper

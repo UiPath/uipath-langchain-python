@@ -132,7 +132,7 @@ class TestCreateAnalyzeFileTool:
         )
 
         # Verify calls
-        assert result == "Analyzed result"
+        assert result == {"analysisResult": "Analyzed result"}
         mock_resolve_attachments.assert_called_once()
         mock_add_files.assert_called_once()
         mock_llm.ainvoke.assert_called_once()
@@ -259,7 +259,7 @@ class TestCreateAnalyzeFileTool:
             analysisTask="Compare these documents", attachments=mock_attachments
         )
 
-        assert result == "Multiple files analyzed"
+        assert result == {"analysisResult": "Multiple files analyzed"}
         mock_resolve_attachments.assert_called_once()
 
         # Verify add_files_to_message received both files

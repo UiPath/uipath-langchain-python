@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from uipath.runtime import (
+from uipath.core.triggers import (
     UiPathResumeTrigger,
     UiPathResumeTriggerName,
     UiPathResumeTriggerType,
