@@ -271,6 +271,7 @@ class TestAgentSpanParenting:
                 {"kwargs": {"model_name": "gpt-4"}}, ["prompt"], run_id=run_id
             )
             callback.on_llm_end(None, run_id=run_id)  # type: ignore[arg-type]
+            agent_span.end()
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 3  # agent + llm + model
@@ -296,6 +297,7 @@ class TestAgentSpanParenting:
             run_id = uuid4()
             callback.on_tool_start({"name": "calc"}, "input", run_id=run_id)
             callback.on_tool_end("result", run_id=run_id)
+            agent_span.end()
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 2
@@ -1048,6 +1050,7 @@ class TestNestedLlmCallsInTools:
                 callback.on_llm_end(None, run_id=llm_run_id)
 
             callback.on_tool_end("analysis result", run_id=tool_run_id)
+            agent_span.end()
 
         spans = span_exporter.get_finished_spans()
 
@@ -1094,6 +1097,7 @@ class TestNestedLlmCallsInTools:
                     parent_run_id=None,
                 )
                 callback.on_llm_end(None, run_id=llm_run_id)
+            agent_span.end()
 
         spans = span_exporter.get_finished_spans()
 
@@ -1151,6 +1155,7 @@ class TestNestedLlmCallsInTools:
                     parent_run_id=None,
                 )
                 callback.on_llm_end(None, run_id=llm_independent_id)
+            agent_span.end()
 
         spans = span_exporter.get_finished_spans()
 

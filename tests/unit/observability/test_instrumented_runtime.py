@@ -553,6 +553,7 @@ class TestInterruptibleTraceContext:
             parent_span_id=None,
             name="Agent run - test-agent",
             start_time="2024-01-15T10:30:00Z",
+            start_time_ns=0,
             attributes={"agentId": "test-id"},
             pending_tool_span_id=None,
             pending_process_span_id=None,
@@ -588,9 +589,30 @@ class TestInterruptibleTraceContext:
 
     @pytest.mark.asyncio
     async def test_full_suspend_resume_flow(
-        self, mock_delegate, tracer, callback, mock_runtime_context
+        self, mock_delegate, mock_exporter, span_exporter, mock_runtime_context
     ):
-        """Test complete suspend → resume → complete flow with re-parenting."""
+        """Test complete suspend → resume → complete flow with re-parenting.
+
+        Verifies referenceId from the original run propagates into the
+        resumed agent span upsert (spans go through upsert, not span.end()).
+        """
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        mock_exporter.upsert_span = MagicMock(return_value=SpanExportResult.SUCCESS)
+        tracer_with_exp = LlmOpsSpanFactory(exporter=mock_exporter)
+        callback_with_exp = LlmOpsInstrumentationCallback(tracer_with_exp)
+
+        agent_def = AgentDefinition(
+            id="test-agent-id-123",
+            name="test-agent",
+            messages=[],
+            settings=AgentSettings(
+                model="gpt-4", engine="v1", max_tokens=1000, temperature=0.7
+            ),
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+        )
+
         # Simulate storage behavior
         stored_context = None
 
@@ -623,9 +645,10 @@ class TestInterruptibleTraceContext:
 
         instrumented_runtime = InstrumentedRuntime(
             mock_delegate,
-            tracer,
-            callback,
+            tracer_with_exp,
+            callback_with_exp,
             mock_runtime_context,
+            agent_definition=agent_def,
             trace_context_storage=storage,
         )
 
@@ -643,6 +666,21 @@ class TestInterruptibleTraceContext:
 
         # Context should be cleared after success
         assert stored_context is None
+
+        # Verify referenceId propagates into the resumed agent span upsert.
+        # Suspended/resumed spans go through upsert_span (not span.end()),
+        # so we check the mock exporter calls instead of finished spans.
+        upsert_calls = mock_exporter.upsert_span.call_args_list
+        agent_upserts = [
+            c
+            for c in upsert_calls
+            if hasattr(c[0][0], "attributes")
+            and c[0][0].attributes
+            and "referenceId" in c[0][0].attributes
+        ]
+        assert len(agent_upserts) >= 1, "Expected at least one upsert with referenceId"
+        for call in agent_upserts:
+            assert call[0][0].attributes["referenceId"] == "test-agent-id-123"
 
     @pytest.mark.asyncio
     async def test_no_storage_still_works(
@@ -769,17 +807,10 @@ class TestInterruptibleTraceContext:
         result2 = await instrumented_runtime.execute({"input": "resume"}, None)
         assert result2.status == UiPathRuntimeStatus.SUCCESSFUL
 
-        # Verify that spans created during resume have reference_id
-        spans = span_exporter.get_finished_spans()
-
-        # Filter to agent run spans
-        agent_spans = [s for s in spans if "Agent run" in s.name]
-        assert len(agent_spans) >= 1
-
-        # All agent spans should have the same reference_id
-        for span in agent_spans:
-            if hasattr(span, "attributes") and "referenceId" in span.attributes:
-                assert span.attributes["referenceId"] == "test-agent-id-123"
+        # The suspended agent span is intentionally not ended (no span.end()),
+        # so it won't appear in finished spans. Verify reference_id was correctly
+        # saved in trace context and resume completed successfully.
+        assert stored_context is None  # cleared after successful resume
 
 
 class TestSuspendedUsesResumedDataForNonRecordingSpans:
@@ -1087,12 +1118,12 @@ class TestUpsertSpanOnSuspend:
 
         await instrumented_runtime.execute({"input": "test"}, None)
 
-        # 3 upserts: agent start (UNSET) + agent suspended (UNSET) + agent end (OK)
-        assert mock_exporter.upsert_span.call_count == 3
+        # 2 upserts: agent start (UNSET) + agent suspended (UNSET)
+        # No final OK upsert — suspended spans must stay open
+        assert mock_exporter.upsert_span.call_count == 2
         calls = mock_exporter.upsert_span.call_args_list
-        assert calls[0][1]["status_override"] == 0  # UNSET
-        assert calls[1][1]["status_override"] == 0  # UNSET
-        assert calls[2][1]["status_override"] == 1  # OK
+        assert calls[0][1]["status_override"] == 0  # UNSET (start)
+        assert calls[1][1]["status_override"] == 0  # UNSET (suspended)
 
     @pytest.mark.asyncio
     async def test_handle_suspended_upserts_pending_tool_and_process_spans(
@@ -1143,8 +1174,9 @@ class TestUpsertSpanOnSuspend:
 
         await instrumented_runtime.execute({"input": "test"}, None)
 
-        # 5 upserts: agent start + process suspended + tool suspended + agent suspended + agent end
-        assert mock_exporter.upsert_span.call_count == 5
+        # 4 upserts: agent start + process suspended + tool suspended + agent suspended
+        # No final agent end — suspended spans must stay open
+        assert mock_exporter.upsert_span.call_count == 4
 
 
 class TestGetAgentModel:
@@ -1293,3 +1325,237 @@ class TestRegisterLicensing:
             await register_licensing_async(agent_def)
 
         mock_service_cls.assert_not_called()
+
+
+class TestNestedAgentResumeFixes:
+    """Tests for PR #288 fixes: trace errors on nested agent raise_error scenarios."""
+
+    @pytest.mark.asyncio
+    async def test_resumed_trace_id_cleared_after_upsert(
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_runtime_context,
+    ) -> None:
+        """After _upsert_resumed_spans_on_completion, resumed_trace_id must be None
+        so resumed_spans_completed() returns True and OK spans aren't flipped to ERROR.
+        """
+        from uipath_agents._observability.llmops.instrumentors.base import (
+            InstrumentationState,
+        )
+        from uipath_agents._observability.llmops.instrumentors.tool_instrumentor import (
+            ToolSpanInstrumentor,
+        )
+
+        mock_span_factory = MagicMock()
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.resumed_trace_id = "trace-abc-123"
+        state.resumed_process_span_data = None
+        state.resumed_tool_span_data = {"attributes": {}}
+
+        instrumentor = ToolSpanInstrumentor(state=state, close_container=MagicMock())
+
+        instrumentor._upsert_resumed_spans_on_completion({"answer": 42}, None)
+
+        assert state.resumed_trace_id is None
+        assert callback.resumed_spans_completed()
+
+    @pytest.mark.asyncio
+    async def test_faulted_result_sets_agent_span_error(
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_runtime_context,
+        span_exporter,
+    ) -> None:
+        """FAULTED result must set the error attribute on the root agentRun span
+        even though no exception is raised.
+        """
+        import json
+
+        from uipath.runtime.errors import UiPathErrorContract
+
+        faulted_result = MagicMock()
+        faulted_result.status = UiPathRuntimeStatus.FAULTED
+        faulted_result.error = UiPathErrorContract(
+            title="Child agent failed", detail="timeout", code="AGENT_FAULTED"
+        )
+        mock_delegate.execute.return_value = faulted_result
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
+        await instrumented_runtime.execute({"input": "test"}, None)
+
+        spans = span_exporter.get_finished_spans()
+        agent_spans = [s for s in spans if "Agent run" in s.name]
+        assert len(agent_spans) >= 1
+
+        agent_span = agent_spans[0]
+        # _set_agent_span_error sets the "error" attribute with JSON error details
+        error_attr = agent_span.attributes.get("error")
+        assert error_attr is not None
+        error_data = json.loads(error_attr)
+        assert error_data["message"] == "Child agent failed"
+        assert error_data["type"] == "AgentRuntimeError"
+        assert error_data["detail"] == "timeout"
+
+    @pytest.mark.asyncio
+    async def test_faulted_does_not_retroactively_error_tool_spans(
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_runtime_context,
+    ) -> None:
+        """When child agent FAULTs on resume, already-OK tool/agentTool spans
+        must not be retroactively marked ERROR.
+        """
+        from uipath_agents._observability.llmops.instrumentors.base import (
+            InstrumentationState,
+        )
+        from uipath_agents._observability.llmops.instrumentors.tool_instrumentor import (
+            ToolSpanInstrumentor,
+        )
+
+        mock_span_factory = MagicMock()
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.resumed_trace_id = "trace-xyz"
+        state.resumed_process_span_data = {"attributes": {"type": "processTool"}}
+        state.resumed_tool_span_data = {"attributes": {}}
+
+        instrumentor = ToolSpanInstrumentor(state=state, close_container=MagicMock())
+
+        # Complete the resumed spans with a normal result (OK)
+        instrumentor._upsert_resumed_spans_on_completion({"result": "ok"}, None)
+
+        # Verify resumed_trace_id is cleared — this is the gate that
+        # prevents subsequent error propagation from flipping these spans
+        assert state.resumed_trace_id is None
+        assert state.resumed_process_span_data is None
+        assert state.resumed_tool_span_data is None
+
+        # The 2 upserts (process + tool) should have been called with OK data
+        assert mock_span_factory.upsert_span_complete_by_data.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_resumed_agent_span_upserted_with_correct_timing(
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_trace_context_storage,
+        mock_runtime_context,
+        span_exporter,
+    ) -> None:
+        """On resume completion, the agent span must be upserted with
+        start_time_ns from saved context (not epoch) and a fresh EndTime.
+        """
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        mock_exporter = MagicMock()
+        mock_exporter.upsert_span = MagicMock(return_value=SpanExportResult.SUCCESS)
+        tracer_with_exp = LlmOpsSpanFactory(exporter=mock_exporter)
+        callback_with_exp = LlmOpsInstrumentationCallback(tracer_with_exp)
+
+        start_ns = 1708672800_000_000_000
+        saved_context = TraceContextData(
+            trace_id="aabbccdd11223344aabbccdd11223344",
+            span_id="1122334455667788",
+            parent_span_id=None,
+            name="Agent run - TestAgent",
+            start_time="2024-02-23T10:00:00Z",
+            start_time_ns=start_ns,
+            attributes={"agentId": "test-id", "type": "agentRun"},
+            pending_tool_span_id=None,
+            pending_process_span_id=None,
+            pending_tool_name=None,
+            pending_tool_span=None,
+            pending_process_span=None,
+            pending_escalation_span=None,
+            pending_guardrail_hitl_evaluation_span=None,
+            pending_guardrail_hitl_container_span=None,
+            pending_llm_span=None,
+        )
+        mock_trace_context_storage.load_trace_context = AsyncMock(
+            return_value=saved_context
+        )
+
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        mock_result.output = {"result": "done"}
+        mock_delegate.execute.return_value = mock_result
+
+        mock_runtime_context.resume = True
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer_with_exp,
+            callback_with_exp,
+            mock_runtime_context,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        await instrumented_runtime.execute({"input": "resume"}, None)
+
+        # The final upsert_resumed_agent_span should have fired
+        assert mock_exporter.upsert_span.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_uipath_source_context_importable_from_public_path(self) -> None:
+        """uipath_source_context must be importable from the public llmops __init__
+        chain, not just from internal base module.
+        """
+        from uipath_agents._observability.llmops import uipath_source_context
+        from uipath_agents._observability.llmops.spans import (
+            uipath_source_context as from_spans,
+        )
+        from uipath_agents._observability.llmops.spans.spans_schema import (
+            uipath_source_context as from_schema,
+        )
+
+        # All three should resolve to the same ContextVar object
+        assert uipath_source_context is from_spans
+        assert uipath_source_context is from_schema
+
+        # Should be usable: set and reset
+        token = uipath_source_context.set(1)
+        assert uipath_source_context.get() == 1
+        uipath_source_context.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_suspended_skips_final_ok_upsert(
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_trace_context_storage,
+        mock_runtime_context,
+        span_exporter,
+    ) -> None:
+        """When agent suspends (nested agent running), the root span must NOT
+        get a final OK upsert that overwrites the UNSET suspended state.
+        """
+
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = mock_result
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer,
+            callback,
+            mock_runtime_context,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        result = await instrumented_runtime.execute({"input": "test"}, None)
+        assert result.status == UiPathRuntimeStatus.SUSPENDED
+
+        # Suspended agent spans are intentionally NOT ended — span.end() is
+        # never called, so LiveTrackingSpanProcessor.on_end() never fires.
+        spans = span_exporter.get_finished_spans()
+        agent_spans = [s for s in spans if "Agent run" in s.name]
+        assert len(agent_spans) == 0

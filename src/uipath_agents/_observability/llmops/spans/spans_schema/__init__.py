@@ -14,6 +14,7 @@ from .base import (
     format_span_error,
     get_parent_context,
     reference_id_context,
+    uipath_source_context,
 )
 from .guardrails import GuardrailSpanSchema, to_json_string
 from .llm import LlmSpanSchema
@@ -24,6 +25,7 @@ __all__ = [
     "SyntheticReadableSpan",
     "SpanUpsertProtocol",
     "reference_id_context",
+    "uipath_source_context",
     "apply_attributes",
     "get_parent_context",
     "create_span",

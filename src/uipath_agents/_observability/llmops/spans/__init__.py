@@ -50,6 +50,7 @@ from .spans_schema import (
     end_span_ok,
     get_parent_context,
     reference_id_context,
+    uipath_source_context,
 )
 
 __all__ = [
@@ -64,6 +65,7 @@ __all__ = [
     "SyntheticReadableSpan",
     "SpanUpsertProtocol",
     "reference_id_context",
+    "uipath_source_context",
     "apply_attributes",
     "get_parent_context",
     "create_span",

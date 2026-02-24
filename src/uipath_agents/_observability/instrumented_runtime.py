@@ -24,7 +24,7 @@ from importlib.metadata import version
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from opentelemetry import trace
-from opentelemetry.trace import Span, SpanContext, TraceFlags
+from opentelemetry.trace import Span, SpanContext, Status, StatusCode, TraceFlags
 from uipath._cli._utils._common import get_claim_from_token
 from uipath.agent.models.agent import AgentDefinition
 from uipath.platform.common import UiPathConfig
@@ -55,8 +55,8 @@ from .llmops import (
     TraceContextData,
     TraceContextStorage,
     reference_id_context,
+    uipath_source_context,
 )
-from .llmops.spans.spans_schema.base import uipath_source_context
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,7 @@ class InstrumentedRuntime:
         self._trace_context_storage = trace_context_storage
         self._agent_run_id = str(uuid.uuid4())
         self._runtime_context = runtime_context
+        self._resume_final_status: int = SpanStatus.OK
 
     @property
     def delegate(self) -> UiPathRuntimeProtocol:
@@ -147,9 +148,11 @@ class InstrumentedRuntime:
         async with self._agent_span_context(
             input, saved_context, start_time
         ) as agent_span:
+            self._resume_final_status = SpanStatus.OK
             try:
                 result = await self._delegate.execute(input, options)
             except Exception as e:
+                self._resume_final_status = SpanStatus.ERROR
                 if saved_context:
                     self._handle_resume_error(saved_context, e)
                 raise
@@ -158,14 +161,21 @@ class InstrumentedRuntime:
 
             if result.status == UiPathRuntimeStatus.SUSPENDED:
                 await self._handle_suspended(agent_span)
+                # Don't end span — prevents LiveTrackingSpanProcessor.on_end()
+                # from overwriting the UNSET upsert with OK status.
             elif result.status == UiPathRuntimeStatus.SUCCESSFUL:
                 if saved_context:
                     self._handle_resume_complete(saved_context)
+                agent_span.set_status(Status(StatusCode.OK))
+                agent_span.end()
                 self._emit_output_if_successful(result, duration_ms, agent_span)
                 await self._clear_trace_context()
             elif result.status == UiPathRuntimeStatus.FAULTED:
+                self._resume_final_status = SpanStatus.ERROR
                 if saved_context and result.error:
                     self._handle_resume_error(saved_context, result.error)
+                self._set_agent_span_error(agent_span, result.error)
+                agent_span.end()
                 await self._clear_trace_context()
             else:
                 raise ValueError(f"Unexpected runtime status: {result.status}")
@@ -195,6 +205,7 @@ class InstrumentedRuntime:
             input, saved_context, start_time
         ) as agent_span:
             final_result: Optional[UiPathRuntimeResult] = None
+            self._resume_final_status = SpanStatus.OK
 
             try:
                 async for event in self._delegate.stream(input, options):
@@ -202,6 +213,7 @@ class InstrumentedRuntime:
                         final_result = event
                     yield event
             except Exception as e:
+                self._resume_final_status = SpanStatus.ERROR
                 if saved_context:
                     self._handle_resume_error(saved_context, e)
                 raise
@@ -214,13 +226,18 @@ class InstrumentedRuntime:
                 elif final_result.status == UiPathRuntimeStatus.SUCCESSFUL:
                     if saved_context:
                         self._handle_resume_complete(saved_context)
+                    agent_span.set_status(Status(StatusCode.OK))
+                    agent_span.end()
                     self._emit_output_if_successful(
                         final_result, duration_ms, agent_span
                     )
                     await self._clear_trace_context()
                 elif final_result.status == UiPathRuntimeStatus.FAULTED:
+                    self._resume_final_status = SpanStatus.ERROR
                     if saved_context and final_result.error:
                         self._handle_resume_error(saved_context, final_result.error)
+                    self._set_agent_span_error(agent_span, final_result.error)
+                    agent_span.end()
                     await self._clear_trace_context()
                 else:
                     raise ValueError(
@@ -326,6 +343,7 @@ class InstrumentedRuntime:
                 try:
                     yield agent_span
                 finally:
+                    self._upsert_resumed_agent_span(saved_context)
                     self._callback.cleanup()
                     if self._event_emitter:
                         self._event_emitter.cleanup()
@@ -378,11 +396,9 @@ class InstrumentedRuntime:
                             else None
                         )
 
-                        mapped_exc = ExceptionMapper.map_runtime(e)
-                        error_info = mapped_exc.error_info
+                        error_info = ExceptionMapper.map_runtime(e).error_info
 
-                        # Capture full traceback for telemetry debugging
-                        # Most exceptions have include_traceback=False, so we manually capture it here
+                        # Mapped errors have include_traceback=False, so capture manually
                         error_traceback = traceback.format_exc()
 
                         base_properties: Dict[str, Any] = {
@@ -459,9 +475,9 @@ class InstrumentedRuntime:
             try:
                 yield restored_span
             finally:
+                uipath_source_context.reset(source_token)
                 if reference_id_token is not None:
                     reference_id_context.reset(reference_id_token)
-                uipath_source_context.reset(source_token)
 
     async def _handle_suspended(self, agent_span: Span) -> None:
         """Handle suspended state: upsert spans and save trace context.
@@ -569,12 +585,6 @@ class InstrumentedRuntime:
                     context["pending_tool_span"] = current_tool_span_data
 
             await self._trace_context_storage.save_trace_context(runtime_id, context)
-            logger.debug(
-                "Saved trace context for runtime %s (trace_id=%s, pending_tool=%s)",
-                runtime_id,
-                context["trace_id"],
-                tool_name,
-            )
 
     def _extract_pending_span_data(self, span: Span) -> PendingSpanData:
         from opentelemetry.sdk.trace import ReadableSpan
@@ -675,6 +685,48 @@ class InstrumentedRuntime:
                 pending_escalation.get("name", "unknown"),
             )
 
+    def _set_agent_span_error(
+        self,
+        agent_span: Span,
+        error: Optional[UiPathErrorContract],
+    ) -> None:
+        """Set ERROR status on agent span for FAULTED results.
+
+        FAULTED results don't raise exceptions, so the span context manager
+        would otherwise set OK status. This explicitly marks the span as ERROR.
+        """
+        if not isinstance(error, UiPathErrorContract):
+            return
+        error_dict: Dict[str, Any] = {
+            "message": error.title,
+            "type": "AgentRuntimeError",
+        }
+        if error.detail:
+            error_dict["detail"] = error.detail
+        agent_span.set_attribute("error", json.dumps(error_dict))
+        agent_span.set_status(Status(StatusCode.ERROR, error.title))
+
+    def _upsert_resumed_agent_span(self, saved_context: TraceContextData) -> None:
+        """Upsert the root agent span on resume completion with final EndTime.
+
+        On resume the agent span is a NonRecordingSpan whose EndTime stays
+        stale from the pre-suspend upsert. This emits a final upsert with
+        the current timestamp and the correct status (OK or ERROR).
+        """
+        start_ns = saved_context.get("start_time_ns", 0)
+        agent_data: Dict[str, Any] = {
+            "span_id": saved_context["span_id"],
+            "parent_span_id": saved_context.get("parent_span_id"),
+            "name": saved_context.get("name", "unknown"),
+            "start_time_ns": start_ns,
+            "attributes": dict(saved_context.get("attributes") or {}),
+        }
+        self._span_factory.upsert_span_complete_by_data(
+            trace_id=saved_context["trace_id"],
+            span_data=agent_data,
+            status=self._resume_final_status,
+        )
+
     def _complete_pending_tool_span(
         self,
         saved_context: TraceContextData,
@@ -750,6 +802,8 @@ class InstrumentedRuntime:
         logger.debug("Cleared trace context for runtime %s", runtime_id)
 
     def _extract_trace_context(self, span: Span) -> TraceContextData:
+        from opentelemetry.sdk.trace import ReadableSpan
+
         ctx = span.get_span_context()
 
         # Extract attributes if available (ReadableSpan has attributes)
@@ -757,12 +811,18 @@ class InstrumentedRuntime:
         if hasattr(span, "attributes") and span.attributes:
             attributes = dict(span.attributes)
 
+        # Extract start_time_ns from the span for accurate duration on resume
+        start_time_ns = 0
+        if isinstance(span, ReadableSpan) and span.start_time:
+            start_time_ns = span.start_time
+
         return TraceContextData(
             trace_id=format(ctx.trace_id, "032x"),
             span_id=format(ctx.span_id, "016x"),
             parent_span_id=None,  # Root agent span has no parent
             name=span.name if hasattr(span, "name") else self._get_agent_name(),
             start_time=datetime.now(timezone.utc).isoformat(),
+            start_time_ns=start_time_ns,
             attributes=attributes,
             pending_tool_span_id=None,
             pending_process_span_id=None,

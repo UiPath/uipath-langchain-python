@@ -43,6 +43,7 @@ from .spans import (
     SpanType,
     ToolCallSpanAttributes,
     reference_id_context,
+    uipath_source_context,
 )
 from .sqlite_trace_context_storage import SqliteTraceContextStorage
 from .trace_context_storage import (
@@ -96,4 +97,5 @@ __all__ = [
     "TraceContextStorage",
     # Context variables
     "reference_id_context",
+    "uipath_source_context",
 ]

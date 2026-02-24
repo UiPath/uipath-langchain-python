@@ -85,6 +85,7 @@ class SqliteTraceContextStorage(TraceContextStorage):
             parent_span_id=value.get("parent_span_id"),
             name=value["name"],
             start_time=value["start_time"],
+            start_time_ns=value.get("start_time_ns", 0),
             attributes=value.get("attributes", {}),
             pending_tool_span_id=value.get("pending_tool_span_id"),
             pending_process_span_id=value.get("pending_process_span_id"),

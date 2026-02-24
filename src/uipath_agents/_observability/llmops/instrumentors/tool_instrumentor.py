@@ -535,6 +535,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
 
         self._state.resumed_process_span_data = None
         self._state.resumed_tool_span_data = None
+        self._state.resumed_trace_id = None
 
     def _is_graph_interrupt(self, error: BaseException) -> bool:
         """Check if the error is a GraphInterrupt (suspend signal)."""

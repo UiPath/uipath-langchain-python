@@ -25,6 +25,7 @@ class TraceContextData(TypedDict):
     parent_span_id: Optional[str]
     name: str
     start_time: str
+    start_time_ns: int  # Nanoseconds since epoch, for accurate duration on resume
     attributes: dict[str, Any]
     # Pending interruptible tool spans
     pending_tool_span_id: Optional[str]

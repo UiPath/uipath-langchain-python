@@ -7,6 +7,7 @@ import json
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Generator, Optional
 
+from opentelemetry import trace
 from opentelemetry.trace import (
     Span,
     SpanKind,
@@ -112,10 +113,13 @@ class AgentSpanSchema:
 
         agent_span: Optional[Span] = None
         final_status: int = SpanStatus.OK
+        # Use start_span + use_span(end_on_exit=False) so the caller
+        # controls when span.end() fires. This prevents
+        # LiveTrackingSpanProcessor.on_end() from sending a premature
+        # OK upsert when the agent is suspended.
+        span = self._tracer.start_span(span_name, kind=SpanKind.INTERNAL)
         try:
-            with self._tracer.start_as_current_span(
-                span_name, kind=SpanKind.INTERNAL, set_status_on_exception=False
-            ) as span:
+            with trace.use_span(span, end_on_exit=False, set_status_on_exception=False):
                 agent_span = span
                 apply_attributes(span, attrs)
                 if self._upsert_started:
@@ -123,20 +127,22 @@ class AgentSpanSchema:
 
                 try:
                     yield span
-                    span.set_status(Status(StatusCode.OK))
                 except Exception as e:
-                    # May be overridden by _SpanUtils.otel_span_to_uipath_span during export
                     span.set_attribute("error", format_span_error(e))
                     span.set_status(Status(StatusCode.ERROR, format_span_error(e)))
                     final_status = SpanStatus.ERROR
+                    span.end()
                     raise
-            # span.end() called by start_as_current_span exit
         finally:
-            # Reset context variables when agent run completes
             reference_id_context.reset(token)
             uipath_source_context.reset(source_token)
-            # Synchronous upsert with correct end_time
-            if self._upsert_complete and agent_span is not None:
+            # Only upsert if the caller ended the span. Suspended spans
+            # are intentionally left open (is_recording=True).
+            if (
+                self._upsert_complete
+                and agent_span is not None
+                and not agent_span.is_recording()
+            ):
                 self._upsert_complete(agent_span, final_status)
 
     def emit_agent_output(

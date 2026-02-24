@@ -130,11 +130,14 @@ class TestReferenceIdOnAllSpans:
         self, tracer, span_exporter
     ):
         """Test child spans inherit reference_id from agent run."""
-        with tracer.start_agent_run(agent_name="TestAgent", agent_id="test-ref-123"):
+        with tracer.start_agent_run(
+            agent_name="TestAgent", agent_id="test-ref-123"
+        ) as span:
             llm_span = tracer.start_llm_call()
             tool_span = tracer.start_tool_call(tool_name="calculator")
             tracer.end_span_ok(tool_span)
             tracer.end_span_ok(llm_span)
+            span.end()
 
         spans = span_exporter.get_finished_spans()
         agent_span = next(s for s in spans if s.name.startswith("Agent run"))
@@ -148,8 +151,10 @@ class TestReferenceIdOnAllSpans:
 
     def test_reference_id_matches_agent_id(self, tracer, span_exporter):
         """Test reference_id is set to agent_id for agent run."""
-        with tracer.start_agent_run(agent_name="TestAgent", agent_id="my-agent-id"):
-            pass
+        with tracer.start_agent_run(
+            agent_name="TestAgent", agent_id="my-agent-id"
+        ) as span:
+            span.end()
 
         spans = span_exporter.get_finished_spans()
         assert spans[0].attributes["referenceId"] == "my-agent-id"
@@ -157,8 +162,10 @@ class TestReferenceIdOnAllSpans:
 
     def test_reference_id_reset_after_agent_run(self, tracer, span_exporter):
         """Test reference_id context is reset after agent run completes."""
-        with tracer.start_agent_run(agent_name="TestAgent1", agent_id="agent-1"):
-            pass
+        with tracer.start_agent_run(
+            agent_name="TestAgent1", agent_id="agent-1"
+        ) as span:
+            span.end()
 
         # Create span outside of agent run context
         span = tracer.start_tool_call(tool_name="outside_tool")
@@ -175,9 +182,10 @@ class TestReferenceIdOnAllSpans:
 
     def test_model_run_inherits_reference_id(self, tracer, span_exporter):
         """Test model run span inherits reference_id from agent run."""
-        with tracer.start_agent_run(agent_name="TestAgent", agent_id="ref-456"):
+        with tracer.start_agent_run(agent_name="TestAgent", agent_id="ref-456") as span:
             model_span = tracer.start_model_run(model_name="gpt-4")
             tracer.end_span_ok(model_span)
+            span.end()
 
         spans = span_exporter.get_finished_spans()
         model_span_result = next(s for s in spans if s.name == "Model run")
@@ -186,18 +194,24 @@ class TestReferenceIdOnAllSpans:
 
     def test_nested_agent_runs_use_separate_reference_ids(self, tracer, span_exporter):
         """Test nested agent runs maintain separate reference_id contexts."""
-        with tracer.start_agent_run(agent_name="OuterAgent", agent_id="outer-id"):
+        with tracer.start_agent_run(
+            agent_name="OuterAgent", agent_id="outer-id"
+        ) as outer_span:
             outer_tool = tracer.start_tool_call(tool_name="outer_tool")
             tracer.end_span_ok(outer_tool)
 
             # Start nested agent run with different reference_id
-            with tracer.start_agent_run(agent_name="InnerAgent", agent_id="inner-id"):
+            with tracer.start_agent_run(
+                agent_name="InnerAgent", agent_id="inner-id"
+            ) as inner_span:
                 inner_tool = tracer.start_tool_call(tool_name="inner_tool")
                 tracer.end_span_ok(inner_tool)
+                inner_span.end()
 
             # Back to outer context
             outer_tool2 = tracer.start_tool_call(tool_name="outer_tool2")
             tracer.end_span_ok(outer_tool2)
+            outer_span.end()
 
         spans = span_exporter.get_finished_spans()
         outer_agent = next(s for s in spans if "OuterAgent" in s.name)
@@ -223,8 +237,8 @@ class TestAgentRunSpan:
 
     def test_creates_span_with_correct_name(self, tracer, span_exporter):
         """Test agent run span has correct name."""
-        with tracer.start_agent_run(agent_name="TestAgent"):
-            pass
+        with tracer.start_agent_run(agent_name="TestAgent") as span:
+            span.end()
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
@@ -235,8 +249,8 @@ class TestAgentRunSpan:
         with tracer.start_agent_run(
             agent_name="TestAgent",
             agent_id="test-id-123",
-        ):
-            pass
+        ) as span:
+            span.end()
 
         spans = span_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
@@ -251,8 +265,8 @@ class TestAgentRunSpan:
         """Test agent run span includes executionType from UIPATH_IS_DEBUG env."""
         monkeypatch.setenv("UIPATH_IS_DEBUG", "True")
 
-        with tracer.start_agent_run(agent_name="TestAgent"):
-            pass
+        with tracer.start_agent_run(agent_name="TestAgent") as span:
+            span.end()
 
         spans = span_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
@@ -262,8 +276,8 @@ class TestAgentRunSpan:
         """Test agent run span includes agentVersion from UIPATH_PROCESS_VERSION env."""
         monkeypatch.setenv("UIPATH_PROCESS_VERSION", "2.0.5")
 
-        with tracer.start_agent_run(agent_name="TestAgent"):
-            pass
+        with tracer.start_agent_run(agent_name="TestAgent") as span:
+            span.end()
 
         spans = span_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
@@ -275,8 +289,8 @@ class TestAgentRunSpan:
         """Test executionType defaults to RUNTIME when env not set (per OR)."""
         monkeypatch.delenv("UIPATH_IS_DEBUG", raising=False)
 
-        with tracer.start_agent_run(agent_name="TestAgent"):
-            pass
+        with tracer.start_agent_run(agent_name="TestAgent") as span:
+            span.end()
 
         spans = span_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
@@ -287,8 +301,8 @@ class TestAgentRunSpan:
         with tracer.start_agent_run(
             agent_name="ChatAgent",
             is_conversational=True,
-        ):
-            pass
+        ) as span:
+            span.end()
 
         spans = span_exporter.get_finished_spans()
         assert spans[0].name == "Conversational agent run - ChatAgent"
@@ -522,13 +536,14 @@ class TestSpanHierarchy:
         Note: When using start_llm_call/start_model_run (vs context managers),
         we must explicitly pass parent_span for correct hierarchy.
         """
-        with tracer.start_agent_run(agent_name="TestAgent"):
+        with tracer.start_agent_run(agent_name="TestAgent") as agent_span:
             llm_span = tracer.start_llm_call()
             # Must explicitly pass llm_span as parent since start_llm_call
             # doesn't update the current span context
             model_span = tracer.start_model_run("gpt-4", parent_span=llm_span)
             tracer.end_span_ok(model_span)
             tracer.end_span_ok(llm_span)
+            agent_span.end()
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 3
@@ -718,8 +733,8 @@ class TestLiveUpdatesUpsert:
         """Test agent run upserts with OK status after span ends."""
         mock_exporter.reset_mock()
 
-        with tracer_with_exporter.start_agent_run(agent_name="TestAgent"):
-            pass
+        with tracer_with_exporter.start_agent_run(agent_name="TestAgent") as span:
+            span.end()
 
         # 2 calls: UNSET at start, OK at end
         assert mock_exporter.upsert_span.call_count == 2

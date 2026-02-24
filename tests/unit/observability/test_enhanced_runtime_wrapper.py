@@ -428,6 +428,7 @@ class TestEnrichedPropertiesOnResume:
             parent_span_id=None,
             name="Agent run - test-agent",
             start_time="2024-01-15T10:30:00Z",
+            start_time_ns=0,
             attributes={"agentId": "test-agent-id"},
             pending_tool_span_id=None,
             pending_process_span_id=None,
