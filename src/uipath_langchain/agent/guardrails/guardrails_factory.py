@@ -109,7 +109,7 @@ def _assert_value_not_none(value: str | None, operator: AgentWordOperator) -> st
 
 def _create_word_rule_func(
     operator: AgentWordOperator, value: str | None
-) -> Callable[[str], bool]:
+) -> Callable[[str | None], bool]:
     """Create a callable function from AgentWordOperator and value.
 
     Args:
@@ -122,36 +122,36 @@ def _create_word_rule_func(
     match operator:
         case AgentWordOperator.CONTAINS:
             val = _assert_value_not_none(value, operator)
-            return lambda s: val.lower() in s.lower()
+            return lambda s: val.lower() in (s or "").lower()
         case AgentWordOperator.DOES_NOT_CONTAIN:
             val = _assert_value_not_none(value, operator)
-            return lambda s: val.lower() not in s.lower()
+            return lambda s: val.lower() not in (s or "").lower()
         case AgentWordOperator.EQUALS:
             val = _assert_value_not_none(value, operator)
-            return lambda s: s == val
+            return lambda s: (s or "") == val
         case AgentWordOperator.DOES_NOT_EQUAL:
             val = _assert_value_not_none(value, operator)
-            return lambda s: s != val
+            return lambda s: (s or "") != val
         case AgentWordOperator.STARTS_WITH:
             val = _assert_value_not_none(value, operator)
-            return lambda s: s.startswith(val)
+            return lambda s: (s or "").startswith(val)
         case AgentWordOperator.DOES_NOT_START_WITH:
             val = _assert_value_not_none(value, operator)
-            return lambda s: not s.startswith(val)
+            return lambda s: not (s or "").startswith(val)
         case AgentWordOperator.ENDS_WITH:
             val = _assert_value_not_none(value, operator)
-            return lambda s: s.endswith(val)
+            return lambda s: (s or "").endswith(val)
         case AgentWordOperator.DOES_NOT_END_WITH:
             val = _assert_value_not_none(value, operator)
-            return lambda s: not s.endswith(val)
+            return lambda s: not (s or "").endswith(val)
         case AgentWordOperator.IS_EMPTY:
-            return lambda s: len(s) == 0
+            return lambda s: len(s or "") == 0
         case AgentWordOperator.IS_NOT_EMPTY:
-            return lambda s: len(s) > 0
+            return lambda s: len(s or "") > 0
         case AgentWordOperator.MATCHES_REGEX:
             val = _assert_value_not_none(value, operator)
             pattern = re.compile(val)
-            return lambda s: bool(pattern.match(s))
+            return lambda s: bool(pattern.match(s or ""))
         case _:
             raise AgentStartupError(
                 code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
