@@ -1,7 +1,7 @@
 import os
 from unittest.mock import PropertyMock, patch
 
-from uipath_langchain.chat.http_client import build_uipath_headers
+from uipath_langchain.chat._legacy.http_client import build_uipath_headers
 
 
 class TestBuildUiPathHeaders:

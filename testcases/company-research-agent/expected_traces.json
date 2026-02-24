@@ -23,8 +23,7 @@
       "name": "UiPathChat",
       "attributes": {
         "openinference.span.kind": "LLM",
-        "llm.provider": "azure",
-        "llm.system": "openai",
+        "llm.provider": "uipath",
         "llm.model_name": "*"
       }
     },
