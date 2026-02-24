@@ -20,6 +20,7 @@ def create_init_node(
 ):
     def graph_state_init(state: Any) -> Any:
         resolved_messages: Sequence[SystemMessage | HumanMessage] | Overwrite
+        preserved_messages: Sequence[Any] = []
         if callable(messages):
             resolved_messages = list(messages(state))
         else:

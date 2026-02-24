@@ -1,9 +1,21 @@
 import logging
+from dataclasses import dataclass, field
+from typing import Callable
 
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph, MessagesState
 from pydantic import BaseModel, Field
+from uipath.llm_client.settings import PlatformSettings
+from uipath_langchain_client.clients.bedrock.chat_models import (
+    UiPathChatAnthropicBedrock,
+)
+from uipath_langchain_client.settings import (
+    ApiFlavor,
+    RoutingMode,
+    UiPathBaseSettings,
+    VendorType,
+)
 
 from uipath_langchain.agent.multimodal.invoke import llm_call_with_files
 from uipath_langchain.agent.multimodal.types import FileInfo
@@ -11,10 +23,79 @@ from uipath_langchain.chat.chat_model_factory import get_chat_model
 
 logger = logging.getLogger(__name__)
 
-MODELS_TO_TEST = [
-    "gpt-4.1-2025-04-14",
-    "gemini-2.5-pro",
-    "anthropic.claude-sonnet-4-5-20250929-v1:0",
+
+@dataclass
+class ModelTestConfig:
+    """Configuration for a model test case targeting a specific factory class."""
+
+    label: str
+    model_name: str
+    vendor_type: VendorType | None = None
+    api_flavor: ApiFlavor | None = None
+    routing_mode: RoutingMode = RoutingMode.PASSTHROUGH
+    model_factory: Callable[..., object] | None = field(default=None)
+
+
+def _create_model(config: ModelTestConfig, client_settings: UiPathBaseSettings) -> object:
+    """Create a model instance, using custom factory if provided."""
+    if config.model_factory is not None:
+        return config.model_factory(
+            model_name=config.model_name,
+            settings=client_settings,
+            temperature=0.0,
+            max_tokens=200,
+        )
+    return get_chat_model(
+        model=config.model_name,
+        client_settings=client_settings,
+        routing_mode=config.routing_mode,
+        vendor_type=config.vendor_type,
+        api_flavor=config.api_flavor,
+        temperature=0.0,
+        max_tokens=200,
+    )
+
+
+# Each entry targets a different class returned by get_chat_model
+MODELS_TO_TEST: list[ModelTestConfig] = [
+    # VendorType.OPENAI (UiPath-owned) -> UiPathAzureChatOpenAI (responses API by default)
+    ModelTestConfig(
+        label="OpenAI (Azure, default/responses) - UiPathAzureChatOpenAI",
+        model_name="gpt-5.2-2025-12-11",
+    ),
+    # VendorType.OPENAI (UiPath-owned) + CHAT_COMPLETIONS -> UiPathAzureChatOpenAI (chat-completions API)
+    ModelTestConfig(
+        label="OpenAI (Azure, chat-completions) - UiPathAzureChatOpenAI",
+        model_name="gpt-5.2-2025-12-11",
+        api_flavor=ApiFlavor.CHAT_COMPLETIONS,
+    ),
+    # VendorType.VERTEXAI (Google family) -> UiPathChatGoogleGenerativeAI
+    ModelTestConfig(
+        label="VertexAI (Google) - UiPathChatGoogleGenerativeAI",
+        model_name="gemini-2.5-pro",
+    ),
+    # VendorType.VERTEXAI (Google family) -> UiPathChatGoogleGenerativeAI
+    ModelTestConfig(
+        label="VertexAI (Google) - UiPathChatGoogleGenerativeAI",
+        model_name="gemini-3-pro-preview",
+    ),
+    # VendorType.AWSBEDROCK (UiPath-owned) -> UiPathChatBedrockConverse (converse API by default)
+    ModelTestConfig(
+        label="Bedrock (default/converse) - UiPathChatBedrockConverse",
+        model_name="anthropic.claude-sonnet-4-5-20250929-v1:0",
+    ),
+    # VendorType.AWSBEDROCK + INVOKE -> UiPathChatBedrock
+    ModelTestConfig(
+        label="Bedrock (invoke) - UiPathChatBedrock",
+        model_name="anthropic.claude-sonnet-4-5-20250929-v1:0",
+        api_flavor=ApiFlavor.INVOKE,
+    ),
+    # Direct instantiation -> UiPathChatAnthropicBedrock (not reachable via factory default)
+    ModelTestConfig(
+        label="Bedrock (Anthropic SDK, direct) - UiPathChatAnthropicBedrock",
+        model_name="anthropic.claude-sonnet-4-5-20250929-v1:0",
+        model_factory=UiPathChatAnthropicBedrock,
+    ),
 ]
 
 FILES_TO_TEST = [
@@ -51,14 +132,13 @@ async def run_multimodal_invoke(state: GraphState) -> dict:
     messages = [HumanMessage(content=state["prompt"])]
     model_results = {}
 
-    for model_name in MODELS_TO_TEST:
-        logger.info(f"Testing {model_name}...")
-        model = get_chat_model(
-            model=model_name,
-            temperature=0.0,
-            max_tokens=200,
-            agenthub_config="agentsplayground",
-        )
+    for config in MODELS_TO_TEST:
+        logger.info(f"Testing {config.label}...")
+
+        client_settings = PlatformSettings(agenthub_config="agentsplayground")
+
+        model = _create_model(config, client_settings)
+        logger.info(f"  Created: {type(model).__name__}")
         test_results = {}
         for file_info in FILES_TO_TEST:
             label = file_info.name
@@ -72,11 +152,11 @@ async def run_multimodal_invoke(state: GraphState) -> dict:
             except Exception as e:
                 logger.error(f"    {label}: ✗ {e}")
                 test_results[label] = f"✗ {str(e)[:60]}"
-        model_results[model_name] = test_results
+        model_results[config.label] = test_results
 
     summary_lines = []
-    for model_name, results in model_results.items():
-        summary_lines.append(f"{model_name}:")
+    for label, results in model_results.items():
+        summary_lines.append(f"{label}:")
         for file_name, result in results.items():
             summary_lines.append(f"  {file_name}: {result}")
     has_failures = any(

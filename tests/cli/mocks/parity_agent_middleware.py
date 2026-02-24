@@ -145,7 +145,12 @@ Keep jokes appropriate for children, free from offensive language."""
 # LLM
 # ---------------------------------------------------------------------------
 
-llm = UiPathChatOpenAI(temperature=0.7, max_tokens=500, use_responses_api=True)
+llm = UiPathChatOpenAI(
+    model="gpt-4o-2024-11-20",
+    temperature=0.7,
+    max_tokens=500,
+    use_responses_api=True,  # type: ignore[call-arg]
+)
 
 
 # ---------------------------------------------------------------------------
