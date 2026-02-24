@@ -170,7 +170,7 @@ def create_escalation_tool(
         serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
 
         @mockable(
-            name=resource.name,
+            name=tool_name.lower(),
             description=resource.description,
             input_schema=input_model.model_json_schema(),
             output_schema=EscalationToolOutput.model_json_schema(),
