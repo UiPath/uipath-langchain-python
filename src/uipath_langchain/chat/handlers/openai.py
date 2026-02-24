@@ -67,14 +67,15 @@ class OpenAIPayloadHandler(ModelPayloadHandler):
         self,
         tools: Sequence[BaseTool],
         tool_choice: Literal["auto", "any"],
-        parallel_tool_calls: bool = True,
-        strict_mode: bool = False,
+        parallel_tool_calls: bool | None = None,
+        strict_mode: bool | None = None,
     ) -> dict[str, Any]:
-        return {
-            "tool_choice": tool_choice,
-            "parallel_tool_calls": parallel_tool_calls,
-            "strict": strict_mode,
-        }
+        kwargs: dict[str, Any] = {"tool_choice": tool_choice}
+        if parallel_tool_calls is not None:
+            kwargs["parallel_tool_calls"] = parallel_tool_calls
+        if strict_mode is not None:
+            kwargs["strict"] = strict_mode
+        return kwargs
 
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check OpenAI stop reason and raise exception for faulty terminations.

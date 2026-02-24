@@ -145,7 +145,12 @@ Keep jokes appropriate for children, free from offensive language."""
 # LLM
 # ---------------------------------------------------------------------------
 
-llm = UiPathChatOpenAI(temperature=0.7, max_tokens=500, use_responses_api=True)
+llm = UiPathChatOpenAI(
+    model="gpt-4o-2024-11-20",
+    temperature=0.7,
+    max_tokens=500,
+    use_responses_api=True,  # type: ignore[call-arg]
+)
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +258,7 @@ async def joke_node(state: Input) -> Output:
             content=f"Generate a family-friendly joke based on the topic: {state.topic}"
         )
     ]
-    result = await agent.ainvoke({"messages": messages})  # type: ignore[arg-type]
+    result = await agent.ainvoke({"messages": messages})  # type: ignore[call-overload]
     joke = result["messages"][-1].content
     return Output(joke=joke)
 
