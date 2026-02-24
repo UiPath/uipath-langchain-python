@@ -354,16 +354,19 @@ class InstrumentedRuntime:
             system_prompt, user_prompt = self._get_prompts()
             input_schema, output_schema = self._get_schemas()
 
-            is_conversational = (
-                self._agent_definition.is_conversational
-                if self._agent_definition
-                else False
+            is_conversational = bool(
+                self._agent_definition and self._agent_definition.is_conversational
             )
+
+            # Conversational agents receive user messages via conversation
+            # history, not via the template in agent.json's messages array
+            if is_conversational:
+                user_prompt = None
 
             with self._span_factory.start_agent_run(
                 agent_name=agent_name,
                 agent_id=agent_id,
-                is_conversational=is_conversational or False,
+                is_conversational=is_conversational,
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 input_data=self._normalize_input(input_data),
@@ -371,7 +374,11 @@ class InstrumentedRuntime:
                 output_schema=output_schema,
                 source=get_execution_type(self._runtime_context).value,
             ) as agent_span:
-                prompts_captured = system_prompt is not None or user_prompt is not None
+                prompts_captured = (
+                    system_prompt is not None
+                    or user_prompt is not None
+                    or is_conversational
+                )
                 self._callback.set_agent_span(
                     agent_span, uuid.UUID(self._agent_run_id), prompts_captured
                 )

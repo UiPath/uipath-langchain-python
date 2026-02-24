@@ -1,6 +1,7 @@
 """Tests for InstrumentedRuntime."""
 
 import asyncio
+from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -8,6 +9,7 @@ from uipath.agent.models.agent import (
     AgentDefinition,
     AgentMessage,
     AgentMessageRole,
+    AgentMetadata,
     AgentSettings,
 )
 from uipath.runtime import UiPathRuntimeContext, UiPathRuntimeStatus
@@ -1325,6 +1327,135 @@ class TestRegisterLicensing:
             await register_licensing_async(agent_def)
 
         mock_service_cls.assert_not_called()
+
+
+class TestConversationalAgentSuppressesUserPrompt:
+    """Tests that conversational agents suppress the dummy user_prompt template."""
+
+    @staticmethod
+    def _make_delegate() -> MagicMock:
+        delegate = MagicMock(spec=[])
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.FAULTED
+        delegate.execute = AsyncMock(return_value=mock_result)
+        return delegate
+
+    @staticmethod
+    def _make_agent_definition(
+        *,
+        name: str = "chat-agent",
+        is_conversational: bool = True,
+        messages: list[AgentMessage] | None = None,
+    ) -> AgentDefinition:
+        kwargs: Dict[str, Any] = dict(
+            name=name,
+            messages=messages or [],
+            settings=AgentSettings(
+                model="gpt-4o", engine="v1", max_tokens=1000, temperature=0.7
+            ),
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+        )
+        if is_conversational:
+            kwargs["metadata"] = AgentMetadata(
+                is_conversational=True, storage_version="1.0"
+            )
+        return AgentDefinition(**kwargs)
+
+    @pytest.mark.asyncio
+    async def test_conversational_agent_nulls_user_prompt_on_span(
+        self, tracer, callback, mock_runtime_context, span_exporter
+    ) -> None:
+        agent_info = self._make_agent_definition(
+            messages=[
+                AgentMessage(
+                    role=AgentMessageRole.SYSTEM,
+                    content="You are a helpful assistant.",
+                ),
+                AgentMessage(
+                    role=AgentMessageRole.USER,
+                    content="{{input_string}}",
+                ),
+            ],
+        )
+
+        instrumented_runtime = InstrumentedRuntime(
+            self._make_delegate(),
+            tracer,
+            callback,
+            mock_runtime_context,
+            agent_definition=agent_info,
+        )
+        await instrumented_runtime.execute({"input": "hello"}, None)
+
+        spans = span_exporter.get_finished_spans()
+        agent_spans = [s for s in spans if "agent run" in s.name.lower()]
+        assert len(agent_spans) >= 1
+
+        attrs = dict(agent_spans[0].attributes)
+        assert "userPrompt" not in attrs
+        assert attrs["systemPrompt"] == "You are a helpful assistant."
+
+    @pytest.mark.asyncio
+    async def test_conversational_agent_sets_prompts_captured_true(
+        self, tracer, callback, mock_runtime_context
+    ) -> None:
+        """Prevents LLM instrumentor from re-adding userPrompt via _capture_interpolated_prompts."""
+        agent_info = self._make_agent_definition()
+
+        captured_prompts_flag = None
+
+        def capture_set_agent_span(span, run_id, prompts_captured=False):
+            nonlocal captured_prompts_flag
+            captured_prompts_flag = prompts_captured
+
+        callback.set_agent_span = MagicMock(side_effect=capture_set_agent_span)
+
+        instrumented_runtime = InstrumentedRuntime(
+            self._make_delegate(),
+            tracer,
+            callback,
+            mock_runtime_context,
+            agent_definition=agent_info,
+        )
+        await instrumented_runtime.execute({"input": "hello"}, None)
+
+        assert captured_prompts_flag is True
+
+    @pytest.mark.asyncio
+    async def test_non_conversational_agent_preserves_user_prompt(
+        self, tracer, callback, mock_runtime_context, span_exporter
+    ) -> None:
+        agent_info = self._make_agent_definition(
+            name="standard-agent",
+            is_conversational=False,
+            messages=[
+                AgentMessage(
+                    role=AgentMessageRole.SYSTEM,
+                    content="You are a helper.",
+                ),
+                AgentMessage(
+                    role=AgentMessageRole.USER,
+                    content="Process: {{input_string}}",
+                ),
+            ],
+        )
+
+        instrumented_runtime = InstrumentedRuntime(
+            self._make_delegate(),
+            tracer,
+            callback,
+            mock_runtime_context,
+            agent_definition=agent_info,
+        )
+        await instrumented_runtime.execute({"input": "test"}, None)
+
+        spans = span_exporter.get_finished_spans()
+        agent_spans = [s for s in spans if "Agent run" in s.name]
+        assert len(agent_spans) >= 1
+
+        attrs = dict(agent_spans[0].attributes)
+        assert attrs["userPrompt"] == "Process: {{input_string}}"
 
 
 class TestNestedAgentResumeFixes:

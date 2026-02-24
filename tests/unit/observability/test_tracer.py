@@ -308,6 +308,31 @@ class TestAgentRunSpan:
         assert spans[0].name == "Conversational agent run - ChatAgent"
         assert spans[0].attributes["isConversational"] is True
 
+    def test_excludes_user_prompt_when_none(self, tracer, span_exporter):
+        with tracer.start_agent_run(
+            agent_name="ChatAgent",
+            system_prompt="You are helpful.",
+            user_prompt=None,
+            is_conversational=True,
+        ) as span:
+            span.end()
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert "userPrompt" not in attrs
+        assert attrs["systemPrompt"] == "You are helpful."
+
+    def test_includes_user_prompt_when_provided(self, tracer, span_exporter):
+        with tracer.start_agent_run(
+            agent_name="StandardAgent",
+            user_prompt="Hello {{name}}",
+        ) as span:
+            span.end()
+
+        spans = span_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["userPrompt"] == "Hello {{name}}"
+
     def test_captures_error_on_exception(self, tracer, span_exporter):
         """Test that exceptions are captured in span attributes."""
         with pytest.raises(ValueError):
