@@ -7,13 +7,6 @@ from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
 from uipath.platform.guardrails import BaseGuardrail
-from uipath.runtime.errors import UiPathErrorCategory
-
-from uipath_langchain.agent.exceptions import (
-    AgentStartupError,
-    AgentStartupErrorCode,
-)
-from uipath_langchain.chat.types import UiPathPassthroughChatModel
 
 from ..guardrails.actions import GuardrailAction
 from .guardrails.guardrails_subgraph import (
@@ -40,7 +33,6 @@ from .types import (
     AgentGraphConfig,
     AgentGraphNode,
     AgentGraphState,
-    AgentSettings,
 )
 from .utils import create_state_with_input
 
@@ -70,19 +62,6 @@ def create_agent(
     """
     from ..tools import create_tool_node
 
-    if not isinstance(model, UiPathPassthroughChatModel):
-        raise AgentStartupError(
-            code=AgentStartupErrorCode.LLM_INVALID_MODEL,
-            title=f"Model {type(model).__name__} does not implement UiPathPassthroughChatModel.",
-            detail="The model must have llm_provider and api_flavor properties.",
-            category=UiPathErrorCategory.SYSTEM,
-        )
-
-    agent_settings = AgentSettings(
-        llm_provider=model.llm_provider,
-        api_flavor=model.api_flavor,
-    )
-
     if config is None:
         config = AgentGraphConfig()
 
@@ -92,9 +71,7 @@ def create_agent(
     )
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
-    init_node = create_init_node(
-        messages, input_schema, config.is_conversational, agent_settings
-    )
+    init_node = create_init_node(messages, input_schema, config.is_conversational)
 
     tool_nodes = create_tool_node(agent_tools)
     tool_nodes_with_guardrails = create_tools_guardrails_subgraph(
@@ -135,7 +112,9 @@ def create_agent(
         is_conversational=config.is_conversational,
         llm_messages_limit=config.llm_messages_limit,
         thinking_messages_limit=config.thinking_messages_limit,
-        enable_openai_parallel_tool_calls=config.enable_openai_parallel_tool_calls,
+        tool_choice=config.tool_choice,
+        parallel_tool_calls=config.parallel_tool_calls,
+        strict_mode=config.strict_mode,
     )
     llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
         (AgentGraphNode.LLM, llm_node), guardrails, input_schema=input_schema

@@ -33,7 +33,7 @@ def __getattr__(name):
         from . import supported_models
 
         return getattr(supported_models, name)
-    if name in ("LLMProvider", "APIFlavor", "UiPathPassthroughChatModel"):
+    if name in ("LLMProvider", "APIFlavor"):
         from . import types
 
         return getattr(types, name)
@@ -44,11 +44,10 @@ __all__ = [
     "UiPathChat",
     "UiPathAzureChatOpenAI",
     "UiPathChatOpenAI",
-    "UiPathPassthroughChatModel",
     "OpenAIModels",
     "BedrockModels",
     "GeminiModels",
+    "requires_approval",
     "LLMProvider",
     "APIFlavor",
-    "requires_approval",
 ]
