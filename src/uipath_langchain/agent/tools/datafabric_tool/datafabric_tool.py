@@ -5,7 +5,9 @@ This module provides functionality to:
 2. Create SQL-based query tools for the agent
 """
 
+import json
 import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -345,6 +347,13 @@ def _create_sdk_based_tools(
                 if truncated:
                     result["truncated"] = True
                     result["message"] = f"Showing {len(returned_records)} of {total_count} records. Use more specific filters or LIMIT to narrow results."
+
+                # Emit result to file for eval pipeline (activated via env var)
+                result_file = os.environ.get("DATAFABRIC_RESULT_FILE")
+                if result_file:
+                    with open(result_file, "w") as f:
+                        json.dump(result, f)
+
                 return result
             except Exception as e:
                 logger.error(f"SQL query failed for entity '{_entity_name}': {e}")
