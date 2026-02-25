@@ -17,11 +17,12 @@ from uipath_langchain.agent.react import (
 from uipath_langchain.agent.tools import create_tools_from_resources
 from uipath_langchain.agent.tools.mcp import create_mcp_tools_from_agent
 
+from uipath_agents.agent_graph_builder.version import supports_parallel_tool_calls
+
 from .config import AgentExecutionType, get_thinking_messages_limit
 from .llm_utils import create_llm
 from .message_utils import create_message_factory
 from .session_info_debug_state import SessionInfoDebugStateFactory
-from .version import supports_openai_parallel_tool_calls
 
 AGENT_MAX_ITERATIONS_DEFAULT = 25
 
@@ -81,8 +82,8 @@ async def build_agent_graph(
             agent_definition.settings.model
         ),
         is_conversational=agent_definition.is_conversational,
-        enable_openai_parallel_tool_calls=supports_openai_parallel_tool_calls(
-            agent_definition.version
+        parallel_tool_calls=supports_parallel_tool_calls(
+            agent_definition.version, agent_definition.settings.model
         ),
     )
 

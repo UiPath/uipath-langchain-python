@@ -14,9 +14,7 @@ from uipath.agent.models.agent import (
 
 from uipath_agents.agent_graph_builder import build_agent_graph
 from uipath_agents.agent_graph_builder.config import AgentExecutionType
-from uipath_agents.agent_graph_builder.version import (
-    supports_openai_parallel_tool_calls,
-)
+from uipath_agents.agent_graph_builder.version import supports_parallel_tool_calls
 
 
 def create_test_agent_definition(**overrides: Any) -> LowCodeAgentDefinition:
@@ -786,28 +784,40 @@ class TestBuildAgentGraph:
 
 
 class TestSupportsParallelToolCalls:
-    """Test _supports_parallel_tool_calls version check."""
+    """Test supports_parallel_tool_calls version and model name checks."""
 
     def test_version_1_0_0_is_false(self) -> None:
-        assert supports_openai_parallel_tool_calls("1.0.0") is False
+        assert supports_parallel_tool_calls("1.0.0", "gpt-4") is False
 
     def test_version_1_0_9_is_false(self) -> None:
-        assert supports_openai_parallel_tool_calls("1.0.9") is False
+        assert supports_parallel_tool_calls("1.0.9", "gpt-4") is False
 
     def test_version_1_1_0_is_true(self) -> None:
-        assert supports_openai_parallel_tool_calls("1.1.0") is True
+        assert supports_parallel_tool_calls("1.1.0", "gpt-4") is True
 
     def test_version_1_2_0_is_true(self) -> None:
-        assert supports_openai_parallel_tool_calls("1.2.0") is True
+        assert supports_parallel_tool_calls("1.2.0", "gpt-4") is True
 
     def test_version_2_0_0_is_true(self) -> None:
-        assert supports_openai_parallel_tool_calls("2.0.0") is True
+        assert supports_parallel_tool_calls("2.0.0", "gpt-4") is True
 
-    def test_invalid_version_is_false(self) -> None:
-        assert supports_openai_parallel_tool_calls("invalid") is True
+    def test_invalid_version_returns_true(self) -> None:
+        assert supports_parallel_tool_calls("invalid", "gpt-4") is True
 
-    def test_empty_string_is_false(self) -> None:
-        assert supports_openai_parallel_tool_calls("") is True
+    def test_empty_version_returns_true(self) -> None:
+        assert supports_parallel_tool_calls("", "gpt-4") is True
+
+    def test_gpt_model_with_sufficient_version_is_true(self) -> None:
+        assert supports_parallel_tool_calls("1.1.0", "gpt-4o") is True
+
+    def test_gpt_model_name_case_insensitive(self) -> None:
+        assert supports_parallel_tool_calls("1.1.0", "GPT-4o-mini") is True
+
+    def test_non_gpt_model_with_sufficient_version_is_true(self) -> None:
+        assert supports_parallel_tool_calls("1.1.0", "claude-3-sonnet") is True
+
+    def test_non_gpt_model_old_version_is_true(self) -> None:
+        assert supports_parallel_tool_calls("1.0.0", "claude-3-opus") is True
 
 
 @pytest.mark.asyncio
@@ -847,7 +857,7 @@ class TestBuildAgentGraphParallelToolCalls:
             await build_agent_graph(agent_def)
 
             config = mock_create.call_args.kwargs["config"]
-            assert config.enable_openai_parallel_tool_calls is False
+            assert config.parallel_tool_calls is False
 
     async def test_new_version_enables_parallel_tool_calls(self) -> None:
         agent_def = create_test_agent_definition(version="1.1.0")
@@ -873,4 +883,4 @@ class TestBuildAgentGraphParallelToolCalls:
             await build_agent_graph(agent_def)
 
             config = mock_create.call_args.kwargs["config"]
-            assert config.enable_openai_parallel_tool_calls is True
+            assert config.parallel_tool_calls is True
