@@ -8,7 +8,6 @@ import logging
 from enum import StrEnum
 from typing import Any, Dict, Optional
 
-from langchain_core.callbacks import BaseCallbackHandler
 from opentelemetry import trace
 from uipath.telemetry import flush_events as _flush_events
 from uipath.telemetry import track_event as _track_event
@@ -105,7 +104,7 @@ def _set_operation_context_from_current_span() -> None:
         )
 
 
-class TelemetryEventEmitter(BaseCallbackHandler):
+class TelemetryEventEmitter:
     """Emits custom telemetry events to Application Insights.
 
     Dedicated to tracking agent lifecycle events for monitoring and analytics.
@@ -114,13 +113,10 @@ class TelemetryEventEmitter(BaseCallbackHandler):
     Usage:
         emitter = TelemetryEventEmitter()
         emitter.set_agent_info("MyAgent", "agent-123")
-        runtime = SomeRuntime(callbacks=[emitter])
-        await runtime.execute(input)
+        emitter.track_event("AgentRun.Start", {"AgentName": "MyAgent"})
     """
 
     def __init__(self) -> None:
-        """Initialize the telemetry callback."""
-        super().__init__()
         self._agent_name: Optional[str] = None
         self._agent_id: Optional[str] = None
 

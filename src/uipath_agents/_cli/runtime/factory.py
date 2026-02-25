@@ -391,7 +391,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
-            callbacks=[instrumentation_callback, event_emitter],
+            callbacks=[instrumentation_callback],
             agent_definition=agent_definition,
             storage=storage,
         )
