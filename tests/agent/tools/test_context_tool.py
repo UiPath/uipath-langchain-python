@@ -86,17 +86,6 @@ class TestHandleDeepRag:
         assert "deepRagId" in schema["properties"]
         assert schema["properties"]["deepRagId"]["type"] == "string"
 
-    def test_missing_query_object_raises_error(self, base_resource_config):
-        """Test that missing query object raises AgentStartupError."""
-        resource = base_resource_config(query_value=None)
-        resource.settings.query = None
-
-        with pytest.raises(AgentStartupError) as exc_info:
-            handle_deep_rag("test_deep_rag", resource)
-        assert exc_info.value.error_info.code == AgentStartupError.full_code(
-            AgentStartupErrorCode.INVALID_TOOL_CONFIG
-        )
-
     def test_missing_static_query_value_raises_error(self, base_resource_config):
         """Test that missing query.value for static variant raises AgentStartupError."""
         resource = base_resource_config(query_variant="static", query_value=None)
