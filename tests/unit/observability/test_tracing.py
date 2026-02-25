@@ -9,6 +9,9 @@ from opentelemetry.sdk.trace.export import SpanExportResult
 
 from uipath_agents._observability import tracing
 from uipath_agents._observability.exporters import FilteringSpanExporter
+from uipath_agents._observability.exporters.environment_attributes_exporter import (
+    EnvironmentAttributesExporter,
+)
 from uipath_agents._observability.llmops import is_azure_monitor_span, span_filters
 from uipath_agents._observability.tracing import _TelemetryState
 
@@ -76,7 +79,10 @@ class TestConfigureTelemetry:
             assert isinstance(wrapper, FilteringSpanExporter)
             assert wrapper._filter_fn is is_azure_monitor_span
             assert isinstance(wrapper._delegate, PIIFilteringExporter)
-            assert wrapper._delegate._delegate is mock_exporter
+            assert isinstance(
+                wrapper._delegate._delegate, EnvironmentAttributesExporter
+            )
+            assert wrapper._delegate._delegate._delegate is mock_exporter
 
     def test_adds_azure_exporter_without_pii_redaction_when_disabled(self):
         """Test that Azure exporter is wrapped only with FilteringSpanExporter when PII disabled."""
@@ -100,7 +106,8 @@ class TestConfigureTelemetry:
             wrapper = added_exporters[0]
             assert isinstance(wrapper, FilteringSpanExporter)
             assert wrapper._filter_fn is is_azure_monitor_span
-            assert wrapper._delegate is mock_exporter
+            assert isinstance(wrapper._delegate, EnvironmentAttributesExporter)
+            assert wrapper._delegate._delegate is mock_exporter
 
     def test_skips_azure_exporter_when_no_trace_manager(self):
         """Test that Azure exporter is skipped when no trace_manager."""

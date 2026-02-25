@@ -10,6 +10,9 @@ from uipath.core import UiPathTraceManager
 from uipath.platform.common import UiPathConfig
 
 from uipath_agents._observability.exporters import FilteringSpanExporter
+from uipath_agents._observability.exporters.environment_attributes_exporter import (
+    EnvironmentAttributesExporter,
+)
 from uipath_agents._observability.llmops import is_azure_monitor_span
 from uipath_agents._observability.utils import setup_otel_env
 
@@ -50,17 +53,19 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
                 os.getenv("DISABLE_OTEL_MASKING", "false").lower() == "true"
             )
 
+            env_exporter: Any = EnvironmentAttributesExporter(azure_exporter)
+
             if pii_masking_disabled:
                 logger.warning(
                     "PII redaction is DISABLED - sensitive data may be exported"
                 )
-                base_exporter: Any = azure_exporter
+                base_exporter: Any = env_exporter
             else:
                 from uipath_agents._observability.exporters.pii_filtering_exporter import (
                     PIIFilteringExporter,
                 )
 
-                base_exporter = PIIFilteringExporter(azure_exporter)
+                base_exporter = PIIFilteringExporter(env_exporter)
                 logger.debug("Added PII redaction to Azure Monitor exporter")
 
             filtered_exporter = FilteringSpanExporter(

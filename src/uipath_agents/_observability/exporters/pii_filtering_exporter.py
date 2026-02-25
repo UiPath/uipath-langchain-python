@@ -14,6 +14,8 @@ from opentelemetry.sdk.trace import Event, ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.util.types import Attributes
 
+from uipath_agents._observability.exporters.wrapped_span import WrappedSpan
+
 logger = logging.getLogger(__name__)
 
 
@@ -271,81 +273,6 @@ def _redact_events(events: Sequence[Event] | None) -> list[Event]:
     return redacted_events
 
 
-class _RedactedSpan(ReadableSpan):
-    """Wrapper around ReadableSpan that provides redacted attributes and events."""
-
-    def __init__(
-        self,
-        span: ReadableSpan,
-        redacted_attributes: Attributes,
-        redacted_events: Sequence[Event],
-    ):
-        """Initialize with original span and redacted data.
-
-        Args:
-            span: Original span to wrap
-            redacted_attributes: Redacted version of attributes
-            redacted_events: Redacted version of events
-        """
-        self._span = span
-        self._redacted_attributes = redacted_attributes
-        self._redacted_events = redacted_events
-
-    @property
-    def name(self) -> str:
-        return self._span.name
-
-    @property
-    def context(self):
-        return self._span.context
-
-    @property
-    def parent(self):
-        return self._span.parent
-
-    @property
-    def start_time(self) -> int:
-        return self._span.start_time  # type: ignore[return-value]
-
-    @property
-    def end_time(self) -> int:
-        return self._span.end_time  # type: ignore[return-value]
-
-    @property
-    def status(self):
-        return self._span.status
-
-    @property
-    def attributes(self) -> Attributes:
-        """Return redacted attributes instead of original."""
-        return self._redacted_attributes
-
-    @property
-    def events(self) -> Sequence[Event]:
-        """Return redacted events instead of original."""
-        return self._redacted_events
-
-    @property
-    def links(self):
-        return self._span.links
-
-    @property
-    def kind(self):
-        return self._span.kind
-
-    @property
-    def resource(self):
-        return self._span.resource
-
-    @property
-    def instrumentation_scope(self):
-        return self._span.instrumentation_scope
-
-    @property
-    def instrumentation_info(self):
-        return self._span.instrumentation_info
-
-
 class PIIFilteringExporter(SpanExporter):
     """Wraps a SpanExporter to redact PII from attributes and events before export.
 
@@ -394,7 +321,7 @@ class PIIFilteringExporter(SpanExporter):
         for span in spans:
             redacted_attrs = _redact_attributes(span.attributes)
             redacted_events = _redact_events(span.events)
-            redacted_span = _RedactedSpan(span, redacted_attrs, redacted_events)
+            redacted_span = WrappedSpan(span, redacted_attrs, redacted_events)
             redacted_spans.append(redacted_span)
 
         return self._delegate.export(redacted_spans)

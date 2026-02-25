@@ -12,9 +12,9 @@ from uipath_agents._observability.exporters.pii_filtering_exporter import (
     _redact_attributes,
     _redact_events,
     _redact_value,
-    _RedactedSpan,
     _should_redact_exception,
 )
+from uipath_agents._observability.exporters.wrapped_span import WrappedSpan
 
 
 @pytest.fixture
@@ -111,7 +111,7 @@ class TestRedactAttributes:
 
 
 class TestRedactedSpan:
-    """Tests for _RedactedSpan wrapper."""
+    """Tests for WrappedSpan wrapper."""
 
     def test_wrapper_preserves_span_properties(self) -> None:
         """Test that wrapper preserves all span properties except attributes and events."""
@@ -127,7 +127,7 @@ class TestRedactedSpan:
         # Create redacted version
         redacted_attrs = {"input.value": "[REDACTED]", "llm.model_name": "gpt-4"}
         redacted_events = [Event(name="test", attributes={"key": "redacted_value"})]
-        wrapped = _RedactedSpan(original_span, redacted_attrs, redacted_events)
+        wrapped = WrappedSpan(original_span, redacted_attrs, redacted_events)
 
         # Verify properties are preserved
         assert wrapped.name == "test_span"

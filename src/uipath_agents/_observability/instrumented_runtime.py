@@ -48,6 +48,7 @@ from .event_emitter import (
     AgentRunEvent,
     TelemetryEventEmitter,
 )
+from .exporters.environment_attributes_exporter import get_env_attributes
 from .llmops import (
     LlmOpsInstrumentationCallback,
     LlmOpsSpanFactory,
@@ -961,6 +962,7 @@ class InstrumentedRuntime:
         if UiPathConfig.process_version:
             properties["ProcessVersion"] = UiPathConfig.process_version
         properties["ImageVersion"] = os.getenv("IMAGE_VERSION", None)
+        properties.update(get_env_attributes())
         return properties
 
     def _get_agent_id(self) -> Optional[str]:
