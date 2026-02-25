@@ -5,6 +5,7 @@ from typing import Any, ClassVar
 from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter
 from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.sdk.trace import SpanProcessor
 from opentelemetry.sdk.trace.export import SpanExporter
 from uipath.core import UiPathTraceManager
 from uipath.platform.common import UiPathConfig
@@ -20,9 +21,17 @@ logger = logging.getLogger(__name__)
 
 
 class _TelemetryState:
-    """Module-level telemetry state for idempotency and cleanup."""
+    """Module-level telemetry state for idempotency and cleanup.
+
+    Tracks span processors and instrumentors added during configure so they
+    can be properly shut down.  Shutting down a BatchSpanProcessor sets its
+    internal ``done`` flag, making ``on_end()`` a no-op — the processor
+    remains on the global TracerProvider (no remove API) but is inert.
+    Fresh processors are created on the next configure cycle.
+    """
 
     configured: ClassVar[bool] = False
+    span_processors: ClassVar[list[SpanProcessor]] = []
     instrumentors: ClassVar[list[Any]] = []
 
 
@@ -47,6 +56,9 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
     setup_otel_env()
 
     if trace_manager:
+        # Snapshot processor list length so we can capture newly added ones
+        prev_count = len(trace_manager.tracer_span_processors)
+
         azure_exporter = _get_azure_exporter()
         if azure_exporter:
             pii_masking_disabled = (
@@ -77,6 +89,11 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
             trace_manager.add_span_exporter(
                 _get_llmops_file_exporter(llmops_trace_file)
             )
+
+        # Track processors we just added for shutdown cleanup
+        _TelemetryState.span_processors = list(
+            trace_manager.tracer_span_processors[prev_count:]
+        )
 
     _TelemetryState.instrumentors = [
         HTTPXClientInstrumentor(),
@@ -132,11 +149,17 @@ def _get_llmops_file_exporter(file_path: str) -> SpanExporter:
 def shutdown_telemetry() -> None:
     """Cleanup telemetry resources owned by this module.
 
-    Only uninstruments libraries that we instrumented. Does NOT flush or shutdown
-    the TracerProvider - that's the trace_manager's responsibility.
+    Shuts down span processors registered (making them inert on the
+    global TracerProvider) and uninstruments HTTP libraries.
     """
-    if not _TelemetryState.configured:
-        return
+    for processor in _TelemetryState.span_processors:
+        try:
+            processor.force_flush()
+            processor.shutdown()
+        except Exception:
+            logger.exception(
+                "Failed to flush/shutdown processor %s", type(processor).__name__
+            )
 
     for instrumentor in _TelemetryState.instrumentors:
         try:
@@ -144,6 +167,7 @@ def shutdown_telemetry() -> None:
         except Exception:
             logger.exception("Failed to un-instrument %s", type(instrumentor).__name__)
 
-    _TelemetryState.configured = False
+    _TelemetryState.span_processors = []
     _TelemetryState.instrumentors = []
+    _TelemetryState.configured = False
     logger.debug("Telemetry shutdown complete")

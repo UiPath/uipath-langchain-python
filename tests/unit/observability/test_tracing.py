@@ -20,9 +20,11 @@ from uipath_agents._observability.tracing import _TelemetryState
 def reset_telemetry_state():
     """Reset telemetry state before and after each test."""
     _TelemetryState.configured = False
+    _TelemetryState.span_processors = []
     _TelemetryState.instrumentors = []
     yield
     _TelemetryState.configured = False
+    _TelemetryState.span_processors = []
     _TelemetryState.instrumentors = []
 
 
@@ -309,22 +311,28 @@ class TestIsAzureMonitorSpan:
 
 
 class TestShutdownTelemetry:
-    """Test shutdown_telemetry function.
+    """Test shutdown_telemetry function."""
 
-    Note: shutdown_telemetry only uninstruments libraries. It does NOT flush
-    or shutdown the TracerProvider - that's the trace_manager's responsibility.
-    """
+    def test_noop_when_no_state(self) -> None:
+        """Test that shutdown is a no-op when there's nothing to clean up."""
+        _TelemetryState.configured = False
+        _TelemetryState.span_processors = []
+        _TelemetryState.instrumentors = []
 
-    def test_noop_when_not_configured(self):
-        """Test that shutdown is a no-op when not configured."""
+        tracing.shutdown_telemetry()
+
+        assert not _TelemetryState.configured
+
+    def test_cleans_up_even_when_not_configured(self) -> None:
+        """Test that shutdown cleans up leftover state from a partial configure."""
         _TelemetryState.configured = False
         mock_instrumentor = MagicMock()
         _TelemetryState.instrumentors = [mock_instrumentor]
 
         tracing.shutdown_telemetry()
 
-        # Should not uninstrument if not configured
-        mock_instrumentor.uninstrument.assert_not_called()
+        mock_instrumentor.uninstrument.assert_called_once()
+        assert _TelemetryState.instrumentors == []
 
     def test_uninstruments_all_instrumentors(self):
         """Test that shutdown uninstruments all stored instrumentors."""
@@ -338,14 +346,16 @@ class TestShutdownTelemetry:
         mock_instrumentor1.uninstrument.assert_called_once()
         mock_instrumentor2.uninstrument.assert_called_once()
 
-    def test_resets_state_after_shutdown(self):
+    def test_resets_state_after_shutdown(self) -> None:
         """Test that state is reset after shutdown."""
         _TelemetryState.configured = True
+        _TelemetryState.span_processors = [MagicMock()]
         _TelemetryState.instrumentors = [MagicMock()]
 
         tracing.shutdown_telemetry()
 
         assert not _TelemetryState.configured
+        assert _TelemetryState.span_processors == []
         assert _TelemetryState.instrumentors == []
 
     def test_handles_uninstrument_errors_gracefully(self, caplog):
