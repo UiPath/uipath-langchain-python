@@ -64,7 +64,6 @@ def handle_semantic_search(
 ) -> StructuredTool:
     ensure_valid_fields(resource)
 
-    assert resource.settings.query is not None
     assert resource.settings.query.variant is not None
 
     retriever = ContextGroundingRetriever(
@@ -133,7 +132,6 @@ def handle_deep_rag(
 ) -> StructuredTool:
     ensure_valid_fields(resource)
 
-    assert resource.settings.query is not None
     assert resource.settings.query.variant is not None
 
     index_name = resource.index_name
@@ -343,14 +341,6 @@ def handle_batch_transform(
 
 
 def ensure_valid_fields(resource_config: AgentContextResourceConfig):
-    if not resource_config.settings.query:
-        raise AgentStartupError(
-            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
-            title="Missing query object",
-            detail="Query object is required. Please set the query field in context settings.",
-            category=UiPathErrorCategory.USER,
-        )
-
     if not resource_config.settings.query.variant:
         raise AgentStartupError(
             code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
