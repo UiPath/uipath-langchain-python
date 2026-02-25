@@ -76,7 +76,10 @@ def _handle_end_conversational(
         ]
     }
     validated = response_schema.model_validate(output)
-    return validated.model_dump(by_alias=True)
+
+    # Dump with exclude_none to prevent UiPathConversation... fields with None values from being outputted (e.g. UiPathConversationContentPartData.isTranscript).
+    # May need to revisit if other output fields are added for conversational agents, where we want nulls outputted.
+    return validated.model_dump(by_alias=True, exclude_none=True)
 
 
 def create_terminate_node(
