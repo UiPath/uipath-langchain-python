@@ -138,6 +138,7 @@ class TestProcessToolInvocation:
             folder_path="/Shared/MyFolder",
             attachments=[],
             parent_span_id=None,
+            parent_operation_id=None,
         )
 
     @pytest.mark.asyncio
