@@ -302,7 +302,7 @@ class TestMapMessages:
         assert msg.additional_kwargs["message_id"] == "msg-1"
 
     def test_map_messages_handles_tool_calls_without_results(self):
-        """Should include tool calls without results with empty content and error status."""
+        """Should include tool calls on AIMessage without creating ToolMessages."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         from uipath.core.chat import UiPathConversationToolCall
 
@@ -336,22 +336,16 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        # AIMessage + ToolMessage
-        assert len(result) == 2
+        # Only AIMessage - ToolMessages are produced by tool_node during execution
+        assert len(result) == 1
         ai_msg = result[0]
         assert isinstance(ai_msg, AIMessage)
         assert len(ai_msg.tool_calls) == 1
         assert ai_msg.tool_calls[0]["id"] == "call-123"
         assert ai_msg.tool_calls[0]["name"] == "search_database"
 
-        tool_msg = result[1]
-        assert isinstance(tool_msg, ToolMessage)
-        assert tool_msg.tool_call_id == "call-123"
-        assert tool_msg.content == ""  # Empty content for tool without result
-        assert tool_msg.status == "error"  # Error status for tool without result
-
     def test_map_messages_includes_tool_calls_with_results(self):
-        """Should create AIMessage with tool_calls AND ToolMessage for completed tool calls."""
+        """Should create AIMessage with tool_calls but no ToolMessages."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         from uipath.core.chat import (
             UiPathConversationToolCall,
@@ -392,8 +386,8 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        # Should have AIMessage + ToolMessage
-        assert len(result) == 2
+        # Only AIMessage - ToolMessages are produced by tool_node during execution
+        assert len(result) == 1
 
         # Check AIMessage
         ai_msg = result[0]
@@ -407,15 +401,8 @@ class TestMapMessages:
         assert tool_call["args"] == {"query": "test query"}
         assert tool_call["id"] == "call-123"
 
-        # Check ToolMessage
-        tool_msg = result[1]
-        assert isinstance(tool_msg, ToolMessage)
-        assert tool_msg.tool_call_id == "call-123"
-        assert tool_msg.content == '{"results": ["item1", "item2"]}'
-        assert tool_msg.status == "success"
-
     def test_map_messages_includes_tool_calls_with_error_results(self):
-        """Should create ToolMessage with error status for failed tool calls."""
+        """Should create AIMessage with tool_calls for failed tool calls, no ToolMessages."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         from uipath.core.chat import (
             UiPathConversationToolCall,
@@ -447,14 +434,14 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        assert len(result) == 2
-        tool_msg = result[1]
-        assert isinstance(tool_msg, ToolMessage)
-        assert tool_msg.status == "error"
-        assert tool_msg.content == "Tool execution failed"
+        assert len(result) == 1
+        ai_msg = result[0]
+        assert isinstance(ai_msg, AIMessage)
+        assert len(ai_msg.tool_calls) == 1
+        assert ai_msg.tool_calls[0]["id"] == "call-456"
 
     def test_map_messages_includes_tool_calls_with_string_output(self):
-        """Should handle string output in tool results without JSON serialization."""
+        """Should create AIMessage with tool_calls for string output results."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         from uipath.core.chat import (
             UiPathConversationToolCall,
@@ -486,13 +473,14 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        assert len(result) == 2
-        tool_msg = result[1]
-        assert isinstance(tool_msg, ToolMessage)
-        assert tool_msg.content == "plain text result"
+        assert len(result) == 1
+        ai_msg = result[0]
+        assert isinstance(ai_msg, AIMessage)
+        assert len(ai_msg.tool_calls) == 1
+        assert ai_msg.tool_calls[0]["id"] == "call-789"
 
     def test_map_messages_includes_tool_calls_with_none_output(self):
-        """Should handle None output in tool results as empty string."""
+        """Should create AIMessage with tool_calls for None output results."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         from uipath.core.chat import (
             UiPathConversationToolCall,
@@ -524,13 +512,14 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        assert len(result) == 2
-        tool_msg = result[1]
-        assert isinstance(tool_msg, ToolMessage)
-        assert tool_msg.content == ""
+        assert len(result) == 1
+        ai_msg = result[0]
+        assert isinstance(ai_msg, AIMessage)
+        assert len(ai_msg.tool_calls) == 1
+        assert ai_msg.tool_calls[0]["id"] == "call-999"
 
     def test_map_messages_includes_multiple_tool_calls_with_mixed_results(self):
-        """Should handle multiple tool calls, some with results and some without."""
+        """Should handle multiple tool calls on AIMessage, no ToolMessages created."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         from uipath.core.chat import (
             UiPathConversationToolCall,
@@ -572,8 +561,8 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        # Should have AIMessage + 2 ToolMessages (for both tool calls)
-        assert len(result) == 3
+        # Only AIMessage - ToolMessages are produced by tool_node during execution
+        assert len(result) == 1
 
         ai_msg = result[0]
         assert isinstance(ai_msg, AIMessage)
@@ -583,20 +572,6 @@ class TestMapMessages:
         assert ai_msg.tool_calls[0]["name"] == "tool_with_result"  # Spaces replaced
         assert ai_msg.tool_calls[1]["id"] == "call-2"
         assert ai_msg.tool_calls[1]["name"] == "tool_without_result"
-
-        # First ToolMessage (with result)
-        tool_msg_1 = result[1]
-        assert isinstance(tool_msg_1, ToolMessage)
-        assert tool_msg_1.tool_call_id == "call-1"
-        assert tool_msg_1.content == '{"status": "done"}'
-        assert tool_msg_1.status == "success"
-
-        # Second ToolMessage (without result)
-        tool_msg_2 = result[2]
-        assert isinstance(tool_msg_2, ToolMessage)
-        assert tool_msg_2.tool_call_id == "call-2"
-        assert tool_msg_2.content == ""  # Empty content for tool without result
-        assert tool_msg_2.status == "error"  # Error status for tool without result
 
     def test_map_messages_handles_tool_calls_without_input(self):
         """Should handle tool call with None input and with result."""
@@ -631,7 +606,7 @@ class TestMapMessages:
 
         result = mapper.map_messages([uipath_msg])
 
-        assert len(result) == 2
+        assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, AIMessage)
         assert len(msg.tool_calls) == 1
