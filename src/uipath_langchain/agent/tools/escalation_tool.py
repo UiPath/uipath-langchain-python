@@ -154,6 +154,8 @@ def create_escalation_tool(
         action: Literal["approve", "reject"]
         data: output_model
 
+    _bts_context: dict[str, Any] = {}
+
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
         recipient: TaskRecipient | None = (
             await resolve_recipient_value(channel.recipients[0])
@@ -191,6 +193,10 @@ def create_escalation_tool(
                     is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
                     actionable_message_metadata=channel.properties.actionable_message_meta_data,
                 )
+
+                if created_task.id is not None:
+                    _bts_context["task_key"] = str(created_task.id)
+
                 return WaitEscalation(
                     action=created_task,
                     app_folder_path=channel.properties.folder_name,
@@ -283,6 +289,7 @@ def create_escalation_tool(
             "recipient": None,
             "args_schema": input_model,
             "output_schema": output_model,
+            "_bts_context": _bts_context,
         },
     )
     tool.set_tool_wrappers(awrapper=escalation_wrapper)

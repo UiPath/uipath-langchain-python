@@ -66,6 +66,15 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
                     parent_span_id=parent_span_id,
                     parent_operation_id=parent_operation_id,
                 )
+
+                if job.key:
+                    bts_key = (
+                        "wait_for_agent_job_key"
+                        if resource.type.lower() == "agent"
+                        else "wait_for_job_key"
+                    )
+                    _bts_context[bts_key] = str(job.key)
+
                 return WaitJob(job=job, process_folder_key=job.folder_key)
 
             return await start_job()
