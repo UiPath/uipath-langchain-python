@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
+from typing import Any
 from uuid import uuid4
 
+from langchain_core.messages.tool import ToolCall
+from langchain_core.tools import BaseTool
 from uipath.core.chat import (
+    UiPathConversationCitationData,
     UiPathConversationCitationEndEvent,
     UiPathConversationCitationEvent,
     UiPathConversationCitationSourceMedia,
@@ -80,6 +85,37 @@ def _parse_citations(text: str) -> list[tuple[str, _ParsedCitation | None]]:
     return segments
 
 
+def _make_source(
+    citation: _ParsedCitation,
+    source_numbers: dict[_ParsedCitation, int],
+    next_number: int,
+) -> tuple[
+    UiPathConversationCitationSourceUrl | UiPathConversationCitationSourceMedia, int
+]:
+    """Build a citation source, deduplicating by assigning numbers"""
+    if citation not in source_numbers:
+        source_numbers[citation] = next_number
+        next_number += 1
+    number = source_numbers[citation]
+
+    source: UiPathConversationCitationSourceUrl | UiPathConversationCitationSourceMedia
+    if citation.url is not None:
+        source = UiPathConversationCitationSourceUrl(
+            title=citation.title,
+            number=number,
+            url=citation.url,
+        )
+    else:
+        source = UiPathConversationCitationSourceMedia(
+            title=citation.title,
+            number=number,
+            mime_type=None,
+            download_url=citation.reference,
+            page_number=citation.page_number,
+        )
+    return source, next_number
+
+
 def _find_partial_tag_start(text: str) -> int:
     _TAG_PREFIX = "<uip:cite "
 
@@ -120,28 +156,9 @@ class CitationStreamProcessor:
         if citation is None:
             return UiPathConversationContentPartChunkEvent(data=text)
 
-        if citation not in self._source_numbers:
-            self._source_numbers[citation] = self._next_number
-            self._next_number += 1
-        number = self._source_numbers[citation]
-
-        source: (
-            UiPathConversationCitationSourceUrl | UiPathConversationCitationSourceMedia
+        source, self._next_number = _make_source(
+            citation, self._source_numbers, self._next_number
         )
-        if citation.url is not None:
-            source = UiPathConversationCitationSourceUrl(
-                title=citation.title,
-                number=number,
-                url=citation.url,
-            )
-        else:
-            source = UiPathConversationCitationSourceMedia(
-                title=citation.title,
-                number=number,
-                mime_type=None,
-                download_url=citation.reference,
-                page_number=citation.page_number,
-            )
 
         return UiPathConversationContentPartChunkEvent(
             data=text,
@@ -197,3 +214,84 @@ class CitationStreamProcessor:
         self._buffer = ""
 
         return self._process_segments(remaining)
+
+
+def extract_citations_from_text(
+    text: str,
+) -> tuple[str, list[UiPathConversationCitationData]]:
+    """Parse inline <uip:cite .../> tags from text and return cleaned text with structured citations."""
+    segments = _parse_citations(text)
+    if not segments:
+        return (text, [])
+
+    source_numbers: dict[_ParsedCitation, int] = {}
+    next_number = 1
+    cleaned_parts: list[str] = []
+    citations: list[UiPathConversationCitationData] = []
+    offset = 0
+
+    for segment_text, citation in segments:
+        cleaned_parts.append(segment_text)
+        length = len(segment_text)
+
+        if citation is not None:
+            source, next_number = _make_source(citation, source_numbers, next_number)
+            if length > 0:
+                citations.append(
+                    UiPathConversationCitationData(
+                        offset=offset,
+                        length=length,
+                        sources=[source],
+                    )
+                )
+            elif citations:
+                # Back-to-back citation with no preceding text:
+                # merge into the previous citation's sources (one citation data with two sources)
+                citations[-1].sources.append(source)
+
+        offset += length
+
+    return ("".join(cleaned_parts), citations)
+
+
+def _escape_attr(value: str) -> str:
+    """Escape only characters that would break XML attribute parsing."""
+    return value.replace('"', "&quot;")
+
+
+def convert_citations_to_inline_tags(content: dict[str, Any]) -> str:
+    """Replace [ordinal] references in DeepRag text with <uip:cite/> tags."""
+    text = content.get("text", "")
+    citations = content.get("citations", [])
+
+    citation_map: dict[int, dict[str, Any]] = {}
+    for c in citations:
+        ordinal = c.get("ordinal")
+        if ordinal is not None:
+            citation_map[ordinal] = c
+
+    for ordinal, c in citation_map.items():
+        title = _escape_attr(str(c.get("source", "")))
+        reference = _escape_attr(str(c.get("reference", "")))
+        page_number = _escape_attr(str(c.get("pageNumber", c.get("page_number", ""))))
+        tag = (
+            f'<uip:cite title="{title}" '
+            f'reference="{reference}" '
+            f'page_number="{page_number}" />'
+        )
+        text = text.replace(f"[{ordinal}]", tag)
+
+    return text
+
+
+async def cas_deep_rag_citation_wrapper(tool: BaseTool, call: ToolCall):
+    """Transform DeepRag results into CAS's inline <uip:cite/> tags."""
+    result = await tool.ainvoke(call)
+    try:
+        data = json.loads(result.content)
+        result.content = json.dumps({"text": convert_citations_to_inline_tags(data)})
+    except Exception:
+        logger.warning(
+            "Failed to transform DeepRag citations, returning raw result", exc_info=True
+        )
+    return result

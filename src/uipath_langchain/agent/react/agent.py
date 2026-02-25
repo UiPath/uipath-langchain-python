@@ -6,9 +6,12 @@ from langchain_core.tools import BaseTool
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
+from uipath.platform.context_grounding import DeepRagContent
 from uipath.platform.guardrails import BaseGuardrail
 
+from ...runtime._citations import cas_deep_rag_citation_wrapper
 from ..guardrails.actions import GuardrailAction
+from ..tools.structured_tool_with_output_type import StructuredToolWithOutputType
 from .guardrails.guardrails_subgraph import (
     create_agent_init_guardrails_subgraph,
     create_agent_terminate_guardrails_subgraph,
@@ -74,6 +77,15 @@ def create_agent(
     init_node = create_init_node(messages, input_schema, config.is_conversational)
 
     tool_nodes = create_tool_node(agent_tools)
+
+    # for conversational agents we transform deeprag's citation format into cas's
+    if config.is_conversational:
+        for node in tool_nodes.values():
+            if isinstance(node.tool, StructuredToolWithOutputType) and issubclass(
+                node.tool.output_type, DeepRagContent
+            ):
+                node.awrapper = cas_deep_rag_citation_wrapper
+
     tool_nodes_with_guardrails = create_tools_guardrails_subgraph(
         tool_nodes, guardrails, input_schema=input_schema
     )

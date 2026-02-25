@@ -188,6 +188,7 @@ def handle_deep_rag(
                 index_name=index_name,
                 prompt=actual_prompt,
                 citation_mode=citation_mode,
+                index_folder_path=resource.folder_path,
             )
 
         return await create_deep_rag()
