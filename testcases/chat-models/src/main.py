@@ -11,8 +11,17 @@ from langchain_core.language_models import BaseChatModel
 from uipath_langchain.chat.bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
 from uipath_langchain.chat.vertex import UiPathChatVertex
 from uipath_langchain.chat import UiPathChatOpenAI, UiPathChat, UiPathAzureChatOpenAI
+from uipath_langchain.embeddings import UiPathOpenAIEmbeddings, UiPathAzureOpenAIEmbeddings
 
 logger = logging.getLogger(__name__)
+
+
+def create_test_embeddings() -> list[tuple[str, Any]]:
+    """Create all test embedding models."""
+    return [
+        ("UiPathOpenAIEmbeddings", UiPathOpenAIEmbeddings(model="text-embedding-3-large")),
+        ("UiPathAzureOpenAIEmbeddings", UiPathAzureOpenAIEmbeddings(model="text-embedding-3-large")),
+    ]
 
 
 def create_test_models(max_tokens: int = 100) -> list[tuple[str, Any]]:
@@ -244,6 +253,36 @@ async def test_single_model_all(
     return name, model_results, result
 
 
+async def test_single_embedding_model(name: str, model: Any, texts: list[str]) -> tuple[str, dict]:
+    """Run embed_documents and aembed_documents for a single embedding model."""
+    logger.info(f"\nTesting {name}...")
+    model_results = {}
+
+    for method_name, is_async in [("embed_documents", False), ("aembed_documents", True)]:
+        logger.info(f"  Testing {method_name}...")
+        try:
+            if is_async:
+                embeddings = await model.aembed_documents(texts)
+            else:
+                embeddings = model.embed_documents(texts)
+
+            if (
+                isinstance(embeddings, list)
+                and len(embeddings) == len(texts)
+                and all(isinstance(e, list) and len(e) > 0 for e in embeddings)
+            ):
+                logger.info(f"     {method_name}: ✓ (dim={len(embeddings[0])})")
+                model_results[method_name] = f"✓ (dim={len(embeddings[0])})"
+            else:
+                logger.warning(f"     {method_name}: unexpected shape")
+                model_results[method_name] = "✗ unexpected shape"
+        except Exception as e:
+            logger.error(f"     {method_name} failed: {e}")
+            model_results[method_name] = f"✗ {format_error_message(str(e))}"
+
+    return name, model_results
+
+
 async def run_all_tests(state: GraphState) -> dict:
     """Run all tests for all chat models in parallel."""
     import asyncio
@@ -257,12 +296,20 @@ async def run_all_tests(state: GraphState) -> dict:
     tool_messages = [HumanMessage(content="What's the weather in San Francisco? Also calculate 15 * 23.")]
     structured_messages = [HumanMessage(content="Tell me about John Smith, a 35 year old software engineer living in New York.")]
 
+    embedding_models = create_test_embeddings()
+    embedding_texts = [state["prompt"]]
+
     # Run all models in parallel
     tasks = [
         test_single_model_all(name, model, state["messages"], tools, tool_messages, structured_messages)
         for name, model in models
     ]
+    embedding_tasks = [
+        test_single_embedding_model(name, model, embedding_texts)
+        for name, model in embedding_models
+    ]
     results_list = await asyncio.gather(*tasks)
+    embedding_results_list = await asyncio.gather(*embedding_tasks)
 
     # Aggregate results
     all_model_results = {}
@@ -274,6 +321,9 @@ async def run_all_tests(state: GraphState) -> dict:
         total_result.content_length += result.content_length
         total_result.tool_calls += result.tool_calls
 
+    for name, model_results in embedding_results_list:
+        all_model_results[name] = model_results
+
     # Build summary
     logger.info("="*80)
     summary_lines = []
@@ -282,6 +332,14 @@ async def run_all_tests(state: GraphState) -> dict:
             summary_lines.append(f"{model_name}:")
             results = all_model_results[model_name]
             for test_name in ["invoke", "ainvoke", "stream", "astream", "tool_calling", "structured_output"]:
+                if test_name in results:
+                    summary_lines.append(f"  {test_name}: {results[test_name]}")
+
+    for model_name in ["UiPathOpenAIEmbeddings", "UiPathAzureOpenAIEmbeddings"]:
+        if model_name in all_model_results:
+            summary_lines.append(f"{model_name}:")
+            results = all_model_results[model_name]
+            for test_name in ["embed_documents", "aembed_documents"]:
                 if test_name in results:
                     summary_lines.append(f"  {test_name}: {results[test_name]}")
 
