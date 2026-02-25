@@ -11,9 +11,12 @@ from uipath.agent.models.agent import (
     AgentSettings,
     LowCodeAgentDefinition,
 )
+from uipath.platform.guardrails import BuiltInValidatorGuardrail
+from uipath_langchain.agent.guardrails.actions.base_action import GuardrailAction
 
 from uipath_agents.agent_graph_builder import build_agent_graph
 from uipath_agents.agent_graph_builder.config import AgentExecutionType
+from uipath_agents.agent_graph_builder.graph import _filter_guardrails_for_evals
 from uipath_agents.agent_graph_builder.version import supports_parallel_tool_calls
 
 
@@ -884,3 +887,73 @@ class TestBuildAgentGraphParallelToolCalls:
 
             config = mock_create.call_args.kwargs["config"]
             assert config.parallel_tool_calls is True
+
+
+class TestFilterGuardrailsForEvals:
+    """Test filtering of guardrails disabled for evaluations."""
+
+    @staticmethod
+    def _make_guardrail(name: str, enabled_for_evals: bool) -> MagicMock:
+        g = MagicMock(spec=BuiltInValidatorGuardrail)
+        g.name = name
+        g.enabled_for_evals = enabled_for_evals
+        return g
+
+    def test_removes_disabled_guardrails_during_eval(self) -> None:
+        """Guardrails with enabled_for_evals=False are excluded in eval mode."""
+        action = MagicMock(spec=GuardrailAction)
+        enabled = self._make_guardrail("Enabled", enabled_for_evals=True)
+        disabled = self._make_guardrail("Disabled", enabled_for_evals=False)
+
+        guardrails = [(enabled, action), (disabled, action)]
+
+        result = _filter_guardrails_for_evals(guardrails, AgentExecutionType.EVAL)
+
+        assert len(result) == 1
+        assert result[0][0] == enabled
+
+    def test_keeps_all_guardrails_for_runtime(self) -> None:
+        """All guardrails are kept when running in runtime mode."""
+        action = MagicMock(spec=GuardrailAction)
+        enabled = self._make_guardrail("Enabled", enabled_for_evals=True)
+        disabled = self._make_guardrail("Disabled", enabled_for_evals=False)
+
+        guardrails = [(enabled, action), (disabled, action)]
+
+        result = _filter_guardrails_for_evals(guardrails, AgentExecutionType.RUNTIME)
+
+        assert len(result) == 2
+
+    def test_keeps_all_guardrails_for_playground(self) -> None:
+        """All guardrails are kept when running in playground mode."""
+        action = MagicMock(spec=GuardrailAction)
+        enabled = self._make_guardrail("Enabled", enabled_for_evals=True)
+        disabled = self._make_guardrail("Disabled", enabled_for_evals=False)
+
+        guardrails = [(enabled, action), (disabled, action)]
+
+        result = _filter_guardrails_for_evals(guardrails, AgentExecutionType.PLAYGROUND)
+
+        assert len(result) == 2
+
+    def test_removes_all_when_all_disabled_during_eval(self) -> None:
+        """All guardrails filtered out when all have enabled_for_evals=False in eval."""
+        action = MagicMock(spec=GuardrailAction)
+        g1 = self._make_guardrail("G1", enabled_for_evals=False)
+        g2 = self._make_guardrail("G2", enabled_for_evals=False)
+
+        guardrails = [(g1, action), (g2, action)]
+
+        result = _filter_guardrails_for_evals(guardrails, AgentExecutionType.EVAL)
+
+        assert len(result) == 0
+
+    def test_handles_none_input(self) -> None:
+        """Passing None returns an empty list."""
+        result = _filter_guardrails_for_evals(None, AgentExecutionType.EVAL)
+        assert result == []
+
+    def test_handles_empty_input(self) -> None:
+        """Passing an empty sequence returns an empty list."""
+        result = _filter_guardrails_for_evals([], AgentExecutionType.EVAL)
+        assert result == []

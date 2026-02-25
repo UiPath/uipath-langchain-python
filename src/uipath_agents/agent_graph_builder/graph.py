@@ -1,13 +1,15 @@
 """Agent graph construction - wrapper delegating to uipath_langchain.agent.graph."""
 
-from typing import Any
+from typing import Any, Sequence
 
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from uipath.agent.models.agent import (
     LowCodeAgentDefinition,
 )
+from uipath.platform.guardrails import BaseGuardrail
 from uipath.runtime.base import UiPathDisposableProtocol
 from uipath_langchain.agent.guardrails import build_guardrails_with_actions
+from uipath_langchain.agent.guardrails.actions.base_action import GuardrailAction
 from uipath_langchain.agent.react import (
     AgentGraphConfig,
     create_agent,
@@ -25,6 +27,24 @@ from .message_utils import create_message_factory
 from .session_info_debug_state import SessionInfoDebugStateFactory
 
 AGENT_MAX_ITERATIONS_DEFAULT = 25
+
+
+def _filter_guardrails_for_evals(
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None,
+    execution_type: AgentExecutionType,
+) -> list[tuple[BaseGuardrail, GuardrailAction]]:
+    """Filter out guardrails disabled for evaluations.
+
+    When running inside an evaluation, guardrails with
+    ``enabled_for_evals=False`` are excluded.
+    """
+    if execution_type != AgentExecutionType.EVAL:
+        return list(guardrails or [])
+    return [
+        (guardrail, action)
+        for guardrail, action in (guardrails or [])
+        if guardrail.enabled_for_evals
+    ]
 
 
 async def build_agent_graph(
@@ -74,6 +94,7 @@ async def build_agent_graph(
     messages = create_message_factory(agent_definition, input_model)
 
     guardrails = build_guardrails_with_actions(agent_definition.guardrails, tools)
+    guardrails = _filter_guardrails_for_evals(guardrails, execution_type)
 
     agent_config = AgentGraphConfig(
         llm_messages_limit=agent_definition.settings.max_iterations
