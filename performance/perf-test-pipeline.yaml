@@ -1,0 +1,99 @@
+trigger: none
+
+parameters:
+  - name: scenarios
+    type: object
+    default:
+      - mode: 'startUnattended'
+        processKey: '23899934-E6C1-4055-A481-66C0F890FD47'
+        solutionProjectId: ''
+        inputArguments: '{\"longString\":\"test\"}'
+        folderId: '297704'
+        duration: '1s'
+        rate: '1'
+        timeUnit: '1s'
+        preAllocatedVUs: '1200'
+        maxVUs: '1200'
+        testId: 'Simple_Agent_Unattended'
+        dependsOn: []
+      - mode: 'startPlayground'
+        processKey: ''
+        solutionProjectId: '48d96482-dfe2-48eb-9361-6eb5fe78bb91'
+        inputArguments: '{\"longString\":\"test\"}'
+        folderId: '297721'
+        duration: '1s'
+        rate: '1'
+        preAllocatedVUs: '1200'
+        maxVUs: '1200'
+        testId: 'Simple_Agent_Playground'
+        dependsOn: 'Simple_Agent_Unattended'
+  - name: cloudEnvironment
+    type: string
+    default: 'staging'
+  - name: organizationName
+    type: string
+    default: 'testcloudperformance'
+  - name: organizationId
+    type: string
+    default: 'c0c241d2-01e4-4c55-82fa-2f70083dd89e'
+  - name: tenantName
+    type: string
+    default: 'aop_03_alex_groza'
+  - name: tenantId
+    type: string
+    default: '11cb2dc5-c10f-4f0c-a5b1-ac238eb27507'
+  - name: haltWaitThreshold
+    type: string
+    default: '5'
+  - name: socketTimeoutMinutes
+    type: string
+    default: '5'
+
+
+pool:
+  name: 'Agents-Perf-Test-Pool'
+
+stages:
+  - stage: PerformanceTests
+    displayName: Run Performance Tests
+    jobs:
+      - ${{ each scenario in parameters.scenarios }}:
+        - job: ${{ scenario.testId }}
+          timeoutInMinutes: 0
+          displayName: Run ${{ scenario.agent }} in ${{ scenario.mode }} mode
+          dependsOn:
+              - ${{ scenario.dependsOn }}
+          steps:
+            - task: PowerShell@2
+              displayName: 'Run ${{ scenario.agent }} in ${{ scenario.mode }} mode'
+              inputs:
+                targetType: 'inline'
+                script: |
+                  Set-Location -Path "$(Build.SourcesDirectory)/performance"
+                  $env:PERF_USERNAME='$(username)'
+                  $env:PERF_PASSWORD='$(password)'
+                  $env:MODE='${{ scenario.mode }}'
+                  $env:PROCESS_KEY='${{ scenario.processKey }}'
+                  $env:SOLUTION_PROJECT_ID='${{ scenario.solutionProjectId }}'
+                  $env:INPUT_ARGUMENTS='${{ scenario.inputArguments }}'
+                  $env:FOLDER_ID='${{ scenario.folderId }}'
+                  $env:DURATION='${{ scenario.duration }}'
+                  $env:RATE='${{ scenario.rate }}'
+                  $env:TIME_UNIT='${{ scenario.timeUnit }}'
+                  $env:PRE_ALLOCATED_VUS='${{ scenario.preAllocatedVUs }}'
+                  $env:MAX_VUS='${{ scenario.maxVUs }}'
+                  $env:CLOUD_ENVIRONMENT='${{ parameters.cloudEnvironment }}'
+                  $env:ORGANIZATION_NAME='${{ parameters.organizationName }}'
+                  $env:ORGANIZATION_ID='${{ parameters.organizationId }}'
+                  $env:TENANT_NAME='${{ parameters.tenantName }}'
+                  $env:TENANT_ID='${{ parameters.tenantId }}'
+                  $env:HALT_WAIT_THRESHOLD='${{ parameters.haltWaitThreshold }}'
+                  $env:SOCKET_TIMEOUT_MINUTES='${{ parameters.socketTimeoutMinutes }}'
+                  ./run.ps1
+              continueOnError: true
+
+            - task: PublishBuildArtifacts@1
+              displayName: 'Publish Results'
+              inputs:
+                PathtoPublish: '$(Build.SourcesDirectory)/performance/results'
+                ArtifactName: '${{ scenario.testId }}'

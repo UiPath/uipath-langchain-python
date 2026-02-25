@@ -1,0 +1,20 @@
+# k6 specific
+k6-summary-*.json
+
+# Test results
+results/
+*.log
+*.html
+*.csv
+*.json
+
+# Environment files
+.env
+*.env.json
+
+# Dependencies
+node_modules/
+
+# OS specific
+.DS_Store
+Thumbs.db 
