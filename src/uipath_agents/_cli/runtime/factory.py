@@ -53,6 +53,7 @@ from ..._observability.llmops.callback import _get_ancestor_spans, _get_current_
 from ..._observability.utils import configure_appinsights_cloud_role, setup_otel_env
 from ..constants import AGENT_ENTRYPOINT
 from ..utils import _prepare_agent_execution_contract, load_agent_configuration
+from .reporter import ReporterRuntime
 from .runtime import AgentsLangGraphRuntime
 
 load_dotenv()
@@ -79,6 +80,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         logger.info(f"Initializing AgentsRuntimeFactory for command {context.command}")
         _prepare_agent_execution_contract()
         self._disposables: list[UiPathDisposableProtocol] = []
+        self._agent_definition: AgentDefinition | None = None
 
         super().__init__(context)
 
@@ -102,14 +104,14 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             # Extract settings override from kwargs to pass through method chain
             settings = kwargs.get("settings")
 
-            agent_definition = self._load_agent_definition(entrypoint, settings)
+            self._agent_definition = self._load_agent_definition(entrypoint, settings)
 
             # Get shared memory instance
             memory = await self._get_memory()
 
             # Pass definition to graph loading
             compiled_graph = await self._resolve_and_compile_graph(
-                entrypoint, memory, agent_definition=agent_definition, **kwargs
+                entrypoint, memory, agent_definition=self._agent_definition, **kwargs
             )
 
             return await self._create_runtime(
@@ -117,10 +119,22 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
                 runtime_id=runtime_id,
                 entrypoint=entrypoint,
                 memory=memory,
-                agent_definition=agent_definition,
+                agent_definition=self._agent_definition,
             )
         except Exception as e:
-            raise ExceptionMapper.map_config(e) from e
+            reporter = ReporterRuntime(
+                ExceptionMapper.map_config(e),
+                agent_definition=self._agent_definition,
+            )
+            span_factory, callback, event_emitter = self._create_telemetry_components()
+            return InstrumentedRuntime(
+                reporter,
+                span_factory,
+                callback,
+                self.context,
+                event_emitter=event_emitter,
+                agent_definition=self._agent_definition,
+            )
 
     async def get_settings(self) -> UiPathRuntimeFactorySettings | None:
         """Return factory settings with low-code specific trace filtering."""
@@ -369,13 +383,9 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             except Exception:
                 pass  # Folder key fetch failed, LlmOps tracing may fail
 
-        llmops_exporter = LlmOpsHttpExporter()
-        filtered_exporter = FilteringSpanExporter(
-            llmops_exporter, filter_fn=is_custom_instrumentation_span
+        span_factory, instrumentation_callback, event_emitter = (
+            self._create_telemetry_components()
         )
-        span_factory = LlmOpsSpanFactory(exporter=filtered_exporter)
-        instrumentation_callback = LlmOpsInstrumentationCallback(span_factory)
-        event_emitter = TelemetryEventEmitter()
 
         base_runtime = AgentsLangGraphRuntime(
             graph=compiled_graph,
@@ -406,6 +416,19 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             )
 
         return instrumented_runtime
+
+    def _create_telemetry_components(
+        self,
+    ) -> tuple[LlmOpsSpanFactory, LlmOpsInstrumentationCallback, TelemetryEventEmitter]:
+        """Create the telemetry component chain for instrumentation."""
+        llmops_exporter = LlmOpsHttpExporter()
+        filtered_exporter = FilteringSpanExporter(
+            llmops_exporter, filter_fn=is_custom_instrumentation_span
+        )
+        span_factory = LlmOpsSpanFactory(exporter=filtered_exporter)
+        callback = LlmOpsInstrumentationCallback(span_factory)
+        event_emitter = TelemetryEventEmitter()
+        return span_factory, callback, event_emitter
 
     def _wrap_in_resumable_runtime(
         self,
