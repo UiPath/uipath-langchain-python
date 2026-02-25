@@ -185,23 +185,6 @@ class UiPathOpenAIEmbeddings(UiPathRequestMixin, OpenAIEmbeddings):
             model=self.model_name, api_version=self.openai_api_version
         )
 
-    @property
-    def url(self) -> str:
-        """Get the full URL for API requests."""
-        return self.endpoint
-
-    @property
-    def auth_headers(self) -> dict[str, str]:
-        """Get authentication headers for API requests."""
-        headers = {}
-        if self.openai_api_key:
-            headers["Authorization"] = (
-                f"Bearer {self.openai_api_key.get_secret_value()}"
-            )
-        if self.default_headers:
-            headers.update(self.default_headers)
-        return headers
-
     def get_usage_stats(self) -> dict[str, int]:
         """Get token usage statistics.
 
