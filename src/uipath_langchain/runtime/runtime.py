@@ -456,14 +456,14 @@ class UiPathLangGraphRuntime:
         return UiPathBreakpointResult(
             breakpoint_node=breakpoint_node,
             breakpoint_type=breakpoint_type,
-            current_state=serialize_output(graph_state.values),
+            current_state=serialize_output(graph_state.values) or {},
             next_nodes=next_nodes,
         )
 
     def _create_success_result(self, output: Any) -> UiPathRuntimeResult:
         """Create result for successful completion."""
         return UiPathRuntimeResult(
-            output=serialize_output(output),
+            output=serialize_output(output) or {},
             status=UiPathRuntimeStatus.SUCCESSFUL,
         )
 
