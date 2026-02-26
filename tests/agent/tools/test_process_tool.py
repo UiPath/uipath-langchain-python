@@ -121,6 +121,7 @@ class TestProcessToolInvocation:
     ):
         """Test that invoking the tool calls client.processes.invoke_async."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key-123"
         mock_job.folder_key = "folder-key-123"
 
         mock_client = MagicMock()
@@ -138,6 +139,7 @@ class TestProcessToolInvocation:
             folder_path="/Shared/MyFolder",
             attachments=[],
             parent_span_id=None,
+            parent_operation_id=None,
         )
 
     @pytest.mark.asyncio
@@ -148,6 +150,7 @@ class TestProcessToolInvocation:
     ):
         """Test that after invoking, the tool interrupts with WaitJob."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key-456"
         mock_job.folder_key = "folder-key-456"
 
         mock_client = MagicMock()
@@ -173,6 +176,7 @@ class TestProcessToolInvocation:
     ):
         """Test that input arguments are correctly passed to invoke_async."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
         mock_client = MagicMock()
@@ -197,6 +201,7 @@ class TestProcessToolInvocation:
     ):
         """Test that the tool returns the value from interrupt()."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
         mock_client = MagicMock()
@@ -222,6 +227,7 @@ class TestProcessToolSpanContext:
     ):
         """Test that parent_span_id from _span_context is forwarded to invoke_async."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
         mock_client = MagicMock()
@@ -249,6 +255,7 @@ class TestProcessToolSpanContext:
     ):
         """Test that parent_span_id is popped (consumed) from _span_context after use."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
         mock_client = MagicMock()
@@ -274,6 +281,7 @@ class TestProcessToolSpanContext:
     ):
         """Test that parent_span_id defaults to None when _span_context is empty."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
         mock_client = MagicMock()

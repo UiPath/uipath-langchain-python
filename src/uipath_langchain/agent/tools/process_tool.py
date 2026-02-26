@@ -5,7 +5,7 @@ from typing import Any
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
-from uipath.agent.models.agent import AgentProcessToolResourceConfig
+from uipath.agent.models.agent import AgentProcessToolResourceConfig, AgentToolType
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.common import WaitJob
@@ -38,6 +38,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
     output_model: Any = create_model(resource.output_schema)
 
     _span_context: dict[str, Any] = {}
+    _bts_context: dict[str, Any] = {}
 
     async def process_tool_fn(**kwargs: Any):
         attachments = get_job_attachments(input_model, kwargs)
@@ -52,6 +53,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
         )
         async def invoke_process(**_tool_kwargs: Any):
             parent_span_id = _span_context.pop("parent_span_id", None)
+            parent_operation_id = _bts_context.pop("parent_operation_id", None)
 
             @durable_interrupt
             async def start_job():
@@ -62,7 +64,17 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
                     folder_path=folder_path,
                     attachments=attachments,
                     parent_span_id=parent_span_id,
+                    parent_operation_id=parent_operation_id,
                 )
+
+                if job.key:
+                    bts_key = (
+                        "wait_for_agent_job_key"
+                        if resource.type == AgentToolType.AGENT
+                        else "wait_for_job_key"
+                    )
+                    _bts_context[bts_key] = str(job.key)
+
                 return WaitJob(job=job, process_folder_key=job.folder_key)
 
             return await start_job()
@@ -92,6 +104,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             "args_schema": input_model,
             "output_schema": output_model,
             "_span_context": _span_context,
+            "_bts_context": _bts_context,
         },
         argument_properties=resource.argument_properties,
     )
