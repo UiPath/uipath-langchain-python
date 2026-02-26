@@ -72,6 +72,7 @@ class AwsBedrockCompletionsPassthroughClient:
         self._vendor = "awsbedrock"
         self._url: Optional[str] = None
         self.header_capture = header_capture
+        self._read_timeout = float(os.getenv("UIPATH_TIMEOUT_SECONDS", "120"))
 
     @property
     def endpoint(self) -> str:
@@ -108,7 +109,8 @@ class AwsBedrockCompletionsPassthroughClient:
             config=botocore.config.Config(
                 retries={
                     "total_max_attempts": 1,
-                }
+                },
+                read_timeout=self._read_timeout,
             ),
         )
         client.meta.events.register(
