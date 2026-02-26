@@ -124,11 +124,15 @@ class TestProcessToolInvocation:
         mock_job.key = "job-key-123"
         mock_job.folder_key = "folder-key-123"
 
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
         mock_client = MagicMock()
         mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
         mock_uipath_class.return_value = mock_client
 
-        mock_interrupt.return_value = {"output": "result"}
+        mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(process_resource)
         await tool.ainvoke({})
@@ -148,16 +152,20 @@ class TestProcessToolInvocation:
     async def test_invoke_interrupts_with_wait_job(
         self, mock_uipath_class, mock_interrupt, process_resource
     ):
-        """Test that after invoking, the tool interrupts with WaitJob."""
+        """Test that after invoking, the tool interrupts with WaitJobRaw."""
         mock_job = MagicMock(spec=Job)
         mock_job.key = "job-key-456"
         mock_job.folder_key = "folder-key-456"
 
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
         mock_client = MagicMock()
         mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
         mock_uipath_class.return_value = mock_client
 
-        mock_interrupt.return_value = {"output": "done"}
+        mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(process_resource)
         await tool.ainvoke({})
@@ -179,11 +187,15 @@ class TestProcessToolInvocation:
         mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
         mock_client = MagicMock()
         mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
         mock_uipath_class.return_value = mock_client
 
-        mock_interrupt.return_value = {"result": "processed"}
+        mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(process_resource_with_inputs)
         await tool.ainvoke({"name": "test-data", "count": 42})
@@ -196,24 +208,59 @@ class TestProcessToolInvocation:
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
-    async def test_invoke_returns_interrupt_value(
+    async def test_invoke_returns_output_from_extract(
         self, mock_uipath_class, mock_interrupt, process_resource
     ):
-        """Test that the tool returns the value from interrupt()."""
+        """Test that the tool returns the extracted job output on success."""
         mock_job = MagicMock(spec=Job)
         mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
         mock_client = MagicMock()
         mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(
+            return_value='{"output_arg": "value123"}'
+        )
         mock_uipath_class.return_value = mock_client
 
-        mock_interrupt.return_value = {"output_arg": "value123"}
+        mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(process_resource)
         result = await tool.ainvoke({})
 
         assert result == {"output_arg": "value123"}
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_invoke_returns_error_message_on_faulted_job(
+        self, mock_uipath_class, mock_interrupt, process_resource
+    ):
+        """Test that the tool returns an error message string when the job is faulted."""
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
+        mock_job.folder_key = "folder-key"
+
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "faulted"
+        mock_resumed_job.job_error = None
+        mock_resumed_job.info = "Something went wrong in the workflow"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_uipath_class.return_value = mock_client
+
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(process_resource)
+        result = await tool.ainvoke({})
+
+        assert isinstance(result, str)
+        assert "Process did not finish successfully" in result
+        assert "Something went wrong in the workflow" in result
 
 
 class TestProcessToolSpanContext:
@@ -230,11 +277,15 @@ class TestProcessToolSpanContext:
         mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
         mock_client = MagicMock()
         mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
         mock_uipath_class.return_value = mock_client
 
-        mock_interrupt.return_value = {}
+        mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(process_resource)
         assert tool.metadata is not None
@@ -258,11 +309,15 @@ class TestProcessToolSpanContext:
         mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
         mock_client = MagicMock()
         mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
         mock_uipath_class.return_value = mock_client
 
-        mock_interrupt.return_value = {}
+        mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(process_resource)
         assert tool.metadata is not None
@@ -284,11 +339,15 @@ class TestProcessToolSpanContext:
         mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
         mock_client = MagicMock()
         mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
         mock_uipath_class.return_value = mock_client
 
-        mock_interrupt.return_value = {}
+        mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(process_resource)
         # Don't set any parent_span_id

@@ -1,5 +1,6 @@
 """Process tool creation for UiPath process execution."""
 
+import json
 from typing import Any
 
 from langchain.tools import BaseTool
@@ -8,7 +9,7 @@ from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import AgentProcessToolResourceConfig, AgentToolType
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import WaitJob
+from uipath.platform.common import WaitJobRaw
 
 from uipath_langchain.agent.react.job_attachments import get_job_attachments
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
@@ -75,9 +76,22 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
                     )
                     _bts_context[bts_key] = str(job.key)
 
-                return WaitJob(job=job, process_folder_key=job.folder_key)
+                return WaitJobRaw(job=job, process_folder_key=job.folder_key)
 
-            return await start_job()
+            job = await start_job()
+
+            if (job.state or "").lower() == "faulted":
+                error_info = str(job.job_error or job.info or "Unknown error")
+                return f"Process did not finish successfully. Error: {error_info}"
+
+            client = UiPath()
+            output_str = await client.jobs.extract_output_async(job)
+            if output_str:
+                try:
+                    return json.loads(output_str)
+                except (json.JSONDecodeError, TypeError):
+                    return output_str
+            return output_str
 
         return await invoke_process(**kwargs)
 
