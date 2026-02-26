@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import Optional
+from urllib.parse import quote
 
 import httpx
 from langchain_openai import AzureChatOpenAI
@@ -161,7 +162,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         if job_key := os.getenv("UIPATH_JOB_KEY"):
             headers["X-UiPath-JobKey"] = job_key
         if process_key := os.getenv("UIPATH_PROCESS_KEY"):
-            headers["X-UiPath-ProcessKey"] = process_key
+            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
 
         # Allow extra_headers to override defaults
         headers.update(self._extra_headers)

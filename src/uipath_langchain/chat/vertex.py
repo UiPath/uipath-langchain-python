@@ -2,6 +2,7 @@ import logging
 import os
 from collections.abc import AsyncIterator, Iterator
 from typing import Any, Optional
+from urllib.parse import quote
 
 import httpx
 from langchain_core.callbacks import (
@@ -265,7 +266,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         if job_key := os.getenv("UIPATH_JOB_KEY"):
             headers["X-UiPath-JobKey"] = job_key
         if process_key := os.getenv("UIPATH_PROCESS_KEY"):
-            headers["X-UiPath-ProcessKey"] = process_key
+            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
         return headers
 
     @staticmethod
