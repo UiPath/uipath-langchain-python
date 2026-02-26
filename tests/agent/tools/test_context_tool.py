@@ -178,7 +178,7 @@ class TestHandleDeepRag:
             tool = handle_deep_rag("test_tool", resource)
 
             with patch(
-                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt:
                 mock_interrupt.return_value = {"mocked": "response"}
                 assert tool.coroutine is not None
@@ -200,7 +200,7 @@ class TestHandleDeepRag:
 
         task_names = []
         with patch(
-            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
 
@@ -261,7 +261,7 @@ class TestHandleDeepRag:
         tool = handle_deep_rag("test_tool", resource)
 
         with patch(
-            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
@@ -629,7 +629,7 @@ class TestHandleBatchTransform:
         mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-1")
         with (
             patch(
-                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt,
             patch(
                 "uipath_langchain.agent.tools.context_tool.UiPath",
@@ -677,7 +677,7 @@ class TestHandleBatchTransform:
         mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-2")
         with (
             patch(
-                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt,
             patch(
                 "uipath_langchain.agent.tools.context_tool.UiPath",
@@ -705,7 +705,7 @@ class TestHandleBatchTransform:
         mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-3")
         with (
             patch(
-                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt,
             patch(
                 "uipath_langchain.agent.tools.context_tool.UiPath",
@@ -754,7 +754,7 @@ class TestHandleBatchTransform:
         mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-4")
         with (
             patch(
-                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt,
             patch(
                 "uipath_langchain.agent.tools.context_tool.UiPath",

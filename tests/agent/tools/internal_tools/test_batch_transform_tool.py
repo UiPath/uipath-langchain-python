@@ -150,7 +150,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -180,9 +180,8 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        # durable_interrupt always calls interrupt(); first for index, second for transform
+        # Index is ready → ReadyEphemeralIndex skips interrupt(). Only create_batch_transform fires.
         mock_interrupt.side_effect = [
-            mock_index,
             {"file_path": "/path/to/output.csv"},
         ]
 
@@ -226,8 +225,8 @@ class TestCreateBatchTransformTool:
         assert call_kwargs["usage"] == "BatchRAG"
         assert mock_attachment.ID in call_kwargs["attachments"]
 
-        # Both durable_interrupts call interrupt()
-        assert mock_interrupt.call_count == 2
+        # Only create_batch_transform calls interrupt(); index was instant-resumed
+        assert mock_interrupt.call_count == 1
 
         # Verify attachment was uploaded
         mock_uipath.jobs.create_attachment_async.assert_called_once_with(
@@ -243,7 +242,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -324,7 +323,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -354,9 +353,8 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        # durable_interrupt always calls interrupt(); first for index, second for transform
+        # Index is ready → ReadyEphemeralIndex skips interrupt(). Only create_batch_transform fires.
         mock_interrupt.side_effect = [
-            mock_index,
             {"output": "Transformation complete"},
         ]
 
@@ -397,7 +395,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -427,9 +425,8 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        # durable_interrupt always calls interrupt(); first for index, second for transform
+        # Index is ready → ReadyEphemeralIndex skips interrupt(). Only create_batch_transform fires.
         mock_interrupt.side_effect = [
-            mock_index,
             {"file_path": "output.csv"},
         ]
 
@@ -461,8 +458,8 @@ class TestCreateBatchTransformTool:
             }
         }
 
-        # Both durable_interrupts call interrupt()
-        assert mock_interrupt.call_count == 2
+        # Only create_batch_transform calls interrupt(); index was instant-resumed
+        assert mock_interrupt.call_count == 1
 
         # Verify attachment was uploaded with default path
         mock_uipath.jobs.create_attachment_async.assert_called_once_with(
@@ -478,7 +475,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -508,9 +505,8 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        # durable_interrupt always calls interrupt(); first for index, second for transform
+        # Index is ready → ReadyEphemeralIndex skips interrupt(). Only create_batch_transform fires.
         mock_interrupt.side_effect = [
-            mock_index,
             {"file_path": "/custom/path/result.csv"},
         ]
 

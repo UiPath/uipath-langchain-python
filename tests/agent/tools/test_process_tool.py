@@ -114,7 +114,7 @@ class TestProcessToolInvocation:
     """Test process tool invocation behavior: invoke then interrupt."""
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_calls_processes_invoke_async(
         self, mock_uipath_class, mock_interrupt, process_resource
@@ -141,7 +141,7 @@ class TestProcessToolInvocation:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_interrupts_with_wait_job(
         self, mock_uipath_class, mock_interrupt, process_resource
@@ -166,7 +166,7 @@ class TestProcessToolInvocation:
         assert wait_job_arg.process_folder_key == "folder-key-456"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_passes_input_arguments(
         self, mock_uipath_class, mock_interrupt, process_resource_with_inputs
@@ -190,7 +190,7 @@ class TestProcessToolInvocation:
         assert call_kwargs["folder_path"] == "/Shared/DataFolder"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_returns_interrupt_value(
         self, mock_uipath_class, mock_interrupt, process_resource
@@ -215,7 +215,7 @@ class TestProcessToolSpanContext:
     """Test that _span_context is properly wired for tracing."""
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_span_context_parent_span_id_passed_to_invoke(
         self, mock_uipath_class, mock_interrupt, process_resource
@@ -242,7 +242,7 @@ class TestProcessToolSpanContext:
         assert call_kwargs["parent_span_id"] == "span-abc-123"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_span_context_consumed_after_invoke(
         self, mock_uipath_class, mock_interrupt, process_resource
@@ -267,7 +267,7 @@ class TestProcessToolSpanContext:
         assert "parent_span_id" not in tool.metadata["_span_context"]
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_span_context_defaults_to_none_when_empty(
         self, mock_uipath_class, mock_interrupt, process_resource
