@@ -66,33 +66,47 @@ class UiPathToolNode(RunnableCallable):
         tool: BaseTool,
         wrapper: ToolWrapperType | None = None,
         awrapper: AsyncToolWrapperType | None = None,
+        handle_tool_errors: bool = False,
     ):
         super().__init__(func=self._func, afunc=self._afunc, name=tool.name)
         self.tool = tool
         self.wrapper = wrapper
         self.awrapper = awrapper
+        self.handle_tool_errors = handle_tool_errors
 
     def _func(self, state: AgentGraphState) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
             return None
-        if self.wrapper:
-            inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
-            result = self.wrapper(*inputs)
-        else:
-            result = self.tool.invoke(call)
-        return self._process_result(call, result)
+
+        try:
+            if self.wrapper:
+                inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
+                result = self.wrapper(*inputs)
+            else:
+                result = self.tool.invoke(call)
+            return self._process_result(call, result)
+        except Exception as e:
+            if self.handle_tool_errors:
+                return self._process_error_result(call, e)
+            raise
 
     async def _afunc(self, state: AgentGraphState) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
             return None
-        if self.awrapper:
-            inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
-            result = await self.awrapper(*inputs)
-        else:
-            result = await self.tool.ainvoke(call)
-        return self._process_result(call, result)
+
+        try:
+            if self.awrapper:
+                inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
+                result = await self.awrapper(*inputs)
+            else:
+                result = await self.tool.ainvoke(call)
+            return self._process_result(call, result)
+        except Exception as e:
+            if self.handle_tool_errors:
+                return self._process_error_result(call, e)
+            raise
 
     def _extract_tool_call(self, state: AgentGraphState) -> ToolCall | None:
         """Extract the tool call from the state messages."""
@@ -113,6 +127,16 @@ class UiPathToolNode(RunnableCallable):
             return None
 
         return latest_ai_message.tool_calls[current_tool_call_index]
+
+    def _process_error_result(self, call: ToolCall, error: Exception) -> OutputType:
+        """Handle tool execution errors by creating an error ToolMessage."""
+        error_message = ToolMessage(
+            content=str(error),
+            name=call["name"],
+            tool_call_id=call["id"],
+            status="error",
+        )
+        return {"messages": [error_message]}
 
     def _process_result(
         self, call: ToolCall, result: dict[str, Any] | Command[Any] | ToolMessage | None
@@ -189,11 +213,15 @@ class ToolWrapperMixin:
         self.awrapper = awrapper
 
 
-def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, UiPathToolNode]:
+def create_tool_node(
+    tools: Sequence[BaseTool], handle_tool_errors: bool = False
+) -> dict[str, UiPathToolNode]:
     """Create individual ToolNode for each tool.
 
     Args:
         tools: Sequence of tools to create nodes for.
+        handle_tool_errors: If True, catch tool execution errors and return them as error ToolMessages
+            instead of letting exceptions propagate.
 
     Returns:
         Dict mapping tool.name -> ReactToolNode([tool]).
@@ -201,13 +229,19 @@ def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, UiPathToolNode]:
 
     Note:
         handle_tool_errors=False delegates error handling to LangGraph's error boundary.
+        handle_tool_errors=True will cause errors to be caught and converted to ToolMessages with status="error".
     """
     dict_mapping: dict[str, UiPathToolNode] = {}
     for tool in tools:
         if isinstance(tool, ToolWrapperMixin):
             dict_mapping[tool.name] = UiPathToolNode(
-                tool, wrapper=tool.wrapper, awrapper=tool.awrapper
+                tool,
+                wrapper=tool.wrapper,
+                awrapper=tool.awrapper,
+                handle_tool_errors=handle_tool_errors,
             )
         else:
-            dict_mapping[tool.name] = UiPathToolNode(tool, wrapper=None, awrapper=None)
+            dict_mapping[tool.name] = UiPathToolNode(
+                tool, wrapper=None, awrapper=None, handle_tool_errors=handle_tool_errors
+            )
     return dict_mapping

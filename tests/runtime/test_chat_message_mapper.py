@@ -171,6 +171,7 @@ class TestMapMessages:
                     "content_part_id": "part-1",
                     "mime_type": "text/plain",
                     "data": {"inline": "hello from dict"},
+                    "citations": [],
                     "createdAt": "2025-01-15T10:30:00Z",
                     "updatedAt": "2025-01-15T10:30:00Z",
                 }
@@ -1204,7 +1205,34 @@ class TestMapEvent:
         assert event.tool_call is not None
         assert event.tool_call.tool_call_id == "tool-1"
         assert event.tool_call.end is not None
+        assert event.tool_call.end.is_error == False
         assert event.tool_call.end.output == {"result": "success"}
+
+    @pytest.mark.asyncio
+    async def test_map_event_handles_tool_message_with_error(self):
+        """Should convert ToolMessage with error status to appropriate tool call end event."""
+        storage = create_mock_storage()
+        # Pre-populate the tool call mapping in storage
+        storage.get_value.return_value = {"tool-1": "msg-123"}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        tool_msg = ToolMessage(
+            content='{"exception": "Tool execution failed"}',
+            tool_call_id="tool-1",
+            status="error",
+        )
+
+        result = await mapper.map_event(tool_msg)
+
+        assert result is not None
+        assert len(result) == 2  # tool call end event + message end event
+        event = result[0]
+        assert event.message_id == "msg-123"
+        assert event.tool_call is not None
+        assert event.tool_call.tool_call_id == "tool-1"
+        assert event.tool_call.end is not None
+        assert event.tool_call.end.is_error == True
+        assert event.tool_call.end.output == {"exception": "Tool execution failed"}
 
     @pytest.mark.asyncio
     async def test_map_event_cleans_up_tool_mapping_after_use(self):
