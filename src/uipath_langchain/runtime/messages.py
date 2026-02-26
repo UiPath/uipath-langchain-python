@@ -434,6 +434,7 @@ class UiPathChatMessagesMapper:
                     end=UiPathConversationToolCallEndEvent(
                         timestamp=self.get_timestamp(),
                         output=content_value,
+                        is_error=message.status == "error",
                     ),
                 ),
             )
