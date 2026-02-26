@@ -196,7 +196,6 @@ def handle_deep_rag(
 
         @durable_interrupt
         async def create_deep_rag():
-            # TODO: add glob pattern support
             return CreateDeepRag(
                 name=f"task-{uuid.uuid4()}",
                 index_name=index_name,
@@ -310,7 +309,6 @@ def handle_batch_transform(
 
         @durable_interrupt
         async def create_batch_transform():
-            # TODO: storage_bucket_folder_path_prefix support
             return CreateBatchTransform(
                 name=f"task-{uuid.uuid4()}",
                 index_name=index_name,
@@ -319,7 +317,7 @@ def handle_batch_transform(
                 index_folder_path=index_folder_path,
                 enable_web_search_grounding=enable_web_search_grounding,
                 output_columns=batch_transform_output_columns,
-                folder_path_prefix=glob_pattern,
+                storage_bucket_folder_path_prefix=glob_pattern,
             )
 
         await create_batch_transform()
