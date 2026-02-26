@@ -24,6 +24,21 @@ logger = logging.getLogger(__name__)
 _TAG_RE = re.compile(r'<uip:cite\s+((?:[a-z_]+="[^"]*"\s*)+)/\s*>')
 _ATTR_RE = re.compile(r'([a-z_]+)="([^"]*)"')
 
+# Matches <uip:cite ... /> tags that contain backslash-escaped quotes (e.g. title=\"foo\")
+# which can occur when LLM output is double-serialized or the model emits escaped JSON.
+_ESCAPED_TAG_RE = re.compile(r"<uip:cite\s+[^>]*\\\"[^>]*/\s*>")
+
+
+def _normalize_escaped_citation_tags(text: str) -> str:
+    """Replace backslash-escaped quotes within <uip:cite .../> tags with plain quotes."""
+    if '\\"' not in text:
+        return text
+
+    def _unescape_tag(m: re.Match[str]) -> str:
+        return m.group(0).replace('\\"', '"')
+
+    return _ESCAPED_TAG_RE.sub(_unescape_tag, text)
+
 
 @dataclass(frozen=True)  # frozen to make hashable / de-dupe sources
 class _ParsedCitation:
@@ -35,6 +50,7 @@ class _ParsedCitation:
 
 # <uip:cite .../> tags -> [(text_segment, citation_or_none)]
 def _parse_citations(text: str) -> list[tuple[str, _ParsedCitation | None]]:
+    text = _normalize_escaped_citation_tags(text)
     segments: list[tuple[str, _ParsedCitation | None]] = []
     cursor = 0
 

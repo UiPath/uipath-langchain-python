@@ -542,6 +542,30 @@ class TestCitationStreamProcessor:
         assert cited[0].data == "<uip "
         assert cited[0].citation.end.sources[0].url == "https://example.com"
 
+    def test_escaped_quotes_in_citation_tag_streaming(self):
+        """Streaming: production LLM output with backslash-escaped quotes in citation tags."""
+        proc = CitationStreamProcessor()
+        text = r"A fact<uip:cite title=\"Doc\" url=\"https://doc.com\"/>"
+        events = proc.add_chunk(text)
+        events.extend(proc.finalize())
+        cited = [e for e in events if e.citation is not None]
+        assert len(cited) == 1
+        assert cited[0].data == "A fact"
+        assert cited[0].citation.end.sources[0].url == "https://doc.com"
+
+    def test_escaped_quotes_split_across_chunks(self):
+        """Streaming: escaped citation tag split across chunks."""
+        proc = CitationStreamProcessor()
+        events1 = proc.add_chunk(r"Info<uip:cite title=\"Doc\" url=\"https://ex")
+        events2 = proc.add_chunk(r"ample.com\"/> more text")
+        all_events = events1 + events2
+        all_events.extend(proc.finalize())
+        combined = "".join(e.data for e in all_events if e.data)
+        assert combined == "Info more text"
+        cited = [e for e in all_events if e.citation is not None]
+        assert len(cited) == 1
+        assert cited[0].citation.end.sources[0].url == "https://example.com"
+
 
 class TestExtractCitationsFromText:
     """Test cases for extract_citations_from_text function."""
@@ -673,6 +697,59 @@ class TestExtractCitationsFromText:
         cleaned, citations = extract_citations_from_text(text)
         assert citations[0].sources[0].number == 1
         assert citations[1].sources[0].number == 2
+
+    def test_escaped_quotes_in_citation_tag(self):
+        """Production LLM output may contain literal backslash-escaped quotes in citation tags."""
+        text = r"Brie is healthy. <uip:cite title=\"Brie Cheese\" url=\"https://example.com\"/>"
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "Brie is healthy. "
+        assert len(citations) == 1
+        source = citations[0].sources[0]
+        assert isinstance(source, UiPathConversationCitationSourceUrl)
+        assert source.title == "Brie Cheese"
+        assert source.url == "https://example.com"
+
+    def test_multiple_escaped_citations(self):
+        """Multiple citation tags with backslash-escaped quotes are all parsed."""
+        text = (
+            r"Diet info. <uip:cite title=\"Nutrition Facts\" url=\"https://health.com/nutrition\"/>"
+            r" Brie is milder. <uip:cite title=\"Brie vs Camembert\" url=\"https://cheese.com/compare\"/>"
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "Diet info.  Brie is milder. "
+        assert len(citations) == 2
+        assert citations[0].sources[0].title == "Nutrition Facts"
+        assert citations[1].sources[0].title == "Brie vs Camembert"
+
+    def test_escaped_quotes_outside_citation_tags_not_modified(self):
+        """Backslash-escaped quotes in non-citation text are left unchanged."""
+        text = r"He said \"hello\" and left."
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == text
+        assert citations == []
+
+    def test_mixed_escaped_and_normal_citations(self):
+        """Mix of escaped and normal citation tags both parse correctly."""
+        text = (
+            r"Escaped<uip:cite title=\"Doc1\" url=\"https://a.com\"/>"
+            ' Normal<uip:cite title="Doc2" url="https://b.com"/>'
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "Escaped Normal"
+        assert len(citations) == 2
+        assert citations[0].sources[0].url == "https://a.com"
+        assert citations[1].sources[0].url == "https://b.com"
+
+    def test_escaped_reference_citation(self):
+        """Escaped quotes in reference-type citation tags."""
+        text = r"Finding<uip:cite title=\"Report.pdf\" reference=\"https://r.com\" page_number=\"5\"/>"
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "Finding"
+        assert len(citations) == 1
+        source = citations[0].sources[0]
+        assert isinstance(source, UiPathConversationCitationSourceMedia)
+        assert source.download_url == "https://r.com"
+        assert source.page_number == "5"
 
 
 class TestConvertCitationsToInlineTags:
