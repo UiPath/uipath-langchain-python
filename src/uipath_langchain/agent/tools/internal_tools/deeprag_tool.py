@@ -26,6 +26,9 @@ from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErr
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.durable_interrupt import durable_interrupt
+from uipath_langchain.agent.tools.internal_tools.resume_values import (
+    ReadyEphemeralIndex,
+)
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     add_query_field_to_schema,
 )
@@ -101,6 +104,7 @@ def create_deeprag_tool(
             example_calls=[],  # Examples cannot be provided for internal tools
         )
         async def invoke_deeprag(**_tool_kwargs: Any):
+            @durable_interrupt
             async def create_ephemeral_index():
                 uipath = UiPath()
                 ephemeral_index = (
@@ -109,21 +113,9 @@ def create_deeprag_tool(
                         attachments=[attachment_id],
                     )
                 )
-
-                # TODO this will not resume on concurrent runs for the same attachment
                 if ephemeral_index.in_progress_ingestion():
-
-                    @durable_interrupt
-                    async def wait_for_ephemeral_index():
-                        return WaitEphemeralIndex(index=ephemeral_index)
-
-                    index_result = await wait_for_ephemeral_index()
-                    if isinstance(index_result, dict):
-                        ephemeral_index = ContextGroundingIndex(**index_result)
-                    else:
-                        ephemeral_index = index_result
-
-                return ephemeral_index
+                    return WaitEphemeralIndex(index=ephemeral_index)
+                return ReadyEphemeralIndex(index=ephemeral_index)
 
             index_result = await create_ephemeral_index()
             if isinstance(index_result, dict):

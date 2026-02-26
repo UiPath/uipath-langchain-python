@@ -30,6 +30,9 @@ from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErr
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.durable_interrupt import durable_interrupt
+from uipath_langchain.agent.tools.internal_tools.resume_values import (
+    ReadyEphemeralIndex,
+)
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     BATCH_TRANSFORM_OUTPUT_SCHEMA,
     add_query_field_to_schema,
@@ -131,7 +134,7 @@ def create_batch_transform_tool(
                 )
                 if ephemeral_index.in_progress_ingestion():
                     return WaitEphemeralIndex(index=ephemeral_index)
-                return ephemeral_index
+                return ReadyEphemeralIndex(index=ephemeral_index)
 
             index_result = await create_ephemeral_index()
             if isinstance(index_result, dict):
