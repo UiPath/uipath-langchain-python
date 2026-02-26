@@ -1205,7 +1205,7 @@ class TestMapEvent:
         assert event.tool_call is not None
         assert event.tool_call.tool_call_id == "tool-1"
         assert event.tool_call.end is not None
-        assert event.tool_call.end.is_error == False
+        assert not event.tool_call.end.is_error
         assert event.tool_call.end.output == {"result": "success"}
 
     @pytest.mark.asyncio
@@ -1231,7 +1231,7 @@ class TestMapEvent:
         assert event.tool_call is not None
         assert event.tool_call.tool_call_id == "tool-1"
         assert event.tool_call.end is not None
-        assert event.tool_call.end.is_error == True
+        assert event.tool_call.end.is_error
         assert event.tool_call.end.output == {"exception": "Tool execution failed"}
 
     @pytest.mark.asyncio

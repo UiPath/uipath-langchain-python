@@ -76,7 +76,9 @@ def create_agent(
 
     init_node = create_init_node(messages, input_schema, config.is_conversational)
 
-    tool_nodes = create_tool_node(agent_tools, handle_tool_errors=config.is_conversational)
+    tool_nodes = create_tool_node(
+        agent_tools, handle_tool_errors=config.is_conversational
+    )
 
     # for conversational agents we transform deeprag's citation format into cas's
     if config.is_conversational:

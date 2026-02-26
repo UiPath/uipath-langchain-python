@@ -81,7 +81,9 @@ class UiPathToolNode(RunnableCallable):
 
         try:
             if self.wrapper:
-                inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
+                inputs = self._prepare_wrapper_inputs(
+                    self.wrapper, self.tool, call, state
+                )
                 result = self.wrapper(*inputs)
             else:
                 result = self.tool.invoke(call)
@@ -98,7 +100,9 @@ class UiPathToolNode(RunnableCallable):
 
         try:
             if self.awrapper:
-                inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
+                inputs = self._prepare_wrapper_inputs(
+                    self.awrapper, self.tool, call, state
+                )
                 result = await self.awrapper(*inputs)
             else:
                 result = await self.tool.ainvoke(call)

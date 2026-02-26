@@ -296,7 +296,7 @@ class TestUiPathToolNode:
             AgentRuntimeErrorCode.TOOL_INVALID_WRAPPER_STATE
         )
 
-    def test_tool_error_propagates_when_handle_errors_false(self):
+    def test_tool_error_propagates_when_handle_errors_false(self, mock_state):
         """Test that tool errors propagate when handle_tool_errors=False."""
         failing_tool = MockFailingTool()
         tool_call = {
@@ -310,7 +310,7 @@ class TestUiPathToolNode:
         node = UiPathToolNode(failing_tool, handle_tool_errors=False)
 
         with pytest.raises(ValueError) as exc_info:
-            node._func(state)
+            node._func(state)  # type: ignore[arg-type]
 
         assert "Tool execution failed: test input" in str(exc_info.value)
 
@@ -328,7 +328,7 @@ class TestUiPathToolNode:
         node = UiPathToolNode(failing_tool, handle_tool_errors=False)
 
         with pytest.raises(ValueError) as exc_info:
-            await node._afunc(state)
+            await node._afunc(state)  # type: ignore[arg-type]
 
         assert "Async tool execution failed: test input" in str(exc_info.value)
 
@@ -345,7 +345,7 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(failing_tool, handle_tool_errors=True)
 
-        result = node._func(state)
+        result = node._func(state)  # type: ignore[arg-type]
 
         assert result is not None
         assert isinstance(result, dict)
@@ -372,7 +372,7 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(failing_tool, handle_tool_errors=True)
 
-        result = await node._afunc(state)
+        result = await node._afunc(state)  # type: ignore[arg-type]
 
         assert result is not None
         assert isinstance(result, dict)
