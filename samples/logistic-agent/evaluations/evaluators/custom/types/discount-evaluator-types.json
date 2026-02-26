@@ -1,0 +1,73 @@
+{
+  "evaluatorTypeId": "DiscountEvaluator",
+  "evaluatorConfigSchema": {
+    "$defs": {
+      "DiscountEvaluationCriteria": {
+        "description": "Evaluation criteria for the Discount evaluator.",
+        "properties": {
+          "expected_discount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expected Discount"
+          }
+        },
+        "title": "DiscountEvaluationCriteria",
+        "type": "object"
+      }
+    },
+    "description": "Configuration for the Discount evaluator.",
+    "properties": {
+      "name": {
+        "default": "DiscountEvaluator",
+        "title": "Name",
+        "type": "string"
+      },
+      "description": {
+        "default": "",
+        "description": "The description of the evaluator",
+        "title": "Description",
+        "type": "string"
+      },
+      "default_evaluation_criteria": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/DiscountEvaluationCriteria"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "title": "DiscountEvaluatorConfig",
+    "type": "object"
+  },
+  "evaluationCriteriaSchema": {
+    "description": "Evaluation criteria for the Discount evaluator.",
+    "properties": {
+      "expected_discount": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Expected Discount"
+      }
+    },
+    "title": "DiscountEvaluationCriteria",
+    "type": "object"
+  },
+  "justificationSchema": {}
+}
