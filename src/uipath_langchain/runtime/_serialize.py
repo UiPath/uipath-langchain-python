@@ -14,9 +14,6 @@ def serialize_output(output: Any) -> Any:
     Returns:
         Dict[str, Any]: Serialized output as dictionary
     """
-    if output is None:
-        return {}
-
     # Handle LangGraph types
     if isinstance(output, Overwrite):
         return serialize_output(output.value)
