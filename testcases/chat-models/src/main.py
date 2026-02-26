@@ -8,8 +8,8 @@ from langgraph.graph import END, START, StateGraph, MessagesState
 from pydantic import BaseModel, Field
 from langchain_core.language_models import BaseChatModel
 
-from uipath_langchain.chat.bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
-from uipath_langchain.chat.vertex import UiPathChatVertex
+from uipath_langchain.chat import UiPathChatBedrock, UiPathChatBedrockConverse
+from uipath_langchain.chat import UiPathChatVertex
 from uipath_langchain.chat import UiPathChatOpenAI, UiPathChat, UiPathAzureChatOpenAI
 from uipath_langchain.embeddings import UiPathOpenAIEmbeddings, UiPathAzureOpenAIEmbeddings
 

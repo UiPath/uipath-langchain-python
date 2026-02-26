@@ -10,7 +10,7 @@ from langgraph.types import Command
 from langchain.agents import create_agent
 from langchain.messages import SystemMessage, HumanMessage
 
-from uipath_langchain.chat.models import UiPathChat
+from uipath_langchain.chat import UiPathChat
 from langchain_mcp_adapters.tools import load_mcp_tools
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
