@@ -150,7 +150,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -242,7 +242,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -323,7 +323,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -395,7 +395,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -475,7 +475,7 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,

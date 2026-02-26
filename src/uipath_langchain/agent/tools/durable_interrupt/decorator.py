@@ -39,26 +39,9 @@ from langgraph._internal._constants import CONFIG_KEY_SCRATCHPAD
 from langgraph.config import get_config
 from langgraph.types import interrupt
 
+from ._skip_interrupt import SkipInterruptValue
+
 F = TypeVar("F", bound=Callable[..., Any])
-
-
-class ResumeValue:
-    """Base class for instant-resume values in @durable_interrupt.
-
-    When a @durable_interrupt decorated function returns a ResumeValue,
-    the wrapper injects the resolved value into the scratchpad's resume list
-    and calls interrupt(None) — which returns immediately without raising
-    GraphInterrupt.  This keeps LangGraph's interrupt counter in sync while
-    avoiding an actual suspend/resume cycle.
-
-    Subclasses must implement the ``resume_value`` property.
-    """
-
-    @property
-    def resume_value(self) -> Any:
-        """The value to inject into the resume list and return to the caller."""
-        raise NotImplementedError
-
 
 # Tracks (scratchpad identity, call index) per node execution.
 # Resets automatically when the scratchpad changes (new node execution).
@@ -119,6 +102,10 @@ def durable_interrupt(fn: F) -> F:
     is skipped and ``interrupt(None)`` returns the resume value from the
     runtime.
 
+    If the body returns a ``SkipInterruptValue``, the resolved value is
+    injected into the scratchpad resume list and ``interrupt(None)`` returns
+    it immediately — no real suspend/resume cycle occurs.
+
     Replaces the ``@task`` + ``interrupt()`` two-step pattern with a single
     decorator that enforces the pairing contract.  Works correctly in both
     parent graphs and subgraphs.
@@ -147,7 +134,7 @@ def durable_interrupt(fn: F) -> F:
             if _is_resumed(scratchpad, idx):
                 return interrupt(None)
             result = await fn(*args, **kwargs)
-            if isinstance(result, ResumeValue):
+            if isinstance(result, SkipInterruptValue):
                 return _inject_resume(scratchpad, result.resume_value)
             return interrupt(result)
 
@@ -159,7 +146,7 @@ def durable_interrupt(fn: F) -> F:
         if _is_resumed(scratchpad, idx):
             return interrupt(None)
         result = fn(*args, **kwargs)
-        if isinstance(result, ResumeValue):
+        if isinstance(result, SkipInterruptValue):
             return _inject_resume(scratchpad, result.resume_value)
         return interrupt(result)
 

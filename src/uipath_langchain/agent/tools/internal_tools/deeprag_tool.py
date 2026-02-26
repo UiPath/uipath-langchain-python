@@ -25,9 +25,9 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.durable_interrupt import durable_interrupt
-from uipath_langchain.agent.tools.internal_tools.resume_values import (
-    ReadyEphemeralIndex,
+from uipath_langchain.agent.tools.durable_interrupt import (
+    durable_interrupt,
+    SkipInterruptValue,
 )
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     add_query_field_to_schema,
@@ -38,6 +38,17 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 )
 from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
+
+
+class ReadyEphemeralIndex(SkipInterruptValue):
+    """An ephemeral index that is already ready (no wait needed)."""
+
+    def __init__(self, index: ContextGroundingIndex):
+        self.index = index
+
+    @property
+    def resume_value(self) -> Any:
+        return self.index.model_dump()
 
 
 def create_deeprag_tool(
@@ -134,7 +145,9 @@ def create_deeprag_tool(
                     is_ephemeral_index=True,
                 )
 
-            return await create_deeprag()
+            result = await create_deeprag()
+
+            return result
 
         return await invoke_deeprag(**kwargs)
 
