@@ -287,7 +287,7 @@ class TestCitationStreamProcessor:
         text = (
             'A<uip:cite title="Valid" url="https://v.com" />'
             'B<uip:cite title="Invalid" page_number="1" />'
-            'C<uip:cite title="Also Valid" reference="https://r.com" />'
+            'C<uip:cite title="Also Valid" reference="https://r.com" page_number="2" />'
         )
         events = proc.add_chunk(text)
         events.extend(proc.finalize())
@@ -438,6 +438,20 @@ class TestCitationStreamProcessor:
         events.extend(proc.finalize())
         combined = "".join(e.data for e in events if e.data)
         assert combined == "Text more"
+        assert all(e.citation is None for e in events)
+
+    def test_reference_without_page_number_skipped(self):
+        """Web URL misclassified as reference (no page_number) must not emit a media source."""
+        proc = CitationStreamProcessor()
+        text = (
+            "UiPath reported earnings"
+            '<uip:cite title="UiPath Reports Third Quarter Fiscal 2026 Fin..." '
+            'reference="https://ir.uipath.com/news/detail/420/uipath-reports-third-quarter-fiscal-2026-financial-results" />'
+        )
+        events = proc.add_chunk(text)
+        events.extend(proc.finalize())
+        combined = "".join(e.data for e in events if e.data)
+        assert combined == "UiPath reported earnings"
         assert all(e.citation is None for e in events)
 
     def test_only_whitespace_between_citations(self):
@@ -663,6 +677,17 @@ class TestExtractCitationsFromText:
         assert len(citations) == 1
         assert citations[0].offset == 0
         assert citations[0].length == 6  # len("A fact")
+
+    def test_reference_without_page_number_skipped(self):
+        """Web URL misclassified as reference (no page_number) must not emit a citation."""
+        text = (
+            "UiPath reported earnings"
+            '<uip:cite title="UiPath Reports Third Quarter Fiscal 2026 Fin..." '
+            'reference="https://ir.uipath.com/news/detail/420/uipath-reports-third-quarter-fiscal-2026-financial-results" />'
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "UiPath reported earnings"
+        assert citations == []
 
     def test_different_sources_get_different_numbers(self):
         """Different sources get incrementing numbers."""
