@@ -39,7 +39,7 @@ from langgraph._internal._constants import CONFIG_KEY_SCRATCHPAD
 from langgraph.config import get_config
 from langgraph.types import interrupt
 
-from ._skip_interrupt import SkipInterruptValue
+from .skip_interrupt import SkipInterruptValue
 
 F = TypeVar("F", bound=Callable[..., Any])
 
