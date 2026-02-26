@@ -70,10 +70,10 @@ def generate_agent_md_file(
 def generate_specific_agents_md_files(
     target_directory: str, no_agents_md_override: bool
 ) -> Generator[tuple[str, FileOperationStatus], None, None]:
-    """Generate agent-specific files from the packaged resource.
+    """Generate CLAUDE.md file from the packaged resource.
 
     Args:
-        target_directory: The directory where the files should be created.
+        target_directory: The directory where the file should be created.
         no_agents_md_override: Whether to override existing files.
 
     Yields:
@@ -82,15 +82,8 @@ def generate_specific_agents_md_files(
         - UPDATED: File was overwritten
         - SKIPPED: File exists and was not overwritten
     """
-    agent_dir = os.path.join(target_directory, ".agent")
-    os.makedirs(agent_dir, exist_ok=True)
-
     file_configs = [
-        (target_directory, "CLAUDE.md", "uipath._resources"),
-        (agent_dir, "CLI_REFERENCE.md", "uipath._resources"),
-        (agent_dir, "SDK_REFERENCE.md", "uipath._resources"),
-        (target_directory, "AGENTS.md", "uipath_langchain._resources"),
-        (agent_dir, "REQUIRED_STRUCTURE.md", "uipath_langchain._resources"),
+        (target_directory, "CLAUDE.md", "uipath_langchain._resources"),
     ]
 
     for directory, file_name, resource_name in file_configs:
