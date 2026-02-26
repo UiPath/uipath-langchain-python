@@ -1,8 +1,9 @@
 import functools
 import inspect
 from inspect import Parameter
-from typing import Annotated, Any, Callable
+from typing import Annotated, Any, Callable, NamedTuple
 
+from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId
 from langchain_core.tools import tool as langchain_tool
 from langgraph.types import interrupt
@@ -10,7 +11,15 @@ from uipath.core.chat import (
     UiPathConversationToolCallConfirmationValue,
 )
 
-_CANCELLED_MESSAGE = "Cancelled by user"
+CANCELLED_MESSAGE = "Cancelled by user"
+ARGS_MODIFIED_MESSAGE = "Tool arguments were modified by the user"
+
+
+class ConfirmationResult(NamedTuple):
+    """Result of a tool confirmation check."""
+
+    cancelled: ToolMessage | None  # ToolMessage if cancelled, None if approved
+    args_modified: bool
 
 
 def _patch_span_input(approved_args: dict[str, Any]) -> None:
@@ -53,7 +62,7 @@ def _patch_span_input(approved_args: dict[str, Any]) -> None:
         pass
 
 
-def _request_approval(
+def request_approval(
     tool_args: dict[str, Any],
     tool: BaseTool,
 ) -> dict[str, Any] | None:
@@ -89,7 +98,48 @@ def _request_approval(
     if not confirmation.get("approved", True):
         return None
 
-    return confirmation.get("input") or tool_args
+    return (
+        confirmation.get("input")
+        if confirmation.get("input") is not None
+        else tool_args
+    )
+
+
+def inject_confirmation_meta(message: ToolMessage, meta: str) -> None:
+    """Inject a meta note into a ToolMessage content."""
+    # message.content = f'{{"meta": "{meta}", "result": {message.content}}}'
+    message.content = f'{{"result": {message.content}}}'
+
+
+def check_tool_confirmation(
+    call: ToolCall, tool: BaseTool
+) -> ConfirmationResult | None:
+    """Check if a tool requires confirmation and request approval if so.
+
+    Returns None if no confirmation is needed.
+    Returns ConfirmationResult with approved_args=None if cancelled.
+    Returns ConfirmationResult with approved_args and args_modified flag if approved.
+    """
+    if not (tool.metadata and tool.metadata.get("require_conversational_confirmation")):
+        return None
+
+    original_args = call["args"]
+    approved_args = request_approval(
+        {**original_args, "tool_call_id": call["id"]}, tool
+    )
+    if approved_args is None:
+        return ConfirmationResult(
+            cancelled=ToolMessage(
+                content=CANCELLED_MESSAGE,
+                name=call["name"],
+                tool_call_id=call["id"],
+            ),
+            args_modified=False,
+        )
+    call["args"] = approved_args
+    return ConfirmationResult(
+        cancelled=None, args_modified=approved_args != original_args
+    )
 
 
 def requires_approval(
@@ -107,9 +157,9 @@ def requires_approval(
         # wrap the tool/function
         @functools.wraps(fn)
         def wrapper(**tool_args: Any) -> Any:
-            approved_args = _request_approval(tool_args, _created_tool[0])
+            approved_args = request_approval(tool_args, _created_tool[0])
             if approved_args is None:
-                return _CANCELLED_MESSAGE
+                return {"meta": CANCELLED_MESSAGE}
             _patch_span_input(approved_args)
             return fn(**approved_args)
 
