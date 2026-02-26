@@ -39,6 +39,10 @@ from uipath_agents._errors import ExceptionMapper
 from uipath_agents.agent_graph_builder import build_agent_graph
 from uipath_agents.agent_graph_builder.config import get_execution_type
 
+from ..._bts.bts_callback import BtsCallback
+from ..._bts.bts_runtime import BtsRuntime
+from ..._bts.bts_state import BtsState
+from ..._bts.bts_storage import SqliteBtsStateStorage
 from ..._observability import configure_telemetry, shutdown_telemetry
 from ..._observability.event_emitter import TelemetryEventEmitter
 from ..._observability.exporters import FilteringSpanExporter
@@ -354,13 +358,14 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             agent_definition: Pre-loaded agent definition
 
         Returns:
-            Configured runtime stack: Base → Telemetry → Resumable
+            Configured runtime stack: Base → Resumable → BTS → Telemetry
 
         Note:
             Runtime wrapping order:
             1. AgentsLangGraphRuntime (base - handles LangGraph execution)
-            2. InstrumentedRuntime (adds tracing spans + trace context preservation)
-            3. UiPathResumableRuntime (adds persistence/resume)
+            2. UiPathResumableRuntime (adds persistence/resume)
+            3. BtsRuntime (adds BTS transaction/operation tracking)
+            4. InstrumentedRuntime (adds tracing spans + trace context preservation)
 
             The callback is passed via constructor to the base runtime,
             ensuring it persists across debug/chat re-executions where
@@ -387,19 +392,43 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             self._create_telemetry_components()
         )
 
+        # --- BTS setup ---
+        bts_state = BtsState()
+        bts_callback = BtsCallback(bts_state)
+        bts_storage = SqliteBtsStateStorage(storage)
+
+        from uipath.platform import UiPath
+
+        try:
+            sdk = UiPath()
+            bts_state.tracker_service = sdk.automation_tracker
+        except Exception:
+            logger.warning("Failed to initialize AutomationTrackerService for BTS")
+
+        agent_name = agent_definition.name or "Unknown"
+
         base_runtime = AgentsLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
-            callbacks=[instrumentation_callback],
+            callbacks=[instrumentation_callback, bts_callback],
             agent_definition=agent_definition,
             storage=storage,
         )
         resumable_runtime = self._wrap_in_resumable_runtime(
             base_runtime, storage, runtime_id
         )
+        bts_runtime = BtsRuntime(
+            delegate=resumable_runtime,
+            state=bts_state,
+            callback=bts_callback,
+            agent_name=agent_name,
+            runtime_id=runtime_id,
+            bts_storage=bts_storage,
+            parent_operation_id=self.context.parent_operation_id,
+        )
         instrumented_runtime = InstrumentedRuntime(
-            resumable_runtime,
+            bts_runtime,
             span_factory,
             instrumentation_callback,
             self.context,
