@@ -49,6 +49,19 @@ async def create_tools_from_resources(
         )
         tool = await _build_tool_for_resource(resource, llm)
         if tool is not None:
+            # propagate requireConversationalConfirmation to tool metadata (conversational agents only)
+            if agent.is_conversational:
+                tool_list = tool if isinstance(tool, list) else [tool]
+                props = getattr(resource, "properties", None)
+                if props and getattr(
+                    props, "require_conversational_confirmation", False
+                ):
+                    # some resources (like mcp) can return a list of tools, so normalize to a list
+                    for t in tool_list:
+                        if t.metadata is None:
+                            t.metadata = {}
+                        t.metadata["require_conversational_confirmation"] = True
+
             if isinstance(tool, list):
                 tools.extend(tool)
             else:
