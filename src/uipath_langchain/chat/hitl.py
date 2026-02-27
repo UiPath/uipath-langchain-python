@@ -13,6 +13,8 @@ from uipath.core.chat import (
 
 CANCELLED_MESSAGE = "Cancelled by user"
 ARGS_MODIFIED_MESSAGE = "Tool arguments were modified by the user"
+CONVERSATIONAL_APPROVED_TOOL_ARGS = "conversational_approved_tool_args"
+REQUIRE_CONVERSATIONAL_CONFIRMATION = "require_conversational_confirmation"
 
 
 class ConfirmationResult(NamedTuple):
@@ -105,12 +107,6 @@ def request_approval(
     )
 
 
-def inject_confirmation_meta(message: ToolMessage, meta: str) -> None:
-    """Inject a meta note into a ToolMessage content."""
-    # message.content = f'{{"meta": "{meta}", "result": {message.content}}}'
-    message.content = f'{{"result": {message.content}}}'
-
-
 def check_tool_confirmation(
     call: ToolCall, tool: BaseTool
 ) -> ConfirmationResult | None:
@@ -120,7 +116,7 @@ def check_tool_confirmation(
     Returns ConfirmationResult with approved_args=None if cancelled.
     Returns ConfirmationResult with approved_args and args_modified flag if approved.
     """
-    if not (tool.metadata and tool.metadata.get("require_conversational_confirmation")):
+    if not (tool.metadata and tool.metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION)):
         return None
 
     original_args = call["args"]

@@ -39,6 +39,8 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
+from uipath_langchain.chat.hitl import CONVERSATIONAL_APPROVED_TOOL_ARGS
+
 from ._citations import CitationStreamProcessor, extract_citations_from_text
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,7 @@ class UiPathChatMessagesMapper:
         """Initialize the mapper with empty state."""
         self.runtime_id = runtime_id
         self.storage = storage
+        self.confirmation_tool_names: set[str] = set()
         self.current_message: AIMessageChunk
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
@@ -389,11 +392,12 @@ class UiPathChatMessagesMapper:
                         tool_call_id_to_message_id_map[tool_call_id] = (
                             self.current_message.id
                         )
-                        events.append(
-                            self.map_tool_call_to_tool_call_start_event(
-                                self.current_message.id, tool_call
+                        if tool_call["name"] not in self.confirmation_tool_names:
+                            events.append(
+                                self.map_tool_call_to_tool_call_start_event(
+                                    self.current_message.id, tool_call
+                                )
                             )
-                        )
 
                 if self.storage is not None:
                     await self.storage.set_value(
@@ -426,7 +430,19 @@ class UiPathChatMessagesMapper:
                 # Keep as string if not valid JSON
                 pass
 
-        events = [
+        events: list[UiPathConversationMessageEvent] = []
+
+        # Emit deferred startToolCall for confirmation tools (skipped in Pass 1)
+        approved_args = message.response_metadata.get(CONVERSATIONAL_APPROVED_TOOL_ARGS)
+        if approved_args is not None:
+            tool_call = ToolCall(
+                name=message.name or "", args=approved_args, id=message.tool_call_id
+            )
+            events.append(
+                self.map_tool_call_to_tool_call_start_event(message_id, tool_call)
+            )
+
+        events.append(
             UiPathConversationMessageEvent(
                 message_id=message_id,
                 tool_call=UiPathConversationToolCallEvent(
@@ -438,7 +454,7 @@ class UiPathChatMessagesMapper:
                     ),
                 ),
             )
-        ]
+        )
 
         if is_last_tool_call:
             events.append(self.map_to_message_end_event(message_id))

@@ -6,11 +6,9 @@ from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 
 from uipath_langchain.chat.hitl import (
-    ARGS_MODIFIED_MESSAGE,
     CANCELLED_MESSAGE,
     ConfirmationResult,
     check_tool_confirmation,
-    inject_confirmation_meta,
     request_approval,
 )
 
@@ -95,21 +93,6 @@ class TestCheckToolConfirmation:
         assert result.cancelled is None
         assert result.args_modified is True
         assert call["args"] == {"query": "edited"}
-
-
-class TestInjectConfirmationMeta:
-    """Tests for inject_confirmation_meta."""
-
-    def test_injects_meta_into_content(self):
-        msg = ToolMessage(content="some result", name="t", tool_call_id="c1")
-        inject_confirmation_meta(msg, ARGS_MODIFIED_MESSAGE)
-        assert ARGS_MODIFIED_MESSAGE in msg.content
-        assert "some result" in msg.content
-
-    def test_wraps_content_as_json(self):
-        msg = ToolMessage(content="hello", name="t", tool_call_id="c1")
-        inject_confirmation_meta(msg, "test meta")
-        assert msg.content == '{"meta": "test meta", "result": hello}'
 
 
 class TestRequestApprovalTruthiness:

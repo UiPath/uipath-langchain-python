@@ -19,7 +19,11 @@ from uipath_langchain.agent.tools.tool_node import (
     UiPathToolNode,
     create_tool_node,
 )
-from uipath_langchain.chat.hitl import ARGS_MODIFIED_MESSAGE, CANCELLED_MESSAGE
+from uipath_langchain.chat.hitl import (
+    ARGS_MODIFIED_MESSAGE,
+    CANCELLED_MESSAGE,
+    CONVERSATIONAL_APPROVED_TOOL_ARGS,
+)
 
 
 class MockTool(BaseTool):
@@ -597,3 +601,55 @@ class TestToolNodeConfirmation:
         msg = result["messages"][0]
         assert ARGS_MODIFIED_MESSAGE in msg.content
         assert "Async mock result: async edited" in msg.content
+
+    @patch(
+        "uipath_langchain.chat.hitl.request_approval",
+        return_value={"input_text": "approved"},
+    )
+    def test_approved_attaches_approved_args_metadata(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Approved path attaches approved args in response_metadata."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        msg = result["messages"][0]
+        assert CONVERSATIONAL_APPROVED_TOOL_ARGS in msg.response_metadata
+        assert msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] == {
+            "input_text": "approved"
+        }
+
+    @patch("uipath_langchain.chat.hitl.request_approval", return_value=None)
+    def test_cancelled_attaches_original_args_metadata(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Cancelled path attaches original args in response_metadata."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        msg = result["messages"][0]
+        assert CONVERSATIONAL_APPROVED_TOOL_ARGS in msg.response_metadata
+        assert msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] == {
+            "input_text": "test input"
+        }
+
+    def test_no_confirmation_no_metadata(self):
+        """Non-confirmation tools don't get the approved args metadata."""
+        tool = MockTool()  # no confirmation metadata
+        node = UiPathToolNode(tool)
+        tool_call = {
+            "name": "mock_tool",
+            "args": {"input_text": "hello"},
+            "id": "call_1",
+        }
+        state = MockState(messages=[AIMessage(content="go", tool_calls=[tool_call])])
+
+        result = node._func(state)
+
+        assert result is not None
+        msg = result["messages"][0]
+        assert CONVERSATIONAL_APPROVED_TOOL_ARGS not in msg.response_metadata

@@ -16,6 +16,8 @@ from uipath.agent.models.agent import (
     LowCodeAgentDefinition,
 )
 
+from uipath_langchain.chat.hitl import REQUIRE_CONVERSATIONAL_CONFIRMATION
+
 from .context_tool import create_context_tool
 from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
@@ -53,14 +55,12 @@ async def create_tools_from_resources(
             if agent.is_conversational:
                 tool_list = tool if isinstance(tool, list) else [tool]
                 props = getattr(resource, "properties", None)
-                if props and getattr(
-                    props, "require_conversational_confirmation", False
-                ):
+                if props and getattr(props, REQUIRE_CONVERSATIONAL_CONFIRMATION, False):
                     # some resources (like mcp) can return a list of tools, so normalize to a list
                     for t in tool_list:
                         if t.metadata is None:
                             t.metadata = {}
-                        t.metadata["require_conversational_confirmation"] = True
+                        t.metadata[REQUIRE_CONVERSATIONAL_CONFIRMATION] = True
 
             if isinstance(tool, list):
                 tools.extend(tool)
