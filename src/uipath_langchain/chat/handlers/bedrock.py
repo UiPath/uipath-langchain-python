@@ -83,7 +83,9 @@ class BedrockPayloadHandler(ModelPayloadHandler):
         parallel_tool_calls: bool = True,
         strict_mode: bool = False,
     ) -> dict[str, Any]:
-        return {}
+        return {
+            "tool_choice": tool_choice,
+        }
 
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check Bedrock stop reason and raise exception for faulty terminations.

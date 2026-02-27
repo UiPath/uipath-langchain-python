@@ -119,6 +119,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         self._extra_headers = extra_headers or {}
 
         client_kwargs = get_httpx_client_kwargs()
+        client_kwargs["timeout"] = 300.0
         verify = client_kwargs.get("verify", True)
 
         api_flavor = (

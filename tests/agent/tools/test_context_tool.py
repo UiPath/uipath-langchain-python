@@ -19,6 +19,7 @@ from uipath.platform.context_grounding import (
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.tools.context_tool import (
+    build_glob_pattern,
     create_context_tool,
     handle_batch_transform,
     handle_deep_rag,
@@ -178,7 +179,7 @@ class TestHandleDeepRag:
             tool = handle_deep_rag("test_tool", resource)
 
             with patch(
-                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt:
                 mock_interrupt.return_value = {"mocked": "response"}
                 assert tool.coroutine is not None
@@ -200,7 +201,7 @@ class TestHandleDeepRag:
 
         task_names = []
         with patch(
-            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
 
@@ -261,7 +262,7 @@ class TestHandleDeepRag:
         tool = handle_deep_rag("test_tool", resource)
 
         with patch(
-            "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
@@ -629,7 +630,7 @@ class TestHandleBatchTransform:
         mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-1")
         with (
             patch(
-                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt,
             patch(
                 "uipath_langchain.agent.tools.context_tool.UiPath",
@@ -677,7 +678,7 @@ class TestHandleBatchTransform:
         mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-2")
         with (
             patch(
-                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt,
             patch(
                 "uipath_langchain.agent.tools.context_tool.UiPath",
@@ -705,7 +706,7 @@ class TestHandleBatchTransform:
         mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-3")
         with (
             patch(
-                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt,
             patch(
                 "uipath_langchain.agent.tools.context_tool.UiPath",
@@ -754,7 +755,7 @@ class TestHandleBatchTransform:
         mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-4")
         with (
             patch(
-                "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt,
             patch(
                 "uipath_langchain.agent.tools.context_tool.UiPath",
@@ -769,3 +770,81 @@ class TestHandleBatchTransform:
             call_args = mock_interrupt.call_args[0][0]
             assert call_args.prompt == "runtime provided query"
             assert call_args.destination_path == "output.csv"
+
+
+class TestBuildGlobPattern:
+    """Test cases for build_glob_pattern function."""
+
+    # --- No prefix ---
+
+    def test_no_prefix_no_extension(self):
+        assert build_glob_pattern(None, None) == "**/*"
+
+    def test_empty_string_prefix_treated_as_no_prefix(self):
+        assert build_glob_pattern("", None) == "**/*"
+
+    def test_no_prefix_with_extension(self):
+        assert build_glob_pattern(None, "pdf") == "**/*.pdf"
+
+    def test_no_prefix_extension_uppercased(self):
+        """Extension should be lowercased before building the pattern."""
+        assert build_glob_pattern(None, "PDF") == "**/*.pdf"
+
+    def test_no_prefix_extension_mixed_case(self):
+        assert build_glob_pattern(None, "TxT") == "**/*.txt"
+
+    # --- Explicit "**" prefix ---
+
+    def test_double_star_prefix_no_extension(self):
+        assert build_glob_pattern("**", None) == "**/*"
+
+    def test_double_star_prefix_with_extension(self):
+        assert build_glob_pattern("**", "pdf") == "**/*.pdf"
+
+    # --- Prefix with trailing slash stripped ---
+
+    def test_prefix_trailing_slash_stripped(self):
+        assert build_glob_pattern("documents/", "pdf") == "documents/*.pdf"
+
+    def test_prefix_multiple_trailing_slashes_stripped(self):
+        assert build_glob_pattern("documents///", "pdf") == "documents/*.pdf"
+
+    # --- Prefix with leading slash stripped ---
+
+    def test_prefix_leading_slash_stripped(self):
+        assert build_glob_pattern("/documents", "pdf") == "documents/*.pdf"
+
+    def test_prefix_leading_and_trailing_slash_stripped(self):
+        assert build_glob_pattern("/documents/", None) == "documents/*"
+
+    # --- Prefix starting with "**" is kept as-is ---
+
+    def test_prefix_starting_with_double_star_kept(self):
+        assert build_glob_pattern("**/documents", "pdf") == "**/documents/*.pdf"
+
+    def test_prefix_starting_with_double_star_leading_slash_not_stripped(self):
+        """A prefix that already starts with ** is not modified further."""
+        assert build_glob_pattern("**/docs/", "txt") == "**/docs/*.txt"
+
+    # --- Normal prefix without slashes ---
+
+    def test_simple_prefix_no_extension(self):
+        assert build_glob_pattern("folder", None) == "folder/*"
+
+    def test_simple_prefix_with_extension(self):
+        assert build_glob_pattern("folder", "pdf") == "folder/*.pdf"
+
+    def test_nested_prefix_with_extension(self):
+        assert (
+            build_glob_pattern("folder/subfolder", "docx") == "folder/subfolder/*.docx"
+        )
+
+    # --- All supported extensions ---
+
+    @pytest.mark.parametrize("ext", ["pdf", "txt", "docx", "csv"])
+    def test_supported_extensions(self, ext):
+        assert build_glob_pattern(None, ext) == f"**/*.{ext}"
+
+    def test_unsupported_extension_still_works(self):
+        """Extensions outside the named set are handled identically."""
+        assert build_glob_pattern("data", "xlsx") == "data/*.xlsx"

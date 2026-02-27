@@ -27,8 +27,8 @@ def _make_config(scratchpad: FakeScratchpad | None = None) -> dict[str, Any]:
     return {"configurable": {CONFIG_KEY_SCRATCHPAD: scratchpad}}
 
 
-PATCH_GET_CONFIG = "uipath_langchain.agent.tools.durable_interrupt.get_config"
-PATCH_INTERRUPT = "uipath_langchain.agent.tools.durable_interrupt.interrupt"
+PATCH_GET_CONFIG = "uipath_langchain.agent.tools.durable_interrupt.decorator.get_config"
+PATCH_INTERRUPT = "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
 
 
 @pytest.fixture(autouse=True)

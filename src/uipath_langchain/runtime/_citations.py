@@ -53,17 +53,18 @@ def _parse_citations(text: str) -> list[tuple[str, _ParsedCitation | None]]:
 
         has_url = url is not None
         has_reference = reference is not None
+        has_page_number = page_number is not None
 
         if has_url and not has_reference:
             # web citation
             citation = _ParsedCitation(title=title, url=url, page_number=page_number)
-        elif has_reference and not has_url:
+        elif has_reference and has_page_number and not has_url:
             # context grounding citation
             citation = _ParsedCitation(
                 title=title, reference=reference, page_number=page_number
             )
         else:
-            # skip; citation has no url= or reference=
+            # skip; doesn't match a valid source type
             if preceding_text:
                 segments.append((preceding_text, None))
             cursor = match.end()
@@ -90,30 +91,32 @@ def _make_source(
     source_numbers: dict[_ParsedCitation, int],
     next_number: int,
 ) -> tuple[
-    UiPathConversationCitationSourceUrl | UiPathConversationCitationSourceMedia, int
+    UiPathConversationCitationSourceUrl | UiPathConversationCitationSourceMedia | None,
+    int,
 ]:
-    """Build a citation source, deduplicating by assigning numbers"""
-    if citation not in source_numbers:
-        source_numbers[citation] = next_number
-        next_number += 1
-    number = source_numbers[citation]
-
-    source: UiPathConversationCitationSourceUrl | UiPathConversationCitationSourceMedia
+    """Build a citation source, deduplicating by assigning numbers."""
     if citation.url is not None:
-        source = UiPathConversationCitationSourceUrl(
+        if citation not in source_numbers:
+            source_numbers[citation] = next_number
+            next_number += 1
+        return UiPathConversationCitationSourceUrl(
             title=citation.title,
-            number=number,
+            number=source_numbers[citation],
             url=citation.url,
-        )
-    else:
-        source = UiPathConversationCitationSourceMedia(
+        ), next_number
+    elif citation.reference is not None and citation.page_number is not None:
+        if citation not in source_numbers:
+            source_numbers[citation] = next_number
+            next_number += 1
+        return UiPathConversationCitationSourceMedia(
             title=citation.title,
-            number=number,
+            number=source_numbers[citation],
             mime_type=None,
             download_url=citation.reference,
             page_number=citation.page_number,
-        )
-    return source, next_number
+        ), next_number
+    else:
+        return None, next_number
 
 
 def _find_partial_tag_start(text: str) -> int:
@@ -159,6 +162,9 @@ class CitationStreamProcessor:
         source, self._next_number = _make_source(
             citation, self._source_numbers, self._next_number
         )
+
+        if not source:
+            return UiPathConversationContentPartChunkEvent(data=text)
 
         return UiPathConversationContentPartChunkEvent(
             data=text,
@@ -236,6 +242,9 @@ def extract_citations_from_text(
 
         if citation is not None:
             source, next_number = _make_source(citation, source_numbers, next_number)
+            if not source:
+                offset += length
+                continue
             if length > 0:
                 citations.append(
                     UiPathConversationCitationData(

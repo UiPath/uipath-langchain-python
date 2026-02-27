@@ -114,13 +114,14 @@ class TestProcessToolInvocation:
     """Test process tool invocation behavior: invoke then interrupt."""
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_calls_processes_invoke_async(
         self, mock_uipath_class, mock_interrupt, process_resource
     ):
         """Test that invoking the tool calls client.processes.invoke_async."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key-123"
         mock_job.folder_key = "folder-key-123"
 
         mock_client = MagicMock()
@@ -138,16 +139,18 @@ class TestProcessToolInvocation:
             folder_path="/Shared/MyFolder",
             attachments=[],
             parent_span_id=None,
+            parent_operation_id=None,
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_interrupts_with_wait_job(
         self, mock_uipath_class, mock_interrupt, process_resource
     ):
         """Test that after invoking, the tool interrupts with WaitJob."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key-456"
         mock_job.folder_key = "folder-key-456"
 
         mock_client = MagicMock()
@@ -166,13 +169,14 @@ class TestProcessToolInvocation:
         assert wait_job_arg.process_folder_key == "folder-key-456"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_passes_input_arguments(
         self, mock_uipath_class, mock_interrupt, process_resource_with_inputs
     ):
         """Test that input arguments are correctly passed to invoke_async."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
         mock_client = MagicMock()
@@ -190,13 +194,14 @@ class TestProcessToolInvocation:
         assert call_kwargs["folder_path"] == "/Shared/DataFolder"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_returns_interrupt_value(
         self, mock_uipath_class, mock_interrupt, process_resource
     ):
         """Test that the tool returns the value from interrupt()."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
         mock_client = MagicMock()
@@ -215,13 +220,14 @@ class TestProcessToolSpanContext:
     """Test that _span_context is properly wired for tracing."""
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_span_context_parent_span_id_passed_to_invoke(
         self, mock_uipath_class, mock_interrupt, process_resource
     ):
         """Test that parent_span_id from _span_context is forwarded to invoke_async."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
         mock_client = MagicMock()
@@ -242,13 +248,14 @@ class TestProcessToolSpanContext:
         assert call_kwargs["parent_span_id"] == "span-abc-123"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_span_context_consumed_after_invoke(
         self, mock_uipath_class, mock_interrupt, process_resource
     ):
         """Test that parent_span_id is popped (consumed) from _span_context after use."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
         mock_client = MagicMock()
@@ -267,13 +274,14 @@ class TestProcessToolSpanContext:
         assert "parent_span_id" not in tool.metadata["_span_context"]
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.durable_interrupt.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_span_context_defaults_to_none_when_empty(
         self, mock_uipath_class, mock_interrupt, process_resource
     ):
         """Test that parent_span_id defaults to None when _span_context is empty."""
         mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
         mock_job.folder_key = "folder-key"
 
         mock_client = MagicMock()

@@ -39,6 +39,8 @@ from langgraph._internal._constants import CONFIG_KEY_SCRATCHPAD
 from langgraph.config import get_config
 from langgraph.types import interrupt
 
+from .skip_interrupt import SkipInterruptValue
+
 F = TypeVar("F", bound=Callable[..., Any])
 
 # Tracks (scratchpad identity, call index) per node execution.
@@ -77,6 +79,21 @@ def _is_resumed(scratchpad: Any, idx: int) -> bool:
     return scratchpad is not None and scratchpad.resume and idx < len(scratchpad.resume)
 
 
+def _inject_resume(scratchpad: Any, value: Any) -> Any:
+    """Inject a value into the scratchpad resume list and return it via interrupt(None).
+
+    This keeps LangGraph's interrupt_counter in sync (interrupt(None) increments it)
+    while avoiding a real suspend — interrupt(None) finds the injected value and
+    returns it immediately without raising GraphInterrupt.
+    """
+    if scratchpad is not None:
+        if scratchpad.resume is None:
+            scratchpad.resume = []
+        scratchpad.resume.append(value)
+        return interrupt(None)
+    return value
+
+
 def durable_interrupt(fn: F) -> F:
     """Decorator that executes a side-effecting function exactly once and interrupts.
 
@@ -84,6 +101,10 @@ def durable_interrupt(fn: F) -> F:
     ``interrupt()`` (which raises ``GraphInterrupt``).  On resume the body
     is skipped and ``interrupt(None)`` returns the resume value from the
     runtime.
+
+    If the body returns a ``SkipInterruptValue``, the resolved value is
+    injected into the scratchpad resume list and ``interrupt(None)`` returns
+    it immediately — no real suspend/resume cycle occurs.
 
     Replaces the ``@task`` + ``interrupt()`` two-step pattern with a single
     decorator that enforces the pairing contract.  Works correctly in both
@@ -112,7 +133,10 @@ def durable_interrupt(fn: F) -> F:
             scratchpad, idx = _next_durable_index()
             if _is_resumed(scratchpad, idx):
                 return interrupt(None)
-            return interrupt(await fn(*args, **kwargs))
+            result = await fn(*args, **kwargs)
+            if isinstance(result, SkipInterruptValue):
+                return _inject_resume(scratchpad, result.resume_value)
+            return interrupt(result)
 
         return async_wrapper  # type: ignore[return-value]
 
@@ -121,6 +145,9 @@ def durable_interrupt(fn: F) -> F:
         scratchpad, idx = _next_durable_index()
         if _is_resumed(scratchpad, idx):
             return interrupt(None)
-        return interrupt(fn(*args, **kwargs))
+        result = fn(*args, **kwargs)
+        if isinstance(result, SkipInterruptValue):
+            return _inject_resume(scratchpad, result.resume_value)
+        return interrupt(result)
 
     return sync_wrapper  # type: ignore[return-value]
