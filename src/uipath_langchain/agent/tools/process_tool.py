@@ -34,8 +34,8 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
     process_name = resource.properties.process_name
     folder_path = resource.properties.folder_path
 
-    input_model: Any = create_model(resource.input_schema)
-    output_model: Any = create_model(resource.output_schema)
+    input_model: Any = create_model(resource.input_schema, tool_name=tool_name)
+    output_model: Any = create_model(resource.output_schema, tool_name=tool_name)
 
     _span_context: dict[str, Any] = {}
     _bts_context: dict[str, Any] = {}

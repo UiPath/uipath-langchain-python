@@ -281,7 +281,9 @@ def handle_batch_transform(
         folder_path_prefix=folder_path_prefix, file_extension=None
     )
 
-    output_model = create_model_from_schema(BATCH_TRANSFORM_OUTPUT_SCHEMA)
+    output_model = create_model_from_schema(
+        BATCH_TRANSFORM_OUTPUT_SCHEMA, tool_name=tool_name
+    )
 
     schema_fields: dict[str, Any] = {}
     if not static:

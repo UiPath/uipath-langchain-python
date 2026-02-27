@@ -105,8 +105,8 @@ def create_batch_transform_tool(
         )
 
     # Create input model from modified schema
-    input_model = create_model(input_schema)
-    output_model = create_model(BATCH_TRANSFORM_OUTPUT_SCHEMA)
+    input_model = create_model(input_schema, tool_name=tool_name)
+    output_model = create_model(BATCH_TRANSFORM_OUTPUT_SCHEMA, tool_name=tool_name)
 
     async def batch_transform_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query

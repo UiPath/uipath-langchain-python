@@ -48,8 +48,8 @@ def create_analyze_file_tool(
     from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
 
     tool_name = sanitize_tool_name(resource.name)
-    input_model = create_model(resource.input_schema)
-    output_model = create_model(resource.output_schema)
+    input_model = create_model(resource.input_schema, tool_name=tool_name)
+    output_model = create_model(resource.output_schema, tool_name=tool_name)
 
     # Disable streaming so for conversational loops, the internal LLM call doesn't leak
     # AIMessageChunk events into the graph stream.

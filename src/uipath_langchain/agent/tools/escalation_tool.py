@@ -147,8 +147,8 @@ def create_escalation_tool(
     tool_name: str = f"escalate_{sanitize_tool_name(resource.name)}"
     channel: AgentEscalationChannel = resource.channels[0]
 
-    input_model: Any = create_model(channel.input_schema)
-    output_model: Any = create_model(channel.output_schema)
+    input_model: Any = create_model(channel.input_schema, tool_name=tool_name)
+    output_model: Any = create_model(channel.output_schema, tool_name=tool_name)
 
     class EscalationToolOutput(BaseModel):
         action: Literal["approve", "reject"]

@@ -155,10 +155,13 @@ def create_integration_tool(
 
     activity_metadata = convert_to_activity_metadata(resource)
 
-    input_model = create_model(resource.input_schema)
+    input_model = create_model(resource.input_schema, tool_name=tool_name)
     # note: IS tools output schemas were recently added and are most likely not present in all resources
     output_model: Any = (
-        create_model(remove_asterisk_from_properties(resource.output_schema))
+        create_model(
+            remove_asterisk_from_properties(resource.output_schema),
+            tool_name=tool_name,
+        )
         if resource.output_schema
         else create_model({"type": "object", "properties": {}})
     )

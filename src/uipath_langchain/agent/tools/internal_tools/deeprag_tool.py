@@ -88,8 +88,8 @@ def create_deeprag_tool(
             default_description="Describe the task: what to research across documents, what to synthesize and how to cite sources.",
         )
 
-    input_model = create_model(input_schema)
-    output_model = create_model(resource.output_schema)
+    input_model = create_model(input_schema, tool_name=tool_name)
+    output_model = create_model(resource.output_schema, tool_name=tool_name)
 
     async def deeprag_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query
