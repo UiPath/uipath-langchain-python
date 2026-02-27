@@ -123,7 +123,6 @@ class GeminiPayloadHandler(ModelPayloadHandler):
         parallel_tool_calls: bool = True,
         strict_mode: bool = False,
     ) -> dict[str, Any]:
-        tool_names = [tool.name for tool in tools]
         mode = tool_choice.upper()
         if strict_mode:
             mode = "VALIDATED"
@@ -131,7 +130,6 @@ class GeminiPayloadHandler(ModelPayloadHandler):
             "tool_config": {
                 "function_calling_config": {
                     "mode": mode,
-                    "allowed_function_names": tool_names,
                 }
             }
         }
