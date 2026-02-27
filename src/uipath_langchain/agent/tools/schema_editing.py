@@ -2,6 +2,7 @@
 
 import copy
 import json
+import re
 from typing import Any
 
 from jsonpath_ng import (  # type: ignore[import-untyped]
@@ -106,6 +107,37 @@ def _navigate_schema_inlining_refs(
         current = _skip_anyof_inlining_ref(schema, current)
 
     return current
+
+
+def strip_matching_enums(
+    schema: dict[str, Any],
+    path_segments: list[str],
+    pattern: re.Pattern[str],
+) -> None:
+    """Navigate to a field in schema and remove enum values matching the pattern.
+
+    If the path doesn't exist in the schema, this is a no-op.
+    After removing matching values, if the enum becomes empty, the enum key is deleted.
+
+    Args:
+        schema: The root JSON schema (modified in place).
+        path_segments: Path segments to navigate to the field.
+        pattern: Compiled regex pattern to match enum values against.
+    """
+    try:
+        field_schema = _navigate_schema_inlining_refs(schema, path_segments)
+    except SchemaModificationError:
+        return
+
+    enum = field_schema.get("enum")
+    if enum is None:
+        return
+
+    cleaned = [v for v in enum if not (isinstance(v, str) and pattern.match(v))]
+    if not cleaned:
+        del field_schema["enum"]
+    else:
+        field_schema["enum"] = cleaned
 
 
 def _apply_sensitive_schema_modification(

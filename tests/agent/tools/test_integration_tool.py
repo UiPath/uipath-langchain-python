@@ -783,7 +783,8 @@ class TestStripTemplateEnumsFromSchema:
 
         result = strip_template_enums_from_schema(schema, parameters)
 
-        config_props = result["definitions"]["Config"]["properties"]
+        # The $ref is inlined and modified on the inlined copy
+        config_props = result["properties"]["config"]["properties"]
         assert config_props["mode"]["enum"] == ["auto"]
 
     def test_skips_argument_param_when_schema_path_not_found(self):

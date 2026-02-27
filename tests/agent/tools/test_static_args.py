@@ -6,19 +6,14 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel, Field
 from uipath.agent.models.agent import (
-    AgentIntegrationToolParameter,
-    AgentIntegrationToolProperties,
-    AgentIntegrationToolResourceConfig,
     AgentToolArgumentProperties,
     AgentToolStaticArgumentProperties,
     BaseAgentResourceConfig,
 )
-from uipath.platform.connections import Connection
 
 from uipath_langchain.agent.tools.static_args import (
     apply_static_args,
     apply_static_argument_properties_to_schema,
-    resolve_integration_static_args,
     resolve_static_args,
 )
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
@@ -29,64 +24,19 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 class TestResolveStaticArgs:
     """Test cases for resolve_static_args function."""
 
-    @pytest.fixture
-    def connection(self):
-        """Common connection object used by tests."""
-        return Connection(
-            id="test-connection-id", name="Test Connection", element_instance_id=12345
-        )
+    def test_resolve_static_args_with_argument_properties(self):
+        """Test resolve_static_args with an object that has argument_properties."""
 
-    @pytest.fixture
-    def integration_properties_factory(self, connection):
-        """Factory for creating integration tool properties."""
+        class ResourceWithProps:
+            argument_properties = {
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="api.example.com"
+                ),
+            }
 
-        def _create_properties(parameters=None):
-            return AgentIntegrationToolProperties(
-                method="POST",
-                tool_path="/api/test",
-                object_name="test_object",
-                tool_display_name="Test Tool",
-                tool_description="Test tool description",
-                connection=connection,
-                parameters=parameters or [],
-            )
+        result = resolve_static_args(ResourceWithProps(), {"unused": "input"})
 
-        return _create_properties
-
-    @pytest.fixture
-    def integration_resource_factory(self, integration_properties_factory):
-        """Factory for creating integration resource config."""
-
-        def _create_resource(parameters=None):
-            properties = integration_properties_factory(parameters)
-            return AgentIntegrationToolResourceConfig(
-                name="test_tool",
-                description="Test tool",
-                properties=properties,
-                input_schema={},
-            )
-
-        return _create_resource
-
-    def test_resolve_static_args_with_integration_resource(
-        self, integration_resource_factory
-    ):
-        """Test resolve_static_args with AgentIntegrationToolResourceConfig."""
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="static_param",
-                type="string",
-                field_variant="static",
-                field_location="body",
-                value="static_value",
-            )
-        ]
-        resource = integration_resource_factory(parameters)
-        agent_input = {"input_arg": "input_value"}
-
-        result = resolve_static_args(resource, agent_input)
-
-        assert result == {"static_param": "static_value"}
+        assert result == {"$['host']": "api.example.com"}
 
     def test_resolve_static_args_with_unknown_resource_type(self):
         """Test resolve_static_args with unknown resource type returns empty dict."""
@@ -96,171 +46,6 @@ class TestResolveStaticArgs:
         result = resolve_static_args(mock_resource, agent_input)
 
         assert result == {}
-
-
-class TestResolveIntegrationStaticArgs:
-    """Test cases for resolve_integration_static_args function."""
-
-    def test_resolve_with_static_values(self):
-        """Test resolving parameters with static values."""
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="connection_id",
-                type="string",
-                field_variant="static",
-                field_location="body",
-                value="12345",
-            ),
-            AgentIntegrationToolParameter(
-                name="timeout",
-                type="integer",
-                field_variant="static",
-                field_location="body",
-                value=30,
-            ),
-            AgentIntegrationToolParameter(
-                name="config",
-                type="object",
-                field_variant="static",
-                field_location="body",
-                value={"enabled": True, "retries": 3},
-            ),
-        ]
-        agent_input = {"user_input": "test"}
-
-        result = resolve_integration_static_args(parameters, agent_input)
-
-        expected = {
-            "connection_id": "12345",
-            "timeout": 30,
-            "config": {"enabled": True, "retries": 3},
-        }
-        assert result == expected
-
-    def test_resolve_with_input_arg_values(self):
-        """Test resolving parameters with input argument values."""
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="user_id",
-                type="string",
-                field_variant="argument",
-                field_location="body",
-                value="{{userId}}",
-            ),
-            AgentIntegrationToolParameter(
-                name="query",
-                type="string",
-                field_variant="argument",
-                field_location="body",
-                value="{{searchQuery}}",
-            ),
-        ]
-        agent_input = {
-            "userId": "user123",
-            "searchQuery": "test search",
-            "unused_arg": "not_used",
-        }
-
-        result = resolve_integration_static_args(parameters, agent_input)
-
-        expected = {"user_id": "user123", "query": "test search"}
-        assert result == expected
-
-    def test_resolve_with_mixed_static_and_argument_values(self):
-        """Test resolving parameters with both static and argument values."""
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="api_key",
-                type="string",
-                field_variant="static",
-                field_location="body",
-                value="secret_key",
-            ),
-            AgentIntegrationToolParameter(
-                name="user_id",
-                type="string",
-                field_variant="argument",
-                field_location="body",
-                value="{{userId}}",
-            ),
-            AgentIntegrationToolParameter(
-                name="version",
-                type="string",
-                field_variant="static",
-                field_location="body",
-                value="v1",
-            ),
-        ]
-        agent_input = {"userId": "user456"}
-
-        result = resolve_integration_static_args(parameters, agent_input)
-
-        expected = {"api_key": "secret_key", "user_id": "user456", "version": "v1"}
-        assert result == expected
-
-    def test_resolve_skips_none_values(self):
-        """Test that None values are skipped in the result."""
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="existing_param",
-                type="string",
-                field_variant="argument",
-                field_location="body",
-                value="{{existingArg}}",
-            ),
-            AgentIntegrationToolParameter(
-                name="missing_param",
-                type="string",
-                field_variant="argument",
-                field_location="body",
-                value="{{missingArg}}",
-            ),
-        ]
-        agent_input = {"existingArg": "exists"}
-
-        result = resolve_integration_static_args(parameters, agent_input)
-
-        assert result == {"existing_param": "exists"}
-        assert "missing_param" not in result
-
-    def test_resolve_with_invalid_argument_format_raises_error(self):
-        """Test that invalid argument format raises ValueError."""
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="invalid_param",
-                type="string",
-                field_variant="argument",
-                field_location="body",
-                value="invalid_format",
-            )
-        ]
-
-        with pytest.raises(ValueError, match="Parameter value must be in the format"):
-            resolve_integration_static_args(parameters, {})
-
-    def test_resolve_with_malformed_argument_braces(self):
-        """Test various malformed argument brace patterns."""
-        test_cases = [
-            "{missing_closing",
-            "missing_opening}",
-            "{{missing_closing}",
-            "{missing_opening}}",
-            "no_braces_at_all",
-        ]
-
-        for invalid_value in test_cases:
-            parameters = [
-                AgentIntegrationToolParameter(
-                    name="test_param",
-                    type="string",
-                    field_variant="argument",
-                    field_location="body",
-                    value=invalid_value,
-                )
-            ]
-
-            with pytest.raises(ValueError):
-                resolve_integration_static_args(parameters, {})
 
 
 class TestApplyStaticArgs:
