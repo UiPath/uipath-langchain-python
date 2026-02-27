@@ -1,0 +1,10 @@
+{
+    "document_id": "DOC-2025-005",
+    "document_type": "work_order",
+    "title": "Production Line Maintenance Request",
+    "content": "Scheduled maintenance required for production line PL-03. Quality inspection revealed wear on conveyor belt components. Inventory check shows replacement parts available in warehouse. Process workflow requires 4-hour maintenance window. This will affect production logistics and supply chain temporarily.",
+    "sender_email": "production.manager@company.com",
+    "sender_department": "operations",
+    "urgency_level": "low",
+    "tags": ["maintenance", "production", "scheduled"]
+}
