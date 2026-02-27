@@ -3,7 +3,8 @@
 from typing import Any
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolCall, ToolMessage
+from langgraph.types import Command
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.core.chat import UiPathConversationMessageData
@@ -12,7 +13,11 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
-from uipath_langchain.agent.react.terminate_node import create_terminate_node
+from uipath_langchain.agent.react.terminate_node import (
+    _build_validation_retry_command,
+    create_terminate_node,
+)
+from uipath_langchain.agent.react.types import AgentGraphNode
 
 
 class MockInnerState(BaseModel):
@@ -354,3 +359,175 @@ class TestTerminateNodeFactory:
 
         with pytest.raises(AgentRuntimeError):
             terminate_node(state)
+
+
+class TestTerminateNodeValidationRetry:
+    """Test cases for ValidationError retry behavior in terminate_node."""
+
+    def test_validation_error_returns_command_to_retry(self) -> None:
+        """When LLM output fails schema validation, terminate_node should
+        return a Command routing back to AGENT instead of raising."""
+
+        class StrictOutput(BaseModel):
+            notes: str
+            score: int
+
+        terminate_node = create_terminate_node(
+            response_schema=StrictOutput, is_conversational=False
+        )
+
+        # LLM returns None for a required str field
+        ai_message = AIMessage(
+            content="Done",
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"notes": None, "score": 10},
+                    "id": "call_1",
+                }
+            ],
+        )
+        state = MockAgentGraphState(messages=[ai_message])
+
+        result = terminate_node(state)
+
+        assert isinstance(result, Command)
+        assert result.goto == AgentGraphNode.AGENT
+        update_messages = result.update["messages"]
+        assert len(update_messages) == 1
+        tool_msg = update_messages[0]
+        assert isinstance(tool_msg, ToolMessage)
+        assert tool_msg.tool_call_id == "call_1"
+        assert tool_msg.status == "error"
+        assert "validation" in tool_msg.content.lower()
+        assert "end_execution" in tool_msg.content
+
+    def test_validation_error_wrong_type_returns_retry(self) -> None:
+        """When LLM returns wrong type (str instead of dict), terminate_node
+        should return a retry Command."""
+
+        class DetailedOutput(BaseModel):
+            summary: str
+            details: dict[str, str]
+
+        terminate_node = create_terminate_node(
+            response_schema=DetailedOutput, is_conversational=False
+        )
+
+        # LLM returns a string where a dict is expected
+        ai_message = AIMessage(
+            content="Done",
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {
+                        "summary": "Report complete",
+                        "details": "just a string",
+                    },
+                    "id": "call_2",
+                }
+            ],
+        )
+        state = MockAgentGraphState(messages=[ai_message])
+
+        result = terminate_node(state)
+
+        assert isinstance(result, Command)
+        assert result.goto == AgentGraphNode.AGENT
+        tool_msg = result.update["messages"][0]
+        assert isinstance(tool_msg, ToolMessage)
+        assert tool_msg.tool_call_id == "call_2"
+        assert tool_msg.status == "error"
+
+    def test_valid_output_still_succeeds_after_schema_defined(self) -> None:
+        """When output matches the schema, terminate_node should return
+        the validated dict (not a Command)."""
+
+        class StrictOutput(BaseModel):
+            notes: str
+            score: int
+
+        terminate_node = create_terminate_node(
+            response_schema=StrictOutput, is_conversational=False
+        )
+
+        ai_message = AIMessage(
+            content="Done",
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"notes": "All good", "score": 95},
+                    "id": "call_1",
+                }
+            ],
+        )
+        state = MockAgentGraphState(messages=[ai_message])
+
+        result = terminate_node(state)
+
+        assert isinstance(result, dict)
+        assert result == {"notes": "All good", "score": 95}
+
+    def test_validation_error_missing_required_field_returns_retry(self) -> None:
+        """When a required field is completely missing, terminate_node should
+        return a retry Command with descriptive error feedback."""
+
+        class RequiredFields(BaseModel):
+            field_a: str
+            field_b: int
+
+        terminate_node = create_terminate_node(
+            response_schema=RequiredFields, is_conversational=False
+        )
+
+        # LLM omits field_b entirely
+        ai_message = AIMessage(
+            content="Done",
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"field_a": "present"},
+                    "id": "call_3",
+                }
+            ],
+        )
+        state = MockAgentGraphState(messages=[ai_message])
+
+        result = terminate_node(state)
+
+        assert isinstance(result, Command)
+        assert result.goto == AgentGraphNode.AGENT
+        tool_msg = result.update["messages"][0]
+        assert "field_b" in tool_msg.content
+
+
+class TestBuildValidationRetryCommand:
+    """Test cases for the _build_validation_retry_command helper."""
+
+    def test_command_structure(self) -> None:
+        """The returned Command should target AGENT and include an error ToolMessage."""
+        from pydantic import ValidationError
+
+        class SampleModel(BaseModel):
+            value: int
+
+        try:
+            SampleModel.model_validate({"value": "not_an_int"})
+        except ValidationError as e:
+            tool_call = ToolCall(
+                name=END_EXECUTION_TOOL.name,
+                args={"value": "not_an_int"},
+                id="tc_123",
+            )
+            command = _build_validation_retry_command(tool_call, e)
+
+        assert isinstance(command, Command)
+        assert command.goto == AgentGraphNode.AGENT
+        msgs = command.update["messages"]
+        assert len(msgs) == 1
+        msg = msgs[0]
+        assert isinstance(msg, ToolMessage)
+        assert msg.name == END_EXECUTION_TOOL.name
+        assert msg.tool_call_id == "tc_123"
+        assert msg.status == "error"
+        assert "int_parsing" in msg.content or "integer" in msg.content.lower()

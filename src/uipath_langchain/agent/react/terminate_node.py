@@ -2,23 +2,31 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, NoReturn
 
-from langchain_core.messages import AIMessage
-from pydantic import BaseModel
+from langchain_core.messages import AIMessage, ToolCall, ToolMessage
+from langgraph.types import Command
+from pydantic import BaseModel, ValidationError
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.core.chat import UiPathConversationMessageData
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ...runtime.messages import UiPathChatMessagesMapper
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
-from .types import AgentGraphState
+from .types import AgentGraphNode, AgentGraphState
+
+logger = logging.getLogger("uipath")
 
 
 def _handle_end_execution(
     args: dict[str, Any], response_schema: type[BaseModel] | None
 ) -> dict[str, Any]:
-    """Handle LLM-initiated termination via END_EXECUTION_TOOL."""
+    """Handle LLM-initiated termination via END_EXECUTION_TOOL.
+
+    Raises:
+        ValidationError: When the LLM output does not conform to the schema.
+    """
     output_schema = response_schema or END_EXECUTION_TOOL.args_schema
     validated = output_schema.model_validate(args)
     return validated.model_dump()
@@ -82,6 +90,37 @@ def _handle_end_conversational(
     return validated.model_dump(by_alias=True, exclude_none=True)
 
 
+def _build_validation_retry_command(
+    tool_call: ToolCall,
+    error: ValidationError,
+) -> Command[Any]:
+    """Build a Command that feeds validation errors back to the LLM for retry.
+
+    Args:
+        tool_call: The tool call that produced invalid output.
+        error: The Pydantic ValidationError from output validation.
+
+    Returns:
+        A Command that updates messages with error feedback and routes
+        back to the AGENT node for another LLM attempt.
+    """
+    error_feedback = (
+        f"Output validation failed for '{tool_call['name']}'. "
+        f"Fix the errors and call '{tool_call['name']}' again.\n"
+        f"Validation errors:\n{error}"
+    )
+    tool_message = ToolMessage(
+        content=error_feedback,
+        name=tool_call["name"],
+        tool_call_id=tool_call["id"],
+        status="error",
+    )
+    return Command(
+        goto=AgentGraphNode.AGENT,
+        update={"messages": [tool_message]},
+    )
+
+
 def create_terminate_node(
     response_schema: type[BaseModel] | None = None,
     is_conversational: bool = False,
@@ -92,9 +131,15 @@ def create_terminate_node(
     1. LLM-initiated termination (END_EXECUTION_TOOL)
     2. LLM-initiated error (RAISE_ERROR_TOOL)
     3. End of conversational loop
+
+    When the LLM's structured output fails Pydantic validation, the
+    validation errors are fed back as a ToolMessage and the agent is
+    routed back to the AGENT node for retry instead of faulting.
     """
 
-    def terminate_node(state: AgentGraphState):
+    def terminate_node(
+        state: AgentGraphState,
+    ) -> dict[str, Any] | Command[Any]:
         if is_conversational:
             return _handle_end_conversational(state, response_schema)
         else:
@@ -111,7 +156,15 @@ def create_terminate_node(
                 tool_name = tool_call["name"]
 
                 if tool_name == END_EXECUTION_TOOL.name:
-                    return _handle_end_execution(tool_call["args"], response_schema)
+                    try:
+                        return _handle_end_execution(tool_call["args"], response_schema)
+                    except ValidationError as e:
+                        logger.warning(
+                            "Output validation failed in terminate_node, "
+                            "routing back to LLM for retry: %s",
+                            e,
+                        )
+                        return _build_validation_retry_command(tool_call, e)
 
                 if tool_name == RAISE_ERROR_TOOL.name:
                     _handle_raise_error(tool_call["args"])
