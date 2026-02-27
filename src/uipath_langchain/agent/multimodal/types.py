@@ -18,3 +18,15 @@ IMAGE_MIME_TYPES: set[str] = {
     "image/gif",
     "image/webp",
 }
+
+TEXT_MIME_TYPES: set[str] = {
+    "text/plain",
+    "text/csv",
+    "text/xml",
+    "text/html",
+    "text/markdown",
+    "text/tab-separated-values",
+    "application/xml",
+    "application/json",
+    "application/x-yaml",
+}

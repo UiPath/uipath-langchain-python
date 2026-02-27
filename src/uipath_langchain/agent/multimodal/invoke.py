@@ -1,6 +1,7 @@
 """LLM invocation with multimodal file attachments."""
 
 import asyncio
+import logging
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -10,10 +11,23 @@ from langchain_core.messages import (
     DataContentBlock,
     HumanMessage,
 )
-from langchain_core.messages.content import create_file_block, create_image_block
+from langchain_core.messages.content import (
+    create_file_block,
+    create_image_block,
+    create_plaintext_block,
+)
 
 from .types import FileInfo
-from .utils import download_file_base64, is_image, is_pdf, sanitize_filename
+from .utils import (
+    download_file_base64,
+    download_file_text,
+    is_image,
+    is_pdf,
+    is_text,
+    sanitize_filename,
+)
+
+logger = logging.getLogger("uipath")
 
 
 async def build_file_content_block(
@@ -25,11 +39,17 @@ async def build_file_content_block(
         file_info: File URL, name, and MIME type.
 
     Returns:
-        A DataContentBlock for the file (image or PDF).
-
-    Raises:
-        ValueError: If the MIME type is not supported.
+        A DataContentBlock for the file (image, PDF, or text).
+        For unsupported MIME types, returns a plaintext block with an
+        error description instead of raising.
     """
+    if is_text(file_info.mime_type):
+        text_content = await download_file_text(file_info.url)
+        return create_plaintext_block(
+            text=text_content,
+            title=file_info.name,
+        )
+
     base64_file = await download_file_base64(file_info.url)
 
     if is_image(file_info.mime_type):
@@ -41,7 +61,20 @@ async def build_file_content_block(
             filename=sanitize_filename(file_info.name),
         )
 
-    raise ValueError(f"Unsupported mime_type={file_info.mime_type}")
+    logger.warning(
+        "Unsupported MIME type '%s' for file '%s'; "
+        "returning descriptive placeholder to LLM.",
+        file_info.mime_type,
+        file_info.name,
+    )
+    return create_plaintext_block(
+        text=(
+            f"[File '{file_info.name}' could not be processed: "
+            f"unsupported file type '{file_info.mime_type}'. "
+            f"Summarize your response based on available information.]"
+        ),
+        title=file_info.name,
+    )
 
 
 async def build_file_content_blocks(files: list[FileInfo]) -> list[DataContentBlock]:
