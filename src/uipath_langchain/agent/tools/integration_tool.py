@@ -1,7 +1,7 @@
 """Process tool creation for UiPath process execution."""
 
 import copy
-from typing import Any
+from typing import Any, Optional
 
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
@@ -153,6 +153,10 @@ def create_integration_tool(
         )
     connection_id: str = resource.properties.connection.id
 
+    folder_key: Optional[str] = None
+    if resource.properties.connection.folder is not None:
+        folder_key = resource.properties.connection.folder.get("key")
+
     activity_metadata = convert_to_activity_metadata(resource)
 
     input_model = create_model(resource.input_schema)
@@ -178,6 +182,7 @@ def create_integration_tool(
                 activity_metadata=activity_metadata,
                 connection_id=connection_id,
                 activity_input=sanitize_dict_for_serialization(kwargs),
+                folder_key=folder_key,
             )
         except Exception:
             raise

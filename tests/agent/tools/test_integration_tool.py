@@ -1,5 +1,7 @@
 """Tests for integration_tool.py module."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
@@ -10,6 +12,7 @@ from uipath.platform.connections import ActivityParameterLocationInfo, Connectio
 
 from uipath_langchain.agent.tools.integration_tool import (
     convert_to_activity_metadata,
+    create_integration_tool,
 )
 
 
@@ -265,3 +268,96 @@ class TestConvertToIntegrationServiceMetadata:
 
         assert "user" in result.parameter_location_info.body_fields
         assert len(result.parameter_location_info.body_fields) == 1
+
+
+class TestCreateIntegrationToolFolderKey:
+    """Test that create_integration_tool correctly extracts and passes folder_key."""
+
+    def _make_resource(
+        self, folder: dict | None = None
+    ) -> AgentIntegrationToolResourceConfig:
+        """Helper to create a minimal integration tool resource."""
+        connection = Connection(
+            id="test-connection-id",
+            name="Test Connection",
+            element_instance_id=12345,
+            folder=folder,
+        )
+        properties = AgentIntegrationToolProperties(
+            method="POST",
+            tool_path="/v2/webSearch",
+            object_name="v2::webSearch",
+            tool_display_name="Web Search",
+            tool_description="Search the web",
+            connection=connection,
+            parameters=[
+                AgentIntegrationToolParameter(
+                    name="query", type="string", field_location="body"
+                ),
+            ],
+        )
+        return AgentIntegrationToolResourceConfig(
+            name="Web Search",
+            description="Search the web",
+            properties=properties,
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_folder_key_passed_to_invoke_activity(self) -> None:
+        """Test that folder_key from connection.folder is passed to invoke_activity_async."""
+        folder_key = "d6f5c54a-e2b2-4083-be93-623aa670ed40"
+        resource = self._make_resource(folder={"key": folder_key})
+
+        mock_invoke = AsyncMock(return_value={"results": []})
+
+        with patch(
+            "uipath_langchain.agent.tools.integration_tool.UiPath"
+        ) as mock_sdk_cls:
+            mock_sdk_cls.return_value.connections.invoke_activity_async = mock_invoke
+            tool = create_integration_tool(resource)
+            await tool.ainvoke({"query": "test search"})
+
+        mock_invoke.assert_called_once()
+        call_kwargs = mock_invoke.call_args.kwargs
+        assert call_kwargs["folder_key"] == folder_key
+
+    @pytest.mark.asyncio
+    async def test_folder_key_none_when_no_folder(self) -> None:
+        """Test that folder_key is None when connection has no folder."""
+        resource = self._make_resource(folder=None)
+
+        mock_invoke = AsyncMock(return_value={"results": []})
+
+        with patch(
+            "uipath_langchain.agent.tools.integration_tool.UiPath"
+        ) as mock_sdk_cls:
+            mock_sdk_cls.return_value.connections.invoke_activity_async = mock_invoke
+            tool = create_integration_tool(resource)
+            await tool.ainvoke({"query": "test search"})
+
+        mock_invoke.assert_called_once()
+        call_kwargs = mock_invoke.call_args.kwargs
+        assert call_kwargs["folder_key"] is None
+
+    @pytest.mark.asyncio
+    async def test_folder_key_none_when_folder_has_no_key(self) -> None:
+        """Test that folder_key is None when folder dict has no 'key' field."""
+        resource = self._make_resource(folder={"path": "some/path"})
+
+        mock_invoke = AsyncMock(return_value={"results": []})
+
+        with patch(
+            "uipath_langchain.agent.tools.integration_tool.UiPath"
+        ) as mock_sdk_cls:
+            mock_sdk_cls.return_value.connections.invoke_activity_async = mock_invoke
+            tool = create_integration_tool(resource)
+            await tool.ainvoke({"query": "test search"})
+
+        mock_invoke.assert_called_once()
+        call_kwargs = mock_invoke.call_args.kwargs
+        assert call_kwargs["folder_key"] is None
