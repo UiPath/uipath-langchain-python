@@ -6,7 +6,9 @@ from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 
 from uipath_langchain.chat.hitl import (
+    ARGS_MODIFIED_MESSAGE,
     CANCELLED_MESSAGE,
+    CONVERSATIONAL_APPROVED_TOOL_ARGS,
     ConfirmationResult,
     check_tool_confirmation,
     request_approval,
@@ -48,7 +50,7 @@ class TestCheckToolConfirmation:
 
     @patch("uipath_langchain.chat.hitl.request_approval", return_value=None)
     def test_cancelled_returns_tool_message(self, mock_approval):
-        """User rejects → ConfirmationResult with cancelled ToolMessage."""
+        """User rejects → ConfirmationResult with cancelled ToolMessage and metadata."""
         tool = MockTool(metadata={"require_conversational_confirmation": True})
         call = _make_call()
 
@@ -62,6 +64,9 @@ class TestCheckToolConfirmation:
         assert result.cancelled.name == "mock_tool"
         assert result.cancelled.tool_call_id == "call_1"
         assert result.args_modified is False
+        assert result.cancelled.response_metadata[
+            CONVERSATIONAL_APPROVED_TOOL_ARGS
+        ] == {"query": "test"}
 
     @patch(
         "uipath_langchain.chat.hitl.request_approval",
@@ -77,6 +82,7 @@ class TestCheckToolConfirmation:
         assert result is not None
         assert result.cancelled is None
         assert result.args_modified is False
+        assert result.approved_args == {"query": "test"}
 
     @patch(
         "uipath_langchain.chat.hitl.request_approval",
@@ -92,7 +98,41 @@ class TestCheckToolConfirmation:
         assert result is not None
         assert result.cancelled is None
         assert result.args_modified is True
+        assert result.approved_args == {"query": "edited"}
         assert call["args"] == {"query": "edited"}
+
+
+class TestAnnotateResult:
+    """Tests for ConfirmationResult.annotate_result."""
+
+    def test_annotate_sets_metadata(self):
+        """annotate_result sets approved_args on response_metadata."""
+        confirmation = ConfirmationResult(
+            cancelled=None, args_modified=False, approved_args={"query": "test"}
+        )
+        msg = ToolMessage(content="result", tool_call_id="call_1")
+
+        confirmation.annotate_result(msg)
+
+        assert msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] == {
+            "query": "test"
+        }
+        assert msg.content == "result"
+
+    def test_annotate_wraps_content_when_modified(self):
+        """annotate_result wraps content when args were modified."""
+        confirmation = ConfirmationResult(
+            cancelled=None, args_modified=True, approved_args={"query": "edited"}
+        )
+        msg = ToolMessage(content="result", tool_call_id="call_1")
+
+        confirmation.annotate_result(msg)
+
+        assert msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] == {
+            "query": "edited"
+        }
+        assert ARGS_MODIFIED_MESSAGE in msg.content
+        assert "result" in msg.content
 
 
 class TestRequestApprovalTruthiness:

@@ -21,11 +21,7 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
-from uipath_langchain.chat.hitl import (
-    ARGS_MODIFIED_MESSAGE,
-    CONVERSATIONAL_APPROVED_TOOL_ARGS,
-    check_tool_confirmation,
-)
+from uipath_langchain.chat.hitl import check_tool_confirmation
 
 # the type safety can be improved with generics
 ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
@@ -86,9 +82,6 @@ class UiPathToolNode(RunnableCallable):
 
         confirmation = check_tool_confirmation(call, self.tool)
         if confirmation is not None and confirmation.cancelled:
-            confirmation.cancelled.response_metadata[
-                CONVERSATIONAL_APPROVED_TOOL_ARGS
-            ] = call["args"]
             return self._process_result(call, confirmation.cancelled)
 
         try:
@@ -100,11 +93,10 @@ class UiPathToolNode(RunnableCallable):
             else:
                 result = self.tool.invoke(call)
             output = self._process_result(call, result)
-            msg = self._get_tool_message(output) if confirmation is not None else None
-            if msg is not None:
-                msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] = call["args"]
-                if confirmation.args_modified:
-                    msg.content = f'{{"meta": "{ARGS_MODIFIED_MESSAGE}", "result": {msg.content}}}'
+            if confirmation is not None:
+                msg = self._get_tool_message(output)
+                if msg is not None:
+                    confirmation.annotate_result(msg)
             return output
         except Exception as e:
             if self.handle_tool_errors:
@@ -118,9 +110,6 @@ class UiPathToolNode(RunnableCallable):
 
         confirmation = check_tool_confirmation(call, self.tool)
         if confirmation is not None and confirmation.cancelled:
-            confirmation.cancelled.response_metadata[
-                CONVERSATIONAL_APPROVED_TOOL_ARGS
-            ] = call["args"]
             return self._process_result(call, confirmation.cancelled)
 
         try:
@@ -132,11 +121,10 @@ class UiPathToolNode(RunnableCallable):
             else:
                 result = await self.tool.ainvoke(call)
             output = self._process_result(call, result)
-            msg = self._get_tool_message(output) if confirmation is not None else None
-            if msg is not None:
-                msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] = call["args"]
-                if confirmation.args_modified:
-                    msg.content = f'{{"meta": "{ARGS_MODIFIED_MESSAGE}", "result": {msg.content}}}'
+            if confirmation is not None:
+                msg = self._get_tool_message(output)
+                if msg is not None:
+                    confirmation.annotate_result(msg)
             return output
         except Exception as e:
             if self.handle_tool_errors:

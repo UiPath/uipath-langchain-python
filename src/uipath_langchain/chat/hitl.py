@@ -22,6 +22,18 @@ class ConfirmationResult(NamedTuple):
 
     cancelled: ToolMessage | None  # ToolMessage if cancelled, None if approved
     args_modified: bool
+    approved_args: dict[str, Any] | None = None
+
+    def annotate_result(self, msg: ToolMessage) -> None:
+        """Apply confirmation metadata to a tool result message."""
+        if self.approved_args is not None:
+            msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] = (
+                self.approved_args
+            )
+        if self.args_modified:
+            msg.content = (
+                f'{{"meta": "{ARGS_MODIFIED_MESSAGE}", "result": {msg.content}}}'
+            )
 
 
 def _patch_span_input(approved_args: dict[str, Any]) -> None:
@@ -124,17 +136,20 @@ def check_tool_confirmation(
         {**original_args, "tool_call_id": call["id"]}, tool
     )
     if approved_args is None:
-        return ConfirmationResult(
-            cancelled=ToolMessage(
-                content=CANCELLED_MESSAGE,
-                name=call["name"],
-                tool_call_id=call["id"],
-            ),
-            args_modified=False,
+        cancelled_msg = ToolMessage(
+            content=CANCELLED_MESSAGE,
+            name=call["name"],
+            tool_call_id=call["id"],
         )
+        cancelled_msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] = (
+            original_args
+        )
+        return ConfirmationResult(cancelled=cancelled_msg, args_modified=False)
     call["args"] = approved_args
     return ConfirmationResult(
-        cancelled=None, args_modified=approved_args != original_args
+        cancelled=None,
+        args_modified=approved_args != original_args,
+        approved_args=approved_args,
     )
 
 
