@@ -188,6 +188,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
 
         header_capture = HeaderCapture(name=f"vertex_headers_{id(self)}")
         client_kwargs = get_httpx_client_kwargs()
+        client_kwargs["timeout"] = 300.0
         verify = client_kwargs.get("verify", True)
 
         http_options = genai_types.HttpOptions(
