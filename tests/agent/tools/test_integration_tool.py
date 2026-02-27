@@ -461,6 +461,31 @@ class TestConvertIntegrationParametersToArgumentProperties:
         with pytest.raises(AgentStartupError):
             convert_integration_parameters_to_argument_properties(params)
 
+    @pytest.mark.parametrize(
+        "invalid_value",
+        [
+            "{missing_closing",
+            "missing_opening}",
+            "{{missing_closing}",
+            "{missing_opening}}",
+            "no_braces_at_all",
+        ],
+    )
+    def test_argument_parameter_with_malformed_braces_raises(self, invalid_value):
+        """Various malformed brace patterns raise AgentStartupError."""
+        params = [
+            AgentIntegrationToolParameter(
+                name="test_param",
+                type="string",
+                value=invalid_value,
+                field_location="body",
+                field_variant="argument",
+            ),
+        ]
+
+        with pytest.raises(AgentStartupError):
+            convert_integration_parameters_to_argument_properties(params)
+
 
 class TestStripTemplateEnumsFromSchema:
     """Test cases for strip_template_enums_from_schema function."""
@@ -783,7 +808,8 @@ class TestStripTemplateEnumsFromSchema:
 
         result = strip_template_enums_from_schema(schema, parameters)
 
-        config_props = result["definitions"]["Config"]["properties"]
+        # The $ref is inlined and modified on the inlined copy
+        config_props = result["properties"]["config"]["properties"]
         assert config_props["mode"]["enum"] == ["auto"]
 
     def test_skips_argument_param_when_schema_path_not_found(self):

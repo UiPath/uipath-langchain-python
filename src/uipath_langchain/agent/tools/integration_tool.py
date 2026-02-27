@@ -2,7 +2,7 @@
 
 import copy
 import re
-from typing import Any
+from typing import Any, cast
 
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
@@ -22,11 +22,15 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.static_args import handle_static_args
+from uipath_langchain.agent.tools.static_args import (
+    ArgumentPropertiesMixin,
+    handle_static_args,
+)
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
 
+from .schema_editing import strip_matching_enums
 from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -62,7 +66,7 @@ def convert_integration_parameters_to_argument_properties(
             )
         elif param.field_variant == "argument":
             value_str = str(param.value) if param.value is not None else ""
-            match = re.fullmatch(r"\{\{(.+?)\}\}", value_str)
+            match = _TEMPLATE_PATTERN.match(value_str)
             if not match:
                 raise AgentStartupError(
                     code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
@@ -81,7 +85,7 @@ def convert_integration_parameters_to_argument_properties(
     return result
 
 
-_TEMPLATE_PATTERN = re.compile(r"^\{\{.*\}\}$")
+_TEMPLATE_PATTERN = re.compile(r"^\{\{(.+?)\}\}$")
 
 
 def _param_name_to_segments(param_name: str) -> list[str]:
@@ -133,52 +137,6 @@ def _is_param_name_to_jsonpath(param_name: str) -> str:
     return "$" + "".join(parts)
 
 
-def _resolve_schema_ref(
-    root_schema: dict[str, Any], node: dict[str, Any]
-) -> dict[str, Any]:
-    """Resolve a $ref pointer in a JSON schema node.
-
-    Returns the referenced definition if $ref is present,
-    otherwise returns the node unchanged.
-    """
-    ref = node.get("$ref")
-    if ref is None:
-        return node
-    parts = ref.lstrip("#/").split("/")
-    current = root_schema
-    for part in parts:
-        current = current[part]
-    return current
-
-
-def _navigate_schema_to_field(
-    root_schema: dict[str, Any], segments: list[str]
-) -> dict[str, Any] | None:
-    """Navigate a JSON schema to a leaf field using parsed path segments.
-
-    Args:
-        root_schema: The root schema (needed for $ref resolution).
-        segments: Path segments from _parse_is_param_name.
-
-    Returns:
-        The schema dict of the leaf field, or None if the path doesn't exist.
-    """
-    current = root_schema
-    for seg in segments:
-        current = _resolve_schema_ref(root_schema, current)
-        if seg == "*":
-            items = current.get("items")
-            if items is None:
-                return None
-            current = items
-        else:
-            props = current.get("properties")
-            if props is None or seg not in props:
-                return None
-            current = props[seg]
-    return _resolve_schema_ref(root_schema, current)
-
-
 def strip_template_enums_from_schema(
     schema: dict[str, Any],
     parameters: list[AgentIntegrationToolParameter],
@@ -206,21 +164,7 @@ def strip_template_enums_from_schema(
             continue
 
         segments = _param_name_to_segments(param.name)
-        field_schema = _navigate_schema_to_field(schema, segments)
-        if field_schema is None:
-            continue
-
-        enum = field_schema.get("enum")
-        if enum is None:
-            continue
-
-        cleaned = [
-            v for v in enum if not (isinstance(v, str) and _TEMPLATE_PATTERN.match(v))
-        ]
-        if not cleaned:
-            del field_schema["enum"]
-        else:
-            field_schema["enum"] = cleaned
+        strip_matching_enums(schema, segments, _TEMPLATE_PATTERN)
 
     return schema
 
@@ -392,7 +336,9 @@ def create_integration_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(resource, state, call["args"])
+        call["args"] = handle_static_args(
+            cast(ArgumentPropertiesMixin, tool), state, call["args"]
+        )
         return await tool.ainvoke(call)
 
     tool = StructuredToolWithArgumentProperties(
