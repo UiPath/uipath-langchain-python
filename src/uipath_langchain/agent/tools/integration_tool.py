@@ -6,10 +6,17 @@ from typing import Any
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
@@ -165,6 +172,18 @@ def create_integration_tool(
 
     sdk = UiPath()
 
+    def _is_429(exc: BaseException) -> bool:
+        return (
+            isinstance(exc, EnrichedException)
+            and getattr(exc, "status_code", None) == 429
+        )
+
+    @retry(
+        retry=retry_if_exception(_is_429),
+        wait=wait_exponential_jitter(initial=10, max=120, jitter=5),
+        stop=stop_after_attempt(5),
+        reraise=True,
+    )
     @mockable(
         name=resource.name,
         description=resource.description,
@@ -173,15 +192,11 @@ def create_integration_tool(
         example_calls=resource.properties.example_calls,
     )
     async def integration_tool_fn(**kwargs: Any):
-        try:
-            result = await sdk.connections.invoke_activity_async(
-                activity_metadata=activity_metadata,
-                connection_id=connection_id,
-                activity_input=sanitize_dict_for_serialization(kwargs),
-            )
-        except Exception:
-            raise
-
+        result = await sdk.connections.invoke_activity_async(
+            activity_metadata=activity_metadata,
+            connection_id=connection_id,
+            activity_input=sanitize_dict_for_serialization(kwargs),
+        )
         return result
 
     async def integration_tool_wrapper(
