@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import BaseModel, Field
 from uipath.agent.models.agent import (
+    AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
     AgentToolStaticArgumentProperties,
     BaseAgentResourceConfig,
@@ -37,6 +38,104 @@ class TestResolveStaticArgs:
         result = resolve_static_args(ResourceWithProps(), {"unused": "input"})
 
         assert result == {"$['host']": "api.example.com"}
+
+    def test_resolve_static_args_with_static_values_of_different_types(self):
+        """Test resolve_static_args resolves string, integer, and object static values."""
+
+        class ResourceWithProps:
+            argument_properties = {
+                "$['connection_id']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="12345"
+                ),
+                "$['timeout']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value=30
+                ),
+                "$['config']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value={"enabled": True, "retries": 3}
+                ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {"unused": "input"})
+
+        assert result == {
+            "$['connection_id']": "12345",
+            "$['timeout']": 30,
+            "$['config']": {"enabled": True, "retries": 3},
+        }
+
+    def test_resolve_static_args_with_argument_properties_extracts_from_agent_input(
+        self,
+    ):
+        """Test resolve_static_args resolves AgentToolArgumentArgumentProperties from agent_input."""
+
+        class ResourceWithProps:
+            argument_properties = {
+                "$['user_id']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="userId"
+                ),
+                "$['query']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="searchQuery"
+                ),
+            }
+
+        agent_input = {
+            "userId": "user123",
+            "searchQuery": "test search",
+            "unused_arg": "not_used",
+        }
+
+        result = resolve_static_args(ResourceWithProps(), agent_input)
+
+        assert result == {
+            "$['user_id']": "user123",
+            "$['query']": "test search",
+        }
+
+    def test_resolve_static_args_with_mixed_static_and_argument_properties(self):
+        """Test resolve_static_args with both static and argument properties."""
+
+        class ResourceWithProps:
+            argument_properties = {
+                "$['api_key']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="secret_key"
+                ),
+                "$['user_id']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="userId"
+                ),
+                "$['version']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="v1"
+                ),
+            }
+
+        agent_input = {"userId": "user456"}
+
+        result = resolve_static_args(ResourceWithProps(), agent_input)
+
+        assert result == {
+            "$['api_key']": "secret_key",
+            "$['user_id']": "user456",
+            "$['version']": "v1",
+        }
+
+    def test_resolve_static_args_skips_missing_argument_values(self):
+        """Test that argument properties referencing missing agent_input keys are skipped."""
+
+        class ResourceWithProps:
+            argument_properties = {
+                "$['existing_param']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="existingArg"
+                ),
+                "$['missing_param']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="missingArg"
+                ),
+            }
+
+        agent_input = {"existingArg": "exists"}
+
+        result = resolve_static_args(ResourceWithProps(), agent_input)
+
+        assert result == {"$['existing_param']": "exists"}
+        assert "$['missing_param']" not in result
 
     def test_resolve_static_args_with_unknown_resource_type(self):
         """Test resolve_static_args with unknown resource type returns empty dict."""
