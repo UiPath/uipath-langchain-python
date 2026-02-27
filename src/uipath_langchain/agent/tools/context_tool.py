@@ -152,11 +152,14 @@ def handle_deep_rag(
         assert prompt is not None
 
     folder_path_prefix = None
-    if resource.settings.folder_path_prefix.value:
+    if (
+        resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.value
+    ):
         folder_path_prefix = resource.settings.folder_path_prefix.value
 
     file_extension = None
-    if resource.settings.file_extension.value:
+    if resource.settings.file_extension and resource.settings.file_extension.value:
         file_extension = resource.settings.file_extension.value
 
     glob_pattern = build_glob_pattern(
@@ -268,7 +271,10 @@ def handle_batch_transform(
         assert prompt is not None
 
     folder_path_prefix = None
-    if resource.settings.folder_path_prefix.value:
+    if (
+        resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.value
+    ):
         folder_path_prefix = resource.settings.folder_path_prefix.value
 
     glob_pattern = build_glob_pattern(

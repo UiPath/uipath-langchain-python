@@ -3280,7 +3280,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.9.12"
+version = "2.9.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -3303,9 +3303,9 @@ dependencies = [
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1b/1b/308b3ef5e49796cb90f14b42e63be8aa9e47cb8f20cd004154845d9ced4b/uipath-2.9.12.tar.gz", hash = "sha256:a3c021243491634ba3f1fa0b58c698c360a8a728f369d56a3b3196246af87377", size = 2447228, upload-time = "2026-02-26T14:58:26.534Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/fb/b0e3eaec886809caf9e7c9841152c17cb20d6de62914220025ee1fcc9d07/uipath-2.9.14.tar.gz", hash = "sha256:90bde634e9ee3db8eee286af3ab5324968d4e4aecd421d591cc9254414e7bda5", size = 2447309, upload-time = "2026-02-27T00:25:33.41Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6e/b3/0774ce5a8a992f5f3a04a66ce559e397d80935e5939e53c2a601bda15af1/uipath-2.9.12-py3-none-any.whl", hash = "sha256:973f99cdd1d33742d4b95654671563f42eaa39bcd33ef1a159ce0fbd3111b980", size = 352105, upload-time = "2026-02-26T14:58:25.016Z" },
+    { url = "https://files.pythonhosted.org/packages/37/65/77e0966ed7b534e26089765a6a71e2a15e1975256e48a06f30c38d8a2a05/uipath-2.9.14-py3-none-any.whl", hash = "sha256:16f015b2dfc769deb0507d933ae2620b2ecc1400278afe37b8348d9274a650d3", size = 352171, upload-time = "2026-02-27T00:25:31.755Z" },
 ]
 
 [[package]]
@@ -3324,7 +3324,11 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
+<<<<<<< HEAD
 version = "0.7.9"
+=======
+version = "0.7.8"
+>>>>>>> 2998a62 (fix: tests)
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -3391,7 +3395,7 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.56" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.9.12,<2.10.0" },
+    { name = "uipath", specifier = ">=2.9.14,<2.10.0" },
     { name = "uipath-core", specifier = ">=0.5.2,<0.6.0" },
     { name = "uipath-platform", specifier = ">=0.0.4,<0.1.0" },
     { name = "uipath-runtime", specifier = ">=0.9.1,<0.10.0" },
