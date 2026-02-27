@@ -835,7 +835,9 @@ class TestBuildGlobPattern:
         assert build_glob_pattern("folder", "pdf") == "folder/*.pdf"
 
     def test_nested_prefix_with_extension(self):
-        assert build_glob_pattern("folder/subfolder", "docx") == "folder/subfolder/*.docx"
+        assert (
+            build_glob_pattern("folder/subfolder", "docx") == "folder/subfolder/*.docx"
+        )
 
     # --- All supported extensions ---
 
