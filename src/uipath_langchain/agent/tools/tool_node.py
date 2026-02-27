@@ -94,9 +94,7 @@ class UiPathToolNode(RunnableCallable):
                 result = self.tool.invoke(call)
             output = self._process_result(call, result)
             if confirmation is not None:
-                msg = self._get_tool_message(output)
-                if msg is not None:
-                    confirmation.annotate_result(msg)
+                confirmation.annotate_result(output)
             return output
         except Exception as e:
             if self.handle_tool_errors:
@@ -122,9 +120,7 @@ class UiPathToolNode(RunnableCallable):
                 result = await self.tool.ainvoke(call)
             output = self._process_result(call, result)
             if confirmation is not None:
-                msg = self._get_tool_message(output)
-                if msg is not None:
-                    confirmation.annotate_result(msg)
+                confirmation.annotate_result(output)
             return output
         except Exception as e:
             if self.handle_tool_errors:
@@ -180,15 +176,6 @@ class UiPathToolNode(RunnableCallable):
                 content=content, name=call["name"], tool_call_id=call["id"]
             )
             return {"messages": [message]}
-
-    @staticmethod
-    def _get_tool_message(output: OutputType) -> ToolMessage | None:
-        """Extract the ToolMessage from a processed output, if present."""
-        if isinstance(output, dict):
-            messages = output.get("messages")
-            if messages:
-                return messages[0]
-        return None
 
     @staticmethod
     def _filter_result(command: Command[Any]) -> None:

@@ -51,19 +51,19 @@ async def create_tools_from_resources(
         )
         tool = await _build_tool_for_resource(resource, llm)
         if tool is not None:
+            if isinstance(tool, list):
+                tools.extend(tool)
+            else:
+                tools.append(tool)
 
-            if agent.is_conversational:
-                if isinstance(tool, list):
-                    continue
-                
-                # put REQUIRE_CONVERSATIONAL_CONFIRMATION to tool metadata
-                props = getattr(resource, "properties", None)
-                if props and getattr(props, REQUIRE_CONVERSATIONAL_CONFIRMATION, False):
-                    if tool.metadata is None:
-                        tool.metadata = {}
-                    tool.metadata[REQUIRE_CONVERSATIONAL_CONFIRMATION] = True
-
-            tools.append(tool)
+                if agent.is_conversational:
+                    props = getattr(resource, "properties", None)
+                    if props and getattr(
+                        props, REQUIRE_CONVERSATIONAL_CONFIRMATION, False
+                    ):
+                        if tool.metadata is None:
+                            tool.metadata = {}
+                        tool.metadata[REQUIRE_CONVERSATIONAL_CONFIRMATION] = True
 
     return tools
 

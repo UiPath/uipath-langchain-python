@@ -24,8 +24,15 @@ class ConfirmationResult(NamedTuple):
     args_modified: bool
     approved_args: dict[str, Any] | None = None
 
-    def annotate_result(self, msg: ToolMessage) -> None:
+    def annotate_result(self, output: dict[str, Any] | Any) -> None:
         """Apply confirmation metadata to a tool result message."""
+        msg = None
+        if isinstance(output, dict):
+            messages = output.get("messages")
+            if messages:
+                msg = messages[0]
+        if msg is None:
+            return
         if self.approved_args is not None:
             msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] = (
                 self.approved_args
@@ -122,12 +129,6 @@ def request_approval(
 def check_tool_confirmation(
     call: ToolCall, tool: BaseTool
 ) -> ConfirmationResult | None:
-    """Check if a tool requires confirmation and request approval if so.
-
-    Returns None if no confirmation is needed.
-    Returns ConfirmationResult with approved_args=None if cancelled.
-    Returns ConfirmationResult with approved_args and args_modified flag if approved.
-    """
     if not (tool.metadata and tool.metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION)):
         return None
 
