@@ -151,6 +151,21 @@ def handle_deep_rag(
     if static:
         assert prompt is not None
 
+    folder_path_prefix = None
+    if (
+        resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.value
+    ):
+        folder_path_prefix = resource.settings.folder_path_prefix.value
+
+    file_extension = None
+    if resource.settings.file_extension and resource.settings.file_extension.value:
+        file_extension = resource.settings.file_extension.value
+
+    glob_pattern = build_glob_pattern(
+        folder_path_prefix=folder_path_prefix, file_extension=file_extension
+    )
+
     output_model = create_model(
         "DeepRagOutputModel",
         __base__=DeepRagContent,
@@ -184,13 +199,13 @@ def handle_deep_rag(
 
         @durable_interrupt
         async def create_deep_rag():
-            # TODO: add glob pattern support
             return CreateDeepRag(
                 name=f"task-{uuid.uuid4()}",
                 index_name=index_name,
                 prompt=actual_prompt,
                 citation_mode=citation_mode,
                 index_folder_path=resource.folder_path,
+                glob_pattern=glob_pattern,
             )
 
         return await create_deep_rag()
@@ -255,6 +270,17 @@ def handle_batch_transform(
     if static:
         assert prompt is not None
 
+    folder_path_prefix = None
+    if (
+        resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.value
+    ):
+        folder_path_prefix = resource.settings.folder_path_prefix.value
+
+    glob_pattern = build_glob_pattern(
+        folder_path_prefix=folder_path_prefix, file_extension=None
+    )
+
     output_model = create_model_from_schema(BATCH_TRANSFORM_OUTPUT_SCHEMA)
 
     schema_fields: dict[str, Any] = {}
@@ -289,7 +315,6 @@ def handle_batch_transform(
 
         @durable_interrupt
         async def create_batch_transform():
-            # TODO: storage_bucket_folder_path_prefix support
             return CreateBatchTransform(
                 name=f"task-{uuid.uuid4()}",
                 index_name=index_name,
@@ -298,6 +323,7 @@ def handle_batch_transform(
                 index_folder_path=index_folder_path,
                 enable_web_search_grounding=enable_web_search_grounding,
                 output_columns=batch_transform_output_columns,
+                storage_bucket_folder_path_prefix=glob_pattern,
             )
 
         await create_batch_transform()
@@ -363,3 +389,31 @@ def ensure_valid_fields(resource_config: AgentContextResourceConfig):
             detail="Static query requires a query value to be set. Please provide a value for the static query in context settings.",
             category=UiPathErrorCategory.USER,
         )
+
+
+def build_glob_pattern(
+    folder_path_prefix: str | None, file_extension: str | None
+) -> str:
+    # Handle prefix
+    prefix = "**"
+    if folder_path_prefix:
+        prefix = folder_path_prefix.rstrip("/")
+
+        if not prefix.startswith("**"):
+            if prefix.startswith("/"):
+                prefix = prefix[1:]
+
+    # Handle extension
+    extension = "*"
+    if file_extension:
+        ext = file_extension.lower()
+        if ext in {"pdf", "txt", "docx", "csv"}:
+            extension = f"*.{ext}"
+        else:
+            extension = f"*.{ext}"
+
+    # Final pattern logic
+    if not prefix or prefix == "**":
+        return "**/*" if extension == "*" else f"**/{extension}"
+
+    return f"{prefix}/{extension}"
