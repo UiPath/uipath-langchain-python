@@ -1,15 +1,18 @@
-"""Process tool creation for UiPath process execution."""
+"""Integration tool creation for UiPath Integration Service connector activities."""
 
 import copy
+import logging
 from typing import Any
 
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
+from langchain_core.messages.tool import ToolMessage
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
@@ -23,6 +26,8 @@ from uipath_langchain.agent.tools.tool_node import (
 
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import sanitize_dict_for_serialization, sanitize_tool_name
+
+logger: logging.Logger = logging.getLogger("uipath")
 
 
 class StructuredToolWithWrapper(StructuredToolWithOutputType, ToolWrapperMixin):
@@ -190,7 +195,23 @@ def create_integration_tool(
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
         call["args"] = handle_static_args(resource, state, call["args"])
-        return await tool.ainvoke(call)
+        try:
+            return await tool.ainvoke(call)
+        except EnrichedException as e:
+            if isinstance(e.status_code, int) and 400 <= e.status_code < 500:
+                logger.warning(
+                    "Integration tool %s returned HTTP %s: %s",
+                    call["name"],
+                    e.status_code,
+                    e.response_content,
+                )
+                return ToolMessage(
+                    content=f"Tool call failed: {e.status_code} — {e.response_content}",
+                    name=call["name"],
+                    tool_call_id=call["id"],
+                    status="error",
+                )
+            raise
 
     tool = StructuredToolWithWrapper(
         name=tool_name,

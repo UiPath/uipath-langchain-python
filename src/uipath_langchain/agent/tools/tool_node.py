@@ -23,7 +23,7 @@ from uipath_langchain.agent.react.utils import (
 )
 
 # the type safety can be improved with generics
-ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
+ToolWrapperReturnType = dict[str, Any] | Command[Any] | ToolMessage | None
 
 ToolWrapperWithoutState = Callable[[BaseTool, ToolCall], ToolWrapperReturnType]
 ToolWrapperWithState = Callable[[BaseTool, ToolCall, Any], ToolWrapperReturnType]

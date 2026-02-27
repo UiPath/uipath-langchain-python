@@ -1,16 +1,25 @@
 """Tests for integration_tool.py module."""
 
+from typing import Any
+from unittest.mock import AsyncMock, patch
+
+import httpx
 import pytest
+from langchain_core.messages import AIMessage
+from langchain_core.messages.tool import ToolMessage
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
     AgentIntegrationToolProperties,
     AgentIntegrationToolResourceConfig,
 )
 from uipath.platform.connections import ActivityParameterLocationInfo, Connection
+from uipath.platform.errors import EnrichedException
 
 from uipath_langchain.agent.tools.integration_tool import (
     convert_to_activity_metadata,
+    create_integration_tool,
 )
+from uipath_langchain.agent.tools.tool_node import UiPathToolNode
 
 
 class TestConvertToIntegrationServiceMetadata:
@@ -265,3 +274,195 @@ class TestConvertToIntegrationServiceMetadata:
 
         assert "user" in result.parameter_location_info.body_fields
         assert len(result.parameter_location_info.body_fields) == 1
+
+
+def _make_enriched_exception(
+    status_code: int, body: str = "error"
+) -> EnrichedException:
+    """Create an EnrichedException from a mock HTTPStatusError."""
+    request = httpx.Request("POST", "https://example.com/elements_/v3/test")
+    response = httpx.Response(
+        status_code=status_code,
+        content=body.encode("utf-8"),
+        request=request,
+    )
+    http_error = httpx.HTTPStatusError(
+        message=f"{status_code} Error",
+        request=request,
+        response=response,
+    )
+    return EnrichedException(http_error)
+
+
+def _make_integration_resource(
+    connection_id: str = "test-conn-id",
+) -> AgentIntegrationToolResourceConfig:
+    """Create a minimal integration tool resource config for testing."""
+    connection = Connection(
+        id=connection_id, name="Test Connection", element_instance_id=12345
+    )
+    properties = AgentIntegrationToolProperties(
+        method="POST",
+        tool_path="/api/query",
+        object_name="query_object",
+        tool_display_name="Run KQL Query",
+        tool_description="Runs a KQL query",
+        connection=connection,
+        parameters=[
+            AgentIntegrationToolParameter(
+                name="query", type="string", field_location="body"
+            ),
+        ],
+    )
+    return AgentIntegrationToolResourceConfig(
+        name="Run_KQL_Query",
+        description="Runs a KQL query against the data source",
+        properties=properties,
+        input_schema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
+    )
+
+
+class TestIntegrationToolWrapperErrorHandling:
+    """Test cases for HTTP 4xx error handling in integration_tool_wrapper.
+
+    Verifies that HTTP 4xx errors from Integration Service are returned
+    to the LLM as error ToolMessages instead of crashing the agent.
+    """
+
+    @pytest.fixture
+    def resource(self) -> AgentIntegrationToolResourceConfig:
+        return _make_integration_resource()
+
+    @pytest.fixture
+    def mock_state(self) -> Any:
+        """State with a single AI message containing a tool call."""
+        tool_call = {
+            "name": "Run_KQL_Query",
+            "args": {"query": "test query"},
+            "id": "call_abc",
+        }
+        ai_message = AIMessage(content="Running query", tool_calls=[tool_call])
+
+        class _State:
+            messages = [ai_message]
+
+        return _State()
+
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_http_400_returned_as_error_tool_message(
+        self,
+        mock_uipath_cls: Any,
+        resource: AgentIntegrationToolResourceConfig,
+        mock_state: Any,
+    ) -> None:
+        """HTTP 400 Bad Request should be caught and returned as error ToolMessage."""
+        mock_sdk = mock_uipath_cls.return_value
+        mock_sdk.connections.invoke_activity_async = AsyncMock(
+            side_effect=_make_enriched_exception(400, "Bad Request: invalid KQL syntax")
+        )
+
+        tool = create_integration_tool(resource)
+
+        node = UiPathToolNode(
+            tool,
+            awrapper=tool.awrapper,  # type: ignore[attr-defined]
+        )
+        result = await node._afunc(mock_state)
+
+        assert result is not None
+        assert "messages" in result
+        msg = result["messages"][0]
+        assert isinstance(msg, ToolMessage)
+        assert msg.status == "error"
+        assert "400" in msg.content
+        assert "Bad Request: invalid KQL syntax" in msg.content
+        assert msg.name == "Run_KQL_Query"
+        assert msg.tool_call_id == "call_abc"
+
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_http_404_returned_as_error_tool_message(
+        self,
+        mock_uipath_cls: Any,
+        resource: AgentIntegrationToolResourceConfig,
+        mock_state: Any,
+    ) -> None:
+        """HTTP 404 Not Found should be caught and returned as error ToolMessage."""
+        mock_sdk = mock_uipath_cls.return_value
+        mock_sdk.connections.invoke_activity_async = AsyncMock(
+            side_effect=_make_enriched_exception(404, "Resource not found")
+        )
+
+        tool = create_integration_tool(resource)
+
+        node = UiPathToolNode(
+            tool,
+            awrapper=tool.awrapper,  # type: ignore[attr-defined]
+        )
+        result = await node._afunc(mock_state)
+
+        assert result is not None
+        assert "messages" in result
+        msg = result["messages"][0]
+        assert isinstance(msg, ToolMessage)
+        assert msg.status == "error"
+        assert "404" in msg.content
+        assert "Resource not found" in msg.content
+
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_http_500_still_propagates(
+        self,
+        mock_uipath_cls: Any,
+        resource: AgentIntegrationToolResourceConfig,
+        mock_state: Any,
+    ) -> None:
+        """HTTP 500 Internal Server Error should still propagate as an exception."""
+        mock_sdk = mock_uipath_cls.return_value
+        mock_sdk.connections.invoke_activity_async = AsyncMock(
+            side_effect=_make_enriched_exception(500, "Internal Server Error")
+        )
+
+        tool = create_integration_tool(resource)
+
+        node = UiPathToolNode(
+            tool,
+            awrapper=tool.awrapper,  # type: ignore[attr-defined]
+        )
+
+        with pytest.raises(EnrichedException) as exc_info:
+            await node._afunc(mock_state)
+
+        assert exc_info.value.status_code == 500
+
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_successful_call_returns_result(
+        self,
+        mock_uipath_cls: Any,
+        resource: AgentIntegrationToolResourceConfig,
+        mock_state: Any,
+    ) -> None:
+        """Successful tool invocations should return the result unchanged."""
+        expected_result = {"rows": [{"col1": "val1"}]}
+        mock_sdk = mock_uipath_cls.return_value
+        mock_sdk.connections.invoke_activity_async = AsyncMock(
+            return_value=expected_result
+        )
+
+        tool = create_integration_tool(resource)
+
+        node = UiPathToolNode(
+            tool,
+            awrapper=tool.awrapper,  # type: ignore[attr-defined]
+        )
+        result = await node._afunc(mock_state)
+
+        assert result is not None
+        assert "messages" in result
+        msg = result["messages"][0]
+        assert isinstance(msg, ToolMessage)
+        assert "rows" in msg.content
+        assert "col1" in msg.content
+        assert msg.name == "Run_KQL_Query"
+        assert msg.tool_call_id == "call_abc"
