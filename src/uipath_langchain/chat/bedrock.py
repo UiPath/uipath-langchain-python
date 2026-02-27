@@ -2,6 +2,7 @@ import logging
 import os
 from collections.abc import Iterator
 from typing import Any, Optional
+from urllib.parse import quote
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
@@ -143,7 +144,7 @@ class AwsBedrockCompletionsPassthroughClient:
         if job_key:
             headers["X-UiPath-JobKey"] = job_key
         if process_key:
-            headers["X-UiPath-ProcessKey"] = process_key
+            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
 
         request.headers.update(headers)
 
