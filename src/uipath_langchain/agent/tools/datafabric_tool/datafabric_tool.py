@@ -8,6 +8,7 @@ This module provides functionality to:
 import json
 import logging
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -315,6 +316,9 @@ def _create_sdk_based_tools(
         # Create a closure to capture the entity name
         entity_display_name = entity.display_name or entity.name
 
+        # Per-entity call counter for unique file names
+        _call_counter = {"n": 0}
+
         async def query_fn(
             sql_query: str,
             _entity_name: str = entity_display_name,
@@ -323,8 +327,18 @@ def _create_sdk_based_tools(
             """Execute a SQL query against the Data Fabric entity."""
             from uipath.platform import UiPath
 
+            # Normalize SQL: collapse whitespace and strip trailing semicolons
+            # (DF parser rejects newlines and trailing semicolons)
+            original_sql = sql_query
+            sql_query = re.sub(r"\s+", " ", sql_query).strip().rstrip(";").strip()
+
             print(f"[DEBUG] query_fn called for entity '{_entity_name}' with SQL: {sql_query}")
+            if original_sql != sql_query:
+                print(f"[DEBUG] SQL was normalized from multiline to single line")
             logger.info(f"Executing SQL query for entity '{_entity_name}': {sql_query}")
+
+            _call_counter["n"] += 1
+            call_num = _call_counter["n"]
 
             sdk = UiPath()
             try:
@@ -334,9 +348,9 @@ def _create_sdk_based_tools(
                 total_count = len(records)
                 truncated = total_count > _max_records
                 returned_records = records[:_max_records] if truncated else records
-                
+
                 print(f"[DEBUG] Retrieved {total_count} records, returning {len(returned_records)} for entity '{_entity_name}'")
-                
+
                 result = {
                     "records": returned_records,
                     "total_count": total_count,
@@ -351,18 +365,36 @@ def _create_sdk_based_tools(
                 # Emit result to file for eval pipeline (activated via env var)
                 result_file = os.environ.get("DATAFABRIC_RESULT_FILE")
                 if result_file:
+                    # Write the "latest" result (overwrite) for backward compat
                     with open(result_file, "w") as f:
+                        json.dump(result, f)
+                    # Also write a per-call snapshot for full audit trail
+                    p = Path(result_file)
+                    call_file = p.parent / f"{p.stem}_call{call_num}{p.suffix}"
+                    with open(call_file, "w") as f:
                         json.dump(result, f)
 
                 return result
             except Exception as e:
                 logger.error(f"SQL query failed for entity '{_entity_name}': {e}")
-                return {
+                error_result = {
                     "records": [],
                     "total_count": 0,
                     "error": str(e),
                     "sql_query": sql_query,
+                    "original_sql": original_sql if original_sql != sql_query else None,
+                    "entity": _entity_name,
                 }
+
+                # Write error result too so eval pipeline can see what happened
+                result_file = os.environ.get("DATAFABRIC_RESULT_FILE")
+                if result_file:
+                    p = Path(result_file)
+                    call_file = p.parent / f"{p.stem}_call{call_num}{p.suffix}"
+                    with open(call_file, "w") as f:
+                        json.dump(error_result, f)
+
+                return error_result
 
         entity_description = entity.description or f"Query {entity_display_name} records"
 
