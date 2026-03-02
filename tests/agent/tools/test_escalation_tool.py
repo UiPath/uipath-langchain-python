@@ -297,6 +297,7 @@ class TestEscalationToolMetadata:
         mock_result = MagicMock()
         mock_result.action = None
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource)
@@ -325,6 +326,7 @@ class TestEscalationToolMetadata:
         mock_result = MagicMock()
         mock_result.action = None
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource_no_recipient)
@@ -349,6 +351,7 @@ class TestEscalationToolMetadata:
         mock_result = MagicMock()
         mock_result.action = None
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         # Create resource with string task title
@@ -398,6 +401,7 @@ class TestEscalationToolMetadata:
         mock_result = MagicMock()
         mock_result.action = None
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         # Create resource with TEXT_BUILDER task title containing variable token
@@ -455,6 +459,7 @@ class TestEscalationToolMetadata:
         mock_result = MagicMock()
         mock_result.action = None
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         # Create resource with empty string task title
@@ -555,6 +560,7 @@ class TestEscalationToolOutputSchema:
         mock_result.assigned_to_user = None
         mock_result.action = "approve"
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource)
@@ -579,6 +585,7 @@ class TestEscalationToolOutputSchema:
         mock_result = MagicMock()
         mock_result.action = "approve"
         mock_result.data = {"approved": True}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource)
@@ -587,6 +594,31 @@ class TestEscalationToolOutputSchema:
         await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert mock_interrupt.called
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
+    async def test_escalation_tool_raises_when_task_is_deleted(
+        self, mock_interrupt, mock_uipath_class, escalation_resource
+    ):
+        """Test that escalation tool raises AgentRuntimeError when task is deleted."""
+        from uipath_langchain.agent.exceptions import AgentRuntimeError
+
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.is_deleted = True
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        with pytest.raises(AgentRuntimeError):
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
@@ -787,6 +819,7 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
         mock_result.action = "approve"
         mock_result.data = {}
         mock_result.assigned_to_user = None
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource)
