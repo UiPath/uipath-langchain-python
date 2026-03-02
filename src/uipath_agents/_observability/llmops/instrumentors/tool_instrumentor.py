@@ -208,7 +208,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         parent_span=span,
                     )
                     self._state.vs_escalation_run_ids.add(run_id)
-                elif tool_type == "context_grounding":
+                elif tool_type == "context_grounding" or tool_type == "context":
                     assert metadata is not None  # tool_type came from metadata
                     query = (
                         (arguments or {}).get("query")
@@ -279,6 +279,7 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                         "ixp_extraction",
                         "vs_escalation",
                         "context_grounding",
+                        "context",
                     ):
                         self._state.pending_tool_name = tool_name
                         self._state.pending_tool_span = span
