@@ -8,7 +8,3 @@ def register_middleware():
     """This function will be called by the entry point system when uipath_langchain is installed"""
     Middlewares.register("init", langgraph_init_middleware)
     Middlewares.register("new", langgraph_new_middleware)
-
-
-if __name__ == "__main__":
-    pass
