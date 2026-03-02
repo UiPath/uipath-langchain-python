@@ -1,6 +1,7 @@
 """Tests for context_tool.py module."""
 
-from unittest.mock import AsyncMock, patch
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.documents import Document
@@ -271,6 +272,27 @@ class TestHandleDeepRag:
             call_args = mock_interrupt.call_args[0][0]
             assert call_args.prompt == "runtime provided query"
 
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
+    async def test_deep_rag_uses_execution_folder_path(self, base_resource_config):
+        """Test that CreateDeepRag receives index_folder_path from the execution environment."""
+        resource = base_resource_config(
+            query_variant="static",
+            query_value="test query",
+            citation_mode_value=AgentContextValueSetting(value="Inline"),
+        )
+        tool = handle_deep_rag("test_tool", resource)
+
+        with patch(
+            "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = {"mocked": "response"}
+            assert tool.coroutine is not None
+            await tool.coroutine()
+
+            deep_rag_arg = mock_interrupt.call_args[0][0]
+            assert deep_rag_arg.index_folder_path == "/Shared/TestFolder"
+
 
 class TestCreateContextTool:
     """Test cases for create_context_tool function."""
@@ -489,6 +511,17 @@ class TestHandleSemanticSearch:
             mock_retriever.ainvoke.assert_called_once_with("predefined static query")
             assert "documents" in result
             assert len(result["documents"]) == 1
+
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
+    def test_semantic_search_uses_execution_folder_path(self, semantic_config):
+        """Test that ContextGroundingRetriever receives folder_path from the execution environment."""
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            handle_semantic_search("semantic_tool", semantic_config)
+
+            call_kwargs = mock_retriever_class.call_args[1]
+            assert call_kwargs["folder_path"] == "/Shared/TestFolder"
 
 
 class TestHandleBatchTransform:
@@ -770,6 +803,32 @@ class TestHandleBatchTransform:
             call_args = mock_interrupt.call_args[0][0]
             assert call_args.prompt == "runtime provided query"
             assert call_args.destination_path == "output.csv"
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
+    async def test_batch_transform_uses_execution_folder_path(
+        self, batch_transform_config
+    ):
+        """Test that CreateBatchTransform receives index_folder_path from the execution environment."""
+        tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
+
+        mock_uipath = MagicMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id")
+        with (
+            patch(
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
+            mock_interrupt.return_value = MagicMock()
+            assert tool.coroutine is not None
+            await tool.coroutine(destination_path="output.csv")
+
+            batch_transform_arg = mock_interrupt.call_args[0][0]
+            assert batch_transform_arg.index_folder_path == "/Shared/TestFolder"
 
 
 class TestBuildGlobPattern:
