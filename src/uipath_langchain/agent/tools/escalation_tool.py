@@ -210,6 +210,13 @@ def create_escalation_tool(
         if isinstance(result, dict):
             result = TypeAdapter(EscalationToolOutput).validate_python(result)
 
+        if result.is_deleted:
+            return {
+                "action": EscalationAction.END,
+                "output": None,
+                "outcome": "The escalation task was deleted",
+            }
+
         outcome = result.action
         escalation_output = _parse_task_data(
             result.data.model_dump()
