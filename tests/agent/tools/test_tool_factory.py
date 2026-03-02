@@ -275,7 +275,7 @@ class TestCreateToolsFromResources:
             "internal_resource",
             "ixp_extraction_resource",
             # Note: mcp_resource is excluded because MCP tools are created
-            # separately via create_mcp_tools_from_agent, not through
+            # separately via create_mcp_tools_and_clients, not through
             # _build_tool_for_resource
         ],
     )

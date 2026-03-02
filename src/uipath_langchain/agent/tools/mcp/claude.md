@@ -32,9 +32,9 @@ src/uipath_langchain/agent/tools/mcp/
 ```python
 from .mcp_client import McpClient, SessionInfoFactory
 from .mcp_tool import (
+    create_mcp_tools_and_clients,
+    open_mcp_tools,
     create_mcp_tools,
-    create_mcp_tools_from_agent,
-    create_mcp_tools_from_metadata_for_mcp_server,
 )
 from .streamable_http import SessionInfo
 ```
@@ -228,12 +228,12 @@ On session reinitialization (404 retry), only steps 5-6 repeat.
 
 ### Tool Factory Functions
 
-#### `create_mcp_tools_from_agent(agent, session_info_factory)` → `tuple[list[BaseTool], list[McpClient]]`
+#### `create_mcp_tools_and_clients(agent, session_info_factory)` → `tuple[list[BaseTool], list[McpClient]]`
 
 **Primary factory function** for creating MCP tools from a LowCodeAgentDefinition.
 
 ```python
-async def create_mcp_tools_from_agent(
+async def create_mcp_tools_and_clients(
     agent: LowCodeAgentDefinition,
     session_info_factory: SessionInfoFactory | None = None,
 ) -> tuple[list[BaseTool], list[McpClient]]:
@@ -245,7 +245,7 @@ defaults to the base `SessionInfoFactory`.  Pass a custom factory (e.g.
 
 **Usage:**
 ```python
-tools, clients = await create_mcp_tools_from_agent(agent, session_info_factory=factory)
+tools, clients = await create_mcp_tools_and_clients(agent, session_info_factory=factory)
 try:
     # Use tools...
 finally:
@@ -253,15 +253,15 @@ finally:
         await client.dispose()
 ```
 
-#### `create_mcp_tools_from_metadata_for_mcp_server(config, mcpClient)` → `list[BaseTool]`
+#### `create_mcp_tools(config, mcpClient)` → `list[BaseTool]`
 
 Creates tools for a single MCP resource config using an existing McpClient.
 
-#### `create_mcp_tools(config)` → Context Manager
+#### `open_mcp_tools(config)` → Context Manager
 
-Async context manager that creates live MCP sessions using the **upstream SDK's**
-`mcp.client.streamable_http.streamable_http_client` (not our local copy).  This
-is a simpler path that does not support `SessionInfo`.
+Async context manager that wraps `create_mcp_tools_and_clients()` with automatic
+client lifecycle management.  Yields a list of `BaseTool` instances and
+disposes all `McpClient` instances on exit.
 
 ## Two-Phase Initialization
 
@@ -487,7 +487,7 @@ and `SessionInfo` instance are all reused.
 uipath-langchain (this package)
 ├── streamable_http.py  → SessionInfo (base class)
 ├── mcp_client.py       → SessionInfoFactory (base factory)
-└── mcp_tool.py         → create_mcp_tools_from_agent(session_info_factory=...)
+└── mcp_tool.py         → create_mcp_tools_and_clients(session_info_factory=...)
 
 uipath-agents (consumer)
 ├── session_info_debug_state.py
@@ -592,7 +592,7 @@ When the upstream MCP SDK changes its transport:
 2. Override `get_session_id` and/or `set_session_id` for custom behavior
 3. Create a corresponding factory that inherits `SessionInfoFactory`
 4. The factory receives `McpServer` — use its `slug`, `folder_key`, etc.
-5. Pass the factory to `create_mcp_tools_from_agent(session_info_factory=...)`
+5. Pass the factory to `create_mcp_tools_and_clients(session_info_factory=...)`
 
 ## Related Files
 
