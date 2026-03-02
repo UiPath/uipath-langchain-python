@@ -42,8 +42,12 @@ from uipath.runtime.schema import UiPathRuntimeSchema
 from uipath.tracing import SpanStatus
 
 from uipath_agents._errors import ExceptionMapper
+from uipath_agents._observability.conversational_consumption import (
+    ConversationalConsumptionHandler,
+)
 
 from ..agent_graph_builder.config import get_execution_type
+from ..agent_graph_builder.llm_utils import _get_agenthub_config
 from .event_emitter import (
     AgentRunEvent,
     TelemetryEventEmitter,
@@ -96,6 +100,7 @@ class InstrumentedRuntime:
         event_emitter: TelemetryEventEmitter | None = None,
         agent_definition: AgentDefinition | None = None,
         trace_context_storage: TraceContextStorage | None = None,
+        consumption_handler: ConversationalConsumptionHandler | None = None,
     ):
         """Initialize the instrumented runtime.
 
@@ -108,6 +113,7 @@ class InstrumentedRuntime:
             agent_definition: Optional agent metadata for span attributes and telemetry enrichment
             trace_context_storage: Optional storage for trace context preservation
                 across suspend/resume cycles. If None, trace context is not preserved.
+            consumption_handler: Optional handler for conversational consumption recording
         """
         self._delegate = delegate
         self._span_factory = span_factory
@@ -115,6 +121,7 @@ class InstrumentedRuntime:
         self._event_emitter = event_emitter
         self._agent_definition = agent_definition
         self._trace_context_storage = trace_context_storage
+        self._consumption_handler = consumption_handler
         self._agent_run_id = str(uuid.uuid4())
         self._runtime_context = runtime_context
         self._resume_final_status: int = SpanStatus.OK
@@ -170,6 +177,14 @@ class InstrumentedRuntime:
                 agent_span.set_status(Status(StatusCode.OK))
                 agent_span.end()
                 self._emit_output_if_successful(result, duration_ms, agent_span)
+                if self._consumption_handler:
+                    agenthub_config = _get_agenthub_config(
+                        get_execution_type(self._runtime_context),
+                        is_conversational=True,
+                    )
+                    await self._consumption_handler.register_consumption_if_applicable(
+                        input, agenthub_config=agenthub_config
+                    )
                 await self._clear_trace_context()
             elif result.status == UiPathRuntimeStatus.FAULTED:
                 self._resume_final_status = SpanStatus.ERROR
@@ -232,6 +247,14 @@ class InstrumentedRuntime:
                     self._emit_output_if_successful(
                         final_result, duration_ms, agent_span
                     )
+                    if self._consumption_handler:
+                        agenthub_config = _get_agenthub_config(
+                            get_execution_type(self._runtime_context),
+                            is_conversational=True,
+                        )
+                        await self._consumption_handler.register_consumption_if_applicable(
+                            input, agenthub_config=agenthub_config
+                        )
                     await self._clear_trace_context()
                 elif final_result.status == UiPathRuntimeStatus.FAULTED:
                     self._resume_final_status = SpanStatus.ERROR

@@ -44,6 +44,9 @@ from ..._bts.bts_runtime import BtsRuntime
 from ..._bts.bts_state import BtsState
 from ..._bts.bts_storage import SqliteBtsStateStorage
 from ..._observability import configure_telemetry, shutdown_telemetry
+from ..._observability.conversational_consumption import (
+    ConversationalConsumptionHandler,
+)
 from ..._observability.event_emitter import TelemetryEventEmitter
 from ..._observability.exporters import FilteringSpanExporter
 from ..._observability.instrumented_runtime import InstrumentedRuntime
@@ -407,6 +410,15 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
 
         agent_name = agent_definition.name or "Unknown"
 
+        consumption_handler = (
+            ConversationalConsumptionHandler(
+                agent_definition=agent_definition,
+                callback=instrumentation_callback,
+            )
+            if agent_definition and agent_definition.is_conversational
+            else None
+        )
+
         base_runtime = AgentsLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
@@ -435,6 +447,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             event_emitter=event_emitter,
             agent_definition=agent_definition,
             trace_context_storage=trace_context_storage,
+            consumption_handler=consumption_handler,
         )
 
         if not self.context.resume:

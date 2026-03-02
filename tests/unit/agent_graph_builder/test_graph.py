@@ -129,6 +129,7 @@ class TestBuildAgentGraph:
                 execution_type=AgentExecutionType.PLAYGROUND,
                 byo_connection_id="test-connection-id",
                 disable_streaming=True,
+                is_conversational=False,
             )
 
     async def test_conversational_agent_enables_streaming(self):
@@ -168,6 +169,7 @@ class TestBuildAgentGraph:
                 execution_type=AgentExecutionType.RUNTIME,
                 byo_connection_id=None,
                 disable_streaming=False,
+                is_conversational=True,
             )
 
     async def test_handles_input_data_dict(self):

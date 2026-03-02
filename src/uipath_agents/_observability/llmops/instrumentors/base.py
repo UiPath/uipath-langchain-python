@@ -31,6 +31,7 @@ class InstrumentationState:
     llm_span_from_guardrail: bool = False  # Track if LLM span was created by guardrails
 
     # Tool-specific state
+    had_tool_calls: bool = False
     current_tool_span: Optional[Span] = None
     tool_span_from_guardrail: bool = (
         False  # Track if tool span was created by guardrails
@@ -94,6 +95,7 @@ class InstrumentationState:
         self.prompts_captured = prompts_captured
 
         # Tool state
+        self.had_tool_calls = False
         self.pending_tool_name = None
         self.pending_tool_span = None
         self.pending_process_span = None

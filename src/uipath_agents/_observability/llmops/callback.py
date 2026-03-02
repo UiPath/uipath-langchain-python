@@ -311,6 +311,10 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
 
     # --- Tool Events ---
 
+    @property
+    def had_tool_calls(self) -> bool:
+        return self._state.had_tool_calls
+
     def on_tool_start(
         self,
         serialized: Dict[str, Any],
@@ -322,6 +326,7 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
         metadata: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> None:
+        self._state.had_tool_calls = True
         self._tool_instrumentor.on_tool_start(
             serialized,
             input_str,
