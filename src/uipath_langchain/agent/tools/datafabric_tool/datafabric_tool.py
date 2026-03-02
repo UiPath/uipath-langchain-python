@@ -141,8 +141,19 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
         if entity.description:
             lines.append(f"_{entity.description}_")
         lines.append("")
-        lines.append("| Field | Type |")
-        lines.append("|-------|------|")
+        # Check if any field has a description
+        has_descriptions = any(
+            f.description
+            for f in (entity.fields or [])
+            if not f.is_hidden_field and not f.is_system_field
+        )
+
+        if has_descriptions:
+            lines.append("| Field | Type | Description |")
+            lines.append("|-------|------|-------------|")
+        else:
+            lines.append("| Field | Type |")
+            lines.append("|-------|------|")
 
         # Collect field info for query pattern examples
         field_names = []
@@ -156,7 +167,11 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
             field_type = format_field_type(field)
             field_names.append(field_name)
             display_label = f"{field_name} ({field.display_name})" if field.display_name and field.display_name != field_name else field_name
-            lines.append(f"| {display_label} | {field_type} |")
+            if has_descriptions:
+                desc = field.description or ""
+                lines.append(f"| {display_label} | {field_type} | {desc} |")
+            else:
+                lines.append(f"| {display_label} | {field_type} |")
 
             # Track field types for examples
             sql_type = field.sql_type.name.lower() if field.sql_type else ""
