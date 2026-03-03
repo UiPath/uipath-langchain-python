@@ -12,30 +12,29 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Get the workspace root directory (where this script is located)
-WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 echo -e "${GREEN}Cleaning local development environment...${NC}"
 echo "Workspace root: $WORKSPACE_ROOT"
 echo ""
 
-# Function to remove [tool.uv.sources] section from pyproject.toml
-remove_uv_sources() {
+# Function to remove a TOML section from pyproject.toml
+remove_toml_section() {
     local pyproject_file="$1"
-    
+    local section_pattern="$2"
+    local section_name="$3"
+
     if [ ! -f "$pyproject_file" ]; then
         echo -e "${RED}Error: $pyproject_file not found!${NC}"
         return 1
     fi
-    
-    # Check if [tool.uv.sources] section exists
-    if grep -q "^\[tool\.uv\.sources\]" "$pyproject_file"; then
-        echo -e "${GREEN}Removing [tool.uv.sources] section from $(basename "$pyproject_file")${NC}"
-        
-        # Use awk to remove the section and all its content until the next section or end of file
-        # Remove from [tool.uv.sources] until next [ section or end of file
-        awk '
+
+    if grep -q "$section_pattern" "$pyproject_file"; then
+        echo -e "${GREEN}Removing $section_name from $(basename "$pyproject_file")${NC}"
+
+        awk -v pattern="$section_pattern" '
             BEGIN { in_section = 0 }
-            /^\[tool\.uv\.sources\]/ {
+            $0 ~ pattern {
                 in_section = 1
                 next
             }
@@ -51,17 +50,25 @@ remove_uv_sources() {
                 print
             }
         ' "$pyproject_file" > "$pyproject_file.tmp" && mv "$pyproject_file.tmp" "$pyproject_file"
-        
+
         echo -e "${GREEN}✓ Section removed${NC}"
     else
-        echo -e "${YELLOW}[tool.uv.sources] section not found in $(basename "$pyproject_file")${NC}"
+        echo -e "${YELLOW}$section_name not found in $(basename "$pyproject_file")${NC}"
     fi
 }
 
-# Step 1: Remove [tool.uv.sources] from uipath-agents-python/pyproject.toml
-echo -e "${GREEN}Step 1: Removing [tool.uv.sources] from uipath-agents-python/pyproject.toml${NC}"
+# Convenience wrapper for removing [tool.uv.sources]
+remove_uv_sources() {
+    remove_toml_section "$1" '^\[tool\.uv\.sources\]' '[tool.uv.sources]'
+}
+
+# Step 1: Remove local-only sections from uipath-agents-python/pyproject.toml
+echo -e "${GREEN}Step 1: Cleaning uipath-agents-python/pyproject.toml${NC}"
 AGENTS_PYPROJECT="$WORKSPACE_ROOT/uipath-agents-python/pyproject.toml"
 remove_uv_sources "$AGENTS_PYPROJECT"
+remove_toml_section "$AGENTS_PYPROJECT" \
+    '^\[project\.entry-points\."uipath\.middlewares"\]' \
+    '[project.entry-points."uipath.middlewares"]'
 
 # Step 2: Sync dependencies for uipath-agents-python
 echo ""
@@ -96,6 +103,7 @@ fi
 echo ""
 echo -e "${GREEN}✓ Local development environment cleaned!${NC}"
 echo ""
-echo "All editable dependencies have been removed:"
+echo "All local-only configuration has been removed:"
 echo "  - uipath-agents-python: [tool.uv.sources] section removed"
+echo "  - uipath-agents-python: [project.entry-points.\"uipath.middlewares\"] section removed"
 echo "  - uipath-langchain-python: [tool.uv.sources] section removed"

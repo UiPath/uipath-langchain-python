@@ -47,9 +47,9 @@ else
 fi
 
 echo "🔐 Authenticating with UiPath..."
-if ! uipath auth --alpha; then
+if ! uv run uipath auth --alpha; then
     echo "⚠️  Auth failed, retrying with --force..."
-    uipath auth --alpha --force
+    uv run uipath auth --alpha --force
 fi
 
 echo ""

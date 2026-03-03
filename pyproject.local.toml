@@ -3,12 +3,14 @@ name = "uipath-agents"
 version = "0.0.0"
 description = "UiPath Agents"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
   "uipath",
   "uipath-langchain[vertex,bedrock]",
-  "langgraph>=1.0.0",
-  "azure-monitor-opentelemetry>=1.7.0",
+  "langgraph>=1.0.0,<2.0.0",
+  "azure-monitor-opentelemetry-exporter>=1.0.0b46,<2.0.0",
+  "opentelemetry-instrumentation-httpx>=0.60b0",
+  "opentelemetry-instrumentation-aiohttp-client>=0.60b0",
 ]
 maintainers = [
   { name = "Silviu Georgescu", email = "silviu.georgescu@uipath.com" },
@@ -17,6 +19,12 @@ maintainers = [
 
 [project.entry-points."uipath.runtime.factories"]
 agents = "uipath_agents.runtime:register_runtime_factory"
+
+[project.entry-points."uipath.preload"]
+preloads = "uipath_agents.preload:get_preload_modules"
+
+[project.entry-points."uipath.middlewares"]
+agents_middleware = "uipath_agents.middlewares:register_middleware"
 
 [project.urls]
 Homepage = "https://uipath.com"
@@ -29,6 +37,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+  "uipath-robot>=0.0.13",
   "datamodel-code-generator>=0.33.0",
   "debugpy>=1.8.17",
   "mypy>=1.14.1",
@@ -37,13 +46,40 @@ dev = [
   "pytest-asyncio>=1.0.0",
   "pytest-cov>=4.1.0",
   "pytest-mock>=3.11.1",
+  "pytest-xdist>=3.5.0",
   "pytest>=7.4.0",
   "requests>=2.32.5",
   "ruff>=0.9.4",
+  "uipath-dev>=0.0.17",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/uipath_agents"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+  # Test and example code
+  "tests/",
+  "examples/",
+
+  # CI/CD and tooling
+  ".github/",
+  "performance/",
+  "*.yml",
+  "*.yaml",
+  "Dockerfile",
+
+  # Documentation
+  "*.md", # All markdown except README.md (auto-kept)
+
+  # Local IDE or dev configs
+  "pytest.ini",
+  "pyproject.local.toml",
+  ".*",
+  "!.gitignore",          # Except this one
+  ".pycharm/",
+  ".claude/",
+]
 
 [tool.ruff]
 line-length = 88
@@ -91,10 +127,41 @@ addopts = "-ra -q"
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
 markers = [
-    "e2e: End-to-end tests that require UiPath authentication",
-    "slow: Tests that take a long time to run",
+  "e2e: End-to-end tests that require UiPath authentication",
+  "slow: Tests that take a long time to run",
 ]
 
+[tool.coverage.run]
+source = ["src/uipath_agents"]
+relative_files = true
+omit = ["*/tests/*", "*/__pycache__/*", "*/site-packages/*", "*/conftest.py"]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "@abstractmethod",
+]
+
+[[tool.uv.index]]
+name = "alpha"
+url = "https://pkgs.dev.azure.com/uipath/SemanticProxy/_packaging/python-packages-private-alpha/pypi/simple/"
+publish-url = "https://pkgs.dev.azure.com/uipath/SemanticProxy/_packaging/python-packages-private-alpha/pypi/upload/"
+explicit = true
+
+[[tool.uv.index]]
+name = "prod"
+url = "https://pkgs.dev.azure.com/uipath/SemanticProxy/_packaging/python-packages-private-prod/pypi/simple/"
+publish-url = "https://pkgs.dev.azure.com/uipath/SemanticProxy/_packaging/python-packages-private-prod/pypi/upload/"
+explicit = true
+
 [tool.uv.sources]
-uipath = { path = "<YOUR_LOCAL_PATH_TO_uipath_REPO>", editable = true }
-uipath-langchain = { path = "YOUR_LOCAL_PATH_TO_uipath-langchain-python_REPO", editable = true }
+uipath = { path = "../uipath-python", editable = true }
+uipath-langchain = { path = "../uipath-langchain-python", editable = true }

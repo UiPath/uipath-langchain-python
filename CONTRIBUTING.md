@@ -162,9 +162,9 @@ A basic set of configuration options and recommended extensions can be found in 
 
 The default python interpreter should already be loaded from the local `.venv`, but make sure to double check. This will probably be the main cause of problems when working cross-repositories. If the Intellisense is not working, check the configured interpreter.
 
-We recommend using a vs-code [multi-root workspace](https://code.visualstudio.com/docs/editing/workspaces/multi-root-workspaces) 
-which will allow the mypy (type checking) and ruff (lint/formatting) plugins to find and use the config for each individual package. 
-Without this, type checking in vscode will report invalid errors. 
+We recommend using a vs-code [multi-root workspace](https://code.visualstudio.com/docs/editing/workspaces/multi-root-workspaces)
+which will allow the mypy (type checking) and ruff (lint/formatting) plugins to find and use the config for each individual package.
+Without this, type checking in vscode will report invalid errors.
 
 To use a multi-root workspace, create an `ur.code-workspace` file in your workspace root, then open that file in vscode:
 
@@ -237,6 +237,48 @@ Once the workspace is configured with all repositories and editable dependencies
 #### Windows + WSL
 
 If you're running you code in WSL, using `localhost` may not work to connect back to the PyCharm instance on Windows. If you get a connection refused error, replace `localhost` with the IP of the Windows host.
+
+## Pulling Agent Projects (Local Development Only)
+
+The `uipath pull` command can be extended with agent-specific support through a middleware entry point. This is **only available during local development** and is not part of the published package.
+
+### What It Does
+
+The pull middleware adds the capability to `uipath pull`:
+- **Studio Web mode** — Detects `agent.json` in the remote project and pulls all agent project files (instead of treating it as a coded project).
+
+### Setup
+
+The middleware entry point is registered automatically by the `setup-local-dev.sh` script (see [Multiple Repositories - Option A](#option-a-automated-setup-recommended)). It adds the following to `pyproject.toml`:
+
+```toml
+[project.entry-points."uipath.middlewares"]
+agents_middleware = "uipath_agents.middlewares:register_middleware"
+```
+
+If you're using the manual setup, add this section to `uipath-agents-python/pyproject.toml` before `[project.urls]` and run `uv sync`.
+
+> **Do NOT commit this entry point** — it is for local development only. The `clean-local-dev.sh` script will remove it along with the editable source configuration.
+
+### Usage
+
+```bash
+# Pull an agent project from Studio Web (requires UIPATH_PROJECT_ID)
+uv run uipath pull
+```
+
+```bash
+# Pull an agent project from Studio Web in a passed directory
+uv run uipath pull ./tmp/agent-project
+```
+
+**Prerequisites**: You must be authenticated (`uv run uipath auth --alpha`) and have `UIPATH_URL` set. Studio Web mode also requires `UIPATH_PROJECT_ID` — add it to the `.env` file in your agent project directory:
+
+```env
+UIPATH_PROJECT_ID=<your-project-id>
+```
+
+Alternatively, you can export it as an environment variable: `export UIPATH_PROJECT_ID=<your-project-id>`.
 
 ## Code Quality Tools
 
