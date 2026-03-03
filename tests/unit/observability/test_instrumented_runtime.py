@@ -1566,7 +1566,10 @@ class TestNestedAgentResumeFixes:
         # prevents subsequent error propagation from flipping these spans
         assert state.resumed_trace_id is None
         assert state.resumed_process_span_data is None
-        assert state.resumed_tool_span_data is None
+        # resumed_tool_span_data is intentionally kept alive for potential
+        # HITL guardrail suspend; resumed_trace_id=None is the authoritative
+        # signal that upserts are done.
+        assert state.resumed_tool_span_data is not None
 
         # The 2 upserts (process + tool) should have been called with OK data
         assert mock_span_factory.upsert_span_complete_by_data.call_count == 2

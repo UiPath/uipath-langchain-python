@@ -130,6 +130,7 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
             and self._state.current_tool_span is not None
         ):
             self._state.current_tool_span = None
+            self._state.resumed_tool_span_data = None
 
     def cleanup_containers(self) -> None:
         """Close all remaining open guardrail container spans."""
@@ -230,6 +231,11 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
             self._track_escalation_outcome_event(
                 GuardrailEvent.ESCALATION_APPROVED, metadata
             )
+
+            # Clear resumed data so subsequent action node errors in the same
+            # chain don't overwrite the already-completed Review task / eval spans
+            self._state.resumed_escalation_span_data = None
+            self._state.resumed_hitl_guardrail_span_data = None
             return
 
         # Normal flow: complete the pending guardrail span
@@ -373,6 +379,8 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                     span_data=self._state.resumed_tool_span_data,
                     status=SpanStatus.ERROR,
                 )
+                self._state.resumed_tool_span_data = None
+                self._state.current_tool_span = None
             elif self._state.current_tool_span:
                 self._span_factory.end_span_error(self._state.current_tool_span, error)
                 self._state.current_tool_span = None

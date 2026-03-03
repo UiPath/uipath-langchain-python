@@ -222,10 +222,15 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
         return self._state.resumed_llm_span_data
 
     def resumed_spans_completed(self) -> bool:
-        """Check if resumed tool spans were already completed."""
+        """Check if resumed tool spans were already completed.
+
+        Uses resumed_trace_id as the definitive signal — it is cleared at the
+        end of _upsert_resumed_spans_on_completion after all span upserts are
+        done.  resumed_tool_span_data is intentionally kept alive longer (for
+        potential HITL guardrail suspend) and must not be checked here.
+        """
         return (
             self._state.resumed_trace_id is None
-            and self._state.resumed_tool_span_data is None
             and self._state.resumed_process_span_data is None
         )
 

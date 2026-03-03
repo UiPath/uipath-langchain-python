@@ -97,6 +97,11 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 self._state.reinvoked_tool_run_ids.add(run_id)
                 return
 
+            # A new (non-resumed) tool is starting — clear stale resume data
+            # from a previously completed resumed tool so it doesn't leak into
+            # this tool's guardrail error handling.
+            self._state.resumed_tool_span_data = None
+
             # Get call_id from kwargs, fall back to metadata (set by escalation_wrapper)
             call_id = kwargs.get("tool_call_id")
             if not call_id and metadata:
@@ -535,7 +540,11 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             self._state.suspended_tool_span = None
 
         self._state.resumed_process_span_data = None
-        self._state.resumed_tool_span_data = None
+        # resumed_tool_span_data is intentionally kept alive here — it may be
+        # needed if a post-execution HITL guardrail suspends after tool
+        # completion.  It is cleared at the correct lifecycle points:
+        # close_container(TOOL/POST_EXECUTION), on_tool_start (new tool),
+        # handle_action_error (block), and cleanup().
         self._state.resumed_trace_id = None
 
     def _is_graph_interrupt(self, error: BaseException) -> bool:

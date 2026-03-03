@@ -1061,7 +1061,8 @@ class TestToolGuardrailResumeFlow:
         """After tool interrupt+resume, post guardrails should still parent to tool span.
 
         Flow: set_resume_context → tool re-invokes (skipped) → tool completes
-        (upserts resumed spans, clears resumed_tool_span_data) → post guardrail fires.
+        (upserts resumed spans, keeps resumed_tool_span_data for potential HITL
+        suspend) → post guardrail fires.
         The post guardrail must parent to the tool span, not the root/agent span.
         """
         agent_run_id = uuid4()
@@ -1084,11 +1085,11 @@ class TestToolGuardrailResumeFlow:
             # Tool re-invokes (skipped in resume mode)
             tool_run_id = uuid4()
             callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
-            # Tool completes — clears resumed_tool_span_data
+            # Tool completes — resumed_tool_span_data preserved for potential HITL suspend
             callback.on_tool_end("result", run_id=tool_run_id)
 
-            # resumed_tool_span_data should be cleared
-            assert callback._state.resumed_tool_span_data is None
+            # resumed_tool_span_data stays available for HITL guardrail suspend
+            assert callback._state.resumed_tool_span_data is not None
             # current_tool_span should still be set
             assert callback._state.current_tool_span is not None
 
@@ -1292,6 +1293,258 @@ class TestEscalationReviewedData:
                 span_data = review_call[1]["span_data"]
                 assert span_data["attributes"]["reviewStatus"] == "Completed"
                 assert span_data["attributes"]["reviewOutcome"] == "Rejected"
+
+    def test_block_after_approved_escalation_does_not_overwrite_review_task(
+        self,
+        callback: LlmOpsInstrumentationCallback,
+        tracer: LlmOpsSpanFactory,
+        span_exporter,
+    ) -> None:
+        """When HITL is approved and a subsequent action node errors (block),
+        the Review task span should NOT be overwritten from OK to ERROR."""
+        from uipath.tracing import SpanStatus
+
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "pii_guard"
+            mock_guardrail.description = "PII Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "deterministic"
+            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+
+            # Simulate resumed escalation context
+            callback._state.resumed_escalation_trace_id = "0123456789abcdef"
+            callback._state.resumed_escalation_span_data = {
+                "name": "Review task",
+                "span_id": "abcd1234",
+                "attributes": {
+                    "type": "guardrailEscalation",
+                    "reviewStatus": "Pending",
+                },
+            }
+            callback._state.resumed_hitl_guardrail_span_data = {
+                "name": "pii_guard",
+                "span_id": "eval5678",
+                "attributes": {},
+            }
+
+            # Step 1: Escalation action node completes (HITL approved)
+            approval_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=approval_run_id,
+                metadata={
+                    "langgraph_node": "agent_pre_execution_pii_guard_hitl",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_action",
+                    "scope": GuardrailScope.AGENT,
+                    "execution_stage": ExecutionStage.PRE_EXECUTION,
+                    "action_type": "Escalate",
+                    "escalation_data": {
+                        "reviewed_by": "user@example.com",
+                        "reviewed_inputs": {"input": "sanitized"},
+                    },
+                },
+            )
+
+            with patch.object(
+                callback._state.span_factory, "upsert_span_complete_by_data"
+            ) as mock_upsert:
+                mock_upsert.return_value = None
+
+                callback.on_chain_end(
+                    {},
+                    run_id=approval_run_id,
+                )
+
+                # Verify Review task was upserted as OK
+                review_calls = [
+                    c
+                    for c in mock_upsert.call_args_list
+                    if c[1].get("span_data", {}).get("name") == "Review task"
+                ]
+                assert len(review_calls) == 1
+                assert review_calls[0][1]["status"] == SpanStatus.OK
+
+                # Step 2: Subsequent action node in the same chain errors (block)
+                block_run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=block_run_id,
+                    metadata={
+                        "langgraph_node": "agent_pre_execution_pii_guard_block",
+                        "guardrail": mock_guardrail,
+                        "node_type": "guardrail_action",
+                        "scope": GuardrailScope.AGENT,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Escalate",
+                    },
+                )
+
+                callback.on_chain_error(
+                    Exception("Blocked by guardrail"),
+                    run_id=block_run_id,
+                )
+
+                # Verify Review task was NOT re-upserted with ERROR
+                review_calls_after = [
+                    c
+                    for c in mock_upsert.call_args_list
+                    if c[1].get("span_data", {}).get("name") == "Review task"
+                ]
+                # Should still be exactly 1 call (the original OK one), not 2
+                assert len(review_calls_after) == 1
+                assert review_calls_after[0][1]["status"] == SpanStatus.OK
+
+
+class TestResumedToolSpanDataLifecycle:
+    """Tests for resumed_tool_span_data clearing at the correct lifecycle points."""
+
+    def test_resumed_tool_span_data_survives_tool_completion(
+        self,
+        callback: LlmOpsInstrumentationCallback,
+        tracer: LlmOpsSpanFactory,
+        span_exporter: Any,
+    ) -> None:
+        """resumed_tool_span_data should stay available after tool completion
+        so that a subsequent HITL guardrail suspend can persist it."""
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            trace_id_hex = format(agent_span.get_span_context().trace_id, "032x")
+            callback.set_resume_context(
+                tool_name="my_tool",
+                trace_id=trace_id_hex,
+                tool_span_data={
+                    "span_id": "abcdef1234567890",
+                    "name": "Tool call - my_tool",
+                    "start_time_ns": 1000,
+                    "attributes": {"type": "toolCall"},
+                },
+            )
+
+            # Tool re-invokes (skipped) then completes
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+            assert callback._state.resumed_tool_span_data is not None
+            assert (
+                callback._state.resumed_tool_span_data["name"] == "Tool call - my_tool"
+            )
+
+    def test_resumed_tool_span_data_cleared_on_post_execution_container_close(
+        self,
+        callback: LlmOpsInstrumentationCallback,
+        tracer: LlmOpsSpanFactory,
+        span_exporter: Any,
+    ) -> None:
+        """resumed_tool_span_data should be cleared when the TOOL/POST_EXECUTION
+        guardrail container closes (post-execution guardrails completed normally)."""
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            trace_id_hex = format(agent_span.get_span_context().trace_id, "032x")
+            callback.set_resume_context(
+                tool_name="my_tool",
+                trace_id=trace_id_hex,
+                tool_span_data={
+                    "span_id": "abcdef1234567890",
+                    "name": "Tool call - my_tool",
+                    "start_time_ns": 1000,
+                    "attributes": {"type": "toolCall"},
+                },
+            )
+
+            # Tool re-invokes (skipped) then completes
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+            # Post-execution guardrail evaluation (passes)
+            mock_guardrail = MagicMock()
+            mock_guardrail.name = "output_guard"
+            mock_guardrail.description = "Output Guard"
+            mock_guardrail.enabled_for_evals = True
+            mock_guardrail.guardrail_type = "builtInValidator"
+            mock_guardrail.selector = MagicMock()
+            mock_guardrail.selector.scopes = [GuardrailScope.TOOL]
+
+            guard_run_id = uuid4()
+            callback.on_chain_start(
+                {},
+                {},
+                run_id=guard_run_id,
+                metadata={
+                    "langgraph_node": "tool_post_execution_output_guard",
+                    "guardrail": mock_guardrail,
+                    "node_type": "guardrail_evaluation",
+                    "scope": GuardrailScope.TOOL,
+                    "execution_stage": ExecutionStage.POST_EXECUTION,
+                    "action_type": "Skip",
+                },
+            )
+            # Validation passes
+            callback.on_chain_end(
+                {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+                run_id=guard_run_id,
+            )
+
+            # Close container (happens when transitioning to next phase)
+            callback._guardrail_instrumentor.close_container(
+                GuardrailScope.TOOL, ExecutionStage.POST_EXECUTION
+            )
+
+            assert callback._state.resumed_tool_span_data is None
+            assert callback._state.current_tool_span is None
+
+    def test_resumed_tool_span_data_cleared_on_new_tool_start(
+        self,
+        callback: LlmOpsInstrumentationCallback,
+        tracer: LlmOpsSpanFactory,
+        span_exporter: Any,
+    ) -> None:
+        """Stale resumed_tool_span_data from a previous resumed tool should be
+        cleared when a new (non-resumed) tool starts."""
+        agent_run_id = uuid4()
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            trace_id_hex = format(agent_span.get_span_context().trace_id, "032x")
+            callback.set_resume_context(
+                tool_name="my_tool",
+                trace_id=trace_id_hex,
+                tool_span_data={
+                    "span_id": "abcdef1234567890",
+                    "name": "Tool call - my_tool",
+                    "start_time_ns": 1000,
+                    "attributes": {"type": "toolCall"},
+                },
+            )
+
+            # Tool re-invokes (skipped) then completes
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "my_tool"}, "input", run_id=tool_run_id)
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+            # Stale data still present
+            assert callback._state.resumed_tool_span_data is not None
+
+            # A new (non-resumed) tool starts
+            new_tool_run_id = uuid4()
+            callback.on_tool_start(
+                {"name": "other_tool"}, "input2", run_id=new_tool_run_id
+            )
+
+            # Stale data cleared by on_tool_start
+            assert callback._state.resumed_tool_span_data is None
 
 
 class TestGuardrailInstrumentorEdgeCases:
