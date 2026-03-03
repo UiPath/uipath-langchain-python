@@ -20,6 +20,7 @@ from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 from uipath.platform.common import WaitEscalation
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.static_args import (
     handle_static_args,
@@ -51,7 +52,7 @@ async def resolve_recipient_value(
 ) -> TaskRecipient | None:
     """Resolve recipient value based on recipient type."""
     if isinstance(recipient, AssetRecipient):
-        value = await resolve_asset(recipient.asset_name, recipient.folder_path)
+        value = await resolve_asset(recipient.asset_name, get_execution_folder_path())
         type = None
         if recipient.type == AgentEscalationRecipientType.ASSET_USER_EMAIL:
             type = TaskRecipientType.EMAIL
@@ -70,7 +71,7 @@ async def resolve_recipient_value(
     return None
 
 
-async def resolve_asset(asset_name: str, folder_path: str) -> str | None:
+async def resolve_asset(asset_name: str, folder_path: str | None) -> str | None:
     """Retrieve asset value."""
     try:
         client = UiPath()
@@ -162,6 +163,7 @@ def create_escalation_tool(
             if channel.recipients
             else None
         )
+        folder_path = get_execution_folder_path()
 
         task_title = "Escalation Task"
         if tool.metadata is not None:
@@ -186,7 +188,7 @@ def create_escalation_tool(
                     title=task_title,
                     data=serialized_data,
                     app_name=channel.properties.app_name,
-                    app_folder_path=channel.properties.folder_name or "",
+                    app_folder_path=folder_path,
                     recipient=recipient,
                     priority=channel.priority,
                     labels=channel.labels,
@@ -199,7 +201,7 @@ def create_escalation_tool(
 
                 return WaitEscalation(
                     action=created_task,
-                    app_folder_path=channel.properties.folder_name,
+                    app_folder_path=folder_path,
                     app_name=channel.properties.app_name,
                     recipient=recipient,
                 )

@@ -1,5 +1,6 @@
 """Tests for process_tool.py."""
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -79,11 +80,12 @@ class TestProcessToolMetadata:
         assert tool.metadata is not None
         assert tool.metadata["display_name"] == "MyProcess"
 
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
     def test_process_tool_metadata_has_folder_path(self, process_resource):
         """Test that metadata contains folder_path for span attributes."""
         tool = create_process_tool(process_resource)
         assert tool.metadata is not None
-        assert tool.metadata["folder_path"] == "/Shared/MyFolder"
+        assert tool.metadata["folder_path"] == "/Shared/TestFolder"
 
     def test_process_tool_metadata_has_span_context(self, process_resource):
         """Test that metadata contains _span_context dict for tracing."""
@@ -114,6 +116,7 @@ class TestProcessToolInvocation:
     """Test process tool invocation behavior: invoke then interrupt."""
 
     @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/MyFolder"})
     @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_calls_processes_invoke_async(
@@ -177,6 +180,7 @@ class TestProcessToolInvocation:
         assert wait_job_arg.process_folder_key == "folder-key-456"
 
     @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/DataFolder"})
     @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_passes_input_arguments(

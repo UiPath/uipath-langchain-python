@@ -21,6 +21,7 @@ from uipath.platform.context_grounding import (
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model as create_model_from_schema,
@@ -68,7 +69,7 @@ def handle_semantic_search(
 
     retriever = ContextGroundingRetriever(
         index_name=resource.index_name,
-        folder_path=resource.folder_path,
+        folder_path=get_execution_folder_path(),
         number_of_results=resource.settings.result_count,
     )
 
@@ -204,7 +205,7 @@ def handle_deep_rag(
                 index_name=index_name,
                 prompt=actual_prompt,
                 citation_mode=citation_mode,
-                index_folder_path=resource.folder_path,
+                index_folder_path=get_execution_folder_path(),
                 glob_pattern=glob_pattern,
             )
 
@@ -234,7 +235,7 @@ def handle_batch_transform(
     assert resource.settings.query.variant is not None
 
     index_name = resource.index_name
-    index_folder_path = resource.folder_path
+    index_folder_path = get_execution_folder_path()
     if not resource.settings.web_search_grounding:
         raise AgentStartupError(
             code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,

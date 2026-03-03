@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -780,3 +781,38 @@ class TestMcpClient:
         assert list_tools_count == 2
 
         await client.dispose()
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
+    @patch("httpx.AsyncClient")
+    async def test_retrieve_async_uses_execution_folder_path(
+        self, mock_async_client_class, mcp_resource_config
+    ):
+        """Test that retrieve_async is called with folder_path from the execution environment."""
+        mock_sdk = MagicMock()
+        mock_server = MagicMock()
+        mock_server.mcp_url = "https://test.uipath.com/mcp"
+        mock_sdk.mcp.retrieve_async = AsyncMock(return_value=mock_server)
+        mock_sdk._config = MagicMock()
+        mock_sdk._config.secret = "test-secret-token"
+
+        method_call_sequence: list[str] = []
+        initialize_count = [0]
+        tool_call_count = [0]
+
+        MockStreamResponse = self.create_mock_stream_response(
+            method_call_sequence, initialize_count, tool_call_count
+        )
+        mock_http_client = self.create_mock_http_client(MockStreamResponse)
+        mock_async_client_class.return_value = mock_http_client
+
+        session = McpClient(config=mcp_resource_config)
+
+        with patch("uipath.platform.UiPath", return_value=mock_sdk):
+            await session.call_tool("test_tool", {"query": "test"})
+
+        mock_sdk.mcp.retrieve_async.assert_called_once_with(
+            slug="test-server", folder_path="/Shared/TestFolder"
+        )
+
+        await session.dispose()
