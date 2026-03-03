@@ -847,10 +847,15 @@ class InstrumentedRuntime:
         if isinstance(span, ReadableSpan) and span.start_time:
             start_time_ns = span.start_time
 
+        # Extract parent span ID so the trace hierarchy is preserved on resume
+        parent_span_id = None
+        if isinstance(span, ReadableSpan) and span.parent and span.parent.span_id:
+            parent_span_id = format(span.parent.span_id, "016x")
+
         return TraceContextData(
             trace_id=format(ctx.trace_id, "032x"),
             span_id=format(ctx.span_id, "016x"),
-            parent_span_id=None,  # Root agent span has no parent
+            parent_span_id=parent_span_id,
             name=span.name if hasattr(span, "name") else self._get_agent_name(),
             start_time=datetime.now(timezone.utc).isoformat(),
             start_time_ns=start_time_ns,
