@@ -163,6 +163,7 @@ def create_escalation_tool(
             if channel.recipients
             else None
         )
+        folder_path = get_execution_folder_path()
 
         task_title = "Escalation Task"
         if tool.metadata is not None:
@@ -187,7 +188,7 @@ def create_escalation_tool(
                     title=task_title,
                     data=serialized_data,
                     app_name=channel.properties.app_name,
-                    app_folder_path=get_execution_folder_path(),
+                    app_folder_path=folder_path,
                     recipient=recipient,
                     priority=channel.priority,
                     labels=channel.labels,
@@ -200,7 +201,7 @@ def create_escalation_tool(
 
                 return WaitEscalation(
                     action=created_task,
-                    app_folder_path=channel.properties.folder_name,
+                    app_folder_path=folder_path,
                     app_name=channel.properties.app_name,
                     recipient=recipient,
                 )

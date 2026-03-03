@@ -139,9 +139,10 @@ class McpClient(UiPathDisposableProtocol):
 
         Then calls _initialize_session() to complete the MCP handshake.
         """
+        folder_path = get_execution_folder_path()
         logger.debug(
             f"Initializing MCP client for '{self._config.slug}' "
-            f"in folder '{self._config.folder_path}'"
+            f"in folder '{folder_path}'"
         )
 
         # Lazy import to improve cold start time
@@ -150,7 +151,7 @@ class McpClient(UiPathDisposableProtocol):
         # Retrieve MCP server URL from SDK
         sdk = UiPath()
         mcp_server = await sdk.mcp.retrieve_async(
-            slug=self._config.slug, folder_path=get_execution_folder_path()
+            slug=self._config.slug, folder_path=folder_path
         )
 
         if mcp_server.mcp_url is None:

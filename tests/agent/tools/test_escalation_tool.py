@@ -855,6 +855,7 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
         mock_result.action = "approve"
         mock_result.data = {}
         mock_result.assigned_to_user = None
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource)
