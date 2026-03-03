@@ -67,6 +67,7 @@ dev = [
     "numpy>=1.24.0",
     "pytest_httpx>=0.35.0",
     "rust-just>=1.39.0",
+    "uipath-langchain",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -116,3 +117,6 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+[tool.uv.sources]
+uipath-langchain = { workspace = true }
