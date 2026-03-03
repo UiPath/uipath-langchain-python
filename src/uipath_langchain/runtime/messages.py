@@ -317,6 +317,19 @@ class UiPathChatMessagesMapper:
 
         # For every new message_id, start a new message
         if message.id not in self.seen_message_ids:
+            # Skip empty metadata-only chunks (e.g. response.created from OpenAI
+            # Responses API) that arrive with a transient ID different from the
+            # subsequent content chunks. Without this guard, the mapper would emit
+            # a phantom empty message_start that never receives content or an end.
+            has_content = (
+                bool(message.content_blocks)
+                or bool(message.content)
+                or bool(message.tool_call_chunks)
+                or bool(message.tool_calls)
+            )
+            if not has_content and message.chunk_position != "last":
+                return []
+
             self.current_message = message
             self.seen_message_ids.add(message.id)
             self._citation_stream_processor = CitationStreamProcessor()
