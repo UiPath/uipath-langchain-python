@@ -494,6 +494,124 @@ class TestGetJobAttachments:
         assert result[1].full_name == "file2.docx"
 
 
+    def test_skips_attachment_with_non_uuid_id(self):
+        """Regression: should skip attachments with non-UUID IDs instead of crashing.
+
+        This tests the fix for AE-1071 where eval set file inputs stored as
+        StudioWeb paths (e.g., 'evaluationFiles/doc.pdf') would crash the entire
+        eval run because Attachment.model_validate requires UUID format for ID.
+        """
+        schema = {
+            "type": "object",
+            "properties": {"attachment": {"$ref": "#/definitions/job-attachment"}},
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "FullName": {"type": "string"},
+                        "MimeType": {"type": "string"},
+                    },
+                    "required": ["ID"],
+                }
+            },
+        }
+        model = create_model(schema)
+        data = {
+            "attachment": {
+                "ID": "evaluationFiles/document.pdf",
+                "FullName": "document.pdf",
+                "MimeType": "application/pdf",
+            }
+        }
+
+        result = get_job_attachments(model, data)
+
+        # Should return empty list instead of crashing
+        assert result == []
+
+    def test_skips_invalid_uuid_keeps_valid_ones(self):
+        """Regression: should skip only invalid attachments, keep valid ones."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/job-attachment"},
+                }
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "FullName": {"type": "string"},
+                        "MimeType": {"type": "string"},
+                    },
+                    "required": ["ID"],
+                }
+            },
+        }
+        model = create_model(schema)
+        valid_uuid = "550e8400-e29b-41d4-a716-446655440000"
+        data = {
+            "attachments": [
+                {
+                    "ID": valid_uuid,
+                    "FullName": "valid.pdf",
+                    "MimeType": "application/pdf",
+                },
+                {
+                    "ID": "evaluationFiles/invalid.pdf",
+                    "FullName": "invalid.pdf",
+                    "MimeType": "application/pdf",
+                },
+                {
+                    "ID": "not-a-uuid-at-all",
+                    "FullName": "also_invalid.pdf",
+                    "MimeType": "application/pdf",
+                },
+            ]
+        }
+
+        result = get_job_attachments(model, data)
+
+        # Should only return the valid attachment
+        assert len(result) == 1
+        assert str(result[0].id) == valid_uuid
+        assert result[0].full_name == "valid.pdf"
+
+    def test_skips_attachment_missing_required_fields(self):
+        """Regression: should skip attachments missing required Attachment fields."""
+        schema = {
+            "type": "object",
+            "properties": {"attachment": {"$ref": "#/definitions/job-attachment"}},
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "FullName": {"type": "string"},
+                        "MimeType": {"type": "string"},
+                    },
+                    "required": ["ID"],
+                }
+            },
+        }
+        model = create_model(schema)
+        # Missing FullName and MimeType which are required by Attachment model
+        data = {
+            "attachment": {
+                "ID": "550e8400-e29b-41d4-a716-446655440000",
+            }
+        }
+
+        result = get_job_attachments(model, data)
+
+        # Should skip instead of crashing (Attachment requires full_name and mime_type)
+        assert result == []
+
+
 class TestMergeDicts:
     """Test dictionary merging."""
 
