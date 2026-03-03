@@ -6,7 +6,6 @@ extracting retry information from their specific exception types.
 """
 
 import logging
-import random
 from abc import ABC, abstractmethod
 from typing import Callable, Mapping
 
@@ -16,8 +15,11 @@ from tenacity import (
     Retrying,
     stop_after_attempt,
 )
-
-RETRYABLE_STATUS_CODES = {408, 429, 502, 503, 504}
+from uipath.platform.common.retry import (
+    RETRYABLE_STATUS_CODES,
+    exponential_backoff_with_jitter,
+    parse_retry_after,
+)
 
 
 class RetryProvider(ABC):
@@ -89,16 +91,6 @@ def _create_wait_strategy(
 ) -> Callable[[RetryCallState], float]:
     """Create wait strategy honoring Retry-After header with exponential backoff fallback."""
 
-    def _parse_retry_after(header_value: str) -> float | None:
-        """Parse Retry-After header value (durations only, not datetimes)."""
-        try:
-            seconds = float(header_value.strip())
-            if seconds < 0:
-                return None
-            return seconds
-        except (ValueError, AttributeError):
-            return None
-
     def _extract_retry_after_header(exception: BaseException) -> float | None:
         """Extract and parse Retry-After header from exception chain."""
         current: BaseException | None = exception
@@ -107,18 +99,11 @@ def _create_wait_strategy(
             if headers:
                 retry_after = headers.get("retry-after") or headers.get("Retry-After")
                 if retry_after:
-                    parsed = _parse_retry_after(retry_after)
+                    parsed = parse_retry_after(retry_after)
                     if parsed is not None:
                         return parsed
             current = current.__cause__
         return None
-
-    def _exponential_backoff(attempt: int, initial: float) -> float:
-        """Calculate exponential backoff with jitter."""
-        exponent = attempt - 1
-        exponential = initial * (2**exponent)
-        jitter = random.uniform(0, 1.0)
-        return exponential + jitter
 
     def wait_strategy(retry_state: RetryCallState) -> float:
         """Calculate wait time based on exception and retry state."""
@@ -137,7 +122,9 @@ def _create_wait_strategy(
                     )
                 return capped_wait
 
-        exponential_wait = _exponential_backoff(retry_state.attempt_number, initial)
+        exponential_wait = exponential_backoff_with_jitter(
+            retry_state.attempt_number, initial
+        )
         capped_wait = min(exponential_wait, max_delay)
         if logger:
             logger.info(
