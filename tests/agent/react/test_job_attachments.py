@@ -493,7 +493,6 @@ class TestGetJobAttachments:
         assert str(result[1].id) == uuid2
         assert result[1].full_name == "file2.docx"
 
-
     def test_skips_attachment_with_non_uuid_id(self):
         """Regression: should skip attachments with non-UUID IDs instead of crashing.
 
