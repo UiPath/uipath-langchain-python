@@ -5,6 +5,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 from uuid import UUID
 
+from opentelemetry.trace import Span
 from pydantic import BaseModel
 from uipath.core.guardrails import GuardrailScope
 from uipath.core.serialization import serialize_json
@@ -131,9 +132,17 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
                 self._close_container(GuardrailScope.TOOL, ExecutionStage.PRE_EXECUTION)
                 self._span_factory.upsert_span_started(span)
             else:
-                parent = self._state.current_llm_span or self._state.get_span_or_root(
-                    parent_run_id
-                )
+                # Context grounding tools parent to LLM span (RAG flow, matches
+                # C# CompletionExecutor). All other tools parent to agent span
+                # (matches C# ToolWorkflowV4).
+                parent: Optional[Span] = None
+                if (
+                    tool_type in ("context_grounding", "context")
+                    and self._state.current_llm_span
+                ):
+                    parent = self._state.current_llm_span
+                else:
+                    parent = self._state.get_span_or_root(parent_run_id)
                 span = self._span_factory.start_tool_call(
                     tool_name,
                     tool_type_value=tool_type_value,

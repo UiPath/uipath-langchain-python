@@ -125,6 +125,7 @@ class InstrumentedRuntime:
         self._agent_run_id = str(uuid.uuid4())
         self._runtime_context = runtime_context
         self._resume_final_status: int = SpanStatus.OK
+        self._re_suspended = False
 
     @property
     def delegate(self) -> UiPathRuntimeProtocol:
@@ -157,6 +158,7 @@ class InstrumentedRuntime:
             input, saved_context, start_time
         ) as agent_span:
             self._resume_final_status = SpanStatus.OK
+            self._re_suspended = False
             try:
                 result = await self._delegate.execute(input, options)
             except Exception as e:
@@ -168,7 +170,8 @@ class InstrumentedRuntime:
             duration_ms = int((time.time() - start_time) * 1000)
 
             if result.status == UiPathRuntimeStatus.SUSPENDED:
-                await self._handle_suspended(agent_span)
+                self._re_suspended = True
+                await self._handle_suspended(agent_span, saved_context)
                 # Don't end span — prevents LiveTrackingSpanProcessor.on_end()
                 # from overwriting the UNSET upsert with OK status.
             elif result.status == UiPathRuntimeStatus.SUCCESSFUL:
@@ -222,6 +225,7 @@ class InstrumentedRuntime:
         ) as agent_span:
             final_result: Optional[UiPathRuntimeResult] = None
             self._resume_final_status = SpanStatus.OK
+            self._re_suspended = False
 
             try:
                 async for event in self._delegate.stream(input, options):
@@ -238,7 +242,8 @@ class InstrumentedRuntime:
                 duration_ms = int((time.time() - start_time) * 1000)
 
                 if final_result.status == UiPathRuntimeStatus.SUSPENDED:
-                    await self._handle_suspended(agent_span)
+                    self._re_suspended = True
+                    await self._handle_suspended(agent_span, saved_context)
                 elif final_result.status == UiPathRuntimeStatus.SUCCESSFUL:
                     if saved_context:
                         self._handle_resume_complete(saved_context)
@@ -367,7 +372,8 @@ class InstrumentedRuntime:
                 try:
                     yield agent_span
                 finally:
-                    self._upsert_resumed_agent_span(saved_context)
+                    if not self._re_suspended:
+                        self._upsert_resumed_agent_span(saved_context)
                     self._callback.cleanup()
                     if self._event_emitter:
                         self._event_emitter.cleanup()
@@ -510,7 +516,11 @@ class InstrumentedRuntime:
                 if reference_id_token is not None:
                     reference_id_context.reset(reference_id_token)
 
-    async def _handle_suspended(self, agent_span: Span) -> None:
+    async def _handle_suspended(
+        self,
+        agent_span: Span,
+        previous_context: Optional[TraceContextData] = None,
+    ) -> None:
         """Handle suspended state: upsert spans and save trace context.
 
         Called when agent execution returns SUSPENDED status.
@@ -521,6 +531,9 @@ class InstrumentedRuntime:
 
         Args:
             agent_span: The current agent span
+            previous_context: Trace context from a prior suspension, used to
+                carry forward start_time_ns/attributes/name when agent_span
+                is a NonRecordingSpan (resume → re-suspend scenario).
         """
         tool_name, tool_span, process_span = self._callback.get_pending_tool_info()
         escalation_span = self._callback.get_pending_escalation()
@@ -544,6 +557,20 @@ class InstrumentedRuntime:
         if self._trace_context_storage:
             runtime_id = self._get_runtime_id()
             context = self._extract_trace_context(agent_span)
+
+            # Carry forward original agent span data from previous context
+            # when agent_span is a NonRecordingSpan (resume → re-suspend)
+            if previous_context:
+                if (
+                    context["start_time_ns"] == 0
+                    and previous_context.get("start_time_ns", 0) != 0
+                ):
+                    context["start_time_ns"] = previous_context["start_time_ns"]
+                if not context["attributes"] and previous_context.get("attributes"):
+                    context["attributes"] = previous_context["attributes"]
+                prev_name = previous_context.get("name")
+                if prev_name and prev_name != context.get("name"):
+                    context["name"] = prev_name
 
             if tool_name:
                 context["pending_tool_name"] = tool_name

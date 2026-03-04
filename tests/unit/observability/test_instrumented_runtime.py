@@ -1693,3 +1693,167 @@ class TestNestedAgentResumeFixes:
         spans = span_exporter.get_finished_spans()
         agent_spans = [s for s in spans if "Agent run" in s.name]
         assert len(agent_spans) == 0
+
+
+class TestMultipleSuspensionFixes:
+    """Tests for multi-suspension bugs: start_time_ns loss and premature OK upsert."""
+
+    @pytest.mark.asyncio
+    async def test_re_suspension_preserves_start_time_ns(
+        self,
+        mock_delegate: AsyncMock,
+        tracer: LlmOpsSpanFactory,
+        callback: LlmOpsInstrumentationCallback,
+        mock_runtime_context: MagicMock,
+    ) -> None:
+        """suspend → resume → suspend again must retain original start_time_ns."""
+        stored_context: TraceContextData | None = None
+
+        async def mock_save(runtime_id: str, context: TraceContextData) -> None:
+            nonlocal stored_context
+            stored_context = context
+
+        async def mock_load(runtime_id: str) -> TraceContextData | None:
+            return stored_context
+
+        async def mock_clear(runtime_id: str) -> None:
+            nonlocal stored_context
+            stored_context = None
+
+        storage = MagicMock()
+        storage.save_trace_context = AsyncMock(side_effect=mock_save)
+        storage.load_trace_context = AsyncMock(side_effect=mock_load)
+        storage.clear_trace_context = AsyncMock(side_effect=mock_clear)
+
+        suspended_result = MagicMock()
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
+
+        success_result = MagicMock()
+        success_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        success_result.output = {"result": "done"}
+
+        mock_delegate.execute.side_effect = [
+            suspended_result,  # first run: suspend
+            suspended_result,  # resume: re-suspend
+            success_result,  # second resume: complete
+        ]
+
+        agent_def = AgentDefinition(
+            id="agent-multi-suspend",
+            name="MultiSuspendAgent",
+            messages=[],
+            settings=AgentSettings(
+                model="gpt-4o", engine="v1", max_tokens=1000, temperature=0.7
+            ),
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+        )
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer,
+            callback,
+            mock_runtime_context,
+            agent_definition=agent_def,
+            trace_context_storage=storage,
+        )
+
+        # First run → SUSPENDED
+        result1 = await instrumented_runtime.execute({"input": "first"}, None)
+        assert result1.status == UiPathRuntimeStatus.SUSPENDED
+        assert stored_context is not None
+
+        first_start_ns = stored_context["start_time_ns"]
+        first_name = stored_context["name"]
+        first_attrs = stored_context["attributes"]
+        # The first span is a real ReadableSpan, so start_time_ns should be > 0
+        assert first_start_ns != 0, "First suspension must capture real start_time_ns"
+        assert first_attrs.get("referenceId") == "agent-multi-suspend"
+
+        # Resume → re-SUSPENDED (agent_span is NonRecordingSpan)
+        result2 = await instrumented_runtime.execute({"input": "second"}, None)
+        assert result2.status == UiPathRuntimeStatus.SUSPENDED
+        assert stored_context is not None
+
+        # start_time_ns must be carried forward from the first suspension
+        assert stored_context["start_time_ns"] == first_start_ns
+        assert stored_context["name"] == first_name
+        assert stored_context["attributes"].get("referenceId") == "agent-multi-suspend"
+
+    @pytest.mark.asyncio
+    async def test_re_suspension_skips_ok_upsert(
+        self,
+        mock_delegate: AsyncMock,
+        mock_runtime_context: MagicMock,
+    ) -> None:
+        """Resume that re-suspends must NOT fire _upsert_resumed_agent_span."""
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        mock_exporter = MagicMock()
+        mock_exporter.upsert_span = MagicMock(return_value=SpanExportResult.SUCCESS)
+        tracer_with_exp = LlmOpsSpanFactory(exporter=mock_exporter)
+        callback_with_exp = LlmOpsInstrumentationCallback(tracer_with_exp)
+
+        original_start_ns = 1708672800_000_000_000
+
+        saved_context = TraceContextData(
+            trace_id="aabbccdd11223344aabbccdd11223344",
+            span_id="1122334455667788",
+            parent_span_id=None,
+            name="Agent run - TestAgent",
+            start_time="2024-02-23T10:00:00Z",
+            start_time_ns=original_start_ns,
+            attributes={"agentId": "test-id", "type": "agentRun"},
+            pending_tool_span_id=None,
+            pending_process_span_id=None,
+            pending_tool_name=None,
+            pending_tool_span=None,
+            pending_process_span=None,
+            pending_escalation_span=None,
+            pending_guardrail_hitl_evaluation_span=None,
+            pending_guardrail_hitl_container_span=None,
+            pending_llm_span=None,
+        )
+
+        stored_context: TraceContextData | None = dict(saved_context)  # type: ignore[assignment]
+
+        async def mock_save(runtime_id: str, context: TraceContextData) -> None:
+            nonlocal stored_context
+            stored_context = context
+
+        async def mock_load(runtime_id: str) -> TraceContextData | None:
+            return stored_context
+
+        async def mock_clear(runtime_id: str) -> None:
+            nonlocal stored_context
+            stored_context = None
+
+        storage = MagicMock()
+        storage.save_trace_context = AsyncMock(side_effect=mock_save)
+        storage.load_trace_context = AsyncMock(side_effect=mock_load)
+        storage.clear_trace_context = AsyncMock(side_effect=mock_clear)
+
+        suspended_result = MagicMock()
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = suspended_result
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer_with_exp,
+            callback_with_exp,
+            mock_runtime_context,
+            trace_context_storage=storage,
+        )
+
+        # Resume execution that re-suspends
+        await instrumented_runtime.execute({"input": "resume-suspend"}, None)
+
+        # Collect all upsert calls and check none have OK/ERROR status
+        # (the only upserts should be UNSET from _handle_suspended)
+        upsert_calls = mock_exporter.upsert_span.call_args_list
+        for call in upsert_calls:
+            status_override = call[1].get("status_override")
+            # 0 = UNSET (in-progress), which is correct for suspended spans
+            assert status_override == 0, (
+                f"Expected UNSET (0) status on re-suspension, got {status_override}"
+            )

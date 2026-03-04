@@ -623,3 +623,256 @@ class TestUpsertResumedSpansNoContent:
             "span_data"
         ]
         assert span_data["attributes"]["output"] == '{"answer": 42}'
+
+
+class TestToolSpanParentingHierarchy:
+    """Tests for tool span parent selection (C# parity)."""
+
+    def test_regular_tool_parents_to_agent_span_not_llm_span(self) -> None:
+        """Standard tools should parent to agent span even when current_llm_span is set."""
+        mock_span_factory = MagicMock()
+        mock_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_span
+
+        mock_agent_span = MagicMock(name="agent_span")
+        mock_llm_span = MagicMock(name="llm_span")
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = mock_agent_span
+        state.current_llm_span = mock_llm_span
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        run_id = uuid4()
+        parent_run_id = uuid4()
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            with patch.object(
+                state, "get_span_or_root", return_value=mock_agent_span
+            ) as mock_get:
+                instrumentor.on_tool_start(
+                    serialized={"name": "Test_VB"},
+                    input_str='{"param": "value"}',
+                    run_id=run_id,
+                    parent_run_id=parent_run_id,
+                    metadata={"tool_type": "process", "display_name": "Test VB"},
+                )
+
+        call_kwargs = mock_span_factory.start_tool_call.call_args.kwargs
+        assert call_kwargs["parent_span"] is mock_agent_span
+        mock_get.assert_called_once_with(parent_run_id)
+
+    def test_context_grounding_tool_parents_to_llm_span(self) -> None:
+        """Context grounding tools should parent to current LLM span."""
+        mock_span_factory = MagicMock()
+        mock_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_span
+
+        mock_agent_span = MagicMock(name="agent_span")
+        mock_llm_span = MagicMock(name="llm_span")
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = mock_agent_span
+        state.current_llm_span = mock_llm_span
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        run_id = uuid4()
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            instrumentor.on_tool_start(
+                serialized={"name": "context_grounding_search"},
+                input_str='{"query": "test"}',
+                run_id=run_id,
+                parent_run_id=None,
+                metadata={
+                    "tool_type": "context_grounding",
+                    "display_name": "Context Grounding",
+                },
+            )
+
+        call_kwargs = mock_span_factory.start_tool_call.call_args.kwargs
+        assert call_kwargs["parent_span"] is mock_llm_span
+
+    def test_context_type_tool_parents_to_llm_span(self) -> None:
+        """Tools with tool_type='context' should also parent to LLM span."""
+        mock_span_factory = MagicMock()
+        mock_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_span
+
+        mock_llm_span = MagicMock(name="llm_span")
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = MagicMock()
+        state.current_llm_span = mock_llm_span
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            instrumentor.on_tool_start(
+                serialized={"name": "context_search"},
+                input_str="{}",
+                run_id=uuid4(),
+                parent_run_id=None,
+                metadata={"tool_type": "context", "display_name": "Context"},
+            )
+
+        call_kwargs = mock_span_factory.start_tool_call.call_args.kwargs
+        assert call_kwargs["parent_span"] is mock_llm_span
+
+    def test_context_grounding_falls_back_when_no_llm_span(self) -> None:
+        """Context grounding tool should fall back to agent span when no LLM span."""
+        mock_span_factory = MagicMock()
+        mock_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_span
+
+        mock_agent_span = MagicMock(name="agent_span")
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = mock_agent_span
+        state.current_llm_span = None
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        parent_run_id = uuid4()
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            with patch.object(
+                state, "get_span_or_root", return_value=mock_agent_span
+            ) as mock_get:
+                instrumentor.on_tool_start(
+                    serialized={"name": "context_grounding_search"},
+                    input_str="{}",
+                    run_id=uuid4(),
+                    parent_run_id=parent_run_id,
+                    metadata={
+                        "tool_type": "context_grounding",
+                        "display_name": "Context Grounding",
+                    },
+                )
+
+        call_kwargs = mock_span_factory.start_tool_call.call_args.kwargs
+        assert call_kwargs["parent_span"] is mock_agent_span
+        mock_get.assert_called_once_with(parent_run_id)
+
+    def test_escalation_tool_parents_to_agent_span(self) -> None:
+        """Escalation tools should parent to agent span (C# ToolWorkflowV4)."""
+        mock_span_factory = MagicMock()
+        mock_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_span
+
+        mock_agent_span = MagicMock(name="agent_span")
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = mock_agent_span
+        state.current_llm_span = MagicMock(name="llm_span")
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            with patch.object(state, "get_span_or_root", return_value=mock_agent_span):
+                instrumentor.on_tool_start(
+                    serialized={"name": "Escalation_1"},
+                    input_str='{"message": "need help"}',
+                    run_id=uuid4(),
+                    parent_run_id=None,
+                    metadata={
+                        "tool_type": "escalation",
+                        "display_name": "Escalation_1",
+                    },
+                )
+
+        call_kwargs = mock_span_factory.start_tool_call.call_args.kwargs
+        assert call_kwargs["parent_span"] is mock_agent_span
+
+    def test_ixp_extraction_tool_parents_to_agent_span(self) -> None:
+        """IXP extraction tools should parent to agent span (C# ToolWorkflowV4)."""
+        mock_span_factory = MagicMock()
+        mock_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_span
+
+        mock_agent_span = MagicMock(name="agent_span")
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = mock_agent_span
+        state.current_llm_span = MagicMock(name="llm_span")
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            with patch.object(state, "get_span_or_root", return_value=mock_agent_span):
+                instrumentor.on_tool_start(
+                    serialized={"name": "Extract_Invoice"},
+                    input_str='{"document": "invoice.pdf"}',
+                    run_id=uuid4(),
+                    parent_run_id=None,
+                    metadata={
+                        "tool_type": "ixp_extraction",
+                        "display_name": "Extract Invoice",
+                    },
+                )
+
+        call_kwargs = mock_span_factory.start_tool_call.call_args.kwargs
+        assert call_kwargs["parent_span"] is mock_agent_span
+
+    def test_tool_without_type_parents_to_agent_span(self) -> None:
+        """Tool with no tool_type should parent to agent span, not LLM span."""
+        mock_span_factory = MagicMock()
+        mock_span = MagicMock()
+        mock_span_factory.start_tool_call.return_value = mock_span
+
+        mock_agent_span = MagicMock(name="agent_span")
+
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = mock_agent_span
+        state.current_llm_span = MagicMock(name="llm_span")
+
+        instrumentor = ToolSpanInstrumentor(
+            state=state,
+            close_container=MagicMock(),
+        )
+
+        with patch(
+            "uipath_agents._observability.llmops.instrumentors.tool_instrumentor.SpanHierarchyManager"
+        ):
+            with patch.object(state, "get_span_or_root", return_value=mock_agent_span):
+                instrumentor.on_tool_start(
+                    serialized={"name": "custom_tool"},
+                    input_str="{}",
+                    run_id=uuid4(),
+                    parent_run_id=None,
+                    metadata=None,
+                )
+
+        call_kwargs = mock_span_factory.start_tool_call.call_args.kwargs
+        assert call_kwargs["parent_span"] is mock_agent_span
