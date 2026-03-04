@@ -211,7 +211,9 @@ class TestRequestMixinHeaderEncoding:
             object.__setattr__(obj, "__pydantic_fields_set__", set())
             object.__setattr__(obj, "__pydantic_extra__", None)
             object.__setattr__(
-                obj, "__pydantic_private__", {"_url": None, "_auth_headers": None}
+                obj,
+                "__pydantic_private__",
+                {"_url": None, "_is_override": False, "_auth_headers": None},
             )
             obj.default_headers = mod.UiPathRequestMixin.model_fields[
                 "default_headers"

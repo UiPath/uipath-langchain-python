@@ -11,7 +11,7 @@ from uipath.platform.common import (
     resource_override,
 )
 
-from .http_client import build_uipath_headers
+from .http_client import build_uipath_headers, resolve_gateway_url
 from .supported_models import OpenAIModels
 from .types import APIFlavor, LLMProvider
 
@@ -113,10 +113,11 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         self._openai_api_version = api_version
         self._vendor = "openai"
         self._model_name = model_name
-        self._url: Optional[str] = None
         self._agenthub_config = agenthub_config
         self._byo_connection_id = byo_connection_id
         self._extra_headers = extra_headers or {}
+
+        url, is_override = self._resolve_url()
 
         client_kwargs = get_httpx_client_kwargs()
         client_kwargs["timeout"] = 300.0
@@ -129,9 +130,9 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         )
 
         super().__init__(
-            azure_endpoint=self._build_base_url(),
+            azure_endpoint=url,
             model_name=model_name,
-            default_headers=self._build_headers(token),
+            default_headers=self._build_headers(token, inject_routing=is_override),
             http_async_client=httpx.AsyncClient(
                 transport=UiPathURLRewriteTransport(verify=verify),
                 **client_kwargs,
@@ -150,11 +151,14 @@ class UiPathChatOpenAI(AzureChatOpenAI):
 
         self._api_flavor = api_flavor
 
-    def _build_headers(self, token: str) -> dict[str, str]:
+    def _build_headers(
+        self, token: str, *, inject_routing: bool = False
+    ) -> dict[str, str]:
         headers = build_uipath_headers(
             token,
             agenthub_config=self._agenthub_config,
             byo_connection_id=self._byo_connection_id,
+            inject_routing=inject_routing,
         )
         headers["X-UiPath-LlmGateway-ApiFlavor"] = "auto"
         headers.update(self._extra_headers)
@@ -170,13 +174,5 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         base_endpoint = formatted_endpoint.replace("/completions", "")
         return f"{base_endpoint}?api-version={self._openai_api_version}"
 
-    def _build_base_url(self) -> str:
-        if not self._url:
-            env_uipath_url = os.getenv("UIPATH_URL")
-
-            if env_uipath_url:
-                self._url = f"{env_uipath_url.rstrip('/')}/{self.endpoint}"
-            else:
-                raise ValueError("UIPATH_URL environment variable is required")
-
-        return self._url
+    def _resolve_url(self) -> tuple[str, bool]:
+        return resolve_gateway_url(self.endpoint)

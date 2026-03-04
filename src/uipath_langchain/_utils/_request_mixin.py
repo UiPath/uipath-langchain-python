@@ -33,7 +33,7 @@ from uipath_langchain._utils._settings import (
     get_uipath_token_header,
 )
 from uipath_langchain._utils._sleep_policy import before_sleep_log
-from uipath_langchain.chat.http_client import build_uipath_headers
+from uipath_langchain.chat.http_client import build_uipath_headers, resolve_gateway_url
 from uipath_langchain.runtime.errors import (
     LangGraphErrorCode,
     LangGraphRuntimeError,
@@ -153,6 +153,7 @@ class UiPathRequestMixin(BaseModel):
     max_delay: float = 60.0
 
     _url: str | None = None
+    _is_override: bool = False
     _auth_headers: dict[str, str] | None = None
 
     # required to instantiate AzureChatOpenAI subclasses
@@ -733,11 +734,9 @@ class UiPathRequestMixin(BaseModel):
     @property
     def url(self) -> str:
         if not self._url:
-            env_uipath_url = os.getenv("UIPATH_URL")
-
-            if env_uipath_url:
-                self._url = f"{env_uipath_url.rstrip('/')}/{self.endpoint}"
-            else:
+            try:
+                self._url, self._is_override = resolve_gateway_url(self.endpoint)
+            except ValueError:
                 self._url = (
                     f"{self.base_url}/{self.org_id}/{self.tenant_id}/{self.endpoint}"
                 )
@@ -760,6 +759,7 @@ class UiPathRequestMixin(BaseModel):
                     self.access_token,
                     agenthub_config=self.agenthub_config,
                     byo_connection_id=self.byo_connection_id,
+                    inject_routing=self._is_override,
                 )
             )
             self._auth_headers["X-UiPath-LlmGateway-TimeoutSeconds"] = str(
