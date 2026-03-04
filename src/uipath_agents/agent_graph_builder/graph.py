@@ -4,6 +4,7 @@ from typing import Any, Sequence
 
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from uipath.agent.models.agent import (
+    AgentMcpResourceConfig,
     LowCodeAgentDefinition,
 )
 from uipath.platform.guardrails import BaseGuardrail
@@ -17,7 +18,7 @@ from uipath_langchain.agent.react import (
     resolve_output_model,
 )
 from uipath_langchain.agent.tools import create_tools_from_resources
-from uipath_langchain.agent.tools.mcp import create_mcp_tools_from_agent
+from uipath_langchain.agent.tools.mcp import create_mcp_tools_and_clients
 
 from uipath_agents.agent_graph_builder.version import supports_parallel_tool_calls
 
@@ -83,8 +84,12 @@ async def build_agent_graph(
         if execution_type == AgentExecutionType.PLAYGROUND
         else None
     )
-    mcp_tools, mcp_clients = await create_mcp_tools_from_agent(
-        agent_definition,
+    mcp_tools, mcp_clients = await create_mcp_tools_and_clients(
+        [
+            resource
+            for resource in agent_definition.resources
+            if isinstance(resource, AgentMcpResourceConfig)
+        ],
         session_info_factory=session_info_factory,
         terminate_on_close=execution_type != AgentExecutionType.PLAYGROUND,
     )

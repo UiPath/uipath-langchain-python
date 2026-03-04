@@ -49,9 +49,9 @@ class TestBuildAgentGraph:
 
     @pytest.fixture(autouse=True)
     def mock_mcp_tools(self):
-        """Mock create_mcp_tools_from_agent to avoid SDK initialization."""
+        """Mock create_mcp_tools_and_clients to avoid SDK initialization."""
         with patch(
-            "uipath_agents.agent_graph_builder.graph.create_mcp_tools_from_agent",
+            "uipath_agents.agent_graph_builder.graph.create_mcp_tools_and_clients",
             new_callable=AsyncMock,
             return_value=([], []),
         ):
@@ -832,7 +832,7 @@ class TestBuildAgentGraphParallelToolCalls:
     @pytest.fixture(autouse=True)
     def mock_mcp_tools(self):
         with patch(
-            "uipath_agents.agent_graph_builder.graph.create_mcp_tools_from_agent",
+            "uipath_agents.agent_graph_builder.graph.create_mcp_tools_and_clients",
             new_callable=AsyncMock,
             return_value=([], []),
         ):
