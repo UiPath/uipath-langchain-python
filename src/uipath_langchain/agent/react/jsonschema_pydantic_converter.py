@@ -5,13 +5,16 @@ from typing import Any, Type, get_args, get_origin
 
 from jsonschema_pydantic_converter import transform_with_modules
 from pydantic import BaseModel
-from uipath.runtime.errors import UiPathErrorCategory
-
-from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 
 # Shared pseudo-module for all dynamically created types
 # This allows get_type_hints() to resolve forward references
 _DYNAMIC_MODULE_NAME = "jsonschema_pydantic_converter._dynamic"
+
+# Field names that shadow BaseModel attributes and must be renamed.
+# Computed from BaseModel's public interface to stay future-proof across Pydantic versions.
+_RESERVED_FIELD_NAMES: frozenset[str] = frozenset(
+    name for name in dir(BaseModel) if not name.startswith("_")
+)
 
 
 def _get_or_create_dynamic_module() -> ModuleType:
@@ -25,18 +28,144 @@ def _get_or_create_dynamic_module() -> ModuleType:
     return sys.modules[_DYNAMIC_MODULE_NAME]
 
 
+def _needs_rename(name: str) -> bool:
+    """Check if a JSON Schema property name needs renaming for Pydantic compatibility."""
+    return name.startswith("_") or name in _RESERVED_FIELD_NAMES
+
+
+def _safe_field_name(
+    original: str, existing_keys: set[str], used_keys: set[str]
+) -> str:
+    """Generate a Pydantic-safe field name from a JSON Schema property name.
+
+    Strips leading underscores and avoids collisions with BaseModel attributes
+    and other property names (both original and already-renamed).
+    """
+    name = original.lstrip("_") or "field"
+    if name in _RESERVED_FIELD_NAMES:
+        name += "_"
+    while name in existing_keys or name in used_keys:
+        name += "_"
+    return name
+
+
+def _rename_reserved_properties(
+    schema: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Rename JSON Schema properties that are invalid as Pydantic field names.
+
+    Handles two cases:
+    - Properties starting with ``_`` (Pydantic treats these as private attributes)
+    - Properties that shadow ``BaseModel`` attributes (e.g. ``schema``, ``copy``)
+
+    Returns:
+        Tuple of (modified schema copy, {new_field_name: original_name}).
+    """
+    renames: dict[str, str] = {}
+
+    def _process(s: dict[str, Any]) -> dict[str, Any]:
+        result = s.copy()
+
+        if "properties" in result:
+            existing_keys = set(result["properties"].keys())
+            used_keys: set[str] = set()
+            new_props: dict[str, Any] = {}
+
+            for key, value in result["properties"].items():
+                if _needs_rename(key):
+                    new_key = _safe_field_name(key, existing_keys, used_keys)
+                    renames[new_key] = key
+                else:
+                    new_key = key
+
+                used_keys.add(new_key)
+                new_props[new_key] = (
+                    _process(value) if isinstance(value, dict) else value
+                )
+            result["properties"] = new_props
+
+            if "required" in result:
+                # Build a lookup from original→renamed for this level only
+                local_renames = {v: k for k, v in renames.items() if v in existing_keys}
+                result["required"] = [
+                    local_renames.get(name, name) for name in result["required"]
+                ]
+
+        for defs_key in ("$defs", "definitions"):
+            if defs_key in result:
+                result[defs_key] = {
+                    k: (_process(v) if isinstance(v, dict) else v)
+                    for k, v in result[defs_key].items()
+                }
+
+        if "items" in result and isinstance(result["items"], dict):
+            result["items"] = _process(result["items"])
+
+        for keyword in ("allOf", "anyOf", "oneOf"):
+            if keyword in result:
+                result[keyword] = [
+                    _process(sub) if isinstance(sub, dict) else sub
+                    for sub in result[keyword]
+                ]
+
+        if "not" in result and isinstance(result["not"], dict):
+            result["not"] = _process(result["not"])
+
+        for keyword in ("if", "then", "else"):
+            if keyword in result and isinstance(result[keyword], dict):
+                result[keyword] = _process(result[keyword])
+
+        return result
+
+    modified = _process(schema)
+    return modified, renames
+
+
+def _apply_field_aliases(
+    model: Type[BaseModel],
+    namespace: dict[str, Any],
+    renames: dict[str, str],
+) -> None:
+    """Add aliases to renamed fields so serialization/validation uses original names.
+
+    Iterates the root model and all nested models from the namespace. For any
+    field whose name appears in ``renames``, sets alias/validation_alias/
+    serialization_alias to the original property name and enables
+    ``populate_by_name`` + ``serialize_by_alias`` in the model config.
+    """
+    if not renames:
+        return
+
+    all_models = [model]
+    for v in namespace.values():
+        if inspect.isclass(v) and issubclass(v, BaseModel):
+            all_models.append(v)
+
+    for m in all_models:
+        needs_rebuild = False
+        for field_name, field_info in m.model_fields.items():
+            if field_name in renames:
+                original_name = renames[field_name]
+                field_info.alias = original_name
+                field_info.validation_alias = original_name
+                field_info.serialization_alias = original_name
+                needs_rebuild = True
+
+        if needs_rebuild:
+            m.model_config = {
+                **m.model_config,
+                "populate_by_name": True,
+                "serialize_by_alias": True,
+            }
+            m.model_rebuild(force=True)
+
+
 def create_model(
     schema: dict[str, Any],
 ) -> Type[BaseModel]:
-    if has_underscore_fields(schema):
-        raise AgentStartupError(
-            code=AgentStartupErrorCode.UNDERSCORE_SCHEMA,
-            title="Schema contains properties starting with '_'",
-            detail="Schema properties starting with '_' are currently not supported. If they are unavoidable, please contact UiPath Support",
-            category=UiPathErrorCategory.USER,
-        )
-
-    model, namespace = transform_with_modules(schema)
+    processed_schema, renames = _rename_reserved_properties(schema)
+    model, namespace = transform_with_modules(processed_schema)
+    _apply_field_aliases(model, namespace, renames)
     corrected_namespace: dict[str, Any] = {}
 
     def collect_types(annotation: Any) -> None:

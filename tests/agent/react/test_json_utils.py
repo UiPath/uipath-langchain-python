@@ -1,11 +1,12 @@
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 from uipath_langchain.agent.react.json_utils import (
     extract_values_by_paths,
     get_json_paths_by_type,
 )
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
 
 class Target(BaseModel):
@@ -151,3 +152,176 @@ class TestExtractValuesByPaths:
     def test_extract_path_not_found(self):
         values = extract_values_by_paths({"a": 1}, ["$.missing"])
         assert values == []
+
+
+# -- aliased fields (renamed by create_model) ---------------------------------
+
+
+class TestJsonPathsWithAliasedFields:
+    """Verify that JSONPath extraction works correctly when fields have been
+    renamed by create_model (underscore-prefixed or reserved names)."""
+
+    def test_underscore_field_jsonpath_uses_alias(self):
+        """JSONPath must use the original '_attachment' name, not the Python 'attachment'."""
+
+        class Attachment(BaseModel):
+            id: str
+
+        class ModelWithAlias(BaseModel):
+            model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+            attachment: Attachment = Field(
+                alias="_attachment", serialization_alias="_attachment"
+            )
+
+        paths = get_json_paths_by_type(ModelWithAlias, "Attachment")
+        assert paths == ["$._attachment"]
+
+    def test_reserved_field_jsonpath_uses_alias(self):
+        """JSONPath must use the original 'schema' alias, not the Python 'schema_'."""
+
+        class Attachment(BaseModel):
+            id: str
+
+        class ModelWithReserved(BaseModel):
+            model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+            schema_: Attachment = Field(alias="schema", serialization_alias="schema")
+
+        paths = get_json_paths_by_type(ModelWithReserved, "Attachment")
+        assert paths == ["$.schema"]
+
+    def test_extract_values_from_dict_with_alias_keys(self):
+        """extract_values_by_paths must find values using alias-keyed dicts."""
+
+        class Attachment(BaseModel):
+            id: str
+
+        class ModelWithAlias(BaseModel):
+            model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+            attachment: Attachment = Field(
+                alias="_attachment", serialization_alias="_attachment"
+            )
+
+        paths = get_json_paths_by_type(ModelWithAlias, "Attachment")
+        # Dict uses original/alias key names (as LLM or API would produce)
+        data = {"_attachment": {"id": "abc-123"}}
+        values = extract_values_by_paths(data, paths)
+        assert values == [{"id": "abc-123"}]
+
+    def test_extract_values_from_model_with_alias(self):
+        """extract_values_by_paths on a BaseModel must dump with aliases."""
+
+        class Attachment(BaseModel):
+            id: str
+
+        class ModelWithAlias(BaseModel):
+            model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+            attachment: Attachment = Field(
+                alias="_attachment", serialization_alias="_attachment"
+            )
+
+        paths = get_json_paths_by_type(ModelWithAlias, "Attachment")
+        obj = ModelWithAlias.model_validate({"_attachment": {"id": "abc-123"}})
+        values = extract_values_by_paths(obj, paths)
+        assert values == [{"id": "abc-123"}]
+
+    def test_create_model_with_underscore_attachment_field(self):
+        """End-to-end: create_model + JSONPath for an underscore attachment field.
+
+        Uses 'job-attachment' definition name (production format) which the library
+        converts internally to namespace key '__Job_attachment'.
+        """
+        schema: dict[str, Any] = {
+            "type": "object",
+            "title": "Input",
+            "properties": {
+                "_file": {"$ref": "#/definitions/job-attachment"},
+                "name": {"type": "string"},
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "full_name": {"type": "string"},
+                    },
+                }
+            },
+        }
+        model = create_model(schema)
+
+        # JSONPath should use the original "_file" name (the alias)
+        paths = get_json_paths_by_type(model, "__Job_attachment")
+        assert paths == ["$._file"]
+
+        # Extract from a dict with original keys (as LLM would produce)
+        data = {"_file": {"ID": "uuid-1", "full_name": "report.pdf"}, "name": "test"}
+        values = extract_values_by_paths(data, paths)
+        assert len(values) == 1
+        assert values[0]["ID"] == "uuid-1"
+
+    def test_create_model_with_reserved_attachment_field(self):
+        """End-to-end: create_model + JSONPath for a reserved-name attachment field."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "title": "Input",
+            "properties": {
+                "copy": {"$ref": "#/definitions/job-attachment"},
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "full_name": {"type": "string"},
+                    },
+                }
+            },
+        }
+        model = create_model(schema)
+
+        paths = get_json_paths_by_type(model, "__Job_attachment")
+        assert paths == ["$.copy"]
+
+        data = {"copy": {"ID": "uuid-2", "full_name": "backup.zip"}}
+        values = extract_values_by_paths(data, paths)
+        assert len(values) == 1
+        assert values[0]["ID"] == "uuid-2"
+
+    def test_create_model_attachment_list_with_underscore(self):
+        """End-to-end: underscore attachment field inside a list."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "title": "Input",
+            "properties": {
+                "_files": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/job-attachment"},
+                },
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "full_name": {"type": "string"},
+                    },
+                }
+            },
+        }
+        model = create_model(schema)
+
+        paths = get_json_paths_by_type(model, "__Job_attachment")
+        assert paths == ["$._files[*]"]
+
+        data = {
+            "_files": [
+                {"ID": "uuid-a", "full_name": "a.pdf"},
+                {"ID": "uuid-b", "full_name": "b.pdf"},
+            ]
+        }
+        values = extract_values_by_paths(data, paths)
+        assert len(values) == 2
