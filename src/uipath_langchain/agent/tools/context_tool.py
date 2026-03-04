@@ -368,6 +368,7 @@ def handle_batch_transform(
             "display_name": resource.name,
             "index_name": resource.index_name,
             "context_retrieval_mode": resource.settings.retrieval_mode,
+            "output_schema": output_model,
         },
     )
     tool.set_tool_wrappers(awrapper=context_batch_transform_wrapper)
