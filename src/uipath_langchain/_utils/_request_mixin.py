@@ -4,7 +4,6 @@ import logging
 import os
 import time
 from typing import Any, AsyncIterator, Dict, Iterator, Mapping
-from urllib.parse import quote
 
 import httpx
 import openai
@@ -34,7 +33,7 @@ from uipath_langchain._utils._settings import (
     get_uipath_token_header,
 )
 from uipath_langchain._utils._sleep_policy import before_sleep_log
-from uipath_langchain.chat._headers import build_uipath_context_headers
+from uipath_langchain.chat.http_client import build_uipath_headers
 from uipath_langchain.runtime.errors import (
     LangGraphErrorCode,
     LangGraphRuntimeError,
@@ -80,7 +79,6 @@ class UiPathRequestMixin(BaseModel):
 
     default_headers: Mapping[str, str] | None = {
         "X-UiPath-Streaming-Enabled": "false",
-        "X-UiPath-ProcessKey": quote(os.getenv("UIPATH_PROCESS_KEY", ""), safe=""),
     }
     model_name: str | None = Field(
         default_factory=lambda: os.getenv(
@@ -756,15 +754,17 @@ class UiPathRequestMixin(BaseModel):
         if not self._auth_headers:
             self._auth_headers = {
                 **self.default_headers,  # type: ignore
-                "Authorization": f"Bearer {self.access_token}",
-                "X-UiPath-LlmGateway-TimeoutSeconds": str(self.default_request_timeout),
             }
-            if self.agenthub_config:
-                self._auth_headers["X-UiPath-AgentHub-Config"] = self.agenthub_config
-            if self.byo_connection_id:
-                self._auth_headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = (
-                    self.byo_connection_id
+            self._auth_headers.update(
+                build_uipath_headers(
+                    self.access_token,
+                    agenthub_config=self.agenthub_config,
+                    byo_connection_id=self.byo_connection_id,
                 )
+            )
+            self._auth_headers["X-UiPath-LlmGateway-TimeoutSeconds"] = str(
+                self.default_request_timeout
+            )
             if self.is_normalized and self.model_name:
                 self._auth_headers["X-UiPath-LlmGateway-NormalizedApi-ModelName"] = (
                     self.model_name
@@ -772,7 +772,6 @@ class UiPathRequestMixin(BaseModel):
             if self.include_account_id:
                 self._auth_headers["x-uipath-internal-accountid"] = self.org_id
                 self._auth_headers["x-uipath-internal-tenantid"] = self.tenant_id
-            self._auth_headers.update(build_uipath_context_headers())
         return self._auth_headers
 
     def _get_llm_string(self, stop: list[str] | None = None, **kwargs: Any) -> str:

@@ -1,7 +1,6 @@
 import logging
 import os
 from typing import Optional
-from urllib.parse import quote
 
 import httpx
 from langchain_openai import AzureChatOpenAI
@@ -12,7 +11,7 @@ from uipath.platform.common import (
     resource_override,
 )
 
-from ._headers import build_uipath_context_headers
+from .http_client import build_uipath_headers
 from .supported_models import OpenAIModels
 from .types import APIFlavor, LLMProvider
 
@@ -152,21 +151,12 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         self._api_flavor = api_flavor
 
     def _build_headers(self, token: str) -> dict[str, str]:
-        headers = {
-            "X-UiPath-LlmGateway-ApiFlavor": "auto",
-            "Authorization": f"Bearer {token}",
-        }
-
-        if self._agenthub_config:
-            headers["X-UiPath-AgentHub-Config"] = self._agenthub_config
-        if self._byo_connection_id:
-            headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = self._byo_connection_id
-        if process_key := os.getenv("UIPATH_PROCESS_KEY"):
-            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
-
-        headers.update(build_uipath_context_headers())
-
-        # Allow extra_headers to override defaults
+        headers = build_uipath_headers(
+            token,
+            agenthub_config=self._agenthub_config,
+            byo_connection_id=self._byo_connection_id,
+        )
+        headers["X-UiPath-LlmGateway-ApiFlavor"] = "auto"
         headers.update(self._extra_headers)
         return headers
 

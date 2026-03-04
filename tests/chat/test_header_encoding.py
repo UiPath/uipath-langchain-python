@@ -56,7 +56,7 @@ class TestOpenAIHeaderEncoding:
             headers = obj._build_headers("fake-token")
         assert "X-UiPath-ProcessKey" not in headers
 
-    def test_context_headers_from_uipath_config(self) -> None:
+    def test_context_headers_included(self) -> None:
         env = {
             **BASE_ENV,
             "UIPATH_JOB_KEY": "job-123",
@@ -72,7 +72,6 @@ class TestOpenAIHeaderEncoding:
         assert headers["x-uipath-jobkey"] == "job-123"
         assert headers["x-uipath-folderkey"] == "folder-456"
         assert headers["x-uipath-traceid"] == "trace-789"
-        # Old header name should NOT be present
         assert "X-UiPath-JobKey" not in headers
 
     def test_extra_headers_override_context_headers(self) -> None:
@@ -112,7 +111,7 @@ class TestVertexHeaderEncoding:
             headers = UiPathChatVertex._build_headers("fake-token")
         assert headers["X-UiPath-ProcessKey"] == quote(ASCII_PROCESS_KEY, safe="")
 
-    def test_context_headers_from_uipath_config(self) -> None:
+    def test_context_headers_included(self) -> None:
         from uipath_langchain.chat.vertex import UiPathChatVertex
 
         env = {
@@ -158,7 +157,7 @@ class TestBedrockHeaderEncoding:
         assert "%E8%AB%8B" in value
         value.encode("ascii")
 
-    def test_context_headers_from_uipath_config(self) -> None:
+    def test_context_headers_included(self) -> None:
         pytest.importorskip("botocore", reason="botocore not installed")
         from uipath_langchain.chat.bedrock import AwsBedrockCompletionsPassthroughClient
 
@@ -191,26 +190,12 @@ class TestBedrockHeaderEncoding:
 
 
 class TestRequestMixinHeaderEncoding:
-    """Verify UiPathRequestMixin default_headers percent-encodes non-ASCII values."""
-
-    def test_non_ascii_process_key_encoded_in_defaults(self) -> None:
-        env = {**BASE_ENV, "UIPATH_PROCESS_KEY": NON_ASCII_PROCESS_KEY}
-        with patch.dict(os.environ, env, clear=False):
-            import importlib
-
-            import uipath_langchain._utils._request_mixin as mod
-
-            importlib.reload(mod)
-            value = mod.UiPathRequestMixin.model_fields["default_headers"].default[
-                "X-UiPath-ProcessKey"
-            ]
-            assert "請" not in value
-            assert "%E8%AB%8B" in value
-            value.encode("ascii")
+    """Verify UiPathRequestMixin auth_headers includes all UiPath headers."""
 
     def test_context_headers_in_auth_headers(self) -> None:
         env = {
             **BASE_ENV,
+            "UIPATH_PROCESS_KEY": NON_ASCII_PROCESS_KEY,
             "UIPATH_JOB_KEY": "job-123",
             "UIPATH_FOLDER_KEY": "folder-456",
             "UIPATH_TRACE_ID": "trace-789",
@@ -223,7 +208,6 @@ class TestRequestMixinHeaderEncoding:
             importlib.reload(mod)
 
             obj = object.__new__(mod.UiPathRequestMixin)
-            # Initialize Pydantic internals so __setattr__ works
             object.__setattr__(obj, "__pydantic_fields_set__", set())
             object.__setattr__(obj, "__pydantic_extra__", None)
             object.__setattr__(
@@ -242,3 +226,7 @@ class TestRequestMixinHeaderEncoding:
         assert headers["x-uipath-jobkey"] == "job-123"
         assert headers["x-uipath-folderkey"] == "folder-456"
         assert headers["x-uipath-traceid"] == "trace-789"
+        # Process key should be percent-encoded
+        value = headers["X-UiPath-ProcessKey"]
+        assert "請" not in value
+        assert "%E8%AB%8B" in value

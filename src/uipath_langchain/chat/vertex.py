@@ -2,7 +2,6 @@ import logging
 import os
 from collections.abc import AsyncIterator, Iterator
 from typing import Any, Optional
-from urllib.parse import quote
 
 import httpx
 from langchain_core.callbacks import (
@@ -16,9 +15,9 @@ from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.platform.common import EndpointManager
 
-from ._headers import build_uipath_context_headers
-from .header_capture import HeaderCapture
-from .retryers.vertex import AsyncVertexRetryer, VertexRetryer
+from .http_client import build_uipath_headers
+from .http_client.header_capture import HeaderCapture
+from .http_client.retryers.vertex import AsyncVertexRetryer, VertexRetryer
 from .supported_models import GeminiModels
 from .types import APIFlavor, LLMProvider
 
@@ -258,18 +257,11 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         byo_connection_id: Optional[str] = None,
     ) -> dict[str, str]:
         """Build HTTP headers for UiPath Gateway requests."""
-        headers = {
-            "Authorization": f"Bearer {token}",
-        }
-        if agenthub_config:
-            headers["X-UiPath-AgentHub-Config"] = agenthub_config
-        if byo_connection_id:
-            headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = byo_connection_id
-        if process_key := os.getenv("UIPATH_PROCESS_KEY"):
-            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
-
-        headers.update(build_uipath_context_headers())
-        return headers
+        return build_uipath_headers(
+            token,
+            agenthub_config=agenthub_config,
+            byo_connection_id=byo_connection_id,
+        )
 
     @staticmethod
     def _build_base_url(model_name: str) -> str:

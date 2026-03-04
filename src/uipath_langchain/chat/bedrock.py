@@ -2,7 +2,6 @@ import logging
 import os
 from collections.abc import Iterator
 from typing import Any, Optional
-from urllib.parse import quote
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
@@ -10,9 +9,9 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
 from uipath.platform.common import EndpointManager, resource_override
 
-from ._headers import build_uipath_context_headers
-from .header_capture import HeaderCapture
-from .retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
+from .http_client import build_uipath_headers
+from .http_client.header_capture import HeaderCapture
+from .http_client.retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
 from .supported_models import BedrockModels
 from .types import APIFlavor, LLMProvider
 
@@ -130,20 +129,13 @@ class AwsBedrockCompletionsPassthroughClient:
         streaming = "true" if request.url.endswith("-stream") else "false"
         request.url = self._build_base_url()
 
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "X-UiPath-LlmGateway-ApiFlavor": self.api_flavor,
-            "X-UiPath-Streaming-Enabled": streaming,
-        }
-
-        if self.agenthub_config:
-            headers["X-UiPath-AgentHub-Config"] = self.agenthub_config
-        if self.byo_connection_id:
-            headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = self.byo_connection_id
-        if process_key := os.getenv("UIPATH_PROCESS_KEY"):
-            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
-
-        headers.update(build_uipath_context_headers())
+        headers = build_uipath_headers(
+            self.token,
+            agenthub_config=self.agenthub_config,
+            byo_connection_id=self.byo_connection_id,
+        )
+        headers["X-UiPath-LlmGateway-ApiFlavor"] = self.api_flavor
+        headers["X-UiPath-Streaming-Enabled"] = streaming
 
         request.headers.update(headers)
 
