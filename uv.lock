@@ -3356,7 +3356,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.60b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.60b0" },
     { name = "uipath", specifier = "==2.10.3" },
-    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.8.3" },
+    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.8.4" },
 ]
 
 [package.metadata.requires-dev]
@@ -3412,7 +3412,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.8.3"
+version = "0.8.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -3433,9 +3433,9 @@ dependencies = [
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/34/c8/efde51c1a2014890efe719fe0827d54c7da97744378917cfe62e97b9a992/uipath_langchain-0.8.3.tar.gz", hash = "sha256:a1ced25262f4588ee9e255b78d4aef883148c2e253c7d9e66afe454af44855cb", size = 4170789, upload-time = "2026-03-04T07:13:10.593Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/5c/1a24020c0338549b4e3e1e09f523e70bc22237b5fb2c20dfaeb681c7fb21/uipath_langchain-0.8.4.tar.gz", hash = "sha256:cc8b7fa425ecf595a10f8309dc62d1a0bb7fa157eb5bf499538272ca0378335c", size = 4171273, upload-time = "2026-03-04T10:22:17.902Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/b6/e33e204667a4af6f2c78df7bf91a53c70818d92b343dc46e85cb80cd8ffc/uipath_langchain-0.8.3-py3-none-any.whl", hash = "sha256:7b743ed5a902c598ca79c427cba788c1db3eaafb3c44b8715a6d5866292da8ea", size = 221812, upload-time = "2026-03-04T07:13:08.873Z" },
+    { url = "https://files.pythonhosted.org/packages/73/dd/da040ef9d995ed29ec1d0590d2a547a2d058a7ad555d401d8a9d326d5fb1/uipath_langchain-0.8.4-py3-none-any.whl", hash = "sha256:7c5278d77bda2d604089910b768feb5b5161ce20bbe3c738206c22d2a2d7a52a", size = 221268, upload-time = "2026-03-04T10:22:15.991Z" },
 ]
 
 [package.optional-dependencies]
