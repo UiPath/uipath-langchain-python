@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "uipath>=2.10.0, <2.11.0",
     "uipath-core>=0.5.2, <0.6.0",
-    "uipath-platform>=0.0.8, <0.1.0",
+    "uipath-platform==0.0.11.dev1000130072",
     "uipath-runtime>=0.9.1, <0.10.0",
     "langgraph>=1.0.0, <2.0.0",
     "langchain-core>=1.2.11, <2.0.0",
@@ -70,6 +70,9 @@ dev = [
     "pytest_httpx>=0.35.0",
     "rust-just>=1.39.0",
 ]
+
+[tool.uv.sources]
+uipath-platform = { index = "testpypi" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/uipath_langchain"]
