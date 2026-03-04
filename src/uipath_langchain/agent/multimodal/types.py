@@ -18,3 +18,7 @@ IMAGE_MIME_TYPES: set[str] = {
     "image/gif",
     "image/webp",
 }
+
+# LLM providers enforce payload limits (OpenAI ~20MB, Anthropic ~32MB).
+# Base64 encoding adds ~33% overhead, so 15MB raw ≈ 20MB encoded.
+MAX_FILE_SIZE_BYTES: int = 15 * 1024 * 1024

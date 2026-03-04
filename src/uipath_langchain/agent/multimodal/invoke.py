@@ -1,6 +1,5 @@
 """LLM invocation with multimodal file attachments."""
 
-import asyncio
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -47,6 +46,9 @@ async def build_file_content_block(
 async def build_file_content_blocks(files: list[FileInfo]) -> list[DataContentBlock]:
     """Build content blocks from file attachments.
 
+    Files are processed sequentially to avoid loading multiple large files
+    into memory simultaneously.
+
     Args:
         files: List of file information to convert to content blocks
 
@@ -56,9 +58,10 @@ async def build_file_content_blocks(files: list[FileInfo]) -> list[DataContentBl
     if not files:
         return []
 
-    file_content_blocks: list[DataContentBlock] = await asyncio.gather(
-        *[build_file_content_block(file) for file in files]
-    )
+    file_content_blocks: list[DataContentBlock] = []
+    for file in files:
+        block = await build_file_content_block(file)
+        file_content_blocks.append(block)
     return file_content_blocks
 
 
@@ -100,6 +103,10 @@ async def llm_call_with_files(
     all_messages = list(messages) + [file_message]
 
     response = await model.ainvoke(all_messages)
+
+    # Free the base64 content blocks immediately — they can be tens of MB
+    del all_messages, file_message, content_blocks
+
     if not isinstance(response, AIMessage):
         raise TypeError(f"LLM returned {type(response).__name__} instead of AIMessage")
     return response
