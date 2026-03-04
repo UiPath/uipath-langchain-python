@@ -13,11 +13,12 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateBatchTransform, CreateDeepRag, UiPathConfig
+from uipath.platform.common import CreateBatchTransform, CreateDeepRagRaw, UiPathConfig
 from uipath.platform.context_grounding import (
     BatchTransformOutputColumn,
     CitationMode,
     DeepRagContent,
+    DeepRagStatus,
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -200,7 +201,7 @@ def handle_deep_rag(
 
         @durable_interrupt
         async def create_deep_rag():
-            return CreateDeepRag(
+            return CreateDeepRagRaw(
                 name=f"task-{uuid.uuid4()}",
                 index_name=index_name,
                 prompt=actual_prompt,
@@ -209,7 +210,16 @@ def handle_deep_rag(
                 glob_pattern=glob_pattern,
             )
 
-        return await create_deep_rag()
+        result = await create_deep_rag()
+        if result.last_deep_rag_status == DeepRagStatus.FAILED:
+            return result.failure_reason
+
+        if result.content:
+            content = result.content.model_dump()
+            content["deepRagId"] = result.id
+            return content
+
+        return {"status": result.last_deep_rag_status, "__internal": "NO_CONTENT"}
 
     return StructuredToolWithOutputType(
         name=tool_name,
