@@ -626,6 +626,31 @@ class TestEscalationToolOutputSchema:
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
     @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
+    async def test_escalation_tool_dict_result_without_is_deleted_defaults_to_false(
+        self, mock_interrupt, mock_uipath_class, escalation_resource
+    ):
+        """Test that a dict result without is_deleted is accepted and defaults to False."""
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        # Return a plain dict without is_deleted — exercises the TypeAdapter path
+        mock_interrupt.return_value = {
+            "action": "approve",
+            "data": {"approved": True, "reason": "looks good"},
+        }
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        assert result["outcome"] == "approve"
+        assert result["output"] == {"approved": True, "reason": "looks good"}
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_with_outcome_mapping_end(
         self, mock_interrupt, mock_uipath_class
     ):

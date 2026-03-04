@@ -154,6 +154,7 @@ def create_escalation_tool(
     class EscalationToolOutput(BaseModel):
         action: Literal["approve", "reject"]
         data: output_model
+        is_deleted: bool = False
 
     _bts_context: dict[str, Any] = {}
 
