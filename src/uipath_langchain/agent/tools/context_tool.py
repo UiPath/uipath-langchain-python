@@ -14,16 +14,22 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateBatchTransform, CreateDeepRag, UiPathConfig
+from uipath.platform.common import CreateBatchTransform, CreateDeepRagRaw, UiPathConfig
 from uipath.platform.context_grounding import (
     BatchTransformOutputColumn,
     CitationMode,
     DeepRagContent,
+    DeepRagStatus,
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_execution_folder_path
-from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    AgentStartupError,
+    AgentStartupErrorCode,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model as create_model_from_schema,
 )
@@ -261,7 +267,7 @@ def handle_deep_rag(
 
         @durable_interrupt
         async def create_deep_rag():
-            return CreateDeepRag(
+            return CreateDeepRagRaw(
                 name=f"task-{uuid.uuid4()}",
                 index_name=index_name,
                 prompt=actual_prompt,
@@ -270,7 +276,24 @@ def handle_deep_rag(
                 glob_pattern=glob_pattern,
             )
 
-        return await create_deep_rag()
+        result = await create_deep_rag()
+
+        if result.last_deep_rag_status == DeepRagStatus.FAILED:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.DEEP_RAG_FAILED,
+                title="Deep RAG task failed",
+                detail=str(result.failure_reason)
+                if result.failure_reason
+                else "Deep RAG task failed.",
+                category=UiPathErrorCategory.USER,
+            )
+
+        if result.content:
+            content = result.content.model_dump()
+            content["deepRagId"] = result.id
+            return content
+
+        return {"status": result.last_deep_rag_status, "__internal": "NO_CONTENT"}
 
     return StructuredToolWithArgumentProperties(
         name=tool_name,

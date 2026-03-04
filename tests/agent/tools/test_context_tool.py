@@ -16,6 +16,8 @@ from uipath.agent.models.agent import (
 from uipath.platform.context_grounding import (
     CitationMode,
     DeepRagContent,
+    DeepRagResponse,
+    DeepRagStatus,
 )
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
@@ -182,7 +184,14 @@ class TestHandleDeepRag:
             with patch(
                 "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt:
-                mock_interrupt.return_value = {"mocked": "response"}
+                mock_interrupt.return_value = DeepRagResponse(
+                    id="mocked-id",
+                    name="mocked-deep-rag",
+                    created_date="2024-01-01",
+                    last_deep_rag_status=DeepRagStatus.SUCCESSFUL,
+                    content=DeepRagContent(text="mocked response", citations=[]),
+                    failure_reason=None,
+                )
                 assert tool.coroutine is not None
                 await tool.coroutine()
 
@@ -204,7 +213,14 @@ class TestHandleDeepRag:
         with patch(
             "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
         ) as mock_interrupt:
-            mock_interrupt.return_value = {"mocked": "response"}
+            mock_interrupt.return_value = DeepRagResponse(
+                id="mocked-id",
+                name="mocked-deep-rag",
+                created_date="2024-01-01",
+                last_deep_rag_status=DeepRagStatus.SUCCESSFUL,
+                content=DeepRagContent(text="mocked response", citations=[]),
+                failure_reason=None,
+            )
 
             # Invoke the tool multiple times
             assert tool.coroutine is not None
@@ -265,7 +281,14 @@ class TestHandleDeepRag:
         with patch(
             "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
         ) as mock_interrupt:
-            mock_interrupt.return_value = {"mocked": "response"}
+            mock_interrupt.return_value = DeepRagResponse(
+                id="mocked-id",
+                name="mocked-deep-rag",
+                created_date="2024-01-01",
+                last_deep_rag_status=DeepRagStatus.SUCCESSFUL,
+                content=DeepRagContent(text="mocked response", citations=[]),
+                failure_reason=None,
+            )
             assert tool.coroutine is not None
             await tool.coroutine(query="runtime provided query")
 
@@ -286,12 +309,55 @@ class TestHandleDeepRag:
         with patch(
             "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
         ) as mock_interrupt:
-            mock_interrupt.return_value = {"mocked": "response"}
+            mock_interrupt.return_value = DeepRagResponse(
+                id="mocked-id",
+                name="mocked-deep-rag",
+                created_date="2024-01-01",
+                last_deep_rag_status=DeepRagStatus.SUCCESSFUL,
+                content=DeepRagContent(text="mocked response", citations=[]),
+                failure_reason=None,
+            )
             assert tool.coroutine is not None
             await tool.coroutine()
 
             deep_rag_arg = mock_interrupt.call_args[0][0]
             assert deep_rag_arg.index_folder_path == "/Shared/TestFolder"
+
+    @pytest.mark.asyncio
+    async def test_failed_deep_rag_with_null_failure_reason_uses_fallback_message(
+        self, base_resource_config
+    ):
+        """Test that a fallback detail message is used when failure_reason is None."""
+        from uipath_langchain.agent.exceptions import (
+            AgentRuntimeError,
+            AgentRuntimeErrorCode,
+        )
+
+        resource = base_resource_config(
+            query_value="test query",
+            citation_mode_value=AgentContextValueSetting(value="Inline"),
+        )
+        tool = handle_deep_rag("test_tool", resource)
+
+        with patch(
+            "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = DeepRagResponse(
+                id="mocked-id",
+                name="mocked-deep-rag",
+                created_date="2024-01-01",
+                last_deep_rag_status=DeepRagStatus.FAILED,
+                content=None,
+                failure_reason=None,
+            )
+            assert tool.coroutine is not None
+            with pytest.raises(AgentRuntimeError) as exc_info:
+                await tool.coroutine()
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.DEEP_RAG_FAILED
+        )
+        assert "Deep RAG task failed." in str(exc_info.value)
 
 
 class TestCreateContextTool:
@@ -670,7 +736,14 @@ class TestHandleBatchTransform:
                 return_value=mock_uipath,
             ),
         ):
-            mock_interrupt.return_value = {"mocked": "response"}
+            mock_interrupt.return_value = DeepRagResponse(
+                id="mocked-id",
+                name="mocked-deep-rag",
+                created_date="2024-01-01",
+                last_deep_rag_status=DeepRagStatus.SUCCESSFUL,
+                content=DeepRagContent(text="mocked response", citations=[]),
+                failure_reason=None,
+            )
             assert tool.coroutine is not None
             await tool.coroutine(destination_path="/output/result.csv")
 
@@ -718,7 +791,14 @@ class TestHandleBatchTransform:
                 return_value=mock_uipath,
             ),
         ):
-            mock_interrupt.return_value = {"mocked": "response"}
+            mock_interrupt.return_value = DeepRagResponse(
+                id="mocked-id",
+                name="mocked-deep-rag",
+                created_date="2024-01-01",
+                last_deep_rag_status=DeepRagStatus.SUCCESSFUL,
+                content=DeepRagContent(text="mocked response", citations=[]),
+                failure_reason=None,
+            )
             assert tool.coroutine is not None
             await tool.coroutine(
                 query="runtime provided query", destination_path="/output/result.csv"
@@ -746,7 +826,14 @@ class TestHandleBatchTransform:
                 return_value=mock_uipath,
             ),
         ):
-            mock_interrupt.return_value = {"mocked": "response"}
+            mock_interrupt.return_value = DeepRagResponse(
+                id="mocked-id",
+                name="mocked-deep-rag",
+                created_date="2024-01-01",
+                last_deep_rag_status=DeepRagStatus.SUCCESSFUL,
+                content=DeepRagContent(text="mocked response", citations=[]),
+                failure_reason=None,
+            )
             assert tool.coroutine is not None
             # Call without providing destination_path
             await tool.coroutine()
@@ -795,7 +882,14 @@ class TestHandleBatchTransform:
                 return_value=mock_uipath,
             ),
         ):
-            mock_interrupt.return_value = {"mocked": "response"}
+            mock_interrupt.return_value = DeepRagResponse(
+                id="mocked-id",
+                name="mocked-deep-rag",
+                created_date="2024-01-01",
+                last_deep_rag_status=DeepRagStatus.SUCCESSFUL,
+                content=DeepRagContent(text="mocked response", citations=[]),
+                failure_reason=None,
+            )
             assert tool.coroutine is not None
             # Call with only query, no destination_path
             await tool.coroutine(query="runtime provided query")
