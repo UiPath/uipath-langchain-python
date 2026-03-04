@@ -76,7 +76,10 @@ class UiPathLangGraphRuntimeFactory:
             ):
                 # If not resuming and no job id, delete the previous state file
                 if os.path.exists(path):
-                    os.remove(path)
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass  # File may be held by another process
             os.makedirs(self.context.runtime_dir, exist_ok=True)
             return path
 
