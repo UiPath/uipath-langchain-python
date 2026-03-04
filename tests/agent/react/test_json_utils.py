@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, RootModel
 
@@ -6,6 +6,7 @@ from uipath_langchain.agent.react.json_utils import (
     extract_values_by_paths,
     get_json_paths_by_type,
 )
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
 
 class Target(BaseModel):
@@ -151,3 +152,78 @@ class TestExtractValuesByPaths:
     def test_extract_path_not_found(self):
         values = extract_values_by_paths({"a": 1}, ["$.missing"])
         assert values == []
+
+
+# -- get_json_paths_by_type: dynamic models from create_model ------------------
+
+
+class TestGetJsonPathsByTypeDynamic:
+    """Exercise _get_target_type pseudo-module lookup with dynamic models."""
+
+    def test_direct_ref(self) -> None:
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "attachment": {"$ref": "#/definitions/job-attachment"},
+                "name": {"type": "string"},
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "FullName": {"type": "string"},
+                    },
+                }
+            },
+        }
+        model = create_model(schema)
+        paths = get_json_paths_by_type(model, "__Job_attachment")
+        assert paths == ["$.attachment"]
+
+    def test_array_ref(self) -> None:
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/job-attachment"},
+                }
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {"ID": {"type": "string"}},
+                }
+            },
+        }
+        model = create_model(schema)
+        paths = get_json_paths_by_type(model, "__Job_attachment")
+        assert paths == ["$.items[*]"]
+
+    def test_nested_ref_only_in_defs(self) -> None:
+        """Type referenced only by another $def, not directly by root."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "order": {"$ref": "#/$defs/Order"},
+            },
+            "$defs": {
+                "Order": {
+                    "type": "object",
+                    "properties": {
+                        "item": {"$ref": "#/$defs/Item"},
+                        "quantity": {"type": "integer"},
+                    },
+                },
+                "Item": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                    },
+                },
+            },
+        }
+        model = create_model(schema)
+        paths = get_json_paths_by_type(model, "__Item")
+        assert paths == ["$.order.item"]

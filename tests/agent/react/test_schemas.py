@@ -275,6 +275,148 @@ class TestHasUnderscoreFieldsReturnsFalse:
         assert has_underscore_fields(schema) is False
 
 
+class TestCreateModelJsonSchemaRoundtrip:
+    """Verify that model_json_schema() works on models produced by create_model().
+
+    Pydantic re-resolves forward references via sys.modules[cls.__module__],
+    so all types must be registered in the pseudo-module.
+    """
+
+    def test_single_ref(self) -> None:
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "address": {"$ref": "#/$defs/Address"},
+            },
+            "$defs": {
+                "Address": {
+                    "type": "object",
+                    "properties": {
+                        "street": {"type": "string"},
+                        "city": {"type": "string"},
+                    },
+                },
+            },
+        }
+        model = create_model(schema)
+        result = model.model_json_schema()
+        defs = result.get("$defs") or result.get("definitions") or {}
+        assert len(defs) == 1
+
+    def test_deeply_nested_defs_chain(self) -> None:
+        """Type B is only referenced by type A (not by root). Old code missed B."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "order": {"$ref": "#/$defs/Order"},
+            },
+            "$defs": {
+                "Order": {
+                    "type": "object",
+                    "properties": {
+                        "item": {"$ref": "#/$defs/Item"},
+                        "quantity": {"type": "integer"},
+                    },
+                },
+                "Item": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "price": {"type": "number"},
+                    },
+                },
+            },
+        }
+        model = create_model(schema)
+        result = model.model_json_schema()
+        defs = result.get("$defs") or result.get("definitions") or {}
+        assert len(defs) == 2
+
+    def test_three_level_defs_chain(self) -> None:
+        """Root -> A -> B -> C. C is two levels removed from root fields."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "company": {"$ref": "#/$defs/Company"},
+            },
+            "$defs": {
+                "Company": {
+                    "type": "object",
+                    "properties": {
+                        "department": {"$ref": "#/$defs/Department"},
+                    },
+                },
+                "Department": {
+                    "type": "object",
+                    "properties": {
+                        "manager": {"$ref": "#/$defs/Employee"},
+                    },
+                },
+                "Employee": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "role": {"type": "string"},
+                    },
+                },
+            },
+        }
+        model = create_model(schema)
+        result = model.model_json_schema()
+        defs = result.get("$defs") or result.get("definitions") or {}
+        assert len(defs) == 3
+
+    def test_enum_in_defs(self) -> None:
+        """Non-BaseModel types (enums) in $defs must also be registered."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "status": {"$ref": "#/$defs/Status"},
+            },
+            "$defs": {
+                "Status": {
+                    "type": "string",
+                    "enum": ["active", "inactive", "pending"],
+                },
+            },
+        }
+        model = create_model(schema)
+        result = model.model_json_schema()
+        assert result is not None
+
+    def test_array_of_nested_refs(self) -> None:
+        """Array field referencing a $def type that itself has a $ref."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/Task"},
+                },
+            },
+            "$defs": {
+                "Task": {
+                    "type": "object",
+                    "properties": {
+                        "assignee": {"$ref": "#/$defs/Person"},
+                        "title": {"type": "string"},
+                    },
+                },
+                "Person": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "email": {"type": "string"},
+                    },
+                },
+            },
+        }
+        model = create_model(schema)
+        result = model.model_json_schema()
+        defs = result.get("$defs") or result.get("definitions") or {}
+        assert len(defs) == 2
+
+
 class TestCreateModelRejectsUnderscoreFields:
     def test_top_level_underscore_field(self) -> None:
         schema = {
