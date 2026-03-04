@@ -12,6 +12,7 @@ from uipath.platform.common import (
     resource_override,
 )
 
+from ._headers import build_uipath_context_headers
 from .supported_models import OpenAIModels
 from .types import APIFlavor, LLMProvider
 
@@ -160,10 +161,10 @@ class UiPathChatOpenAI(AzureChatOpenAI):
             headers["X-UiPath-AgentHub-Config"] = self._agenthub_config
         if self._byo_connection_id:
             headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = self._byo_connection_id
-        if job_key := os.getenv("UIPATH_JOB_KEY"):
-            headers["X-UiPath-JobKey"] = job_key
         if process_key := os.getenv("UIPATH_PROCESS_KEY"):
             headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
+
+        headers.update(build_uipath_context_headers())
 
         # Allow extra_headers to override defaults
         headers.update(self._extra_headers)

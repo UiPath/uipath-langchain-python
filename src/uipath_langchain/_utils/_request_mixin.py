@@ -34,6 +34,7 @@ from uipath_langchain._utils._settings import (
     get_uipath_token_header,
 )
 from uipath_langchain._utils._sleep_policy import before_sleep_log
+from uipath_langchain.chat._headers import build_uipath_context_headers
 from uipath_langchain.runtime.errors import (
     LangGraphErrorCode,
     LangGraphRuntimeError,
@@ -79,7 +80,6 @@ class UiPathRequestMixin(BaseModel):
 
     default_headers: Mapping[str, str] | None = {
         "X-UiPath-Streaming-Enabled": "false",
-        "X-UiPath-JobKey": os.getenv("UIPATH_JOB_KEY", ""),
         "X-UiPath-ProcessKey": quote(os.getenv("UIPATH_PROCESS_KEY", ""), safe=""),
     }
     model_name: str | None = Field(
@@ -772,6 +772,7 @@ class UiPathRequestMixin(BaseModel):
             if self.include_account_id:
                 self._auth_headers["x-uipath-internal-accountid"] = self.org_id
                 self._auth_headers["x-uipath-internal-tenantid"] = self.tenant_id
+            self._auth_headers.update(build_uipath_context_headers())
         return self._auth_headers
 
     def _get_llm_string(self, stop: list[str] | None = None, **kwargs: Any) -> str:

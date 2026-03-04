@@ -10,6 +10,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
 from uipath.platform.common import EndpointManager, resource_override
 
+from ._headers import build_uipath_context_headers
 from .header_capture import HeaderCapture
 from .retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
 from .supported_models import BedrockModels
@@ -139,12 +140,10 @@ class AwsBedrockCompletionsPassthroughClient:
             headers["X-UiPath-AgentHub-Config"] = self.agenthub_config
         if self.byo_connection_id:
             headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = self.byo_connection_id
-        job_key = os.getenv("UIPATH_JOB_KEY")
-        process_key = os.getenv("UIPATH_PROCESS_KEY")
-        if job_key:
-            headers["X-UiPath-JobKey"] = job_key
-        if process_key:
+        if process_key := os.getenv("UIPATH_PROCESS_KEY"):
             headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
+
+        headers.update(build_uipath_context_headers())
 
         request.headers.update(headers)
 
