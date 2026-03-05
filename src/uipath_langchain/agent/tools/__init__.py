@@ -6,6 +6,7 @@ from .datafabric_tool import (
     fetch_entity_schemas,
     format_schemas_for_context,
     get_datafabric_contexts,
+    get_datafabric_entity_identifiers_from_resources,
 )
 from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
@@ -30,6 +31,7 @@ __all__ = [
     "fetch_entity_schemas",
     "format_schemas_for_context",
     "get_datafabric_contexts",
+    "get_datafabric_entity_identifiers_from_resources",
     "UiPathToolNode",
     "ToolWrapperMixin",
 ]

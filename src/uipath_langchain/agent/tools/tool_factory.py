@@ -30,7 +30,7 @@ logger = getLogger(__name__)
 
 async def create_tools_from_resources(
     agent: LowCodeAgentDefinition, llm: BaseChatModel
-) -> tuple[list[BaseTool], str]:
+) -> list[BaseTool]:
     """Create tools from agent resources including Data Fabric tools.
 
     Args:
@@ -38,17 +38,14 @@ async def create_tools_from_resources(
         llm: The language model for tool creation.
 
     Returns:
-        Tuple of (tools, datafabric_schema_context).
+        List of BaseTool instances.
     """
     tools: list[BaseTool] = []
-    datafabric_schema_context: str = ""
 
     logger.info("Creating tools for agent '%s' from resources", agent.name)
 
-    # Handle Data Fabric tools first (they need special handling)
-    datafabric_tools, schema_context = await create_datafabric_tools(agent)
-    tools.extend(datafabric_tools)
-    datafabric_schema_context = schema_context
+    # Register the generic Data Fabric query tool (no fetching/schema here)
+    tools.extend(create_datafabric_tools(agent))
 
     for resource in agent.resources:
         if not resource.is_enabled:
@@ -71,7 +68,7 @@ async def create_tools_from_resources(
             else:
                 tools.append(tool)
 
-    return tools, datafabric_schema_context
+    return tools
 
 
 async def _build_tool_for_resource(

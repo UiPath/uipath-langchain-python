@@ -171,6 +171,7 @@ class TestCreateAgent:
                 llm_provider=mock_model.llm_provider,
                 api_flavor=mock_model.api_flavor,
             ),
+            resources_for_init=None,
         )
         mock_create_terminate_node.assert_called_once_with(
             None,  # output schema
@@ -270,6 +271,7 @@ class TestCreateAgent:
                 llm_provider=mock_model.llm_provider,
                 api_flavor=mock_model.api_flavor,
             ),
+            resources_for_init=None,
         )
         mock_create_terminate_node.assert_called_once_with(
             None,  # output schema

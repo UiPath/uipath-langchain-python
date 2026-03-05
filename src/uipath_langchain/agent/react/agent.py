@@ -35,6 +35,7 @@ from .types import (
     AgentGraphConfig,
     AgentGraphNode,
     AgentGraphState,
+    AgentResources,
     AgentSettings,
 )
 from .utils import create_state_with_input
@@ -53,6 +54,7 @@ def create_agent(
     output_schema: Type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None = None,
+    resources: AgentResources | None = None,
 ) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
     """Build agent graph with INIT -> AGENT (subgraph) <-> TOOLS loop, terminated by control flow tools.
 
@@ -86,7 +88,11 @@ def create_agent(
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
     init_node = create_init_node(
-        messages, input_schema, config.is_conversational, agent_settings
+        messages,
+        input_schema,
+        config.is_conversational,
+        agent_settings,
+        resources_for_init=resources,
     )
 
     tool_nodes = create_tool_node(agent_tools)

@@ -5,6 +5,7 @@ from .datafabric_tool import (
     fetch_entity_schemas,
     format_schemas_for_context,
     get_datafabric_contexts,
+    get_datafabric_entity_identifiers_from_resources,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "fetch_entity_schemas",
     "format_schemas_for_context",
     "get_datafabric_contexts",
+    "get_datafabric_entity_identifiers_from_resources",
 ]

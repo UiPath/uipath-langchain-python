@@ -1,25 +1,25 @@
 """Data Fabric tool creation for entity-based queries.
 
-This module provides functionality to:
-1. Fetch and format entity schemas for agent context hydration
-2. Create SQL-based query tools for the agent
+This module provides:
+1. A single generic ``query_datafabric`` tool (no per-entity knowledge at build time)
+2. Schema fetching & formatting helpers consumed by the INIT node at runtime
+3. Helpers to extract entity identifiers from agent definitions
 """
 
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from langchain_core.tools import BaseTool
-from pydantic import BaseModel, Field
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
+    BaseAgentResourceConfig,
     LowCodeAgentDefinition,
 )
 from uipath.platform.entities import Entity, FieldMetadata
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
-from ..utils import sanitize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +111,8 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
     if not entities:
         return ""
 
-    lines = []
+    lines: list[str] = []
 
-    # Add SQL generation strategy from system_prompt.txt
     system_prompt = _load_system_prompt()
     if system_prompt:
         lines.append("## SQL Query Generation Guidelines")
@@ -121,7 +120,6 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
         lines.append(system_prompt)
         lines.append("")
 
-    # Add SQL constraints from sql_constraints.txt
     sql_constraints = _load_sql_constraints()
     if sql_constraints:
         lines.append("## SQL Constraints")
@@ -141,10 +139,9 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
         lines.append("| Field | Type |")
         lines.append("|-------|------|")
 
-        # Collect field info for query pattern examples
-        field_names = []
-        numeric_field = None
-        text_field = None
+        field_names: list[str] = []
+        numeric_field: str | None = None
+        text_field: str | None = None
 
         for field in entity.fields or []:
             if field.is_hidden_field or field.is_system_field:
@@ -154,7 +151,6 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
             field_names.append(field_name)
             lines.append(f"| {field_name} | {field_type} |")
 
-            # Track field types for examples
             sql_type = field.sql_type.name.lower() if field.sql_type else ""
             if not numeric_field and sql_type in ("int", "decimal", "float", "double", "bigint"):
                 numeric_field = field_name
@@ -163,7 +159,6 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
 
         lines.append("")
 
-        # Add entity-specific query pattern examples
         group_field = text_field or (field_names[0] if field_names else "Category")
         agg_field = numeric_field or (field_names[1] if len(field_names) > 1 else "Amount")
         filter_field = text_field or (field_names[0] if field_names else "Name")
@@ -198,201 +193,130 @@ def get_datafabric_contexts(
     Returns:
         List of context resources configured for Data Fabric retrieval mode.
     """
-    datafabric_contexts: list[AgentContextResourceConfig] = []
-
-    for resource in agent.resources:
-        if not isinstance(resource, AgentContextResourceConfig):
-            continue
-        if not resource.is_enabled:
-            continue
-        if resource.settings.retrieval_mode.lower() == "datafabric":
-            datafabric_contexts.append(resource)
-
-    return datafabric_contexts
+    return _filter_datafabric_contexts(agent.resources)
 
 
-# --- Tool Creation ---
+def _filter_datafabric_contexts(
+    resources: Sequence[BaseAgentResourceConfig],
+) -> list[AgentContextResourceConfig]:
+    """Filter resources to only Data Fabric context configs."""
+    return [
+        resource
+        for resource in resources
+        if isinstance(resource, AgentContextResourceConfig)
+        and resource.is_enabled
+        and resource.settings.retrieval_mode.lower() == "datafabric"
+    ]
 
 
-class QueryEntityInput(BaseModel):
-    """Input schema for the query_entity tool."""
+def get_datafabric_entity_identifiers_from_resources(
+    resources: Sequence[BaseAgentResourceConfig],
+) -> list[str]:
+    """Extract Data Fabric entity identifiers from a sequence of resource configs.
 
-    entity_identifier: str = Field(
-        ..., description="The entity identifier to query"
+    Args:
+        resources: Resource configs (typically from ``agent_definition.resources``).
+
+    Returns:
+        Flat list of entity identifier strings across all Data Fabric contexts.
+    """
+    identifiers: list[str] = []
+    for context in _filter_datafabric_contexts(resources):
+        identifiers.extend(context.settings.entity_identifiers or [])
+    return identifiers
+
+
+# --- Generic Tool Creation ---
+
+_MAX_RECORDS_IN_RESPONSE = 50
+
+
+def create_datafabric_query_tool() -> BaseTool:
+    """Create a single generic ``query_datafabric`` tool.
+
+    The tool accepts an arbitrary SQL SELECT query and dispatches it to
+    ``sdk.entities.query_entity_records_async()``.  Entity knowledge is
+    *not* baked in — the LLM receives schema guidance via the system
+    prompt (injected at INIT time) and constructs raw SQL.
+    """
+
+    async def _query_datafabric(sql_query: str) -> dict[str, Any]:
+        from uipath.platform import UiPath
+
+        logger.debug(f"query_datafabric called with SQL: {sql_query}")
+
+        sdk = UiPath()
+        try:
+            records = await sdk.entities.query_entity_records_async(
+                sql_query=sql_query,
+            )
+            total_count = len(records)
+            truncated = total_count > _MAX_RECORDS_IN_RESPONSE
+            returned_records = records[:_MAX_RECORDS_IN_RESPONSE] if truncated else records
+
+            result: dict[str, Any] = {
+                "records": returned_records,
+                "total_count": total_count,
+                "returned_count": len(returned_records),
+                "sql_query": sql_query,
+            }
+            if truncated:
+                result["truncated"] = True
+                result["message"] = (
+                    f"Showing {len(returned_records)} of {total_count} records. "
+                    "Use more specific filters or LIMIT to narrow results."
+                )
+            return result
+        except Exception as e:
+            logger.error(f"SQL query failed: {e}")
+            return {
+                "records": [],
+                "total_count": 0,
+                "error": str(e),
+                "sql_query": sql_query,
+            }
+
+    return BaseUiPathStructuredTool(
+        name="query_datafabric",
+        description=(
+            "Execute a SQL SELECT query against Data Fabric entities. "
+            "Refer to the entity schemas in the system prompt for available tables and columns. "
+            "Include LIMIT unless aggregating."
+        ),
+        args_schema={
+            "type": "object",
+            "properties": {
+                "sql_query": {
+                    "type": "string",
+                    "description": (
+                        "Complete SQL SELECT statement. "
+                        "Use exact table and column names from the entity schemas in the system prompt."
+                    ),
+                },
+            },
+            "required": ["sql_query"],
+        },
+        coroutine=_query_datafabric,
+        metadata={"tool_type": "datafabric_sql"},
     )
-    sql_where: str = Field(
-        default="",
-        description="SQL WHERE clause to filter records (without the WHERE keyword). "
-        "Example: 'Status = \"Active\" AND Amount > 100'",
-    )
-    limit: int = Field(
-        default=1000, description="Maximum number of records to return"
-    )
 
 
-class QueryEntityOutput(BaseModel):
-    """Output schema for the query_entity tool."""
-
-    records: list[dict[str, Any]] = Field(
-        ..., description="List of entity records matching the query"
-    )
-    total_count: int = Field(..., description="Total number of matching records")
-
-
-async def create_datafabric_tools(
+def create_datafabric_tools(
     agent: LowCodeAgentDefinition,
-) -> tuple[list[BaseTool], str]:
-    """Create Data Fabric tools and schema context from agent definition.
+) -> list[BaseTool]:
+    """Register the generic Data Fabric query tool if the agent has DF contexts.
 
-    This function:
-    1. Finds all Data Fabric context resources in the agent
-    2. Fetches entity schemas for context hydration
-    3. Returns tools and schema context string
+    No fetching, no formatting, no schema — purely tool registration.
+    Schema hydration happens at INIT time.
 
     Args:
         agent: The agent definition containing Data Fabric context resources.
 
     Returns:
-        Tuple of (tools, schema_context) where:
-        - tools: List of BaseTool instances for querying entities
-        - schema_context: Formatted schema string to inject into system prompt
+        A list containing the single ``query_datafabric`` tool, or empty.
     """
-    tools: list[BaseTool] = []  
-    all_entities: list[Entity] = []
+    if not get_datafabric_entity_identifiers_from_resources(agent.resources):
+        return []
 
-    datafabric_contexts = get_datafabric_contexts(agent)
-
-    if not datafabric_contexts:
-        return tools, ""
-
-    logger.info(f"Found {len(datafabric_contexts)} Data Fabric context resource(s)")
-
-    for context in datafabric_contexts:
-        entity_identifiers = context.settings.entity_identifiers or []
-
-        if not entity_identifiers:
-            logger.warning(
-                f"Data Fabric context '{context.name}' has no entity_identifiers configured"
-            )
-            continue
-
-        # Fetch entity schemas
-        entities = await fetch_entity_schemas(entity_identifiers)
-        all_entities.extend(entities)
-
-        context_tools = _create_sdk_based_tools(context, entities)
-        tools.extend(context_tools)
-
-        logger.info(
-            f"Created {len(context_tools)} tools for Data Fabric context '{context.name}'"
-        )
-
-    # Format all entity schemas for context injection
-    schema_context = format_schemas_for_context(all_entities)
-
-    return tools, schema_context
-
-
-def _create_sdk_based_tools(
-    context: AgentContextResourceConfig,
-    entities: list[Entity],
-) -> list[BaseTool]:
-    """Create SDK-based tools for querying entities using SQL.
-
-    Each tool accepts a full SQL query and executes it via the SDK's
-    query_entity_records_async method.
-    """
-    tools: list[BaseTool] = []
-    MAX_RECORDS_IN_RESPONSE = 50  # Limit records to prevent context overflow
-
-    for entity in entities:
-        tool_name = sanitize_tool_name(f"query_{entity.name}")
-
-        # Create a closure to capture the entity name
-        entity_display_name = entity.display_name or entity.name
-
-        async def query_fn(
-            sql_query: str,
-            _entity_name: str = entity_display_name,
-            _max_records: int = MAX_RECORDS_IN_RESPONSE,
-        ) -> dict[str, Any]:
-            """Execute a SQL query against the Data Fabric entity."""
-            from uipath.platform import UiPath
-
-            print(f"[DEBUG] query_fn called for entity '{_entity_name}' with SQL: {sql_query}")
-            logger.info(f"Executing SQL query for entity '{_entity_name}': {sql_query}")
-
-            sdk = UiPath()
-            try:
-                records = await sdk.entities.query_entity_records_async(
-                    sql_query=sql_query,
-                )
-                total_count = len(records)
-                truncated = total_count > _max_records
-                returned_records = records[:_max_records] if truncated else records
-                
-                print(f"[DEBUG] Retrieved {total_count} records, returning {len(returned_records)} for entity '{_entity_name}'")
-                
-                result = {
-                    "records": returned_records,
-                    "total_count": total_count,
-                    "returned_count": len(returned_records),
-                    "entity": _entity_name,
-                    "sql_query": sql_query,
-                }
-                if truncated:
-                    result["truncated"] = True
-                    result["message"] = f"Showing {len(returned_records)} of {total_count} records. Use more specific filters or LIMIT to narrow results."
-                return result
-            except Exception as e:
-                logger.error(f"SQL query failed for entity '{_entity_name}': {e}")
-                return {
-                    "records": [],
-                    "total_count": 0,
-                    "error": str(e),
-                    "sql_query": sql_query,
-                }
-
-        entity_description = entity.description or f"Query {entity_display_name} records"
-
-        # Extract actual field names from entity schema (exclude system/hidden fields)
-        field_names = [
-            f.display_name or f.name
-            for f in (entity.fields or [])
-            if not f.is_hidden_field and not f.is_system_field
-        ]
-        fields_str = ", ".join(field_names[:10])  # Limit to first 10 fields
-        if len(field_names) > 10:
-            fields_str += f", ... ({len(field_names)} total)"
-
-        tools.append(
-            BaseUiPathStructuredTool(
-                name=tool_name,
-                description=(
-                    f"{context.description}. {entity_description}. "
-                    f"Available fields: {fields_str}. "
-                    f"Use SQL patterns from system prompt based on user intent."
-                ),
-                args_schema={
-                    "type": "object",
-                    "properties": {
-                        "sql_query": {
-                            "type": "string",
-                            "description": (
-                                f"Complete SQL SELECT statement for {entity_display_name}. "
-                                f"Use exact column names from schema. Include LIMIT unless aggregating."
-                            ),
-                        },
-                    },
-                    "required": ["sql_query"],
-                },
-                coroutine=query_fn,
-                metadata={
-                    "tool_type": "datafabric_sql",
-                    "display_name": f"Query {entity_display_name}",
-                    "entity_name": entity_display_name,
-                },
-            )
-        )
-
-    return tools
+    logger.info("Registering generic query_datafabric tool")
+    return [create_datafabric_query_tool()]

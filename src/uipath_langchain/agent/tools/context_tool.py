@@ -40,7 +40,7 @@ def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
         return handle_deep_rag(tool_name, resource)
     elif retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
         return handle_batch_transform(tool_name, resource)
-    elif retrieval_mode == AgentContextRetrievalMode.DATA_FABRIC.value.lower():
+    elif retrieval_mode == "datafabric":
         # Data Fabric contexts are handled by create_datafabric_tools() in tool_factory.py
         raise ValueError(
             "Data Fabric context should be handled via create_datafabric_tools(), "
