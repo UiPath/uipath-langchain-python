@@ -1,0 +1,33 @@
+[project]
+name = "ecommerce-scraper-agent"
+version = "0.0.8"
+description = "E-commerce product scraper with coordinator and 5 parallel sub-agents"
+authors = [{ name = "Agent Developer" }]
+requires-python = ">=3.11"
+dependencies = [
+    "uipath",
+    "uipath-langchain",
+    "langgraph>=0.2.0",
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+    "playwright>=1.40.0",
+]
+
+[dependency-groups]
+dev = [
+    "uipath-dev",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+select = ["E", "F", "W", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.uv]
+prerelease = "allow"
