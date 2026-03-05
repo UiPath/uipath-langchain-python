@@ -211,6 +211,11 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
     ) -> Optional[Any]:
         return self._state.resumed_tool_span_data
 
+    def get_resumed_process_data(
+        self,
+    ) -> Optional[Any]:
+        return self._state.resumed_process_span_data
+
     def get_resumed_hitl_guardrail_container_data(
         self,
     ) -> Optional[Any]:

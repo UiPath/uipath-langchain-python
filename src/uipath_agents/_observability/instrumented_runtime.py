@@ -588,6 +588,26 @@ class InstrumentedRuntime:
                 context["pending_tool_span"] = resumed_tool_span_data
                 context["pending_tool_span_id"] = resumed_tool_span_data["span_id"]
 
+            # retrieve pending tool name from previous context
+            # so the next resume can arm the skip logic.
+            if not context.get("pending_tool_name") and previous_context:
+                prev_tool_name = previous_context.get("pending_tool_name")
+                if prev_tool_name:
+                    context["pending_tool_name"] = prev_tool_name
+
+            resumed_process_span_data = self._callback.get_resumed_process_data()
+            if not context.get("pending_process_span"):
+                if resumed_process_span_data:
+                    context["pending_process_span"] = resumed_process_span_data
+                    context["pending_process_span_id"] = resumed_process_span_data[
+                        "span_id"
+                    ]
+                elif previous_context:
+                    prev_process = previous_context.get("pending_process_span")
+                    if prev_process:
+                        context["pending_process_span"] = prev_process
+                        context["pending_process_span_id"] = prev_process["span_id"]
+
             # Save escalation span data for resume completion
             if escalation_span:
                 pending_escalation_data = self._extract_pending_span_data(

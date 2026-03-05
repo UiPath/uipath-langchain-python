@@ -17,7 +17,10 @@ from uipath.runtime import UiPathRuntimeContext, UiPathRuntimeStatus
 from uipath_agents._observability.instrumented_runtime import InstrumentedRuntime
 from uipath_agents._observability.llmops.callback import LlmOpsInstrumentationCallback
 from uipath_agents._observability.llmops.spans.span_factory import LlmOpsSpanFactory
-from uipath_agents._observability.llmops.trace_context_storage import TraceContextData
+from uipath_agents._observability.llmops.trace_context_storage import (
+    PendingSpanData,
+    TraceContextData,
+)
 
 
 @pytest.fixture
@@ -1857,3 +1860,310 @@ class TestMultipleSuspensionFixes:
             assert status_override == 0, (
                 f"Expected UNSET (0) status on re-suspension, got {status_override}"
             )
+
+    @pytest.mark.asyncio
+    async def test_re_suspension_preserves_pending_tool_name(
+        self,
+        mock_delegate: AsyncMock,
+        mock_runtime_context: MagicMock,
+    ) -> None:
+        """Resume → re-suspend must carry forward pending_tool_name so the
+        next resume arms the skip logic and avoids duplicate tool spans."""
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        mock_exporter = MagicMock()
+        mock_exporter.upsert_span = MagicMock(return_value=SpanExportResult.SUCCESS)
+        tracer_with_exp = LlmOpsSpanFactory(exporter=mock_exporter)
+        callback_with_exp = LlmOpsInstrumentationCallback(tracer_with_exp)
+
+        original_tool_span_data: PendingSpanData = {
+            "span_id": "aabb000000001234",
+            "parent_span_id": "1122334455667788",
+            "name": "Tool call - DeepRAG",
+            "start_time_ns": 1708672800_000_000_000,
+            "attributes": {"tool.name": "DeepRAG", "type": "toolCall"},
+        }
+        original_process_span_data: PendingSpanData = {
+            "span_id": "aabb000000005678",
+            "parent_span_id": "aabb000000001234",
+            "name": "DeepRAG",
+            "start_time_ns": 1708672800_100_000_000,
+            "attributes": {"type": "contextGroundingTool"},
+        }
+
+        saved_context = TraceContextData(
+            trace_id="aabbccdd11223344aabbccdd11223344",
+            span_id="1122334455667788",
+            parent_span_id=None,
+            name="Agent run - TestAgent",
+            start_time="2024-02-23T10:00:00Z",
+            start_time_ns=1708672800_000_000_000,
+            attributes={"agentId": "test-id", "type": "agentRun"},
+            pending_tool_span_id="aabb000000001234",
+            pending_process_span_id="aabb000000005678",
+            pending_tool_name="DeepRAG",
+            pending_tool_span=original_tool_span_data,
+            pending_process_span=original_process_span_data,
+            pending_escalation_span=None,
+            pending_guardrail_hitl_evaluation_span=None,
+            pending_guardrail_hitl_container_span=None,
+            pending_llm_span=None,
+        )
+
+        stored_context: TraceContextData | None = dict(saved_context)  # type: ignore[assignment]
+
+        async def mock_save(runtime_id: str, context: TraceContextData) -> None:
+            nonlocal stored_context
+            stored_context = context
+
+        async def mock_load(runtime_id: str) -> TraceContextData | None:
+            return stored_context
+
+        async def mock_clear(runtime_id: str) -> None:
+            nonlocal stored_context
+            stored_context = None
+
+        storage = MagicMock()
+        storage.save_trace_context = AsyncMock(side_effect=mock_save)
+        storage.load_trace_context = AsyncMock(side_effect=mock_load)
+        storage.clear_trace_context = AsyncMock(side_effect=mock_clear)
+
+        suspended_result = MagicMock()
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = suspended_result
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer_with_exp,
+            callback_with_exp,
+            mock_runtime_context,
+            trace_context_storage=storage,
+        )
+
+        # Resume execution that re-suspends (tool suspends again)
+        await instrumented_runtime.execute({"input": "resume-suspend"}, None)
+
+        assert stored_context is not None
+        # pending_tool_name must be carried forward from previous context
+        assert stored_context["pending_tool_name"] == "DeepRAG", (
+            "pending_tool_name must survive re-suspend so next resume arms skip logic"
+        )
+
+    @pytest.mark.asyncio
+    async def test_re_suspension_preserves_pending_tool_and_process_spans(
+        self,
+        mock_delegate: AsyncMock,
+        mock_runtime_context: MagicMock,
+    ) -> None:
+        """Resume → re-suspend must carry forward pending_tool_span and
+        pending_process_span so the next resume can complete the original spans."""
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        mock_exporter = MagicMock()
+        mock_exporter.upsert_span = MagicMock(return_value=SpanExportResult.SUCCESS)
+        tracer_with_exp = LlmOpsSpanFactory(exporter=mock_exporter)
+        callback_with_exp = LlmOpsInstrumentationCallback(tracer_with_exp)
+
+        original_tool_span_data: PendingSpanData = {
+            "span_id": "aabb000000001234",
+            "parent_span_id": "1122334455667788",
+            "name": "Tool call - DeepRAG",
+            "start_time_ns": 1708672800_000_000_000,
+            "attributes": {"tool.name": "DeepRAG", "type": "toolCall"},
+        }
+        original_process_span_data: PendingSpanData = {
+            "span_id": "aabb000000005678",
+            "parent_span_id": "aabb000000001234",
+            "name": "DeepRAG",
+            "start_time_ns": 1708672800_100_000_000,
+            "attributes": {"type": "contextGroundingTool"},
+        }
+
+        saved_context = TraceContextData(
+            trace_id="aabbccdd11223344aabbccdd11223344",
+            span_id="1122334455667788",
+            parent_span_id=None,
+            name="Agent run - TestAgent",
+            start_time="2024-02-23T10:00:00Z",
+            start_time_ns=1708672800_000_000_000,
+            attributes={"agentId": "test-id", "type": "agentRun"},
+            pending_tool_span_id="aabb000000001234",
+            pending_process_span_id="aabb000000005678",
+            pending_tool_name="DeepRAG",
+            pending_tool_span=original_tool_span_data,
+            pending_process_span=original_process_span_data,
+            pending_escalation_span=None,
+            pending_guardrail_hitl_evaluation_span=None,
+            pending_guardrail_hitl_container_span=None,
+            pending_llm_span=None,
+        )
+
+        stored_context: TraceContextData | None = dict(saved_context)  # type: ignore[assignment]
+
+        async def mock_save(runtime_id: str, context: TraceContextData) -> None:
+            nonlocal stored_context
+            stored_context = context
+
+        async def mock_load(runtime_id: str) -> TraceContextData | None:
+            return stored_context
+
+        async def mock_clear(runtime_id: str) -> None:
+            nonlocal stored_context
+            stored_context = None
+
+        storage = MagicMock()
+        storage.save_trace_context = AsyncMock(side_effect=mock_save)
+        storage.load_trace_context = AsyncMock(side_effect=mock_load)
+        storage.clear_trace_context = AsyncMock(side_effect=mock_clear)
+
+        suspended_result = MagicMock()
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
+        mock_delegate.execute.return_value = suspended_result
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer_with_exp,
+            callback_with_exp,
+            mock_runtime_context,
+            trace_context_storage=storage,
+        )
+
+        # Resume execution that re-suspends
+        await instrumented_runtime.execute({"input": "resume-suspend"}, None)
+
+        assert stored_context is not None
+
+        # pending_tool_span must be carried forward with original span_id
+        tool_span = stored_context.get("pending_tool_span")
+        assert tool_span is not None
+        assert tool_span["span_id"] == "aabb000000001234"
+        assert tool_span["name"] == "Tool call - DeepRAG"
+
+        # pending_process_span must also be carried forward
+        process_span = stored_context.get("pending_process_span")
+        assert process_span is not None
+        assert process_span["span_id"] == "aabb000000005678"
+        assert process_span["name"] == "DeepRAG"
+
+    @pytest.mark.asyncio
+    async def test_triple_suspend_preserves_tool_context_throughout(
+        self,
+        mock_delegate: AsyncMock,
+        mock_runtime_context: MagicMock,
+    ) -> None:
+        """suspend → resume → re-suspend → resume → re-suspend must preserve
+        tool name and span data across all cycles so the final resume works."""
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        mock_exporter = MagicMock()
+        mock_exporter.upsert_span = MagicMock(return_value=SpanExportResult.SUCCESS)
+        tracer_with_exp = LlmOpsSpanFactory(exporter=mock_exporter)
+        callback_with_exp = LlmOpsInstrumentationCallback(tracer_with_exp)
+
+        agent_def = AgentDefinition(
+            id="agent-triple-suspend",
+            name="TripleSuspendAgent",
+            messages=[],
+            settings=AgentSettings(
+                model="gpt-4o", engine="v1", max_tokens=1000, temperature=0.7
+            ),
+            input_schema={"type": "object"},
+            output_schema={"type": "string"},
+        )
+
+        stored_context: TraceContextData | None = None
+
+        async def mock_save(runtime_id: str, context: TraceContextData) -> None:
+            nonlocal stored_context
+            stored_context = context
+
+        async def mock_load(runtime_id: str) -> TraceContextData | None:
+            return stored_context
+
+        async def mock_clear(runtime_id: str) -> None:
+            nonlocal stored_context
+            stored_context = None
+
+        storage = MagicMock()
+        storage.save_trace_context = AsyncMock(side_effect=mock_save)
+        storage.load_trace_context = AsyncMock(side_effect=mock_load)
+        storage.clear_trace_context = AsyncMock(side_effect=mock_clear)
+
+        suspended_result = MagicMock()
+        suspended_result.status = UiPathRuntimeStatus.SUSPENDED
+
+        mock_delegate.execute.return_value = suspended_result
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer_with_exp,
+            callback_with_exp,
+            mock_runtime_context,
+            agent_definition=agent_def,
+            trace_context_storage=storage,
+        )
+
+        # --- First execution: suspend (creates real spans) ---
+        # Simulate a pending tool via the callback state
+        from opentelemetry.sdk.trace import ReadableSpan
+
+        mock_tool_span = MagicMock(spec=ReadableSpan)
+        mock_tool_span.get_span_context.return_value = MagicMock(
+            span_id=0xAA11, trace_id=0xBB22
+        )
+        mock_tool_span.name = "Tool call - DeepRAG"
+        mock_tool_span.attributes = {"tool.name": "DeepRAG", "type": "toolCall"}
+        mock_tool_span.start_time = 1708672800_000_000_000
+        mock_tool_span.parent = None
+
+        mock_process_span = MagicMock(spec=ReadableSpan)
+        mock_process_span.get_span_context.return_value = MagicMock(
+            span_id=0xCC33, trace_id=0xBB22
+        )
+        mock_process_span.name = "DeepRAG"
+        mock_process_span.attributes = {"type": "contextGroundingTool"}
+        mock_process_span.start_time = 1708672800_100_000_000
+        mock_process_span.parent = MagicMock(span_id=0xAA11)
+
+        with patch.object(
+            callback_with_exp,
+            "get_pending_tool_info",
+            return_value=("DeepRAG", mock_tool_span, mock_process_span),
+        ):
+            await instrumented_runtime.execute({"input": "first"}, None)
+        assert stored_context is not None
+        assert stored_context["pending_tool_name"] == "DeepRAG"
+        first_tool = stored_context["pending_tool_span"]
+        first_process = stored_context["pending_process_span"]
+        assert first_tool is not None
+        assert first_process is not None
+        first_tool_span_id = first_tool["span_id"]
+        first_process_span_id = first_process["span_id"]
+
+        # --- Second execution: resume → re-suspend ---
+        # On resume, no new pending tool is set (tool start was skipped)
+
+        await instrumented_runtime.execute({"input": "second"}, None)
+        assert stored_context is not None
+        assert stored_context["pending_tool_name"] == "DeepRAG", (
+            "pending_tool_name must survive first re-suspend"
+        )
+        second_tool = stored_context["pending_tool_span"]
+        second_process = stored_context["pending_process_span"]
+        assert second_tool is not None
+        assert second_tool["span_id"] == first_tool_span_id
+        assert second_process is not None
+        assert second_process["span_id"] == first_process_span_id
+
+        # --- Third execution: resume → re-suspend again ---
+        await instrumented_runtime.execute({"input": "third"}, None)
+        assert stored_context is not None
+        assert stored_context["pending_tool_name"] == "DeepRAG", (
+            "pending_tool_name must survive second re-suspend"
+        )
+        third_tool = stored_context["pending_tool_span"]
+        third_process = stored_context["pending_process_span"]
+        assert third_tool is not None
+        assert third_tool["span_id"] == first_tool_span_id
+        assert third_process is not None
+        assert third_process["span_id"] == first_process_span_id
