@@ -3,6 +3,7 @@
 import os
 from urllib.parse import quote
 
+from uipath.platform.common._config import UiPathConfig
 from uipath.platform.common.constants import (
     ENV_FOLDER_KEY,
     ENV_JOB_KEY,
@@ -15,6 +16,7 @@ from uipath.platform.common.constants import (
     HEADER_INTERNAL_ACCOUNT_ID,
     HEADER_INTERNAL_TENANT_ID,
     HEADER_JOB_KEY,
+    HEADER_LICENSING_CONTEXT,
     HEADER_LLMGATEWAY_BYO_CONNECTION_ID,
     HEADER_PROCESS_KEY,
     HEADER_TRACE_ID,
@@ -53,9 +55,13 @@ def build_uipath_headers(
         headers[HEADER_FOLDER_KEY] = folder_key
     if trace_id := os.getenv(ENV_UIPATH_TRACE_ID):
         headers[HEADER_TRACE_ID] = trace_id
+    if licensing_context := UiPathConfig.licensing_context:
+        headers[HEADER_LICENSING_CONTEXT] = licensing_context
+
     if inject_routing:
         if tenant_id := os.getenv(ENV_TENANT_ID):
             headers[HEADER_INTERNAL_TENANT_ID] = tenant_id
         if organization_id := os.getenv(ENV_ORGANIZATION_ID):
             headers[HEADER_INTERNAL_ACCOUNT_ID] = organization_id
+
     return headers
