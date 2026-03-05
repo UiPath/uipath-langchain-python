@@ -534,3 +534,21 @@ class UiPathLangGraphRuntime:
     async def dispose(self) -> None:
         """Cleanup runtime resources."""
         pass
+
+
+class VoiceLangGraphRuntime(UiPathLangGraphRuntime):
+    """Passes input through without chat mapping.
+
+    Voice tool calls supply a synthetic AIMessage directly — the base
+    class's UiPathChatMessagesMapper would corrupt it.
+    """
+
+    async def _get_graph_input(
+        self,
+        input: dict[str, Any] | None,
+        options: UiPathExecuteOptions | None,
+    ) -> Any:
+        graph_input = input or {}
+        if options and options.resume:
+            return Command(resume=graph_input)
+        return graph_input
