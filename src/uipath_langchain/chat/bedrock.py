@@ -2,7 +2,6 @@ import logging
 import os
 from collections.abc import Iterator
 from typing import Any, Optional
-from urllib.parse import quote
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
@@ -10,8 +9,9 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
 from uipath.platform.common import EndpointManager, resource_override
 
-from .header_capture import HeaderCapture
-from .retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
+from .http_client import build_uipath_headers, resolve_gateway_url
+from .http_client.header_capture import HeaderCapture
+from .http_client.retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
 from .supported_models import BedrockModels
 from .types import APIFlavor, LLMProvider
 
@@ -72,6 +72,7 @@ class AwsBedrockCompletionsPassthroughClient:
         self.byo_connection_id = byo_connection_id
         self._vendor = "awsbedrock"
         self._url: Optional[str] = None
+        self._is_override: bool = False
         self.header_capture = header_capture
 
     @property
@@ -83,16 +84,10 @@ class AwsBedrockCompletionsPassthroughClient:
         )
         return formatted_endpoint
 
-    def _build_base_url(self) -> str:
+    def _resolve_url(self) -> tuple[str, bool]:
         if not self._url:
-            env_uipath_url = os.getenv("UIPATH_URL")
-
-            if env_uipath_url:
-                self._url = f"{env_uipath_url.rstrip('/')}/{self.endpoint}"
-            else:
-                raise ValueError("UIPATH_URL environment variable is required")
-
-        return self._url
+            self._url, self._is_override = resolve_gateway_url(self.endpoint)
+        return self._url, self._is_override
 
     def _capture_response_headers(self, parsed, model, **kwargs):
         if "ResponseMetadata" in parsed:
@@ -122,29 +117,24 @@ class AwsBedrockCompletionsPassthroughClient:
         return client
 
     def _modify_request(self, request, **kwargs):
-        """Intercept boto3 request and redirect to LLM Gateway"""
+        """Intercept boto3 request and redirect to LLM Gateway."""
         # Detect streaming based on URL suffix:
         # - converse-stream / invoke-with-response-stream -> streaming
         # - converse / invoke -> non-streaming
         streaming = "true" if request.url.endswith("-stream") else "false"
-        request.url = self._build_base_url()
+        url, is_override = self._resolve_url()
+        request.url = url
 
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "X-UiPath-LlmGateway-ApiFlavor": self.api_flavor,
-            "X-UiPath-Streaming-Enabled": streaming,
-        }
-
-        if self.agenthub_config:
-            headers["X-UiPath-AgentHub-Config"] = self.agenthub_config
-        if self.byo_connection_id:
-            headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = self.byo_connection_id
-        job_key = os.getenv("UIPATH_JOB_KEY")
-        process_key = os.getenv("UIPATH_PROCESS_KEY")
-        if job_key:
-            headers["X-UiPath-JobKey"] = job_key
-        if process_key:
-            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
+        headers: dict[str, str] = {"Authorization": f"Bearer {self.token}"}
+        headers.update(
+            build_uipath_headers(
+                agenthub_config=self.agenthub_config,
+                byo_connection_id=self.byo_connection_id,
+                inject_routing=is_override,
+            )
+        )
+        headers["X-UiPath-LlmGateway-ApiFlavor"] = self.api_flavor
+        headers["X-UiPath-Streaming-Enabled"] = streaming
 
         request.headers.update(headers)
 
