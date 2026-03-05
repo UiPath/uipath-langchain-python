@@ -4,18 +4,13 @@ import logging
 
 from uipath._utils import Endpoint, RequestSpec
 from uipath.agent.models.agent import AgentDefinition
-from uipath.platform.common import BaseService, UiPathApiConfig, UiPathExecutionContext
+from uipath.platform.common import BaseService
 
 logger = logging.getLogger("uipath")
 
 
 class LicensingService(BaseService):
     """Service for notifying AgentHub of licensing at agent start."""
-
-    def __init__(
-        self, config: UiPathApiConfig, execution_context: UiPathExecutionContext
-    ) -> None:
-        super().__init__(config=config, execution_context=execution_context)
 
     async def register_consumption_async(
         self, model_name: str, *, job_key: str | None = None
@@ -85,6 +80,16 @@ class LicensingService(BaseService):
             )
 
 
+def _create_licensing_service() -> LicensingService:
+    from uipath.platform import UiPath
+
+    uipath = UiPath()
+    return LicensingService(
+        config=uipath._config,
+        execution_context=uipath._execution_context,
+    )
+
+
 async def register_licensing_async(
     agent_definition: AgentDefinition | None,
     job_key: str | None = None,
@@ -100,14 +105,8 @@ async def register_licensing_async(
         if not model_name:
             return
 
-        from uipath.platform import UiPath
-
-        uipath = UiPath()
-        service = LicensingService(
-            config=uipath._config,
-            execution_context=uipath._execution_context,
-        )
-        await service.register_consumption_async(str(model_name), job_key=job_key)
+        service = _create_licensing_service()
+        await service.register_consumption_async(model_name, job_key=job_key)
     except Exception:
         logger.debug("Failed to register licensing", exc_info=True)
 
@@ -125,26 +124,17 @@ async def register_conversational_licensing_async(
     """
     try:
         if not agent_definition:
-            raise ValueError(
-                "agent_definition is required for conversational licensing"
-            )
-
+            return
         model_name = agent_definition.settings.model
         if not model_name:
-            raise ValueError("model_name is required for conversational licensing")
+            return
 
-        from uipath.platform import UiPath
-
-        uipath = UiPath()
-        service = LicensingService(
-            config=uipath._config,
-            execution_context=uipath._execution_context,
-        )
+        service = _create_licensing_service()
         await service.register_conversational_consumption_async(
-            str(model_name),
+            model_name,
             agenthub_config=agenthub_config,
             is_byo_execution=is_byo_execution,
             job_key=job_key,
         )
     except Exception:
-        logger.error("Failed to register conversational licensing", exc_info=True)
+        logger.debug("Failed to register conversational licensing", exc_info=True)

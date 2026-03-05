@@ -43,10 +43,8 @@ from ..._bts.bts_callback import BtsCallback
 from ..._bts.bts_runtime import BtsRuntime
 from ..._bts.bts_state import BtsState
 from ..._bts.bts_storage import SqliteBtsStateStorage
+from ..._licensing.licensed_runtime import LicensedRuntime, ToolCallTracker
 from ..._observability import configure_telemetry, shutdown_telemetry
-from ..._observability.conversational_consumption import (
-    ConversationalConsumptionHandler,
-)
 from ..._observability.event_emitter import TelemetryEventEmitter
 from ..._observability.exporters import FilteringSpanExporter
 from ..._observability.instrumented_runtime import InstrumentedRuntime
@@ -361,14 +359,15 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             agent_definition: Pre-loaded agent definition
 
         Returns:
-            Configured runtime stack: Base → Resumable → BTS → Telemetry
+            Configured runtime stack: Base → Resumable → BTS → Licensed → Telemetry
 
         Note:
             Runtime wrapping order:
             1. AgentsLangGraphRuntime (base - handles LangGraph execution)
             2. UiPathResumableRuntime (adds persistence/resume)
             3. BtsRuntime (adds BTS transaction/operation tracking)
-            4. InstrumentedRuntime (adds tracing spans + trace context preservation)
+            4. LicensedRuntime (adds startup + conversational licensing)
+            5. InstrumentedRuntime (adds tracing spans + trace context preservation)
 
             The callback is passed via constructor to the base runtime,
             ensuring it persists across debug/chat re-executions where
@@ -394,6 +393,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         span_factory, instrumentation_callback, event_emitter = (
             self._create_telemetry_components()
         )
+        tool_call_tracker = ToolCallTracker()
 
         # --- BTS setup ---
         bts_state = BtsState()
@@ -410,20 +410,11 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
 
         agent_name = agent_definition.name or "Unknown"
 
-        consumption_handler = (
-            ConversationalConsumptionHandler(
-                agent_definition=agent_definition,
-                callback=instrumentation_callback,
-            )
-            if agent_definition and agent_definition.is_conversational
-            else None
-        )
-
         base_runtime = AgentsLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
-            callbacks=[instrumentation_callback, bts_callback],
+            callbacks=[instrumentation_callback, bts_callback, tool_call_tracker],
             agent_definition=agent_definition,
             storage=storage,
         )
@@ -439,23 +430,22 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             bts_storage=bts_storage,
             parent_operation_id=self.context.parent_operation_id,
         )
-        instrumented_runtime = InstrumentedRuntime(
+        licensed_runtime = LicensedRuntime(
             bts_runtime,
+            agent_definition=agent_definition,
+            tool_call_tracker=tool_call_tracker,
+            execution_type=get_execution_type(self.context),
+            is_resume=self.context.resume,
+        )
+        instrumented_runtime = InstrumentedRuntime(
+            licensed_runtime,
             span_factory,
             instrumentation_callback,
             self.context,
             event_emitter=event_emitter,
             agent_definition=agent_definition,
             trace_context_storage=trace_context_storage,
-            consumption_handler=consumption_handler,
         )
-
-        if not self.context.resume:
-            from uipath_agents._services import register_licensing_async
-
-            await register_licensing_async(
-                agent_definition, job_key=UiPathConfig.job_key
-            )
 
         return instrumented_runtime
 
