@@ -78,9 +78,9 @@ class TestRoutingHeadersInjection:
             "UIPATH_ORGANIZATION_ID": "org-xyz",
         }
         with patch.dict(os.environ, env, clear=True):
-            headers = build_uipath_headers("fake-token")
-        assert "X-UiPath-Internal-TenantId" not in headers
-        assert "X-UiPath-Internal-AccountId" not in headers
+            headers = build_uipath_headers()
+        assert "x-uipath-internal-tenantid" not in headers
+        assert "x-uipath-internal-accountid" not in headers
 
     def test_routing_headers_injected_when_override(self) -> None:
         from uipath_langchain.chat.http_client import build_uipath_headers
@@ -90,23 +90,23 @@ class TestRoutingHeadersInjection:
             "UIPATH_ORGANIZATION_ID": "org-xyz",
         }
         with patch.dict(os.environ, env, clear=True):
-            headers = build_uipath_headers("fake-token", inject_routing=True)
-        assert headers["X-UiPath-Internal-TenantId"] == "tenant-abc"
-        assert headers["X-UiPath-Internal-AccountId"] == "org-xyz"
+            headers = build_uipath_headers(inject_routing=True)
+        assert headers["x-uipath-internal-tenantid"] == "tenant-abc"
+        assert headers["x-uipath-internal-accountid"] == "org-xyz"
 
     def test_routing_headers_omitted_when_env_missing(self) -> None:
         from uipath_langchain.chat.http_client import build_uipath_headers
 
         with patch.dict(os.environ, {}, clear=True):
-            headers = build_uipath_headers("fake-token", inject_routing=True)
-        assert "X-UiPath-Internal-TenantId" not in headers
-        assert "X-UiPath-Internal-AccountId" not in headers
+            headers = build_uipath_headers(inject_routing=True)
+        assert "x-uipath-internal-tenantid" not in headers
+        assert "x-uipath-internal-accountid" not in headers
 
     def test_partial_routing_headers(self) -> None:
         from uipath_langchain.chat.http_client import build_uipath_headers
 
         env = {"UIPATH_ORGANIZATION_ID": "org-only"}
         with patch.dict(os.environ, env, clear=True):
-            headers = build_uipath_headers("fake-token", inject_routing=True)
-        assert "X-UiPath-Internal-TenantId" not in headers
-        assert headers["X-UiPath-Internal-AccountId"] == "org-only"
+            headers = build_uipath_headers(inject_routing=True)
+        assert "x-uipath-internal-tenantid" not in headers
+        assert headers["x-uipath-internal-accountid"] == "org-only"

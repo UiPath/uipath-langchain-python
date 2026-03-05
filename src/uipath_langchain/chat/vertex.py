@@ -185,8 +185,11 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
             )
 
         uipath_url, is_override = self._resolve_url(model_name)
-        headers = self._build_headers(
-            token, agenthub_config, byo_connection_id, inject_routing=is_override
+        headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+        headers.update(
+            self._build_headers(
+                agenthub_config, byo_connection_id, inject_routing=is_override
+            )
         )
 
         header_capture = HeaderCapture(name=f"vertex_headers_{id(self)}")
@@ -254,7 +257,6 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
 
     @staticmethod
     def _build_headers(
-        token: str,
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
         *,
@@ -262,7 +264,6 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
     ) -> dict[str, str]:
         """Build HTTP headers for UiPath Gateway requests."""
         return build_uipath_headers(
-            token,
             agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
             inject_routing=inject_routing,

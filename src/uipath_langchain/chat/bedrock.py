@@ -125,11 +125,13 @@ class AwsBedrockCompletionsPassthroughClient:
         url, is_override = self._resolve_url()
         request.url = url
 
-        headers = build_uipath_headers(
-            self.token,
-            agenthub_config=self.agenthub_config,
-            byo_connection_id=self.byo_connection_id,
-            inject_routing=is_override,
+        headers: dict[str, str] = {"Authorization": f"Bearer {self.token}"}
+        headers.update(
+            build_uipath_headers(
+                agenthub_config=self.agenthub_config,
+                byo_connection_id=self.byo_connection_id,
+                inject_routing=is_override,
+            )
         )
         headers["X-UiPath-LlmGateway-ApiFlavor"] = self.api_flavor
         headers["X-UiPath-Streaming-Enabled"] = streaming

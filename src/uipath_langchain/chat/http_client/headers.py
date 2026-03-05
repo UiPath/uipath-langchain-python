@@ -3,9 +3,25 @@
 import os
 from urllib.parse import quote
 
+from uipath.platform.common.constants import (
+    ENV_FOLDER_KEY,
+    ENV_JOB_KEY,
+    ENV_ORGANIZATION_ID,
+    ENV_PROCESS_KEY,
+    ENV_TENANT_ID,
+    ENV_UIPATH_TRACE_ID,
+    HEADER_AGENTHUB_CONFIG,
+    HEADER_FOLDER_KEY,
+    HEADER_INTERNAL_ACCOUNT_ID,
+    HEADER_INTERNAL_TENANT_ID,
+    HEADER_JOB_KEY,
+    HEADER_LLMGATEWAY_BYO_CONNECTION_ID,
+    HEADER_PROCESS_KEY,
+    HEADER_TRACE_ID,
+)
+
 
 def build_uipath_headers(
-    token: str,
     *,
     agenthub_config: str | None = None,
     byo_connection_id: str | None = None,
@@ -17,7 +33,6 @@ def build_uipath_headers(
     environment variables when set.
 
     Args:
-        token: Bearer token for authorization.
         agenthub_config: Optional AgentHub configuration identifier.
         byo_connection_id: Optional BYO connection identifier.
         inject_routing: When True, adds tenant and account routing
@@ -25,24 +40,22 @@ def build_uipath_headers(
             layer.  Set this when using a service URL override that
             bypasses the platform.
     """
-    headers: dict[str, str] = {
-        "Authorization": f"Bearer {token}",
-    }
+    headers: dict[str, str] = {}
     if agenthub_config:
-        headers["X-UiPath-AgentHub-Config"] = agenthub_config
+        headers[HEADER_AGENTHUB_CONFIG] = agenthub_config
     if byo_connection_id:
-        headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = byo_connection_id
-    if process_key := os.getenv("UIPATH_PROCESS_KEY"):
-        headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
-    if job_key := os.getenv("UIPATH_JOB_KEY"):
-        headers["x-uipath-jobkey"] = job_key
-    if folder_key := os.getenv("UIPATH_FOLDER_KEY"):
-        headers["x-uipath-folderkey"] = folder_key
-    if trace_id := os.getenv("UIPATH_TRACE_ID"):
-        headers["x-uipath-traceid"] = trace_id
+        headers[HEADER_LLMGATEWAY_BYO_CONNECTION_ID] = byo_connection_id
+    if process_key := os.getenv(ENV_PROCESS_KEY):
+        headers[HEADER_PROCESS_KEY] = quote(process_key, safe="")
+    if job_key := os.getenv(ENV_JOB_KEY):
+        headers[HEADER_JOB_KEY] = job_key
+    if folder_key := os.getenv(ENV_FOLDER_KEY):
+        headers[HEADER_FOLDER_KEY] = folder_key
+    if trace_id := os.getenv(ENV_UIPATH_TRACE_ID):
+        headers[HEADER_TRACE_ID] = trace_id
     if inject_routing:
-        if tenant_id := os.getenv("UIPATH_TENANT_ID"):
-            headers["X-UiPath-Internal-TenantId"] = tenant_id
-        if organization_id := os.getenv("UIPATH_ORGANIZATION_ID"):
-            headers["X-UiPath-Internal-AccountId"] = organization_id
+        if tenant_id := os.getenv(ENV_TENANT_ID):
+            headers[HEADER_INTERNAL_TENANT_ID] = tenant_id
+        if organization_id := os.getenv(ENV_ORGANIZATION_ID):
+            headers[HEADER_INTERNAL_ACCOUNT_ID] = organization_id
     return headers

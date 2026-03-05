@@ -154,11 +154,13 @@ class UiPathChatOpenAI(AzureChatOpenAI):
     def _build_headers(
         self, token: str, *, inject_routing: bool = False
     ) -> dict[str, str]:
-        headers = build_uipath_headers(
-            token,
-            agenthub_config=self._agenthub_config,
-            byo_connection_id=self._byo_connection_id,
-            inject_routing=inject_routing,
+        headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+        headers.update(
+            build_uipath_headers(
+                agenthub_config=self._agenthub_config,
+                byo_connection_id=self._byo_connection_id,
+                inject_routing=inject_routing,
+            )
         )
         headers["X-UiPath-LlmGateway-ApiFlavor"] = "auto"
         headers.update(self._extra_headers)

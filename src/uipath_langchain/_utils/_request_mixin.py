@@ -731,15 +731,26 @@ class UiPathRequestMixin(BaseModel):
     def _build_headers(self, options, retries_taken: int = 0) -> httpx.Headers:
         return httpx.Headers(self.auth_headers)
 
+    def _resolve_url_and_override(self) -> None:
+        """Resolve ``_url`` and ``_is_override`` idempotently."""
+        if self._url:
+            return
+        try:
+            self._url, self._is_override = resolve_gateway_url(self.endpoint)
+        except ValueError:
+            self._url = (
+                f"{self.base_url}/{self.org_id}/{self.tenant_id}/{self.endpoint}"
+            )
+        except NotImplementedError:
+            pass
+
     @property
     def url(self) -> str:
+        self._resolve_url_and_override()
         if not self._url:
-            try:
-                self._url, self._is_override = resolve_gateway_url(self.endpoint)
-            except ValueError:
-                self._url = (
-                    f"{self.base_url}/{self.org_id}/{self.tenant_id}/{self.endpoint}"
-                )
+            raise NotImplementedError(
+                "The endpoint property is not implemented for this class."
+            )
         return self._url
 
     @property
@@ -751,12 +762,13 @@ class UiPathRequestMixin(BaseModel):
     @property
     def auth_headers(self) -> dict[str, str]:
         if not self._auth_headers:
+            self._resolve_url_and_override()
             self._auth_headers = {
                 **self.default_headers,  # type: ignore
             }
+            self._auth_headers["Authorization"] = f"Bearer {self.access_token}"
             self._auth_headers.update(
                 build_uipath_headers(
-                    self.access_token,
                     agenthub_config=self.agenthub_config,
                     byo_connection_id=self.byo_connection_id,
                     inject_routing=self._is_override,
