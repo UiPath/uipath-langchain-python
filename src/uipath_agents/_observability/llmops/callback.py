@@ -239,6 +239,16 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
             and self._state.resumed_process_span_data is None
         )
 
+    def escalation_span_completed(self) -> bool:
+        """Check if the escalation (Review task) span was already completed by the callback.
+
+        When the callback processes an approved/rejected escalation in
+        handle_action_end / handle_action_error, it clears
+        resumed_escalation_span_data.  A None value means the span was
+        already upserted and must not be overwritten by the runtime fallback.
+        """
+        return self._state.resumed_escalation_span_data is None
+
     # --- Container Management ---
 
     def cleanup_containers(self) -> None:

@@ -1294,28 +1294,39 @@ class TestEscalationReviewedData:
                 assert span_data["attributes"]["reviewStatus"] == "Completed"
                 assert span_data["attributes"]["reviewOutcome"] == "Rejected"
 
-    def test_block_after_approved_escalation_does_not_overwrite_review_task(
+    def test_separate_block_guardrail_after_approved_escalation_does_not_overwrite_review_task(
         self,
         callback: LlmOpsInstrumentationCallback,
         tracer: LlmOpsSpanFactory,
         span_exporter,
     ) -> None:
-        """When HITL is approved and a subsequent action node errors (block),
-        the Review task span should NOT be overwritten from OK to ERROR."""
+        """When HITL is approved and a DIFFERENT guardrail with Block action errors,
+        the Review task span should NOT be overwritten from OK to ERROR.
+
+        Scenario: Guardrail A (Escalate, approved) → Guardrail B (Block) in same scope/stage.
+        """
+        from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
         from uipath.tracing import SpanStatus
 
         agent_run_id = uuid4()
         with tracer.start_agent_run("TestAgent") as agent_span:
             callback.set_agent_span(agent_span, agent_run_id)
 
-            mock_guardrail = MagicMock()
-            mock_guardrail.name = "pii_guard"
-            mock_guardrail.description = "PII Guard"
-            mock_guardrail.enabled_for_evals = True
-            mock_guardrail.guardrail_type = "deterministic"
-            mock_guardrail.selector.scopes = [GuardrailScope.AGENT]
+            mock_guardrail_a = MagicMock()
+            mock_guardrail_a.name = "pii_guard"
+            mock_guardrail_a.description = "PII Guard"
+            mock_guardrail_a.enabled_for_evals = True
+            mock_guardrail_a.guardrail_type = "builtInValidator"
+            mock_guardrail_a.selector.scopes = [GuardrailScope.AGENT]
 
-            # Simulate resumed escalation context
+            mock_guardrail_b = MagicMock()
+            mock_guardrail_b.name = "toxicity_guard"
+            mock_guardrail_b.description = "Toxicity Guard"
+            mock_guardrail_b.enabled_for_evals = True
+            mock_guardrail_b.guardrail_type = "builtInValidator"
+            mock_guardrail_b.selector.scopes = [GuardrailScope.AGENT]
+
+            # Simulate resumed escalation context (all three span data sets)
             callback._state.resumed_escalation_trace_id = "0123456789abcdef"
             callback._state.resumed_escalation_span_data = {
                 "name": "Review task",
@@ -1330,6 +1341,22 @@ class TestEscalationReviewedData:
                 "span_id": "eval5678",
                 "attributes": {},
             }
+            callback._state.resumed_hitl_guardrail_container_span_data = {
+                "name": "Guardrails",
+                "span_id": "abcdef1234567890",
+                "attributes": {},
+            }
+
+            # Restore container as NonRecordingSpan (as it would be on resume)
+            restored_span_context = SpanContext(
+                trace_id=int("0123456789abcdef", 16),
+                span_id=int("abcdef1234567890", 16),
+                is_remote=True,
+                trace_flags=TraceFlags(0x01),
+            )
+            callback._state.guardrail_containers[
+                (GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION)
+            ] = NonRecordingSpan(restored_span_context)
 
             # Step 1: Escalation action node completes (HITL approved)
             approval_run_id = uuid4()
@@ -1339,7 +1366,7 @@ class TestEscalationReviewedData:
                 run_id=approval_run_id,
                 metadata={
                     "langgraph_node": "agent_pre_execution_pii_guard_hitl",
-                    "guardrail": mock_guardrail,
+                    "guardrail": mock_guardrail_a,
                     "node_type": "guardrail_action",
                     "scope": GuardrailScope.AGENT,
                     "execution_stage": ExecutionStage.PRE_EXECUTION,
@@ -1370,24 +1397,51 @@ class TestEscalationReviewedData:
                 assert len(review_calls) == 1
                 assert review_calls[0][1]["status"] == SpanStatus.OK
 
-                # Step 2: Subsequent action node in the same chain errors (block)
+                # Step 2: Guardrail B evaluation starts and fails
+                eval_run_id = uuid4()
+                callback.on_chain_start(
+                    {},
+                    {},
+                    run_id=eval_run_id,
+                    metadata={
+                        "langgraph_node": "agent_pre_execution_toxicity_guard",
+                        "guardrail": mock_guardrail_b,
+                        "node_type": "guardrail_evaluation",
+                        "scope": GuardrailScope.AGENT,
+                        "execution_stage": ExecutionStage.PRE_EXECUTION,
+                        "action_type": "Block",
+                    },
+                )
+
+                callback.on_chain_end(
+                    {
+                        INNER_STATE_KEY: {
+                            GUARDRAIL_VALIDATION_RESULT_KEY: False,
+                            GUARDRAIL_VALIDATION_DETAILS_KEY: "Toxicity detected",
+                        }
+                    },
+                    run_id=eval_run_id,
+                )
+
+                # Step 3: Block action node starts and errors
                 block_run_id = uuid4()
                 callback.on_chain_start(
                     {},
                     {},
                     run_id=block_run_id,
                     metadata={
-                        "langgraph_node": "agent_pre_execution_pii_guard_block",
-                        "guardrail": mock_guardrail,
+                        "langgraph_node": "agent_pre_execution_toxicity_guard_block",
+                        "guardrail": mock_guardrail_b,
                         "node_type": "guardrail_action",
                         "scope": GuardrailScope.AGENT,
                         "execution_stage": ExecutionStage.PRE_EXECUTION,
-                        "action_type": "Escalate",
+                        "action_type": "Block",
+                        "reason": "Toxicity detected",
                     },
                 )
 
                 callback.on_chain_error(
-                    Exception("Blocked by guardrail"),
+                    Exception("Blocked by guardrail [toxicity_guard]"),
                     run_id=block_run_id,
                 )
 
@@ -1397,7 +1451,7 @@ class TestEscalationReviewedData:
                     for c in mock_upsert.call_args_list
                     if c[1].get("span_data", {}).get("name") == "Review task"
                 ]
-                # Should still be exactly 1 call (the original OK one), not 2
+                # Should still be exactly 1 call (the original OK one)
                 assert len(review_calls_after) == 1
                 assert review_calls_after[0][1]["status"] == SpanStatus.OK
 

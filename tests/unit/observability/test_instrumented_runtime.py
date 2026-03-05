@@ -2167,3 +2167,190 @@ class TestMultipleSuspensionFixes:
         assert third_tool["span_id"] == first_tool_span_id
         assert third_process is not None
         assert third_process["span_id"] == first_process_span_id
+
+
+class TestResumeErrorDoesNotOverwriteApprovedEscalation:
+    """When a block guardrail fires after an approved escalation,
+    _handle_resume_error must not overwrite the Review task span."""
+
+    @pytest.mark.asyncio
+    async def test_handle_resume_error_skips_escalation_when_callback_completed_it(
+        self,
+        mock_delegate,
+        mock_runtime_context,
+    ) -> None:
+        """_handle_resume_error must not upsert the escalation span when
+        the callback already completed it (approved)."""
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        from uipath_agents._observability.llmops.trace_context_storage import (
+            TraceContextData,
+        )
+
+        mock_exporter = MagicMock()
+        mock_exporter.upsert_span = MagicMock(return_value=SpanExportResult.SUCCESS)
+        tracer = LlmOpsSpanFactory(exporter=mock_exporter)
+        callback = LlmOpsInstrumentationCallback(tracer)
+
+        saved_context = TraceContextData(
+            trace_id="aabbccdd11223344aabbccdd11223344",
+            span_id="1122334455667788",
+            parent_span_id=None,
+            name="Agent run - TestAgent",
+            start_time="2024-02-23T10:00:00Z",
+            start_time_ns=1708672800_000_000_000,
+            attributes={"agentId": "test-id", "type": "agentRun"},
+            pending_tool_span_id=None,
+            pending_process_span_id=None,
+            pending_tool_name=None,
+            pending_tool_span=None,
+            pending_process_span=None,
+            pending_escalation_span={
+                "name": "Review task",
+                "span_id": "aaaa1111bbbb2222",
+                "attributes": {
+                    "type": "guardrailEscalation",
+                    "reviewStatus": "waiting",
+                },
+            },
+            pending_guardrail_hitl_evaluation_span={
+                "name": "Guardrail_3",
+                "span_id": "cccc3333dddd4444",
+                "attributes": {},
+            },
+            pending_guardrail_hitl_container_span={
+                "name": "Tool input guardrail check",
+                "span_id": "eeee5555ffff6666",
+                "attributes": {},
+            },
+            pending_llm_span=None,
+        )
+
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.FAULTED
+        mock_result.error = None
+        mock_delegate.execute = AsyncMock(
+            side_effect=Exception("Blocked by guardrail [Guardrail_1]")
+        )
+
+        mock_trace_context_storage = MagicMock()
+        mock_trace_context_storage.load_trace_context = AsyncMock(
+            return_value=saved_context
+        )
+        mock_trace_context_storage.clear_trace_context = AsyncMock()
+        mock_runtime_context.resume = True
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer,
+            callback,
+            mock_runtime_context,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        # Simulate: callback already completed the escalation span (approved)
+        callback._state.resumed_escalation_span_data = None
+
+        with pytest.raises(Exception, match="Blocked by guardrail"):
+            await instrumented_runtime.execute({"input": "resume"}, None)
+
+        # The escalation span must NOT have been upserted with ERROR
+        escalation_upserts = [
+            c
+            for c in mock_exporter.upsert_span.call_args_list
+            if hasattr(c[0][0], "name") and c[0][0].name == "Review task"
+        ]
+        assert len(escalation_upserts) == 0, (
+            "Review task span should not be re-upserted when callback already completed it"
+        )
+
+    @pytest.mark.asyncio
+    async def test_handle_resume_error_upserts_escalation_when_callback_did_not_complete_it(
+        self,
+        mock_delegate,
+        mock_runtime_context,
+    ) -> None:
+        """_handle_resume_error must still upsert the escalation span with ERROR
+        when the callback did NOT complete it (e.g., escalation was rejected or
+        never processed)."""
+        from opentelemetry.sdk.trace.export import SpanExportResult
+
+        from uipath_agents._observability.llmops.trace_context_storage import (
+            TraceContextData,
+        )
+
+        mock_exporter = MagicMock()
+        mock_exporter.upsert_span = MagicMock(return_value=SpanExportResult.SUCCESS)
+        tracer = LlmOpsSpanFactory(exporter=mock_exporter)
+        callback = LlmOpsInstrumentationCallback(tracer)
+
+        saved_context = TraceContextData(
+            trace_id="aabbccdd11223344aabbccdd11223344",
+            span_id="1122334455667788",
+            parent_span_id=None,
+            name="Agent run - TestAgent",
+            start_time="2024-02-23T10:00:00Z",
+            start_time_ns=1708672800_000_000_000,
+            attributes={"agentId": "test-id", "type": "agentRun"},
+            pending_tool_span_id=None,
+            pending_process_span_id=None,
+            pending_tool_name="Sentence_Analyzer",
+            pending_tool_span={
+                "name": "Tool call - Sentence_Analyzer",
+                "span_id": "7777888899990000",
+                "start_time_ns": 1000,
+                "attributes": {"type": "toolCall"},
+            },
+            pending_process_span=None,
+            pending_escalation_span={
+                "name": "Review task",
+                "span_id": "aaaa1111bbbb2222",
+                "attributes": {
+                    "type": "guardrailEscalation",
+                    "reviewStatus": "waiting",
+                },
+            },
+            pending_guardrail_hitl_evaluation_span={
+                "name": "Guardrail_3",
+                "span_id": "cccc3333dddd4444",
+                "attributes": {},
+            },
+            pending_guardrail_hitl_container_span={
+                "name": "Tool input guardrail check",
+                "span_id": "eeee5555ffff6666",
+                "attributes": {},
+            },
+            pending_llm_span=None,
+        )
+
+        mock_delegate.execute = AsyncMock(
+            side_effect=Exception("Blocked by guardrail [Guardrail_1]")
+        )
+
+        mock_trace_context_storage = MagicMock()
+        mock_trace_context_storage.load_trace_context = AsyncMock(
+            return_value=saved_context
+        )
+        mock_trace_context_storage.clear_trace_context = AsyncMock()
+        mock_runtime_context.resume = True
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate,
+            tracer,
+            callback,
+            mock_runtime_context,
+            trace_context_storage=mock_trace_context_storage,
+        )
+
+        with pytest.raises(Exception, match="Blocked by guardrail"):
+            await instrumented_runtime.execute({"input": "resume"}, None)
+
+        # The escalation span SHOULD have been upserted with ERROR
+        escalation_upserts = [
+            c
+            for c in mock_exporter.upsert_span.call_args_list
+            if hasattr(c[0][0], "name") and c[0][0].name == "Review task"
+        ]
+        assert len(escalation_upserts) == 1, (
+            "Review task span should be upserted with ERROR when callback didn't complete it"
+        )

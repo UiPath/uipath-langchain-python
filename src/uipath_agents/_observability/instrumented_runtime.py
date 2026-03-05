@@ -684,7 +684,7 @@ class InstrumentedRuntime:
 
         trace_id = saved_context["trace_id"]
         pending_escalation = saved_context.get("pending_escalation_span")
-        if pending_escalation:
+        if pending_escalation and not self._callback.escalation_span_completed():
             pending_escalation["attributes"]["reviewStatus"] = "Completed"
             pending_escalation["attributes"]["reviewOutcome"] = "Approved"
             self._span_factory.upsert_span_complete_by_data(
@@ -728,7 +728,7 @@ class InstrumentedRuntime:
 
         trace_id = saved_context["trace_id"]
         pending_escalation = saved_context.get("pending_escalation_span")
-        if pending_escalation:
+        if pending_escalation and not self._callback.escalation_span_completed():
             pending_escalation["attributes"]["error"] = error_info
             self._span_factory.upsert_span_complete_by_data(
                 trace_id=trace_id,
