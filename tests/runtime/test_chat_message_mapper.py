@@ -1791,7 +1791,10 @@ class TestMapAiMessageToEvents:
             if e.content_part is not None and e.content_part.chunk is not None
         ]
         assert len(chunk_events) == 1
-        assert chunk_events[0].content_part.chunk.data == "Hello!"
+        event = chunk_events[0]
+        assert event.content_part is not None
+        assert event.content_part.chunk is not None
+        assert event.content_part.chunk.data == "Hello!"
 
     @pytest.mark.asyncio
     async def test_emits_content_chunk_for_list_content(self):
@@ -1811,7 +1814,10 @@ class TestMapAiMessageToEvents:
             if e.content_part is not None and e.content_part.chunk is not None
         ]
         assert len(chunk_events) == 1
-        assert chunk_events[0].content_part.chunk.data == "Hello Maxwell!"
+        event = chunk_events[0]
+        assert event.content_part is not None
+        assert event.content_part.chunk is not None
+        assert event.content_part.chunk.data == "Hello Maxwell!"
 
     @pytest.mark.asyncio
     async def test_emits_no_chunk_for_empty_content(self):
@@ -1859,9 +1865,7 @@ class TestMapAiMessageToEvents:
         msg = AIMessage(
             content="",
             id="msg-1",
-            tool_calls=[
-                {"id": "tool-1", "name": "search", "args": {"query": "cats"}}
-            ],
+            tool_calls=[{"id": "tool-1", "name": "search", "args": {"query": "cats"}}],
         )
 
         result = await mapper.map_event(msg)
@@ -1873,9 +1877,12 @@ class TestMapAiMessageToEvents:
             if e.tool_call is not None and e.tool_call.start is not None
         ]
         assert len(tool_start_events) == 1
-        assert tool_start_events[0].tool_call.tool_call_id == "tool-1"
-        assert tool_start_events[0].tool_call.start.tool_name == "search"
-        assert tool_start_events[0].tool_call.start.input == {"query": "cats"}
+        tool_event = tool_start_events[0]
+        assert tool_event.tool_call is not None
+        assert tool_event.tool_call.start is not None
+        assert tool_event.tool_call.tool_call_id == "tool-1"
+        assert tool_event.tool_call.start.tool_name == "search"
+        assert tool_event.tool_call.start.input == {"query": "cats"}
 
     @pytest.mark.asyncio
     async def test_stores_tool_call_to_message_id_mapping(self):
@@ -1907,6 +1914,52 @@ class TestMapAiMessageToEvents:
         assert "msg-42" in mapper.seen_message_ids
 
     @pytest.mark.asyncio
+    async def test_processes_citations_in_content(self):
+        """Should strip citation tags, emit cleaned text, and attach citation to chunk."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        msg = AIMessage(
+            content='Some fact<uip:cite title="Doc" url="https://doc.com" /> and more.',
+            id="msg-1",
+        )
+
+        result = await mapper.map_event(msg)
+
+        assert result is not None
+        chunk_events = [
+            e
+            for e in result
+            if e.content_part is not None and e.content_part.chunk is not None
+        ]
+        texts: list[str] = []
+        for e in chunk_events:
+            assert e.content_part is not None
+            assert e.content_part.chunk is not None
+            assert e.content_part.chunk.data is not None
+            texts.append(e.content_part.chunk.data)
+        full_text = "".join(texts)
+        assert "uip:cite" not in full_text
+        assert "Some fact" in full_text
+
+        # The "Some fact" chunk should carry an attached citation
+        citation_chunk = next(
+            e
+            for e in chunk_events
+            if e.content_part is not None
+            and e.content_part.chunk is not None
+            and e.content_part.chunk.citation is not None
+        )
+        assert citation_chunk.content_part is not None
+        assert citation_chunk.content_part.chunk is not None
+        citation_event = citation_chunk.content_part.chunk.citation
+        assert citation_event is not None
+        assert citation_event.end is not None
+        assert len(citation_event.end.sources) == 1
+        source = citation_event.end.sources[0]
+        assert isinstance(source, UiPathConversationCitationSourceUrl)
+        assert source.url == "https://doc.com"
+        assert source.title == "Doc"
+
+    @pytest.mark.asyncio
     async def test_pii_masked_response_full_flow(self):
         """End-to-end: PII-masked response arrives as single AIMessage with list content."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
@@ -1932,40 +1985,12 @@ class TestMapAiMessageToEvents:
             if e.content_part is not None and e.content_part.chunk is not None
         ]
         assert len(chunk_events) >= 1
-        full_text = "".join(e.content_part.chunk.data for e in chunk_events)
+        texts: list[str] = []
+        for e in chunk_events:
+            assert e.content_part is not None
+            assert e.content_part.chunk is not None
+            assert e.content_part.chunk.data is not None
+            texts.append(e.content_part.chunk.data)
+        full_text = "".join(texts)
         assert "Hello!" in full_text
         assert result[-1].end is not None
-
-    @pytest.mark.asyncio
-    async def test_processes_citations_in_content(self):
-        """Should strip citation tags, emit cleaned text, and attach citation to chunk."""
-        mapper = UiPathChatMessagesMapper("test-runtime", None)
-        msg = AIMessage(
-            content='Some fact<uip:cite title="Doc" url="https://doc.com" /> and more.',
-            id="msg-1",
-        )
-
-        result = await mapper.map_event(msg)
-
-        assert result is not None
-        chunk_events = [
-            e
-            for e in result
-            if e.content_part is not None and e.content_part.chunk is not None
-        ]
-        full_text = "".join(e.content_part.chunk.data for e in chunk_events)
-        assert "uip:cite" not in full_text
-        assert "Some fact" in full_text
-
-        # The "Some fact" chunk should carry an attached citation
-        citation_chunks = [
-            e for e in chunk_events if e.content_part.chunk.citation is not None
-        ]
-        assert len(citation_chunks) == 1
-        citation_event = citation_chunks[0].content_part.chunk.citation
-        assert citation_event.end is not None
-        assert len(citation_event.end.sources) == 1
-        source = citation_event.end.sources[0]
-        assert isinstance(source, UiPathConversationCitationSourceUrl)
-        assert source.url == "https://doc.com"
-        assert source.title == "Doc"
