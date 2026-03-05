@@ -1718,3 +1718,254 @@ class TestMapLangChainAIMessageCitations:
         assert isinstance(source, UiPathConversationCitationSourceMedia)
         assert source.download_url == "https://r.com"
         assert source.page_number == "3"
+
+
+class TestMapAiMessageToEvents:
+    """Tests for map_ai_message_to_events (full AIMessage, e.g. PII-masking enabled)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_for_ai_message_without_id(self):
+        """Should return empty list when AIMessage has no id."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        msg = AIMessage(content="hello", id=None)
+
+        result = await mapper.map_event(msg)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_for_duplicate_id(self):
+        """Should ignore AIMessage with an already-seen id."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        msg = AIMessage(content="hello", id="msg-1")
+
+        await mapper.map_event(msg)
+        result = await mapper.map_event(AIMessage(content="again", id="msg-1"))
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_routes_full_ai_message_not_chunk(self):
+        """map_event should route AIMessage (not AIMessageChunk) to map_ai_message_to_events."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        msg = AIMessage(content="hello", id="msg-1")
+
+        result = await mapper.map_event(msg)
+
+        # A proper AIMessage should be handled (not None), unlike HumanMessage
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_emits_start_and_end_events(self):
+        """Should emit message start and end events for simple text response."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        msg = AIMessage(content="Hello world", id="msg-1")
+
+        result = await mapper.map_event(msg)
+
+        assert result is not None
+        start_event = result[0]
+        assert start_event.message_id == "msg-1"
+        assert start_event.start is not None
+        assert start_event.start.role == "assistant"
+        assert start_event.content_part is not None
+        assert start_event.content_part.start is not None
+
+        end_event = result[-1]
+        assert end_event.end is not None
+        assert end_event.content_part is not None
+        assert end_event.content_part.end is not None
+
+    @pytest.mark.asyncio
+    async def test_emits_content_chunk_for_string_content(self):
+        """Should emit text chunk events for plain string content."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        msg = AIMessage(content="Hello!", id="msg-1")
+
+        result = await mapper.map_event(msg)
+
+        assert result is not None
+        chunk_events = [
+            e
+            for e in result
+            if e.content_part is not None and e.content_part.chunk is not None
+        ]
+        assert len(chunk_events) == 1
+        assert chunk_events[0].content_part.chunk.data == "Hello!"
+
+    @pytest.mark.asyncio
+    async def test_emits_content_chunk_for_list_content(self):
+        """Should emit text chunk events when content is list[dict] (PII-masking format)."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        msg = AIMessage(
+            content=[{"type": "text", "text": "Hello Maxwell!"}],
+            id="msg-1",
+        )
+
+        result = await mapper.map_event(msg)
+
+        assert result is not None
+        chunk_events = [
+            e
+            for e in result
+            if e.content_part is not None and e.content_part.chunk is not None
+        ]
+        assert len(chunk_events) == 1
+        assert chunk_events[0].content_part.chunk.data == "Hello Maxwell!"
+
+    @pytest.mark.asyncio
+    async def test_emits_no_chunk_for_empty_content(self):
+        """Should emit only start and end events when content is empty."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        msg = AIMessage(content="", id="msg-1")
+
+        result = await mapper.map_event(msg)
+
+        assert result is not None
+        chunk_events = [
+            e
+            for e in result
+            if e.content_part is not None and e.content_part.chunk is not None
+        ]
+        assert len(chunk_events) == 0
+        # Still has start and end
+        assert result[0].start is not None
+        assert result[-1].end is not None
+
+    @pytest.mark.asyncio
+    async def test_no_end_event_when_has_tool_calls(self):
+        """Should not emit message end event when tool calls are present."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        msg = AIMessage(
+            content="",
+            id="msg-1",
+            tool_calls=[{"id": "tool-1", "name": "search", "args": {}}],
+        )
+
+        result = await mapper.map_event(msg)
+
+        assert result is not None
+        end_events = [e for e in result if e.end is not None]
+        assert len(end_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_emits_tool_call_start_events_when_has_tool_calls(self):
+        """Should emit tool call start events for each tool call."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        msg = AIMessage(
+            content="",
+            id="msg-1",
+            tool_calls=[
+                {"id": "tool-1", "name": "search", "args": {"query": "cats"}}
+            ],
+        )
+
+        result = await mapper.map_event(msg)
+
+        assert result is not None
+        tool_start_events = [
+            e
+            for e in result
+            if e.tool_call is not None and e.tool_call.start is not None
+        ]
+        assert len(tool_start_events) == 1
+        assert tool_start_events[0].tool_call.tool_call_id == "tool-1"
+        assert tool_start_events[0].tool_call.start.tool_name == "search"
+        assert tool_start_events[0].tool_call.start.input == {"query": "cats"}
+
+    @pytest.mark.asyncio
+    async def test_stores_tool_call_to_message_id_mapping(self):
+        """Should persist tool_call_id -> message_id mapping in storage."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        msg = AIMessage(
+            content="",
+            id="msg-1",
+            tool_calls=[{"id": "tool-1", "name": "search", "args": {}}],
+        )
+
+        await mapper.map_event(msg)
+
+        storage.set_value.assert_called()
+        call_args = storage.set_value.call_args[0]
+        assert call_args[2] == "tool_call_map"
+        assert call_args[3] == {"tool-1": "msg-1"}
+
+    @pytest.mark.asyncio
+    async def test_tracks_seen_message_id(self):
+        """Should add message id to seen_message_ids."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        msg = AIMessage(content="hi", id="msg-42")
+
+        await mapper.map_event(msg)
+
+        assert "msg-42" in mapper.seen_message_ids
+
+    @pytest.mark.asyncio
+    async def test_pii_masked_response_full_flow(self):
+        """End-to-end: PII-masked response arrives as single AIMessage with list content."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        # Simulates the format returned by LLM-gateway with PII masking enabled
+        msg = AIMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": "Hello! Here's what I can do:\n\n1. **Web Search**\n2. **File Analysis**",
+                }
+            ],
+            id="lc_run--019cbfe6-36b4-71d3-9988-d83569e6ffda-0",
+        )
+
+        result = await mapper.map_event(msg)
+
+        assert result is not None
+        assert result[0].start is not None
+        assert result[0].start.role == "assistant"
+        chunk_events = [
+            e
+            for e in result
+            if e.content_part is not None and e.content_part.chunk is not None
+        ]
+        assert len(chunk_events) >= 1
+        full_text = "".join(e.content_part.chunk.data for e in chunk_events)
+        assert "Hello!" in full_text
+        assert result[-1].end is not None
+
+    @pytest.mark.asyncio
+    async def test_processes_citations_in_content(self):
+        """Should strip citation tags, emit cleaned text, and attach citation to chunk."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        msg = AIMessage(
+            content='Some fact<uip:cite title="Doc" url="https://doc.com" /> and more.',
+            id="msg-1",
+        )
+
+        result = await mapper.map_event(msg)
+
+        assert result is not None
+        chunk_events = [
+            e
+            for e in result
+            if e.content_part is not None and e.content_part.chunk is not None
+        ]
+        full_text = "".join(e.content_part.chunk.data for e in chunk_events)
+        assert "uip:cite" not in full_text
+        assert "Some fact" in full_text
+
+        # The "Some fact" chunk should carry an attached citation
+        citation_chunks = [
+            e for e in chunk_events if e.content_part.chunk.citation is not None
+        ]
+        assert len(citation_chunks) == 1
+        citation_event = citation_chunks[0].content_part.chunk.citation
+        assert citation_event.end is not None
+        assert len(citation_event.end.sources) == 1
+        source = citation_event.end.sources[0]
+        assert isinstance(source, UiPathConversationCitationSourceUrl)
+        assert source.url == "https://doc.com"
+        assert source.title == "Doc"
