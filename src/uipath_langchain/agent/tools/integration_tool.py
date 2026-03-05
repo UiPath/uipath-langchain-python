@@ -1,30 +1,172 @@
 """Process tool creation for UiPath process execution."""
 
 import copy
-from typing import Any
+import re
+from typing import Any, cast
 
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
-from uipath.agent.models.agent import AgentIntegrationToolResourceConfig
+from uipath.agent.models.agent import (
+    AgentIntegrationToolParameter,
+    AgentIntegrationToolResourceConfig,
+    AgentToolArgumentArgumentProperties,
+    AgentToolArgumentProperties,
+    AgentToolStaticArgumentProperties,
+)
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.static_args import handle_static_args
+from uipath_langchain.agent.tools.static_args import (
+    ArgumentPropertiesMixin,
+    handle_static_args,
+)
 from uipath_langchain.agent.tools.tool_node import (
-    ToolWrapperMixin,
     ToolWrapperReturnType,
 )
 
-from .structured_tool_with_output_type import StructuredToolWithOutputType
+from .schema_editing import strip_matching_enums
+from .structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
+)
 from .utils import sanitize_dict_for_serialization, sanitize_tool_name
 
 
-class StructuredToolWithWrapper(StructuredToolWithOutputType, ToolWrapperMixin):
-    pass
+def convert_integration_parameters_to_argument_properties(
+    parameters: list[AgentIntegrationToolParameter],
+) -> dict[str, AgentToolArgumentProperties]:
+    """Convert integration tool parameters to argument_properties format.
+
+    Converts parameters with fieldVariant 'static' or 'argument' to the
+    corresponding AgentToolArgumentProperties type. Parameters without
+    a recognized fieldVariant are skipped.
+
+    Args:
+        parameters: List of integration tool parameters to convert.
+
+    Returns:
+        Dictionary mapping JSONPath keys to argument properties.
+
+    Raises:
+        AgentStartupError: If an argument variant parameter has a malformed template.
+    """
+    result: dict[str, AgentToolArgumentProperties] = {}
+
+    for param in parameters:
+        if param.field_variant == "static":
+            key = _is_param_name_to_jsonpath(param.name)
+            result[key] = AgentToolStaticArgumentProperties(
+                is_sensitive=False,
+                value=param.value,
+            )
+        elif param.field_variant == "argument":
+            value_str = str(param.value) if param.value is not None else ""
+            match = _TEMPLATE_PATTERN.match(value_str)
+            if not match:
+                raise AgentStartupError(
+                    code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+                    title="Malformed integration tool argument",
+                    detail=f"Argument parameter '{param.name}' has malformed template: "
+                    f"'{param.value}'. Expected format: '{{{{argName}}}}'",
+                    category=UiPathErrorCategory.USER,
+                )
+            arg_name = match.group(1)
+            key = _is_param_name_to_jsonpath(param.name)
+            result[key] = AgentToolArgumentArgumentProperties(
+                is_sensitive=False,
+                argument_path=arg_name,
+            )
+
+    return result
+
+
+_TEMPLATE_PATTERN = re.compile(r"^\{\{(.+?)\}\}$")
+
+
+def _param_name_to_segments(param_name: str) -> list[str]:
+    """Parse an Integration Service dot-notation parameter name into path segments.
+
+    Splits by '.' and expands '[*]' suffixes into a separate '*' wildcard segment.
+
+    Examples:
+        "channel"                             -> ["channel"]
+        "attachment.title"                    -> ["attachment", "title"]
+        "attachments[*].actions[*].confirm.text"
+            -> ["attachments", "*", "actions", "*", "confirm", "text"]
+    """
+    segments: list[str] = []
+    for part in param_name.split("."):
+        if part.endswith("[*]"):
+            segments.append(part[:-3])
+            segments.append("*")
+        else:
+            segments.append(part)
+    return segments
+
+
+def _escape_jsonpath_property(name: str) -> str:
+    """Escape a property name for bracket-notation JSONPath.
+
+    Per the JSONPath bracket-notation spec, escapes are applied in order:
+    1. Backslashes first: \\\\ -> \\\\\\\\
+    2. Single quotes second: ' -> \\\\'
+    """
+    return name.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _is_param_name_to_jsonpath(param_name: str) -> str:
+    """Convert an IS dot-notation parameter name to bracket-notation JSONPath.
+
+    Examples:
+        "channel"            -> "$['channel']"
+        "attachment.title"   -> "$['attachment']['title']"
+        "attachments[*].text" -> "$['attachments'][*]['text']"
+    """
+    segments = _param_name_to_segments(param_name)
+    parts: list[str] = []
+    for seg in segments:
+        if seg == "*":
+            parts.append("[*]")
+        else:
+            parts.append(f"['{_escape_jsonpath_property(seg)}']")
+    return "$" + "".join(parts)
+
+
+def strip_template_enums_from_schema(
+    schema: dict[str, Any],
+    parameters: list[AgentIntegrationToolParameter],
+) -> dict[str, Any]:
+    """Remove {{template}} enum values only from argument-variant parameter fields.
+
+    For each parameter with fieldVariant 'argument', navigates the schema to the
+    corresponding field (supporting nested objects, arrays, and $ref resolution)
+    and strips enum values matching the {{...}} pattern.
+
+    The function deep-copies the schema so the original is never mutated.
+
+    Args:
+        schema: A JSON-schema-style dictionary (the tool's inputSchema).
+        parameters: List of integration tool parameters from resource.properties.
+
+    Returns:
+        A cleaned copy of the schema with template enum values removed
+        only from argument-variant fields.
+    """
+    schema = copy.deepcopy(schema)
+
+    for param in parameters:
+        if param.field_variant != "argument":
+            continue
+
+        segments = _param_name_to_segments(param.name)
+        strip_matching_enums(schema, segments, _TEMPLATE_PATTERN)
+
+    return schema
 
 
 def remove_asterisk_from_properties(fields: dict[str, Any]) -> dict[str, Any]:
@@ -119,18 +261,21 @@ def convert_to_activity_metadata(
 
     param_location_info.body_fields = list(body_fields_set)
 
-    # determine content type
+    # determine content type and json body section
     content_type = "application/json"
+    json_body_section = None
     if resource.properties.body_structure is not None:
         shorthand_type = resource.properties.body_structure.get("contentType", "json")
         if shorthand_type == "multipart":
             content_type = "multipart/form-data"
+        json_body_section = resource.properties.body_structure.get("jsonBodySection")
 
     return ActivityMetadata(
         object_path=resource.properties.tool_path,
         method_name=http_method,
         content_type=content_type,
         parameter_location_info=param_location_info,
+        json_body_section=json_body_section,
     )
 
 
@@ -140,17 +285,29 @@ def create_integration_tool(
     """Creates a StructuredTool for invoking an Integration Service connector activity."""
     tool_name: str = sanitize_tool_name(resource.name)
     if resource.properties.connection.id is None:
-        raise ValueError("Connection ID cannot be None for integration tool.")
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Missing connection ID",
+            detail="Connection ID cannot be None for integration tool.",
+            category=UiPathErrorCategory.SYSTEM,
+        )
     connection_id: str = resource.properties.connection.id
 
     activity_metadata = convert_to_activity_metadata(resource)
 
-    input_model = create_model(resource.input_schema)
+    cleaned_input_schema = strip_template_enums_from_schema(
+        resource.input_schema, resource.properties.parameters
+    )
+    input_model = create_model(cleaned_input_schema)
     # note: IS tools output schemas were recently added and are most likely not present in all resources
     output_model: Any = (
         create_model(remove_asterisk_from_properties(resource.output_schema))
         if resource.output_schema
         else create_model({"type": "object", "properties": {}})
+    )
+
+    argument_properties = convert_integration_parameters_to_argument_properties(
+        resource.properties.parameters
     )
 
     sdk = UiPath()
@@ -179,10 +336,12 @@ def create_integration_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(resource, state, call["args"])
+        call["args"] = handle_static_args(
+            cast(ArgumentPropertiesMixin, tool), state, call["args"]
+        )
         return await tool.ainvoke(call)
 
-    tool = StructuredToolWithWrapper(
+    tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
@@ -191,7 +350,10 @@ def create_integration_tool(
         metadata={
             "tool_type": "integration",
             "display_name": resource.name,
+            "connector_key": resource.properties.connection.id,
+            "connector_name": resource.properties.connection.name,
         },
+        argument_properties=argument_properties,
     )
     tool.set_tool_wrappers(awrapper=integration_tool_wrapper)
 

@@ -9,8 +9,13 @@ from langchain_core.tools import BaseTool
 from langgraph._internal._runnable import RunnableCallable
 from langgraph.types import Command
 from pydantic import BaseModel
+from uipath.platform.resume_triggers import is_no_content_marker
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentStateException
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
@@ -61,33 +66,51 @@ class UiPathToolNode(RunnableCallable):
         tool: BaseTool,
         wrapper: ToolWrapperType | None = None,
         awrapper: AsyncToolWrapperType | None = None,
+        handle_tool_errors: bool = False,
     ):
         super().__init__(func=self._func, afunc=self._afunc, name=tool.name)
         self.tool = tool
         self.wrapper = wrapper
         self.awrapper = awrapper
+        self.handle_tool_errors = handle_tool_errors
 
     def _func(self, state: AgentGraphState) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
             return None
-        if self.wrapper:
-            inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
-            result = self.wrapper(*inputs)
-        else:
-            result = self.tool.invoke(call)
-        return self._process_result(call, result)
+
+        try:
+            if self.wrapper:
+                inputs = self._prepare_wrapper_inputs(
+                    self.wrapper, self.tool, call, state
+                )
+                result = self.wrapper(*inputs)
+            else:
+                result = self.tool.invoke(call)
+            return self._process_result(call, result)
+        except Exception as e:
+            if self.handle_tool_errors:
+                return self._process_error_result(call, e)
+            raise
 
     async def _afunc(self, state: AgentGraphState) -> OutputType:
         call = self._extract_tool_call(state)
         if call is None:
             return None
-        if self.awrapper:
-            inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
-            result = await self.awrapper(*inputs)
-        else:
-            result = await self.tool.ainvoke(call)
-        return self._process_result(call, result)
+
+        try:
+            if self.awrapper:
+                inputs = self._prepare_wrapper_inputs(
+                    self.awrapper, self.tool, call, state
+                )
+                result = await self.awrapper(*inputs)
+            else:
+                result = await self.tool.ainvoke(call)
+            return self._process_result(call, result)
+        except Exception as e:
+            if self.handle_tool_errors:
+                return self._process_error_result(call, e)
+            raise
 
     def _extract_tool_call(self, state: AgentGraphState) -> ToolCall | None:
         """Extract the tool call from the state messages."""
@@ -100,7 +123,7 @@ class UiPathToolNode(RunnableCallable):
             current_tool_call_index = extract_current_tool_call_index(
                 state.messages, self.tool.name
             )
-        except AgentStateException:
+        except AgentRuntimeError:
             # Handle cases where AIMessage has no tool calls or other invalid states
             return None
 
@@ -109,19 +132,48 @@ class UiPathToolNode(RunnableCallable):
 
         return latest_ai_message.tool_calls[current_tool_call_index]
 
+    def _process_error_result(self, call: ToolCall, error: Exception) -> OutputType:
+        """Handle tool execution errors by creating an error ToolMessage."""
+        error_message = ToolMessage(
+            content=str(error),
+            name=call["name"],
+            tool_call_id=call["id"],
+            status="error",
+        )
+        return {"messages": [error_message]}
+
     def _process_result(
         self, call: ToolCall, result: dict[str, Any] | Command[Any] | ToolMessage | None
     ) -> OutputType:
-        """Process the tool result into a message format or return a Command."""
+        """Process the tool result into a message format or return a Command.
+        Strip NO_CONTENT markers into ToolMessages embedded in a Command.
+        """
         if isinstance(result, Command):
+            self._filter_result(result)
             return result
         elif isinstance(result, ToolMessage):
+            if is_no_content_marker(result.content):
+                result.content = ""
             return {"messages": [result]}
         else:
+            content = "" if is_no_content_marker(result) else str(result)
             message = ToolMessage(
-                content=str(result), name=call["name"], tool_call_id=call["id"]
+                content=content, name=call["name"], tool_call_id=call["id"]
             )
             return {"messages": [message]}
+
+    @staticmethod
+    def _filter_result(command: Command[Any]) -> None:
+        """Strip NO_CONTENT markers from ToolMessages embedded in a Command."""
+        update = getattr(command, "update", None)
+        if not isinstance(update, dict):
+            return
+        messages = update.get("messages")
+        if not messages:
+            return
+        for msg in messages:
+            if isinstance(msg, ToolMessage) and is_no_content_marker(msg.content):
+                msg.content = ""
 
     def _prepare_wrapper_inputs(
         self,
@@ -142,8 +194,11 @@ class UiPathToolNode(RunnableCallable):
         """Filter the state to the expected model type."""
         model_type = list(signature(wrapper).parameters.values())[2].annotation
         if not issubclass(model_type, BaseModel):
-            raise ValueError(
-                "Wrapper state parameter must be a pydantic BaseModel subclass."
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TOOL_INVALID_WRAPPER_STATE,
+                title="Wrapper state parameter must be a pydantic BaseModel subclass.",
+                detail=f"Got {model_type.__name__} instead of BaseModel for wrapper state parameter.",
+                category=UiPathErrorCategory.SYSTEM,
             )
         return model_type.model_validate(state, from_attributes=True)
 
@@ -162,11 +217,15 @@ class ToolWrapperMixin:
         self.awrapper = awrapper
 
 
-def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, UiPathToolNode]:
+def create_tool_node(
+    tools: Sequence[BaseTool], handle_tool_errors: bool = False
+) -> dict[str, UiPathToolNode]:
     """Create individual ToolNode for each tool.
 
     Args:
         tools: Sequence of tools to create nodes for.
+        handle_tool_errors: If True, catch tool execution errors and return them as error ToolMessages
+            instead of letting exceptions propagate.
 
     Returns:
         Dict mapping tool.name -> ReactToolNode([tool]).
@@ -174,13 +233,19 @@ def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, UiPathToolNode]:
 
     Note:
         handle_tool_errors=False delegates error handling to LangGraph's error boundary.
+        handle_tool_errors=True will cause errors to be caught and converted to ToolMessages with status="error".
     """
     dict_mapping: dict[str, UiPathToolNode] = {}
     for tool in tools:
         if isinstance(tool, ToolWrapperMixin):
             dict_mapping[tool.name] = UiPathToolNode(
-                tool, wrapper=tool.wrapper, awrapper=tool.awrapper
+                tool,
+                wrapper=tool.wrapper,
+                awrapper=tool.awrapper,
+                handle_tool_errors=handle_tool_errors,
             )
         else:
-            dict_mapping[tool.name] = UiPathToolNode(tool, wrapper=None, awrapper=None)
+            dict_mapping[tool.name] = UiPathToolNode(
+                tool, wrapper=None, awrapper=None, handle_tool_errors=handle_tool_errors
+            )
     return dict_mapping

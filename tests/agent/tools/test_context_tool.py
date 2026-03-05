@@ -1,6 +1,7 @@
 """Tests for context_tool.py module."""
 
-from unittest.mock import AsyncMock, patch
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.documents import Document
@@ -13,12 +14,13 @@ from uipath.agent.models.agent import (
     AgentContextValueSetting,
 )
 from uipath.platform.context_grounding import (
-    BatchTransformResponse,
     CitationMode,
-    DeepRagResponse,
+    DeepRagContent,
 )
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.tools.context_tool import (
+    build_glob_pattern,
     create_context_tool,
     handle_batch_transform,
     handle_deep_rag,
@@ -79,43 +81,46 @@ class TestHandleDeepRag:
         assert isinstance(result, StructuredToolWithOutputType)
         assert result.name == "test_deep_rag"
         assert result.description == "Test Deep RAG tool"
-        assert result.args_schema is None
-        assert result.output_type == DeepRagResponse
-
-    def test_missing_query_object_raises_error(self, base_resource_config):
-        """Test that missing query object raises ValueError."""
-        resource = base_resource_config(query_value=None)
-        resource.settings.query = None
-
-        with pytest.raises(ValueError, match="Query object is required"):
-            handle_deep_rag("test_deep_rag", resource)
+        assert hasattr(result.args_schema, "model_json_schema")
+        assert result.args_schema.model_json_schema()["properties"] == {}
+        assert issubclass(result.output_type, DeepRagContent)
+        schema = result.output_type.model_json_schema()
+        assert "deepRagId" in schema["properties"]
+        assert schema["properties"]["deepRagId"]["type"] == "string"
 
     def test_missing_static_query_value_raises_error(self, base_resource_config):
-        """Test that missing query.value for static variant raises ValueError."""
+        """Test that missing query.value for static variant raises AgentStartupError."""
         resource = base_resource_config(query_variant="static", query_value=None)
 
-        with pytest.raises(
-            ValueError, match="Static query requires a query value to be set"
-        ):
+        with pytest.raises(AgentStartupError) as exc_info:
             handle_deep_rag("test_deep_rag", resource)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
 
     def test_missing_query_variant_raises_error(self, base_resource_config):
-        """Test that missing query.variant raises ValueError."""
+        """Test that missing query.variant raises AgentStartupError."""
         resource = base_resource_config(query_value="some query")
         resource.settings.query.variant = None
 
-        with pytest.raises(ValueError, match="Query variant is required"):
+        with pytest.raises(AgentStartupError) as exc_info:
             handle_deep_rag("test_deep_rag", resource)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
 
     def test_missing_citation_mode_raises_error(self, base_resource_config):
-        """Test that missing citation_mode raises ValueError."""
+        """Test that missing citation_mode raises AgentStartupError."""
         resource = base_resource_config(
             query_value="some query", citation_mode_value=None
         )
         resource.settings.citation_mode = None
 
-        with pytest.raises(ValueError, match="Citation mode is required for Deep RAG"):
+        with pytest.raises(AgentStartupError) as exc_info:
             handle_deep_rag("test_deep_rag", resource)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_TOOL_CONFIG
+        )
 
     @pytest.mark.parametrize(
         "citation_mode_value,expected_enum",
@@ -175,7 +180,7 @@ class TestHandleDeepRag:
             tool = handle_deep_rag("test_tool", resource)
 
             with patch(
-                "uipath_langchain.agent.tools.context_tool.interrupt"
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
             ) as mock_interrupt:
                 mock_interrupt.return_value = {"mocked": "response"}
                 assert tool.coroutine is not None
@@ -197,7 +202,7 @@ class TestHandleDeepRag:
 
         task_names = []
         with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
 
@@ -227,7 +232,7 @@ class TestHandleDeepRag:
         assert result.name == "test_deep_rag"
         assert result.description == "Test Deep RAG tool"
         assert result.args_schema is not None  # Dynamic has input schema
-        assert result.output_type == DeepRagResponse
+        assert issubclass(result.output_type, DeepRagContent)
 
     def test_dynamic_query_deep_rag_has_query_parameter(self, base_resource_config):
         """Test that dynamic Deep RAG tool has query parameter in schema."""
@@ -258,7 +263,7 @@ class TestHandleDeepRag:
         tool = handle_deep_rag("test_tool", resource)
 
         with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
+            "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
         ) as mock_interrupt:
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
@@ -266,6 +271,27 @@ class TestHandleDeepRag:
 
             call_args = mock_interrupt.call_args[0][0]
             assert call_args.prompt == "runtime provided query"
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
+    async def test_deep_rag_uses_execution_folder_path(self, base_resource_config):
+        """Test that CreateDeepRag receives index_folder_path from the execution environment."""
+        resource = base_resource_config(
+            query_variant="static",
+            query_value="test query",
+            citation_mode_value=AgentContextValueSetting(value="Inline"),
+        )
+        tool = handle_deep_rag("test_tool", resource)
+
+        with patch(
+            "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = {"mocked": "response"}
+            assert tool.coroutine is not None
+            await tool.coroutine()
+
+            deep_rag_arg = mock_interrupt.call_args[0][0]
+            assert deep_rag_arg.index_folder_path == "/Shared/TestFolder"
 
 
 class TestCreateContextTool:
@@ -328,8 +354,9 @@ class TestCreateContextTool:
 
         assert isinstance(result, StructuredToolWithOutputType)
         assert result.name == "test_deep_rag"
-        assert result.args_schema is None  # Deep RAG has no input schema
-        assert result.output_type == DeepRagResponse
+        assert hasattr(result.args_schema, "model_json_schema")
+        assert result.args_schema.model_json_schema()["properties"] == {}
+        assert issubclass(result.output_type, DeepRagContent)
 
     def test_case_insensitive_retrieval_mode(self, deep_rag_config):
         """Test that retrieval mode matching is case-insensitive."""
@@ -414,7 +441,7 @@ class TestHandleSemanticSearch:
 
             assert "documents" in result
             assert len(result["documents"]) == 2
-            assert result["documents"][0].page_content == "Test content 1"
+            assert result["documents"][0]["page_content"] == "Test content 1"
 
     def test_static_query_semantic_search_creation(self):
         """Test successful creation of semantic search tool with static query."""
@@ -441,7 +468,8 @@ class TestHandleSemanticSearch:
         assert isinstance(result, StructuredToolWithOutputType)
         assert result.name == "semantic_tool"
         assert result.description == "Semantic search tool"
-        assert result.args_schema is None  # Static has no input schema
+        assert hasattr(result.args_schema, "model_json_schema")
+        assert result.args_schema.model_json_schema()["properties"] == {}
 
     @pytest.mark.asyncio
     async def test_static_query_uses_predefined_query(self):
@@ -483,6 +511,17 @@ class TestHandleSemanticSearch:
             mock_retriever.ainvoke.assert_called_once_with("predefined static query")
             assert "documents" in result
             assert len(result["documents"]) == 1
+
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
+    def test_semantic_search_uses_execution_folder_path(self, semantic_config):
+        """Test that ContextGroundingRetriever receives folder_path from the execution environment."""
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            handle_semantic_search("semantic_tool", semantic_config)
+
+            call_kwargs = mock_retriever_class.call_args[1]
+            assert call_kwargs["folder_path"] == "/Shared/TestFolder"
 
 
 class TestHandleBatchTransform:
@@ -526,7 +565,10 @@ class TestHandleBatchTransform:
         assert result.name == "batch_transform_tool"
         assert result.description == "Batch transform tool"
         assert result.args_schema is not None  # Has destination_path parameter
-        assert result.output_type == BatchTransformResponse
+        # Output model is built from the job-attachment schema so that the
+        # job_attachment_wrapper can locate and register the attachment.
+        output_schema = result.output_type.model_json_schema()
+        assert "result" in output_schema.get("properties", {})
 
     def test_static_query_batch_transform_has_destination_path_only(
         self, batch_transform_config
@@ -572,7 +614,8 @@ class TestHandleBatchTransform:
         assert isinstance(result, StructuredToolWithOutputType)
         assert result.name == "batch_transform_tool"
         assert result.args_schema is not None
-        assert result.output_type == BatchTransformResponse
+        output_schema = result.output_type.model_json_schema()
+        assert "result" in output_schema.get("properties", {})
 
     def test_dynamic_query_batch_transform_has_both_parameters(self):
         """Test that dynamic batch transform has both query and destination_path."""
@@ -616,9 +659,17 @@ class TestHandleBatchTransform:
         """Test that static query variant uses the predefined query value."""
         tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
 
-        with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
-        ) as mock_interrupt:
+        mock_uipath = AsyncMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-1")
+        with (
+            patch(
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
             await tool.coroutine(destination_path="/output/result.csv")
@@ -656,9 +707,17 @@ class TestHandleBatchTransform:
 
         tool = handle_batch_transform("batch_transform_tool", resource)
 
-        with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
-        ) as mock_interrupt:
+        mock_uipath = AsyncMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-2")
+        with (
+            patch(
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
             await tool.coroutine(
@@ -676,9 +735,17 @@ class TestHandleBatchTransform:
         """Test that static batch transform uses default destination_path when not provided."""
         tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
 
-        with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
-        ) as mock_interrupt:
+        mock_uipath = AsyncMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-3")
+        with (
+            patch(
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
             # Call without providing destination_path
@@ -717,9 +784,17 @@ class TestHandleBatchTransform:
 
         tool = handle_batch_transform("batch_transform_tool", resource)
 
-        with patch(
-            "uipath_langchain.agent.tools.context_tool.interrupt"
-        ) as mock_interrupt:
+        mock_uipath = AsyncMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id-4")
+        with (
+            patch(
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
             mock_interrupt.return_value = {"mocked": "response"}
             assert tool.coroutine is not None
             # Call with only query, no destination_path
@@ -728,3 +803,107 @@ class TestHandleBatchTransform:
             call_args = mock_interrupt.call_args[0][0]
             assert call_args.prompt == "runtime provided query"
             assert call_args.destination_path == "output.csv"
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
+    async def test_batch_transform_uses_execution_folder_path(
+        self, batch_transform_config
+    ):
+        """Test that CreateBatchTransform receives index_folder_path from the execution environment."""
+        tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
+
+        mock_uipath = MagicMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id")
+        with (
+            patch(
+                "uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
+            mock_interrupt.return_value = MagicMock()
+            assert tool.coroutine is not None
+            await tool.coroutine(destination_path="output.csv")
+
+            batch_transform_arg = mock_interrupt.call_args[0][0]
+            assert batch_transform_arg.index_folder_path == "/Shared/TestFolder"
+
+
+class TestBuildGlobPattern:
+    """Test cases for build_glob_pattern function."""
+
+    # --- No prefix ---
+
+    def test_no_prefix_no_extension(self):
+        assert build_glob_pattern(None, None) == "**/*"
+
+    def test_empty_string_prefix_treated_as_no_prefix(self):
+        assert build_glob_pattern("", None) == "**/*"
+
+    def test_no_prefix_with_extension(self):
+        assert build_glob_pattern(None, "pdf") == "**/*.pdf"
+
+    def test_no_prefix_extension_uppercased(self):
+        """Extension should be lowercased before building the pattern."""
+        assert build_glob_pattern(None, "PDF") == "**/*.pdf"
+
+    def test_no_prefix_extension_mixed_case(self):
+        assert build_glob_pattern(None, "TxT") == "**/*.txt"
+
+    # --- Explicit "**" prefix ---
+
+    def test_double_star_prefix_no_extension(self):
+        assert build_glob_pattern("**", None) == "**/*"
+
+    def test_double_star_prefix_with_extension(self):
+        assert build_glob_pattern("**", "pdf") == "**/*.pdf"
+
+    # --- Prefix with trailing slash stripped ---
+
+    def test_prefix_trailing_slash_stripped(self):
+        assert build_glob_pattern("documents/", "pdf") == "documents/*.pdf"
+
+    def test_prefix_multiple_trailing_slashes_stripped(self):
+        assert build_glob_pattern("documents///", "pdf") == "documents/*.pdf"
+
+    # --- Prefix with leading slash stripped ---
+
+    def test_prefix_leading_slash_stripped(self):
+        assert build_glob_pattern("/documents", "pdf") == "documents/*.pdf"
+
+    def test_prefix_leading_and_trailing_slash_stripped(self):
+        assert build_glob_pattern("/documents/", None) == "documents/*"
+
+    # --- Prefix starting with "**" is kept as-is ---
+
+    def test_prefix_starting_with_double_star_kept(self):
+        assert build_glob_pattern("**/documents", "pdf") == "**/documents/*.pdf"
+
+    def test_prefix_starting_with_double_star_leading_slash_not_stripped(self):
+        """A prefix that already starts with ** is not modified further."""
+        assert build_glob_pattern("**/docs/", "txt") == "**/docs/*.txt"
+
+    # --- Normal prefix without slashes ---
+
+    def test_simple_prefix_no_extension(self):
+        assert build_glob_pattern("folder", None) == "folder/*"
+
+    def test_simple_prefix_with_extension(self):
+        assert build_glob_pattern("folder", "pdf") == "folder/*.pdf"
+
+    def test_nested_prefix_with_extension(self):
+        assert (
+            build_glob_pattern("folder/subfolder", "docx") == "folder/subfolder/*.docx"
+        )
+
+    # --- All supported extensions ---
+
+    @pytest.mark.parametrize("ext", ["pdf", "txt", "docx", "csv"])
+    def test_supported_extensions(self, ext):
+        assert build_glob_pattern(None, ext) == f"**/*.{ext}"
+
+    def test_unsupported_extension_still_works(self):
+        """Extensions outside the named set are handled identically."""
+        assert build_glob_pattern("data", "xlsx") == "data/*.xlsx"

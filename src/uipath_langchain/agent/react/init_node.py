@@ -9,8 +9,9 @@ from pydantic import BaseModel
 
 from .job_attachments import (
     get_job_attachments,
+    parse_attachments_from_conversation_messages,
 )
-from .types import AgentResources, AgentSettings
+from .types import AgentResources
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,6 @@ def create_init_node(
     | Callable[..., Sequence[SystemMessage | HumanMessage]],
     input_schema: type[BaseModel] | None,
     is_conversational: bool = False,
-    agent_settings: AgentSettings | None = None,
     resources_for_init: AgentResources | None = None,
 ):
     async def graph_state_init(state: Any) -> Any:
@@ -74,12 +74,25 @@ def create_init_node(
         job_attachments_dict = {
             str(att.id): att for att in job_attachments if att.id is not None
         }
+        # Merge attachments from preserved messages for conversational agents
+        if is_conversational:
+            message_attachments = parse_attachments_from_conversation_messages(
+                preserved_messages
+            )
+            job_attachments_dict.update(message_attachments)
+
+        # Calculate initial message count for tracking new messages
+        initial_message_count = (
+            len(resolved_messages.value)
+            if isinstance(resolved_messages, Overwrite)
+            else len(resolved_messages)
+        )
 
         return {
             "messages": resolved_messages,
             "inner_state": {
                 "job_attachments": job_attachments_dict,
-                "agent_settings": agent_settings,
+                "initial_message_count": initial_message_count,
             },
         }
 

@@ -25,11 +25,15 @@ def __getattr__(name):
         from .openai import UiPathChatOpenAI
 
         return UiPathChatOpenAI
+    if name == "requires_approval":
+        from .hitl import requires_approval
+
+        return requires_approval
     if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
         from . import supported_models
 
         return getattr(supported_models, name)
-    if name in ("LLMProvider", "APIFlavor", "UiPathPassthroughChatModel"):
+    if name in ("LLMProvider", "APIFlavor"):
         from . import types
 
         return getattr(types, name)
@@ -40,10 +44,10 @@ __all__ = [
     "UiPathChat",
     "UiPathAzureChatOpenAI",
     "UiPathChatOpenAI",
-    "UiPathPassthroughChatModel",
     "OpenAIModels",
     "BedrockModels",
     "GeminiModels",
+    "requires_approval",
     "LLMProvider",
     "APIFlavor",
 ]

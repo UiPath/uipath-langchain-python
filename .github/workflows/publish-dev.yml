@@ -3,9 +3,6 @@ name: Publish Dev Build
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
-    secrets:
-      PYPI_TOKEN_NIGHTLY:
-        required: true
 
 jobs:
   publish-dev:
@@ -31,46 +28,6 @@ jobs:
         with:
           python-version-file: ".python-version"
 
-      - name: Modify pyproject.toml for custom UiPath version
-        if: contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')
-        shell: pwsh
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          # Extract version from PR title (e.g., "2.0.65.dev1004030443")
-          if ($env:PR_TITLE -match '(\d+\.\d+\.\d+\.dev\d+)') {
-            $VERSION = $matches[1]
-          } else {
-            Write-Error "No version found in PR title. Example: 'chore: test (uipath version 2.0.65.dev1004030443)'"
-            exit 1
-          }
-
-          Write-Output "Using UiPath version: $VERSION"
-
-          # Update uipath dependency to exact version (only in dependency arrays, not project name)
-          $content = Get-Content pyproject.toml -Raw
-
-          # Replace in main dependencies array
-          $content = $content -replace '(?s)(dependencies\s*=\s*\[.*?\])', {
-            param($match)
-            $match.Value -replace '"uipath([>=<\s,][^"]*|)"', "`"uipath==$VERSION`""
-          }
-
-          # Replace in optional-dependencies section (from [project.optional-dependencies] to next [)
-          $content = $content -replace '(?s)(\[project\.optional-dependencies\].*?)(?=\n\[|\z)', {
-            param($match)
-            $match.Value -replace '"uipath([>=<\s,][^"]*|)"', "`"uipath==$VERSION`""
-          }
-
-          # Add [tool.uv.sources] if missing
-          if ($content -notmatch '\[tool\.uv\.sources\]') {
-            $content += "`n`n[tool.uv.sources]`n uipath = { index = `"testpypi`" }`n"
-          }
-
-          # Save changes
-          $content | Set-Content pyproject.toml -NoNewline
-          Write-Output "✓ Updated pyproject.toml"
-
       - name: Install dependencies
         run: uv sync --all-extras
 
@@ -83,6 +40,7 @@ jobs:
 
           $PROJECT_NAME    = ($pyprojcontent | Select-String -Pattern '(?m)^\[(project|tool\.poetry)\][^\[]*?name\s*=\s*"([^"]*)"' -AllMatches).Matches[0].Groups[2].Value
           $CURRENT_VERSION = ($pyprojcontent | Select-String -Pattern '(?m)^\[(project|tool\.poetry)\][^\[]*?version\s*=\s*"([^"]*)"' -AllMatches).Matches[0].Groups[2].Value
+
 
           # Get PR number and run number with proper padding
           $PR_NUM = [int]"${{ github.event.pull_request.number }}"
@@ -102,9 +60,14 @@ jobs:
 
           Write-Output "Package version set to $DEV_VERSION"
 
+          $startMarker = "<!-- DEV_PACKAGE_START -->"
+          $endMarker = "<!-- DEV_PACKAGE_END -->"
+
           $dependencyMessage = @"
+          $startMarker
           ## Development Package
 
+          - Use ``uipath pack --nolock`` to get the latest dev build from this PR (requires version range).
           - Add this package as a dependency in your pyproject.toml:
 
           ``````toml
@@ -125,7 +88,13 @@ jobs:
 
           [tool.uv.sources]
           $PROJECT_NAME = { index = "testpypi" }
+
+          [tool.uv]
+          override-dependencies = [
+              "$PROJECT_NAME>=$MIN_VERSION,<$MAX_VERSION",
+          ]
           ``````
+          $endMarker
           "@
 
           # Get the owner and repo from the GitHub repository
@@ -143,10 +112,11 @@ jobs:
           $pr = Invoke-RestMethod -Uri $prUri -Method Get -Headers $headers
           $currentBody = $pr.body
 
-          # Check if there's already a development package section
-          if ($currentBody -match '## Development Package') {
-            # Replace the existing section with the new dependency message
-            $newBody = $currentBody -replace '## Development Package(\r?\n|.)*?(?=##|$)', $dependencyMessage
+          # Check if markers already exist in the PR description
+          $markerPattern = "(?s)$([regex]::Escape($startMarker)).*?$([regex]::Escape($endMarker))"
+          if ($currentBody -match $markerPattern) {
+            # Replace everything between markers (including markers)
+            $newBody = $currentBody -replace $markerPattern, $dependencyMessage
           } else {
             # Append the dependency message to the end of the description
             $newBody = if ($currentBody) { "$currentBody`n`n$dependencyMessage" } else { $dependencyMessage }

@@ -146,8 +146,11 @@ class TestCreateBatchTransformTool:
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
+    )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -156,6 +159,7 @@ class TestCreateBatchTransformTool:
         self,
         mock_interrupt,
         mock_uipath_class,
+        mock_uipath_config,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
@@ -164,6 +168,7 @@ class TestCreateBatchTransformTool:
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
 
         mock_index = ContextGroundingIndex(
             id=str(uuid.uuid4()),
@@ -175,7 +180,15 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"file_path": "/path/to/output.csv"}
+        # Index is ready → ReadyEphemeralIndex skips interrupt(). Only create_batch_transform fires.
+        mock_interrupt.side_effect = [
+            {"file_path": "/path/to/output.csv"},
+        ]
+
+        mock_attachment_uuid = uuid.uuid4()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=mock_attachment_uuid
+        )
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
@@ -195,8 +208,14 @@ class TestCreateBatchTransformTool:
         assert tool.coroutine is not None
         result = await tool.coroutine(attachment=mock_attachment)
 
-        # Verify result
-        assert result == {"file_path": "/path/to/output.csv"}
+        # Verify result contains attachment info
+        assert result == {
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
+        }
 
         # Verify ephemeral index was created
         mock_uipath.context_grounding.create_ephemeral_index_async.assert_called_once()
@@ -206,14 +225,24 @@ class TestCreateBatchTransformTool:
         assert call_kwargs["usage"] == "BatchRAG"
         assert mock_attachment.ID in call_kwargs["attachments"]
 
-        # Verify interrupt was called only once (no WaitEphemeralIndex needed)
+        # Only create_batch_transform calls interrupt(); index was instant-resumed
         assert mock_interrupt.call_count == 1
+
+        # Verify attachment was uploaded
+        mock_uipath.jobs.create_attachment_async.assert_called_once_with(
+            name="output.csv",
+            source_path="output.csv",
+            job_key="test-job-key",
+        )
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
+    )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -222,6 +251,7 @@ class TestCreateBatchTransformTool:
         self,
         mock_interrupt,
         mock_uipath_class,
+        mock_uipath_config,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
@@ -230,6 +260,7 @@ class TestCreateBatchTransformTool:
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
 
         pending_id = str(uuid.uuid4())
         mock_index_pending = ContextGroundingIndex(
@@ -254,6 +285,11 @@ class TestCreateBatchTransformTool:
             {"file_path": "/path/to/transformed.csv"},
         ]
 
+        mock_attachment_uuid = uuid.uuid4()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=mock_attachment_uuid
+        )
+
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
 
@@ -268,8 +304,14 @@ class TestCreateBatchTransformTool:
         assert tool.coroutine is not None
         result = await tool.coroutine(attachment=mock_attachment)
 
-        # Verify result
-        assert result == {"file_path": "/path/to/transformed.csv"}
+        # Verify result contains attachment info
+        assert result == {
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
+        }
 
         # Verify interrupt was called twice (WaitEphemeralIndex + CreateBatchTransform)
         assert mock_interrupt.call_count == 2
@@ -277,8 +319,11 @@ class TestCreateBatchTransformTool:
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
+    )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -287,6 +332,7 @@ class TestCreateBatchTransformTool:
         self,
         mock_interrupt,
         mock_uipath_class,
+        mock_uipath_config,
         mock_get_wrapper,
         resource_config_dynamic,
         mock_llm,
@@ -295,6 +341,7 @@ class TestCreateBatchTransformTool:
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
 
         mock_index = ContextGroundingIndex(
             id=str(uuid.uuid4()),
@@ -306,7 +353,15 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"output": "Transformation complete"}
+        # Index is ready → ReadyEphemeralIndex skips interrupt(). Only create_batch_transform fires.
+        mock_interrupt.side_effect = [
+            {"output": "Transformation complete"},
+        ]
+
+        mock_attachment_uuid = uuid.uuid4()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=mock_attachment_uuid
+        )
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
@@ -324,14 +379,23 @@ class TestCreateBatchTransformTool:
             attachment=mock_attachment, query="Extract all names"
         )
 
-        # Verify result
-        assert result == {"output": "Transformation complete"}
+        # Verify result contains attachment info
+        assert result == {
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
+        }
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
+    )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -340,6 +404,7 @@ class TestCreateBatchTransformTool:
         self,
         mock_interrupt,
         mock_uipath_class,
+        mock_uipath_config,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
@@ -348,6 +413,7 @@ class TestCreateBatchTransformTool:
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
 
         mock_index = ContextGroundingIndex(
             id=str(uuid.uuid4()),
@@ -359,7 +425,15 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"file_path": "output.csv"}
+        # Index is ready → ReadyEphemeralIndex skips interrupt(). Only create_batch_transform fires.
+        mock_interrupt.side_effect = [
+            {"file_path": "output.csv"},
+        ]
+
+        mock_attachment_uuid = uuid.uuid4()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=mock_attachment_uuid
+        )
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
@@ -375,17 +449,33 @@ class TestCreateBatchTransformTool:
         assert tool.coroutine is not None
         result = await tool.coroutine(attachment=mock_attachment)
 
-        # Verify result
-        assert result == {"file_path": "output.csv"}
+        # Verify result contains attachment info with default destination_path
+        assert result == {
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "output.csv",
+                "MimeType": "text/csv",
+            }
+        }
 
-        # Verify CreateBatchTransform was called with default destination_path
+        # Only create_batch_transform calls interrupt(); index was instant-resumed
         assert mock_interrupt.call_count == 1
+
+        # Verify attachment was uploaded with default path
+        mock_uipath.jobs.create_attachment_async.assert_called_once_with(
+            name="output.csv",
+            source_path="output.csv",
+            job_key="test-job-key",
+        )
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPathConfig"
+    )
     @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -394,6 +484,7 @@ class TestCreateBatchTransformTool:
         self,
         mock_interrupt,
         mock_uipath_class,
+        mock_uipath_config,
         mock_get_wrapper,
         resource_config_static,
         mock_llm,
@@ -402,6 +493,7 @@ class TestCreateBatchTransformTool:
         # Setup mocks
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config.job_key = "test-job-key"
 
         mock_index = ContextGroundingIndex(
             id=str(uuid.uuid4()),
@@ -413,7 +505,15 @@ class TestCreateBatchTransformTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"file_path": "/custom/path/result.csv"}
+        # Index is ready → ReadyEphemeralIndex skips interrupt(). Only create_batch_transform fires.
+        mock_interrupt.side_effect = [
+            {"file_path": "/custom/path/result.csv"},
+        ]
+
+        mock_attachment_uuid = uuid.uuid4()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(
+            return_value=mock_attachment_uuid
+        )
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
@@ -431,8 +531,21 @@ class TestCreateBatchTransformTool:
             attachment=mock_attachment, destination_path="/custom/path/result.csv"
         )
 
-        # Verify result
-        assert result == {"file_path": "/custom/path/result.csv"}
+        # Verify result contains attachment info with custom path
+        assert result == {
+            "result": {
+                "ID": str(mock_attachment_uuid),
+                "FullName": "/custom/path/result.csv",
+                "MimeType": "text/csv",
+            }
+        }
+
+        # Verify attachment was uploaded with custom path
+        mock_uipath.jobs.create_attachment_async.assert_called_once_with(
+            name="/custom/path/result.csv",
+            source_path="/custom/path/result.csv",
+            job_key="test-job-key",
+        )
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"

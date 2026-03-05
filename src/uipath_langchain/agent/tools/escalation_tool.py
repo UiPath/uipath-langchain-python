@@ -5,9 +5,7 @@ from typing import Any, Literal
 
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.func import task
-from langgraph.types import interrupt
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipient,
@@ -15,16 +13,14 @@ from uipath.agent.models.agent import (
     AgentEscalationResourceConfig,
     AssetRecipient,
     StandardRecipient,
-    TaskTitle,
-    TextBuilderTaskTitle,
 )
-from uipath.agent.utils.text_tokens import build_string_from_tokens
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
-from uipath.platform.common import UiPathConfig, WaitEscalation
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.platform.common import WaitEscalation
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.static_args import (
     handle_static_args,
@@ -33,10 +29,15 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 
-from ..exceptions import AgentTerminationException
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..react.types import AgentGraphState
+from .durable_interrupt import durable_interrupt
 from .tool_node import ToolWrapperReturnType
-from .utils import sanitize_dict_for_serialization, sanitize_tool_name
+from .utils import (
+    resolve_task_title,
+    sanitize_dict_for_serialization,
+    sanitize_tool_name,
+)
 
 
 class EscalationAction(str, Enum):
@@ -51,24 +52,26 @@ async def resolve_recipient_value(
 ) -> TaskRecipient | None:
     """Resolve recipient value based on recipient type."""
     if isinstance(recipient, AssetRecipient):
-        value = await resolve_asset(recipient.asset_name, recipient.folder_path)
+        value = await resolve_asset(recipient.asset_name, get_execution_folder_path())
         type = None
         if recipient.type == AgentEscalationRecipientType.ASSET_USER_EMAIL:
             type = TaskRecipientType.EMAIL
         elif recipient.type == AgentEscalationRecipientType.ASSET_GROUP_NAME:
             type = TaskRecipientType.GROUP_NAME
-        return TaskRecipient(value=value, type=type)
+        return TaskRecipient(value=value, type=type, displayName=value)
 
     if isinstance(recipient, StandardRecipient):
         type = TaskRecipientType(recipient.type)
         if recipient.type == AgentEscalationRecipientType.USER_EMAIL:
             type = TaskRecipientType.EMAIL
-        return TaskRecipient(value=recipient.value, type=type)
+        return TaskRecipient(
+            value=recipient.value, type=type, displayName=recipient.value
+        )
 
     return None
 
 
-async def resolve_asset(asset_name: str, folder_path: str) -> str | None:
+async def resolve_asset(asset_name: str, folder_path: str | None) -> str | None:
     """Retrieve asset value."""
     try:
         client = UiPath()
@@ -84,19 +87,6 @@ async def resolve_asset(asset_name: str, folder_path: str) -> str | None:
         raise ValueError(
             f"Failed to resolve asset '{asset_name}' in folder '{folder_path}': {str(e)}"
         ) from e
-
-
-def _resolve_task_title(
-    task_title: TaskTitle | str | None, agent_input: dict[str, Any]
-) -> str:
-    """Resolve task title based on channel configuration."""
-    if isinstance(task_title, TextBuilderTaskTitle):
-        return build_string_from_tokens(task_title.tokens, agent_input)
-
-    if isinstance(task_title, str):
-        return task_title
-
-    return "Escalation Task"
 
 
 def _get_user_email(user: Any) -> str | None:
@@ -164,6 +154,9 @@ def create_escalation_tool(
     class EscalationToolOutput(BaseModel):
         action: Literal["approve", "reject"]
         data: output_model
+        is_deleted: bool = False
+
+    _bts_context: dict[str, Any] = {}
 
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
         recipient: TaskRecipient | None = (
@@ -171,6 +164,7 @@ def create_escalation_tool(
             if channel.recipients
             else None
         )
+        folder_path = get_execution_folder_path()
 
         task_title = "Escalation Task"
         if tool.metadata is not None:
@@ -187,15 +181,15 @@ def create_escalation_tool(
             output_schema=EscalationToolOutput.model_json_schema(),
             example_calls=channel.properties.example_calls,
         )
-        async def escalate():
-            @task
+        async def escalate(**_tool_kwargs: Any):
+            @durable_interrupt
             async def create_escalation_task():
                 client = UiPath()
-                return await client.tasks.create_async(
+                created_task = await client.tasks.create_async(
                     title=task_title,
                     data=serialized_data,
                     app_name=channel.properties.app_name,
-                    app_folder_path=channel.properties.folder_name or "",
+                    app_folder_path=folder_path,
                     recipient=recipient,
                     priority=channel.priority,
                     labels=channel.labels,
@@ -203,28 +197,36 @@ def create_escalation_tool(
                     actionable_message_metadata=channel.properties.actionable_message_meta_data,
                 )
 
-            created_task = await create_escalation_task()
-            return interrupt(
-                WaitEscalation(
+                if created_task.id is not None:
+                    _bts_context["task_key"] = str(created_task.id)
+
+                return WaitEscalation(
                     action=created_task,
-                    app_folder_path=channel.properties.folder_name,
+                    app_folder_path=folder_path,
                     app_name=channel.properties.app_name,
                     recipient=recipient,
                 )
-            )
 
-        result = await escalate()
+            return await create_escalation_task()
 
-        # Extract task info before validation
-        task_id = result.id
-        task_url = f"{UiPathConfig.base_url}/actions_/tasks/{task_id}"
-        assigned_to = _get_user_email(result.assigned_to_user)
+        result = await escalate(**kwargs)
+        if isinstance(result, dict):
+            result = TypeAdapter(EscalationToolOutput).validate_python(result)
+
+        if result.is_deleted:
+            return {
+                "action": EscalationAction.END,
+                "output": None,
+                "outcome": "The escalation task was deleted",
+            }
 
         outcome = result.action
         escalation_output = _parse_task_data(
-            result.data,
+            result.data.model_dump()
+            if isinstance(result.data, BaseModel)
+            else result.data,
             input_schema=input_model.model_json_schema(),
-            output_schema=EscalationToolOutput.model_json_schema(),
+            output_schema=output_model.model_json_schema(),
         )
 
         outcome_str = (
@@ -240,9 +242,6 @@ def create_escalation_tool(
             "action": escalation_action,
             "output": escalation_output,
             "outcome": outcome,
-            "task_id": task_id,
-            "task_url": task_url,
-            "assigned_to": assigned_to,
         }
 
     async def escalation_wrapper(
@@ -253,8 +252,10 @@ def create_escalation_tool(
         if tool.metadata is None:
             raise RuntimeError("Tool metadata is required for task_title resolution")
 
-        tool.metadata["task_title"] = _resolve_task_title(
-            channel.task_title, sanitize_dict_for_serialization(dict(state))
+        tool.metadata["task_title"] = resolve_task_title(
+            channel.task_title,
+            sanitize_dict_for_serialization(dict(state)),
+            default_title="Escalation Task",
         )
 
         tool.metadata["_call_id"] = call.get("id")
@@ -270,18 +271,18 @@ def create_escalation_tool(
                 f"with directive {result['outcome']}"
             )
 
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
                 title=termination_title,
                 detail=output_detail,
+                category=UiPathErrorCategory.USER,
             )
 
         return {
             "output": result["output"],
             "outcome": result["outcome"],
-            "task_id": result["task_id"],
-            "task_url": result["task_url"],
-            "assigned_to": result["assigned_to"],
+            "task_id": result.get("task_id"),
+            "assigned_to": result.get("assigned_to"),
         }
 
     tool = StructuredToolWithArgumentProperties(
@@ -296,6 +297,9 @@ def create_escalation_tool(
             "display_name": channel.properties.app_name,
             "channel_type": channel.type,
             "recipient": None,
+            "args_schema": input_model,
+            "output_schema": output_model,
+            "_bts_context": _bts_context,
         },
     )
     tool.set_tool_wrappers(awrapper=escalation_wrapper)

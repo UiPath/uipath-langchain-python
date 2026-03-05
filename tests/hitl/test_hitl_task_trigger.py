@@ -8,6 +8,7 @@ import uuid
 import pytest
 from click.testing import CliRunner
 from pytest_httpx import HTTPXMock
+from uipath.platform.action_center.tasks import TaskStatus
 from uipath.runtime import (
     UiPathExecuteOptions,
     UiPathRuntimeContext,
@@ -89,6 +90,16 @@ class TestHitlActionTrigger:
                             ]
                         }
                     ),
+                )
+
+                # mock fired triggers check
+                httpx_mock.add_response(
+                    url=f"{base_url}/orchestrator_/tasks/GenericTasks/GetTaskDataByKey?taskKey={action_key}",
+                    json={
+                        "id": 1,
+                        "title": "Action Required: Report Review",
+                        "status": TaskStatus.PENDING.value,
+                    },
                 )
 
                 # First execution: creates action trigger and stores it in database
@@ -175,6 +186,16 @@ class TestHitlActionTrigger:
 
                 resume_runtime_1 = await resume_factory_1.new_runtime(
                     entrypoint="agent", runtime_id="test-action-runtime"
+                )
+
+                # mock fired triggers check
+                httpx_mock.add_response(
+                    url=f"{base_url}/orchestrator_/tasks/GenericTasks/GetTaskDataByKey?taskKey=1662478a-65b4-4a09-8e22-d707e5bd64f3",
+                    json={
+                        "id": 1,
+                        "title": "Action Required: Report Review",
+                        "status": TaskStatus.PENDING.value,
+                    },
                 )
 
                 with resume_context_1:

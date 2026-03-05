@@ -2,7 +2,7 @@ import sys
 from typing import Any, ForwardRef, Union, get_args, get_origin
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 
 
 def get_json_paths_by_type(model: type[BaseModel], type_name: str) -> list[str]:
@@ -63,25 +63,34 @@ def get_json_paths_by_type(model: type[BaseModel], type_name: str) -> list[str]:
                 continue
 
             if origin is list:
-                args = get_args(annotation)
-                if args:
-                    list_item_type = args[0]
-                    if matches_type(list_item_type):
-                        json_paths.append(f"{field_path}[*]")
-                        continue
-
-                    if _is_pydantic_model(list_item_type):
-                        nested_paths = _recursive_search(
-                            list_item_type, f"{field_path}[*]"
-                        )
-                        json_paths.extend(nested_paths)
-                        continue
+                inner_type, suffix = _unwrap_lists(annotation)
+                inner_path = f"{field_path}{suffix}"
+                if matches_type(inner_type):
+                    json_paths.append(inner_path)
+                    continue
+                if _is_pydantic_model(inner_type):
+                    nested_paths = _recursive_search(inner_type, inner_path)
+                    json_paths.extend(nested_paths)
+                    continue
 
             if _is_pydantic_model(annotation):
                 nested_paths = _recursive_search(annotation, field_path)
                 json_paths.extend(nested_paths)
 
         return json_paths
+
+    # RootModel serializes without the "root" wrapper — e.g. RootModel[list[X]]
+    # dumps as [...], not {"root": [...]}.  Iterating model_fields directly would
+    # produce wrong paths like "$.root.field".  Instead we peel off the RootModel
+    # envelope (and any Optional/list layers) so _recursive_search only ever sees
+    # a plain BaseModel with correct JSONPath prefixes (e.g. "$[*].field").
+    if issubclass(model, RootModel):
+        inner = _unwrap_optional(model.model_fields["root"].annotation)
+        inner, suffix = _unwrap_lists(inner)
+        # Primitive or non-model root types can't contain nested typed fields.
+        if not _is_pydantic_model(inner):
+            return []
+        return _recursive_search(inner, f"${suffix}" if suffix else "")
 
     return _recursive_search(model, "")
 
@@ -177,6 +186,22 @@ def _unwrap_optional(annotation: Any) -> Any:
         if non_none_args:
             return non_none_args[0]
     return annotation
+
+
+def _unwrap_lists(annotation: Any) -> tuple[Any, str]:
+    """Unwrap nested list types, returning (inner_type, jsonpath_suffix).
+
+    Each list layer adds a "[*]" wildcard so the resulting suffix maps directly
+    to JSONPath:  list[list[X]] → (X, "[*][*]").
+    """
+    suffix = ""
+    while get_origin(annotation) is list:
+        args = get_args(annotation)
+        if not args:
+            break
+        annotation = args[0]
+        suffix += "[*]"
+    return annotation, suffix
 
 
 def _is_pydantic_model(annotation: Any) -> bool:

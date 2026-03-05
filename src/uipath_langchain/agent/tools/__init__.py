@@ -12,6 +12,7 @@ from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
 from .integration_tool import create_integration_tool
 from .ixp_escalation_tool import create_ixp_escalation_tool
+from .mcp import open_mcp_tools
 from .process_tool import create_process_tool
 from .tool_factory import (
     create_tools_from_resources,
@@ -23,6 +24,7 @@ __all__ = [
     "create_tool_node",
     "create_context_tool",
     "create_datafabric_tools",
+    "open_mcp_tools",
     "create_process_tool",
     "create_integration_tool",
     "create_escalation_tool",

@@ -13,12 +13,12 @@ dependencies = [
     "aiohttp>=3.11.12",
     "typing-extensions>=4.12.2",
     "ipython>=8.32.0",
-    "uipath>=2.3.0, <2.4.0",
-    "uipath-langchain>=0.2.0, <0.3.0",
+    "uipath",
+    "uipath-langchain",
 ]
 requires-python = ">=3.11"
 
 [dependency-groups]
 dev = [
-    "uipath-dev>=0.0.14",
+    "uipath-dev",
 ]

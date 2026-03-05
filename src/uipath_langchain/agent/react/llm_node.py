@@ -1,19 +1,23 @@
 """LLM node for ReAct Agent graph."""
 
-from typing import Sequence, TypeVar
+from typing import Literal, Sequence, TypeVar
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage, ToolCall
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    ToolCall,
+)
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
-from uipath.runtime.errors import UiPathErrorCategory, UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.tools.static_args import (
     apply_static_argument_properties_to_schema,
 )
 from uipath_langchain.chat.handlers import get_payload_handler
 
-from ..exceptions import AgentTerminationException
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..messages.message_utils import replace_tool_calls
 from .constants import (
     DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
@@ -44,6 +48,9 @@ def create_llm_node(
     is_conversational: bool = False,
     llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
     thinking_messages_limit: int = DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
+    tool_choice: Literal["auto", "any"] = "auto",
+    parallel_tool_calls: bool = True,
+    strict_mode: bool = False,
 ):
     """Create LLM node with dynamic tool_choice enforcement.
 
@@ -60,39 +67,46 @@ def create_llm_node(
     """
     bindable_tools = list(tools) if tools else []
     payload_handler = get_payload_handler(model)
-    tool_choice_required_value = payload_handler.get_required_tool_choice()
 
     async def llm_node(state: StateT):
         messages: list[AnyMessage] = state.messages
         agent_ai_messages = sum(1 for msg in messages if isinstance(msg, AIMessage))
         if agent_ai_messages >= llm_messages_limit:
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_MAX_ITERATIONS,
                 title=f"Maximum iterations of '{llm_messages_limit}' reached.",
                 detail="Verify the agent's trajectory or consider increasing the max iterations in the agent's settings.",
                 category=UiPathErrorCategory.USER,
             )
 
-        consecutive_thinking_messages = count_consecutive_thinking_messages(messages)
-
         static_schema_tools = _apply_tool_argument_properties(
             bindable_tools, state, input_schema
         )
-        base_llm = model.bind_tools(static_schema_tools)
-
-        if (
+        current_tool_choice: Literal["auto", "any"] = tool_choice
+        if current_tool_choice == "auto" and (
             not is_conversational
             and bindable_tools
-            and consecutive_thinking_messages >= thinking_messages_limit
+            and count_consecutive_thinking_messages(messages) >= thinking_messages_limit
         ):
-            llm = base_llm.bind(tool_choice=tool_choice_required_value)
-        else:
-            llm = base_llm
+            current_tool_choice = "any"
+
+        binding_kwargs = payload_handler.get_tool_binding_kwargs(
+            tools=static_schema_tools,
+            tool_choice=current_tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+            strict_mode=strict_mode,
+        )
+
+        llm = model.bind_tools(static_schema_tools, **binding_kwargs)
 
         response = await llm.ainvoke(messages)
         if not isinstance(response, AIMessage):
-            raise TypeError(
-                f"LLM returned {type(response).__name__} instead of AIMessage"
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
+                title=f"LLM returned {type(response).__name__} invalid response.",
+                detail="The language model returned an unexpected response type."
+                "If you are using a BYOM configuration, verify your model deployment.",
+                category=UiPathErrorCategory.SYSTEM,
             )
 
         payload_handler.check_stop_reason(response)

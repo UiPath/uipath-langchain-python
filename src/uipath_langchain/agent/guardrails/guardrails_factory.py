@@ -33,7 +33,9 @@ from uipath.core.guardrails import (
     WordRule,
 )
 from uipath.platform.guardrails import BaseGuardrail, GuardrailScope
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.guardrails.actions import (
     BlockAction,
     EscalateAction,
@@ -107,7 +109,7 @@ def _assert_value_not_none(value: str | None, operator: AgentWordOperator) -> st
 
 def _create_word_rule_func(
     operator: AgentWordOperator, value: str | None
-) -> Callable[[str], bool]:
+) -> Callable[[str | None], bool]:
     """Create a callable function from AgentWordOperator and value.
 
     Args:
@@ -120,38 +122,43 @@ def _create_word_rule_func(
     match operator:
         case AgentWordOperator.CONTAINS:
             val = _assert_value_not_none(value, operator)
-            return lambda s: val.lower() in s.lower()
+            return lambda s: val.lower() in (s or "").lower()
         case AgentWordOperator.DOES_NOT_CONTAIN:
             val = _assert_value_not_none(value, operator)
-            return lambda s: val.lower() not in s.lower()
+            return lambda s: val.lower() not in (s or "").lower()
         case AgentWordOperator.EQUALS:
             val = _assert_value_not_none(value, operator)
-            return lambda s: s == val
+            return lambda s: (s or "") == val
         case AgentWordOperator.DOES_NOT_EQUAL:
             val = _assert_value_not_none(value, operator)
-            return lambda s: s != val
+            return lambda s: (s or "") != val
         case AgentWordOperator.STARTS_WITH:
             val = _assert_value_not_none(value, operator)
-            return lambda s: s.startswith(val)
+            return lambda s: (s or "").startswith(val)
         case AgentWordOperator.DOES_NOT_START_WITH:
             val = _assert_value_not_none(value, operator)
-            return lambda s: not s.startswith(val)
+            return lambda s: not (s or "").startswith(val)
         case AgentWordOperator.ENDS_WITH:
             val = _assert_value_not_none(value, operator)
-            return lambda s: s.endswith(val)
+            return lambda s: (s or "").endswith(val)
         case AgentWordOperator.DOES_NOT_END_WITH:
             val = _assert_value_not_none(value, operator)
-            return lambda s: not s.endswith(val)
+            return lambda s: not (s or "").endswith(val)
         case AgentWordOperator.IS_EMPTY:
-            return lambda s: len(s) == 0
+            return lambda s: len(s or "") == 0
         case AgentWordOperator.IS_NOT_EMPTY:
-            return lambda s: len(s) > 0
+            return lambda s: len(s or "") > 0
         case AgentWordOperator.MATCHES_REGEX:
             val = _assert_value_not_none(value, operator)
             pattern = re.compile(val)
-            return lambda s: bool(pattern.match(s))
+            return lambda s: bool(pattern.match(s or ""))
         case _:
-            raise ValueError(f"Unsupported word operator: {operator}")
+            raise AgentStartupError(
+                code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+                title="Unsupported word operator",
+                detail=f"Unsupported word operator: {operator}. Please review your guardrail config.",
+                category=UiPathErrorCategory.USER,
+            )
 
 
 def _build_field_selector_description(field_selector: AgentFieldSelector) -> str:
@@ -217,7 +224,12 @@ def _build_rule_description(
     }:
         return f"{selector_description} {operator.value}"
 
-    raise ValueError(f"Unsupported word operator: {operator}")
+    raise AgentStartupError(
+        code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+        title="Unsupported word operator",
+        detail=f"Unsupported word operator: {operator}. Please review your guardrail config.",
+        category=UiPathErrorCategory.USER,
+    )
 
 
 def _create_number_rule_func(
@@ -246,7 +258,12 @@ def _create_number_rule_func(
         case AgentNumberOperator.LESS_THAN_OR_EQUAL:
             return lambda n: n <= value
         case _:
-            raise ValueError(f"Unsupported number operator: {operator}")
+            raise AgentStartupError(
+                code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+                title="Unsupported number operator",
+                detail=f"Unsupported number operator: {operator}. Please review your guardrail config.",
+                category=UiPathErrorCategory.USER,
+            )
 
 
 def _create_boolean_rule_func(
@@ -265,7 +282,12 @@ def _create_boolean_rule_func(
         case AgentBooleanOperator.EQUALS:
             return lambda b: b == value
         case _:
-            raise ValueError(f"Unsupported boolean operator: {operator}")
+            raise AgentStartupError(
+                code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+                title="Unsupported boolean operator",
+                detail=f"Unsupported boolean operator: {operator}. Please review your guardrail config.",
+                category=UiPathErrorCategory.USER,
+            )
 
 
 def _compute_field_sources_for_guardrail(
@@ -286,7 +308,7 @@ def _compute_field_sources_for_guardrail(
         - [INPUT, OUTPUT] if tool has both input and output schemas
 
     Raises:
-        ValueError: If match_names is not specified/empty, or if the specified tool
+        AgentStartupError: If match_names is not specified/empty, or if the specified tool
                    is not found in the provided tools list.
     """
     field_sources = []
@@ -313,11 +335,14 @@ def _compute_field_sources_for_guardrail(
     tool_name: str | None = (
         guardrail.selector.match_names[0] if guardrail.selector.match_names else None
     )
-    raise ValueError(
-        f"Guardrail '{guardrail.name}' requires a valid match_names with at least one tool. "
-        f"Tool '{tool_name}' not found in available tools."
+    raise AgentStartupError(
+        code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+        title="Invalid guardrail match_names",
+        detail=f"Guardrail '{guardrail.name}' requires a valid match_names with at least one tool. "
+        f"Tool '{tool_name}' not found in available tools. Please verify the tool name in your guardrail config."
         if tool_name
-        else "match_names is empty or not specified."
+        else f"Guardrail '{guardrail.name}' has match_names empty or not specified. Please add at least one tool name to match_names.",
+        category=UiPathErrorCategory.USER,
     )
 
 
@@ -346,8 +371,11 @@ def _convert_agent_field_selector_to_deterministic(
         # SpecificFieldsSelector is already compatible
         return agent_field_selector
     else:
-        raise ValueError(
-            f"Unsupported agent field selector type: {type(agent_field_selector)}"
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+            title="Unsupported field selector type",
+            detail=f"Unsupported agent field selector type: {type(agent_field_selector)}. Please review your guardrail config.",
+            category=UiPathErrorCategory.USER,
         )
 
 
@@ -415,7 +443,12 @@ def _convert_agent_rule_to_deterministic(
             ),
         )
 
-    raise ValueError(f"Unsupported agent rule type: {type(agent_rule)}")
+    raise AgentStartupError(
+        code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+        title="Unsupported rule type",
+        detail=f"Unsupported agent rule type: {type(agent_rule)}. Please review your guardrail config.",
+        category=UiPathErrorCategory.USER,
+    )
 
 
 def _convert_agent_custom_guardrail_to_deterministic(
@@ -482,10 +515,13 @@ def build_guardrails_with_actions(
             ]
 
             if non_tool_scopes:
-                raise ValueError(
-                    f"Deterministic guardrail '{converted_guardrail.name}' can only be used with TOOL scope. "
+                raise AgentStartupError(
+                    code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
+                    title="Invalid guardrail scope",
+                    detail=f"Deterministic guardrail '{converted_guardrail.name}' can only be used with TOOL scope. "
                     f"Found invalid scopes: {[scope.name for scope in non_tool_scopes]}. "
-                    f"Please configure this guardrail to use only TOOL scope."
+                    f"Please configure this guardrail to use only TOOL scope.",
+                    category=UiPathErrorCategory.USER,
                 )
         else:
             converted_guardrail = guardrail

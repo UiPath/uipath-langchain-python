@@ -1,5 +1,6 @@
 """Tests for escalation_tool.py metadata."""
 
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,18 +22,6 @@ from uipath_langchain.agent.tools.escalation_tool import (
     resolve_asset,
     resolve_recipient_value,
 )
-
-
-def _noop_task(fn):
-    """No-op replacement for @task so it works outside Pregel context."""
-    return fn
-
-
-@pytest.fixture(autouse=True)
-def _patch_lg_task():
-    """Patch @task decorator to no-op since unit tests run outside Pregel context."""
-    with patch("uipath_langchain.agent.tools.escalation_tool.task", _noop_task):
-        yield
 
 
 def _make_mock_task(**overrides):
@@ -123,6 +112,7 @@ class TestResolveRecipientValue:
     """Test the resolve_recipient_value function."""
 
     @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
     @patch("uipath_langchain.agent.tools.escalation_tool.resolve_asset")
     async def test_resolve_recipient_asset_user_email(self, mock_resolve_asset):
         """Test ASSET_USER_EMAIL type calls resolve_asset."""
@@ -137,11 +127,14 @@ class TestResolveRecipientValue:
         result = await resolve_recipient_value(recipient)
 
         assert result == TaskRecipient(
-            value="resolved@example.com", type=TaskRecipientType.EMAIL
+            value="resolved@example.com",
+            type=TaskRecipientType.EMAIL,
+            displayName="resolved@example.com",
         )
         mock_resolve_asset.assert_called_once_with("email_asset", "/Test/Folder")
 
     @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
     @patch("uipath_langchain.agent.tools.escalation_tool.resolve_asset")
     async def test_resolve_recipient_asset_group_name(self, mock_resolve_asset):
         """Test ASSET_GROUP_NAME type calls resolve_asset."""
@@ -156,7 +149,9 @@ class TestResolveRecipientValue:
         result = await resolve_recipient_value(recipient)
 
         assert result == TaskRecipient(
-            value="ResolvedGroup", type=TaskRecipientType.GROUP_NAME
+            value="ResolvedGroup",
+            type=TaskRecipientType.GROUP_NAME,
+            displayName="ResolvedGroup",
         )
         mock_resolve_asset.assert_called_once_with("group_asset", "/Test/Folder")
 
@@ -171,7 +166,9 @@ class TestResolveRecipientValue:
         result = await resolve_recipient_value(recipient)
 
         assert result == TaskRecipient(
-            value="direct@example.com", type=TaskRecipientType.EMAIL
+            value="direct@example.com",
+            type=TaskRecipientType.EMAIL,
+            displayName="direct@example.com",
         )
 
     @pytest.mark.asyncio
@@ -291,7 +288,7 @@ class TestEscalationToolMetadata:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_metadata_has_recipient(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
@@ -303,6 +300,7 @@ class TestEscalationToolMetadata:
         mock_result = MagicMock()
         mock_result.action = None
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource)
@@ -312,12 +310,14 @@ class TestEscalationToolMetadata:
 
         assert tool.metadata is not None
         assert tool.metadata["recipient"] == TaskRecipient(
-            value="user@example.com", type=TaskRecipientType.EMAIL
+            value="user@example.com",
+            type=TaskRecipientType.EMAIL,
+            displayName="user@example.com",
         )
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_metadata_recipient_none_when_no_recipients(
         self, mock_interrupt, mock_uipath_class, escalation_resource_no_recipient
     ):
@@ -329,6 +329,7 @@ class TestEscalationToolMetadata:
         mock_result = MagicMock()
         mock_result.action = None
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource_no_recipient)
@@ -341,7 +342,7 @@ class TestEscalationToolMetadata:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_with_string_task_title(
         self, mock_interrupt, mock_uipath_class
     ):
@@ -353,6 +354,7 @@ class TestEscalationToolMetadata:
         mock_result = MagicMock()
         mock_result.action = None
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         # Create resource with string task title
@@ -390,7 +392,7 @@ class TestEscalationToolMetadata:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_with_text_builder_task_title(
         self, mock_interrupt, mock_uipath_class
     ):
@@ -402,6 +404,7 @@ class TestEscalationToolMetadata:
         mock_result = MagicMock()
         mock_result.action = None
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         # Create resource with TEXT_BUILDER task title containing variable token
@@ -447,7 +450,7 @@ class TestEscalationToolMetadata:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_with_empty_task_title_defaults_to_escalation_task(
         self, mock_interrupt, mock_uipath_class
     ):
@@ -459,6 +462,7 @@ class TestEscalationToolMetadata:
         mock_result = MagicMock()
         mock_result.action = None
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         # Create resource with empty string task title
@@ -544,7 +548,7 @@ class TestEscalationToolOutputSchema:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_result_validation(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
@@ -559,6 +563,7 @@ class TestEscalationToolOutputSchema:
         mock_result.assigned_to_user = None
         mock_result.action = "approve"
         mock_result.data = {}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource)
@@ -568,12 +573,10 @@ class TestEscalationToolOutputSchema:
 
         assert isinstance(result, dict)
         assert result["outcome"] == "approve"
-        assert result["task_id"] == 123
-        assert result["assigned_to"] is None
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_extracts_action_from_result(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
@@ -585,6 +588,7 @@ class TestEscalationToolOutputSchema:
         mock_result = MagicMock()
         mock_result.action = "approve"
         mock_result.data = {"approved": True}
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource)
@@ -596,12 +600,62 @@ class TestEscalationToolOutputSchema:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
+    async def test_escalation_tool_raises_when_task_is_deleted(
+        self, mock_interrupt, mock_uipath_class, escalation_resource
+    ):
+        """Test that escalation tool raises AgentRuntimeError when task is deleted."""
+        from uipath_langchain.agent.exceptions import AgentRuntimeError
+
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.is_deleted = True
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        with pytest.raises(AgentRuntimeError):
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
+    async def test_escalation_tool_dict_result_without_is_deleted_defaults_to_false(
+        self, mock_interrupt, mock_uipath_class, escalation_resource
+    ):
+        """Test that a dict result without is_deleted is accepted and defaults to False."""
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
+        mock_uipath_class.return_value = mock_client
+
+        # Return a plain dict without is_deleted — exercises the TypeAdapter path
+        mock_interrupt.return_value = {
+            "action": "approve",
+            "data": {"approved": True, "reason": "looks good"},
+        }
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        assert result["outcome"] == "approve"
+        assert result["output"] == {"approved": True, "reason": "looks good"}
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_with_outcome_mapping_end(
         self, mock_interrupt, mock_uipath_class
     ):
         """Test escalation tool with outcome mapping that ends agent."""
-        from uipath_langchain.agent.exceptions import AgentTerminationException
+        from uipath_langchain.agent.exceptions import AgentRuntimeError
 
         mock_client = MagicMock()
         mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
@@ -640,8 +694,8 @@ class TestEscalationToolOutputSchema:
         tool = create_escalation_tool(resource)
         call = ToolCall(args={}, id="test-call", name=tool.name)
 
-        # Invoke through the wrapper - should raise AgentTerminationException
-        with pytest.raises(AgentTerminationException):
+        # Invoke through the wrapper - should raise AgentRuntimeError
+        with pytest.raises(AgentRuntimeError):
             await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert mock_interrupt.called
@@ -702,54 +756,48 @@ class TestEscalationToolTaskInfo:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
-    async def test_wrapper_returns_task_id_and_assigned_to(
-        self, mock_interrupt, mock_uipath_class, escalation_resource
-    ):
+    async def test_wrapper_returns_task_id_and_assigned_to(self, escalation_resource):
         """Test that wrapper result includes task_id and assigned_to from Task."""
-        mock_client = MagicMock()
-        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
-        mock_uipath_class.return_value = mock_client
-
-        mock_result = MagicMock()
-        mock_result.id = 12345
-        mock_result.key = None
-        mock_result.assigned_to_user = {"emailAddress": "user@example.com"}
-        mock_result.action = "approve"
-        mock_result.data = {"reason": "looks good"}
-        mock_interrupt.return_value = mock_result
-
         tool = create_escalation_tool(escalation_resource)
+
+        # Mock ainvoke on the class to test the wrapper in isolation
+        mock_ainvoke = AsyncMock(
+            return_value={
+                "action": "continue",
+                "output": {"reason": "looks good"},
+                "outcome": "approve",
+                "task_id": 12345,
+                "assigned_to": "user@example.com",
+            }
+        )
+
         call = ToolCall(args={}, id="test-call", name=tool.name)
-        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+        with patch.object(type(tool), "ainvoke", mock_ainvoke):
+            result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert result["task_id"] == 12345
         assert result["assigned_to"] == "user@example.com"
         assert result["outcome"] == "approve"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
-    async def test_wrapper_handles_missing_assigned_to_user(
-        self, mock_interrupt, mock_uipath_class, escalation_resource
-    ):
+    async def test_wrapper_handles_missing_assigned_to_user(self, escalation_resource):
         """Test that wrapper handles None assigned_to_user gracefully."""
-        mock_client = MagicMock()
-        mock_client.tasks.create_async = AsyncMock(return_value=_make_mock_task())
-        mock_uipath_class.return_value = mock_client
-
-        mock_result = MagicMock()
-        mock_result.id = 99999
-        mock_result.key = None
-        mock_result.assigned_to_user = None
-        mock_result.action = "reject"
-        mock_result.data = {}
-        mock_interrupt.return_value = mock_result
-
         tool = create_escalation_tool(escalation_resource)
+
+        # Mock ainvoke on the class to test the wrapper in isolation
+        mock_ainvoke = AsyncMock(
+            return_value={
+                "action": "continue",
+                "output": {},
+                "outcome": "reject",
+                "task_id": 99999,
+                "assigned_to": None,
+            }
+        )
+
         call = ToolCall(args={}, id="test-call", name=tool.name)
-        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+        with patch.object(type(tool), "ainvoke", mock_ainvoke):
+            result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert result["task_id"] == 99999
         assert result["assigned_to"] is None
@@ -782,7 +830,7 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.escalation_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     async def test_creates_task_then_interrupts_with_wait_escalation(
         self, mock_interrupt, mock_uipath_class, escalation_resource
     ):
@@ -799,6 +847,7 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
         mock_result.action = "approve"
         mock_result.data = {}
         mock_result.assigned_to_user = None
+        mock_result.is_deleted = False
         mock_interrupt.return_value = mock_result
 
         tool = create_escalation_tool(escalation_resource)
@@ -812,6 +861,34 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
         interrupt_arg = mock_interrupt.call_args[0][0]
         assert isinstance(interrupt_arg, WaitEscalation)
         assert interrupt_arg.action == task
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
+    async def test_creates_task_with_execution_folder_path(
+        self, mock_interrupt, mock_uipath_class, escalation_resource
+    ):
+        """Test that tasks.create_async receives app_folder_path from the execution environment."""
+        task = _make_mock_task(id=555)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.id = 555
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.assigned_to_user = None
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(escalation_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        create_call_kwargs = mock_client.tasks.create_async.call_args[1]
+        assert create_call_kwargs["app_folder_path"] == "/Test/Folder"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")

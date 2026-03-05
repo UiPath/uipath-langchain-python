@@ -3,6 +3,12 @@
 from typing import Any, Hashable, TypeVar
 
 from pydantic import BaseModel
+from uipath.runtime.errors import UiPathErrorCategory
+
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 
 K = TypeVar("K", bound=Hashable)
 
@@ -42,7 +48,7 @@ def merge_objects(left: Any, right: Any) -> Any:
         New Pydantic model instance with merged values
 
     Raises:
-        TypeError: If left is not a Pydantic BaseModel or right is not a BaseModel or dict
+        AgentRuntimeError: If left is not a Pydantic BaseModel or right is not a BaseModel or dict
     """
     if not right:
         return left
@@ -52,10 +58,20 @@ def merge_objects(left: Any, right: Any) -> Any:
 
     # validate input types
     if not isinstance(left, BaseModel):
-        raise TypeError("Left object must be a Pydantic BaseModel")
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.STATE_ERROR,
+            title="Left object must be a Pydantic BaseModel.",
+            detail=f"Got {type(left).__name__} instead of BaseModel during state merge.",
+            category=UiPathErrorCategory.SYSTEM,
+        )
 
     if not isinstance(right, (BaseModel, dict)):
-        raise TypeError("Right object must be a Pydantic BaseModel or dict")
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.STATE_ERROR,
+            title="Right object must be a Pydantic BaseModel or dict.",
+            detail=f"Got {type(right).__name__} instead of BaseModel or dict during state merge.",
+            category=UiPathErrorCategory.SYSTEM,
+        )
 
     model_fields = type(left).model_fields
     merged_values = {}

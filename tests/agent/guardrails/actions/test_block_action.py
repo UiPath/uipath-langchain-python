@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from uipath.platform.guardrails import GuardrailScope
 
-from uipath_langchain.agent.exceptions import AgentTerminationException
+from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.agent.guardrails.actions.block_action import BlockAction
 from uipath_langchain.agent.guardrails.types import (
     ExecutionStage,
@@ -69,8 +69,11 @@ class TestBlockAction:
 
         assert node_name == expected_node_name
 
-        with pytest.raises(AgentTerminationException) as excinfo:
+        with pytest.raises(AgentRuntimeError) as excinfo:
             await node(AgentGuardrailsGraphState(messages=[]))
 
         # The exception string is the provided reason
-        assert str(excinfo.value) == "Sensitive data detected"
+        assert (
+            str(excinfo.value)
+            == "Execution was blocked by guardrail [My Guardrail v1], with reason: Sensitive data detected"
+        )

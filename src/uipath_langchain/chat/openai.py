@@ -1,13 +1,16 @@
 import logging
 import os
 from typing import Optional
+from urllib.parse import quote
 
 import httpx
 from langchain_openai import AzureChatOpenAI
 from pydantic import PrivateAttr
-from uipath._utils import resource_override
-from uipath._utils._ssl_context import get_httpx_client_kwargs
-from uipath.utils import EndpointManager
+from uipath.platform.common import (
+    EndpointManager,
+    get_httpx_client_kwargs,
+    resource_override,
+)
 
 from .supported_models import OpenAIModels
 from .types import APIFlavor, LLMProvider
@@ -79,7 +82,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
     )
     def __init__(
         self,
-        use_responses_api: bool,
+        use_responses_api: bool = True,
         token: Optional[str] = None,
         model_name: str = OpenAIModels.gpt_4_1_mini_2025_04_14,
         api_version: str = "2024-12-01-preview",
@@ -116,6 +119,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         self._extra_headers = extra_headers or {}
 
         client_kwargs = get_httpx_client_kwargs()
+        client_kwargs["timeout"] = 300.0
         verify = client_kwargs.get("verify", True)
 
         api_flavor = (
@@ -159,7 +163,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         if job_key := os.getenv("UIPATH_JOB_KEY"):
             headers["X-UiPath-JobKey"] = job_key
         if process_key := os.getenv("UIPATH_PROCESS_KEY"):
-            headers["X-UiPath-ProcessKey"] = process_key
+            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
 
         # Allow extra_headers to override defaults
         headers.update(self._extra_headers)

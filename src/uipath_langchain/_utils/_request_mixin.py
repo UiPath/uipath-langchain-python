@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from typing import Any, AsyncIterator, Dict, Iterator, Mapping
+from urllib.parse import quote
 
 import httpx
 import openai
@@ -79,7 +80,7 @@ class UiPathRequestMixin(BaseModel):
     default_headers: Mapping[str, str] | None = {
         "X-UiPath-Streaming-Enabled": "false",
         "X-UiPath-JobKey": os.getenv("UIPATH_JOB_KEY", ""),
-        "X-UiPath-ProcessKey": os.getenv("UIPATH_PROCESS_KEY", ""),
+        "X-UiPath-ProcessKey": quote(os.getenv("UIPATH_PROCESS_KEY", ""), safe=""),
     }
     model_name: str | None = Field(
         default_factory=lambda: os.getenv(

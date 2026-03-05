@@ -6,11 +6,12 @@ from langchain_core.tools import BaseTool
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
+from uipath.platform.context_grounding import DeepRagContent
 from uipath.platform.guardrails import BaseGuardrail
 
-from uipath_langchain.chat.types import UiPathPassthroughChatModel
-
+from ...runtime._citations import cas_deep_rag_citation_wrapper
 from ..guardrails.actions import GuardrailAction
+from ..tools.structured_tool_with_output_type import StructuredToolWithOutputType
 from .guardrails.guardrails_subgraph import (
     create_agent_init_guardrails_subgraph,
     create_agent_terminate_guardrails_subgraph,
@@ -36,7 +37,6 @@ from .types import (
     AgentGraphNode,
     AgentGraphState,
     AgentResources,
-    AgentSettings,
 )
 from .utils import create_state_with_input
 
@@ -67,17 +67,6 @@ def create_agent(
     """
     from ..tools import create_tool_node
 
-    if not isinstance(model, UiPathPassthroughChatModel):
-        raise TypeError(
-            f"Model {type(model).__name__} does not implement UiPathPassthroughChatModel. "
-            "The model must have llm_provider and api_flavor properties."
-        )
-
-    agent_settings = AgentSettings(
-        llm_provider=model.llm_provider,
-        api_flavor=model.api_flavor,
-    )
-
     if config is None:
         config = AgentGraphConfig()
 
@@ -91,11 +80,20 @@ def create_agent(
         messages,
         input_schema,
         config.is_conversational,
-        agent_settings,
         resources_for_init=resources,
     )
+    tool_nodes = create_tool_node(
+        agent_tools, handle_tool_errors=config.is_conversational
+    )
 
-    tool_nodes = create_tool_node(agent_tools)
+    # for conversational agents we transform deeprag's citation format into cas's
+    if config.is_conversational:
+        for node in tool_nodes.values():
+            if isinstance(node.tool, StructuredToolWithOutputType) and issubclass(
+                node.tool.output_type, DeepRagContent
+            ):
+                node.awrapper = cas_deep_rag_citation_wrapper
+
     tool_nodes_with_guardrails = create_tools_guardrails_subgraph(
         tool_nodes, guardrails, input_schema=input_schema
     )
@@ -134,6 +132,9 @@ def create_agent(
         is_conversational=config.is_conversational,
         llm_messages_limit=config.llm_messages_limit,
         thinking_messages_limit=config.thinking_messages_limit,
+        tool_choice=config.tool_choice,
+        parallel_tool_calls=config.parallel_tool_calls,
+        strict_mode=config.strict_mode,
     )
     llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
         (AgentGraphNode.LLM, llm_node), guardrails, input_schema=input_schema

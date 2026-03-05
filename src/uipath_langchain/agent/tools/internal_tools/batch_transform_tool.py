@@ -6,15 +6,17 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from langgraph.types import interrupt
 from uipath.agent.models.agent import (
     AgentInternalBatchTransformToolProperties,
     AgentInternalToolResourceConfig,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateBatchTransform
-from uipath.platform.common.interrupt_models import WaitEphemeralIndex
+from uipath.platform.common import (
+    CreateBatchTransform,
+    UiPathConfig,
+    WaitEphemeralIndex,
+)
 from uipath.platform.context_grounding import (
     BatchTransformOutputColumn,
     EphemeralIndexUsage,
@@ -22,10 +24,17 @@ from uipath.platform.context_grounding import (
 from uipath.platform.context_grounding.context_grounding_index import (
     ContextGroundingIndex,
 )
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.durable_interrupt import (
+    SkipInterruptValue,
+    durable_interrupt,
+)
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
+    BATCH_TRANSFORM_OUTPUT_SCHEMA,
     add_query_field_to_schema,
 )
 from uipath_langchain.agent.tools.static_args import handle_static_args
@@ -36,13 +45,27 @@ from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
 
+class ReadyEphemeralIndex(SkipInterruptValue):
+    """An ephemeral index that is already ready (no wait needed)."""
+
+    def __init__(self, index: ContextGroundingIndex):
+        self.index = index
+
+    @property
+    def resume_value(self) -> Any:
+        return self.index.model_dump()
+
+
 def create_batch_transform_tool(
     resource: AgentInternalToolResourceConfig, llm: BaseChatModel
 ) -> StructuredTool:
     """Create a Batch Transform internal tool from resource configuration."""
     if not isinstance(resource.properties, AgentInternalBatchTransformToolProperties):
-        raise ValueError(
-            f"Expected AgentInternalBatchTransformToolProperties, got {type(resource.properties)}"
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Invalid Batch Transform tool properties",
+            detail=f"Expected AgentInternalBatchTransformToolProperties, got {type(resource.properties)}.",
+            category=UiPathErrorCategory.SYSTEM,
         )
 
     tool_name = sanitize_tool_name(resource.name)
@@ -83,15 +106,8 @@ def create_batch_transform_tool(
 
     # Create input model from modified schema
     input_model = create_model(input_schema)
-    output_model = create_model(resource.output_schema)
+    output_model = create_model(BATCH_TRANSFORM_OUTPUT_SCHEMA)
 
-    @mockable(
-        name=resource.name,
-        description=resource.description,
-        input_schema=input_model.model_json_schema() if input_model else None,
-        output_schema=output_model.model_json_schema(),
-        example_calls=[],  # Examples cannot be provided for internal tools
-    )
     async def batch_transform_tool_fn(**kwargs: Any) -> dict[str, Any]:
         query = kwargs.get("query") if not is_query_static else static_query
         if not query:
@@ -110,29 +126,69 @@ def create_batch_transform_tool(
 
         destination_path = kwargs.get("destination_path", "output.csv")
 
-        uipath = UiPath()
-        ephemeral_index = await uipath.context_grounding.create_ephemeral_index_async(
-            usage=EphemeralIndexUsage.BATCH_RAG,
-            attachments=[attachment_id],
+        @mockable(
+            name=resource.name,
+            description=resource.description,
+            input_schema=input_model.model_json_schema() if input_model else None,
+            output_schema=output_model.model_json_schema(),
+            example_calls=[],  # Examples cannot be provided for internal tools
         )
+        async def invoke_batch_transform(**_tool_kwargs: Any):
+            @durable_interrupt
+            async def create_ephemeral_index():
+                uipath = UiPath()
+                ephemeral_index = (
+                    await uipath.context_grounding.create_ephemeral_index_async(
+                        usage=EphemeralIndexUsage.BATCH_RAG,
+                        attachments=[attachment_id],
+                    )
+                )
+                if ephemeral_index.in_progress_ingestion():
+                    return WaitEphemeralIndex(index=ephemeral_index)
+                return ReadyEphemeralIndex(index=ephemeral_index)
 
-        if ephemeral_index.in_progress_ingestion():
-            ephemeral_index_dict = interrupt(WaitEphemeralIndex(index=ephemeral_index))
-            ephemeral_index = ContextGroundingIndex(**ephemeral_index_dict)
+            index_result = await create_ephemeral_index()
+            if isinstance(index_result, dict):
+                ephemeral_index = ContextGroundingIndex(**index_result)
+            else:
+                ephemeral_index = index_result
 
-        return interrupt(
-            CreateBatchTransform(
-                name=f"task-{uuid.uuid4()}",
-                index_name=ephemeral_index.name,
-                index_id=ephemeral_index.id,
-                prompt=query,
-                output_columns=batch_transform_output_columns,
-                storage_bucket_folder_path_prefix=static_folder_path_prefix,
-                enable_web_search_grounding=static_web_search,
-                destination_path=destination_path,
-                is_ephemeral_index=True,
-            )
-        )
+            @durable_interrupt
+            async def create_batch_transform():
+                return CreateBatchTransform(
+                    name=f"task-{uuid.uuid4()}",
+                    index_name=ephemeral_index.name,
+                    index_id=ephemeral_index.id,
+                    prompt=query,
+                    output_columns=batch_transform_output_columns,
+                    storage_bucket_folder_path_prefix=static_folder_path_prefix,
+                    enable_web_search_grounding=static_web_search,
+                    destination_path=destination_path,
+                    is_ephemeral_index=True,
+                )
+
+            await create_batch_transform()
+
+            # create job attachment with output
+            async def upload_result_attachment():
+                uipath = UiPath()
+                return await uipath.jobs.create_attachment_async(
+                    name=destination_path,
+                    source_path=destination_path,
+                    job_key=UiPathConfig.job_key,
+                )
+
+            result_attachment_id = await upload_result_attachment()
+
+            return {
+                "ID": str(result_attachment_id),
+                "FullName": destination_path,
+                "MimeType": "text/csv",
+            }
+
+        result_attachment = await invoke_batch_transform(**kwargs)
+
+        return {"result": result_attachment}
 
     # Import here to avoid circular dependency
     from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
@@ -155,10 +211,17 @@ def create_batch_transform_tool(
         output_type=output_model,
         argument_properties=resource.argument_properties,
         metadata={
-            "tool_type": resource.type.lower(),
+            "tool_type": "context_grounding",
             "display_name": tool_name,
             "args_schema": input_model,
             "output_schema": output_model,
+            "retrieval_mode": "BatchTransform",
+            "output_columns": [
+                {"name": col.name, "description": col.description}
+                for col in batch_transform_output_columns
+            ],
+            "web_search_grounding": static_web_search,
+            **({"static_query": static_query} if is_query_static else {}),
         },
     )
     tool.set_tool_wrappers(awrapper=batch_transform_tool_wrapper)

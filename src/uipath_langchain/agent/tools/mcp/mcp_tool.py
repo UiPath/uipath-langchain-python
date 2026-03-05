@@ -1,18 +1,12 @@
-import asyncio
 import logging
-import os
-from collections import Counter, defaultdict
 from contextlib import AsyncExitStack, asynccontextmanager
-from itertools import chain
 from typing import Any, AsyncGenerator
 
-import httpx
 from langchain_core.tools import BaseTool
-from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
-    LowCodeAgentDefinition,
+    DynamicToolsMode,
 )
 from uipath.eval.mocks import mockable
 
@@ -21,92 +15,34 @@ from uipath_langchain.agent.tools.base_uipath_structured_tool import (
 )
 
 from ..utils import sanitize_tool_name
-from .mcp_client import McpClient
+from .mcp_client import McpClient, SessionInfoFactory
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def _deduplicate_tools(tools: list[BaseTool]) -> list[BaseTool]:
-    """Deduplicate tools by appending numeric suffix to duplicate names."""
-    counts = Counter(tool.name for tool in tools)
-    seen: defaultdict[str, int] = defaultdict(int)
-
-    for tool in tools:
-        if counts[tool.name] > 1:
-            seen[tool.name] += 1
-            tool.name = f"{tool.name}_{seen[tool.name]}"
-
-    return tools
-
-
-def _filter_tools(tools: list[BaseTool], cfg: AgentMcpResourceConfig) -> list[BaseTool]:
-    """Filter tools to only include those in available_tools."""
-    allowed = {t.name for t in cfg.available_tools}
-    return [t for t in tools if t.name in allowed]
-
-
 @asynccontextmanager
-async def create_mcp_tools(
-    config: AgentMcpResourceConfig | list[AgentMcpResourceConfig],
-    max_concurrency: int = 5,
+async def open_mcp_tools(
+    config: list[AgentMcpResourceConfig],
 ) -> AsyncGenerator[list[BaseTool], None]:
-    """Connect to UiPath MCP server(s) and yield LangChain-compatible tools."""
-    if not (base_url := os.getenv("UIPATH_URL")):
-        raise ValueError("UIPATH_URL environment variable is not set")
-    if not (access_token := os.getenv("UIPATH_ACCESS_TOKEN")):
-        raise ValueError("UIPATH_ACCESS_TOKEN environment variable is not set")
+    """Connect to UiPath MCP server(s) via McpClient and yield LangChain-compatible tools.
 
-    configs = config if isinstance(config, list) else [config]
-    enabled = [c for c in configs if c.is_enabled is not False]
+    Wraps create_mcp_tools_and_clients() with automatic client lifecycle management.
+    Tools are lazily initialized on first call via the UiPath SDK.
 
-    if not enabled:
-        yield []
-        return
+    Args:
+        config: List of MCP resource configurations.
 
-    base_url = base_url.rstrip("/")
-    semaphore = asyncio.Semaphore(max_concurrency)
-
-    default_client_kwargs = get_httpx_client_kwargs()
-    client_kwargs = {
-        **default_client_kwargs,
-        "headers": {"Authorization": f"Bearer {access_token}"},
-        "timeout": httpx.Timeout(60),
-    }
-
-    # Lazy import to improve cold start time
-    from langchain_mcp_adapters.tools import load_mcp_tools
-    from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
-
-    async def init_session(
-        session: ClientSession, cfg: AgentMcpResourceConfig
-    ) -> list[BaseTool]:
-        async with semaphore:
-            await session.initialize()
-            tools = await load_mcp_tools(session)
-            for tool in tools:
-                tool.metadata = {"tool_type": "mcp", "display_name": tool.name}
-            return _filter_tools(tools, cfg)
-
-    async def create_session(
-        stack: AsyncExitStack, cfg: AgentMcpResourceConfig
-    ) -> ClientSession:
-        url = f"{base_url}/agenthub_/mcp/{cfg.folder_path}/{cfg.slug}"
-        http_client = await stack.enter_async_context(
-            httpx.AsyncClient(**client_kwargs)
-        )
-        read, write, _ = await stack.enter_async_context(
-            streamable_http_client(url=url, http_client=http_client)
-        )
-        return await stack.enter_async_context(ClientSession(read, write))
-
+    Yields:
+        List of BaseTool instances for all enabled MCP resources.
+    """
     async with AsyncExitStack() as stack:
-        sessions = [(await create_session(stack, cfg), cfg) for cfg in enabled]
-        results = await asyncio.gather(*[init_session(s, cfg) for s, cfg in sessions])
-        yield _deduplicate_tools(list(chain.from_iterable(results)))
+        tools, clients = await create_mcp_tools_and_clients(config)
+        for client in clients:
+            stack.push_async_callback(client.dispose)
+        yield tools
 
 
-async def create_mcp_tools_from_metadata_for_mcp_server(
+async def create_mcp_tools(
     config: AgentMcpResourceConfig,
     mcpClient: McpClient,
 ) -> list[BaseTool]:
@@ -119,10 +55,62 @@ async def create_mcp_tools_from_metadata_for_mcp_server(
     Returns:
         List of BaseTool instances, one for each tool in the config.
         Returns empty list if config.is_enabled is False.
+
+    Behavior depends on config.dynamic_tools:
+        - none: Uses tool schemas from config.available_tools (default).
+        - schema: Lists tools from the MCP server via mcpClient, but only
+          includes tools whose names appear in config.available_tools.
+        - all: Lists all tools from the MCP server via mcpClient, ignoring
+          config.available_tools entirely.
     """
 
     if config.is_enabled is False:
         return []
+
+    dynamic_tools = config.dynamic_tools
+    logger.info(
+        f"Loading MCP tools for server '{config.slug}' "
+        f"(dynamic_tools={dynamic_tools.value})"
+    )
+
+    if dynamic_tools in (DynamicToolsMode.SCHEMA, DynamicToolsMode.ALL):
+        logger.info(f"Fetching tools from MCP server '{config.slug}' via list_tools")
+        result = await mcpClient.list_tools()
+        server_tools = result.tools
+        logger.info(
+            f"MCP server '{config.slug}' returned {len(server_tools)} tools: "
+            f"{[t.name for t in server_tools]}"
+        )
+
+        if dynamic_tools == DynamicToolsMode.SCHEMA:
+            allowed_names = {t.name for t in config.available_tools}
+            server_tool_names = {t.name for t in server_tools}
+            missing = allowed_names - server_tool_names
+            for name in missing:
+                logger.warning(
+                    f"Tool '{name}' is in availableTools for server "
+                    f"'{config.slug}' but was not found on the MCP server"
+                )
+            server_tools = [t for t in server_tools if t.name in allowed_names]
+            logger.info(
+                f"Filtered to {len(server_tools)} tools matching availableTools"
+            )
+
+        mcp_tools = [
+            AgentMcpTool(
+                name=tool.name,
+                description=tool.description or "",
+                input_schema=tool.inputSchema,
+                output_schema=tool.outputSchema,
+            )
+            for tool in server_tools
+        ]
+    else:
+        mcp_tools = config.available_tools
+        logger.info(
+            f"Using {len(mcp_tools)} tools from resource config for "
+            f"server '{config.slug}'"
+        )
 
     return [
         BaseUiPathStructuredTool(
@@ -137,7 +125,7 @@ async def create_mcp_tools_from_metadata_for_mcp_server(
                 "slug": config.slug,
             },
         )
-        for mcp_tool in config.available_tools
+        for mcp_tool in mcp_tools
     ]
 
 
@@ -162,24 +150,40 @@ def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
         """
         result = await mcpClient.call_tool(mcp_tool.name, arguments=kwargs)
         logger.info(f"Tool call successful for {mcp_tool.name}")
-        return result.content if hasattr(result, "content") else result
+        content = result.content if hasattr(result, "content") else result
+        if isinstance(content, list):
+            return [
+                item.model_dump(exclude_none=True)
+                if hasattr(item, "model_dump")
+                else item
+                for item in content
+            ]
+        if hasattr(content, "model_dump"):
+            return content.model_dump(exclude_none=True)
+        return content
 
     return tool_fn
 
 
-async def create_mcp_tools_from_agent(
-    agent: LowCodeAgentDefinition,
+async def create_mcp_tools_and_clients(
+    resources: list[AgentMcpResourceConfig],
+    session_info_factory: SessionInfoFactory | None = None,
+    terminate_on_close: bool = True,
 ) -> tuple[list[BaseTool], list[McpClient]]:
-    """Create MCP tools from a LowCodeAgentDefinition.
+    """Create MCP tools from a list of MCP resource configurations.
 
-    Iterates over all MCP resources in the agent definition and creates tools
-    for each enabled MCP server. Each MCP server gets its own McpClient instance.
+    Iterates over all MCP resources and creates tools for each enabled MCP
+    server. Each MCP server gets its own McpClient instance.
 
     The MCP server URL is loaded lazily on first tool call via the UiPath SDK,
     using environment variables (UIPATH_URL, UIPATH_ACCESS_TOKEN).
 
     Args:
-        agent: The agent definition containing MCP resources.
+        resources: List of MCP resource configurations.
+        session_info_factory: Factory for creating SessionInfo instances.
+            Defaults to the base ``SessionInfoFactory``.  Pass
+            ``SessionInfoDebugStateFactory()`` for playground mode.
+        terminate_on_close: Whether to terminate the MCP session on close.
 
     Returns:
         A tuple of (tools, mcp_clients) where:
@@ -193,23 +197,21 @@ async def create_mcp_tools_from_agent(
     tools: list[BaseTool] = []
     clients: list[McpClient] = []
 
-    for resource in agent.resources:
-        if not isinstance(resource, AgentMcpResourceConfig):
-            continue
-
+    for resource in resources:
         if resource.is_enabled is False:
             logger.info(f"Skipping disabled MCP resource '{resource.name}'")
             continue
 
         logger.info(f"Creating MCP tools for resource '{resource.name}'")
 
-        # McpClient will lazily load the MCP server URL on first tool call
-        mcpClient = McpClient(config=resource)
+        mcpClient = McpClient(
+            config=resource,
+            session_info_factory=session_info_factory,
+            terminate_on_close=terminate_on_close,
+        )
         clients.append(mcpClient)
 
-        resource_tools = await create_mcp_tools_from_metadata_for_mcp_server(
-            resource, mcpClient
-        )
+        resource_tools = await create_mcp_tools(resource, mcpClient)
         tools.extend(resource_tools)
         logger.info(
             f"Created {len(resource_tools)} tools for MCP resource '{resource.name}'"

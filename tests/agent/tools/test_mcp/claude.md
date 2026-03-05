@@ -328,7 +328,7 @@ Note: All tests use `patch("uipath_langchain.agent.tools.mcp.mcp_tool.UiPath")` 
 **Assertions:**
 ```python
 with patch(..., return_value=mock_uipath_class):
-    tools, clients = await create_mcp_tools_from_agent(agent)
+    tools, clients = await create_mcp_tools_and_clients(agent)
 assert len(tools) == 3  # 2 from server 1 + 1 from server 2
 ```
 
@@ -339,7 +339,7 @@ assert len(tools) == 3  # 2 from server 1 + 1 from server 2
 **Assertions:**
 ```python
 with patch(..., return_value=mock_uipath_class):
-    tools, clients = await create_mcp_tools_from_agent(agent)
+    tools, clients = await create_mcp_tools_and_clients(agent)
 assert len(clients) == 2  # One per MCP server
 ```
 
@@ -350,7 +350,7 @@ assert len(clients) == 2  # One per MCP server
 **Assertions:**
 ```python
 with patch(..., return_value=mock_uipath_class):
-    tools, clients = await create_mcp_tools_from_agent(agent)
+    tools, clients = await create_mcp_tools_and_clients(agent)
 assert len(tools) == 1  # Only enabled server's tool
 assert tools[0].name == "enabled_tool"
 ```
@@ -362,7 +362,7 @@ assert tools[0].name == "enabled_tool"
 **Assertions:**
 ```python
 with patch(..., return_value=mock_uipath_class):
-    tools, clients = await create_mcp_tools_from_agent(agent)
+    tools, clients = await create_mcp_tools_and_clients(agent)
 assert tools == []
 assert clients == []
 ```
@@ -375,7 +375,7 @@ assert clients == []
 ```python
 with patch(..., return_value=mock_sdk_no_url):
     with pytest.raises(ValueError, match="has no URL configured"):
-        await create_mcp_tools_from_agent(agent)
+        await create_mcp_tools_and_clients(agent)
 ```
 
 #### test_tools_have_correct_metadata
@@ -548,7 +548,7 @@ assert tool_call_count[0] == 3
 assert initialize_count[0] == 1  # Session reused
 ```
 
-### Testing create_mcp_tools_from_agent
+### Testing create_mcp_tools_and_clients
 
 The function uses lazy SDK initialization (`sdk = UiPath()`), so we patch the `UiPath` class:
 
@@ -570,7 +570,7 @@ async def test_example(self, agent_fixture, mock_uipath_class):
         "uipath_langchain.agent.tools.mcp.mcp_tool.UiPath",
         return_value=mock_uipath_class,
     ):
-        tools, clients = await create_mcp_tools_from_agent(agent_fixture)
+        tools, clients = await create_mcp_tools_and_clients(agent_fixture)
 ```
 
 ## Debugging Failed Tests

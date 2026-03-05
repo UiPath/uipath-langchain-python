@@ -19,7 +19,7 @@ in the appropriate component modules instead.
 import json
 import os
 import tempfile
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -27,6 +27,7 @@ from uipath.core.guardrails import (
     GuardrailValidationResult,
     GuardrailValidationResultType,
 )
+from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 from uipath.runtime import (
     UiPathExecuteOptions,
     UiPathRuntimeContext,
@@ -1089,8 +1090,6 @@ graph = create_agent(
                         )
 
                 # Mock the escalation interrupt to simulate human approval
-                from unittest.mock import MagicMock
-
                 escalation_was_triggered = False
 
                 def mock_interrupt(value):
@@ -1127,6 +1126,30 @@ graph = create_agent(
                     # For other interrupts, return the value as-is
                     return value
 
+                # Mock UiPath client so _create_task_node doesn't make real HTTP calls
+                mock_created_task = MagicMock()
+                mock_created_task.id = 999
+                mock_created_task.key = "mock-task-key"
+                mock_created_task.title = "Agents Guardrail Task"
+                mock_created_task.model_dump.return_value = {
+                    "id": 999,
+                    "key": "mock-task-key",
+                    "title": "Agents Guardrail Task",
+                }
+
+                mock_tasks_service = AsyncMock()
+                mock_tasks_service.create_async.return_value = mock_created_task
+
+                mock_uipath_instance = MagicMock()
+                mock_uipath_instance.tasks = mock_tasks_service
+
+                mock_resolve = AsyncMock(
+                    return_value=TaskRecipient(
+                        value="test@example.com",
+                        type=TaskRecipientType.EMAIL,
+                    )
+                )
+
                 with (
                     patch(
                         "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
@@ -1139,6 +1162,14 @@ graph = create_agent(
                     patch(
                         "uipath_langchain.agent.guardrails.actions.escalate_action.interrupt",
                         side_effect=mock_interrupt,
+                    ),
+                    patch(
+                        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPath",
+                        return_value=mock_uipath_instance,
+                    ),
+                    patch(
+                        "uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value",
+                        mock_resolve,
                     ),
                 ):
                     # Create runtime context
@@ -1284,8 +1315,6 @@ graph = create_agent(
                         )
 
                 # Mock the escalation interrupt to simulate human rejection
-                from unittest.mock import MagicMock
-
                 escalation_was_triggered = False
 
                 def mock_interrupt(value):
@@ -1307,6 +1336,30 @@ graph = create_agent(
                     # For other interrupts, return the value as-is
                     return value
 
+                # Mock UiPath client so _create_task_node doesn't make real HTTP calls
+                mock_created_task = MagicMock()
+                mock_created_task.id = 999
+                mock_created_task.key = "mock-task-key"
+                mock_created_task.title = "Agents Guardrail Task"
+                mock_created_task.model_dump.return_value = {
+                    "id": 999,
+                    "key": "mock-task-key",
+                    "title": "Agents Guardrail Task",
+                }
+
+                mock_tasks_service = AsyncMock()
+                mock_tasks_service.create_async.return_value = mock_created_task
+
+                mock_uipath_instance = MagicMock()
+                mock_uipath_instance.tasks = mock_tasks_service
+
+                mock_resolve = AsyncMock(
+                    return_value=TaskRecipient(
+                        value="test@example.com",
+                        type=TaskRecipientType.EMAIL,
+                    )
+                )
+
                 with (
                     patch(
                         "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
@@ -1319,6 +1372,14 @@ graph = create_agent(
                     patch(
                         "uipath_langchain.agent.guardrails.actions.escalate_action.interrupt",
                         side_effect=mock_interrupt,
+                    ),
+                    patch(
+                        "uipath_langchain.agent.guardrails.actions.escalate_action.UiPath",
+                        return_value=mock_uipath_instance,
+                    ),
+                    patch(
+                        "uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value",
+                        mock_resolve,
                     ),
                 ):
                     # Create runtime context

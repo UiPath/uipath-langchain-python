@@ -17,7 +17,7 @@ from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResu
 from langchain_core.runnables import Runnable
 from langchain_openai.chat_models import AzureChatOpenAI
 from pydantic import BaseModel
-from uipath.utils import EndpointManager
+from uipath.platform.common import EndpointManager
 
 from uipath_langchain._utils._request_mixin import UiPathRequestMixin
 

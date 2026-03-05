@@ -2,13 +2,14 @@
 
 import json
 import logging
+import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from uipath.agent.models.agent import AgentMcpResourceConfig, AgentMcpTool
 
-from uipath_langchain.agent.tools.mcp import McpClient
+from uipath_langchain.agent.tools.mcp import McpClient, SessionInfo, SessionInfoFactory
 
 logger = logging.getLogger(__name__)
 
@@ -256,7 +257,7 @@ class TestMcpClient:
         session = McpClient(config=mcp_resource_config)
 
         # Session should not be initialized yet
-        assert session.session_id is None
+        assert await session.get_session_id() is None
         assert not session.is_client_initialized
 
         # Call tool - should trigger initialization (with SDK mocked)
@@ -268,7 +269,7 @@ class TestMcpClient:
 
         # Verify initialization happened
         assert initialize_count[0] == 1
-        assert session.session_id == "test-session-first"
+        assert await session.get_session_id() == "test-session-first"
         assert session.is_client_initialized
         assert tool_call_count[0] == 1
         assert result is not None
@@ -371,7 +372,7 @@ class TestMcpClient:
         )
 
         # Verify session ID changed to the retry session
-        assert session.session_id == "test-session-retry"
+        assert await session.get_session_id() == "test-session-retry"
         assert result is not None
 
         # KEY ASSERTION: HTTP client should be created only ONCE
@@ -512,14 +513,14 @@ class TestMcpClient:
             return_value=mock_uipath_sdk,
         ):
             await session.call_tool("test_tool", {"query": "test"})
-        assert session.session_id is not None
+        assert await session.get_session_id() is not None
         assert session.is_client_initialized
 
         # Close session
         await session.dispose()
 
         # Verify resources are released
-        assert session.session_id is None
+        assert await session.get_session_id() is None
         assert session._session is None
         assert session._stack is None
         assert not session.is_client_initialized
@@ -583,16 +584,16 @@ class TestMcpClient:
         ):
             # First use
             await session.call_tool("test_tool", {"query": "first"})
-            assert session.session_id == "test-session-first"
+            assert await session.get_session_id() == "test-session-first"
 
             # Close
             await session.dispose()
-            assert session.session_id is None
+            assert await session.get_session_id() is None
 
             # Reuse - should create new client and session
             # Note: mock returns "test-session-retry" for second initialize
             await session.call_tool("test_tool", {"query": "second"})
-            assert session.session_id == "test-session-retry"
+            assert await session.get_session_id() == "test-session-retry"
             assert session.is_client_initialized
 
         # HTTP client was created twice (once before dispose, once after)
@@ -618,3 +619,200 @@ class TestMcpClient:
         ):
             with pytest.raises(ValueError, match="has no URL configured"):
                 await session.call_tool("test_tool", {"query": "test"})
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_custom_session_info_factory_is_used(
+        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
+    ):
+        """Test that a custom SessionInfoFactory is called during initialization."""
+        method_call_sequence: list[str] = []
+        initialize_count = [0]
+        tool_call_count = [0]
+
+        MockStreamResponse = self.create_mock_stream_response(
+            method_call_sequence, initialize_count, tool_call_count
+        )
+        mock_http_client = self.create_mock_http_client(MockStreamResponse)
+        mock_async_client_class.return_value = mock_http_client
+
+        custom_session_info = SessionInfo()
+
+        class TrackingFactory(SessionInfoFactory):
+            called_with_server = None
+
+            def create_session(self, mcp_server: Any) -> SessionInfo:
+                TrackingFactory.called_with_server = mcp_server
+                return custom_session_info
+
+        factory = TrackingFactory()
+        session = McpClient(
+            config=mcp_resource_config,
+            session_info_factory=factory,
+        )
+
+        with patch(
+            "uipath.platform.UiPath",
+            return_value=mock_uipath_sdk,
+        ):
+            await session.call_tool("test_tool", {"query": "test"})
+
+        # Verify factory was called with the McpServer
+        assert TrackingFactory.called_with_server is not None
+
+        # Verify our custom SessionInfo instance is used by McpClient
+        assert session._session_info is custom_session_info
+        assert await session.get_session_id() == "test-session-first"
+
+        await session.dispose()
+
+    @pytest.mark.asyncio
+    async def test_skips_initialize_when_session_info_has_id(self, mcp_resource_config):
+        """Test that _initialize_session skips session.initialize() when SessionInfo has an ID."""
+        session = McpClient(config=mcp_resource_config)
+
+        # Simulate already-initialized client with pre-existing session ID
+        session._session_info = SessionInfo(session_id="pre-existing-id")
+        session._session = MagicMock()
+        session._session.initialize = AsyncMock()
+
+        await session._initialize_session()
+
+        # initialize() should NOT be called because session_info already has an ID
+        session._session.initialize.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reinitialize_clears_session_info_before_init(
+        self, mcp_resource_config
+    ):
+        """Test that _reinitialize_session clears session info then calls initialize."""
+        session = McpClient(config=mcp_resource_config)
+
+        # Simulate already-initialized client with a stale session ID
+        session._client_initialized = True
+        session._session_info = SessionInfo(session_id="stale-id")
+        session._session = MagicMock()
+        session._session.initialize = AsyncMock()
+
+        await session._reinitialize_session()
+
+        # Session info should have been cleared before re-initializing
+        # (set_session_id(None) was called, then _initialize_session ran)
+        session._session.initialize.assert_called_once()
+
+        # After reinitialize, session_info.session_id is None because
+        # the mocked initialize() doesn't set a new one
+        assert await session.get_session_id() is None
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_list_tools_initializes_session_and_returns_result(
+        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
+    ):
+        """Test that list_tools lazily initializes session and returns tools."""
+        method_call_sequence: list[str] = []
+        initialize_count = [0]
+        tool_call_count = [0]
+
+        MockStreamResponse = self.create_mock_stream_response(
+            method_call_sequence, initialize_count, tool_call_count
+        )
+
+        mock_http_client = self.create_mock_http_client(MockStreamResponse)
+        mock_async_client_class.return_value = mock_http_client
+
+        client = McpClient(config=mcp_resource_config)
+
+        assert not client.is_client_initialized
+
+        with patch(
+            "uipath.platform.UiPath",
+            return_value=mock_uipath_sdk,
+        ):
+            result = await client.list_tools()
+
+        # Session should have been initialized
+        assert initialize_count[0] == 1
+        assert client.is_client_initialized
+
+        # Should return the tools from the mock server
+        assert result is not None
+        assert len(result.tools) == 1
+        assert result.tools[0].name == "test_tool"
+
+        # Verify protocol flow includes tools/list
+        assert "initialize" in method_call_sequence
+        assert "tools/list" in method_call_sequence
+        # tools/call should NOT have been called
+        assert "tools/call" not in method_call_sequence
+
+        await client.dispose()
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_list_tools_reuses_session(
+        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
+    ):
+        """Test that list_tools reuses existing session on subsequent calls."""
+        method_call_sequence: list[str] = []
+        initialize_count = [0]
+        tool_call_count = [0]
+
+        MockStreamResponse = self.create_mock_stream_response(
+            method_call_sequence, initialize_count, tool_call_count
+        )
+
+        mock_http_client = self.create_mock_http_client(MockStreamResponse)
+        mock_async_client_class.return_value = mock_http_client
+
+        client = McpClient(config=mcp_resource_config)
+
+        with patch(
+            "uipath.platform.UiPath",
+            return_value=mock_uipath_sdk,
+        ):
+            await client.list_tools()
+            assert initialize_count[0] == 1
+
+            await client.list_tools()
+            assert initialize_count[0] == 1  # Still only one initialization
+
+        list_tools_count = method_call_sequence.count("tools/list")
+        assert list_tools_count == 2
+
+        await client.dispose()
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
+    @patch("httpx.AsyncClient")
+    async def test_retrieve_async_uses_execution_folder_path(
+        self, mock_async_client_class, mcp_resource_config
+    ):
+        """Test that retrieve_async is called with folder_path from the execution environment."""
+        mock_sdk = MagicMock()
+        mock_server = MagicMock()
+        mock_server.mcp_url = "https://test.uipath.com/mcp"
+        mock_sdk.mcp.retrieve_async = AsyncMock(return_value=mock_server)
+        mock_sdk._config = MagicMock()
+        mock_sdk._config.secret = "test-secret-token"
+
+        method_call_sequence: list[str] = []
+        initialize_count = [0]
+        tool_call_count = [0]
+
+        MockStreamResponse = self.create_mock_stream_response(
+            method_call_sequence, initialize_count, tool_call_count
+        )
+        mock_http_client = self.create_mock_http_client(MockStreamResponse)
+        mock_async_client_class.return_value = mock_http_client
+
+        session = McpClient(config=mcp_resource_config)
+
+        with patch("uipath.platform.UiPath", return_value=mock_sdk):
+            await session.call_tool("test_tool", {"query": "test"})
+
+        mock_sdk.mcp.retrieve_async.assert_called_once_with(
+            slug="test-server", folder_path="/Shared/TestFolder"
+        )
+
+        await session.dispose()

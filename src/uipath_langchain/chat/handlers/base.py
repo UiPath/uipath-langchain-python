@@ -1,9 +1,10 @@
 """Abstract base class for model payload handlers."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Literal, Sequence
 
 from langchain_core.messages import AIMessage
+from langchain_core.tools import BaseTool
 
 
 class ModelPayloadHandler(ABC):
@@ -13,15 +14,13 @@ class ModelPayloadHandler(ABC):
     """
 
     @abstractmethod
-    def get_required_tool_choice(self) -> str | dict[str, Any]:
-        """Get the tool_choice value that enforces tool usage.
-
-        Returns:
-            Provider-specific value to force tool usage:
-            - "required" for OpenAI-compatible models
-            - "any" for Bedrock Converse and Vertex models (string format)
-            - {"type": "any"} for Bedrock Invoke API (dict format required)
-        """
+    def get_tool_binding_kwargs(
+        self,
+        tools: Sequence[BaseTool],
+        tool_choice: Literal["auto", "any"],
+        parallel_tool_calls: bool = True,
+        strict_mode: bool = False,
+    ) -> dict[str, Any]: ...
 
     @abstractmethod
     def check_stop_reason(self, response: AIMessage) -> None:
@@ -33,5 +32,21 @@ class ModelPayloadHandler(ABC):
             response: The AIMessage response from the model
 
         Raises:
-            AgentTerminationException: If stop reason indicates a faulty termination
+            ChatModelError: If stop reason indicates a faulty termination
         """
+
+
+class DefaultModelPayloadHandler(ModelPayloadHandler):
+    """Default model payload handler."""
+
+    def get_tool_binding_kwargs(
+        self,
+        tools: Sequence[BaseTool],
+        tool_choice: Literal["auto", "any"],
+        parallel_tool_calls: bool = True,
+        strict_mode: bool = False,
+    ) -> dict[str, Any]:
+        return {"tool_choice": tool_choice}
+
+    def check_stop_reason(self, response: AIMessage) -> None:
+        return

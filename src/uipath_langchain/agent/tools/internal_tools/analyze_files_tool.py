@@ -12,6 +12,7 @@ from langchain_core.messages import (
     SystemMessage,
 )
 from langchain_core.messages.tool import ToolCall
+from langchain_core.runnables.config import var_child_runnable_config
 from langchain_core.tools import BaseTool, StructuredTool
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
@@ -50,6 +51,10 @@ def create_analyze_file_tool(
     input_model = create_model(resource.input_schema)
     output_model = create_model(resource.output_schema)
 
+    # Disable streaming so for conversational loops, the internal LLM call doesn't leak
+    # AIMessageChunk events into the graph stream.
+    non_streaming_llm = llm.model_copy(update={"disable_streaming": True})
+
     @mockable(
         name=resource.name,
         description=resource.description,
@@ -79,10 +84,11 @@ def create_analyze_file_tool(
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),
             cast(AnyMessage, human_message_with_files),
         ]
-        result = await llm.ainvoke(messages)
+        config = var_child_runnable_config.get(None)
+        result = await non_streaming_llm.ainvoke(messages, config=config)
 
         analysis_result = extract_text_content(result)
-        return analysis_result
+        return {"analysisResult": analysis_result}
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 

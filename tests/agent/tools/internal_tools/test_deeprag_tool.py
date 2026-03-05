@@ -122,7 +122,7 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -150,7 +150,11 @@ class TestCreateDeepRagTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"text": "Deep RAG analysis result"}
+        # Index is ready → ReadyEphemeralIndex skips interrupt() (no scratchpad in tests).
+        # Only create_deeprag calls interrupt().
+        mock_interrupt.side_effect = [
+            {"text": "Deep RAG analysis result"},
+        ]
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper
@@ -181,14 +185,14 @@ class TestCreateDeepRagTool:
         assert call_kwargs["usage"] == "DeepRAG"
         assert mock_attachment.ID in call_kwargs["attachments"]
 
-        # Verify interrupt was called only once (no WaitEphemeralIndex needed)
+        # Only create_deeprag calls interrupt(); index was instant-resumed
         assert mock_interrupt.call_count == 1
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -253,7 +257,7 @@ class TestCreateDeepRagTool:
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
     )
     @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.UiPath")
-    @patch("uipath_langchain.agent.tools.internal_tools.deeprag_tool.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     @patch(
         "uipath_langchain.agent.tools.internal_tools.deeprag_tool.mockable",
         lambda **kwargs: lambda f: f,
@@ -281,7 +285,10 @@ class TestCreateDeepRagTool:
             return_value=mock_index
         )
 
-        mock_interrupt.return_value = {"content": "Dynamic query result"}
+        # Index is ready → ReadyEphemeralIndex skips interrupt(). Only create_deeprag fires.
+        mock_interrupt.side_effect = [
+            {"content": "Dynamic query result"},
+        ]
 
         mock_wrapper = Mock()
         mock_get_wrapper.return_value = mock_wrapper

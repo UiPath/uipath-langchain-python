@@ -2,6 +2,7 @@ import logging
 import os
 from collections.abc import AsyncIterator, Iterator
 from typing import Any, Optional
+from urllib.parse import quote
 
 import httpx
 from langchain_core.callbacks import (
@@ -13,7 +14,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
 from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
-from uipath.utils import EndpointManager
+from uipath.platform.common import EndpointManager
 
 from .header_capture import HeaderCapture
 from .retryers.vertex import AsyncVertexRetryer, VertexRetryer
@@ -188,6 +189,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
 
         header_capture = HeaderCapture(name=f"vertex_headers_{id(self)}")
         client_kwargs = get_httpx_client_kwargs()
+        client_kwargs["timeout"] = 300.0
         verify = client_kwargs.get("verify", True)
 
         http_options = genai_types.HttpOptions(
@@ -265,7 +267,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         if job_key := os.getenv("UIPATH_JOB_KEY"):
             headers["X-UiPath-JobKey"] = job_key
         if process_key := os.getenv("UIPATH_PROCESS_KEY"):
-            headers["X-UiPath-ProcessKey"] = process_key
+            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
         return headers
 
     @staticmethod

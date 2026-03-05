@@ -5,11 +5,11 @@ description = "Joke generating agent that creates family-friendly jokes based on
 authors = [{ name = "Andrei Petraru", email = "andrei.petraru@uipath.com" }]
 requires-python = ">=3.11"
 dependencies = [
-    "uipath-langchain>=0.5.1, <0.6.0",
-    "uipath>=2.3.0, <2.7.0",
+    "uipath-langchain",
+    "uipath",
 ]
 
 [dependency-groups]
 dev = [
-    "uipath-dev>=0.0.14",
+    "uipath-dev",
 ]

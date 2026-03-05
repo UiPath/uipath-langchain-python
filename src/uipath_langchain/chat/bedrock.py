@@ -2,13 +2,13 @@ import logging
 import os
 from collections.abc import Iterator
 from typing import Any, Optional
+from urllib.parse import quote
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
-from uipath._utils import resource_override
-from uipath.utils import EndpointManager
+from uipath.platform.common import EndpointManager, resource_override
 
 from .header_capture import HeaderCapture
 from .retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
@@ -109,7 +109,8 @@ class AwsBedrockCompletionsPassthroughClient:
             config=botocore.config.Config(
                 retries={
                     "total_max_attempts": 1,
-                }
+                },
+                read_timeout=300,
             ),
         )
         client.meta.events.register(
@@ -143,7 +144,7 @@ class AwsBedrockCompletionsPassthroughClient:
         if job_key:
             headers["X-UiPath-JobKey"] = job_key
         if process_key:
-            headers["X-UiPath-ProcessKey"] = process_key
+            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
 
         request.headers.update(headers)
 

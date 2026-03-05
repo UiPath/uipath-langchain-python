@@ -9,6 +9,10 @@ from langchain_core.tools import BaseTool
 from langgraph.types import Command
 from pydantic import BaseModel
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
     UiPathToolNode,
@@ -40,6 +44,19 @@ class MockToolWithWrappers(BaseTool, ToolWrapperMixin):
 
     async def _arun(self, input_text: str = "") -> str:
         return f"Async wrapped mock result: {input_text}"
+
+
+class MockFailingTool(BaseTool):
+    """Mock tool that always fails for testing error handling."""
+
+    name: str = "mock_failing_tool"
+    description: str = "A mock tool that fails for testing"
+
+    def _run(self, input_text: str = "") -> str:
+        raise ValueError(f"Tool execution failed: {input_text}")
+
+    async def _arun(self, input_text: str = "") -> str:
+        raise ValueError(f"Async tool execution failed: {input_text}")
 
 
 class FilteredState(BaseModel):
@@ -263,7 +280,7 @@ class TestUiPathToolNode:
         assert filtered_state.session_id == "test_session"
 
     def test_invalid_wrapper_state_type_raises_error(self, mock_tool, mock_state):
-        """Test that invalid wrapper state parameter types raise ValueError."""
+        """Test that invalid wrapper state parameter types raise AgentRuntimeError."""
 
         def invalid_wrapper(
             tool: BaseTool, call: ToolCall, state: str
@@ -272,11 +289,102 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(mock_tool, wrapper=invalid_wrapper)
 
-        with pytest.raises(
-            ValueError,
-            match="Wrapper state parameter must be a pydantic BaseModel subclass",
-        ):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             node._func(mock_state)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.TOOL_INVALID_WRAPPER_STATE
+        )
+
+    def test_tool_error_propagates_when_handle_errors_false(self, mock_state):
+        """Test that tool errors propagate when handle_tool_errors=False."""
+        failing_tool = MockFailingTool()
+        tool_call = {
+            "name": "mock_failing_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        state = MockState(messages=[ai_message])
+
+        node = UiPathToolNode(failing_tool, handle_tool_errors=False)
+
+        with pytest.raises(ValueError) as exc_info:
+            node._func(state)  # type: ignore[arg-type]
+
+        assert "Tool execution failed: test input" in str(exc_info.value)
+
+    async def test_async_tool_error_propagates_when_handle_errors_false(self):
+        """Test that async tool errors propagate when handle_tool_errors=False."""
+        failing_tool = MockFailingTool()
+        tool_call = {
+            "name": "mock_failing_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        state = MockState(messages=[ai_message])
+
+        node = UiPathToolNode(failing_tool, handle_tool_errors=False)
+
+        with pytest.raises(ValueError) as exc_info:
+            await node._afunc(state)  # type: ignore[arg-type]
+
+        assert "Async tool execution failed: test input" in str(exc_info.value)
+
+    def test_tool_error_captured_when_handle_errors_true(self):
+        """Test that tool errors are captured as error ToolMessages when handle_tool_errors=True."""
+        failing_tool = MockFailingTool()
+        tool_call = {
+            "name": "mock_failing_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        state = MockState(messages=[ai_message])
+
+        node = UiPathToolNode(failing_tool, handle_tool_errors=True)
+
+        result = node._func(state)  # type: ignore[arg-type]
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+
+        tool_message = result["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        assert tool_message.name == "mock_failing_tool"
+        assert tool_message.tool_call_id == "test_call_id"
+        assert tool_message.status == "error"
+        assert "Tool execution failed: test input" in tool_message.content
+
+    async def test_async_tool_error_captured_when_handle_errors_true(self):
+        """Test that async tool errors are captured as error ToolMessages when handle_tool_errors=True."""
+        failing_tool = MockFailingTool()
+        tool_call = {
+            "name": "mock_failing_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        state = MockState(messages=[ai_message])
+
+        node = UiPathToolNode(failing_tool, handle_tool_errors=True)
+
+        result = await node._afunc(state)  # type: ignore[arg-type]
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+
+        tool_message = result["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        assert tool_message.name == "mock_failing_tool"
+        assert tool_message.tool_call_id == "test_call_id"
+        assert tool_message.status == "error"
+        assert "Async tool execution failed: test input" in tool_message.content
 
 
 class TestToolWrapperMixin:
@@ -349,3 +457,28 @@ class TestCreateToolNode:
         result = create_tool_node([])
 
         assert result == {}
+
+    def test_create_tool_node_with_handle_errors_false(self):
+        """Test creating tool nodes with handle_tool_errors=False."""
+        tools = [MockTool(name="mock_tool_1")]
+
+        result = create_tool_node(tools, handle_tool_errors=False)
+
+        assert len(result) == 1
+        assert "mock_tool_1" in result
+        node = result["mock_tool_1"]
+        assert isinstance(node, UiPathToolNode)
+        assert node.handle_tool_errors is False
+
+    def test_create_tool_node_with_handle_errors_true(self):
+        """Test creating tool nodes with handle_tool_errors=True."""
+        tools = [MockTool(name="mock_tool_1"), MockTool(name="mock_tool_2")]
+
+        result = create_tool_node(tools, handle_tool_errors=True)
+
+        assert len(result) == 2
+        for tool_name in ["mock_tool_1", "mock_tool_2"]:
+            assert tool_name in result
+            node = result[tool_name]
+            assert isinstance(node, UiPathToolNode)
+            assert node.handle_tool_errors is True

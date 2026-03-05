@@ -8,6 +8,7 @@ import uuid
 import pytest
 from click.testing import CliRunner
 from pytest_httpx import HTTPXMock
+from uipath.platform.orchestrator.job import JobState
 from uipath.runtime import (
     UiPathExecuteOptions,
     UiPathRuntimeContext,
@@ -55,9 +56,27 @@ class TestHitlJobTrigger:
                 # Mock UiPath API response for job creation
                 httpx_mock.add_response(
                     url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.StartJobs",
-                    json={"value": [{"key": f"{job_key}", "Id": "123"}]},
+                    json={
+                        "value": [
+                            {
+                                "Key": f"{job_key}",
+                                "Id": 123,
+                                "FolderKey": "test-folder-key",
+                            }
+                        ]
+                    },
                 )
 
+                # mock fired triggers check
+                httpx_mock.add_response(
+                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={job_key})",
+                    json={
+                        "Key": f"{job_key}",
+                        "Id": 123,
+                        "FolderKey": "test-folder-key",
+                        "State": JobState.RUNNING.value,
+                    },
+                )
                 # First execution: creates job trigger and stores it in database
                 context = UiPathRuntimeContext.with_defaults(
                     entrypoint="agent",
@@ -125,10 +144,11 @@ class TestHitlJobTrigger:
                 httpx_mock.add_response(
                     url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={trigger_data['item_key']})",
                     json={
-                        "key": f"{job_key}",
-                        "id": 123,
-                        "state": "successful",
-                        "output_arguments": json.dumps(output_args_dict),
+                        "Key": f"{job_key}",
+                        "Id": 123,
+                        "FolderKey": "test-folder-key",
+                        "State": "successful",
+                        "OutputArguments": json.dumps(output_args_dict),
                     },
                 )
 
@@ -138,6 +158,16 @@ class TestHitlJobTrigger:
                     input="{}",
                     output_file="__uipath/output.json",
                     resume=True,
+                )
+
+                httpx_mock.add_response(
+                    url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier=487d9dc7-30fe-4926-b5f0-35a956914042)",
+                    json={
+                        "Key": f"{job_key}",
+                        "Id": 123,
+                        "FolderKey": "test-folder-key",
+                        "State": JobState.RUNNING.value,
+                    },
                 )
 
                 resume_factory_1 = UiPathRuntimeFactoryRegistry.get(
@@ -200,10 +230,11 @@ class TestHitlJobTrigger:
                 httpx_mock.add_response(
                     url=f"{base_url}/orchestrator_/odata/Jobs/UiPath.Server.Configuration.OData.GetByKey(identifier={trigger_data['item_key']})",
                     json={
-                        "key": f"{job_key}",
-                        "id": 123,
-                        "state": "successful",
-                        "output_arguments": json.dumps(output_args_dict),
+                        "Key": f"{job_key}",
+                        "Id": 123,
+                        "FolderKey": "test-folder-key",
+                        "State": "successful",
+                        "OutputArguments": json.dumps(output_args_dict),
                     },
                 )
 

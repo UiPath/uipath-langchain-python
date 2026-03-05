@@ -33,6 +33,7 @@ class ContextGroundingRetriever(BaseRetriever):
                 page_content=x.content,
                 metadata={
                     "source": x.source,
+                    "reference": x.reference,
                     "page_number": x.page_number,
                 },
             )
@@ -58,6 +59,7 @@ class ContextGroundingRetriever(BaseRetriever):
                 page_content=x.content,
                 metadata={
                     "source": x.source,
+                    "reference": x.reference,
                     "page_number": x.page_number,
                 },
             )

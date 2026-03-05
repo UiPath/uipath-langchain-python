@@ -28,7 +28,7 @@ def create_end_execution_tool(
 
 
 def create_raise_error_tool() -> StructuredTool:
-    """Never executed - routing intercepts and raises AgentTerminationException."""
+    """Never executed - routing intercepts and raises AgentRuntimeError."""
 
     async def raise_error_fn(**kwargs: Any) -> dict[str, Any]:
         return kwargs

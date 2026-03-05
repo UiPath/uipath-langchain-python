@@ -14,9 +14,12 @@ from uipath.core.guardrails import (
     GuardrailValidationResult,
     GuardrailValidationResultType,
 )
-from uipath.runtime.errors import UiPathErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentTerminationException
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 
 from .models import GuardrailAction
 
@@ -77,7 +80,7 @@ class LogAction(GuardrailAction):
 class BlockAction(GuardrailAction):
     """Example implementation: Block action for guardrails.
 
-    This action blocks execution by raising an AgentTerminationException when
+    This action blocks execution by raising an AgentRuntimeError when
     a guardrail validation fails.
 
     Args:
@@ -100,9 +103,10 @@ class BlockAction(GuardrailAction):
         if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
             title = self.title or f"Guardrail [{guardrail_name}] blocked execution"
             detail = self.detail or result.reason or "Guardrail validation failed"
-            raise AgentTerminationException(
-                code=UiPathErrorCode.EXECUTION_ERROR,
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION,
                 title=title,
                 detail=detail,
+                category=UiPathErrorCategory.USER,
             )
         return None

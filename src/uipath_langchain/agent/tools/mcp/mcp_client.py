@@ -6,26 +6,47 @@ including automatic reconnection on session disconnect errors.
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import httpx
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp import ClientSession
-from mcp.client.streamable_http import (
-    GetSessionIdCallback,
-    streamable_http_client,
-)
 from mcp.shared.exceptions import McpError
 from mcp.shared.message import SessionMessage
-from mcp.types import CallToolResult
+from mcp.types import CallToolResult, ListToolsResult
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.runtime.base import UiPathDisposableProtocol
 
+from uipath_langchain._utils import get_execution_folder_path
+
+from .streamable_http import SessionInfo, streamable_http_client
+
 if TYPE_CHECKING:
     from uipath.agent.models.agent import AgentMcpResourceConfig
+    from uipath.platform.orchestrator.mcp import McpServer
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+class SessionInfoFactory:
+    """Creates SessionInfo instances for MCP servers.
+
+    The default implementation returns a plain ``SessionInfo``.
+    Subclass and override ``create_session`` to customise behaviour
+    (e.g. ``SessionInfoDebugStateFactory``).
+    """
+
+    def create_session(self, mcp_server: "McpServer") -> SessionInfo:
+        """Create a SessionInfo for the given MCP server."""
+        logger.info(
+            f"Creating session for server '{mcp_server.slug}' "
+            f"in folder '{mcp_server.folder_key}'"
+        )
+        return SessionInfo()
 
 
 class McpClient(UiPathDisposableProtocol):
@@ -55,6 +76,8 @@ class McpClient(UiPathDisposableProtocol):
         config: "AgentMcpResourceConfig",
         timeout: httpx.Timeout | None = None,
         max_retries: int = 1,
+        session_info_factory: SessionInfoFactory | None = None,
+        terminate_on_close: bool = True,
     ) -> None:
         """Initialize the MCP tool session.
 
@@ -65,10 +88,14 @@ class McpClient(UiPathDisposableProtocol):
             config: The MCP resource configuration containing slug and folder_path.
             timeout: Optional timeout configuration for HTTP requests.
             max_retries: Maximum number of retries on session disconnect errors.
+            session_info_factory: Factory for creating SessionInfo instances.
+                Defaults to ``SessionInfoFactory`` which returns a plain SessionInfo.
         """
         self._config = config
         self._timeout = timeout or httpx.Timeout(600)
         self._max_retries = max_retries
+        self._session_info_factory = session_info_factory or SessionInfoFactory()
+        self._terminate_on_close = terminate_on_close
 
         # URL and headers are resolved lazily from SDK
         self._url: str | None = None
@@ -83,18 +110,18 @@ class McpClient(UiPathDisposableProtocol):
             MemoryObjectReceiveStream[SessionMessage | Exception] | None
         ) = None
         self._write_stream: MemoryObjectSendStream[SessionMessage] | None = None
-        self._get_session_id: GetSessionIdCallback | None = None
+        self._session_info: SessionInfo | None = None
         self._stack: AsyncExitStack | None = None
 
         # Session state (can be reinitialized without recreating client)
         self._session: ClientSession | None = None
-        self._session_id: str | None = None
         self._client_initialized: bool = False
 
-    @property
-    def session_id(self) -> str | None:
-        """Get the current session ID."""
-        return self._session_id
+    async def get_session_id(self) -> str | None:
+        """Get the current session ID from the SessionInfo."""
+        if self._session_info is None:
+            return None
+        return await self._session_info.get_session_id()
 
     @property
     def is_client_initialized(self) -> bool:
@@ -112,9 +139,10 @@ class McpClient(UiPathDisposableProtocol):
 
         Then calls _initialize_session() to complete the MCP handshake.
         """
+        folder_path = get_execution_folder_path()
         logger.debug(
             f"Initializing MCP client for '{self._config.slug}' "
-            f"in folder '{self._config.folder_path}'"
+            f"in folder '{folder_path}'"
         )
 
         # Lazy import to improve cold start time
@@ -123,7 +151,7 @@ class McpClient(UiPathDisposableProtocol):
         # Retrieve MCP server URL from SDK
         sdk = UiPath()
         mcp_server = await sdk.mcp.retrieve_async(
-            slug=self._config.slug, folder_path=self._config.folder_path
+            slug=self._config.slug, folder_path=folder_path
         )
 
         if mcp_server.mcp_url is None:
@@ -149,15 +177,25 @@ class McpClient(UiPathDisposableProtocol):
             httpx.AsyncClient(**client_kwargs)
         )
 
+        # Create session info for tracking session ID
+        self._session_info = self._session_info_factory.create_session(mcp_server)
+
+        # Load previously stored session ID (no-op for base SessionInfo,
+        # triggers lazy load from debug state for SessionInfoDebugState)
+        existing = await self._session_info.get_session_id()
+        if existing:
+            logger.info(f"Loaded existing session ID from session info: {existing}")
+
         # Create streamable HTTP connection
         (
             self._read_stream,
             self._write_stream,
-            self._get_session_id,
         ) = await self._stack.enter_async_context(
             streamable_http_client(
                 url=self._url,
                 http_client=self._http_client,
+                session_info=self._session_info,
+                terminate_on_close=self._terminate_on_close,
             )
         )
 
@@ -187,12 +225,24 @@ class McpClient(UiPathDisposableProtocol):
         if self._session is None:
             raise RuntimeError("Cannot initialize session: client not initialized")
 
-        logger.debug(f"Initializing MCP session (previous: {self._session_id})")
+        existing_session_id = (
+            await self._session_info.get_session_id() if self._session_info else None
+        )
+        logger.info(
+            f"Initializing MCP session (session_info id: {existing_session_id})"
+        )
 
-        await self._session.initialize()
-        self._session_id = self._get_session_id()  # type: ignore[misc]
+        if existing_session_id is None:
+            await self._session.initialize()
 
-        logger.info(f"MCP session initialized: {self._session_id}")
+            # The transport calls set_session_id during initialize,
+            # so we just read the current value here.
+            new_session_id = (
+                await self._session_info.get_session_id()
+                if self._session_info
+                else None
+            )
+            logger.info(f"MCP session initialized with session ID: {new_session_id}")
 
     async def _ensure_session(self) -> ClientSession:
         """Ensure client and session are initialized, return the session.
@@ -215,13 +265,16 @@ class McpClient(UiPathDisposableProtocol):
 
         Thread-safe via lock. Reuses existing HTTP client and streamable
         connection; only performs a new MCP handshake.
+        Clears the session info first so initialize() doesn't send a stale session ID.
         """
         async with self._lock:
             if not self._client_initialized:
                 # Client not initialized, do full initialization
                 await self._initialize_client()
             else:
-                # Client exists, just reinitialize session
+                # Clear stale session ID before re-initializing
+                if self._session_info:
+                    await self._session_info.set_session_id(None)
                 await self._initialize_session()
 
     def _is_session_error(self, error: McpError) -> bool:
@@ -239,25 +292,27 @@ class McpClient(UiPathDisposableProtocol):
             and error.error.code in self.SESSION_ERROR_CODES
         )
 
-    async def call_tool(
+    async def _execute_with_retry(
         self,
-        name: str,
-        arguments: dict[str, Any] | None = None,
-    ) -> CallToolResult:
-        """Call an MCP tool with automatic retry on session disconnect.
+        operation: Callable[[ClientSession], Awaitable[T]],
+        operation_name: str,
+    ) -> T:
+        """Execute a session operation with automatic retry on session disconnect.
 
         On first call, initializes the full client stack. On session
-        disconnect (404/32600), reinitializes only the session and retries.
+        disconnect, reinitializes only the session and retries up to
+        ``_max_retries`` times.
 
         Args:
-            name: The name of the tool to call.
-            arguments: Optional arguments to pass to the tool.
+            operation: An async callable that receives the ``ClientSession``
+                and returns the desired result.
+            operation_name: A label used in log messages.
 
         Returns:
-            The tool call result.
+            The result of *operation*.
 
         Raises:
-            McpError: If the tool call fails after all retries.
+            McpError: If the operation fails after all retries.
         """
         retry_count = 0
 
@@ -265,14 +320,12 @@ class McpClient(UiPathDisposableProtocol):
             try:
                 session = await self._ensure_session()
                 logger.debug(
-                    f"Calling tool {name} (attempt {retry_count + 1}/{self._max_retries + 1})"
+                    f"{operation_name} (attempt {retry_count + 1}/{self._max_retries + 1})"
                 )
-                result = await session.call_tool(name, arguments=arguments)
-                logger.info(f"Tool call successful: {name}")
-                return result
+                return await operation(session)
 
             except McpError as e:
-                logger.info(f"McpError during tool call: {e}")
+                logger.info(f"McpError during {operation_name}: {e}")
 
                 if self._is_session_error(e) and retry_count < self._max_retries:
                     logger.warning(
@@ -289,8 +342,33 @@ class McpClient(UiPathDisposableProtocol):
                         logger.error(f"Non-retryable MCP error: {e}")
                     raise
 
-        # Should not reach here, but just in case
         raise RuntimeError("Exited retry loop unexpectedly")
+
+    async def list_tools(self) -> ListToolsResult:
+        """List available tools from the MCP server."""
+        return await self._execute_with_retry(
+            lambda session: session.list_tools(),
+            "list_tools",
+        )
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> CallToolResult:
+        """Call an MCP tool by name.
+
+        Args:
+            name: The name of the tool to call.
+            arguments: Optional arguments to pass to the tool.
+
+        Returns:
+            The tool call result.
+        """
+        return await self._execute_with_retry(
+            lambda session: session.call_tool(name, arguments=arguments),
+            f"call_tool({name})",
+        )
 
     async def dispose(self) -> None:
         """Dispose of the client and release all resources.
@@ -309,11 +387,10 @@ class McpClient(UiPathDisposableProtocol):
                 finally:
                     self._stack = None
                     self._session = None
-                    self._session_id = None
                     self._http_client = None
                     self._read_stream = None
                     self._write_stream = None
-                    self._get_session_id = None
+                    self._session_info = None
                     self._client_initialized = False
 
             logger.info("MCP client disposed")

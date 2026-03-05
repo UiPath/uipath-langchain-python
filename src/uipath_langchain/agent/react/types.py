@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Annotated, Any, Hashable, Optional, Sequence
+from typing import Annotated, Any, Hashable, Literal, Optional, Sequence
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
@@ -12,23 +12,15 @@ from uipath_langchain.agent.react.reducers import (
     merge_dicts,
     merge_objects,
 )
-from uipath_langchain.chat.types import APIFlavor, LLMProvider
 
 FLOW_CONTROL_TOOLS = [END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name]
 
 AgentResources = Sequence[BaseAgentResourceConfig]
 
 
-class AgentSettings(BaseModel):
-    """Agent settings extracted from the LLM model."""
-
-    llm_provider: LLMProvider
-    api_flavor: APIFlavor
-
-
 class InnerAgentGraphState(BaseModel):
     job_attachments: Annotated[dict[str, Attachment], merge_dicts] = {}
-    agent_settings: AgentSettings | None = None
+    initial_message_count: int | None = None
     tools_storage: Annotated[dict[Hashable, Any], merge_dicts] = {}
 
 
@@ -38,6 +30,7 @@ class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
     guardrail_validation_result: Optional[bool] = None
     guardrail_validation_details: Optional[str] = None
     agent_result: Optional[dict[str, Any]] = None
+    hitl_task_info: Optional[Any] = {}
 
 
 class AgentGraphState(BaseModel):
@@ -80,4 +73,16 @@ class AgentGraphConfig(BaseModel):
     )
     is_conversational: bool = Field(
         default=False, description="If set, creates a graph for conversational agents"
+    )
+    tool_choice: Literal["auto", "any"] = Field(
+        default="auto",
+        description="The tool choice to use for the LLM. 'auto' means the LLM will choose the tool, 'any' means the LLM will return multiple tool calls in a single response.",
+    )
+    parallel_tool_calls: bool = Field(
+        default=True,
+        description="Allow the LLM to return multiple tool calls in a single response.",
+    )
+    strict_mode: bool = Field(
+        default=False,
+        description="If set, the LLM will guarantee schema validation of the tool calls.",
     )
