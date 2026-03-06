@@ -30,11 +30,17 @@ from .utils import count_consecutive_thinking_messages, extract_input_data_from_
 def _filter_control_flow_tool_calls(
     tool_calls: list[ToolCall],
 ) -> list[ToolCall]:
-    """Remove control flow tools when multiple tool calls exist."""
+    """Remove control flow tools only when regular tool calls exist alongside them."""
     if len(tool_calls) <= 1:
         return tool_calls
 
-    return [tc for tc in tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS]
+    non_control_flow_tool_calls = [
+        tc for tc in tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS
+    ]
+    if not non_control_flow_tool_calls:
+        return tool_calls
+
+    return non_control_flow_tool_calls
 
 
 StateT = TypeVar("StateT", bound=AgentGraphState)
