@@ -21,6 +21,7 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
+from uipath_langchain.chat.hitl import check_tool_confirmation
 
 # the type safety can be improved with generics
 ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
@@ -79,6 +80,10 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
 
+        confirmation = check_tool_confirmation(call, self.tool)
+        if confirmation is not None and confirmation.cancelled:
+            return self._process_result(call, confirmation.cancelled)
+
         try:
             if self.wrapper:
                 inputs = self._prepare_wrapper_inputs(
@@ -87,7 +92,10 @@ class UiPathToolNode(RunnableCallable):
                 result = self.wrapper(*inputs)
             else:
                 result = self.tool.invoke(call)
-            return self._process_result(call, result)
+            output = self._process_result(call, result)
+            if confirmation is not None:
+                confirmation.annotate_result(output)
+            return output
         except Exception as e:
             if self.handle_tool_errors:
                 return self._process_error_result(call, e)
@@ -98,6 +106,10 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
 
+        confirmation = check_tool_confirmation(call, self.tool)
+        if confirmation is not None and confirmation.cancelled:
+            return self._process_result(call, confirmation.cancelled)
+
         try:
             if self.awrapper:
                 inputs = self._prepare_wrapper_inputs(
@@ -106,7 +118,10 @@ class UiPathToolNode(RunnableCallable):
                 result = await self.awrapper(*inputs)
             else:
                 result = await self.tool.ainvoke(call)
-            return self._process_result(call, result)
+            output = self._process_result(call, result)
+            if confirmation is not None:
+                confirmation.annotate_result(output)
+            return output
         except Exception as e:
             if self.handle_tool_errors:
                 return self._process_error_result(call, e)
