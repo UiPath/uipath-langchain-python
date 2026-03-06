@@ -1,5 +1,5 @@
 import os
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 from uipath_langchain.chat.http_client import build_uipath_headers
 
@@ -49,3 +49,27 @@ class TestBuildUiPathHeaders:
             )
         assert headers["x-uipath-agenthub-config"] == "config-abc"
         assert headers["x-uipath-llmgateway-byoisconnectionid"] == "conn-xyz"
+
+    def test_licensing_context_header_present(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "uipath.platform.common._config.ConfigurationManager.licensing_context",
+                new_callable=PropertyMock,
+                return_value="robot:unattended",
+            ),
+        ):
+            headers = build_uipath_headers()
+        assert headers["x-uipath-licensing-context"] == "robot:unattended"
+
+    def test_licensing_context_header_absent_when_none(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "uipath.platform.common._config.ConfigurationManager.licensing_context",
+                new_callable=PropertyMock,
+                return_value=None,
+            ),
+        ):
+            headers = build_uipath_headers()
+        assert "x-uipath-licensing-context" not in headers
