@@ -60,7 +60,7 @@ class UiPathChatMessagesMapper:
         """Initialize the mapper with empty state."""
         self.runtime_id = runtime_id
         self.storage = storage
-        self.confirmation_tool_names: set[str] = set[str]()
+        self.confirmation_tool_names: set[str] = set()
         self.current_message: AIMessageChunk
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
@@ -394,7 +394,7 @@ class UiPathChatMessagesMapper:
                         )
 
                         if tool_call["name"] not in self.confirmation_tool_names:
-                            # defer tool call for HITL
+                            # if tool requires HITL, we skip start tool call
                             events.append(
                                 self.map_tool_call_to_tool_call_start_event(
                                     self.current_message.id, tool_call
@@ -683,7 +683,6 @@ class UiPathChatMessagesMapper:
             role="assistant",
             content_parts=content_parts,
             tool_calls=uipath_tool_calls,
-            interrupts=[],  # interrupts are skipped during eval mode
         )
 
 

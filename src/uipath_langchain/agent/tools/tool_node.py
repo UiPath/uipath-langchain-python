@@ -21,7 +21,7 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
-from uipath_langchain.chat.hitl import check_tool_confirmation
+from uipath_langchain.chat.hitl import request_tool_confirmation
 
 # the type safety can be improved with generics
 ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
@@ -80,7 +80,10 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
 
-        confirmation = check_tool_confirmation(call, self.tool)
+        # HITL: prompt user for approval if tool requires confirmation
+        confirmation = request_tool_confirmation(call, self.tool)
+
+        # HITL cancelled: user rejected the tool call
         if confirmation is not None and confirmation.cancelled:
             return self._process_result(call, confirmation.cancelled)
 
@@ -93,6 +96,7 @@ class UiPathToolNode(RunnableCallable):
             else:
                 result = self.tool.invoke(call)
             output = self._process_result(call, result)
+            # HITL approved: tag result with approved args (and whether they were modified)
             if confirmation is not None:
                 confirmation.annotate_result(output)
             return output
@@ -106,7 +110,10 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
 
-        confirmation = check_tool_confirmation(call, self.tool)
+        # HITL: prompt user for approval if tool requires confirmation
+        confirmation = request_tool_confirmation(call, self.tool)
+
+        # HITL cancelled: user rejected the tool call
         if confirmation is not None and confirmation.cancelled:
             return self._process_result(call, confirmation.cancelled)
 
@@ -119,6 +126,7 @@ class UiPathToolNode(RunnableCallable):
             else:
                 result = await self.tool.ainvoke(call)
             output = self._process_result(call, result)
+            # HITL approved: tag result with approved args (and whether they were modified)
             if confirmation is not None:
                 confirmation.annotate_result(output)
             return output

@@ -7,12 +7,11 @@ from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 
 from uipath_langchain.chat.hitl import (
-    ARGS_MODIFIED_MESSAGE,
     CANCELLED_MESSAGE,
     CONVERSATIONAL_APPROVED_TOOL_ARGS,
     ConfirmationResult,
-    check_tool_confirmation,
     request_approval,
+    request_tool_confirmation,
 )
 
 
@@ -29,25 +28,25 @@ def _make_call(args: dict[str, Any] | None = None) -> ToolCall:
 
 
 class TestCheckToolConfirmation:
-    """Tests for check_tool_confirmation."""
+    """Tests for request_tool_confirmation."""
 
     def test_returns_none_when_no_metadata(self):
         """No metadata → no confirmation needed."""
         tool = MockTool()
         call = _make_call()
-        assert check_tool_confirmation(call, tool) is None
+        assert request_tool_confirmation(call, tool) is None
 
     def test_returns_none_when_flag_not_set(self):
         """Metadata exists but flag is missing → no confirmation needed."""
         tool = MockTool(metadata={"other_key": True})
         call = _make_call()
-        assert check_tool_confirmation(call, tool) is None
+        assert request_tool_confirmation(call, tool) is None
 
     def test_returns_none_when_flag_false(self):
         """Flag explicitly False → no confirmation needed."""
         tool = MockTool(metadata={"require_conversational_confirmation": False})
         call = _make_call()
-        assert check_tool_confirmation(call, tool) is None
+        assert request_tool_confirmation(call, tool) is None
 
     @patch("uipath_langchain.chat.hitl.request_approval", return_value=None)
     def test_cancelled_returns_tool_message(self, mock_approval):
@@ -55,7 +54,7 @@ class TestCheckToolConfirmation:
         tool = MockTool(metadata={"require_conversational_confirmation": True})
         call = _make_call()
 
-        result = check_tool_confirmation(call, tool)
+        result = request_tool_confirmation(call, tool)
 
         assert result is not None
         assert isinstance(result, ConfirmationResult)
@@ -78,7 +77,7 @@ class TestCheckToolConfirmation:
         tool = MockTool(metadata={"require_conversational_confirmation": True})
         call = _make_call({"query": "test"})
 
-        result = check_tool_confirmation(call, tool)
+        result = request_tool_confirmation(call, tool)
 
         assert result is not None
         assert result.cancelled is None
@@ -94,7 +93,7 @@ class TestCheckToolConfirmation:
         tool = MockTool(metadata={"require_conversational_confirmation": True})
         call = _make_call({"query": "original"})
 
-        result = check_tool_confirmation(call, tool)
+        result = request_tool_confirmation(call, tool)
 
         assert result is not None
         assert result.cancelled is None
@@ -122,7 +121,7 @@ class TestAnnotateResult:
         assert msg.content == "result"
 
     def test_annotate_wraps_content_when_modified(self):
-        """annotate_result wraps content when args were modified."""
+        """annotate_result wraps content with structured meta when args were modified."""
         confirmation = ConfirmationResult(
             cancelled=None, args_modified=True, approved_args={"query": "edited"}
         )
@@ -134,8 +133,12 @@ class TestAnnotateResult:
         assert msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] == {
             "query": "edited"
         }
-        assert ARGS_MODIFIED_MESSAGE in msg.content
-        assert "result" in msg.content
+        import json
+
+        wrapped = json.loads(msg.content)
+        assert wrapped["meta"]["args_modified_by_user"] is True
+        assert wrapped["meta"]["executed_args"] == {"query": "edited"}
+        assert wrapped["result"] == "result"
 
 
 class TestRequestApprovalTruthiness:

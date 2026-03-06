@@ -1,5 +1,6 @@
 import functools
 import inspect
+import json
 from inspect import Parameter
 from typing import Annotated, Any, Callable, NamedTuple
 
@@ -12,7 +13,6 @@ from uipath.core.chat import (
 )
 
 CANCELLED_MESSAGE = "Cancelled by user"
-ARGS_MODIFIED_MESSAGE = "Tool arguments were modified by the user"
 
 CONVERSATIONAL_APPROVED_TOOL_ARGS = "conversational_approved_tool_args"
 REQUIRE_CONVERSATIONAL_CONFIRMATION = "require_conversational_confirmation"
@@ -39,8 +39,18 @@ class ConfirmationResult(NamedTuple):
                 self.approved_args
             )
         if self.args_modified:
-            msg.content = (
-                f'{{"meta": "{ARGS_MODIFIED_MESSAGE}", "result": {msg.content}}}'
+            try:
+                result_value = json.loads(msg.content)
+            except (json.JSONDecodeError, TypeError):
+                result_value = msg.content
+            msg.content = json.dumps(
+                {
+                    "meta": {
+                        "args_modified_by_user": True,
+                        "executed_args": self.approved_args,
+                    },
+                    "result": result_value,
+                }
             )
 
 
@@ -127,9 +137,10 @@ def request_approval(
     )
 
 
-def check_tool_confirmation(
+def request_tool_confirmation(
     call: ToolCall, tool: BaseTool
 ) -> ConfirmationResult | None:
+    """Check whether a tool requires user confirmation and request approval"""
     if not (tool.metadata and tool.metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION)):
         return None
 
@@ -147,6 +158,7 @@ def check_tool_confirmation(
             original_args
         )
         return ConfirmationResult(cancelled=cancelled_msg, args_modified=False)
+    # Mutate call args so the tool executes with the approved values
     call["args"] = approved_args
     return ConfirmationResult(
         cancelled=None,
