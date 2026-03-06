@@ -35,6 +35,7 @@ class ContextGroundingRetriever(BaseRetriever):
                     "source": x.source,
                     "reference": x.reference,
                     "page_number": x.page_number,
+                    "score": x.score,
                 },
             )
             for x in results
@@ -61,6 +62,7 @@ class ContextGroundingRetriever(BaseRetriever):
                     "source": x.source,
                     "reference": x.reference,
                     "page_number": x.page_number,
+                    "score": x.score,
                 },
             )
             for x in results
