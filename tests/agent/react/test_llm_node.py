@@ -263,3 +263,43 @@ class TestLLMNodeToolCallFiltering:
         ]
         assert len(tool_call_blocks) == 1
         assert tool_call_blocks[0]["name"] == "regular_tool"
+
+    @pytest.mark.asyncio
+    async def test_multiple_flow_control_calls_only_are_preserved(self):
+        """Multiple control-flow calls without regular tools should remain intact."""
+        mock_response = AIMessage(
+            content_blocks=[
+                create_tool_call(
+                    name=END_EXECUTION_TOOL.name,
+                    args={"result": "done"},
+                    id="call_1",
+                ),
+                create_tool_call(
+                    name=RAISE_ERROR_TOOL.name,
+                    args={"message": "conflict"},
+                    id="call_2",
+                ),
+            ],
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"result": "done"},
+                    "id": "call_1",
+                },
+                {
+                    "name": RAISE_ERROR_TOOL.name,
+                    "args": {"message": "conflict"},
+                    "id": "call_2",
+                },
+            ],
+        )
+        self.mock_model.ainvoke = AsyncMock(return_value=mock_response)
+
+        llm_node = create_llm_node(self.mock_model, [self.regular_tool])
+
+        result = await llm_node(self.test_state)
+
+        response_message = result["messages"][0]
+        assert len(response_message.tool_calls) == 2
+        assert response_message.tool_calls[0]["name"] == END_EXECUTION_TOOL.name
+        assert response_message.tool_calls[1]["name"] == RAISE_ERROR_TOOL.name

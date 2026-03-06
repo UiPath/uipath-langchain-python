@@ -107,7 +107,26 @@ def create_terminate_node(
                     category=UiPathErrorCategory.SYSTEM,
                 )
 
-            for tool_call in last_message.tool_calls:
+            control_flow_tool_calls = [
+                tool_call
+                for tool_call in last_message.tool_calls
+                if tool_call["name"] in {END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name}
+            ]
+
+            if len(control_flow_tool_calls) > 1:
+                tool_names = ", ".join(
+                    tool_call["name"] for tool_call in control_flow_tool_calls
+                )
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.ROUTING_ERROR,
+                    title="Multiple control flow tool calls found in terminate node.",
+                    detail="The terminate node received more than one control flow tool call "
+                    f"in a single AIMessage: {tool_names}. The LLM must return exactly one "
+                    f"of {END_EXECUTION_TOOL.name} or {RAISE_ERROR_TOOL.name}.",
+                    category=UiPathErrorCategory.SYSTEM,
+                )
+
+            for tool_call in control_flow_tool_calls:
                 tool_name = tool_call["name"]
 
                 if tool_name == END_EXECUTION_TOOL.name:

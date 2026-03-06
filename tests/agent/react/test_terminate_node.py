@@ -261,6 +261,29 @@ class TestTerminateNodeNonConversational:
         )
         return MockAgentGraphState(messages=[ai_message])
 
+    @pytest.fixture
+    def state_with_conflicting_control_flow_tools(self):
+        """Fixture for state with conflicting control-flow tool calls."""
+        ai_message = AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"success": True, "message": "done"},
+                    "id": "call_1",
+                },
+                {
+                    "name": RAISE_ERROR_TOOL.name,
+                    "args": {
+                        "message": "Something went wrong",
+                        "details": "Additional info",
+                    },
+                    "id": "call_2",
+                },
+            ],
+        )
+        return MockAgentGraphState(messages=[ai_message])
+
     def test_non_conversational_handles_end_execution(
         self, terminate_node, state_with_end_execution
     ):
@@ -303,6 +326,18 @@ class TestTerminateNodeNonConversational:
         assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.ROUTING_ERROR
         )
+
+    def test_non_conversational_raises_on_conflicting_control_flow_tools(
+        self, terminate_node, state_with_conflicting_control_flow_tools
+    ):
+        """Non-conversational mode should reject conflicting control-flow tool calls."""
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            terminate_node(state_with_conflicting_control_flow_tools)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )
+        assert "Multiple control flow tool calls" in exc_info.value.error_info.title
 
 
 class TestTerminateNodeWithResponseSchema:
