@@ -11,43 +11,63 @@ Do NOT add eager imports like:
 Instead, all exports are loaded on-demand when first accessed.
 """
 
+from .chat_model_factory import get_chat_model
+
 
 def __getattr__(name):
-    if name == "UiPathAzureChatOpenAI":
-        from .models import UiPathAzureChatOpenAI
-
-        return UiPathAzureChatOpenAI
     if name == "UiPathChat":
-        from .models import UiPathChat
+        from uipath_langchain_client.clients.normalized.chat_models import (
+            UiPathChat,
+        )
 
         return UiPathChat
+    if name == "UiPathAzureChatOpenAI":
+        from uipath_langchain_client.clients.openai.chat_models import (
+            UiPathAzureChatOpenAI,
+        )
+
+        return UiPathAzureChatOpenAI
     if name == "UiPathChatOpenAI":
-        from .openai import UiPathChatOpenAI
+        from uipath_langchain_client.clients.openai.chat_models import (
+            UiPathChatOpenAI,
+        )
 
         return UiPathChatOpenAI
-    if name == "requires_approval":
-        from .hitl import requires_approval
+    if name == "UiPathChatGoogleGenerativeAI":
+        from uipath_langchain_client.clients.google.chat_models import (
+            UiPathChatGoogleGenerativeAI,
+        )
 
-        return requires_approval
-    if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
-        from . import supported_models
+        return UiPathChatGoogleGenerativeAI
+    if name == "UiPathChatBedrock":
+        from uipath_langchain_client.clients.bedrock.chat_models import (
+            UiPathChatBedrock,
+        )
 
-        return getattr(supported_models, name)
-    if name in ("LLMProvider", "APIFlavor"):
-        from . import types
+        return UiPathChatBedrock
+    if name == "UiPathChatBedrockConverse":
+        from uipath_langchain_client.clients.bedrock.chat_models import (
+            UiPathChatBedrockConverse,
+        )
 
-        return getattr(types, name)
+        return UiPathChatBedrockConverse
+    if name == "UiPathChatAnthropic":
+        from uipath_langchain_client.clients.anthropic.chat_models import (
+            UiPathChatAnthropic,
+        )
+
+        return UiPathChatAnthropic
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
+    "get_chat_model",
     "UiPathChat",
     "UiPathAzureChatOpenAI",
     "UiPathChatOpenAI",
-    "OpenAIModels",
-    "BedrockModels",
-    "GeminiModels",
-    "requires_approval",
-    "LLMProvider",
-    "APIFlavor",
+    "UiPathChatGoogleGenerativeAI",
+    "UiPathChatBedrock",
+    "UiPathChatBedrockConverse",
+    "UiPathChatAnthropic",
 ]

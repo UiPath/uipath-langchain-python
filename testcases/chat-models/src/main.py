@@ -8,8 +8,7 @@ from langgraph.graph import END, START, StateGraph, MessagesState
 from pydantic import BaseModel, Field
 from langchain_core.language_models import BaseChatModel
 
-from uipath_langchain.chat.bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
-from uipath_langchain.chat.vertex import UiPathChatVertex
+from uipath_langchain.chat import UiPathChatBedrock, UiPathChatBedrockConverse
 from uipath_langchain.chat import UiPathChatOpenAI, UiPathChat, UiPathAzureChatOpenAI
 from uipath_langchain.embeddings import UiPathOpenAIEmbeddings, UiPathAzureOpenAIEmbeddings
 
@@ -27,12 +26,11 @@ def create_test_embeddings() -> list[tuple[str, Any]]:
 def create_test_models(max_tokens: int = 100) -> list[tuple[str, Any]]:
     """Create all test chat models with the specified max_tokens."""
     return [
-        ("UiPathChatOpenAI", UiPathChatOpenAI(use_responses_api=True)),
-        ("UiPathChatVertex", UiPathChatVertex()),
-        ("UiPathChatBedrockConverse", UiPathChatBedrockConverse()),
-        ("UiPathChatBedrock", UiPathChatBedrock()),
-        ("UiPathChat", UiPathChat()),
-        ("UiPathAzureChatOpenAI", UiPathAzureChatOpenAI())
+        ("UiPathChatOpenAI", UiPathChatOpenAI(model="gpt-4o-mini-2024-07-18", use_responses_api=True, max_tokens=max_tokens)),
+        ("UiPathChatBedrockConverse", UiPathChatBedrockConverse(model="anthropic.claude-3-5-sonnet-20240620-v1:0", max_tokens=max_tokens)),
+        ("UiPathChatBedrock", UiPathChatBedrock(model="anthropic.claude-3-5-sonnet-20240620-v1:0", max_tokens=max_tokens)),
+        ("UiPathChat", UiPathChat(model="gpt-4o-mini-2024-07-18", max_tokens=max_tokens)),
+        ("UiPathAzureChatOpenAI", UiPathAzureChatOpenAI(model="gpt-4o-mini-2024-07-18", max_tokens=max_tokens))
     ]
 
 

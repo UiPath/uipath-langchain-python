@@ -11,7 +11,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.vectorstores import VectorStore
-from uipath_langchain.chat.models import UiPathAzureChatOpenAI
+from uipath_langchain.chat import UiPathAzureChatOpenAI
 from uipath_langchain.vectorstores.context_grounding_vectorstore import (
     ContextGroundingVectorStore,
 )
