@@ -43,7 +43,6 @@ class GuardrailEvent(StrEnum):
 def track_event(
     name: str,
     properties: Optional[Dict[str, Any]] = None,
-    measurements: Optional[Dict[str, float]] = None,
 ) -> None:
     """Track a custom event to Application Insights with trace context.
 
@@ -53,14 +52,9 @@ def track_event(
     Args:
         name: Name of the event
         properties: Properties for the event (converted to strings)
-        measurements: Numeric measurements for the event (currently ignored,
-                     kept for backward compatibility)
     """
     logger.info("track_event called: %s, properties: %s", name, properties)
-
-    # Set operation context from current span before tracking event
     _set_operation_context_from_current_span()
-
     _track_event(name, properties)
     logger.info("_track_event completed for: %s", name)
 
@@ -104,43 +98,6 @@ def _set_operation_context_from_current_span() -> None:
         )
 
 
-class TelemetryEventEmitter:
-    """Emits custom telemetry events to Application Insights.
-
-    Dedicated to tracking agent lifecycle events for monitoring and analytics.
-    Sends events directly to AppInsights without creating OpenTelemetry spans.
-
-    Usage:
-        emitter = TelemetryEventEmitter()
-        emitter.set_agent_info("MyAgent", "agent-123")
-        emitter.track_event("AgentRun.Start", {"AgentName": "MyAgent"})
-    """
-
-    def __init__(self) -> None:
-        self._agent_name: Optional[str] = None
-        self._agent_id: Optional[str] = None
-
-    def set_agent_info(self, agent_name: str, agent_id: Optional[str] = None) -> None:
-        """Set agent information for telemetry events.
-
-        Args:
-            agent_name: Name of the agent
-            agent_id: Unique identifier for the agent instance
-        """
-        self._agent_name = agent_name
-        self._agent_id = agent_id
-
-    def track_event(
-        self, name: str, properties: Optional[Dict[str, Any]] = None
-    ) -> None:
-        """Track a custom event to Application Insights.
-
-        Args:
-            name: Name of the event
-            properties: Properties for the event
-        """
-        track_event(name, properties)
-
-    def cleanup(self) -> None:
-        """Clean up and flush any pending telemetry events."""
-        _flush_events()
+def flush_events() -> None:
+    """Flush any pending telemetry events."""
+    _flush_events()

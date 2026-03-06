@@ -45,7 +45,6 @@ from ..._bts.bts_state import BtsState
 from ..._bts.bts_storage import SqliteBtsStateStorage
 from ..._licensing.licensed_runtime import LicensedRuntime, ToolCallTracker
 from ..._observability import configure_telemetry, shutdown_telemetry
-from ..._observability.event_emitter import TelemetryEventEmitter
 from ..._observability.exporters import FilteringSpanExporter
 from ..._observability.instrumented_runtime import InstrumentedRuntime
 from ..._observability.llmops import (
@@ -66,9 +65,6 @@ load_dotenv()
 # Setup OTEL environment variables at module load time
 # This must happen before any TracerProvider is created
 setup_otel_env()
-
-# Configure cloud role for Application Insights custom events
-configure_appinsights_cloud_role()
 
 logger = logging.getLogger(__name__)
 
@@ -131,13 +127,12 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
                 ExceptionMapper.map_config(e),
                 agent_definition=self._agent_definition,
             )
-            span_factory, callback, event_emitter = self._create_telemetry_components()
+            span_factory, callback = self._create_telemetry_components()
             return InstrumentedRuntime(
                 reporter,
                 span_factory,
                 callback,
                 self.context,
-                event_emitter=event_emitter,
                 agent_definition=self._agent_definition,
             )
 
@@ -167,7 +162,18 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
         """Setup tracing and instrumentation."""
         super()._setup_instrumentation(trace_manager)
+
+        # Set provider BEFORE any initialization so the AppInsights client
+        # reads TELEMETRY_CONNECTION_STRING from the current env instead of
+        # falling back to the baked-in constant.
+        from uipath.telemetry import set_event_connection_string_provider
+
+        set_event_connection_string_provider(
+            lambda: os.getenv("TELEMETRY_CONNECTION_STRING")
+        )
+
         configure_telemetry(trace_manager)
+        configure_appinsights_cloud_role()
         UiPathSpanUtils.register_current_span_provider(_get_current_span)
         UiPathSpanUtils.register_current_span_ancestors_provider(_get_ancestor_spans)
 
@@ -390,9 +396,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             except Exception:
                 pass  # Folder key fetch failed, LlmOps tracing may fail
 
-        span_factory, instrumentation_callback, event_emitter = (
-            self._create_telemetry_components()
-        )
+        span_factory, instrumentation_callback = self._create_telemetry_components()
         tool_call_tracker = ToolCallTracker()
 
         # --- BTS setup ---
@@ -442,7 +446,6 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             span_factory,
             instrumentation_callback,
             self.context,
-            event_emitter=event_emitter,
             agent_definition=agent_definition,
             trace_context_storage=trace_context_storage,
         )
@@ -451,7 +454,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
 
     def _create_telemetry_components(
         self,
-    ) -> tuple[LlmOpsSpanFactory, LlmOpsInstrumentationCallback, TelemetryEventEmitter]:
+    ) -> tuple[LlmOpsSpanFactory, LlmOpsInstrumentationCallback]:
         """Create the telemetry component chain for instrumentation."""
         llmops_exporter = LlmOpsHttpExporter()
         filtered_exporter = FilteringSpanExporter(
@@ -459,8 +462,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         )
         span_factory = LlmOpsSpanFactory(exporter=filtered_exporter)
         callback = LlmOpsInstrumentationCallback(span_factory)
-        event_emitter = TelemetryEventEmitter()
-        return span_factory, callback, event_emitter
+        return span_factory, callback
 
     def _wrap_in_resumable_runtime(
         self,

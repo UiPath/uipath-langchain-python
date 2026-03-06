@@ -46,7 +46,8 @@ from uipath_agents._errors import ExceptionMapper
 from ..agent_graph_builder.config import get_execution_type
 from .event_emitter import (
     AgentRunEvent,
-    TelemetryEventEmitter,
+    flush_events,
+    track_event,
 )
 from .exporters.environment_attributes_exporter import get_env_attributes
 from .llmops import (
@@ -93,7 +94,6 @@ class InstrumentedRuntime:
         span_factory: LlmOpsSpanFactory,
         callback: LlmOpsInstrumentationCallback,
         runtime_context: UiPathRuntimeContext,
-        event_emitter: TelemetryEventEmitter | None = None,
         agent_definition: AgentDefinition | None = None,
         trace_context_storage: TraceContextStorage | None = None,
     ):
@@ -104,7 +104,6 @@ class InstrumentedRuntime:
             span_factory: LlmOpsSpanFactory for creating spans
             callback: Callback for LangChain event instrumentation
             runtime_context: Runtime context containing command and environment info
-            event_emitter: Optional emitter for Application Insights telemetry events
             agent_definition: Optional agent metadata for span attributes and telemetry enrichment
             trace_context_storage: Optional storage for trace context preservation
                 across suspend/resume cycles. If None, trace context is not preserved.
@@ -112,7 +111,6 @@ class InstrumentedRuntime:
         self._delegate = delegate
         self._span_factory = span_factory
         self._callback = callback
-        self._event_emitter = event_emitter
         self._agent_definition = agent_definition
         self._trace_context_storage = trace_context_storage
         self._agent_run_id = str(uuid.uuid4())
@@ -300,8 +298,7 @@ class InstrumentedRuntime:
                 # Rebuild enriched properties so post-resume events
                 # (e.g. guardrail escalation approved/rejected) still carry
                 # agent and execution metadata.
-                if self._event_emitter:
-                    self._build_and_set_enriched_properties(agent_span)
+                self._build_and_set_enriched_properties(agent_span)
 
                 pending_tool = saved_context.get("pending_tool_name")
                 pending_tool_span = saved_context.get("pending_tool_span")
@@ -352,8 +349,7 @@ class InstrumentedRuntime:
                     if not self._re_suspended:
                         self._upsert_resumed_agent_span(saved_context)
                     self._callback.cleanup()
-                    if self._event_emitter:
-                        self._event_emitter.cleanup()
+                    flush_events()
         else:
             # Normal: create new trace context
             agent_name = self._get_agent_name()
@@ -390,60 +386,47 @@ class InstrumentedRuntime:
                     agent_span, uuid.UUID(self._agent_run_id), prompts_captured
                 )
 
-                if self._event_emitter:
-                    self._event_emitter.set_agent_info(agent_name, agent_id)
-
-                    enriched_properties = self._build_and_set_enriched_properties(
-                        agent_span
-                    )
-                    self._event_emitter.track_event(
-                        AgentRunEvent.STARTED, enriched_properties
-                    )
+                enriched_properties = self._build_and_set_enriched_properties(
+                    agent_span
+                )
+                track_event(AgentRunEvent.STARTED, enriched_properties)
 
                 try:
                     yield agent_span
                 except Exception as e:
-                    if self._event_emitter:
-                        duration_ms = (
-                            int((time.time() - start_time) * 1000)
-                            if start_time
-                            else None
-                        )
+                    duration_ms = (
+                        int((time.time() - start_time) * 1000) if start_time else None
+                    )
 
-                        error_info = ExceptionMapper.map_runtime(e).error_info
+                    error_info = ExceptionMapper.map_runtime(e).error_info
 
-                        # Mapped errors have include_traceback=False, so capture manually
-                        error_traceback = traceback.format_exc()
+                    # Mapped errors have include_traceback=False, so capture manually
+                    error_traceback = traceback.format_exc()
 
-                        base_properties: Dict[str, Any] = {
-                            "AgentName": agent_name,
-                            "Status": "Failed",
-                            "Timestamp": datetime.now(timezone.utc).isoformat(),
-                            "ErrorMessage": str(e)[:500],
-                            "ErrorType": type(e).__name__,
-                            "ErrorCode": error_info.code,
-                            "ErrorTitle": error_info.title,
-                            "ErrorCategory": error_info.category.value,
-                            "ErrorTraceback": error_traceback,
-                        }
+                    base_properties: Dict[str, Any] = {
+                        "AgentName": agent_name,
+                        "Status": "Failed",
+                        "Timestamp": datetime.now(timezone.utc).isoformat(),
+                        "ErrorMessage": str(e)[:500],
+                        "ErrorType": type(e).__name__,
+                        "ErrorCode": error_info.code,
+                        "ErrorTitle": error_info.title,
+                        "ErrorCategory": error_info.category.value,
+                        "ErrorTraceback": error_traceback,
+                    }
 
-                        if agent_id:
-                            base_properties["AgentId"] = agent_id
-                        if duration_ms is not None:
-                            base_properties["DurationMs"] = duration_ms
+                    if agent_id:
+                        base_properties["AgentId"] = agent_id
+                    if duration_ms is not None:
+                        base_properties["DurationMs"] = duration_ms
 
-                        enriched_properties = self._get_enriched_properties(
-                            base_properties
-                        )
+                    enriched_properties = self._get_enriched_properties(base_properties)
 
-                        self._event_emitter.track_event(
-                            AgentRunEvent.FAILED, enriched_properties
-                        )
+                    track_event(AgentRunEvent.FAILED, enriched_properties)
                     raise
                 finally:
                     self._callback.cleanup()
-                    if self._event_emitter:
-                        self._event_emitter.cleanup()
+                    flush_events()
 
     @asynccontextmanager
     async def _restore_trace_context(
@@ -1071,26 +1054,23 @@ class InstrumentedRuntime:
             input_schema, output_schema = self._get_schemas()
             self._span_factory.emit_agent_output(result.output, output_schema)
 
-            if self._event_emitter:
-                agent_name = self._get_agent_name()
-                agent_id = self._get_agent_id()
+            agent_name = self._get_agent_name()
+            agent_id = self._get_agent_id()
 
-                base_properties: Dict[str, Any] = {
-                    "AgentName": agent_name,
-                    "Status": "Completed",
-                    "ErrorMessage": "",
-                }
+            base_properties: Dict[str, Any] = {
+                "AgentName": agent_name,
+                "Status": "Completed",
+                "ErrorMessage": "",
+            }
 
-                if agent_id:
-                    base_properties["AgentId"] = agent_id
+            if agent_id:
+                base_properties["AgentId"] = agent_id
 
-                if duration_ms is not None:
-                    base_properties["DurationMs"] = duration_ms
+            if duration_ms is not None:
+                base_properties["DurationMs"] = duration_ms
 
-                enriched_properties = self._get_enriched_properties(
-                    base_properties, agent_span
-                )
+            enriched_properties = self._get_enriched_properties(
+                base_properties, agent_span
+            )
 
-                self._event_emitter.track_event(
-                    AgentRunEvent.COMPLETED, enriched_properties
-                )
+            track_event(AgentRunEvent.COMPLETED, enriched_properties)

@@ -369,3 +369,27 @@ class TestShutdownTelemetry:
 
         assert "Failed to un-instrument" in caplog.text
         assert not _TelemetryState.configured
+
+    def test_resets_appinsights_event_client(self) -> None:
+        """Test that shutdown resets AppInsights event client for re-initialization."""
+        _TelemetryState.configured = True
+        _TelemetryState.span_processors = []
+        _TelemetryState.instrumentors = []
+
+        with patch("uipath.telemetry.reset_event_client") as mock_reset:
+            tracing.shutdown_telemetry()
+
+            mock_reset.assert_called_once()
+
+    def test_resets_appinsights_even_when_processors_fail(self) -> None:
+        """Test that AppInsights client is reset even if processor shutdown fails."""
+        mock_processor = MagicMock()
+        mock_processor.force_flush.side_effect = Exception("Flush error")
+        _TelemetryState.configured = True
+        _TelemetryState.span_processors = [mock_processor]
+        _TelemetryState.instrumentors = []
+
+        with patch("uipath.telemetry.reset_event_client") as mock_reset:
+            tracing.shutdown_telemetry()
+
+            mock_reset.assert_called_once()

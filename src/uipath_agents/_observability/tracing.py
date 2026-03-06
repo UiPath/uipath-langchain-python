@@ -151,7 +151,11 @@ def shutdown_telemetry() -> None:
 
     Shuts down span processors registered (making them inert on the
     global TracerProvider) and uninstruments HTTP libraries.
+    Resets the AppInsights event client so the next job re-reads
+    TELEMETRY_CONNECTION_STRING from the environment.
     """
+    from uipath.telemetry import reset_event_client
+
     for processor in _TelemetryState.span_processors:
         try:
             processor.force_flush()
@@ -166,6 +170,8 @@ def shutdown_telemetry() -> None:
             instrumentor.uninstrument()
         except Exception:
             logger.exception("Failed to un-instrument %s", type(instrumentor).__name__)
+
+    reset_event_client()
 
     _TelemetryState.span_processors = []
     _TelemetryState.instrumentors = []
