@@ -1,4 +1,3 @@
-import asyncio
 import uuid
 from typing import Any, cast
 
@@ -87,6 +86,9 @@ def create_analyze_file_tool(
         config = var_child_runnable_config.get(None)
         result = await non_streaming_llm.ainvoke(messages, config=config)
 
+        # Free the base64 content blocks immediately — they can be tens of MB
+        del messages, human_message_with_files, files
+
         analysis_result = extract_text_content(result)
         return {"analysisResult": analysis_result}
 
@@ -172,9 +174,10 @@ async def add_files_to_message(
     if not files:
         return message
 
-    file_content_blocks: list[DataContentBlock] = await asyncio.gather(
-        *[build_file_content_block(file) for file in files]
-    )
+    file_content_blocks: list[DataContentBlock] = []
+    for file in files:
+        block = await build_file_content_block(file)
+        file_content_blocks.append(block)
     return append_content_blocks_to_message(
         message, cast(list[ContentBlock], file_content_blocks)
     )
