@@ -29,6 +29,7 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
+from uipath_langchain.chat.hitl import REQUIRE_CONVERSATIONAL_CONFIRMATION
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
@@ -64,6 +65,7 @@ class UiPathLangGraphRuntime:
         self.entrypoint: str | None = entrypoint
         self.callbacks: list[BaseCallbackHandler] = callbacks or []
         self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
+        self.chat.confirmation_tool_names = self._get_confirmation_tool_names()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
     async def execute(
@@ -485,6 +487,18 @@ class UiPathLangGraphRuntime:
                 middleware_nodes.add(node_name)
 
         return middleware_nodes
+
+    def _get_confirmation_tool_names(self) -> set[str]:
+        names: set[str] = set()
+        for node_name, node_spec in self.graph.nodes.items():
+            # PregelNode.bound -> Runnable, Runnable.tool -> BaseTool (if tool node)
+            tool = getattr(getattr(node_spec, "bound", None), "tool", None)
+            if tool is None:
+                continue
+            metadata = getattr(tool, "metadata", None) or {}
+            if metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION):
+                names.add(getattr(tool, "name", node_name))
+        return names
 
     def _is_middleware_node(self, node_name: str) -> bool:
         """Check if a node name represents a middleware node."""

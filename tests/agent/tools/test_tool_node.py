@@ -1,6 +1,7 @@
 """Tests for tool_node.py module."""
 
 from typing import Any, Dict
+from unittest.mock import patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -13,10 +14,15 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
     UiPathToolNode,
     create_tool_node,
+)
+from uipath_langchain.chat.hitl import (
+    CANCELLED_MESSAGE,
+    CONVERSATIONAL_APPROVED_TOOL_ARGS,
 )
 
 
@@ -66,10 +72,9 @@ class FilteredState(BaseModel):
     session_id: str = "test_session"
 
 
-class MockState(BaseModel):
+class MockState(AgentGraphState):
     """Mock state for testing."""
 
-    messages: list[Any] = []
     user_id: str = "test_user"
     session_id: str = "test_session"
 
@@ -310,8 +315,7 @@ class TestUiPathToolNode:
         node = UiPathToolNode(failing_tool, handle_tool_errors=False)
 
         with pytest.raises(ValueError) as exc_info:
-            node._func(state)  # type: ignore[arg-type]
-
+            node._func(state)
         assert "Tool execution failed: test input" in str(exc_info.value)
 
     async def test_async_tool_error_propagates_when_handle_errors_false(self):
@@ -328,8 +332,7 @@ class TestUiPathToolNode:
         node = UiPathToolNode(failing_tool, handle_tool_errors=False)
 
         with pytest.raises(ValueError) as exc_info:
-            await node._afunc(state)  # type: ignore[arg-type]
-
+            await node._afunc(state)
         assert "Async tool execution failed: test input" in str(exc_info.value)
 
     def test_tool_error_captured_when_handle_errors_true(self):
@@ -345,8 +348,7 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(failing_tool, handle_tool_errors=True)
 
-        result = node._func(state)  # type: ignore[arg-type]
-
+        result = node._func(state)
         assert result is not None
         assert isinstance(result, dict)
         assert "messages" in result
@@ -372,8 +374,7 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(failing_tool, handle_tool_errors=True)
 
-        result = await node._afunc(state)  # type: ignore[arg-type]
-
+        result = await node._afunc(state)
         assert result is not None
         assert isinstance(result, dict)
         assert "messages" in result
@@ -482,3 +483,185 @@ class TestCreateToolNode:
             node = result[tool_name]
             assert isinstance(node, UiPathToolNode)
             assert node.handle_tool_errors is True
+
+
+class TestToolNodeConfirmation:
+    """Tests for confirmation flow in UiPathToolNode._func / _afunc."""
+
+    @pytest.fixture
+    def confirmation_tool(self):
+        """Tool with require_conversational_confirmation metadata."""
+        return MockTool(metadata={"require_conversational_confirmation": True})
+
+    @pytest.fixture
+    def confirmation_state(self):
+        tool_call = {
+            "name": "mock_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        return MockState(messages=[ai_message])
+
+    def test_no_confirmation_without_metadata(self):
+        """Tool without metadata executes normally, no interrupt."""
+        tool = MockTool()  # no metadata
+        node = UiPathToolNode(tool)
+        tool_call = {
+            "name": "mock_tool",
+            "args": {"input_text": "hello"},
+            "id": "call_1",
+        }
+        state = MockState(messages=[AIMessage(content="go", tool_calls=[tool_call])])
+
+        result = node._func(state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "Mock result: hello" in result["messages"][0].content
+
+    @patch("uipath_langchain.chat.hitl.request_approval", return_value=None)
+    def test_cancelled_returns_cancelled_message(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Rejected confirmation returns CANCELLED_MESSAGE."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert isinstance(msg, ToolMessage)
+        assert msg.content == CANCELLED_MESSAGE
+
+    @patch(
+        "uipath_langchain.chat.hitl.request_approval",
+        return_value={"input_text": "test input"},
+    )
+    def test_approved_same_args_no_meta(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Approved with same args → normal execution, no meta injected."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert "args_modified_by_user" not in msg.content
+        assert "Mock result:" in msg.content
+
+    @patch(
+        "uipath_langchain.chat.hitl.request_approval",
+        return_value={"input_text": "edited"},
+    )
+    def test_approved_modified_args_injects_meta(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Approved with edited args → tool runs with new args, meta injected."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        import json
+
+        wrapped = json.loads(msg.content)
+        assert wrapped["meta"]["args_modified_by_user"] is True
+        assert wrapped["meta"]["executed_args"] == {"input_text": "edited"}
+        assert "Mock result: edited" in wrapped["result"]
+
+    @patch("uipath_langchain.chat.hitl.request_approval", return_value=None)
+    async def test_async_cancelled(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Async path: rejected confirmation returns CANCELLED_MESSAGE."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = await node._afunc(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert msg.content == CANCELLED_MESSAGE
+
+    @patch(
+        "uipath_langchain.chat.hitl.request_approval",
+        return_value={"input_text": "async edited"},
+    )
+    async def test_async_approved_modified_args(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Async path: approved with edited args → meta injected."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = await node._afunc(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        import json
+
+        wrapped = json.loads(msg.content)
+        assert wrapped["meta"]["args_modified_by_user"] is True
+        assert wrapped["meta"]["executed_args"] == {"input_text": "async edited"}
+        assert "Async mock result: async edited" in wrapped["result"]
+
+    @patch(
+        "uipath_langchain.chat.hitl.request_approval",
+        return_value={"input_text": "approved"},
+    )
+    def test_approved_attaches_approved_args_metadata(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Approved path attaches approved args in response_metadata."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert CONVERSATIONAL_APPROVED_TOOL_ARGS in msg.response_metadata
+        assert msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] == {
+            "input_text": "approved"
+        }
+
+    @patch("uipath_langchain.chat.hitl.request_approval", return_value=None)
+    def test_cancelled_attaches_original_args_metadata(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Cancelled path attaches original args in response_metadata."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert CONVERSATIONAL_APPROVED_TOOL_ARGS in msg.response_metadata
+        assert msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] == {
+            "input_text": "test input"
+        }
+
+    def test_no_confirmation_no_metadata(self):
+        """Non-confirmation tools don't get the approved args metadata."""
+        tool = MockTool()  # no confirmation metadata
+        node = UiPathToolNode(tool)
+        tool_call = {
+            "name": "mock_tool",
+            "args": {"input_text": "hello"},
+            "id": "call_1",
+        }
+        state = MockState(messages=[AIMessage(content="go", tool_calls=[tool_call])])
+
+        result = node._func(state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert CONVERSATIONAL_APPROVED_TOOL_ARGS not in msg.response_metadata
