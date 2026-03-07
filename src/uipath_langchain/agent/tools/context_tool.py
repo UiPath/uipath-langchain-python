@@ -152,20 +152,18 @@ def handle_deep_rag(
     if static:
         assert prompt is not None
 
-    folder_path_prefix = None
+    static_folder_path_prefix = None
     if (
         resource.settings.folder_path_prefix
         and resource.settings.folder_path_prefix.value
+        and resource.settings.folder_path_prefix.variant
+        and resource.settings.folder_path_prefix.variant == "static"
     ):
-        folder_path_prefix = resource.settings.folder_path_prefix.value
+        static_folder_path_prefix = resource.settings.folder_path_prefix.value
 
     file_extension = None
     if resource.settings.file_extension and resource.settings.file_extension.value:
         file_extension = resource.settings.file_extension.value
-
-    glob_pattern = build_glob_pattern(
-        folder_path_prefix=folder_path_prefix, file_extension=file_extension
-    )
 
     output_model = create_model(
         "DeepRagOutputModel",
@@ -186,6 +184,31 @@ def handle_deep_rag(
             ),
         }
     )
+
+    arg_props = {}
+    if (
+        resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.variant
+        and resource.settings.folder_path_prefix.variant == "argument"
+    ):
+        schema_fields["folder_path_prefix"] = (
+            str,
+            Field(
+                default=None,
+                description="The folder path within the index to filter on",
+            ),
+        )
+        stripped_static_folder_path_prefix = (
+            resource.settings.folder_path_prefix.value.strip("{}")
+        )
+        arg_props = {
+            "folder_path_prefix": {
+                "variant": "argument",
+                "argumentPath": f"{stripped_static_folder_path_prefix}",
+                "isSensitive": False,
+            }
+        }
+
     input_model = create_model("DeepRagInput", **schema_fields)
 
     @mockable(
@@ -195,8 +218,14 @@ def handle_deep_rag(
         output_schema=output_model.model_json_schema(),
         example_calls=[],  # Examples cannot be provided for context.
     )
-    async def context_tool_fn(query: Optional[str] = None) -> dict[str, Any]:
+    async def context_tool_fn(
+        query: Optional[str] = None, folder_path_prefix: Optional[str] = None
+    ) -> dict[str, Any]:
         actual_prompt = prompt or query
+        glob = build_glob_pattern(
+            folder_path_prefix=static_folder_path_prefix or folder_path_prefix,
+            file_extension=file_extension,
+        )
 
         @durable_interrupt
         async def create_deep_rag():
@@ -206,17 +235,18 @@ def handle_deep_rag(
                 prompt=actual_prompt,
                 citation_mode=citation_mode,
                 index_folder_path=get_execution_folder_path(),
-                glob_pattern=glob_pattern,
+                glob_pattern=glob,
             )
 
         return await create_deep_rag()
 
-    return StructuredToolWithOutputType(
+    return StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
         coroutine=context_tool_fn,
         output_type=output_model,
+        argument_properties=arg_props,
         metadata={
             "tool_type": "context",
             "display_name": resource.name,
