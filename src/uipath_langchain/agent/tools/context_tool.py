@@ -1,15 +1,16 @@
 """Context tool creation for semantic index retrieval."""
 
 import uuid
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from langchain_core.documents import Document
 from langchain_core.messages import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, Field, TypeAdapter, create_model
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
+    AgentToolArgumentProperties,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
@@ -40,6 +41,41 @@ from .structured_tool_with_argument_properties import (
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
+
+_ARG_PROPS_ADAPTER = TypeAdapter(Dict[str, AgentToolArgumentProperties])
+
+
+def _get_argument_properties(
+    resource: AgentContextResourceConfig,
+) -> dict[str, AgentToolArgumentProperties]:
+    """Extract argumentProperties from the resource's extra fields.
+
+    AgentContextResourceConfig doesn't declare argument_properties yet,
+    but BaseCfg(extra="allow") preserves the raw JSON value.
+    """
+    raw = resource.model_extra.get("argumentProperties") if resource.model_extra else None
+    if not raw:
+        return {}
+    return _ARG_PROPS_ADAPTER.validate_python(raw)
+
+
+def _build_folder_path_prefix_arg_props(
+    resource: AgentContextResourceConfig,
+) -> dict[str, Any]:
+    """Build argument_properties for folder_path_prefix from settings.
+
+    Fallback for when the server doesn't include argumentProperties
+    at the resource level but does set settings.folder_path_prefix
+    with variant="argument".
+    """
+    argument_path = (resource.settings.folder_path_prefix.value or "").strip("{}")
+    return {
+        "folder_path_prefix": {
+            "variant": "argument",
+            "argumentPath": argument_path,
+            "isSensitive": False,
+        }
+    }
 
 
 def is_static_query(resource: AgentContextResourceConfig) -> bool:
@@ -170,6 +206,16 @@ def handle_deep_rag(
         deep_rag_id=(str, Field(alias="deepRagId")),
     )
 
+    arg_props = _get_argument_properties(resource)
+
+    has_folder_path_prefix_arg = (
+        "folder_path_prefix" in arg_props
+        or (
+            resource.settings.folder_path_prefix
+            and resource.settings.folder_path_prefix.variant == "argument"
+        )
+    )
+
     schema_fields: dict[str, Any] = (
         {}
         if static
@@ -184,11 +230,7 @@ def handle_deep_rag(
         }
     )
 
-    arg_props = {}
-    if (
-        resource.settings.folder_path_prefix
-        and resource.settings.folder_path_prefix.variant == "argument"
-    ):
+    if has_folder_path_prefix_arg:
         schema_fields["folder_path_prefix"] = (
             str,
             Field(
@@ -196,16 +238,8 @@ def handle_deep_rag(
                 description="The folder path prefix within the index to filter on",
             ),
         )
-        stripped_static_folder_path_prefix = (
-            (resource.settings.folder_path_prefix.value or "").strip("{}")
-        )
-        arg_props = {
-            "folder_path_prefix": {
-                "variant": "argument",
-                "argumentPath": f"{stripped_static_folder_path_prefix}",
-                "isSensitive": False,
-            }
-        }
+        if "folder_path_prefix" not in arg_props:
+            arg_props = _build_folder_path_prefix_arg_props(resource)
 
     input_model = create_model("DeepRagInput", **schema_fields)
 
@@ -307,6 +341,16 @@ def handle_batch_transform(
     ):
         static_folder_path_prefix = resource.settings.folder_path_prefix.value
 
+    arg_props = _get_argument_properties(resource)
+
+    has_folder_path_prefix_arg = (
+        "folder_path_prefix" in arg_props
+        or (
+            resource.settings.folder_path_prefix
+            and resource.settings.folder_path_prefix.variant == "argument"
+        )
+    )
+
     output_model = create_model_from_schema(BATCH_TRANSFORM_OUTPUT_SCHEMA)
 
     schema_fields: dict[str, Any] = {}
@@ -325,11 +369,7 @@ def handle_batch_transform(
             description="The relative file path destination for the modified csv file",
         ),
     )
-    arg_props = {}
-    if (
-        resource.settings.folder_path_prefix
-        and resource.settings.folder_path_prefix.variant == "argument"
-    ):
+    if has_folder_path_prefix_arg:
         schema_fields["folder_path_prefix"] = (
             str,
             Field(
@@ -337,16 +377,8 @@ def handle_batch_transform(
                 description="The folder path prefix within the index to filter on",
             ),
         )
-        stripped_static_folder_path_prefix = (
-            (resource.settings.folder_path_prefix.value or "").strip("{}")
-        )
-        arg_props = {
-            "folder_path_prefix": {
-                "variant": "argument",
-                "argumentPath": f"{stripped_static_folder_path_prefix}",
-                "isSensitive": False,
-            }
-        }
+        if "folder_path_prefix" not in arg_props:
+            arg_props = _build_folder_path_prefix_arg_props(resource)
     input_model = create_model("BatchTransformInput", **schema_fields)
 
     @mockable(
