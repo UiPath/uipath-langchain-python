@@ -197,7 +197,7 @@ def handle_deep_rag(
             ),
         )
         stripped_static_folder_path_prefix = (
-            resource.settings.folder_path_prefix.value.strip("{}")
+            (resource.settings.folder_path_prefix.value or "").strip("{}")
         )
         arg_props = {
             "folder_path_prefix": {
@@ -338,7 +338,7 @@ def handle_batch_transform(
             ),
         )
         stripped_static_folder_path_prefix = (
-            resource.settings.folder_path_prefix.value.strip("{}")
+            (resource.settings.folder_path_prefix.value or "").strip("{}")
         )
         arg_props = {
             "folder_path_prefix": {
