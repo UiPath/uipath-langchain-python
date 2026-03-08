@@ -156,7 +156,6 @@ def handle_deep_rag(
     if (
         resource.settings.folder_path_prefix
         and resource.settings.folder_path_prefix.value
-        and resource.settings.folder_path_prefix.variant
         and resource.settings.folder_path_prefix.variant == "static"
     ):
         static_folder_path_prefix = resource.settings.folder_path_prefix.value
@@ -188,14 +187,13 @@ def handle_deep_rag(
     arg_props = {}
     if (
         resource.settings.folder_path_prefix
-        and resource.settings.folder_path_prefix.variant
         and resource.settings.folder_path_prefix.variant == "argument"
     ):
         schema_fields["folder_path_prefix"] = (
             str,
             Field(
                 default=None,
-                description="The folder path within the index to filter on",
+                description="The folder path prefix within the index to filter on",
             ),
         )
         stripped_static_folder_path_prefix = (
@@ -222,7 +220,7 @@ def handle_deep_rag(
         query: Optional[str] = None, folder_path_prefix: Optional[str] = None
     ) -> dict[str, Any]:
         actual_prompt = prompt or query
-        glob = build_glob_pattern(
+        glob_pattern = build_glob_pattern(
             folder_path_prefix=static_folder_path_prefix or folder_path_prefix,
             file_extension=file_extension,
         )
@@ -235,7 +233,7 @@ def handle_deep_rag(
                 prompt=actual_prompt,
                 citation_mode=citation_mode,
                 index_folder_path=get_execution_folder_path(),
-                glob_pattern=glob,
+                glob_pattern=glob_pattern,
             )
 
         return await create_deep_rag()
@@ -301,16 +299,13 @@ def handle_batch_transform(
     if static:
         assert prompt is not None
 
-    folder_path_prefix = None
+    static_folder_path_prefix = None
     if (
         resource.settings.folder_path_prefix
         and resource.settings.folder_path_prefix.value
+        and resource.settings.folder_path_prefix.variant == "static"
     ):
-        folder_path_prefix = resource.settings.folder_path_prefix.value
-
-    glob_pattern = build_glob_pattern(
-        folder_path_prefix=folder_path_prefix, file_extension=None
-    )
+        static_folder_path_prefix = resource.settings.folder_path_prefix.value
 
     output_model = create_model_from_schema(BATCH_TRANSFORM_OUTPUT_SCHEMA)
 
@@ -330,6 +325,28 @@ def handle_batch_transform(
             description="The relative file path destination for the modified csv file",
         ),
     )
+    arg_props = {}
+    if (
+        resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.variant == "argument"
+    ):
+        schema_fields["folder_path_prefix"] = (
+            str,
+            Field(
+                default=None,
+                description="The folder path prefix within the index to filter on",
+            ),
+        )
+        stripped_static_folder_path_prefix = (
+            resource.settings.folder_path_prefix.value.strip("{}")
+        )
+        arg_props = {
+            "folder_path_prefix": {
+                "variant": "argument",
+                "argumentPath": f"{stripped_static_folder_path_prefix}",
+                "isSensitive": False,
+            }
+        }
     input_model = create_model("BatchTransformInput", **schema_fields)
 
     @mockable(
@@ -340,9 +357,15 @@ def handle_batch_transform(
         example_calls=[],  # Examples cannot be provided for context.
     )
     async def context_tool_fn(
-        query: Optional[str] = None, destination_path: str = "output.csv"
+        query: Optional[str] = None,
+        destination_path: str = "output.csv",
+        folder_path_prefix: Optional[str] = None,
     ) -> dict[str, Any]:
         actual_prompt = prompt or query
+        glob_pattern = build_glob_pattern(
+            folder_path_prefix=static_folder_path_prefix or folder_path_prefix,
+            file_extension=None,
+        )
 
         @durable_interrupt
         async def create_batch_transform():
@@ -392,7 +415,7 @@ def handle_batch_transform(
         args_schema=input_model,
         coroutine=context_tool_fn,
         output_type=output_model,
-        argument_properties={},
+        argument_properties=arg_props,
         metadata={
             "tool_type": "context",
             "display_name": resource.name,
