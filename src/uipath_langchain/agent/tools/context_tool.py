@@ -64,10 +64,11 @@ def _build_folder_path_prefix_arg_props(
 ) -> dict[str, Any]:
     """Build argument_properties for folder_path_prefix from settings.
 
-    Fallback for when the server doesn't include argumentProperties
+    Fallback for when settings bag doesn't include argumentProperties
     at the resource level but does set settings.folder_path_prefix
     with variant="argument".
     """
+    assert resource.settings.folder_path_prefix is not None
     argument_path = (resource.settings.folder_path_prefix.value or "").strip("{}")
     return {
         "folder_path_prefix": {
