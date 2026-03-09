@@ -227,3 +227,99 @@ class TestGetJsonPathsByTypeDynamic:
         model = create_model(schema)
         paths = get_json_paths_by_type(model, "__Item")
         assert paths == ["$.order.item"]
+
+
+class TestJsonPathsWithAliasedFields:
+    """Verify JSONPath extraction works with renamed fields from create_model."""
+
+    def test_underscore_field_jsonpath(self) -> None:
+        """JSONPath must use original '_file' name, not Python 'file'."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "_file": {"$ref": "#/definitions/job-attachment"},
+                "name": {"type": "string"},
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "full_name": {"type": "string"},
+                    },
+                }
+            },
+        }
+        model = create_model(schema)
+        paths = get_json_paths_by_type(model, "__Job_attachment")
+        assert paths == ["$._file"]
+
+    def test_reserved_field_jsonpath(self) -> None:
+        """JSONPath must use original 'copy' name."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "copy": {"$ref": "#/definitions/job-attachment"},
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "full_name": {"type": "string"},
+                    },
+                }
+            },
+        }
+        model = create_model(schema)
+        paths = get_json_paths_by_type(model, "__Job_attachment")
+        assert paths == ["$.copy"]
+
+    def test_underscore_field_extract_from_dict(self) -> None:
+        """extract_values_by_paths must find values using alias-keyed dicts."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "_file": {"$ref": "#/definitions/job-attachment"},
+                "name": {"type": "string"},
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "full_name": {"type": "string"},
+                    },
+                }
+            },
+        }
+        model = create_model(schema)
+        paths = get_json_paths_by_type(model, "__Job_attachment")
+        data = {"_file": {"ID": "uuid-1", "full_name": "report.pdf"}, "name": "test"}
+        values = extract_values_by_paths(data, paths)
+        assert len(values) == 1
+        assert values[0]["ID"] == "uuid-1"
+
+    def test_underscore_field_list_jsonpath(self) -> None:
+        """Underscore attachment field inside a list."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "_files": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/job-attachment"},
+                },
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "full_name": {"type": "string"},
+                    },
+                }
+            },
+        }
+        model = create_model(schema)
+        paths = get_json_paths_by_type(model, "__Job_attachment")
+        assert paths == ["$._files[*]"]

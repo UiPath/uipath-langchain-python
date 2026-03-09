@@ -1212,14 +1212,14 @@ wheels = [
 
 [[package]]
 name = "jsonschema-pydantic-converter"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/dc/1e/9c2292e2cbe0290b3d2b5d055bee84ac467b61eff64780394d30bc497541/jsonschema_pydantic_converter-0.2.0.tar.gz", hash = "sha256:59e501fe04be47d31f6bf4f19afce2646991e68877550a52d1b7f50a6d4fb5f0", size = 62343, upload-time = "2026-03-02T15:58:14.898Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/86/81f6997a2f33a5d7a1ec69f5409e1e17515f0ba9a93b024f3ba6e925b6ad/jsonschema_pydantic_converter-0.3.0.tar.gz", hash = "sha256:501e6f2aed2dbc86f969f3c050afa696b0e39fad3e5f3775e5c44d06747b613a", size = 67059, upload-time = "2026-03-08T22:21:43.138Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/60/54f0be7aecfa1bf7c48568b2e1c955d61de4fc6552e2512e7f6267595f66/jsonschema_pydantic_converter-0.2.0-py3-none-any.whl", hash = "sha256:3181396414d500a2577513d258e94e33d7fb9f1864e87b76f2ec54af00229fcb", size = 17796, upload-time = "2026-03-02T15:58:13.397Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/8d/8c010e18950fbe05f9ba61b234b0befc0484891e9f0f1e8b03793216f4a0/jsonschema_pydantic_converter-0.3.0-py3-none-any.whl", hash = "sha256:6b0be5a33e207a946bf1e4c30d39c0e270129d5645ee41bb4ec911852b273b67", size = 19989, upload-time = "2026-03-08T22:21:41.704Z" },
 ]
 
 [[package]]
@@ -3378,7 +3378,7 @@ requires-dist = [
     { name = "google-generativeai", marker = "extra == 'vertex'", specifier = ">=0.8.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
-    { name = "jsonschema-pydantic-converter", specifier = ">=0.2.0" },
+    { name = "jsonschema-pydantic-converter", specifier = ">=0.3.0" },
     { name = "langchain", specifier = ">=1.0.0,<2.0.0" },
     { name = "langchain-aws", marker = "extra == 'bedrock'", specifier = ">=0.2.35" },
     { name = "langchain-core", specifier = ">=1.2.11,<2.0.0" },
