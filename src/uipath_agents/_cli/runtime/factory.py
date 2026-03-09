@@ -107,6 +107,12 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
 
             self._agent_definition = self._load_agent_definition(entrypoint, settings)
 
+            voice_mode = getattr(self.context, "voice_mode", None)
+            if voice_mode is not None:
+                from uipath_agents.voice.job_runtime import VoiceJobRuntime
+
+                return VoiceJobRuntime(self._agent_definition, voice_mode, self.context)
+
             # Get shared memory instance
             memory = await self._get_memory()
 
@@ -158,6 +164,131 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         self._disposables.clear()
 
         await super().dispose()
+
+    @staticmethod
+    async def wrap_with_agents_stack(
+        base_runtime: UiPathRuntimeProtocol,
+        storage: SqliteResumableStorage,
+        runtime_id: str,
+        ctx: UiPathRuntimeContext,
+        agent_name: str,
+        agent_definition: AgentDefinition | None = None,
+        licensed: bool = True,
+    ) -> tuple[UiPathRuntimeProtocol, SqliteResumableStorage]:
+        """Build the shared wrapping stack around a base runtime.
+
+        Stack order: Resumable → BTS → (Licensed if licensed) → Instrumented.
+
+        Callbacks (instrumentation + BTS + optional tool tracking) are injected
+        into base_runtime.callbacks so LangChain sees them during graph execution.
+
+        Args:
+            base_runtime: The inner runtime to wrap (must expose a mutable ``callbacks`` list)
+            storage: Shared storage for persistence, telemetry, and BTS
+            runtime_id: Unique identifier for the runtime instance
+            ctx: Runtime context (used by Licensed/Instrumented layers)
+            agent_name: Display name for BTS tracking
+            agent_definition: Agent config, forwarded to Licensed + Instrumented layers
+            licensed: Whether to add the LicensedRuntime layer with tool call tracking
+
+        Returns:
+            (outermost_runtime, storage)
+
+        Note:
+            Runtime wrapping order:
+            1. AgentsLangGraphRuntime (base - handles LangGraph execution)
+            2. UiPathResumableRuntime (adds persistence/resume)
+            3. BtsRuntime (adds BTS transaction/operation tracking)
+            4. LicensedRuntime (adds startup + conversational licensing)
+            5. InstrumentedRuntime (adds tracing spans + trace context preservation)
+
+            The callback is passed via constructor to the base runtime,
+            ensuring it persists across debug/chat re-executions where
+            the same runtime instance is executed multiple times.
+
+            Trace context storage is shared between InstrumentedRuntime
+            (for trace context preservation) and UiPathResumableRuntime
+            (for agent state persistence).
+        """
+        trace_context_storage = SqliteTraceContextStorage(storage)
+
+        span_factory, instrumentation_callback = (
+            AgentsRuntimeFactory._create_telemetry_components()
+        )
+
+        # --- BTS setup ---
+        bts_state = BtsState()
+        bts_callback = BtsCallback(bts_state)
+        bts_storage = SqliteBtsStateStorage(storage)
+
+        from uipath.platform import UiPath
+
+        try:
+            sdk = UiPath()
+            bts_state.tracker_service = sdk.automation_tracker
+        except Exception:
+            logger.warning("Failed to initialize AutomationTrackerService for BTS")
+
+        # Inject callbacks into base runtime
+        tool_call_tracker = ToolCallTracker() if licensed else None
+        callbacks: list[Any] = [instrumentation_callback, bts_callback]
+        if tool_call_tracker:
+            callbacks.append(tool_call_tracker)
+        if hasattr(base_runtime, "callbacks"):
+            base_runtime.callbacks = callbacks
+
+        # --- Wrapping stack ---
+        trigger_manager = UiPathResumeTriggerHandler()
+        resumable_runtime = UiPathResumableRuntime(
+            delegate=base_runtime,
+            storage=storage,
+            trigger_manager=trigger_manager,
+            runtime_id=runtime_id,
+        )
+
+        bts_runtime = BtsRuntime(
+            delegate=resumable_runtime,
+            state=bts_state,
+            callback=bts_callback,
+            agent_name=agent_name,
+            runtime_id=runtime_id,
+            bts_storage=bts_storage,
+            parent_operation_id=ctx.parent_operation_id,
+        )
+
+        licensed_runtime: UiPathRuntimeProtocol = bts_runtime
+        if tool_call_tracker:
+            licensed_runtime = LicensedRuntime(
+                bts_runtime,
+                agent_definition=agent_definition,
+                tool_call_tracker=tool_call_tracker,
+                execution_type=get_execution_type(ctx),
+                is_resume=ctx.resume,
+            )
+
+        instrumented_runtime = InstrumentedRuntime(
+            licensed_runtime,
+            span_factory,
+            instrumentation_callback,
+            ctx,
+            agent_definition=agent_definition,
+            trace_context_storage=trace_context_storage,
+        )
+
+        return instrumented_runtime, storage
+
+    @staticmethod
+    def _create_telemetry_components() -> tuple[
+        LlmOpsSpanFactory, LlmOpsInstrumentationCallback
+    ]:
+        """Create the telemetry component chain for instrumentation."""
+        llmops_exporter = LlmOpsHttpExporter()
+        filtered_exporter = FilteringSpanExporter(
+            llmops_exporter, filter_fn=is_custom_instrumentation_span
+        )
+        span_factory = LlmOpsSpanFactory(exporter=filtered_exporter)
+        callback = LlmOpsInstrumentationCallback(span_factory)
+        return span_factory, callback
 
     def _setup_instrumentation(self, trace_manager: UiPathTraceManager | None) -> None:
         """Setup tracing and instrumentation."""
@@ -366,27 +497,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
 
         Returns:
             Configured runtime stack: Base → Resumable → BTS → Licensed → Telemetry
-
-        Note:
-            Runtime wrapping order:
-            1. AgentsLangGraphRuntime (base - handles LangGraph execution)
-            2. UiPathResumableRuntime (adds persistence/resume)
-            3. BtsRuntime (adds BTS transaction/operation tracking)
-            4. LicensedRuntime (adds startup + conversational licensing)
-            5. InstrumentedRuntime (adds tracing spans + trace context preservation)
-
-            The callback is passed via constructor to the base runtime,
-            ensuring it persists across debug/chat re-executions where
-            the same runtime instance is executed multiple times.
-
-            Trace context storage is shared between InstrumentedRuntime
-            (for trace context preservation) and UiPathResumableRuntime
-            (for agent state persistence).
         """
-        # Create storage first - shared between telemetry and resumable runtime
-        storage = SqliteResumableStorage(memory)
-        trace_context_storage = SqliteTraceContextStorage(storage)
-
         # Only fetch folder_key for local runs (no job_key), not production
         if not UiPathConfig.job_key and not UiPathConfig.folder_key:
             try:
@@ -396,95 +507,24 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             except Exception:
                 pass  # Folder key fetch failed, LlmOps tracing may fail
 
-        span_factory, instrumentation_callback = self._create_telemetry_components()
-        tool_call_tracker = ToolCallTracker()
-
-        # --- BTS setup ---
-        bts_state = BtsState()
-        bts_callback = BtsCallback(bts_state)
-        bts_storage = SqliteBtsStateStorage(storage)
-
-        from uipath.platform import UiPath
-
-        try:
-            sdk = UiPath()
-            bts_state.tracker_service = sdk.automation_tracker
-        except Exception:
-            logger.warning("Failed to initialize AutomationTrackerService for BTS")
-
+        # Create storage first - shared between telemetry and resumable runtime
+        storage = SqliteResumableStorage(memory)
         agent_name = agent_definition.name or "Unknown"
 
         base_runtime = AgentsLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
-            callbacks=[instrumentation_callback, bts_callback, tool_call_tracker],
             agent_definition=agent_definition,
             storage=storage,
         )
-        resumable_runtime = self._wrap_in_resumable_runtime(
-            base_runtime, storage, runtime_id
-        )
-        bts_runtime = BtsRuntime(
-            delegate=resumable_runtime,
-            state=bts_state,
-            callback=bts_callback,
+
+        runtime, _ = await self.wrap_with_agents_stack(
+            base_runtime=base_runtime,
+            storage=storage,
+            runtime_id=runtime_id,
+            ctx=self.context,
             agent_name=agent_name,
-            runtime_id=runtime_id,
-            bts_storage=bts_storage,
-            parent_operation_id=self.context.parent_operation_id,
-        )
-        licensed_runtime = LicensedRuntime(
-            bts_runtime,
             agent_definition=agent_definition,
-            tool_call_tracker=tool_call_tracker,
-            execution_type=get_execution_type(self.context),
-            is_resume=self.context.resume,
         )
-        instrumented_runtime = InstrumentedRuntime(
-            licensed_runtime,
-            span_factory,
-            instrumentation_callback,
-            self.context,
-            agent_definition=agent_definition,
-            trace_context_storage=trace_context_storage,
-        )
-
-        return instrumented_runtime
-
-    def _create_telemetry_components(
-        self,
-    ) -> tuple[LlmOpsSpanFactory, LlmOpsInstrumentationCallback]:
-        """Create the telemetry component chain for instrumentation."""
-        llmops_exporter = LlmOpsHttpExporter()
-        filtered_exporter = FilteringSpanExporter(
-            llmops_exporter, filter_fn=is_custom_instrumentation_span
-        )
-        span_factory = LlmOpsSpanFactory(exporter=filtered_exporter)
-        callback = LlmOpsInstrumentationCallback(span_factory)
-        return span_factory, callback
-
-    def _wrap_in_resumable_runtime(
-        self,
-        base_runtime: UiPathRuntimeProtocol,
-        storage: SqliteResumableStorage,
-        runtime_id: str,
-    ) -> UiPathResumableRuntime:
-        """Wrap a base runtime in UiPathResumableRuntime with storage and trigger manager.
-
-        Args:
-            base_runtime: The base runtime to wrap
-            storage: Pre-created storage (shared with InstrumentedRuntime)
-            runtime_id: Unique identifier for the runtime instance
-
-        Returns:
-            UiPathResumableRuntime wrapping the base runtime
-        """
-        trigger_manager = UiPathResumeTriggerHandler()
-
-        return UiPathResumableRuntime(
-            delegate=base_runtime,
-            storage=storage,
-            trigger_manager=trigger_manager,
-            runtime_id=runtime_id,
-        )
+        return runtime

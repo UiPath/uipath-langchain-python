@@ -16,6 +16,7 @@ def factory() -> AgentsRuntimeFactory:
     mock_context.resume = False
     mock_context.trace_manager = None
     mock_context.command = "debug"
+    mock_context.voice_mode = None
     with patch("uipath_agents._cli.runtime.factory._prepare_agent_execution_contract"):
         return AgentsRuntimeFactory(mock_context)
 
