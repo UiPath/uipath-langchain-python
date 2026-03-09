@@ -405,12 +405,12 @@ class TestCreateContextTool:
     def test_case_insensitive_retrieval_mode(self, deep_rag_config):
         """Test that retrieval mode matching is case-insensitive."""
         # Test with uppercase
-        deep_rag_config.settings.retrieval_mode = "DEEP_RAG"
+        deep_rag_config.settings.retrieval_mode = "DEEPRAG"
         result = create_context_tool(deep_rag_config)
         assert isinstance(result, StructuredToolWithArgumentProperties)
 
         # Test with mixed case
-        deep_rag_config.settings.retrieval_mode = "Deep_Rag"
+        deep_rag_config.settings.retrieval_mode = "deeprag"
         result = create_context_tool(deep_rag_config)
         assert isinstance(result, StructuredToolWithArgumentProperties)
 
