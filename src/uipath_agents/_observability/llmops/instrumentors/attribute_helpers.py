@@ -40,10 +40,9 @@ def sanitize_file_data(obj: Any) -> Any:
             ):
                 if isinstance(value, bytes):
                     sanitized[key] = f"<bytes: {len(value)} bytes>"
-                elif (
-                    isinstance(value, str)
-                    and len(value) > 1000
-                    and _BASE64_RE.match(value)
+                elif isinstance(value, str) and (
+                    (len(value) > 1000 and _BASE64_RE.match(value))
+                    or (value.startswith("data:") and ";base64," in value)
                 ):
                     sanitized[key] = "<base64 data omitted>"
                 elif isinstance(value, list):

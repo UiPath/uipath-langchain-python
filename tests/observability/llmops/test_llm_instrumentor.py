@@ -185,6 +185,131 @@ class TestModelRunParenting:
         assert model_call.kwargs["parent_span"] is guardrail_llm_span
 
 
+# --- Base64 sanitization ---
+
+
+class TestBase64Sanitization:
+    """on_chat_model_start sanitizes base64 file data from multimodal content."""
+
+    def test_multimodal_content_base64_sanitized(self) -> None:
+        """Base64 image data in multimodal message parts is replaced with placeholder."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+
+        base64_payload = "A" * 2000  # long base64-like string
+        multimodal_content = [
+            {"type": "text", "text": "Analyze this image"},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{base64_payload}"},
+            },
+        ]
+        msg = MagicMock(content=multimodal_content, type="human")
+
+        run_id = uuid4()
+        with (
+            patch(
+                "uipath_agents._observability.llmops.instrumentors.llm_instrumentor.SpanHierarchyManager"
+            ),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4o"}},
+                messages=[[msg]],
+                run_id=run_id,
+                parent_run_id=uuid4(),
+            )
+
+        input_value = mock_factory.start_llm_call.call_args.kwargs["input"]
+        assert base64_payload not in input_value
+        assert "<base64 data omitted>" in input_value
+
+    def test_data_uri_in_dict_content_sanitized(self) -> None:
+        """data: URI with base64 in a dict-based content part is sanitized."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+
+        content = [
+            {"type": "text", "text": "describe the file"},
+            {
+                "type": "image_url",
+                "data": "data:application/pdf;base64,JVBERi0xLjQK" + "A" * 1500,
+            },
+        ]
+        msg = MagicMock(content=content, type="human")
+
+        run_id = uuid4()
+        with (
+            patch(
+                "uipath_agents._observability.llmops.instrumentors.llm_instrumentor.SpanHierarchyManager"
+            ),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4o"}},
+                messages=[[msg]],
+                run_id=run_id,
+                parent_run_id=uuid4(),
+            )
+
+        input_value = mock_factory.start_llm_call.call_args.kwargs["input"]
+        assert "JVBERi0" not in input_value
+
+    def test_raw_base64_in_data_key_sanitized(self) -> None:
+        """Raw base64 bytes in a 'data' key are replaced with placeholder."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+
+        raw_base64 = "A" * 2000
+        content = [
+            {"type": "text", "text": "describe the file"},
+            {"type": "file", "data": raw_base64},
+        ]
+        msg = MagicMock(content=content, type="human")
+
+        run_id = uuid4()
+        with (
+            patch(
+                "uipath_agents._observability.llmops.instrumentors.llm_instrumentor.SpanHierarchyManager"
+            ),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4o"}},
+                messages=[[msg]],
+                run_id=run_id,
+                parent_run_id=uuid4(),
+            )
+
+        input_value = mock_factory.start_llm_call.call_args.kwargs["input"]
+        assert raw_base64 not in input_value
+        assert "<base64 data omitted>" in input_value
+
+    def test_plain_text_content_not_affected(self) -> None:
+        """Plain text content passes through without modification."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+
+        msg = MagicMock(content="What is 2+2?", type="human")
+
+        run_id = uuid4()
+        with (
+            patch(
+                "uipath_agents._observability.llmops.instrumentors.llm_instrumentor.SpanHierarchyManager"
+            ),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4o"}},
+                messages=[[msg]],
+                run_id=run_id,
+                parent_run_id=uuid4(),
+            )
+
+        input_value = mock_factory.start_llm_call.call_args.kwargs["input"]
+        assert input_value == "What is 2+2?"
+
+
 # --- on_llm_end span lifecycle ---
 
 _PATCH_HIERARCHY = "uipath_agents._observability.llmops.instrumentors.llm_instrumentor.SpanHierarchyManager"

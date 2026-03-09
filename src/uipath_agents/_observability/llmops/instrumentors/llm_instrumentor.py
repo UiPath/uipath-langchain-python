@@ -147,7 +147,7 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
             input_text = None
             if messages and messages[0]:
                 last_msg = messages[0][-1]
-                content = last_msg.content
+                content = sanitize_file_data(last_msg.content)
                 input_text = content if isinstance(content, str) else str(content)
 
             self._start_llm_and_model_spans(
