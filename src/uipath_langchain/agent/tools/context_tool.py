@@ -53,7 +53,9 @@ def _get_argument_properties(
     AgentContextResourceConfig doesn't declare argument_properties yet,
     but BaseCfg(extra="allow") preserves the raw JSON value.
     """
-    raw = resource.model_extra.get("argumentProperties") if resource.model_extra else None
+    raw = (
+        resource.model_extra.get("argumentProperties") if resource.model_extra else None
+    )
     if not raw:
         return {}
     return _ARG_PROPS_ADAPTER.validate_python(raw)
@@ -209,12 +211,9 @@ def handle_deep_rag(
 
     arg_props = _get_argument_properties(resource)
 
-    has_folder_path_prefix_arg = (
-        "folder_path_prefix" in arg_props
-        or (
-            resource.settings.folder_path_prefix
-            and resource.settings.folder_path_prefix.variant == "argument"
-        )
+    has_folder_path_prefix_arg = "folder_path_prefix" in arg_props or (
+        resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.variant == "argument"
     )
 
     schema_fields: dict[str, Any] = (
@@ -344,12 +343,9 @@ def handle_batch_transform(
 
     arg_props = _get_argument_properties(resource)
 
-    has_folder_path_prefix_arg = (
-        "folder_path_prefix" in arg_props
-        or (
-            resource.settings.folder_path_prefix
-            and resource.settings.folder_path_prefix.variant == "argument"
-        )
+    has_folder_path_prefix_arg = "folder_path_prefix" in arg_props or (
+        resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.variant == "argument"
     )
 
     output_model = create_model_from_schema(BATCH_TRANSFORM_OUTPUT_SCHEMA)
