@@ -1,16 +1,15 @@
 """Context tool creation for semantic index retrieval."""
 
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from langchain_core.documents import Document
 from langchain_core.messages import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from pydantic import BaseModel, Field, TypeAdapter, create_model
+from pydantic import BaseModel, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
-    AgentToolArgumentProperties,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
@@ -41,24 +40,6 @@ from .structured_tool_with_argument_properties import (
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
-
-_ARG_PROPS_ADAPTER = TypeAdapter(Dict[str, AgentToolArgumentProperties])
-
-
-def _get_argument_properties(
-    resource: AgentContextResourceConfig,
-) -> dict[str, AgentToolArgumentProperties]:
-    """Extract argumentProperties from the resource's extra fields.
-
-    AgentContextResourceConfig doesn't declare argument_properties yet,
-    but BaseCfg(extra="allow") preserves the raw JSON value.
-    """
-    raw = (
-        resource.model_extra.get("argumentProperties") if resource.model_extra else None
-    )
-    if not raw:
-        return {}
-    return _ARG_PROPS_ADAPTER.validate_python(raw)
 
 
 def _build_folder_path_prefix_arg_props(
@@ -209,7 +190,7 @@ def handle_deep_rag(
         deep_rag_id=(str, Field(alias="deepRagId")),
     )
 
-    arg_props = _get_argument_properties(resource)
+    arg_props = dict(resource.argument_properties)
 
     has_folder_path_prefix_arg = "folder_path_prefix" in arg_props or (
         resource.settings.folder_path_prefix
@@ -272,7 +253,15 @@ def handle_deep_rag(
 
         return await create_deep_rag()
 
-    return StructuredToolWithArgumentProperties(
+    async def context_deep_rag_wrapper(
+        tool: BaseTool,
+        call: ToolCall,
+        state: AgentGraphState,
+    ) -> ToolWrapperReturnType:
+        call["args"] = handle_static_args(tool, state, call["args"])
+        return await tool.ainvoke(call)
+
+    tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
@@ -286,6 +275,8 @@ def handle_deep_rag(
             "context_retrieval_mode": resource.settings.retrieval_mode,
         },
     )
+    tool.set_tool_wrappers(awrapper=context_deep_rag_wrapper)
+    return tool
 
 
 def handle_batch_transform(
@@ -341,7 +332,7 @@ def handle_batch_transform(
     ):
         static_folder_path_prefix = resource.settings.folder_path_prefix.value
 
-    arg_props = _get_argument_properties(resource)
+    arg_props = dict(resource.argument_properties)
 
     has_folder_path_prefix_arg = "folder_path_prefix" in arg_props or (
         resource.settings.folder_path_prefix
@@ -435,7 +426,7 @@ def handle_batch_transform(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(resource, state, call["args"])
+        call["args"] = handle_static_args(tool, state, call["args"])
         return await job_attachment_wrapper(tool, call, state)
 
     tool = StructuredToolWithArgumentProperties(
@@ -475,29 +466,35 @@ def ensure_valid_fields(resource_config: AgentContextResourceConfig):
         )
 
 
+def _normalize_folder_prefix(folder_path_prefix: str | None) -> str:
+    """Normalize a folder path prefix to a clean directory-only pattern.
+
+    Strips leading/trailing slashes and trailing file-matching globs
+    (e.g. /*, /**, /**/*) since the caller appends the file extension part.
+    """
+    if not folder_path_prefix:
+        return "**"
+
+    prefix = folder_path_prefix.strip("/").rstrip("/*")
+    if not prefix:
+        return "**"
+
+    return prefix
+
+
 def build_glob_pattern(
     folder_path_prefix: str | None, file_extension: str | None
 ) -> str:
-    # Handle prefix
-    prefix = "**"
-    if folder_path_prefix:
-        prefix = folder_path_prefix.rstrip("/")
-
-        if not prefix.startswith("**"):
-            if prefix.startswith("/"):
-                prefix = prefix[1:]
+    prefix = _normalize_folder_prefix(folder_path_prefix)
 
     # Handle extension
     extension = "*"
     if file_extension:
         ext = file_extension.lower()
-        if ext in {"pdf", "txt", "docx", "csv"}:
-            extension = f"*.{ext}"
-        else:
-            extension = f"*.{ext}"
+        extension = f"*.{ext}"
 
     # Final pattern logic
-    if not prefix or prefix == "**":
+    if prefix == "**":
         return "**/*" if extension == "*" else f"**/{extension}"
 
     return f"{prefix}/{extension}"
