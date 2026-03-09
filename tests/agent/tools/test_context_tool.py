@@ -129,6 +129,7 @@ class TestHandleDeepRag:
         assert isinstance(result, StructuredToolWithArgumentProperties)
         assert "folder_path_prefix" in result.argument_properties
         # Schema should include folder_path_prefix field
+        assert isinstance(result.args_schema, type)
         schema = result.args_schema.model_json_schema()
         assert "folder_path_prefix" in schema["properties"]
 
@@ -148,6 +149,7 @@ class TestHandleDeepRag:
 
         assert isinstance(result, StructuredToolWithArgumentProperties)
         assert "folder_path_prefix" in result.argument_properties
+        assert isinstance(result.args_schema, type)
         schema = result.args_schema.model_json_schema()
         assert "folder_path_prefix" in schema["properties"]
 
@@ -700,6 +702,7 @@ class TestHandleBatchTransform:
 
         assert isinstance(result, StructuredToolWithArgumentProperties)
         assert "folder_path_prefix" in result.argument_properties
+        assert isinstance(result.args_schema, type)
         schema = result.args_schema.model_json_schema()
         assert "folder_path_prefix" in schema["properties"]
 
@@ -1026,9 +1029,7 @@ class TestNormalizeFolderPrefix:
         assert _normalize_folder_prefix("folder/subfolder/*") == "folder/subfolder"
 
     def test_nested_prefix_strips_trailing_double_star_star(self):
-        assert (
-            _normalize_folder_prefix("folder/subfolder/**/*") == "folder/subfolder"
-        )
+        assert _normalize_folder_prefix("folder/subfolder/**/*") == "folder/subfolder"
 
     # --- Match-all patterns become ** ---
 

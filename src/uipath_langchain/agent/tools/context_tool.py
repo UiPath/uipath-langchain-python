@@ -1,7 +1,7 @@
 """Context tool creation for semantic index retrieval."""
 
 import uuid
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from langchain_core.documents import Document
 from langchain_core.messages import ToolCall
@@ -30,7 +30,10 @@ from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     BATCH_TRANSFORM_OUTPUT_SCHEMA,
 )
-from uipath_langchain.agent.tools.static_args import handle_static_args
+from uipath_langchain.agent.tools.static_args import (
+    ArgumentPropertiesMixin,
+    handle_static_args,
+)
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
 from .durable_interrupt import durable_interrupt
@@ -152,7 +155,7 @@ def handle_semantic_search(
 
 def handle_deep_rag(
     tool_name: str, resource: AgentContextResourceConfig
-) -> StructuredTool:
+) -> StructuredToolWithArgumentProperties:
     ensure_valid_fields(resource)
 
     assert resource.settings.query.variant is not None
@@ -258,7 +261,9 @@ def handle_deep_rag(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(tool, state, call["args"])
+        call["args"] = handle_static_args(
+            cast(ArgumentPropertiesMixin, tool), state, call["args"]
+        )
         return await tool.ainvoke(call)
 
     tool = StructuredToolWithArgumentProperties(
@@ -281,7 +286,7 @@ def handle_deep_rag(
 
 def handle_batch_transform(
     tool_name: str, resource: AgentContextResourceConfig
-) -> StructuredTool:
+) -> StructuredToolWithArgumentProperties:
     ensure_valid_fields(resource)
 
     assert resource.settings.query is not None
@@ -426,7 +431,9 @@ def handle_batch_transform(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(tool, state, call["args"])
+        call["args"] = handle_static_args(
+            cast(ArgumentPropertiesMixin, tool), state, call["args"]
+        )
         return await job_attachment_wrapper(tool, call, state)
 
     tool = StructuredToolWithArgumentProperties(
