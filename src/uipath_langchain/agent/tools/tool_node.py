@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, Literal
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph._internal._runnable import RunnableCallable
+from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command
 from pydantic import BaseModel
 from uipath.platform.resume_triggers import is_no_content_marker
@@ -88,6 +89,8 @@ class UiPathToolNode(RunnableCallable):
             else:
                 result = self.tool.invoke(call)
             return self._process_result(call, result)
+        except GraphBubbleUp:
+            raise
         except Exception as e:
             if self.handle_tool_errors:
                 return self._process_error_result(call, e)
@@ -107,6 +110,8 @@ class UiPathToolNode(RunnableCallable):
             else:
                 result = await self.tool.ainvoke(call)
             return self._process_result(call, result)
+        except GraphBubbleUp:
+            raise
         except Exception as e:
             if self.handle_tool_errors:
                 return self._process_error_result(call, e)
