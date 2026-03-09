@@ -2,277 +2,11 @@
 
 from typing import Any
 
-import pytest
+from pydantic import BaseModel
 
-from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model,
-    has_underscore_fields,
 )
-
-
-class TestHasUnderscoreFieldsReturnsTrue:
-    """Scenarios where underscore fields are present."""
-
-    @pytest.mark.parametrize(
-        "schema",
-        [
-            pytest.param(
-                {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "_hidden": {"type": "string"},
-                    },
-                },
-                id="top-level underscore field",
-            ),
-            pytest.param(
-                {
-                    "type": "object",
-                    "properties": {
-                        "outer": {
-                            "type": "object",
-                            "properties": {
-                                "_secret": {"type": "integer"},
-                            },
-                        },
-                    },
-                },
-                id="nested underscore field in object properties",
-            ),
-            pytest.param(
-                {
-                    "type": "object",
-                    "properties": {"name": {"type": "string"}},
-                    "$defs": {
-                        "Inner": {
-                            "type": "object",
-                            "properties": {
-                                "_internal": {"type": "boolean"},
-                            },
-                        },
-                    },
-                },
-                id="underscore field in $defs",
-            ),
-            pytest.param(
-                {
-                    "type": "object",
-                    "properties": {"name": {"type": "string"}},
-                    "definitions": {
-                        "Inner": {
-                            "type": "object",
-                            "properties": {
-                                "_private": {"type": "number"},
-                            },
-                        },
-                    },
-                },
-                id="underscore field in definitions",
-            ),
-            pytest.param(
-                {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "_element_id": {"type": "string"},
-                        },
-                    },
-                },
-                id="underscore field in array items",
-            ),
-            pytest.param(
-                {
-                    "allOf": [
-                        {
-                            "type": "object",
-                            "properties": {
-                                "_merged": {"type": "string"},
-                            },
-                        },
-                    ],
-                },
-                id="underscore field in allOf sub-schema",
-            ),
-            pytest.param(
-                {
-                    "anyOf": [
-                        {"type": "string"},
-                        {
-                            "type": "object",
-                            "properties": {
-                                "_variant": {"type": "integer"},
-                            },
-                        },
-                    ],
-                },
-                id="underscore field in anyOf sub-schema",
-            ),
-            pytest.param(
-                {
-                    "oneOf": [
-                        {
-                            "type": "object",
-                            "properties": {
-                                "_choice": {"type": "boolean"},
-                            },
-                        },
-                    ],
-                },
-                id="underscore field in oneOf sub-schema",
-            ),
-            pytest.param(
-                {
-                    "not": {
-                        "type": "object",
-                        "properties": {
-                            "_excluded": {"type": "string"},
-                        },
-                    },
-                },
-                id="underscore field in not sub-schema",
-            ),
-            pytest.param(
-                {
-                    "if": {
-                        "type": "object",
-                        "properties": {
-                            "_condition": {"type": "boolean"},
-                        },
-                    },
-                    "then": {"type": "object", "properties": {}},
-                },
-                id="underscore field in if",
-            ),
-            pytest.param(
-                {
-                    "if": {
-                        "type": "object",
-                        "properties": {"flag": {"type": "boolean"}},
-                    },
-                    "then": {
-                        "type": "object",
-                        "properties": {
-                            "_result": {"type": "string"},
-                        },
-                    },
-                },
-                id="underscore field in then",
-            ),
-            pytest.param(
-                {
-                    "if": {
-                        "type": "object",
-                        "properties": {"flag": {"type": "boolean"}},
-                    },
-                    "then": {"type": "object", "properties": {}},
-                    "else": {
-                        "type": "object",
-                        "properties": {
-                            "_fallback": {"type": "string"},
-                        },
-                    },
-                },
-                id="underscore field in else",
-            ),
-            pytest.param(
-                {
-                    "type": "object",
-                    "properties": {
-                        "level1": {
-                            "type": "object",
-                            "properties": {
-                                "level2": {
-                                    "type": "object",
-                                    "properties": {
-                                        "level3": {
-                                            "type": "object",
-                                            "properties": {
-                                                "_deep": {"type": "string"},
-                                            },
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                id="deeply nested underscore field",
-            ),
-        ],
-    )
-    def test_returns_true(self, schema: dict[str, Any]) -> None:
-        assert has_underscore_fields(schema) is True
-
-
-class TestHasUnderscoreFieldsReturnsFalse:
-    """Scenarios where no underscore fields exist."""
-
-    @pytest.mark.parametrize(
-        "schema",
-        [
-            pytest.param(
-                {},
-                id="empty schema",
-            ),
-            pytest.param(
-                {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "age": {"type": "integer"},
-                    },
-                },
-                id="flat schema with normal property names",
-            ),
-            pytest.param(
-                {
-                    "type": "object",
-                    "properties": {
-                        "user": {
-                            "type": "object",
-                            "properties": {
-                                "firstName": {"type": "string"},
-                                "lastName": {"type": "string"},
-                            },
-                        },
-                        "tags": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "label": {"type": "string"},
-                                    "value": {"type": "integer"},
-                                },
-                            },
-                        },
-                    },
-                    "$defs": {
-                        "Address": {
-                            "type": "object",
-                            "properties": {
-                                "street": {"type": "string"},
-                                "city": {"type": "string"},
-                            },
-                        },
-                    },
-                    "allOf": [
-                        {
-                            "type": "object",
-                            "properties": {
-                                "extra": {"type": "string"},
-                            },
-                        },
-                    ],
-                },
-                id="complex schema with no underscores anywhere",
-            ),
-        ],
-    )
-    def test_returns_false(self, schema: dict[str, Any]) -> None:
-        assert has_underscore_fields(schema) is False
 
 
 class TestCreateModelJsonSchemaRoundtrip:
@@ -417,21 +151,46 @@ class TestCreateModelJsonSchemaRoundtrip:
         assert len(defs) == 2
 
 
-class TestCreateModelRejectsUnderscoreFields:
-    def test_top_level_underscore_field(self) -> None:
+class TestCreateModelWithUnderscoreFields:
+    """Tests for create_model handling of underscore-prefixed fields."""
+
+    def test_underscore_field_creates_valid_model(self) -> None:
         schema = {
             "title": "Input",
             "type": "object",
             "properties": {
+                "_hidden": {"type": "string"},
                 "name": {"type": "string"},
+            },
+        }
+        model = create_model(schema)
+        assert issubclass(model, BaseModel)
+
+    def test_underscore_field_validate_and_dump(self) -> None:
+        schema = {
+            "title": "Input",
+            "type": "object",
+            "properties": {
+                "_hidden": {"type": "string"},
+                "name": {"type": "string"},
+            },
+        }
+        model = create_model(schema)
+        instance = model.model_validate({"_hidden": "secret", "name": "alice"})
+        dumped = instance.model_dump()
+        assert dumped == {"_hidden": "secret", "name": "alice"}
+
+    def test_underscore_field_json_schema_shows_original(self) -> None:
+        schema = {
+            "title": "Input",
+            "type": "object",
+            "properties": {
                 "_hidden": {"type": "string"},
             },
         }
-        with pytest.raises(AgentStartupError) as exc_info:
-            create_model(schema)
-        assert exc_info.value.error_info.code == AgentStartupError.full_code(
-            AgentStartupErrorCode.UNDERSCORE_SCHEMA
-        )
+        model = create_model(schema)
+        json_schema = model.model_json_schema()
+        assert "_hidden" in json_schema["properties"]
 
     def test_nested_underscore_field(self) -> None:
         schema = {
@@ -446,8 +205,70 @@ class TestCreateModelRejectsUnderscoreFields:
                 },
             },
         }
-        with pytest.raises(AgentStartupError) as exc_info:
-            create_model(schema)
-        assert exc_info.value.error_info.code == AgentStartupError.full_code(
-            AgentStartupErrorCode.UNDERSCORE_SCHEMA
+        model = create_model(schema)
+        instance = model.model_validate({"outer": {"_secret": 42}})
+        dumped = instance.model_dump()
+        assert dumped["outer"]["_secret"] == 42
+
+
+class TestCreateModelWithReservedFields:
+    """Tests for create_model handling of reserved field names."""
+
+    def test_schema_field_creates_valid_model(self) -> None:
+        schema = {
+            "title": "Input",
+            "type": "object",
+            "properties": {
+                "schema": {"type": "string"},
+                "name": {"type": "string"},
+            },
+        }
+        model = create_model(schema)
+        assert issubclass(model, BaseModel)
+        assert callable(model.model_json_schema)
+
+    def test_reserved_field_validate_and_dump(self) -> None:
+        schema = {
+            "title": "Input",
+            "type": "object",
+            "properties": {
+                "schema": {"type": "string"},
+                "name": {"type": "string"},
+            },
+        }
+        model = create_model(schema)
+        instance = model.model_validate({"schema": "test_val", "name": "alice"})
+        dumped = instance.model_dump()
+        assert dumped == {"schema": "test_val", "name": "alice"}
+
+    def test_multiple_reserved_fields(self) -> None:
+        schema = {
+            "title": "Input",
+            "type": "object",
+            "properties": {
+                "schema": {"type": "string"},
+                "copy": {"type": "string"},
+                "validate": {"type": "string"},
+                "name": {"type": "string"},
+            },
+        }
+        model = create_model(schema)
+        instance = model.model_validate(
+            {"schema": "s", "copy": "c", "validate": "v", "name": "n"}
         )
+        dumped = instance.model_dump()
+        assert dumped == {"schema": "s", "copy": "c", "validate": "v", "name": "n"}
+
+    def test_model_json_schema_shows_original_names(self) -> None:
+        schema = {
+            "title": "Input",
+            "type": "object",
+            "properties": {
+                "schema": {"type": "string"},
+                "copy": {"type": "integer"},
+            },
+        }
+        model = create_model(schema)
+        json_schema = model.model_json_schema()
+        assert "schema" in json_schema["properties"]
+        assert "copy" in json_schema["properties"]

@@ -66,7 +66,6 @@ class AgentStartupErrorCode(str, Enum):
 
     # Tool configuration errors
     INVALID_TOOL_CONFIG = "INVALID_TOOL_CONFIG"
-    UNDERSCORE_SCHEMA = "UNDERSCORE_SCHEMA"  # specific code for this error to easily detect it in alerts.
 
     # Guardrail configuration errors
     INVALID_GUARDRAIL_CONFIG = "INVALID_GUARDRAIL_CONFIG"

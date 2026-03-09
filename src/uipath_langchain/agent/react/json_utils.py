@@ -50,10 +50,11 @@ def get_json_paths_by_type(model: type[BaseModel], type_name: str) -> list[str]:
         for field_name, field_info in current_model.model_fields.items():
             annotation = field_info.annotation
 
+            json_key = _json_key(field_name, field_info)
             if current_path:
-                field_path = f"{current_path}.{field_name}"
+                field_path = f"{current_path}.{json_key}"
             else:
-                field_path = f"$.{field_name}"
+                field_path = f"$.{json_key}"
 
             annotation = _unwrap_optional(annotation)
             origin = get_origin(annotation)
@@ -202,6 +203,11 @@ def _unwrap_lists(annotation: Any) -> tuple[Any, str]:
         annotation = args[0]
         suffix += "[*]"
     return annotation, suffix
+
+
+def _json_key(field_name: str, field_info: Any) -> str:
+    """Get the JSON property name for a field, accounting for aliases."""
+    return field_info.alias or field_name
 
 
 def _is_pydantic_model(annotation: Any) -> bool:
