@@ -12,17 +12,24 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateDeepRag, WaitEphemeralIndex
+from uipath.platform.common import CreateDeepRagRaw, WaitEphemeralIndexRaw
 from uipath.platform.context_grounding import (
     CitationMode,
+    DeepRagStatus,
     EphemeralIndexUsage,
+    IndexStatus,
 )
 from uipath.platform.context_grounding.context_grounding_index import (
     ContextGroundingIndex,
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    AgentStartupError,
+    AgentStartupErrorCode,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.durable_interrupt import (
@@ -125,7 +132,7 @@ def create_deeprag_tool(
                     )
                 )
                 if ephemeral_index.in_progress_ingestion():
-                    return WaitEphemeralIndex(index=ephemeral_index)
+                    return WaitEphemeralIndexRaw(index=ephemeral_index)
                 return ReadyEphemeralIndex(index=ephemeral_index)
 
             index_result = await create_ephemeral_index()
@@ -134,9 +141,22 @@ def create_deeprag_tool(
             else:
                 ephemeral_index = index_result
 
+            if ephemeral_index.last_ingestion_status == IndexStatus.FAILED:
+                detail = (
+                    f"Attachment ingestion failed. Please check all your attachments are valid. Error: {ephemeral_index.last_ingestion_failure_reason}"
+                    if ephemeral_index.last_ingestion_failure_reason
+                    else "Ephemeral index ingestion failed."
+                )
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.EPHEMERAL_INDEX_INGESTION_FAILED,
+                    title="Ephemeral index ingestion failed",
+                    detail=detail,
+                    category=UiPathErrorCategory.USER,
+                )
+
             @durable_interrupt
             async def create_deeprag():
-                return CreateDeepRag(
+                return CreateDeepRagRaw(
                     name=f"task-{uuid.uuid4()}",
                     index_name=ephemeral_index.name,
                     index_id=ephemeral_index.id,
@@ -147,7 +167,22 @@ def create_deeprag_tool(
 
             result = await create_deeprag()
 
-            return result
+            if result.last_deep_rag_status == DeepRagStatus.FAILED:
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.DEEP_RAG_FAILED,
+                    title="Deep RAG task failed",
+                    detail=str(result.failure_reason)
+                    if result.failure_reason
+                    else "Deep RAG task failed.",
+                    category=UiPathErrorCategory.USER,
+                )
+
+            if result.content:
+                content = result.content.model_dump()
+                content["deepRagId"] = result.id
+                return content
+
+            return {"status": result.last_deep_rag_status, "__internal": "NO_CONTENT"}
 
         return await invoke_deeprag(**kwargs)
 
