@@ -143,12 +143,19 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
     ) -> None:
         """Handle chat model start event. Also captures interpolated prompts."""
         try:
-            # Extract last message as input
+            # Extract last message as input, sanitizing any base64 file data
+            # to avoid storing multi-MB blobs in span attributes
             input_text = None
             if messages and messages[0]:
                 last_msg = messages[0][-1]
                 content = sanitize_file_data(last_msg.content)
-                input_text = content if isinstance(content, str) else str(content)
+                if isinstance(content, str):
+                    input_text = content
+                else:
+                    try:
+                        input_text = serialize_json(content)
+                    except Exception:
+                        input_text = str(content)
 
             self._start_llm_and_model_spans(
                 run_id, parent_run_id, serialized, input_text=input_text

@@ -19,9 +19,23 @@ logger = logging.getLogger(__name__)
 
 _BASE64_RE = re.compile(r"^[A-Za-z0-9+/\-_]+=*$")
 
+# Keys known to carry binary/file content in LangChain multimodal messages.
+# Only values under these keys are checked with the heuristic base64 regex,
+# to avoid false positives on long alphanumeric strings in unrelated fields.
+_FILE_DATA_KEYS = frozenset({"data", "bytes", "file_data", "image_url"})
 
-def sanitize_file_data(obj: Any) -> Any:
-    """Recursively sanitize content, replacing file data with placeholders."""
+
+_SanitizableData = Union[str, bytes, list[Any], dict[str, Any], int, float, bool, None]
+
+
+def sanitize_file_data(obj: _SanitizableData) -> _SanitizableData:
+    """Recursively sanitize content, replacing binary/base64 file data with placeholders.
+
+    For dicts, values under file-related keys (data, bytes, file_data, image_url)
+    are checked for binary content and replaced with placeholders. Dict values
+    under those keys are recursed into (to handle e.g. image_url: {"url": "data:..."}).
+    All other keys recurse normally to handle nested structures.
+    """
     if isinstance(obj, bytes):
         return f"<bytes: {len(obj)} bytes>"
     if isinstance(obj, str):
@@ -33,11 +47,9 @@ def sanitize_file_data(obj: Any) -> Any:
     if isinstance(obj, list):
         return [sanitize_file_data(item) for item in obj]
     if isinstance(obj, dict):
-        sanitized = {}
+        sanitized: dict[str, _SanitizableData] = {}
         for key, value in obj.items():
-            if key in ("data", "bytes", "file_data", "image_url") and not isinstance(
-                value, dict
-            ):
+            if key in _FILE_DATA_KEYS and not isinstance(value, dict):
                 if isinstance(value, bytes):
                     sanitized[key] = f"<bytes: {len(value)} bytes>"
                 elif isinstance(value, str) and (
@@ -322,8 +334,8 @@ def get_span_attachments(
     and converts them to SpanAttachment objects for tracing.
 
     Args:
-        input_data: The input data dictionary to extract attachments from
-        input_schema: JSON schema definition (dict) or Pydantic model class
+        data: The input data dictionary to extract attachments from
+        schema: JSON schema definition (dict) or Pydantic model class
         direction: Attachment direction (int or AttachmentDirection enum)
         provider: Attachment provider (int or AttachmentProvider enum)
 
@@ -501,7 +513,7 @@ def set_context_grounding_results(span: Span, output: Any) -> None:
     if not content or not isinstance(content, dict):
         return
 
-    raw = content.get("result") if isinstance(content, dict) else {}
+    raw = content.get("result")
     raw = raw if isinstance(raw, dict) else {}
     result_info: Dict[str, Any] = {}
     if "ID" in raw:

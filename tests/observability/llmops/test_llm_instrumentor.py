@@ -1,5 +1,7 @@
 """Tests for LLM instrumentor span parenting and get_span_or_root priority."""
 
+import json
+from typing import Any
 from unittest.mock import ANY, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -285,6 +287,70 @@ class TestBase64Sanitization:
         assert raw_base64 not in input_value
         assert "<base64 data omitted>" in input_value
 
+    def test_multimodal_content_serialized_as_json(self) -> None:
+        """Multimodal list content is serialized as JSON, not Python repr."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+
+        multimodal_content = [
+            {"type": "text", "text": "What is in this image?"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}},
+        ]
+        msg = MagicMock(content=multimodal_content, type="human")
+
+        run_id = uuid4()
+        with (
+            patch(
+                "uipath_agents._observability.llmops.instrumentors.llm_instrumentor.SpanHierarchyManager"
+            ),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4o"}},
+                messages=[[msg]],
+                run_id=run_id,
+                parent_run_id=uuid4(),
+            )
+
+        input_value = mock_factory.start_llm_call.call_args.kwargs["input"]
+        # Must be valid JSON, not Python repr (which uses single quotes)
+        parsed = json.loads(input_value)
+        assert isinstance(parsed, list)
+        assert parsed[0]["type"] == "text"
+        assert parsed[0]["text"] == "What is in this image?"
+
+    def test_non_serializable_content_falls_back_to_str(self) -> None:
+        """Non-JSON-serializable content falls back to str() without dropping spans."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+
+        # Content with a custom object that serialize_json cannot handle
+        custom_obj = object()
+        multimodal_content = [
+            {"type": "text", "text": "hello"},
+            {"type": "custom", "value": custom_obj},
+        ]
+        msg = MagicMock(content=multimodal_content, type="human")
+
+        run_id = uuid4()
+        with (
+            patch(
+                "uipath_agents._observability.llmops.instrumentors.llm_instrumentor.SpanHierarchyManager"
+            ),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4o"}},
+                messages=[[msg]],
+                run_id=run_id,
+                parent_run_id=uuid4(),
+            )
+
+        # Span must still be created (not dropped)
+        mock_factory.start_llm_call.assert_called_once()
+        input_value = mock_factory.start_llm_call.call_args.kwargs["input"]
+        assert "hello" in input_value
+
     def test_plain_text_content_not_affected(self) -> None:
         """Plain text content passes through without modification."""
         agent_span = MagicMock(name="agent_span")
@@ -384,5 +450,102 @@ class TestOnLlmEnd:
         ):
             instrumentor.on_llm_end(MagicMock(), run_id=run_id)
 
-        for call in mock_factory.end_span_error.call_args_list:
-            assert call.args[0] is not INVALID_SPAN
+        for c in mock_factory.end_span_error.call_args_list:
+            assert c.args[0] is not INVALID_SPAN
+
+
+# --- on_chat_model_start sanitization ---
+
+
+class TestOnChatModelStartSanitization:
+    """on_chat_model_start sanitizes message content before storing as span input."""
+
+    def _invoke_chat_model_start(
+        self,
+        content: Any,
+        msg_type: str = "human",
+    ) -> MagicMock:
+        """Helper: call on_chat_model_start and return the mock span factory."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+
+        msg = MagicMock(content=content, type=msg_type)
+        run_id = uuid4()
+        with (
+            patch(_PATCH_HIERARCHY),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}},
+                messages=[[msg]],
+                run_id=run_id,
+                parent_run_id=uuid4(),
+            )
+        return mock_factory
+
+    def test_plain_string_content_passed_as_input(self) -> None:
+        """Test that plain string content is passed unchanged to the LLM span."""
+        mock_factory = self._invoke_chat_model_start("What is 2+2?")
+        input_text = mock_factory.start_llm_call.call_args.kwargs["input"]
+        assert input_text == "What is 2+2?"
+
+    def test_data_uri_in_string_content_is_sanitized(self) -> None:
+        """Test that a data URI string is replaced with placeholder."""
+        mock_factory = self._invoke_chat_model_start(
+            "data:image/png;base64," + "A" * 5000
+        )
+        input_text = mock_factory.start_llm_call.call_args.kwargs["input"]
+        assert input_text == "<base64 data omitted>"
+
+    def test_multimodal_list_content_is_sanitized(self) -> None:
+        """Test that multimodal list content with base64 image is sanitized."""
+        content = [
+            {"type": "text", "text": "Describe this"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64," + "B" * 5000},
+            },
+        ]
+        mock_factory = self._invoke_chat_model_start(content)
+        input_text = mock_factory.start_llm_call.call_args.kwargs["input"]
+        # List content gets str() after sanitization
+        assert "<base64 data omitted>" in input_text
+        assert "Describe this" in input_text
+        # Original multi-MB data should not be present
+        assert "B" * 5000 not in input_text
+
+    def test_user_prompt_attribute_is_sanitized(self) -> None:
+        """Test that userPrompt on agent span is also sanitized."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, _, state = _make_instrumentor(agent_span, agent_span)
+
+        content = [
+            {"type": "text", "text": "Analyze this file"},
+            {
+                "type": "image_url",
+                "image_url": {"url": "data:image/png;base64," + "C" * 3000},
+            },
+        ]
+        msg = MagicMock(content=content, type="human")
+        run_id = uuid4()
+        with (
+            patch(_PATCH_HIERARCHY),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}},
+                messages=[[msg]],
+                run_id=run_id,
+                parent_run_id=uuid4(),
+            )
+
+        # Find the userPrompt set_attribute call on agent_span
+        user_prompt_calls = [
+            c
+            for c in agent_span.set_attribute.call_args_list
+            if c.args[0] == "userPrompt"
+        ]
+        assert len(user_prompt_calls) == 1
+        prompt_value = user_prompt_calls[0].args[1]
+        assert "C" * 3000 not in prompt_value
+        assert "<base64 data omitted>" in prompt_value
