@@ -6,7 +6,6 @@ import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
-from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.agent.multimodal.invoke import build_file_content_block
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES, FileInfo
 from uipath_langchain.agent.multimodal.utils import (
@@ -178,7 +177,7 @@ class TestBuildFileContentBlock:
         httpx_mock.add_response(url=FILE_URL, content=oversized_content)
         file_info = FileInfo(url=FILE_URL, name="huge.pdf", mime_type="application/pdf")
 
-        with pytest.raises(AgentRuntimeError, match="exceeds"):
+        with pytest.raises(ValueError, match="exceeds"):
             await build_file_content_block(file_info)
 
     async def test_rejects_file_exceeding_custom_limit(
@@ -189,7 +188,7 @@ class TestBuildFileContentBlock:
         httpx_mock.add_response(url=FILE_URL, content=content)
         file_info = FileInfo(url=FILE_URL, name="big.png", mime_type="image/png")
 
-        with pytest.raises(AgentRuntimeError, match="exceeds"):
+        with pytest.raises(ValueError, match="exceeds"):
             await build_file_content_block(file_info, max_size=10)
 
     async def test_file_within_custom_limit_succeeds(
@@ -212,12 +211,12 @@ class TestBuildFileContentBlock:
             await build_file_content_block(file_info)
 
     async def test_error_includes_filename(self, httpx_mock: HTTPXMock) -> None:
-        """AgentRuntimeError from download includes the filename for debuggability."""
+        """ValueError from download includes the filename for debuggability."""
         content = b"x" * 200
         httpx_mock.add_response(url=FILE_URL, content=content)
         file_info = FileInfo(
             url=FILE_URL, name="report.pdf", mime_type="application/pdf"
         )
 
-        with pytest.raises(AgentRuntimeError, match="report.pdf"):
+        with pytest.raises(ValueError, match="report.pdf"):
             await build_file_content_block(file_info, max_size=100)

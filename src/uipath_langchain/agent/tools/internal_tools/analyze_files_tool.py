@@ -18,7 +18,12 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.multimodal import FileInfo, build_file_content_block
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
@@ -76,8 +81,16 @@ def create_analyze_file_tool(
         if not files:
             return {"analysisResult": "No attachments provided to analyze."}
 
-        human_message = HumanMessage(content=analysis_task)
-        human_message_with_files = await add_files_to_message(human_message, files)
+        try:
+            human_message = HumanMessage(content=analysis_task)
+            human_message_with_files = await add_files_to_message(human_message, files)
+        except ValueError as exc:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.FILE_ERROR,
+                title="File attachment too large",
+                detail=str(exc),
+                category=UiPathErrorCategory.USER,
+            ) from exc
 
         messages: list[AnyMessage] = [
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),

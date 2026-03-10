@@ -11,12 +11,6 @@ from langchain_core.messages import (
     HumanMessage,
 )
 from langchain_core.messages.content import create_file_block, create_image_block
-from uipath.runtime.errors import UiPathErrorCategory
-
-from uipath_langchain.agent.exceptions import (
-    AgentRuntimeError,
-    AgentRuntimeErrorCode,
-)
 
 from .types import MAX_FILE_SIZE_BYTES, FileInfo
 from .utils import download_file_base64, is_image, is_pdf, sanitize_filename
@@ -44,19 +38,13 @@ async def build_file_content_block(
         A DataContentBlock for the file (image or PDF).
 
     Raises:
-        AgentRuntimeError: If the file exceeds the size limit for LLM
-            payloads (USER category).
-        ValueError: If the MIME type is not supported.
+        ValueError: If the MIME type is not supported or the file exceeds
+            the size limit for LLM payloads.
     """
     try:
         base64_file = await download_file_base64(file_info.url, max_size=max_size)
     except ValueError as exc:
-        raise AgentRuntimeError(
-            code=AgentRuntimeErrorCode.FILE_ERROR,
-            title="File attachment too large",
-            detail=f"File '{file_info.name}': {exc}",
-            category=UiPathErrorCategory.USER,
-        ) from exc
+        raise ValueError(f"File '{file_info.name}': {exc}") from exc
 
     if is_image(file_info.mime_type):
         return create_image_block(base64=base64_file, mime_type=file_info.mime_type)
