@@ -493,7 +493,10 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
                 logger.debug("Failed to end placeholder LLM span during cleanup: %s", e)
 
         # End orphaned placeholder tool span
-        if self._state.current_tool_span:
+        if (
+            self._state.current_tool_span
+            and self._state.current_tool_span is not self._state.suspended_tool_span
+        ):
             try:
                 self._state.current_tool_span.end()
             except Exception as e:
