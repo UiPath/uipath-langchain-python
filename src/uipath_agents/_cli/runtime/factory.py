@@ -26,12 +26,7 @@ from uipath.runtime import (
     UiPathRuntimeProtocol,
 )
 from uipath.runtime.base import UiPathDisposableProtocol
-from uipath.runtime.errors import UiPathErrorCategory
 from uipath.tracing import LlmOpsHttpExporter
-from uipath_langchain.agent.exceptions import (
-    AgentStartupError,
-    AgentStartupErrorCode,
-)
 from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
 from uipath_langchain.runtime.storage import SqliteResumableStorage
 
@@ -322,40 +317,27 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         Raises:
             AgentStartupError: If definition cannot be loaded
         """
-        try:
-            agent_json_path = Path.cwd() / entrypoint
-            agent_definition = load_agent_configuration(agent_json_path)
+        agent_json_path = Path.cwd() / entrypoint
+        agent_definition = load_agent_configuration(agent_json_path)
 
-            # Apply settings override if provided
-            if settings:
-                agent_definition = self._apply_settings_override(
-                    agent_definition, settings
-                )
+        # Apply settings override if provided
+        if settings:
+            agent_definition = self._apply_settings_override(agent_definition, settings)
 
-            # Low-code Conversational Agents (agent.json with isConversational=true) implicitly are given:
-            # - 'messages' and 'uipath__user_settings' input fields
-            # - 'uipath__agent_response_messages' output field
-            if agent_definition.is_conversational:
-                agent_definition.input_schema = (
-                    self._get_conversational_agent_input_schema(
-                        agent_definition.input_schema
-                    )
-                )
-                agent_definition.output_schema = self._get_conversational_agent_output_schema(
-                    # Currently, the output_schema from conversational agent.jsons has just a default 'content' field and is ignored.
-                    # When user-defined outputs are supported, pass in agent_definition.output_schema here instead.
-                    None
-                )
+        # Low-code Conversational Agents (agent.json with isConversational=true) implicitly are given:
+        # - 'messages' and 'uipath__user_settings' input fields
+        # - 'uipath__agent_response_messages' output field
+        if agent_definition.is_conversational:
+            agent_definition.input_schema = self._get_conversational_agent_input_schema(
+                agent_definition.input_schema
+            )
+            agent_definition.output_schema = self._get_conversational_agent_output_schema(
+                # Currently, the output_schema from conversational agent.jsons has just a default 'content' field and is ignored.
+                # When user-defined outputs are supported, pass in agent_definition.output_schema here instead.
+                None
+            )
 
-            return agent_definition
-
-        except FileNotFoundError as e:
-            raise AgentStartupError(
-                AgentStartupErrorCode.FILE_NOT_FOUND,
-                "Agent configuration not found",
-                f"Agent file '{entrypoint}' not found: {str(e)}",
-                UiPathErrorCategory.USER,
-            ) from e
+        return agent_definition
 
     def _apply_settings_override(
         self, agent_definition: AgentDefinition, settings: dict[str, Any]

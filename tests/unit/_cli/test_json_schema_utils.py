@@ -3,8 +3,9 @@
 from typing import Any
 
 import pytest
+from uipath.runtime.errors import UiPathErrorCategory
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 
-from uipath_agents._cli.exceptions import InputValidationError
 from uipath_agents._cli.runtime.utils import validate_json_against_json_schema
 
 
@@ -89,7 +90,7 @@ class TestValidateJsonAgainstJsonSchema:
         assert result == {"tags": ["python", "testing", "automation"]}
 
     def test_raises_on_missing_required_field(self):
-        """Test that missing required field raises InputValidationError."""
+        """Test that missing required field raises AgentStartupError with INPUT_VALIDATION_ERROR."""
         schema = {
             "type": "object",
             "properties": {"name": {"type": "string"}},
@@ -97,35 +98,41 @@ class TestValidateJsonAgainstJsonSchema:
         }
         data: dict[str, Any] = {}
 
-        with pytest.raises(InputValidationError) as exc_info:
+        with pytest.raises(AgentStartupError) as exc_info:
             validate_json_against_json_schema(schema, data)
 
-        assert "Data failed json schema validation" in str(exc_info.value)
-        assert exc_info.value.validation_errors is not None
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INPUT_VALIDATION_ERROR
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
 
     def test_raises_on_type_mismatch(self):
-        """Test that type mismatch raises InputValidationError."""
+        """Test that type mismatch raises AgentStartupError with INPUT_VALIDATION_ERROR."""
         schema = {
             "type": "object",
             "properties": {"age": {"type": "integer"}},
         }
         data = {"age": "not a number"}
 
-        with pytest.raises(InputValidationError) as exc_info:
+        with pytest.raises(AgentStartupError) as exc_info:
             validate_json_against_json_schema(schema, data)
 
-        assert "Data failed json schema validation" in str(exc_info.value)
-        assert exc_info.value.validation_errors is not None
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INPUT_VALIDATION_ERROR
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
 
     def test_raises_on_invalid_json_string(self):
-        """Test that invalid JSON string raises InputValidationError."""
+        """Test that invalid JSON string raises AgentStartupError."""
         schema = {"type": "object", "properties": {}}
         invalid_json = '{"invalid": json}'
 
-        with pytest.raises(InputValidationError) as exc_info:
+        with pytest.raises(AgentStartupError) as exc_info:
             validate_json_against_json_schema(schema, invalid_json)
 
-        assert "Data failed json schema validation" in str(exc_info.value)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INPUT_VALIDATION_ERROR
+        )
 
     def test_allows_extra_fields_not_in_schema(self):
         """Test that fields not in schema are preserved in output when extra='allow'."""
@@ -171,7 +178,7 @@ class TestValidateJsonAgainstJsonSchema:
         assert result == data
 
     def test_validation_error_includes_details(self):
-        """Test that validation error includes detailed error information."""
+        """Test that validation error includes detailed error information in the detail field."""
         schema = {
             "type": "object",
             "properties": {
@@ -182,8 +189,7 @@ class TestValidateJsonAgainstJsonSchema:
         }
         data = {"age": "not an integer"}
 
-        with pytest.raises(InputValidationError) as exc_info:
+        with pytest.raises(AgentStartupError) as exc_info:
             validate_json_against_json_schema(schema, data)
 
-        assert exc_info.value.validation_errors is not None
-        assert len(exc_info.value.validation_errors) > 0
+        assert "Data failed json schema validation" in exc_info.value.error_info.detail

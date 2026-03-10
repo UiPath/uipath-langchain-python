@@ -3,8 +3,9 @@
 import json
 
 import pytest
+from uipath.runtime.errors import UiPathErrorCategory
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 
-from uipath_agents._cli.exceptions import ConfigurationError, InputValidationError
 from uipath_agents._cli.utils import load_agent_configuration
 
 
@@ -55,26 +56,32 @@ class TestLoadAgentConfiguration:
         assert result.settings.temperature == 0.7
 
     def test_raises_when_file_not_found(self, tmp_path):
-        """Test that missing file raises ConfigurationError."""
+        """Test that missing file raises AgentStartupError with FILE_NOT_FOUND."""
         non_existent_file = tmp_path / "missing_agent.json"
 
-        with pytest.raises(ConfigurationError) as exc_info:
+        with pytest.raises(AgentStartupError) as exc_info:
             load_agent_configuration(non_existent_file)
 
-        assert "agent.json not found" in str(exc_info.value)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.FILE_NOT_FOUND
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
 
     def test_raises_on_invalid_json(self, tmp_path):
-        """Test that invalid JSON raises InputValidationError."""
+        """Test that invalid JSON raises AgentStartupError with INVALID_AGENT_CONFIG."""
         invalid_file = tmp_path / "agent.json"
         invalid_file.write_text("{invalid json content")
 
-        with pytest.raises(InputValidationError) as exc_info:
+        with pytest.raises(AgentStartupError) as exc_info:
             load_agent_configuration(invalid_file)
 
-        assert "agent.json failed schema validation" in str(exc_info.value)
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_AGENT_CONFIG
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
 
     def test_raises_on_schema_validation_failure(self, tmp_path):
-        """Test that schema validation failure raises InputValidationError."""
+        """Test that schema validation failure raises AgentStartupError with INVALID_AGENT_CONFIG."""
         invalid_config = {
             "id": "test",
             "name": "Test",
@@ -87,26 +94,31 @@ class TestLoadAgentConfiguration:
         agent_file = tmp_path / "agent.json"
         agent_file.write_text(json.dumps(invalid_config))
 
-        with pytest.raises(InputValidationError) as exc_info:
+        with pytest.raises(AgentStartupError) as exc_info:
             load_agent_configuration(agent_file)
 
-        assert "agent.json failed schema validation" in str(exc_info.value)
-        assert exc_info.value.validation_errors is not None
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_AGENT_CONFIG
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+        assert "agent.json failed schema validation" in exc_info.value.error_info.detail
 
     def test_raises_on_missing_required_fields(self, tmp_path):
-        """Test that missing required fields raises InputValidationError."""
+        """Test that missing required fields raises AgentStartupError with INVALID_AGENT_CONFIG."""
         incomplete_config = {"id": "test"}
         agent_file = tmp_path / "agent.json"
         agent_file.write_text(json.dumps(incomplete_config))
 
-        with pytest.raises(InputValidationError) as exc_info:
+        with pytest.raises(AgentStartupError) as exc_info:
             load_agent_configuration(agent_file)
 
-        assert "agent.json failed schema validation" in str(exc_info.value)
-        assert exc_info.value.validation_errors is not None
+        assert exc_info.value.error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.INVALID_AGENT_CONFIG
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
 
     def test_validation_error_includes_details(self, tmp_path):
-        """Test that validation errors include detailed error information."""
+        """Test that validation errors include detailed error information in the detail field."""
         invalid_config = {
             "id": "test",
             "name": "Test",
@@ -116,11 +128,10 @@ class TestLoadAgentConfiguration:
         agent_file = tmp_path / "agent.json"
         agent_file.write_text(json.dumps(invalid_config))
 
-        with pytest.raises(InputValidationError) as exc_info:
+        with pytest.raises(AgentStartupError) as exc_info:
             load_agent_configuration(agent_file)
 
-        assert exc_info.value.validation_errors is not None
-        assert len(exc_info.value.validation_errors) > 0
+        assert "agent.json failed schema validation" in exc_info.value.error_info.detail
 
     def test_loads_configuration_with_resources(self, tmp_path, valid_agent_config):
         """Test loading configuration with resources defined."""

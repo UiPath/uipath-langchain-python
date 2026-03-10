@@ -1,9 +1,9 @@
 from typing import Any, Optional, Union
 
 from pydantic import ValidationError
+from uipath.runtime.errors import UiPathErrorCategory
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-
-from ..exceptions import InputValidationError
 
 
 def validate_json_against_json_schema(
@@ -20,7 +20,7 @@ def validate_json_against_json_schema(
         Validated data as dictionary
 
     Raises:
-        InputValidationError: If validation fails
+        AgentStartupError: If validation fails
     """
     try:
         if arguments is None or arguments == "":
@@ -35,12 +35,16 @@ def validate_json_against_json_schema(
 
         return parsed_data.model_dump()
     except ValidationError as e:
-        raise InputValidationError(
-            "Data failed json schema validation",
-            validation_errors=e.errors(),
+        raise AgentStartupError(
+            AgentStartupErrorCode.INPUT_VALIDATION_ERROR,
+            "Input validation failed",
+            f"Data failed json schema validation: {e}",
+            UiPathErrorCategory.USER,
         ) from e
     except (ValueError, TypeError) as e:
-        raise InputValidationError(
+        raise AgentStartupError(
+            AgentStartupErrorCode.INPUT_VALIDATION_ERROR,
+            "Input validation failed",
             f"Invalid input data: {e}",
-            validation_errors=None,
+            UiPathErrorCategory.USER,
         ) from e
