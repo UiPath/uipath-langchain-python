@@ -9,7 +9,10 @@ from pytest_httpx import HTTPXMock
 from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.agent.multimodal.invoke import build_file_content_block
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES, FileInfo
-from uipath_langchain.agent.multimodal.utils import download_file_base64
+from uipath_langchain.agent.multimodal.utils import (
+    download_file_base64,
+    encode_streamed_base64,
+)
 
 FILE_URL = "https://blob.storage.example.com/file.pdf"
 
@@ -21,6 +24,59 @@ class _ChunkedStream(httpx.AsyncByteStream):
     async def __aiter__(self):
         for chunk in self._chunks:
             yield chunk
+
+
+async def _async_iter(chunks: list[bytes]):
+    """Helper: wrap a list of byte chunks as an async iterator."""
+    for chunk in chunks:
+        yield chunk
+
+
+class TestEncodeStreamedBase64:
+    """Tests for encode_streamed_base64 — incremental encoding with size limit."""
+
+    async def test_encodes_single_chunk(self) -> None:
+        content = b"hello world"
+        result = await encode_streamed_base64(_async_iter([content]))
+        assert result == base64.b64encode(content).decode("ascii")
+
+    async def test_encodes_multiple_chunks(self) -> None:
+        chunks = [b"hello ", b"world"]
+        result = await encode_streamed_base64(_async_iter(chunks))
+        assert result == base64.b64encode(b"hello world").decode("ascii")
+
+    async def test_encodes_empty_stream(self) -> None:
+        result = await encode_streamed_base64(_async_iter([]))
+        assert result == ""
+
+    async def test_encodes_single_byte_chunks(self) -> None:
+        """Handles worst-case chunking where every chunk is 1 byte."""
+        data = b"abcdefgh"
+        chunks = [bytes([b]) for b in data]
+        result = await encode_streamed_base64(_async_iter(chunks))
+        assert result == base64.b64encode(data).decode("ascii")
+
+    async def test_rejects_when_exceeds_max_size(self) -> None:
+        chunks = [b"x" * 60, b"x" * 60]
+        with pytest.raises(ValueError, match="exceeds"):
+            await encode_streamed_base64(_async_iter(chunks), max_size=100)
+
+    async def test_allows_exactly_at_limit(self) -> None:
+        content = b"x" * 100
+        result = await encode_streamed_base64(_async_iter([content]), max_size=100)
+        assert result == base64.b64encode(content).decode("ascii")
+
+    async def test_unlimited_when_max_size_zero(self) -> None:
+        content = b"x" * 10_000
+        result = await encode_streamed_base64(_async_iter([content]), max_size=0)
+        assert result == base64.b64encode(content).decode("ascii")
+
+    async def test_error_message_formats_as_mb(self) -> None:
+        """Error message shows MB, not raw bytes."""
+        limit = 10 * 1024 * 1024  # 10 MB
+        chunks = [b"x" * (limit + 1)]
+        with pytest.raises(ValueError, match=r"10 MB.*limit"):
+            await encode_streamed_base64(_async_iter(chunks), max_size=limit)
 
 
 class TestDownloadFileBase64:

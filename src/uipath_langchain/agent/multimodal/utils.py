@@ -2,6 +2,7 @@
 
 import base64
 import re
+from collections.abc import AsyncIterator
 
 import httpx
 from uipath._utils._ssl_context import get_httpx_client_kwargs
@@ -36,11 +37,68 @@ def is_image(mime_type: str) -> bool:
     return mime_type.lower() in IMAGE_MIME_TYPES
 
 
+def _format_mb(size_bytes: int, decimals: int = 1) -> str:
+    """Format a byte count as MB.
+
+    Args:
+        size_bytes: Size in bytes.
+        decimals: Number of decimal places (0 for rounded integer).
+    """
+    return f"{size_bytes / (1024 * 1024):.{decimals}f} MB"
+
+
+async def encode_streamed_base64(
+    chunks: AsyncIterator[bytes],
+    *,
+    max_size: int = 0,
+) -> str:
+    """Incrementally base64-encode an async stream of byte chunks.
+
+    Encodes chunks as they arrive so the raw file bytes are never assembled
+    into a single contiguous buffer. base64 processes 3-byte groups, so a
+    remainder of 0-2 bytes is buffered between chunks.
+
+    Args:
+        chunks: Async iterator yielding raw byte chunks.
+        max_size: Maximum allowed total size in bytes. 0 means unlimited.
+
+    Returns:
+        The full base64-encoded string.
+
+    Raises:
+        ValueError: If the total size exceeds max_size.
+    """
+    encoded_buf = bytearray()
+    remainder = b""
+    total = 0
+
+    async for chunk in chunks:
+        total += len(chunk)
+        if max_size > 0 and total > max_size:
+            raise ValueError(
+                f"File exceeds the {_format_mb(max_size, decimals=0)}"
+                f" limit for LLM payloads"
+                f" (downloaded {_format_mb(total)} so far)"
+            )
+
+        data = remainder + chunk
+        usable = len(data) - (len(data) % 3)
+        if usable > 0:
+            encoded_buf += base64.b64encode(data[:usable])
+            remainder = data[usable:]
+        else:
+            remainder = data
+
+    if remainder:
+        encoded_buf += base64.b64encode(remainder)
+
+    result = encoded_buf.decode("ascii")
+    del encoded_buf
+    return result
+
+
 async def download_file_base64(url: str, *, max_size: int = 0) -> str:
     """Download a file from a URL and return its content as a base64 string.
-
-    Base64-encodes chunks incrementally during download so the raw file bytes
-    are never assembled into a single contiguous buffer.
 
     Args:
         url: The URL to download from.
@@ -67,40 +125,11 @@ async def download_file_base64(url: str, *, max_size: int = 0) -> str:
                         and content_length_value > max_size
                     ):
                         raise ValueError(
-                            f"File is {content_length_value / (1024 * 1024):.1f} MB"
-                            f" which exceeds the {max_size / (1024 * 1024):.0f} MB"
+                            f"File is {_format_mb(content_length_value)}"
+                            f" which exceeds the {_format_mb(max_size, decimals=0)}"
                             f" limit for Agent LLM payloads"
                         )
 
-            # Encode base64 incrementally so raw bytes are never fully
-            # assembled. base64 processes 3-byte groups, so we buffer a
-            # remainder of 0-2 bytes between chunks.
-            encoded_buf = bytearray()
-            remainder = b""
-            total = 0
-
-            async for chunk in response.aiter_bytes():
-                total += len(chunk)
-                if max_size > 0 and total > max_size:
-                    raise ValueError(
-                        f"File exceeds the {max_size / (1024 * 1024):.0f} MB"
-                        f" limit for LLM payloads"
-                        f" (downloaded {total / (1024 * 1024):.1f} MB so far)"
-                    )
-
-                data = remainder + chunk
-                # Encode complete 3-byte groups; keep leftover for next chunk
-                usable = len(data) - (len(data) % 3)
-                if usable > 0:
-                    encoded_buf += base64.b64encode(data[:usable])
-                    remainder = data[usable:]
-                else:
-                    remainder = data
-
-            # Encode any remaining bytes (with base64 padding)
-            if remainder:
-                encoded_buf += base64.b64encode(remainder)
-
-    result = encoded_buf.decode("ascii")
-    del encoded_buf
-    return result
+            return await encode_streamed_base64(
+                response.aiter_bytes(), max_size=max_size
+            )
