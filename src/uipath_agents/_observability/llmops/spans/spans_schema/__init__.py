@@ -13,6 +13,7 @@ from .base import (
     end_span_ok,
     format_span_error,
     get_parent_context,
+    license_ref_id_context,
     reference_id_context,
     uipath_source_context,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "SyntheticReadableSpan",
     "SpanUpsertProtocol",
     "reference_id_context",
+    "license_ref_id_context",
     "uipath_source_context",
     "apply_attributes",
     "get_parent_context",

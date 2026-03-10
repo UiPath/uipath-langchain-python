@@ -3,7 +3,9 @@
 Handles LLM call and model run spans.
 """
 
-from typing import Callable, Optional
+import uuid
+from contextvars import Token
+from typing import Callable, Optional, Tuple
 
 from opentelemetry.trace import (
     Span,
@@ -17,7 +19,7 @@ from ..span_attributes import (
     ModelSettings,
 )
 from ..span_name import SpanName
-from .base import apply_attributes, create_span
+from .base import apply_attributes, create_span, license_ref_id_context
 
 __all__ = [
     "LlmSpanSchema",
@@ -76,7 +78,7 @@ class LlmSpanSchema:
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         parent_span: Optional[Span] = None,
-    ) -> Span:
+    ) -> Tuple[Span, Token[Optional[str]]]:
         """Start a model run span (inner actual API call).
 
         Should be a child of an LLM call span.
@@ -88,7 +90,9 @@ class LlmSpanSchema:
             parent_span: Optional parent span. If None, uses current span.
 
         Returns:
-            The started Span (caller must call span.end())
+            Tuple of (started Span, ContextVar token for license_ref_id).
+            Caller must call span.end() and reset the token via
+            license_ref_id_context.reset(token).
         """
         span = create_span(
             self._tracer,
@@ -96,6 +100,10 @@ class LlmSpanSchema:
             parent_span=parent_span,
             kind=SpanKind.INTERNAL,
         )
+
+        license_ref_id = str(uuid.uuid4())
+        license_token = license_ref_id_context.set(license_ref_id)
+
         # Model run: type="completion", has model and nested settings
         settings = None
         if max_tokens is not None or temperature is not None:
@@ -103,8 +111,9 @@ class LlmSpanSchema:
         attrs = CompletionSpanAttributes(
             model=model_name,
             settings=settings,
+            license_ref_id=license_ref_id,
         )
         apply_attributes(span, attrs)
         if self._upsert_started:
             self._upsert_started(span)
-        return span
+        return span, license_token

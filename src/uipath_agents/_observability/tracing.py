@@ -7,6 +7,7 @@ from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrument
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.sdk.trace import SpanProcessor
 from opentelemetry.sdk.trace.export import SpanExporter
+from opentelemetry.trace import Span
 from uipath.core import UiPathTraceManager
 from uipath.platform.common import UiPathConfig
 
@@ -15,6 +16,9 @@ from uipath_agents._observability.exporters.environment_attributes_exporter impo
     EnvironmentAttributesExporter,
 )
 from uipath_agents._observability.llmops import is_azure_monitor_span
+from uipath_agents._observability.llmops.spans.spans_schema.base import (
+    license_ref_id_context,
+)
 from uipath_agents._observability.utils import setup_otel_env
 
 logger = logging.getLogger(__name__)
@@ -33,6 +37,17 @@ class _TelemetryState:
     configured: ClassVar[bool] = False
     span_processors: ClassVar[list[SpanProcessor]] = []
     instrumentors: ClassVar[list[Any]] = []
+
+
+def _httpx_request_hook(span: Span, request: Any) -> None:
+    """HTTPX instrumentation request hook that injects X-UiPath-License-RefId.
+
+    Called by HTTPXClientInstrumentor on every outgoing httpx request.
+    Only injects the header when a model_run span is active (license_ref_id_context is set).
+    """
+    license_ref_id = license_ref_id_context.get()
+    if license_ref_id:
+        request.headers["X-UiPath-License-RefId"] = license_ref_id
 
 
 def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None:
@@ -100,7 +115,13 @@ def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None
         AioHttpClientInstrumentor(),
     ]
     for instrumentor in _TelemetryState.instrumentors:
-        instrumentor.instrument()
+        if isinstance(instrumentor, HTTPXClientInstrumentor):
+            instrumentor.instrument(
+                request_hook=_httpx_request_hook,
+                async_request_hook=_httpx_request_hook,
+            )
+        else:
+            instrumentor.instrument()
 
     _TelemetryState.configured = True
     logger.debug("Telemetry configured successfully")

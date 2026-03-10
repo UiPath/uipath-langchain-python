@@ -33,6 +33,7 @@ __all__ = [
     "SyntheticReadableSpan",
     "SpanUpsertProtocol",
     "reference_id_context",
+    "license_ref_id_context",
     "uipath_source_context",
     "apply_attributes",
     "get_parent_context",
@@ -45,6 +46,13 @@ __all__ = [
 # Context variable to propagate reference_id to all spans in a trace
 reference_id_context: ContextVar[Optional[str]] = ContextVar(
     "reference_id", default=None
+)
+
+# Context variable to hold the licenseRefId for the currently-executing model_run span.
+# Set when a model_run span starts, cleared when it ends.
+# Read by the httpx request hook to inject X-UiPath-License-RefId on LLM proxy calls.
+license_ref_id_context: ContextVar[Optional[str]] = ContextVar(
+    "license_ref_id", default=None
 )
 
 uipath_source_context: ContextVar[Optional[int]] = ContextVar(

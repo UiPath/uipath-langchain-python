@@ -102,7 +102,7 @@ class TestExecutionContextOnAllSpans:
         """Test model run span includes executionType from environment."""
         monkeypatch.setenv("UIPATH_IS_DEBUG", "True")
 
-        span = tracer.start_model_run(model_name="gpt-4")
+        span, _ = tracer.start_model_run(model_name="gpt-4")
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
@@ -183,7 +183,7 @@ class TestReferenceIdOnAllSpans:
     def test_model_run_inherits_reference_id(self, tracer, span_exporter):
         """Test model run span inherits reference_id from agent run."""
         with tracer.start_agent_run(agent_name="TestAgent", agent_id="ref-456") as span:
-            model_span = tracer.start_model_run(model_name="gpt-4")
+            model_span, _ = tracer.start_model_run(model_name="gpt-4")
             tracer.end_span_ok(model_span)
             span.end()
 
@@ -370,7 +370,7 @@ class TestModelRunSpan:
 
     def test_creates_span_with_model_attribute(self, tracer, span_exporter):
         """Test model run span has model attribute and completion type."""
-        span = tracer.start_model_run(model_name="gpt-4")
+        span, _ = tracer.start_model_run(model_name="gpt-4")
         tracer.end_span_ok(span)
 
         spans = span_exporter.get_finished_spans()
@@ -565,7 +565,7 @@ class TestSpanHierarchy:
             llm_span = tracer.start_llm_call()
             # Must explicitly pass llm_span as parent since start_llm_call
             # doesn't update the current span context
-            model_span = tracer.start_model_run("gpt-4", parent_span=llm_span)
+            model_span, _ = tracer.start_model_run("gpt-4", parent_span=llm_span)
             tracer.end_span_ok(model_span)
             tracer.end_span_ok(llm_span)
             agent_span.end()
@@ -694,7 +694,7 @@ class TestLiveUpdatesUpsert:
         """Test start_model_run upserts span immediately with UNSET status."""
         mock_exporter.reset_mock()
 
-        span = tracer_with_exporter.start_model_run(model_name="gpt-4")
+        span, _ = tracer_with_exporter.start_model_run(model_name="gpt-4")
 
         mock_exporter.upsert_span.assert_called_once()
         call_args = mock_exporter.upsert_span.call_args

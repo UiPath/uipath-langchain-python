@@ -7,7 +7,8 @@ Used by LlmOpsInstrumentationCallback to instrument LangGraph agents.
 import logging
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, List, Optional, Type, cast
+from contextvars import Token
+from typing import Any, Dict, Generator, List, Optional, Tuple, Type, cast
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import ReadableSpan
@@ -174,7 +175,7 @@ class LlmOpsSpanFactory:
         max_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         parent_span: Optional[Span] = None,
-    ) -> Span:
+    ) -> Tuple[Span, Token[Optional[str]]]:
         """Start a model run span (inner actual API call).
 
         Should be a child of an LLM call span.
@@ -186,7 +187,8 @@ class LlmOpsSpanFactory:
             parent_span: Optional parent span. If None, uses current span.
 
         Returns:
-            The started Span (caller must call span.end())
+            Tuple of (started Span, ContextVar token for license_ref_id).
+            Caller must call span.end() and reset the token.
         """
         return self._llm_schema.start_model_run(
             model_name=model_name,

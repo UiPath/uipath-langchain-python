@@ -1,6 +1,7 @@
 """LLM span instrumentor for LLMOps instrumentation."""
 
 import logging
+from contextvars import Token
 from typing import Any, Callable, Dict, List, Optional
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from uipath_langchain.agent.guardrails.types import ExecutionStage
 
 from ..span_hierarchy import SpanHierarchyManager
 from ..spans import SpanKeys
+from ..spans.spans_schema.base import license_ref_id_context
 from .attribute_helpers import (
     extract_model_name,
     extract_settings,
@@ -50,10 +52,20 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
         """
         super().__init__(state)
         self._close_container = close_container
+        self._license_tokens: Dict[UUID, Token[Optional[str]]] = {}
 
     def _model_span_key(self, run_id: UUID) -> UUID:
         """Derive unique key for model span from LLM run_id."""
         return SpanKeys.model(run_id)
+
+    def _reset_license_token(self, run_id: UUID) -> None:
+        """Reset the license_ref_id ContextVar token for the given run_id."""
+        token = self._license_tokens.pop(run_id, None)
+        if token is not None:
+            try:
+                license_ref_id_context.reset(token)
+            except ValueError:
+                license_ref_id_context.set(None)
 
     def _start_llm_and_model_spans(
         self,
@@ -101,12 +113,13 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
         # "LLM call" span, so this ensures the "Model run" always has a valid
         # parent in the server trace.
         is_inner_call = parent is not None and parent is not self._agent_span
-        model_span = self._span_factory.start_model_run(
+        model_span, license_token = self._span_factory.start_model_run(
             model_name,
             max_tokens=max_tokens,
             temperature=temperature,
             parent_span=parent if is_inner_call else llm_span,
         )
+        self._license_tokens[run_id] = license_token
         self._spans[self._model_span_key(run_id)] = model_span
         SpanHierarchyManager.push(run_id, model_span)
 
@@ -201,6 +214,7 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
                 set_tool_calls_attributes(model_span, response)
                 self._span_factory.end_span_ok(model_span)
                 model_span = None
+                self._reset_license_token(run_id)
 
             if llm_span:
                 # NonRecordingSpan = resumed LLM span from HITL; complete via upsert
@@ -228,6 +242,7 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
                 self._span_factory.end_span_error(
                     model_span, Exception("on_llm_end failed")
                 )
+                self._reset_license_token(run_id)
             if llm_span and not isinstance(llm_span, NonRecordingSpan):
                 self._span_factory.end_span_error(
                     llm_span, Exception("on_llm_end failed")
@@ -250,6 +265,7 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
             model_span = self._spans.pop(self._model_span_key(run_id), None)
             if model_span:
                 self._span_factory.end_span_error(model_span, exc)
+                self._reset_license_token(run_id)
 
             llm_span = self._spans.pop(run_id, None)
             if llm_span:
