@@ -72,6 +72,12 @@ class AgentStartupErrorCode(str, Enum):
     # Guardrail configuration errors
     INVALID_GUARDRAIL_CONFIG = "INVALID_GUARDRAIL_CONFIG"
 
+    # Agent configuration errors (agent.json structure)
+    INVALID_AGENT_CONFIG = "INVALID_AGENT_CONFIG"
+
+    # Input validation errors (user input doesn't match schema)
+    INPUT_VALIDATION_ERROR = "INPUT_VALIDATION_ERROR"
+
 
 class AgentRuntimeError(UiPathBaseRuntimeError):
     """Custom exception for agent loop runtime errors with structured error information.
