@@ -525,13 +525,20 @@ class TestHandleSemanticSearch:
             assert "documents" in result
             assert len(result["documents"]) == 1
 
+    @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
-    def test_semantic_search_uses_execution_folder_path(self, semantic_config):
+    async def test_semantic_search_uses_execution_folder_path(self, semantic_config):
         """Test that ContextGroundingRetriever receives folder_path from the execution environment."""
         with patch(
             "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
         ) as mock_retriever_class:
-            handle_semantic_search("semantic_tool", semantic_config)
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.return_value = []
+            mock_retriever_class.return_value = mock_retriever
+
+            tool = handle_semantic_search("semantic_tool", semantic_config)
+            assert tool.coroutine is not None
+            await tool.coroutine(query="test query")
 
             call_kwargs = mock_retriever_class.call_args[1]
             assert call_kwargs["folder_path"] == "/Shared/TestFolder"

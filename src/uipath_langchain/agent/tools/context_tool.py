@@ -1,5 +1,6 @@
 """Context tool creation for semantic index retrieval."""
 
+import logging
 import uuid
 from typing import Any, Optional, cast
 
@@ -44,25 +45,67 @@ from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
 
+logger = logging.getLogger(__name__)
 
-def _build_folder_path_prefix_arg_props(
+
+def _build_arg_props_from_settings(
     resource: AgentContextResourceConfig,
 ) -> dict[str, Any]:
-    """Build argument_properties for folder_path_prefix from settings.
+    """Build argument_properties from resource settings for query and folder_path_prefix.
 
-    Fallback for when settings bag doesn't include argumentProperties
-    at the resource level but does set settings.folder_path_prefix
-    with variant="argument".
+    For each setting with variant="argument", creates an argument property entry
+    that maps the tool parameter to the agent input argument path.
     """
-    assert resource.settings.folder_path_prefix is not None
-    argument_path = (resource.settings.folder_path_prefix.value or "").strip("{}")
-    return {
-        "folder_path_prefix": {
+    arg_props = dict(resource.argument_properties)
+
+    if (
+        "query" not in arg_props
+        and resource.settings.query
+        and resource.settings.query.variant == "argument"
+    ):
+        argument_path = (resource.settings.query.value or "").strip("{}")
+        arg_props["query"] = {
             "variant": "argument",
             "argumentPath": argument_path,
             "isSensitive": False,
         }
-    }
+
+    if (
+        "folder_path_prefix" not in arg_props
+        and resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.variant == "argument"
+    ):
+        argument_path = (resource.settings.folder_path_prefix.value or "").strip("{}")
+        arg_props["folder_path_prefix"] = {
+            "variant": "argument",
+            "argumentPath": argument_path,
+            "isSensitive": False,
+        }
+
+    return arg_props
+
+
+def _resolve_file_extension(resource: AgentContextResourceConfig) -> str | None:
+    """Resolve file extension from settings, returning None for 'All' or empty."""
+    if resource.settings.file_extension and resource.settings.file_extension.value:
+        ext = resource.settings.file_extension.value
+        if ext.lower() == "all":
+            return None
+        return ext
+    return None
+
+
+def _resolve_static_folder_path_prefix(
+    resource: AgentContextResourceConfig,
+) -> str | None:
+    """Resolve static folder_path_prefix from settings."""
+    if (
+        resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.value
+        and resource.settings.folder_path_prefix.variant == "static"
+    ):
+        return resource.settings.folder_path_prefix.value
+    return None
 
 
 def is_static_query(resource: AgentContextResourceConfig) -> bool:
@@ -90,16 +133,15 @@ def handle_semantic_search(
 
     assert resource.settings.query.variant is not None
 
-    retriever = ContextGroundingRetriever(
-        index_name=resource.index_name,
-        folder_path=get_execution_folder_path(),
-        number_of_results=resource.settings.result_count,
-    )
+    file_extension = _resolve_file_extension(resource)
+    static_folder_path_prefix = _resolve_static_folder_path_prefix(resource)
 
     static = is_static_query(resource)
     prompt = resource.settings.query.value if static else None
     if static:
         assert prompt is not None
+
+    arg_props = _build_arg_props_from_settings(resource)
 
     class ContextOutputSchemaModel(BaseModel):
         documents: list[Document] = Field(
@@ -108,16 +150,26 @@ def handle_semantic_search(
 
     output_model = ContextOutputSchemaModel
 
-    schema_fields: dict[str, Any] = (
-        {}
-        if static
-        else {
-            "query": (
-                str,
-                Field(..., description="The query to search for in the knowledge base"),
+    schema_fields: dict[str, Any] = {}
+
+    if not static:
+        schema_fields["query"] = (
+            str,
+            Field(
+                default=None,
+                description="The query to search for in the knowledge base",
             ),
-        }
-    )
+        )
+
+    if "folder_path_prefix" in arg_props:
+        schema_fields["folder_path_prefix"] = (
+            str,
+            Field(
+                default=None,
+                description="The folder path prefix within the index to filter on",
+            ),
+        )
+
     input_model = create_model("SemanticSearchInput", **schema_fields)
 
     @mockable(
@@ -127,7 +179,24 @@ def handle_semantic_search(
         output_schema=output_model.model_json_schema(),
         example_calls=[],  # Examples cannot be provided for context.
     )
-    async def context_tool_fn(query: Optional[str] = None) -> dict[str, Any]:
+    async def context_tool_fn(
+        query: Optional[str] = None, folder_path_prefix: Optional[str] = None
+    ) -> dict[str, Any]:
+        resolved_folder_path_prefix = static_folder_path_prefix or folder_path_prefix
+        if resolved_folder_path_prefix:
+            logger.info(
+                "Semantic search folder_path_prefix resolved: %s",
+                resolved_folder_path_prefix,
+            )
+
+        retriever = ContextGroundingRetriever(
+            index_name=resource.index_name,
+            folder_path=get_execution_folder_path(),
+            number_of_results=resource.settings.result_count,
+            scope_folder=resolved_folder_path_prefix,
+            scope_extension=file_extension,
+        )
+
         actual_query = prompt or query
         assert actual_query is not None
         docs = await retriever.ainvoke(actual_query)
@@ -137,6 +206,35 @@ def handle_semantic_search(
                 for doc in docs
             ]
         }
+
+    if arg_props:
+
+        async def context_semantic_search_wrapper(
+            tool: BaseTool,
+            call: ToolCall,
+            state: AgentGraphState,
+        ) -> ToolWrapperReturnType:
+            call["args"] = handle_static_args(
+                cast(ArgumentPropertiesMixin, tool), state, call["args"]
+            )
+            return await tool.ainvoke(call)
+
+        tool = StructuredToolWithArgumentProperties(
+            name=tool_name,
+            description=resource.description,
+            args_schema=input_model,
+            coroutine=context_tool_fn,
+            output_type=output_model,
+            argument_properties=arg_props,
+            metadata={
+                "tool_type": "context",
+                "display_name": resource.name,
+                "index_name": resource.index_name,
+                "context_retrieval_mode": resource.settings.retrieval_mode,
+            },
+        )
+        tool.set_tool_wrappers(awrapper=context_semantic_search_wrapper)
+        return tool
 
     return StructuredToolWithOutputType(
         name=tool_name,
@@ -175,17 +273,8 @@ def handle_deep_rag(
     if static:
         assert prompt is not None
 
-    static_folder_path_prefix = None
-    if (
-        resource.settings.folder_path_prefix
-        and resource.settings.folder_path_prefix.value
-        and resource.settings.folder_path_prefix.variant == "static"
-    ):
-        static_folder_path_prefix = resource.settings.folder_path_prefix.value
-
-    file_extension = None
-    if resource.settings.file_extension and resource.settings.file_extension.value:
-        file_extension = resource.settings.file_extension.value
+    static_folder_path_prefix = _resolve_static_folder_path_prefix(resource)
+    file_extension = _resolve_file_extension(resource)
 
     output_model = create_model(
         "DeepRagOutputModel",
@@ -193,12 +282,7 @@ def handle_deep_rag(
         deep_rag_id=(str, Field(alias="deepRagId")),
     )
 
-    arg_props = dict(resource.argument_properties)
-
-    has_folder_path_prefix_arg = "folder_path_prefix" in arg_props or (
-        resource.settings.folder_path_prefix
-        and resource.settings.folder_path_prefix.variant == "argument"
-    )
+    arg_props = _build_arg_props_from_settings(resource)
 
     schema_fields: dict[str, Any] = (
         {}
@@ -214,7 +298,7 @@ def handle_deep_rag(
         }
     )
 
-    if has_folder_path_prefix_arg:
+    if "folder_path_prefix" in arg_props:
         schema_fields["folder_path_prefix"] = (
             str,
             Field(
@@ -222,8 +306,6 @@ def handle_deep_rag(
                 description="The folder path prefix within the index to filter on",
             ),
         )
-        if "folder_path_prefix" not in arg_props:
-            arg_props = _build_folder_path_prefix_arg_props(resource)
 
     input_model = create_model("DeepRagInput", **schema_fields)
 
@@ -329,20 +411,9 @@ def handle_batch_transform(
     if static:
         assert prompt is not None
 
-    static_folder_path_prefix = None
-    if (
-        resource.settings.folder_path_prefix
-        and resource.settings.folder_path_prefix.value
-        and resource.settings.folder_path_prefix.variant == "static"
-    ):
-        static_folder_path_prefix = resource.settings.folder_path_prefix.value
+    static_folder_path_prefix = _resolve_static_folder_path_prefix(resource)
 
-    arg_props = dict(resource.argument_properties)
-
-    has_folder_path_prefix_arg = "folder_path_prefix" in arg_props or (
-        resource.settings.folder_path_prefix
-        and resource.settings.folder_path_prefix.variant == "argument"
-    )
+    arg_props = _build_arg_props_from_settings(resource)
 
     output_model = create_model_from_schema(BATCH_TRANSFORM_OUTPUT_SCHEMA)
 
@@ -362,7 +433,7 @@ def handle_batch_transform(
             description="The relative file path destination for the modified csv file",
         ),
     )
-    if has_folder_path_prefix_arg:
+    if "folder_path_prefix" in arg_props:
         schema_fields["folder_path_prefix"] = (
             str,
             Field(
@@ -370,8 +441,6 @@ def handle_batch_transform(
                 description="The folder path prefix within the index to filter on",
             ),
         )
-        if "folder_path_prefix" not in arg_props:
-            arg_props = _build_folder_path_prefix_arg_props(resource)
     input_model = create_model("BatchTransformInput", **schema_fields)
 
     @mockable(
