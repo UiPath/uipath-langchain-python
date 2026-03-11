@@ -3356,7 +3356,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-aiohttp-client", specifier = ">=0.60b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.60b0" },
     { name = "uipath", specifier = "==2.10.11" },
-    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.8.14" },
+    { name = "uipath-langchain", extras = ["vertex", "bedrock"], specifier = "==0.8.15" },
 ]
 
 [package.metadata.requires-dev]
@@ -3412,7 +3412,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.8.14"
+version = "0.8.15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -3433,9 +3433,9 @@ dependencies = [
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/19/7c/57c4b965d3d13364fedb8d290cbae02d2092644bd64bb5189faaaf996bdb/uipath_langchain-0.8.14.tar.gz", hash = "sha256:5de62d7e20b75c284730d7069b1800f5ff683297a1303c9d4dfd09125eb2c381", size = 4177580, upload-time = "2026-03-10T10:54:17.398Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/1c/ec9634259046207db0baeb2ede2a1ed9159a62541e03d33036f7c2451005/uipath_langchain-0.8.15.tar.gz", hash = "sha256:c99af7555cba9c5a28dd523ef243f72dde295a3a948c6771f9a21d2e20689c84", size = 4177597, upload-time = "2026-03-11T10:36:26.029Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/e4/6b262565857e726f63190c1262c33d1b556bdecc502f6676acd4a4c3cded/uipath_langchain-0.8.14-py3-none-any.whl", hash = "sha256:6bf91ac0d2e60e6c7275d5621f4f3ad7438ddddb4ce00d3bb04355310f0128a7", size = 225255, upload-time = "2026-03-10T10:54:15.367Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/68/c967421db2a214cfdf1a697323d8db8f4a8fba694d70289572db12fefd56/uipath_langchain-0.8.15-py3-none-any.whl", hash = "sha256:5963b470dafa0e0a6f9ee78ce8742366cc8351d13820dae63eeff3792da9cbcc", size = 225290, upload-time = "2026-03-11T10:36:23.172Z" },
 ]
 
 [package.optional-dependencies]
