@@ -51,18 +51,14 @@ logger = logging.getLogger(__name__)
 def _build_arg_props_from_settings(
     resource: AgentContextResourceConfig,
 ) -> dict[str, Any]:
-    """Build argument_properties from resource settings for query and folder_path_prefix.
+    """Build argument_properties from context resource settings.
 
-    For each setting with variant="argument", creates an argument property entry
-    that maps the tool parameter to the agent input argument path.
+    Context resources don't receive argumentProperties from the frontend.
+    Instead, we derive them from the settings when variant="argument".
     """
-    arg_props = dict(resource.argument_properties)
+    arg_props: dict[str, Any] = {}
 
-    if (
-        "query" not in arg_props
-        and resource.settings.query
-        and resource.settings.query.variant == "argument"
-    ):
+    if resource.settings.query and resource.settings.query.variant == "argument":
         argument_path = (resource.settings.query.value or "").strip("{}")
         arg_props["query"] = {
             "variant": "argument",
@@ -71,8 +67,7 @@ def _build_arg_props_from_settings(
         }
 
     if (
-        "folder_path_prefix" not in arg_props
-        and resource.settings.folder_path_prefix
+        resource.settings.folder_path_prefix
         and resource.settings.folder_path_prefix.variant == "argument"
     ):
         argument_path = (resource.settings.folder_path_prefix.value or "").strip("{}")
@@ -183,11 +178,6 @@ def handle_semantic_search(
         query: Optional[str] = None, folder_path_prefix: Optional[str] = None
     ) -> dict[str, Any]:
         resolved_folder_path_prefix = static_folder_path_prefix or folder_path_prefix
-        if resolved_folder_path_prefix:
-            logger.info(
-                "Semantic search folder_path_prefix resolved: %s",
-                resolved_folder_path_prefix,
-            )
 
         retriever = ContextGroundingRetriever(
             index_name=resource.index_name,

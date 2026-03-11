@@ -45,7 +45,6 @@ def _make_context_resource(
     citation_mode_value=None,
     retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
     folder_path_prefix=None,
-    argument_properties=None,
     **kwargs,
 ):
     """Helper to create an AgentContextResourceConfig."""
@@ -67,7 +66,6 @@ def _make_context_resource(
             folder_path_prefix=folder_path_prefix,
         ),
         is_enabled=True,
-        argument_properties=argument_properties or {},
         **kwargs,
     )
 
@@ -110,38 +108,15 @@ class TestHandleDeepRag:
 
         assert result.awrapper is not None
 
-    def test_deep_rag_with_argument_properties(self, base_resource_config):
-        """Test that Deep RAG tool correctly receives argument_properties from resource."""
-        resource = base_resource_config(
-            citation_mode_value=AgentContextValueSetting(value="Inline"),
-            query_value="some query",
-            argument_properties={
-                "folder_path_prefix": {
-                    "variant": "argument",
-                    "argumentPath": "deepRagFolderPrefix",
-                    "isSensitive": False,
-                },
-            },
-        )
-
-        result = handle_deep_rag("test_deep_rag", resource)
-
-        assert isinstance(result, StructuredToolWithArgumentProperties)
-        assert "folder_path_prefix" in result.argument_properties
-        # Schema should include folder_path_prefix field
-        assert isinstance(result.args_schema, type)
-        schema = result.args_schema.model_json_schema()
-        assert "folder_path_prefix" in schema["properties"]
-
-    def test_deep_rag_folder_path_prefix_from_settings_fallback(
+    def test_deep_rag_with_folder_path_prefix_from_settings(
         self, base_resource_config
     ):
-        """Test that folder_path_prefix argument is detected from settings when not in argument_properties."""
+        """Test that folder_path_prefix argument_properties are built from settings."""
         resource = base_resource_config(
             citation_mode_value=AgentContextValueSetting(value="Inline"),
             query_value="some query",
             folder_path_prefix=AgentContextQuerySetting(
-                value="{myArgPath}", variant="argument"
+                value="{deepRagFolderPrefix}", variant="argument"
             ),
         )
 
@@ -149,6 +124,10 @@ class TestHandleDeepRag:
 
         assert isinstance(result, StructuredToolWithArgumentProperties)
         assert "folder_path_prefix" in result.argument_properties
+        assert (
+            result.argument_properties["folder_path_prefix"]["argumentPath"]
+            == "deepRagFolderPrefix"
+        )
         assert isinstance(result.args_schema, type)
         schema = result.args_schema.model_json_schema()
         assert "folder_path_prefix" in schema["properties"]
@@ -672,8 +651,8 @@ class TestHandleBatchTransform:
         assert "query" in schema["properties"]
         assert "destination_path" in schema["properties"]
 
-    def test_batch_transform_with_argument_properties(self):
-        """Test that batch transform tool correctly receives argument_properties from resource."""
+    def test_batch_transform_with_folder_path_prefix_from_settings(self):
+        """Test that batch transform builds argument_properties from settings."""
         resource = AgentContextResourceConfig(
             name="batch_transform_tool",
             description="Batch transform tool",
@@ -694,21 +673,21 @@ class TestHandleBatchTransform:
                         name="output_col1", description="First output column"
                     ),
                 ],
+                folder_path_prefix=AgentContextQuerySetting(
+                    value="{batchFolderPrefix}", variant="argument"
+                ),
             ),
             is_enabled=True,
-            argument_properties={
-                "folder_path_prefix": {
-                    "variant": "argument",
-                    "argumentPath": "batchFolderPrefix",
-                    "isSensitive": False,
-                },
-            },
         )
 
         result = handle_batch_transform("batch_transform_tool", resource)
 
         assert isinstance(result, StructuredToolWithArgumentProperties)
         assert "folder_path_prefix" in result.argument_properties
+        assert (
+            result.argument_properties["folder_path_prefix"]["argumentPath"]
+            == "batchFolderPrefix"
+        )
         assert isinstance(result.args_schema, type)
         schema = result.args_schema.model_json_schema()
         assert "folder_path_prefix" in schema["properties"]
