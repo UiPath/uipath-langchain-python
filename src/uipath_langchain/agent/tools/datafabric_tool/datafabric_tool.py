@@ -3,6 +3,7 @@
 This module provides functionality to:
 1. Fetch and format entity schemas for agent context hydration
 2. Create SQL-based query tools for the agent
+3. Support Entity Context Pack (ECP) integration for enhanced schema metadata
 """
 
 import json
@@ -25,6 +26,30 @@ from ..base_uipath_structured_tool import BaseUiPathStructuredTool
 from ..utils import sanitize_tool_name
 
 logger = logging.getLogger(__name__)
+
+# --- ECP Integration ---
+
+def _load_ecp_if_available():
+    """Lazy import and load ECP data if available."""
+    try:
+        # Try to import ECP loader from eval environment
+        import sys
+        eval_paths = [
+            "/Users/jm/repos/Eval-Agent/eval/bird/v2",
+            "/Users/jm/repos/Eval-Agent/eval/bird",
+        ]
+        for p in eval_paths:
+            if p not in sys.path:
+                sys.path.insert(0, p)
+
+        from ecp_loader import load_ecp, list_available_ecps
+        return load_ecp, list_available_ecps
+    except ImportError:
+        logger.info("ECP loader not available - using raw schema formatting")
+        return None, None
+
+
+_ecp_load_fn, _ecp_list_fn = _load_ecp_if_available()
 
 # --- Prompt and Constraints Loading ---
 
@@ -99,7 +124,155 @@ def format_field_type(field: FieldMetadata) -> str:
     return type_name
 
 
-def format_schemas_for_context(entities: list[Entity]) -> str:
+def _format_ecp_for_context(entities: list[Entity]) -> str:
+    """Format entity schemas using ECP (Entity Context Pack) metadata as JSON.
+
+    This replaces raw DataFabric schema with ECP-enhanced metadata including:
+    - Column synonyms
+    - Value hints and allowed values
+    - Intent classification (good for aggregation/grouping/filtering)
+    - Pruned/relevant columns only
+
+    Args:
+        entities: List of Entity objects (used to get entity names).
+
+    Returns:
+        String with SQL guidelines and ECP metadata in JSON format.
+    """
+    import json
+
+    if not entities or not _ecp_load_fn:
+        logger.warning("ECP formatting requested but ECP loader not available")
+        return ""
+
+    lines = []
+
+    # Add SQL generation strategy from system_prompt.txt
+    system_prompt = _load_system_prompt()
+    if system_prompt:
+        lines.append("## SQL Query Generation Guidelines")
+        lines.append("")
+        lines.append(system_prompt)
+        lines.append("")
+
+    # Add SQL constraints from sql_constraints.txt
+    sql_constraints = _load_sql_constraints()
+    if sql_constraints:
+        lines.append("## SQL Constraints")
+        lines.append("")
+        lines.append(sql_constraints)
+        lines.append("")
+
+    lines.append("## Available Data Fabric Entities (Enhanced with ECP)")
+    lines.append("")
+    lines.append("The following entities are available with their Entity Context Pack metadata in JSON format:")
+    lines.append("")
+
+    for entity in entities:
+        entity_name = entity.name
+        display_name = entity.display_name or entity_name
+
+        # Try to extract db_id and table_name from display_name
+        db_id = None
+        table_name = None
+
+        if display_name and "." in display_name:
+            parts = display_name.split(".", 1)
+            if len(parts) == 2:
+                db_id, table_name = parts
+
+        if not db_id:
+            logger.warning(f"Could not parse db_id and table_name from entity: {entity_name} (display: {display_name})")
+            # Fall back to raw schema for this entity
+            lines.append(f"### Entity: {display_name} (raw schema - could not parse name)")
+            lines.append(f"_{entity.description or 'No description available'}_")
+            lines.append("")
+            lines.append("| Field | Type |")
+            lines.append("|-------|------|")
+            for col in entity.columns:
+                lines.append(f"| {col.name} | {col.df_type} |")
+            lines.append("")
+            continue
+
+        # Load ECP
+        ecp = _ecp_load_fn(db_id, table_name)
+        if ecp:
+            logger.info(f"Using ECP metadata for {db_id}.{table_name}")
+
+            # Build index of ECP columns by normalized name for matching
+            # ECP uses original SQLite names ("County Name"), DataFabric uses camelCase ("CountyName")
+            ecp_col_index: dict[str, Any] = {}
+            for ecp_col in ecp.columns:
+                normalized = ecp_col.name.replace(" ", "").replace("_", "").replace("-", "").lower()
+                ecp_col_index[normalized] = ecp_col
+
+            # Build ECP JSON using DataFabric entity/column names enriched with ECP metadata
+            ecp_json = {
+                "table_name": entity_name,
+                "description": entity.description or ecp.display_name,
+                "row_count": ecp.row_count,
+                "allowed_operations": ecp.allowed_operations,
+                "allowed_aggregations": ecp.allowed_aggregations,
+                "disallowed_operations": ecp.disallowed_operations,
+                "columns": []
+            }
+
+            # Merge DataFabric columns with ECP metadata
+            for field in entity.fields or []:
+                if field.is_hidden_field or field.is_system_field:
+                    continue
+                df_name = field.name
+                df_type = format_field_type(field)
+
+                # Match to ECP column by normalized name
+                normalized_df = df_name.replace(" ", "").replace("_", "").replace("-", "").lower()
+                ecp_col = ecp_col_index.get(normalized_df)
+
+                col_json: dict[str, Any] = {
+                    "name": df_name,
+                    "type": df_type,
+                }
+
+                if ecp_col:
+                    col_json["description"] = ecp_col.description
+                    col_json["synonyms"] = ecp_col.synonyms
+                    col_json["examples"] = ecp_col.examples
+                    col_json["allowed_values"] = ecp_col.allowed_values
+                    col_json["value_range"] = ecp_col.value_range
+                    col_json["good_for_aggregation"] = ecp_col.good_for_aggregation
+                    col_json["good_for_grouping"] = ecp_col.good_for_grouping
+                    col_json["good_for_filtering"] = ecp_col.good_for_filtering
+
+                ecp_json["columns"].append(col_json)
+
+            # Format as JSON
+            lines.append(f"### Entity: {display_name}")
+            lines.append("```json")
+            lines.append(json.dumps(ecp_json, indent=2))
+            lines.append("```")
+            lines.append("")
+
+            continue
+
+        # Fallback to raw schema if ECP not found
+        logger.warning(f"No ECP found for {entity_name}, using raw schema")
+        lines.append(f"### Entity: {display_name} (raw schema - ECP not available)")
+        lines.append(f"_{entity.description or 'No description'}_")
+        lines.append("")
+        lines.append("| Field | Type |")
+        lines.append("|-------|------|")
+        for field in entity.fields or []:
+            if field.is_hidden_field or field.is_system_field:
+                continue
+            field_name = field.name
+            field_type = format_field_type(field)
+            lines.append(f"| {field_name} | {field_type} |")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_schemas_for_context(entities: list[Entity], use_ecp: bool = False) -> str:
     """Format entity schemas as markdown for injection into agent system prompt.
 
     The output is optimized for SQL query generation by the LLM.
@@ -107,6 +280,7 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
 
     Args:
         entities: List of Entity objects with schema information.
+        use_ecp: If True, use ECP metadata instead of raw schema.
 
     Returns:
         Markdown-formatted string describing entity schemas and SQL guidance.
@@ -114,6 +288,17 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
     if not entities:
         return ""
 
+    # Check environment variable to enable ECP
+    use_ecp_env = os.environ.get("USE_ECP", "").lower() in ("1", "true", "yes")
+    use_ecp = use_ecp or use_ecp_env
+
+    # Use ECP formatting if enabled and available
+    if use_ecp and _ecp_load_fn:
+        logger.info("Using ECP-enhanced schema formatting")
+        return _format_ecp_for_context(entities)
+
+    # Otherwise use raw schema formatting (current behavior)
+    logger.info("Using raw schema formatting")
     lines = []
 
     # Add SQL generation strategy from system_prompt.txt
@@ -193,8 +378,8 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
         lines.append("")
         lines.append("| User Intent | SQL Pattern |")
         lines.append("|-------------|-------------|")
-        lines.append(f"| 'Show all {display_name.lower()}' | `SELECT {fields_sample} FROM {sql_table_name} LIMIT 100` |")
-        lines.append(f"| 'Find by X' | `SELECT {fields_sample} FROM {sql_table_name} WHERE {filter_field} = 'value' LIMIT 100` |")
+        lines.append(f"| 'Show all {display_name.lower()}' | `SELECT {fields_sample} FROM {sql_table_name}` |")
+        lines.append(f"| 'Find by X' | `SELECT {fields_sample} FROM {sql_table_name} WHERE {filter_field} = 'value'` |")
         lines.append(f"| 'Top N by Y' | `SELECT {fields_sample} FROM {sql_table_name} ORDER BY {agg_field} DESC LIMIT N` |")
         lines.append(f"| 'Count by X' | `SELECT {group_field}, COUNT({field_names[0] if field_names else 'id'}) as count FROM {sql_table_name} GROUP BY {group_field}` |")
         lines.append(f"| 'Top N segments' | `SELECT {group_field}, COUNT({field_names[0] if field_names else 'id'}) as count FROM {sql_table_name} GROUP BY {group_field} ORDER BY count DESC LIMIT N` |")
@@ -261,29 +446,32 @@ class QueryEntityOutput(BaseModel):
 
 async def create_datafabric_tools(
     agent: LowCodeAgentDefinition,
-) -> tuple[list[BaseTool], str]:
+    use_ecp: bool = False,
+) -> tuple[list[BaseTool], str, list[Entity]]:
     """Create Data Fabric tools and schema context from agent definition.
 
     This function:
     1. Finds all Data Fabric context resources in the agent
     2. Fetches entity schemas for context hydration
-    3. Returns tools and schema context string
+    3. Returns tools and schema context string (with optional ECP formatting)
 
     Args:
         agent: The agent definition containing Data Fabric context resources.
+        use_ecp: If True, use ECP metadata for schema formatting instead of raw schema.
 
     Returns:
-        Tuple of (tools, schema_context) where:
+        Tuple of (tools, schema_context, entities) where:
         - tools: List of BaseTool instances for querying entities
         - schema_context: Formatted schema string to inject into system prompt
+        - entities: List of Entity objects fetched
     """
-    tools: list[BaseTool] = []  
+    tools: list[BaseTool] = []
     all_entities: list[Entity] = []
 
     datafabric_contexts = get_datafabric_contexts(agent)
 
     if not datafabric_contexts:
-        return tools, ""
+        return tools, "", []
 
     logger.info(f"Found {len(datafabric_contexts)} Data Fabric context resource(s)")
 
@@ -307,10 +495,10 @@ async def create_datafabric_tools(
             f"Created {len(context_tools)} tools for Data Fabric context '{context.name}'"
         )
 
-    # Format all entity schemas for context injection
-    schema_context = format_schemas_for_context(all_entities)
+    # Format all entity schemas for context injection (with optional ECP)
+    schema_context = format_schemas_for_context(all_entities, use_ecp=use_ecp)
 
-    return tools, schema_context
+    return tools, schema_context, all_entities
 
 
 def _create_sdk_based_tools(
@@ -323,7 +511,7 @@ def _create_sdk_based_tools(
     query_entity_records_async method.
     """
     tools: list[BaseTool] = []
-    MAX_RECORDS_IN_RESPONSE = 50  # Limit records to prevent context overflow
+    MAX_RECORDS_IN_RESPONSE = 10000
 
     for entity in entities:
         tool_name = sanitize_tool_name(f"query_{entity.name}")
@@ -438,7 +626,7 @@ def _create_sdk_based_tools(
                             "type": "string",
                             "description": (
                                 f"Complete SQL SELECT statement for {entity_display_name}. "
-                                f"Use exact column names from schema. Include LIMIT unless aggregating."
+                                f"Use exact column names from schema. Only add LIMIT when the question asks for top-N or a specific count."
                             ),
                         },
                     },

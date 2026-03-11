@@ -57,6 +57,7 @@ class AgentGuardrailsGraphState(AgentGraphState):
 class AgentGraphNode(StrEnum):
     INIT = "init"
     GUARDED_INIT = "guarded-init"
+    REWRITE = "rewrite"
     AGENT = "agent"
     LLM = "llm"
     TOOLS = "tools"

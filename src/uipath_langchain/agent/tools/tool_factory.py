@@ -16,6 +16,8 @@ from uipath.agent.models.agent import (
     LowCodeAgentDefinition,
 )
 
+from uipath.platform.entities import Entity
+
 from .context_tool import create_context_tool
 from .datafabric_tool import create_datafabric_tools
 from .escalation_tool import create_escalation_tool
@@ -29,26 +31,29 @@ logger = getLogger(__name__)
 
 
 async def create_tools_from_resources(
-    agent: LowCodeAgentDefinition, llm: BaseChatModel
-) -> tuple[list[BaseTool], str]:
+    agent: LowCodeAgentDefinition, llm: BaseChatModel, use_ecp: bool = False
+) -> tuple[list[BaseTool], str, list[Entity]]:
     """Create tools from agent resources including Data Fabric tools.
 
     Args:
         agent: The agent definition.
         llm: The language model for tool creation.
+        use_ecp: If True, use ECP metadata for DataFabric schema instead of raw schema.
 
     Returns:
-        Tuple of (tools, datafabric_schema_context).
+        Tuple of (tools, datafabric_schema_context, datafabric_entities).
     """
     tools: list[BaseTool] = []
     datafabric_schema_context: str = ""
+    datafabric_entities: list[Entity] = []
 
-    logger.info("Creating tools for agent '%s' from resources", agent.name)
+    logger.info("Creating tools for agent '%s' from resources (use_ecp=%s)", agent.name, use_ecp)
 
     # Handle Data Fabric tools first (they need special handling)
-    datafabric_tools, schema_context = await create_datafabric_tools(agent)
+    datafabric_tools, schema_context, entities = await create_datafabric_tools(agent, use_ecp=use_ecp)
     tools.extend(datafabric_tools)
     datafabric_schema_context = schema_context
+    datafabric_entities = entities
 
     for resource in agent.resources:
         if not resource.is_enabled:
@@ -71,7 +76,7 @@ async def create_tools_from_resources(
             else:
                 tools.append(tool)
 
-    return tools, datafabric_schema_context
+    return tools, datafabric_schema_context, datafabric_entities
 
 
 async def _build_tool_for_resource(

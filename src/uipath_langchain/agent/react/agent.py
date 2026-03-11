@@ -1,4 +1,4 @@
-from typing import Callable, Sequence, Type, TypeVar
+from typing import Any, Callable, Sequence, Type, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -53,6 +53,7 @@ def create_agent(
     output_schema: Type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None = None,
+    rewrite_node: Callable[..., Any] | None = None,
 ) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
     """Build agent graph with INIT -> AGENT (subgraph) <-> TOOLS loop, terminated by control flow tools.
 
@@ -133,7 +134,13 @@ def create_agent(
         (AgentGraphNode.LLM, llm_node), guardrails, input_schema=input_schema
     )
     builder.add_node(AgentGraphNode.AGENT, llm_with_guardrails_subgraph)
-    builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
+
+    if rewrite_node is not None:
+        builder.add_node(AgentGraphNode.REWRITE, rewrite_node)
+        builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.REWRITE)
+        builder.add_edge(AgentGraphNode.REWRITE, AgentGraphNode.AGENT)
+    else:
+        builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
     tool_node_names = list(tool_nodes_with_guardrails.keys())
 
