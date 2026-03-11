@@ -147,11 +147,19 @@ def handle_semantic_search(
 
     schema_fields: dict[str, Any] = {}
 
-    if not static:
+    if "query" in arg_props:
         schema_fields["query"] = (
             str,
             Field(
                 default=None,
+                description="The query to search for in the knowledge base",
+            ),
+        )
+    elif not static:
+        schema_fields["query"] = (
+            str,
+            Field(
+                ...,
                 description="The query to search for in the knowledge base",
             ),
         )
