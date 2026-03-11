@@ -90,6 +90,9 @@ class UiPathToolNode(RunnableCallable):
                 result = self.tool.invoke(call)
             return self._process_result(call, result)
         except GraphBubbleUp:
+            # LangGraph uses exceptions for interrupt control flow — re-raise so
+            # handle_tool_errors doesn't swallow expected interrupts as errors.
+            # https://langchain-ai.github.io/langgraph/concepts/human_in_the_loop/
             raise
         except Exception as e:
             if self.handle_tool_errors:
@@ -111,6 +114,9 @@ class UiPathToolNode(RunnableCallable):
                 result = await self.tool.ainvoke(call)
             return self._process_result(call, result)
         except GraphBubbleUp:
+            # LangGraph uses exceptions for interrupt control flow — re-raise so
+            # handle_tool_errors doesn't swallow expected interrupts as errors.
+            # https://langchain-ai.github.io/langgraph/concepts/human_in_the_loop/
             raise
         except Exception as e:
             if self.handle_tool_errors:
