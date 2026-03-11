@@ -51,7 +51,9 @@ class ContextGroundingRetriever(BaseRetriever):
                 page_content=x.content,
                 metadata={
                     "source": x.source,
-                    "search_id": result.metadata.operation_id if result.metadata else None,
+                    "search_id": result.metadata.operation_id
+                    if result.metadata
+                    else None,
                     "reference": x.reference,
                     "page_number": x.page_number,
                     "score": x.score,

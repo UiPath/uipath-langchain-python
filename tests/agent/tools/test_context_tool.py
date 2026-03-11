@@ -108,9 +108,7 @@ class TestHandleDeepRag:
 
         assert result.awrapper is not None
 
-    def test_deep_rag_with_folder_path_prefix_from_settings(
-        self, base_resource_config
-    ):
+    def test_deep_rag_with_folder_path_prefix_from_settings(self, base_resource_config):
         """Test that folder_path_prefix argument_properties are built from settings."""
         resource = base_resource_config(
             citation_mode_value=AgentContextValueSetting(value="Inline"),
