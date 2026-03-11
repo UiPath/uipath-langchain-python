@@ -29,6 +29,8 @@ from uipath_langchain.runtime.graph import LangGraphLoader
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
 from uipath_langchain.runtime.storage import SqliteResumableStorage
 
+_MAX_GRAPH_CACHE_SIZE = 16
+
 
 class UiPathLangGraphRuntimeFactory:
     """Factory for creating LangGraph runtimes from langgraph.json configuration."""
@@ -216,6 +218,10 @@ class UiPathLangGraphRuntimeFactory:
             loaded_graph = await self._load_graph(entrypoint, **kwargs)
 
             compiled_graph = await self._compile_graph(loaded_graph, memory)
+
+            if len(self._graph_cache) >= _MAX_GRAPH_CACHE_SIZE:
+                oldest_key = next(iter(self._graph_cache))
+                del self._graph_cache[oldest_key]
 
             self._graph_cache[entrypoint] = compiled_graph
 
