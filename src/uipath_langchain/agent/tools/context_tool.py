@@ -191,6 +191,7 @@ def handle_semantic_search(
             index_name=resource.index_name,
             folder_path=get_execution_folder_path(),
             number_of_results=resource.settings.result_count,
+            threshold=resource.settings.threshold,
             scope_folder=resolved_folder_path_prefix,
             scope_extension=file_extension,
         )

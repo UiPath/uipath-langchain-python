@@ -14,6 +14,7 @@ class ContextGroundingRetriever(BaseRetriever):
     folder_key: str | None = None
     uipath_sdk: UiPath | None = None
     number_of_results: int | None = 10
+    threshold: float = 0.0
     scope_folder: str | None = None
     scope_extension: str | None = None
 
@@ -37,6 +38,7 @@ class ContextGroundingRetriever(BaseRetriever):
             number_of_results=self.number_of_results
             if self.number_of_results is not None
             else 10,
+            threshold=self.threshold,
             scope=self._build_scope(),
             folder_path=self.folder_path,
             folder_key=self.folder_key,
@@ -70,6 +72,7 @@ class ContextGroundingRetriever(BaseRetriever):
             number_of_results=self.number_of_results
             if self.number_of_results is not None
             else 10,
+            threshold=self.threshold,
             scope=self._build_scope(),
             folder_path=self.folder_path,
             folder_key=self.folder_key,
