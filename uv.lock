@@ -1212,14 +1212,14 @@ wheels = [
 
 [[package]]
 name = "jsonschema-pydantic-converter"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/dc/1e/9c2292e2cbe0290b3d2b5d055bee84ac467b61eff64780394d30bc497541/jsonschema_pydantic_converter-0.2.0.tar.gz", hash = "sha256:59e501fe04be47d31f6bf4f19afce2646991e68877550a52d1b7f50a6d4fb5f0", size = 62343, upload-time = "2026-03-02T15:58:14.898Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/86/81f6997a2f33a5d7a1ec69f5409e1e17515f0ba9a93b024f3ba6e925b6ad/jsonschema_pydantic_converter-0.3.0.tar.gz", hash = "sha256:501e6f2aed2dbc86f969f3c050afa696b0e39fad3e5f3775e5c44d06747b613a", size = 67059, upload-time = "2026-03-08T22:21:43.138Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/60/54f0be7aecfa1bf7c48568b2e1c955d61de4fc6552e2512e7f6267595f66/jsonschema_pydantic_converter-0.2.0-py3-none-any.whl", hash = "sha256:3181396414d500a2577513d258e94e33d7fb9f1864e87b76f2ec54af00229fcb", size = 17796, upload-time = "2026-03-02T15:58:13.397Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/8d/8c010e18950fbe05f9ba61b234b0befc0484891e9f0f1e8b03793216f4a0/jsonschema_pydantic_converter-0.3.0-py3-none-any.whl", hash = "sha256:6b0be5a33e207a946bf1e4c30d39c0e270129d5645ee41bb4ec911852b273b67", size = 19989, upload-time = "2026-03-08T22:21:41.704Z" },
 ]
 
 [[package]]
@@ -3324,7 +3324,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.8.11"
+version = "0.8.15"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -3378,7 +3378,7 @@ requires-dist = [
     { name = "google-generativeai", marker = "extra == 'vertex'", specifier = ">=0.8.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
-    { name = "jsonschema-pydantic-converter", specifier = ">=0.2.0" },
+    { name = "jsonschema-pydantic-converter", specifier = ">=0.3.0" },
     { name = "langchain", specifier = ">=1.0.0,<2.0.0" },
     { name = "langchain-aws", marker = "extra == 'bedrock'", specifier = ">=0.2.35" },
     { name = "langchain-core", specifier = ">=1.2.11,<2.0.0" },
@@ -3393,7 +3393,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "uipath", specifier = ">=2.10.0,<2.11.0" },
     { name = "uipath-core", specifier = ">=0.5.2,<0.6.0" },
-    { name = "uipath-platform", specifier = ">=0.0.8,<0.1.0" },
+    { name = "uipath-platform", specifier = ">=0.0.18,<0.1.0" },
     { name = "uipath-runtime", specifier = ">=0.9.1,<0.10.0" },
 ]
 provides-extras = ["vertex", "bedrock"]
@@ -3416,7 +3416,7 @@ dev = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.0.14"
+version = "0.0.18"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -3425,9 +3425,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e6/ae/794be1a20fc45e7416e583b0db6023af869b8ffc326294e643426a78d4dd/uipath_platform-0.0.14.tar.gz", hash = "sha256:f9dd2bc0d6702dd503cb2918dc889095c73c6f1e3476dd0c69486825fc2600ce", size = 262145, upload-time = "2026-03-05T12:25:27.538Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/26/eb/848292baafcb7273b189004161b754e46431bb28a711b7f359a2b7642b27/uipath_platform-0.0.18.tar.gz", hash = "sha256:0d0cf196ffc06de90c3ec12a7b52d88b81f38a34e361eb81690ff88cd2a9a0bd", size = 264141, upload-time = "2026-03-09T16:24:11.158Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/cc/4f9531605ea7ea0a017cfe434ece64ca700dc58ceffc48449a5648e20b98/uipath_platform-0.0.14-py3-none-any.whl", hash = "sha256:e8b2f564b5eda3a79cf79ebba7c82b1ab538d166bb52699e3eabe6b3a85669ad", size = 158523, upload-time = "2026-03-05T12:25:26.106Z" },
+    { url = "https://files.pythonhosted.org/packages/36/69/a96b8c66d4a0ed5d5ac1a3e44a5836d1b9e4151519a884b67d8db18fb3d8/uipath_platform-0.0.18-py3-none-any.whl", hash = "sha256:9f46b0b01254b95b18cc753bd91f5a5802d0a15e7284224d6f9a1309bb71b6bf", size = 159073, upload-time = "2026-03-09T16:24:09.717Z" },
 ]
 
 [[package]]

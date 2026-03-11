@@ -45,6 +45,8 @@ class AgentRuntimeErrorCode(str, Enum):
     # State
     STATE_ERROR = "STATE_ERROR"
 
+    FILE_ERROR = "FILE_ERROR"
+
     LLM_INVALID_RESPONSE = "LLM_INVALID_RESPONSE"
     TOOL_INVALID_WRAPPER_STATE = "TOOL_INVALID_WRAPPER_STATE"
 
@@ -66,10 +68,15 @@ class AgentStartupErrorCode(str, Enum):
 
     # Tool configuration errors
     INVALID_TOOL_CONFIG = "INVALID_TOOL_CONFIG"
-    UNDERSCORE_SCHEMA = "UNDERSCORE_SCHEMA"  # specific code for this error to easily detect it in alerts.
 
     # Guardrail configuration errors
     INVALID_GUARDRAIL_CONFIG = "INVALID_GUARDRAIL_CONFIG"
+
+    # Agent configuration errors (agent.json structure)
+    INVALID_AGENT_CONFIG = "INVALID_AGENT_CONFIG"
+
+    # Input validation errors (user input doesn't match schema)
+    INPUT_VALIDATION_ERROR = "INPUT_VALIDATION_ERROR"
 
 
 class AgentRuntimeError(UiPathBaseRuntimeError):
