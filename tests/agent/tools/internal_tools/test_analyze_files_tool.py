@@ -380,8 +380,10 @@ class TestResolveJobAttachmentArguments:
 
         assert len(result) == 0
 
-    async def test_resolve_attachment_with_missing_mime_type(self, mock_uipath_client):
-        """Test resolving attachment with missing MimeType defaults to empty string."""
+    async def test_resolve_attachment_with_missing_mime_type_guesses_from_filename(
+        self, mock_uipath_client
+    ):
+        """Test resolving attachment with missing MimeType guesses from blob name."""
         attachment_id = uuid.uuid4()
 
         class AttachmentWithoutMimeType(BaseModel):
@@ -405,7 +407,126 @@ class TestResolveJobAttachmentArguments:
         result = await _resolve_job_attachment_arguments([mock_attachment])
 
         assert len(result) == 1
+        assert result[0].mime_type == "application/pdf"
+
+    async def test_resolve_attachment_with_none_mime_type_guesses_from_filename(
+        self, mock_uipath_client
+    ):
+        """Test that a None MimeType attribute is handled by guessing from filename."""
+        attachment_id = uuid.uuid4()
+
+        class AttachmentWithNoneMimeType(BaseModel):
+            model_config = ConfigDict(populate_by_name=True)
+            ID: str = Field(alias="ID")
+            FullName: str = Field(alias="FullName")
+            MimeType: str | None = Field(alias="MimeType", default=None)
+
+        mock_attachment = AttachmentWithNoneMimeType(
+            ID=str(attachment_id),
+            FullName="report.png",
+            MimeType=None,
+        )
+
+        mock_blob_info = MockBlobInfo(
+            uri="https://blob.storage.com/files/report.png",
+            name="report.png",
+        )
+
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=mock_blob_info
+        )
+
+        result = await _resolve_job_attachment_arguments([mock_attachment])
+
+        assert len(result) == 1
+        assert result[0].mime_type == "image/png"
+
+    async def test_resolve_attachment_with_empty_mime_type_guesses_from_filename(
+        self, mock_uipath_client
+    ):
+        """Test that an empty string MimeType is handled by guessing from filename."""
+        attachment_id = uuid.uuid4()
+
+        class AttachmentWithEmptyMimeType(BaseModel):
+            model_config = ConfigDict(populate_by_name=True)
+            ID: str = Field(alias="ID")
+            FullName: str = Field(alias="FullName")
+            MimeType: str = Field(alias="MimeType")
+
+        mock_attachment = AttachmentWithEmptyMimeType(
+            ID=str(attachment_id),
+            FullName="image.jpg",
+            MimeType="",
+        )
+
+        mock_blob_info = MockBlobInfo(
+            uri="https://blob.storage.com/files/image.jpg",
+            name="image.jpg",
+        )
+
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=mock_blob_info
+        )
+
+        result = await _resolve_job_attachment_arguments([mock_attachment])
+
+        assert len(result) == 1
+        assert result[0].mime_type == "image/jpeg"
+
+    async def test_resolve_attachment_with_no_mime_type_and_unknown_extension(
+        self, mock_uipath_client
+    ):
+        """Test that unguessable MIME type falls back to empty string."""
+        attachment_id = uuid.uuid4()
+
+        class AttachmentWithoutMimeType(BaseModel):
+            ID: str
+            FullName: str
+
+        mock_attachment = AttachmentWithoutMimeType(
+            ID=str(attachment_id),
+            FullName="data.xyz123",
+        )
+
+        mock_blob_info = MockBlobInfo(
+            uri="https://blob.storage.com/files/data.xyz123",
+            name="data.xyz123",
+        )
+
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=mock_blob_info
+        )
+
+        result = await _resolve_job_attachment_arguments([mock_attachment])
+
+        assert len(result) == 1
         assert result[0].mime_type == ""
+
+    async def test_resolve_attachment_with_valid_mime_type_uses_it(
+        self, mock_uipath_client
+    ):
+        """Test that a valid MimeType from the attachment is used as-is."""
+        attachment_id = uuid.uuid4()
+
+        mock_attachment = MockAttachment(
+            ID=str(attachment_id),
+            FullName="document.pdf",
+            MimeType="application/pdf",
+        )
+
+        mock_blob_info = MockBlobInfo(
+            uri="https://blob.storage.com/files/document.pdf",
+            name="document.pdf",
+        )
+
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            return_value=mock_blob_info
+        )
+
+        result = await _resolve_job_attachment_arguments([mock_attachment])
+
+        assert len(result) == 1
+        assert result[0].mime_type == "application/pdf"
 
     async def test_resolve_attachment_with_invalid_uuid_raises(
         self, mock_uipath_client
