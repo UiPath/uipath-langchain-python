@@ -9,10 +9,10 @@ from google.genai import errors as genai_errors
 from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from tenacity import wait_none
 
-from uipath_langchain.chat.retryers.bedrock import (
+from uipath_langchain.chat.http_client.retryers.bedrock import (
     AsyncBedrockRetryer,
 )
-from uipath_langchain.chat.retryers.vertex import (
+from uipath_langchain.chat.http_client.retryers.vertex import (
     AsyncVertexRetryer,
     VertexRetryer,
 )

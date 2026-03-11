@@ -4,7 +4,6 @@ import logging
 import os
 import time
 from typing import Any, AsyncIterator, Dict, Iterator, Mapping
-from urllib.parse import quote
 
 import httpx
 import openai
@@ -34,6 +33,7 @@ from uipath_langchain._utils._settings import (
     get_uipath_token_header,
 )
 from uipath_langchain._utils._sleep_policy import before_sleep_log
+from uipath_langchain.chat.http_client import build_uipath_headers, resolve_gateway_url
 from uipath_langchain.runtime.errors import (
     LangGraphErrorCode,
     LangGraphRuntimeError,
@@ -79,8 +79,6 @@ class UiPathRequestMixin(BaseModel):
 
     default_headers: Mapping[str, str] | None = {
         "X-UiPath-Streaming-Enabled": "false",
-        "X-UiPath-JobKey": os.getenv("UIPATH_JOB_KEY", ""),
-        "X-UiPath-ProcessKey": quote(os.getenv("UIPATH_PROCESS_KEY", ""), safe=""),
     }
     model_name: str | None = Field(
         default_factory=lambda: os.getenv(
@@ -155,6 +153,7 @@ class UiPathRequestMixin(BaseModel):
     max_delay: float = 60.0
 
     _url: str | None = None
+    _is_override: bool = False
     _auth_headers: dict[str, str] | None = None
 
     # required to instantiate AzureChatOpenAI subclasses
@@ -732,17 +731,26 @@ class UiPathRequestMixin(BaseModel):
     def _build_headers(self, options, retries_taken: int = 0) -> httpx.Headers:
         return httpx.Headers(self.auth_headers)
 
+    def _resolve_url_and_override(self) -> None:
+        """Resolve ``_url`` and ``_is_override`` idempotently."""
+        if self._url:
+            return
+        try:
+            self._url, self._is_override = resolve_gateway_url(self.endpoint)
+        except ValueError:
+            self._url = (
+                f"{self.base_url}/{self.org_id}/{self.tenant_id}/{self.endpoint}"
+            )
+        except NotImplementedError:
+            pass
+
     @property
     def url(self) -> str:
+        self._resolve_url_and_override()
         if not self._url:
-            env_uipath_url = os.getenv("UIPATH_URL")
-
-            if env_uipath_url:
-                self._url = f"{env_uipath_url.rstrip('/')}/{self.endpoint}"
-            else:
-                self._url = (
-                    f"{self.base_url}/{self.org_id}/{self.tenant_id}/{self.endpoint}"
-                )
+            raise NotImplementedError(
+                "The endpoint property is not implemented for this class."
+            )
         return self._url
 
     @property
@@ -754,17 +762,21 @@ class UiPathRequestMixin(BaseModel):
     @property
     def auth_headers(self) -> dict[str, str]:
         if not self._auth_headers:
+            self._resolve_url_and_override()
             self._auth_headers = {
                 **self.default_headers,  # type: ignore
-                "Authorization": f"Bearer {self.access_token}",
-                "X-UiPath-LlmGateway-TimeoutSeconds": str(self.default_request_timeout),
             }
-            if self.agenthub_config:
-                self._auth_headers["X-UiPath-AgentHub-Config"] = self.agenthub_config
-            if self.byo_connection_id:
-                self._auth_headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = (
-                    self.byo_connection_id
+            self._auth_headers["Authorization"] = f"Bearer {self.access_token}"
+            self._auth_headers.update(
+                build_uipath_headers(
+                    agenthub_config=self.agenthub_config,
+                    byo_connection_id=self.byo_connection_id,
+                    inject_routing=self._is_override,
                 )
+            )
+            self._auth_headers["X-UiPath-LlmGateway-TimeoutSeconds"] = str(
+                self.default_request_timeout
+            )
             if self.is_normalized and self.model_name:
                 self._auth_headers["X-UiPath-LlmGateway-NormalizedApi-ModelName"] = (
                     self.model_name

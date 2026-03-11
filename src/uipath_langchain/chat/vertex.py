@@ -2,7 +2,6 @@ import logging
 import os
 from collections.abc import AsyncIterator, Iterator
 from typing import Any, Optional
-from urllib.parse import quote
 
 import httpx
 from langchain_core.callbacks import (
@@ -16,8 +15,9 @@ from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.platform.common import EndpointManager
 
-from .header_capture import HeaderCapture
-from .retryers.vertex import AsyncVertexRetryer, VertexRetryer
+from .http_client import build_uipath_headers, resolve_gateway_url
+from .http_client.header_capture import HeaderCapture
+from .http_client.retryers.vertex import AsyncVertexRetryer, VertexRetryer
 from .supported_models import GeminiModels
 from .types import APIFlavor, LLMProvider
 
@@ -184,8 +184,13 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
                 "UIPATH_ACCESS_TOKEN environment variable or token parameter is required"
             )
 
-        uipath_url = self._build_base_url(model_name)
-        headers = self._build_headers(token, agenthub_config, byo_connection_id)
+        uipath_url, is_override = self._resolve_url(model_name)
+        headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
+        headers.update(
+            self._build_headers(
+                agenthub_config, byo_connection_id, inject_routing=is_override
+            )
+        )
 
         header_capture = HeaderCapture(name=f"vertex_headers_{id(self)}")
         client_kwargs = get_httpx_client_kwargs()
@@ -252,38 +257,27 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
 
     @staticmethod
     def _build_headers(
-        token: str,
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
+        *,
+        inject_routing: bool = False,
     ) -> dict[str, str]:
         """Build HTTP headers for UiPath Gateway requests."""
-        headers = {
-            "Authorization": f"Bearer {token}",
-        }
-        if agenthub_config:
-            headers["X-UiPath-AgentHub-Config"] = agenthub_config
-        if byo_connection_id:
-            headers["X-UiPath-LlmGateway-ByoIsConnectionId"] = byo_connection_id
-        if job_key := os.getenv("UIPATH_JOB_KEY"):
-            headers["X-UiPath-JobKey"] = job_key
-        if process_key := os.getenv("UIPATH_PROCESS_KEY"):
-            headers["X-UiPath-ProcessKey"] = quote(process_key, safe="")
-        return headers
+        return build_uipath_headers(
+            agenthub_config=agenthub_config,
+            byo_connection_id=byo_connection_id,
+            inject_routing=inject_routing,
+        )
 
     @staticmethod
-    def _build_base_url(model_name: str) -> str:
-        """Build the full URL for the UiPath LLM Gateway."""
-        env_uipath_url = os.getenv("UIPATH_URL")
-
-        if not env_uipath_url:
-            raise ValueError("UIPATH_URL environment variable is required")
-
+    def _resolve_url(model_name: str) -> tuple[str, bool]:
+        """Resolve the full URL for the UiPath LLM Gateway."""
         vendor_endpoint = EndpointManager.get_vendor_endpoint()
         formatted_endpoint = vendor_endpoint.format(
             vendor="vertexai",
             model=model_name,
         )
-        return f"{env_uipath_url.rstrip('/')}/{formatted_endpoint}"
+        return resolve_gateway_url(formatted_endpoint)
 
     def invoke(self, *args, **kwargs):
         retryer = self._retryer or _get_default_retryer()

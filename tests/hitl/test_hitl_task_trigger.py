@@ -79,6 +79,7 @@ class TestHitlActionTrigger:
                                         "fullyQualifiedName": "app-folder-path"
                                     },
                                     "systemName": "HITL APP",
+                                    "deploymentTitle": "HITL APP",
                                     "actionSchema": {
                                         "key": "test-key",
                                         "inputs": [],

@@ -10,6 +10,7 @@ from langchain_core.messages import (
 )
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
+from uipath.agent.react import RAISE_ERROR_TOOL
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.tools.static_args import (
@@ -30,11 +31,24 @@ from .utils import count_consecutive_thinking_messages, extract_input_data_from_
 def _filter_control_flow_tool_calls(
     tool_calls: list[ToolCall],
 ) -> list[ToolCall]:
-    """Remove control flow tools when multiple tool calls exist."""
+    """Remove control flow tool calls only when regular tool calls exist alongside them.
+
+    When only control flow tool calls are present and raise_error is among them,
+    keep only the first raise_error (takes precedence over end_execution).
+    """
     if len(tool_calls) <= 1:
         return tool_calls
 
-    return [tc for tc in tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS]
+    non_control_flow_tool_calls = [
+        tc for tc in tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS
+    ]
+    if not non_control_flow_tool_calls:
+        raise_error_calls = [
+            tc for tc in tool_calls if tc.get("name") == RAISE_ERROR_TOOL.name
+        ]
+        return raise_error_calls[:1] if raise_error_calls else tool_calls
+
+    return non_control_flow_tool_calls
 
 
 StateT = TypeVar("StateT", bound=AgentGraphState)

@@ -1,6 +1,6 @@
 """LLM invocation with multimodal file attachments."""
 
-import asyncio
+import logging
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -12,25 +12,39 @@ from langchain_core.messages import (
 )
 from langchain_core.messages.content import create_file_block, create_image_block
 
-from .types import FileInfo
+from .types import MAX_FILE_SIZE_BYTES, FileInfo
 from .utils import download_file_base64, is_image, is_pdf, sanitize_filename
+
+logger = logging.getLogger("uipath")
 
 
 async def build_file_content_block(
     file_info: FileInfo,
+    *,
+    max_size: int = MAX_FILE_SIZE_BYTES,
 ) -> DataContentBlock:
     """Build a LangChain content block for a file attachment.
 
+    Downloads the file with size enforcement and creates the content block.
+    Size validation happens during download (via Content-Length check and
+    streaming guard) to avoid loading oversized files into memory.
+
     Args:
         file_info: File URL, name, and MIME type.
+        max_size: Maximum allowed raw file size in bytes. LLM providers
+            enforce payload limits; base64 encoding adds ~30% overhead.
 
     Returns:
         A DataContentBlock for the file (image or PDF).
 
     Raises:
-        ValueError: If the MIME type is not supported.
+        ValueError: If the MIME type is not supported or the file exceeds
+            the size limit for LLM payloads.
     """
-    base64_file = await download_file_base64(file_info.url)
+    try:
+        base64_file = await download_file_base64(file_info.url, max_size=max_size)
+    except ValueError as exc:
+        raise ValueError(f"File '{file_info.name}': {exc}") from exc
 
     if is_image(file_info.mime_type):
         return create_image_block(base64=base64_file, mime_type=file_info.mime_type)
@@ -47,6 +61,9 @@ async def build_file_content_block(
 async def build_file_content_blocks(files: list[FileInfo]) -> list[DataContentBlock]:
     """Build content blocks from file attachments.
 
+    Files are processed sequentially to avoid loading multiple large files
+    into memory simultaneously.
+
     Args:
         files: List of file information to convert to content blocks
 
@@ -56,9 +73,10 @@ async def build_file_content_blocks(files: list[FileInfo]) -> list[DataContentBl
     if not files:
         return []
 
-    file_content_blocks: list[DataContentBlock] = await asyncio.gather(
-        *[build_file_content_block(file) for file in files]
-    )
+    file_content_blocks: list[DataContentBlock] = []
+    for file in files:
+        block = await build_file_content_block(file)
+        file_content_blocks.append(block)
     return file_content_blocks
 
 
@@ -100,6 +118,9 @@ async def llm_call_with_files(
     all_messages = list(messages) + [file_message]
 
     response = await model.ainvoke(all_messages)
+
+    del all_messages, file_message, content_blocks
+
     if not isinstance(response, AIMessage):
         raise TypeError(f"LLM returned {type(response).__name__} instead of AIMessage")
     return response
