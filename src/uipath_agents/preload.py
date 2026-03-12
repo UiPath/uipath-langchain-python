@@ -23,4 +23,8 @@ def get_preload_modules() -> list[str]:
         "uipath.tracing",
         "uipath.platform",
         "uipath.utils",
+        "uipath_langchain.agent.guardrails",
+        "azure.monitor.opentelemetry.exporter",
+        "opentelemetry.instrumentation.aiohttp_client",
+        "opentelemetry.instrumentation.httpx",
     ]
