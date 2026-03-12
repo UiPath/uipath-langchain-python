@@ -192,6 +192,7 @@ def _filter_voice_resources(
             continue
         if (
             isinstance(r, AgentContextResourceConfig)
+            and r.settings is not None
             and r.settings.retrieval_mode in _CONTEXT_MODES_REQUIRING_LANGGRAPH
         ):
             unsupported_names.append(r.name)
