@@ -122,10 +122,8 @@ class TestHandleDeepRag:
 
         assert isinstance(result, StructuredToolWithArgumentProperties)
         assert "folder_path_prefix" in result.argument_properties
-        assert (
-            result.argument_properties["folder_path_prefix"]["argumentPath"]
-            == "deepRagFolderPrefix"
-        )
+        folder_prop = dict(result.argument_properties["folder_path_prefix"])
+        assert folder_prop["argumentPath"] == "deepRagFolderPrefix"
         assert isinstance(result.args_schema, type)
         schema = result.args_schema.model_json_schema()
         assert "folder_path_prefix" in schema["properties"]
@@ -682,10 +680,8 @@ class TestHandleBatchTransform:
 
         assert isinstance(result, StructuredToolWithArgumentProperties)
         assert "folder_path_prefix" in result.argument_properties
-        assert (
-            result.argument_properties["folder_path_prefix"]["argumentPath"]
-            == "batchFolderPrefix"
-        )
+        folder_prop = dict(result.argument_properties["folder_path_prefix"])
+        assert folder_prop["argumentPath"] == "batchFolderPrefix"
         assert isinstance(result.args_schema, type)
         schema = result.args_schema.model_json_schema()
         assert "folder_path_prefix" in schema["properties"]
