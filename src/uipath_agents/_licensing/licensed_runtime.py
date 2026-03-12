@@ -113,6 +113,8 @@ class LicensedRuntime:
         self._execution_type = execution_type
         self._startup_licensed = is_resume
 
+        self._log_initialization(agent_definition, is_resume)
+
         self._consumption_handler: ConversationalConsumptionHandler | None = None
         if agent_definition and agent_definition.is_conversational:
             self._consumption_handler = ConversationalConsumptionHandler(
@@ -171,13 +173,37 @@ class LicensedRuntime:
 
     # --- Internal ---
 
+    @staticmethod
+    def _log_initialization(
+        agent_definition: AgentDefinition | None,
+        is_resume: bool,
+    ) -> None:
+        model = agent_definition.settings.model if agent_definition else None
+        is_conversational = bool(
+            agent_definition and agent_definition.is_conversational
+        )
+        licensing_context = UiPathConfig.licensing_context
+
+        logger.info(
+            "LicensedRuntime initialized: model='%s', "
+            "is_conversational=%s, is_resume=%s, "
+            "licensing_context=%s",
+            model,
+            is_conversational,
+            is_resume,
+            licensing_context,
+        )
+
     async def _register_startup_licensing(self) -> None:
         if self._startup_licensed:
             return
         self._startup_licensed = True
-        await register_licensing_async(
-            self._agent_definition, job_key=UiPathConfig.job_key
-        )
+        try:
+            await register_licensing_async(
+                self._agent_definition, job_key=UiPathConfig.job_key
+            )
+        except Exception:
+            logger.debug("Failed to register startup consumption", exc_info=True)
 
     def _reset_tool_tracker(self) -> None:
         if self._tool_call_tracker:

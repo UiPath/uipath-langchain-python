@@ -169,14 +169,15 @@ class InstrumentedRuntime:
                 if saved_context:
                     self._handle_resume_complete(saved_context)
                 agent_span.set_status(Status(StatusCode.OK))
-                self._emit_output_if_successful(result, duration_ms, agent_span)
+                self._set_span_output(agent_span, result)
                 agent_span.end()
+                self._emit_completed_event(result, duration_ms, agent_span)
                 await self._clear_trace_context()
             elif result.status == UiPathRuntimeStatus.FAULTED:
                 self._resume_final_status = SpanStatus.ERROR
                 if saved_context and result.error:
                     self._handle_resume_error(saved_context, result.error)
-                self._set_agent_span_error(agent_span, result.error)
+                self._set_span_error(agent_span, result.error)
                 agent_span.end()
                 await self._clear_trace_context()
             else:
@@ -231,16 +232,15 @@ class InstrumentedRuntime:
                     if saved_context:
                         self._handle_resume_complete(saved_context)
                     agent_span.set_status(Status(StatusCode.OK))
-                    self._emit_output_if_successful(
-                        final_result, duration_ms, agent_span
-                    )
+                    self._set_span_output(agent_span, final_result)
                     agent_span.end()
+                    self._emit_completed_event(final_result, duration_ms, agent_span)
                     await self._clear_trace_context()
                 elif final_result.status == UiPathRuntimeStatus.FAULTED:
                     self._resume_final_status = SpanStatus.ERROR
                     if saved_context and final_result.error:
                         self._handle_resume_error(saved_context, final_result.error)
-                    self._set_agent_span_error(agent_span, final_result.error)
+                    self._set_span_error(agent_span, final_result.error)
                     agent_span.end()
                     await self._clear_trace_context()
                 else:
@@ -346,10 +346,16 @@ class InstrumentedRuntime:
                 try:
                     yield agent_span
                 finally:
+                    steps: list[tuple[str, Any]] = []
                     if not self._re_suspended:
-                        self._upsert_resumed_agent_span(saved_context)
-                    self._callback.cleanup()
-                    flush_events()
+                        steps.append(
+                            (
+                                "upsert resumed agent span",
+                                lambda: self._upsert_resumed_agent_span(saved_context),
+                            )
+                        )
+                    steps.append(("callback cleanup", self._callback.cleanup))
+                    self._finalize(*steps)
         else:
             # Normal: create new trace context
             agent_name = self._get_agent_name()
@@ -394,39 +400,42 @@ class InstrumentedRuntime:
                 try:
                     yield agent_span
                 except Exception as e:
-                    duration_ms = (
-                        int((time.time() - start_time) * 1000) if start_time else None
-                    )
-
-                    error_info = ExceptionMapper.map_runtime(e).error_info
-
-                    # Mapped errors have include_traceback=False, so capture manually
-                    error_traceback = traceback.format_exc()
-
-                    base_properties: Dict[str, Any] = {
+                    properties: Dict[str, Any] = {
                         "AgentName": agent_name,
                         "Status": "Failed",
-                        "Timestamp": datetime.now(timezone.utc).isoformat(),
                         "ErrorMessage": str(e)[:500],
                         "ErrorType": type(e).__name__,
-                        "ErrorCode": error_info.code,
-                        "ErrorTitle": error_info.title,
-                        "ErrorCategory": error_info.category.value,
-                        "ErrorTraceback": error_traceback,
                     }
-
-                    if agent_id:
-                        base_properties["AgentId"] = agent_id
-                    if duration_ms is not None:
-                        base_properties["DurationMs"] = duration_ms
-
-                    enriched_properties = self._get_enriched_properties(base_properties)
-
-                    track_event(AgentRunEvent.FAILED, enriched_properties)
+                    try:
+                        duration_ms = (
+                            int((time.time() - start_time) * 1000)
+                            if start_time
+                            else None
+                        )
+                        error_info = ExceptionMapper.map_runtime(e).error_info
+                        properties.update(
+                            {
+                                "Timestamp": datetime.now(timezone.utc).isoformat(),
+                                "ErrorCode": error_info.code,
+                                "ErrorTitle": error_info.title,
+                                "ErrorCategory": error_info.category.value,
+                                "ErrorTraceback": traceback.format_exc(),
+                            }
+                        )
+                        if agent_id:
+                            properties["AgentId"] = agent_id
+                        if duration_ms is not None:
+                            properties["DurationMs"] = duration_ms
+                        properties = self._get_enriched_properties(properties)
+                    except Exception:
+                        logger.warning(
+                            "Failed to enrich failed event properties",
+                            exc_info=True,
+                        )
+                    track_event(AgentRunEvent.FAILED, properties)
                     raise
                 finally:
-                    self._callback.cleanup()
-                    flush_events()
+                    self._finalize(("callback cleanup", self._callback.cleanup))
 
     @asynccontextmanager
     async def _restore_trace_context(
@@ -723,12 +732,12 @@ class InstrumentedRuntime:
                 pending_escalation.get("name", "unknown"),
             )
 
-    def _set_agent_span_error(
+    def _set_span_error(
         self,
         agent_span: Span,
         error: Optional[UiPathErrorContract],
     ) -> None:
-        """Set ERROR status on agent span for FAULTED results.
+        """Set ERROR status and error attributes on agent span.
 
         FAULTED results don't raise exceptions, so the span context manager
         would otherwise set OK status. This explicitly marks the span as ERROR.
@@ -1030,47 +1039,67 @@ class InstrumentedRuntime:
             return system_prompt, user_prompt
         return None, None
 
+    def _finalize(self, *steps: tuple[str, Any]) -> None:
+        """Run cleanup steps in order, then flush events.
+
+        Each step is a (label, callable) pair. If a step raises, the
+        error is logged at warning level and remaining steps still run.
+        ``flush_events()`` always runs last so queued custom events
+        (STARTED/COMPLETED/FAILED) are delivered to Application Insights.
+        """
+        for label, fn in steps:
+            try:
+                fn()
+            except Exception:
+                logger.warning("Cleanup failed: %s", label, exc_info=True)
+        flush_events()
+
     def _normalize_input(self, input_data: Any) -> Optional[Dict[str, Any]]:
         if isinstance(input_data, dict):
             return input_data
         return None
 
-    def _emit_output_if_successful(
+    def _set_span_output(self, agent_span: Span, result: UiPathRuntimeResult) -> None:
+        """Set output attribute and emit OTel output span before agent_span.end().
+
+        Both operations create spans/attributes that must nest inside the
+        agent span, so they run before end(). Failures are logged at debug
+        level and never block the span lifecycle.
+        """
+        try:
+            output = result.output
+            if isinstance(output, (dict, list)):
+                output_str = json.dumps(output)
+            else:
+                output_str = str(output) if output is not None else ""
+            agent_span.set_attribute("output", output_str)
+
+            _, output_schema = self._get_schemas()
+            self._span_factory.emit_agent_output(result.output, output_schema)
+        except Exception:
+            logger.debug("Failed to set span output", exc_info=True)
+
+    def _emit_completed_event(
         self,
         result: UiPathRuntimeResult,
         duration_ms: Optional[int] = None,
         agent_span: Optional[Span] = None,
     ) -> None:
-        if result.status == UiPathRuntimeStatus.SUCCESSFUL:
-            # Set output on parent agentRun span
-            if agent_span:
-                output = result.output
-                if isinstance(output, (dict, list)):
-                    output_str = json.dumps(output)
-                else:
-                    output_str = str(output) if output is not None else ""
-                agent_span.set_attribute("output", output_str)
+        """Emit AgentRun.Completed custom event for monitoring.
 
-            input_schema, output_schema = self._get_schemas()
-            self._span_factory.emit_agent_output(result.output, output_schema)
-
-            agent_name = self._get_agent_name()
+        Called after agent_span.end(). Alerts depend on these events so
+        track_event is always called — property enrichment failures
+        degrade gracefully to a minimal payload.
+        """
+        properties: Dict[str, Any] = {"Status": "Completed", "ErrorMessage": ""}
+        try:
+            properties["AgentName"] = self._get_agent_name()
             agent_id = self._get_agent_id()
-
-            base_properties: Dict[str, Any] = {
-                "AgentName": agent_name,
-                "Status": "Completed",
-                "ErrorMessage": "",
-            }
-
             if agent_id:
-                base_properties["AgentId"] = agent_id
-
+                properties["AgentId"] = agent_id
             if duration_ms is not None:
-                base_properties["DurationMs"] = duration_ms
-
-            enriched_properties = self._get_enriched_properties(
-                base_properties, agent_span
-            )
-
-            track_event(AgentRunEvent.COMPLETED, enriched_properties)
+                properties["DurationMs"] = duration_ms
+            properties = self._get_enriched_properties(properties, agent_span)
+        except Exception:
+            logger.warning("Failed to enrich completed event properties", exc_info=True)
+        track_event(AgentRunEvent.COMPLETED, properties)

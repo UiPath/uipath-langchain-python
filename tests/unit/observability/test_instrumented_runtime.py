@@ -2356,18 +2356,18 @@ class TestResumeErrorDoesNotOverwriteApprovedEscalation:
         )
 
 
-class TestAgentOutputBeforeSpanEnd:
-    """Agent output must be emitted BEFORE agent_span.end() so it nests inside the agent span."""
+class TestSpanOutputAndEventOrdering:
+    """Span output must be set BEFORE agent_span.end(); completed event fires AFTER."""
 
     @pytest.mark.asyncio
-    async def test_execute_emits_output_before_agent_span_end(
+    async def test_execute_span_output_before_end_event_after(
         self,
         mock_delegate,
         tracer,
         callback,
         mock_runtime_context,
     ) -> None:
-        """In execute(), _emit_output_if_successful is called before agent_span.end()."""
+        """In execute(), _set_span_output runs before end(), _emit_completed_event after."""
         mock_result = MagicMock()
         mock_result.status = UiPathRuntimeStatus.SUCCESSFUL
         mock_result.output = "hello"
@@ -2380,11 +2380,16 @@ class TestAgentOutputBeforeSpanEnd:
 
         call_order: list[str] = []
 
-        original_emit = instrumented_runtime._emit_output_if_successful
+        original_set = instrumented_runtime._set_span_output
+        original_event = instrumented_runtime._emit_completed_event
 
-        def tracking_emit(*args: Any, **kwargs: Any) -> None:
-            call_order.append("emit_output")
-            return original_emit(*args, **kwargs)
+        def tracking_set(*args: Any, **kwargs: Any) -> None:
+            call_order.append("set_span_output")
+            return original_set(*args, **kwargs)
+
+        def tracking_event(*args: Any, **kwargs: Any) -> None:
+            call_order.append("emit_completed_event")
+            return original_event(*args, **kwargs)
 
         original_ctx = instrumented_runtime._agent_span_context
 
@@ -2404,25 +2409,27 @@ class TestAgentOutputBeforeSpanEnd:
                 yield agent_span
 
         instrumented_runtime._agent_span_context = tracking_ctx  # type: ignore[method-assign]
-        instrumented_runtime._emit_output_if_successful = tracking_emit  # type: ignore[method-assign]
+        instrumented_runtime._set_span_output = tracking_set  # type: ignore[method-assign]
+        instrumented_runtime._emit_completed_event = tracking_event  # type: ignore[method-assign]
 
         await instrumented_runtime.execute({"input": "test"}, None)
 
-        assert "emit_output" in call_order
-        assert "span_end" in call_order
-        assert call_order.index("emit_output") < call_order.index("span_end"), (
-            f"emit_output must come before span_end, got: {call_order}"
+        assert call_order.index("set_span_output") < call_order.index("span_end"), (
+            f"set_span_output must come before span_end, got: {call_order}"
         )
+        assert call_order.index("span_end") < call_order.index(
+            "emit_completed_event"
+        ), f"span_end must come before emit_completed_event, got: {call_order}"
 
     @pytest.mark.asyncio
-    async def test_stream_emits_output_before_agent_span_end(
+    async def test_stream_span_output_before_end_event_after(
         self,
         mock_delegate,
         tracer,
         callback,
         mock_runtime_context,
     ) -> None:
-        """In stream(), _emit_output_if_successful is called before agent_span.end()."""
+        """In stream(), _set_span_output runs before end(), _emit_completed_event after."""
         from uipath.runtime import UiPathRuntimeResult
 
         success_result = MagicMock(spec=UiPathRuntimeResult)
@@ -2442,11 +2449,16 @@ class TestAgentOutputBeforeSpanEnd:
 
         call_order: list[str] = []
 
-        original_emit = instrumented_runtime._emit_output_if_successful
+        original_set = instrumented_runtime._set_span_output
+        original_event = instrumented_runtime._emit_completed_event
 
-        def tracking_emit(*args: Any, **kwargs: Any) -> None:
-            call_order.append("emit_output")
-            return original_emit(*args, **kwargs)
+        def tracking_set(*args: Any, **kwargs: Any) -> None:
+            call_order.append("set_span_output")
+            return original_set(*args, **kwargs)
+
+        def tracking_event(*args: Any, **kwargs: Any) -> None:
+            call_order.append("emit_completed_event")
+            return original_event(*args, **kwargs)
 
         original_ctx = instrumented_runtime._agent_span_context
 
@@ -2466,12 +2478,16 @@ class TestAgentOutputBeforeSpanEnd:
                 yield agent_span
 
         instrumented_runtime._agent_span_context = tracking_ctx  # type: ignore[method-assign]
-        instrumented_runtime._emit_output_if_successful = tracking_emit  # type: ignore[method-assign]
+        instrumented_runtime._set_span_output = tracking_set  # type: ignore[method-assign]
+        instrumented_runtime._emit_completed_event = tracking_event  # type: ignore[method-assign]
 
         _ = [e async for e in instrumented_runtime.stream({"input": "test"}, None)]
 
-        assert "emit_output" in call_order
-        assert "span_end" in call_order
-        assert call_order.index("emit_output") < call_order.index("span_end"), (
-            f"emit_output must come before span_end in stream(), got: {call_order}"
+        assert call_order.index("set_span_output") < call_order.index("span_end"), (
+            f"set_span_output must come before span_end in stream(), got: {call_order}"
+        )
+        assert call_order.index("span_end") < call_order.index(
+            "emit_completed_event"
+        ), (
+            f"span_end must come before emit_completed_event in stream(), got: {call_order}"
         )
