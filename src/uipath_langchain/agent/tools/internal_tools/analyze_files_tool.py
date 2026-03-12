@@ -1,3 +1,4 @@
+import mimetypes
 import uuid
 from typing import Any, cast
 
@@ -154,10 +155,15 @@ async def _resolve_job_attachment_arguments(
             continue
 
         attachment_id = uuid.UUID(attachment_id_value)
-        mime_type = getattr(attachment, "MimeType", "")
-
         blob_info = await client.attachments.get_blob_file_access_uri_async(
             key=attachment_id
+        )
+
+        input_mime_type = getattr(attachment, "MimeType", None)
+        mime_type = (
+            input_mime_type
+            if input_mime_type
+            else (mimetypes.guess_type(blob_info.name)[0] or "")
         )
 
         file_info = FileInfo(
