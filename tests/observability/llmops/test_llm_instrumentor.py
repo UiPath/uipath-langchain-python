@@ -95,7 +95,10 @@ def _make_instrumentor(
     """Create LlmSpanInstrumentor with mocked span factory."""
     mock_span_factory = MagicMock()
     mock_span_factory.start_llm_call.return_value = MagicMock(name="llm_span")
-    mock_span_factory.start_model_run.return_value = MagicMock(name="model_span")
+    mock_span_factory.start_model_run.return_value = (
+        MagicMock(name="model_span"),
+        None,
+    )
 
     state = InstrumentationState(span_factory=mock_span_factory)
     state.agent_span = agent_span
@@ -453,6 +456,194 @@ class TestOnLlmEnd:
         for c in mock_factory.end_span_error.call_args_list:
             assert c.args[0] is not INVALID_SPAN
 
+    def test_current_llm_span_preserved_after_on_llm_end(self) -> None:
+        """current_llm_span stays set after on_llm_end — POST guardrails need it;
+        next on_chat_model_start overwrites it."""
+        instrumentor, mock_factory, state, run_id, model_span, llm_span = (
+            _setup_on_llm_end()
+        )
+        state.current_llm_span = llm_span
+
+        with patch(_PATCH_HIERARCHY), patch(_PATCH_USAGE), patch(_PATCH_TOOL_CALLS):
+            instrumentor.on_llm_end(MagicMock(), run_id=run_id)
+
+        assert state.current_llm_span is llm_span
+
+    def test_current_llm_span_preserved_after_on_llm_error(self) -> None:
+        """current_llm_span stays set after on_llm_error — POST guardrails need it;
+        next on_chat_model_start overwrites it."""
+        instrumentor, mock_factory, state, run_id, model_span, llm_span = (
+            _setup_on_llm_end()
+        )
+        state.current_llm_span = llm_span
+
+        with patch(_PATCH_HIERARCHY):
+            instrumentor.on_llm_error(
+                RuntimeError("test"), run_id=run_id, parent_run_id=None
+            )
+
+        assert state.current_llm_span is llm_span
+
+
+# --- Multi-turn LLM span isolation ---
+
+
+class TestMultiTurnLlmSpanIsolation:
+    """Simulates LLM → tool → LLM flow to verify second call gets a fresh span."""
+
+    def test_second_llm_call_creates_fresh_span_after_first_completes(self) -> None:
+        """After on_llm_end clears current_llm_span, the next on_chat_model_start
+        must create a new llm_span (not reuse stale state)."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+
+        first_llm_span = MagicMock(name="first_llm_span")
+        second_llm_span = MagicMock(name="second_llm_span")
+        mock_factory.start_llm_call.side_effect = [first_llm_span, second_llm_span]
+
+        run_id_1 = uuid4()
+        parent_run_id = uuid4()
+
+        # --- First LLM call ---
+        with (
+            patch(_PATCH_HIERARCHY),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}},
+                messages=[[MagicMock(content="first call", type="human")]],
+                run_id=run_id_1,
+                parent_run_id=parent_run_id,
+            )
+        assert state.current_llm_span is first_llm_span
+
+        # Complete first LLM call
+        state.spans[SpanKeys.model(run_id_1)] = MagicMock(name="model_span_1")
+        with patch(_PATCH_HIERARCHY), patch(_PATCH_USAGE), patch(_PATCH_TOOL_CALLS):
+            instrumentor.on_llm_end(MagicMock(), run_id=run_id_1)
+        assert state.current_llm_span is first_llm_span
+
+        # --- Second LLM call (after tool execution) ---
+        run_id_2 = uuid4()
+        with (
+            patch(_PATCH_HIERARCHY),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}},
+                messages=[[MagicMock(content="second call", type="human")]],
+                run_id=run_id_2,
+                parent_run_id=parent_run_id,
+            )
+
+        # Second call must get a NEW span, not the first one
+        assert state.current_llm_span is second_llm_span
+        assert state.current_llm_span is not first_llm_span
+        assert mock_factory.start_llm_call.call_count == 2
+
+    def test_second_llm_call_after_error_creates_fresh_span(self) -> None:
+        """After on_llm_error clears current_llm_span, next call gets a fresh span."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+
+        first_llm_span = MagicMock(name="first_llm_span")
+        second_llm_span = MagicMock(name="second_llm_span")
+        mock_factory.start_llm_call.side_effect = [first_llm_span, second_llm_span]
+
+        run_id_1 = uuid4()
+        parent_run_id = uuid4()
+
+        # --- First LLM call ---
+        with (
+            patch(_PATCH_HIERARCHY),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}},
+                messages=[[MagicMock(content="will fail", type="human")]],
+                run_id=run_id_1,
+                parent_run_id=parent_run_id,
+            )
+
+        # Error out first LLM call
+        state.spans[SpanKeys.model(run_id_1)] = MagicMock(name="model_span_1")
+        with patch(_PATCH_HIERARCHY):
+            instrumentor.on_llm_error(
+                RuntimeError("LLM timeout"), run_id=run_id_1, parent_run_id=None
+            )
+        assert state.current_llm_span is first_llm_span
+
+        # --- Retry: second LLM call ---
+        run_id_2 = uuid4()
+        with (
+            patch(_PATCH_HIERARCHY),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}},
+                messages=[[MagicMock(content="retry", type="human")]],
+                run_id=run_id_2,
+                parent_run_id=parent_run_id,
+            )
+
+        assert state.current_llm_span is second_llm_span
+        assert mock_factory.start_llm_call.call_count == 2
+
+    def test_model_spans_correctly_nested_across_multi_turn(self) -> None:
+        """Each LLM iteration's model_run span nests under its own llm_span."""
+        agent_span = MagicMock(name="agent_span")
+        instrumentor, mock_factory, state = _make_instrumentor(agent_span, agent_span)
+
+        first_llm = MagicMock(name="first_llm")
+        second_llm = MagicMock(name="second_llm")
+        first_model = MagicMock(name="first_model")
+        second_model = MagicMock(name="second_model")
+
+        mock_factory.start_llm_call.side_effect = [first_llm, second_llm]
+        mock_factory.start_model_run.side_effect = [
+            (first_model, MagicMock()),
+            (second_model, MagicMock()),
+        ]
+
+        parent_run_id = uuid4()
+
+        # First turn
+        run_id_1 = uuid4()
+        with (
+            patch(_PATCH_HIERARCHY),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}},
+                messages=[[MagicMock(content="turn 1", type="human")]],
+                run_id=run_id_1,
+                parent_run_id=parent_run_id,
+            )
+
+        first_model_call = mock_factory.start_model_run.call_args_list[0]
+        assert first_model_call.kwargs["parent_span"] is first_llm
+
+        # Complete first turn
+        state.spans[SpanKeys.model(run_id_1)] = first_model
+        with patch(_PATCH_HIERARCHY), patch(_PATCH_USAGE), patch(_PATCH_TOOL_CALLS):
+            instrumentor.on_llm_end(MagicMock(), run_id=run_id_1)
+
+        # Second turn
+        run_id_2 = uuid4()
+        with (
+            patch(_PATCH_HIERARCHY),
+            patch.object(state, "get_span_or_root", return_value=agent_span),
+        ):
+            instrumentor.on_chat_model_start(
+                serialized={"kwargs": {"model_name": "gpt-4"}},
+                messages=[[MagicMock(content="turn 2", type="human")]],
+                run_id=run_id_2,
+                parent_run_id=parent_run_id,
+            )
+
+        second_model_call = mock_factory.start_model_run.call_args_list[1]
+        assert second_model_call.kwargs["parent_span"] is second_llm
+
 
 # --- on_chat_model_start sanitization ---
 
@@ -549,3 +740,59 @@ class TestOnChatModelStartSanitization:
         prompt_value = user_prompt_calls[0].args[1]
         assert "C" * 3000 not in prompt_value
         assert "<base64 data omitted>" in prompt_value
+
+
+# --- POST guardrail LLM span preservation ---
+
+
+class TestPostGuardrailLlmSpanPreservation:
+    """Regression: current_llm_span must survive on_llm_end so POST guardrails can parent under it."""
+
+    def test_current_llm_span_preserved_after_on_llm_end_for_post_guardrails(
+        self,
+    ) -> None:
+        """After on_llm_end, current_llm_span is still set so POST guardrails parent under it."""
+        instrumentor, mock_factory, state, run_id, model_span, llm_span = (
+            _setup_on_llm_end()
+        )
+        state.current_llm_span = llm_span
+
+        with patch(_PATCH_HIERARCHY), patch(_PATCH_USAGE), patch(_PATCH_TOOL_CALLS):
+            instrumentor.on_llm_end(MagicMock(), run_id=run_id)
+
+        # POST guardrails read current_llm_span as parent — must not be None
+        assert state.current_llm_span is llm_span
+        assert state.current_llm_span is not None
+
+    def test_close_container_clears_llm_span_when_post_container_closed(
+        self,
+    ) -> None:
+        """When close_container finds an actual POST container, it clears current_llm_span."""
+        from uipath.core.guardrails import GuardrailScope
+        from uipath_langchain.agent.guardrails.types import ExecutionStage
+
+        from uipath_agents._observability.llmops.instrumentors.guardrail_instrumentor import (
+            GuardrailSpanInstrumentor,
+        )
+
+        mock_span_factory = MagicMock()
+        state = InstrumentationState(span_factory=mock_span_factory)
+        state.agent_span = MagicMock(name="agent_span")
+
+        llm_span = MagicMock(name="llm_span")
+        state.current_llm_span = llm_span
+
+        # Simulate a POST container existing in state
+        container_span = MagicMock(name="post_container")
+        state.guardrail_containers[
+            (GuardrailScope.LLM, ExecutionStage.POST_EXECUTION)
+        ] = container_span
+
+        guardrail_instrumentor = GuardrailSpanInstrumentor(state=state)
+        guardrail_instrumentor.close_container(
+            GuardrailScope.LLM, ExecutionStage.POST_EXECUTION
+        )
+
+        # Container closed → current_llm_span cleared
+        assert state.current_llm_span is None
+        mock_span_factory.end_span_ok.assert_called_once_with(container_span)

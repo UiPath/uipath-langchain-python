@@ -2354,3 +2354,124 @@ class TestResumeErrorDoesNotOverwriteApprovedEscalation:
         assert len(escalation_upserts) == 1, (
             "Review task span should be upserted with ERROR when callback didn't complete it"
         )
+
+
+class TestAgentOutputBeforeSpanEnd:
+    """Agent output must be emitted BEFORE agent_span.end() so it nests inside the agent span."""
+
+    @pytest.mark.asyncio
+    async def test_execute_emits_output_before_agent_span_end(
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_runtime_context,
+    ) -> None:
+        """In execute(), _emit_output_if_successful is called before agent_span.end()."""
+        mock_result = MagicMock()
+        mock_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        mock_result.output = "hello"
+        mock_result.error = None
+        mock_delegate.execute = AsyncMock(return_value=mock_result)
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
+
+        call_order: list[str] = []
+
+        original_emit = instrumented_runtime._emit_output_if_successful
+
+        def tracking_emit(*args: Any, **kwargs: Any) -> None:
+            call_order.append("emit_output")
+            return original_emit(*args, **kwargs)
+
+        original_ctx = instrumented_runtime._agent_span_context
+
+        from contextlib import asynccontextmanager
+        from typing import AsyncGenerator as AG
+
+        @asynccontextmanager
+        async def tracking_ctx(*args: Any, **kwargs: Any) -> AG[Any, None]:
+            async with original_ctx(*args, **kwargs) as agent_span:
+                original_end = agent_span.end
+
+                def tracking_end(*a: Any, **kw: Any) -> None:
+                    call_order.append("span_end")
+                    return original_end(*a, **kw)
+
+                agent_span.end = tracking_end  # type: ignore[method-assign]
+                yield agent_span
+
+        instrumented_runtime._agent_span_context = tracking_ctx  # type: ignore[method-assign]
+        instrumented_runtime._emit_output_if_successful = tracking_emit  # type: ignore[method-assign]
+
+        await instrumented_runtime.execute({"input": "test"}, None)
+
+        assert "emit_output" in call_order
+        assert "span_end" in call_order
+        assert call_order.index("emit_output") < call_order.index("span_end"), (
+            f"emit_output must come before span_end, got: {call_order}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stream_emits_output_before_agent_span_end(
+        self,
+        mock_delegate,
+        tracer,
+        callback,
+        mock_runtime_context,
+    ) -> None:
+        """In stream(), _emit_output_if_successful is called before agent_span.end()."""
+        from uipath.runtime import UiPathRuntimeResult
+
+        success_result = MagicMock(spec=UiPathRuntimeResult)
+        success_result.status = UiPathRuntimeStatus.SUCCESSFUL
+        success_result.output = {"answer": "42"}
+        success_result.error = None
+
+        async def mock_stream(*args: Any, **kwargs: Any):
+            yield "event1"
+            yield success_result
+
+        mock_delegate.stream = mock_stream
+
+        instrumented_runtime = InstrumentedRuntime(
+            mock_delegate, tracer, callback, mock_runtime_context
+        )
+
+        call_order: list[str] = []
+
+        original_emit = instrumented_runtime._emit_output_if_successful
+
+        def tracking_emit(*args: Any, **kwargs: Any) -> None:
+            call_order.append("emit_output")
+            return original_emit(*args, **kwargs)
+
+        original_ctx = instrumented_runtime._agent_span_context
+
+        from contextlib import asynccontextmanager
+        from typing import AsyncGenerator as AG
+
+        @asynccontextmanager
+        async def tracking_ctx(*args: Any, **kwargs: Any) -> AG[Any, None]:
+            async with original_ctx(*args, **kwargs) as agent_span:
+                original_end = agent_span.end
+
+                def tracking_end(*a: Any, **kw: Any) -> None:
+                    call_order.append("span_end")
+                    return original_end(*a, **kw)
+
+                agent_span.end = tracking_end  # type: ignore[method-assign]
+                yield agent_span
+
+        instrumented_runtime._agent_span_context = tracking_ctx  # type: ignore[method-assign]
+        instrumented_runtime._emit_output_if_successful = tracking_emit  # type: ignore[method-assign]
+
+        _ = [e async for e in instrumented_runtime.stream({"input": "test"}, None)]
+
+        assert "emit_output" in call_order
+        assert "span_end" in call_order
+        assert call_order.index("emit_output") < call_order.index("span_end"), (
+            f"emit_output must come before span_end in stream(), got: {call_order}"
+        )

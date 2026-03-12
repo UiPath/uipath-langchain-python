@@ -169,8 +169,8 @@ class InstrumentedRuntime:
                 if saved_context:
                     self._handle_resume_complete(saved_context)
                 agent_span.set_status(Status(StatusCode.OK))
-                agent_span.end()
                 self._emit_output_if_successful(result, duration_ms, agent_span)
+                agent_span.end()
                 await self._clear_trace_context()
             elif result.status == UiPathRuntimeStatus.FAULTED:
                 self._resume_final_status = SpanStatus.ERROR
@@ -231,10 +231,10 @@ class InstrumentedRuntime:
                     if saved_context:
                         self._handle_resume_complete(saved_context)
                     agent_span.set_status(Status(StatusCode.OK))
-                    agent_span.end()
                     self._emit_output_if_successful(
                         final_result, duration_ms, agent_span
                     )
+                    agent_span.end()
                     await self._clear_trace_context()
                 elif final_result.status == UiPathRuntimeStatus.FAULTED:
                     self._resume_final_status = SpanStatus.ERROR
