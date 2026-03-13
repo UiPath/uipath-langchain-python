@@ -66,8 +66,8 @@ def _build_arg_props_from_settings(
     if resource.settings.query and resource.settings.query.variant == "argument":
         argument_path = (resource.settings.query.value or "").strip("{}")
         arg_props["query"] = AgentToolArgumentArgumentProperties(
-            argumentPath=argument_path,
-            isSensitive=False,
+            is_sensitive=False,
+            argument_path=argument_path,
         )
 
     return arg_props
