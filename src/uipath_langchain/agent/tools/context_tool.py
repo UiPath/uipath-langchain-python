@@ -60,6 +60,7 @@ def _build_arg_props_from_settings(
     Instead, we derive them from the settings when variant="argument".
     Only includes fields that belong in the tool's args_schema (i.e. query).
     """
+    assert resource.settings is not None
     arg_props: dict[str, AgentToolArgumentProperties] = {}
 
     if resource.settings.query and resource.settings.query.variant == "argument":
@@ -77,6 +78,7 @@ def _resolve_folder_path_prefix_from_state(
     state: dict[str, Any],
 ) -> str | None:
     """Resolve folder_path_prefix from agent state using jsonpath from settings."""
+    assert resource.settings is not None
     setting = resource.settings.folder_path_prefix
     if not setting or setting.variant != "argument" or not setting.value:
         return None
@@ -99,6 +101,7 @@ def _resolve_static_folder_path_prefix(
     resource: AgentContextResourceConfig,
 ) -> str | None:
     """Resolve static folder_path_prefix from settings."""
+    assert resource.settings is not None
     if (
         resource.settings.folder_path_prefix
         and resource.settings.folder_path_prefix.value
@@ -110,6 +113,7 @@ def _resolve_static_folder_path_prefix(
 
 def is_static_query(resource: AgentContextResourceConfig) -> bool:
     """Check if the resource configuration uses a static query variant."""
+    assert resource.settings is not None
     if resource.settings.query is None or resource.settings.query.variant is None:
         return False
     return resource.settings.query.variant.lower() == "static"
