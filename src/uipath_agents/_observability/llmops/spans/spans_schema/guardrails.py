@@ -178,6 +178,7 @@ class GuardrailSpanSchema:
             guardrail_name=guardrail_name,
             guardrail_description=guardrail_description,
             guardrail_action=guardrail_action,
+            action=guardrail_action,
             details=rule_details,
         )
 
