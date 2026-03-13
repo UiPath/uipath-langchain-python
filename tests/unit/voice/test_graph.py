@@ -74,7 +74,7 @@ class TestGraphExecution:
         config: RunnableConfig = {"configurable": {"thread_id": "t1"}}
 
         result = await compiled.ainvoke(
-            self._make_input("add_numbers", {"a": 3, "b": 7}),  # type: ignore[arg-type]
+            self._make_input("add_numbers", {"a": 3, "b": 7}),  # type: ignore[call-overload]
             config,
         )
 
@@ -91,7 +91,7 @@ class TestGraphExecution:
 
         with pytest.raises(Exception, match="Something went wrong"):
             await compiled.ainvoke(
-                self._make_input("failing_tool", {"query": "test"}),  # type: ignore[arg-type]
+                self._make_input("failing_tool", {"query": "test"}),  # type: ignore[call-overload]
                 config,
             )
 
@@ -101,7 +101,7 @@ class TestGraphExecution:
         config: RunnableConfig = {"configurable": {"thread_id": "t3"}}
 
         result = await compiled.ainvoke(
-            self._make_input("interrupting_tool", {"process_name": "Invoice"}),  # type: ignore[arg-type]
+            self._make_input("interrupting_tool", {"process_name": "Invoice"}),  # type: ignore[call-overload]
             config,
         )
 
@@ -120,7 +120,7 @@ class TestGraphExecution:
         config: RunnableConfig = {"configurable": {"thread_id": "t4"}}
 
         await compiled.ainvoke(
-            self._make_input("interrupting_tool", {"process_name": "Invoice"}),  # type: ignore[arg-type]
+            self._make_input("interrupting_tool", {"process_name": "Invoice"}),  # type: ignore[call-overload]
             config,
         )
 

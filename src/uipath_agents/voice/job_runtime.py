@@ -88,9 +88,8 @@ async def post_to_cas(
         if not parsed.netloc:
             raise RuntimeError(f"Invalid UIPATH_URL format: {base_url}")
 
-        host = parsed.netloc
         url = (
-            f"https://{host}/autopilotforeveryone_"
+            f"{base_url.rstrip('/')}/autopilotforeveryone_"
             f"/api/v1/voice/{conversation_id}/{endpoint}"
         )
 
