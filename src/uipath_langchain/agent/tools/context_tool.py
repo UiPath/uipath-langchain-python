@@ -327,8 +327,7 @@ def handle_deep_rag(
     ) -> dict[str, Any]:
         actual_prompt = prompt or query
         glob_pattern = build_glob_pattern(
-            folder_path_prefix=static_folder_path_prefix
-            or _resolved_arg_folder_prefix,
+            folder_path_prefix=static_folder_path_prefix or _resolved_arg_folder_prefix,
             file_extension=file_extension,
         )
 
@@ -461,8 +460,7 @@ def handle_batch_transform(
     ) -> dict[str, Any]:
         actual_prompt = prompt or query
         glob_pattern = build_glob_pattern(
-            folder_path_prefix=static_folder_path_prefix
-            or _resolved_arg_folder_prefix,
+            folder_path_prefix=static_folder_path_prefix or _resolved_arg_folder_prefix,
             file_extension=None,
         )
 
