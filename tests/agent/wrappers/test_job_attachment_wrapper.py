@@ -15,6 +15,7 @@ from uipath.platform.attachments import Attachment
 
 from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphState
 from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
+    _coerce_json_strings,
     get_job_attachment_wrapper,
 )
 
@@ -739,3 +740,97 @@ class TestGetJobAttachmentWrapper:
             job_attachments={str(attachment_with_id.id): attachment_with_id},
             expected_content=None,
         )
+
+
+class TestCoerceJsonStrings:
+    """Tests for _coerce_json_strings."""
+
+    def test_no_coercion_needed(self) -> None:
+        data = {"name": "test", "count": 42}
+        assert _coerce_json_strings(data) == data
+
+    def test_coerce_json_object_string(self) -> None:
+        data = {"metadata": '{"size": "99353"}'}
+        assert _coerce_json_strings(data) == {"metadata": {"size": "99353"}}
+
+    def test_coerce_nested_in_dict(self) -> None:
+        data = {"attachment": {"metadata": '{"size": 1024}', "name": "file.pdf"}}
+        assert _coerce_json_strings(data) == {
+            "attachment": {"metadata": {"size": 1024}, "name": "file.pdf"}
+        }
+
+    def test_coerce_in_list_items(self) -> None:
+        data = {
+            "items": [
+                {"metadata": '{"size": 100}', "name": "a.pdf"},
+                {"metadata": {"size": 200}, "name": "b.pdf"},
+            ]
+        }
+        assert _coerce_json_strings(data) == {
+            "items": [
+                {"metadata": {"size": 100}, "name": "a.pdf"},
+                {"metadata": {"size": 200}, "name": "b.pdf"},
+            ]
+        }
+
+    def test_invalid_json_string_unchanged(self) -> None:
+        data = {"metadata": "not valid json"}
+        assert _coerce_json_strings(data) == data
+
+    def test_json_array_string_coerced(self) -> None:
+        data = {"tags": "[1, 2, 3]"}
+        assert _coerce_json_strings(data) == {"tags": [1, 2, 3]}
+
+    def test_plain_string_unchanged(self) -> None:
+        data = {"name": "hello world"}
+        assert _coerce_json_strings(data) == data
+
+    def test_empty_dict(self) -> None:
+        assert _coerce_json_strings({}) == {}
+
+    def test_dict_value_unchanged(self) -> None:
+        data = {"metadata": {"already": "a dict"}}
+        assert _coerce_json_strings(data) == data
+
+    def test_non_dict_non_list_json_string_unchanged(self) -> None:
+        """JSON primitives (numbers, booleans) should stay as strings."""
+        data = {"value": "42", "flag": "true"}
+        assert _coerce_json_strings(data) == data
+
+    def test_string_field_containing_json_must_not_be_coerced(self) -> None:
+        """A string field that happens to contain valid JSON must stay a string.
+
+        This is the real-world Analyze_Files scenario: analysisTask is a str,
+        Metadata is a dict. Without a schema the blind recursive approach cannot
+        distinguish them, so a schema must be provided.
+        """
+
+        class AttachmentInput(BaseModel):
+            ID: str
+            FullName: str
+            MimeType: str
+            Metadata: dict[str, Any] | None = None
+
+        class AnalyzeFilesInput(BaseModel):
+            analysisTask: str
+            attachments: list[AttachmentInput]
+
+        data = {
+            "analysisTask": '{"instruction": "summarize the document"}',
+            "attachments": [
+                {
+                    "ID": "550e8400-e29b-41d4-a716-446655440000",
+                    "FullName": "report.pdf",
+                    "MimeType": "application/pdf",
+                    "Metadata": '{"size": "99353"}',
+                }
+            ],
+        }
+        result = _coerce_json_strings(data, AnalyzeFilesInput)
+
+        # Metadata SHOULD be coerced — it's a dict field
+        assert result["attachments"][0]["Metadata"] == {"size": "99353"}
+
+        # analysisTask MUST remain a string — it's a str field
+        assert isinstance(result["analysisTask"], str)
+        assert result["analysisTask"] == '{"instruction": "summarize the document"}'
