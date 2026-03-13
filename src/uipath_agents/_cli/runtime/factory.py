@@ -26,6 +26,7 @@ from uipath.runtime import (
     UiPathRuntimeProtocol,
 )
 from uipath.runtime.base import UiPathDisposableProtocol
+from uipath.runtime.resumable.protocols import UiPathResumeTriggerProtocol
 from uipath.tracing import LlmOpsHttpExporter
 from uipath_langchain.runtime.factory import UiPathLangGraphRuntimeFactory
 from uipath_langchain.runtime.storage import SqliteResumableStorage
@@ -169,6 +170,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         agent_name: str,
         agent_definition: AgentDefinition | None = None,
         licensed: bool = True,
+        trigger_manager: UiPathResumeTriggerProtocol | None = None,
     ) -> tuple[UiPathRuntimeProtocol, SqliteResumableStorage]:
         """Build the shared wrapping stack around a base runtime.
 
@@ -185,6 +187,7 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             agent_name: Display name for BTS tracking
             agent_definition: Agent config, forwarded to Licensed + Instrumented layers
             licensed: Whether to add the LicensedRuntime layer with tool call tracking
+            trigger_manager: Custom resume trigger handler (defaults to UiPathResumeTriggerHandler)
 
         Returns:
             (outermost_runtime, storage)
@@ -233,7 +236,8 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
             base_runtime.callbacks = callbacks
 
         # --- Wrapping stack ---
-        trigger_manager = UiPathResumeTriggerHandler()
+        if trigger_manager is None:
+            trigger_manager = UiPathResumeTriggerHandler()
         resumable_runtime = UiPathResumableRuntime(
             delegate=base_runtime,
             storage=storage,

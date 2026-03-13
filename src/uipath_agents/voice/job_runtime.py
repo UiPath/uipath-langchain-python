@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncGenerator
@@ -24,6 +25,9 @@ from uipath.agent.models.agent import (
     AgentProcessToolResourceConfig,
     BaseAgentResourceConfig,
 )
+from uipath.core.errors import UiPathPendingTriggerError
+from uipath.core.triggers import UiPathResumeTrigger
+from uipath.platform.resume_triggers import UiPathResumeTriggerHandler
 from uipath.runtime import (
     UiPathExecuteOptions,
     UiPathRuntimeEvent,
@@ -57,8 +61,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_VOICE_STORAGE_NAMESPACE = "voice"
-_VOICE_TOOL_CALL_KEY = "tool_call_metadata"
+# tools used by voice agents are often short and need responses fast
+_VOICE_POLL_INTERVAL_SECONDS = 1.0
+# timeout is already 60s from CAS cloud side
+_VOICE_POLL_TIMEOUT_SECONDS = 60.0
 
 
 async def post_to_cas(
@@ -153,6 +159,7 @@ async def _build_voice_runtime(
         ctx,
         agent_name,
         licensed=False,
+        trigger_manager=VoicePollingTriggerHandler(),
     )
 
 
@@ -224,6 +231,32 @@ async def _create_voice_tools(
     return [(tool, resource_by_sanitized_name.get(tool.name)) for tool in tools]
 
 
+class VoicePollingTriggerHandler:
+    """Trigger handler that polls read_trigger until the child job completes.
+
+    Voice jobs can't suspend and wait for Orchestrator to resume them,
+    so we block here instead of raising UiPathPendingTriggerError.
+    """
+
+    def __init__(self) -> None:
+        self._delegate = UiPathResumeTriggerHandler()
+
+    async def create_trigger(self, suspend_value: Any) -> UiPathResumeTrigger:
+        return await self._delegate.create_trigger(suspend_value)
+
+    async def read_trigger(self, trigger: UiPathResumeTrigger) -> Any | None:
+        elapsed = 0.0
+        while elapsed < _VOICE_POLL_TIMEOUT_SECONDS:
+            try:
+                return await self._delegate.read_trigger(trigger)
+            except UiPathPendingTriggerError:
+                await asyncio.sleep(_VOICE_POLL_INTERVAL_SECONDS)
+                elapsed += _VOICE_POLL_INTERVAL_SECONDS
+        raise TimeoutError(
+            f"Voice tool did not complete within {_VOICE_POLL_TIMEOUT_SECONDS}s"
+        )
+
+
 async def execute_voice_tool_call(
     agent_definition: LowCodeAgentDefinition,
     tool_name: str,
@@ -235,27 +268,14 @@ async def execute_voice_tool_call(
 ) -> UiPathRuntimeResult:
     """Execute a single tool call through a stub LangGraph graph.
 
-    Quick tools complete immediately (SUCCESSFUL). Process tools with
-    @durable_interrupt suspend the graph (SUSPENDED).
+    Quick tools complete immediately. Process tools with @durable_interrupt
+    are polled to completion via VoicePollingTriggerHandler.
     """
     runtime_id = ctx.conversation_id or ctx.job_id or "default"
     agent_name = agent_definition.name or "Voice Agent"
     state_path = ctx.resolved_state_file_path
 
-    # need sqllite to handle reusmes for tools with @durable_interrupt (api workflow tools, rpa tools, etc.)
     async with AsyncSqliteSaver.from_conn_string(state_path) as memory:
-        # On resume, restore any missing tool metadata from storage
-        if resume and (not tool_name or not call_id):
-            storage = SqliteResumableStorage(memory)
-            stored = await storage.get_value(
-                runtime_id, _VOICE_STORAGE_NAMESPACE, _VOICE_TOOL_CALL_KEY
-            )
-            if isinstance(stored, dict):
-                tool_name = tool_name or stored.get("toolName", "")
-                call_id = call_id or stored.get("callId", "")
-                if not args:
-                    args = stored.get("args", {})
-
         if not tool_name:
             return UiPathRuntimeResult(
                 status=UiPathRuntimeStatus.FAULTED,
@@ -317,16 +337,6 @@ async def execute_voice_tool_call(
                     input_state, UiPathExecuteOptions(resume=resume)
                 )
 
-                # Persist tool metadata on suspension so resume can recover it
-                if result.status == UiPathRuntimeStatus.SUSPENDED:
-                    await storage.set_value(
-                        runtime_id,
-                        _VOICE_STORAGE_NAMESPACE,
-                        _VOICE_TOOL_CALL_KEY,
-                        {"toolName": tool_name, "callId": call_id, "args": args},
-                    )
-
-                # Attach call_id to output so the caller can POST it to CAS on resume
                 if isinstance(result.output, dict):
                     result.output["__voice_call_id"] = call_id
 
@@ -502,10 +512,6 @@ class VoiceJobRuntime:
                 self._ctx,
                 resume=is_resume,
             )
-
-            # SUSPENDED means a durable_interrupt — don't POST, let the platform resume the job later
-            if result.status == UiPathRuntimeStatus.SUSPENDED:
-                return result
 
             # On resume, call_id may be empty — retrieve from stored metadata
             if not call_id:
