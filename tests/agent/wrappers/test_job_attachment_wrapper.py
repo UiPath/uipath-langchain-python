@@ -13,9 +13,9 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 from uipath.platform.attachments import Attachment
 
+from uipath_langchain.agent.react.json_utils import coerce_json_strings
 from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphState
 from uipath_langchain.agent.wrappers.job_attachment_wrapper import (
-    _coerce_json_strings,
     get_job_attachment_wrapper,
 )
 
@@ -743,19 +743,19 @@ class TestGetJobAttachmentWrapper:
 
 
 class TestCoerceJsonStrings:
-    """Tests for _coerce_json_strings."""
+    """Tests for coerce_json_strings."""
 
     def test_no_coercion_needed(self) -> None:
         data = {"name": "test", "count": 42}
-        assert _coerce_json_strings(data) == data
+        assert coerce_json_strings(data) == data
 
     def test_coerce_json_object_string(self) -> None:
         data = {"metadata": '{"size": "99353"}'}
-        assert _coerce_json_strings(data) == {"metadata": {"size": "99353"}}
+        assert coerce_json_strings(data) == {"metadata": {"size": "99353"}}
 
     def test_coerce_nested_in_dict(self) -> None:
         data = {"attachment": {"metadata": '{"size": 1024}', "name": "file.pdf"}}
-        assert _coerce_json_strings(data) == {
+        assert coerce_json_strings(data) == {
             "attachment": {"metadata": {"size": 1024}, "name": "file.pdf"}
         }
 
@@ -766,7 +766,7 @@ class TestCoerceJsonStrings:
                 {"metadata": {"size": 200}, "name": "b.pdf"},
             ]
         }
-        assert _coerce_json_strings(data) == {
+        assert coerce_json_strings(data) == {
             "items": [
                 {"metadata": {"size": 100}, "name": "a.pdf"},
                 {"metadata": {"size": 200}, "name": "b.pdf"},
@@ -775,27 +775,27 @@ class TestCoerceJsonStrings:
 
     def test_invalid_json_string_unchanged(self) -> None:
         data = {"metadata": "not valid json"}
-        assert _coerce_json_strings(data) == data
+        assert coerce_json_strings(data) == data
 
     def test_json_array_string_coerced(self) -> None:
         data = {"tags": "[1, 2, 3]"}
-        assert _coerce_json_strings(data) == {"tags": [1, 2, 3]}
+        assert coerce_json_strings(data) == {"tags": [1, 2, 3]}
 
     def test_plain_string_unchanged(self) -> None:
         data = {"name": "hello world"}
-        assert _coerce_json_strings(data) == data
+        assert coerce_json_strings(data) == data
 
     def test_empty_dict(self) -> None:
-        assert _coerce_json_strings({}) == {}
+        assert coerce_json_strings({}) == {}
 
     def test_dict_value_unchanged(self) -> None:
         data = {"metadata": {"already": "a dict"}}
-        assert _coerce_json_strings(data) == data
+        assert coerce_json_strings(data) == data
 
     def test_non_dict_non_list_json_string_unchanged(self) -> None:
         """JSON primitives (numbers, booleans) should stay as strings."""
         data = {"value": "42", "flag": "true"}
-        assert _coerce_json_strings(data) == data
+        assert coerce_json_strings(data) == data
 
     def test_string_field_containing_json_must_not_be_coerced(self) -> None:
         """A string field that happens to contain valid JSON must stay a string.
@@ -826,7 +826,7 @@ class TestCoerceJsonStrings:
                 }
             ],
         }
-        result = _coerce_json_strings(data, AnalyzeFilesInput)
+        result = coerce_json_strings(data, AnalyzeFilesInput)
 
         # Metadata SHOULD be coerced — it's a dict field
         assert result["attachments"][0]["Metadata"] == {"size": "99353"}

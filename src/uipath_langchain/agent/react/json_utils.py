@@ -1,3 +1,4 @@
+import json
 import sys
 from typing import Any, ForwardRef, Union, get_args, get_origin
 
@@ -212,3 +213,52 @@ def _json_key(field_name: str, field_info: Any) -> str:
 
 def _is_pydantic_model(annotation: Any) -> bool:
     return isinstance(annotation, type) and issubclass(annotation, BaseModel)
+
+
+def _coerce_field(key: str, value: Any, schema: type[BaseModel] | None) -> Any:
+    """Coerce a single field, using schema to protect str-typed fields."""
+    if schema is None:
+        return coerce_json_strings(value)
+
+    field_info = schema.model_fields.get(key)
+    if field_info is None:
+        return coerce_json_strings(value)
+
+    annotation = _unwrap_optional(field_info.annotation)
+
+    if annotation is str:
+        return value
+
+    if _is_pydantic_model(annotation):
+        return coerce_json_strings(value, annotation)
+
+    if get_origin(annotation) is list:
+        item_args = get_args(annotation)
+        item_schema = None
+        if item_args and _is_pydantic_model(item_args[0]):
+            item_schema = item_args[0]
+        if isinstance(value, list):
+            return [coerce_json_strings(item, item_schema) for item in value]
+
+    return coerce_json_strings(value)
+
+
+def coerce_json_strings(data: Any, schema: type[BaseModel] | None = None) -> Any:
+    """Parse JSON strings into dicts/lists, guided by schema when available.
+
+    LLMs sometimes serialize nested objects as JSON strings instead of dicts.
+    When a schema is provided, string-typed fields are preserved even if they
+    contain valid JSON.
+    """
+    if isinstance(data, dict):
+        return {k: _coerce_field(k, v, schema) for k, v in data.items()}
+    if isinstance(data, list):
+        return [coerce_json_strings(item) for item in data]
+    if isinstance(data, str):
+        try:
+            parsed = json.loads(data)
+            if isinstance(parsed, (dict, list)):
+                return parsed
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return data
