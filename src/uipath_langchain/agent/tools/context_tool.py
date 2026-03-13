@@ -4,6 +4,7 @@ import logging
 import uuid
 from typing import Any, Optional, cast
 
+from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.documents import Document
 from langchain_core.messages import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
@@ -11,6 +12,8 @@ from pydantic import BaseModel, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
+    AgentToolArgumentArgumentProperties,
+    AgentToolArgumentProperties,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
@@ -50,34 +53,36 @@ logger = logging.getLogger(__name__)
 
 def _build_arg_props_from_settings(
     resource: AgentContextResourceConfig,
-) -> dict[str, Any]:
+) -> dict[str, AgentToolArgumentProperties]:
     """Build argument_properties from context resource settings.
 
     Context resources don't receive argumentProperties from the frontend.
     Instead, we derive them from the settings when variant="argument".
+    Only includes fields that belong in the tool's args_schema (i.e. query).
     """
-    arg_props: dict[str, Any] = {}
+    arg_props: dict[str, AgentToolArgumentProperties] = {}
 
     if resource.settings.query and resource.settings.query.variant == "argument":
         argument_path = (resource.settings.query.value or "").strip("{}")
-        arg_props["query"] = {
-            "variant": "argument",
-            "argumentPath": argument_path,
-            "isSensitive": False,
-        }
-
-    if (
-        resource.settings.folder_path_prefix
-        and resource.settings.folder_path_prefix.variant == "argument"
-    ):
-        argument_path = (resource.settings.folder_path_prefix.value or "").strip("{}")
-        arg_props["folder_path_prefix"] = {
-            "variant": "argument",
-            "argumentPath": argument_path,
-            "isSensitive": False,
-        }
+        arg_props["query"] = AgentToolArgumentArgumentProperties(
+            argumentPath=argument_path,
+            isSensitive=False,
+        )
 
     return arg_props
+
+
+def _resolve_folder_path_prefix_from_state(
+    resource: AgentContextResourceConfig,
+    state: dict[str, Any],
+) -> str | None:
+    """Resolve folder_path_prefix from agent state using jsonpath from settings."""
+    setting = resource.settings.folder_path_prefix
+    if not setting or setting.variant != "argument" or not setting.value:
+        return None
+    argument_path = "$." + setting.value.strip("{}")
+    matches = parse(argument_path).find(state)
+    return matches[0].value if matches else None
 
 
 def _resolve_file_extension(resource: AgentContextResourceConfig) -> str | None:
@@ -164,14 +169,14 @@ def handle_semantic_search(
             ),
         )
 
-    if "folder_path_prefix" in arg_props:
-        schema_fields["folder_path_prefix"] = (
-            str,
-            Field(
-                default=None,
-                description="The folder path prefix within the index to filter on",
-            ),
-        )
+    has_arg_folder = (
+        resource.settings.folder_path_prefix
+        and resource.settings.folder_path_prefix.variant == "argument"
+        and resource.settings.folder_path_prefix.value
+    )
+
+    # store folder_path_prefix from agent state before tool.ainvoke validates the args.
+    _resolved_arg_folder_prefix: list[str | None] = [None]
 
     input_model = create_model("SemanticSearchInput", **schema_fields)
 
@@ -183,9 +188,11 @@ def handle_semantic_search(
         example_calls=[],  # Examples cannot be provided for context.
     )
     async def context_tool_fn(
-        query: Optional[str] = None, folder_path_prefix: Optional[str] = None
+        query: Optional[str] = None,
     ) -> dict[str, Any]:
-        resolved_folder_path_prefix = static_folder_path_prefix or folder_path_prefix
+        resolved_folder_path_prefix = (
+            static_folder_path_prefix or _resolved_arg_folder_prefix[0]
+        )
 
         retriever = ContextGroundingRetriever(
             index_name=resource.index_name,
@@ -206,7 +213,7 @@ def handle_semantic_search(
             ]
         }
 
-    if arg_props:
+    if arg_props or has_arg_folder:
 
         async def context_semantic_search_wrapper(
             tool: BaseTool,
@@ -215,6 +222,9 @@ def handle_semantic_search(
         ) -> ToolWrapperReturnType:
             call["args"] = handle_static_args(
                 cast(ArgumentPropertiesMixin, tool), state, call["args"]
+            )
+            _resolved_arg_folder_prefix[0] = _resolve_folder_path_prefix_from_state(
+                resource, dict(state)
             )
             return await tool.ainvoke(call)
 
@@ -297,16 +307,10 @@ def handle_deep_rag(
         }
     )
 
-    if "folder_path_prefix" in arg_props:
-        schema_fields["folder_path_prefix"] = (
-            str,
-            Field(
-                default=None,
-                description="The folder path prefix within the index to filter on",
-            ),
-        )
-
     input_model = create_model("DeepRagInput", **schema_fields)
+
+    # store folder_path_prefix from agent state before tool.ainvoke validates the args.
+    _resolved_arg_folder_prefix: list[str | None] = [None]
 
     @mockable(
         name=resource.name,
@@ -316,11 +320,12 @@ def handle_deep_rag(
         example_calls=[],  # Examples cannot be provided for context.
     )
     async def context_tool_fn(
-        query: Optional[str] = None, folder_path_prefix: Optional[str] = None
+        query: Optional[str] = None,
     ) -> dict[str, Any]:
         actual_prompt = prompt or query
         glob_pattern = build_glob_pattern(
-            folder_path_prefix=static_folder_path_prefix or folder_path_prefix,
+            folder_path_prefix=static_folder_path_prefix
+            or _resolved_arg_folder_prefix[0],
             file_extension=file_extension,
         )
 
@@ -344,6 +349,9 @@ def handle_deep_rag(
     ) -> ToolWrapperReturnType:
         call["args"] = handle_static_args(
             cast(ArgumentPropertiesMixin, tool), state, call["args"]
+        )
+        _resolved_arg_folder_prefix[0] = _resolve_folder_path_prefix_from_state(
+            resource, dict(state)
         )
         return await tool.ainvoke(call)
 
@@ -432,15 +440,10 @@ def handle_batch_transform(
             description="The relative file path destination for the modified csv file",
         ),
     )
-    if "folder_path_prefix" in arg_props:
-        schema_fields["folder_path_prefix"] = (
-            str,
-            Field(
-                default=None,
-                description="The folder path prefix within the index to filter on",
-            ),
-        )
     input_model = create_model("BatchTransformInput", **schema_fields)
+
+    # store folder_path_prefix from agent state before tool.ainvoke validates the args.
+    _resolved_arg_folder_prefix: list[str | None] = [None]
 
     @mockable(
         name=resource.name,
@@ -452,11 +455,11 @@ def handle_batch_transform(
     async def context_tool_fn(
         query: Optional[str] = None,
         destination_path: str = "output.csv",
-        folder_path_prefix: Optional[str] = None,
     ) -> dict[str, Any]:
         actual_prompt = prompt or query
         glob_pattern = build_glob_pattern(
-            folder_path_prefix=static_folder_path_prefix or folder_path_prefix,
+            folder_path_prefix=static_folder_path_prefix
+            or _resolved_arg_folder_prefix[0],
             file_extension=None,
         )
 
@@ -501,6 +504,9 @@ def handle_batch_transform(
     ) -> ToolWrapperReturnType:
         call["args"] = handle_static_args(
             cast(ArgumentPropertiesMixin, tool), state, call["args"]
+        )
+        _resolved_arg_folder_prefix[0] = _resolve_folder_path_prefix_from_state(
+            resource, dict(state)
         )
         return await job_attachment_wrapper(tool, call, state)
 

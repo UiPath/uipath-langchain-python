@@ -109,7 +109,7 @@ class TestHandleDeepRag:
         assert result.awrapper is not None
 
     def test_deep_rag_with_folder_path_prefix_from_settings(self, base_resource_config):
-        """Test that folder_path_prefix argument_properties are built from settings."""
+        """Test that folder_path_prefix with argument variant is resolved in wrapper, not via argument_properties."""
         resource = base_resource_config(
             citation_mode_value=AgentContextValueSetting(value="Inline"),
             query_value="some query",
@@ -121,12 +121,12 @@ class TestHandleDeepRag:
         result = handle_deep_rag("test_deep_rag", resource)
 
         assert isinstance(result, StructuredToolWithArgumentProperties)
-        assert "folder_path_prefix" in result.argument_properties
-        folder_prop = dict(result.argument_properties["folder_path_prefix"])
-        assert folder_prop["argument_path"] == "deepRagFolderPrefix"
+        # folder_path_prefix is resolved directly in the wrapper from state,
+        # not via argument_properties or args_schema
+        assert "folder_path_prefix" not in result.argument_properties
         assert isinstance(result.args_schema, type)
         schema = result.args_schema.model_json_schema()
-        assert "folder_path_prefix" in schema["properties"]
+        assert "folder_path_prefix" not in schema.get("properties", {})
 
     def test_missing_static_query_value_raises_error(self, base_resource_config):
         """Test that missing query.value for static variant raises AgentStartupError."""
@@ -679,12 +679,12 @@ class TestHandleBatchTransform:
         result = handle_batch_transform("batch_transform_tool", resource)
 
         assert isinstance(result, StructuredToolWithArgumentProperties)
-        assert "folder_path_prefix" in result.argument_properties
-        folder_prop = dict(result.argument_properties["folder_path_prefix"])
-        assert folder_prop["argument_path"] == "batchFolderPrefix"
+        # folder_path_prefix is resolved directly in the wrapper from state,
+        # not via argument_properties or args_schema
+        assert "folder_path_prefix" not in result.argument_properties
         assert isinstance(result.args_schema, type)
         schema = result.args_schema.model_json_schema()
-        assert "folder_path_prefix" in schema["properties"]
+        assert "folder_path_prefix" not in schema.get("properties", {})
 
     @pytest.mark.asyncio
     async def test_static_query_batch_transform_uses_predefined_query(
