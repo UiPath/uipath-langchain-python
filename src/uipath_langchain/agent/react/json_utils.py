@@ -217,7 +217,7 @@ def _is_pydantic_model(annotation: Any) -> bool:
 
 
 def _coerce_field(key: str, value: Any, schema: type[BaseModel] | None) -> Any:
-    """Coerce a single field, using schema to protect str-typed fields."""
+    """Coerce a single field value, skipping str-typed fields when schema is available."""
     if schema is None:
         return coerce_json_strings(value)
 
@@ -245,11 +245,11 @@ def _coerce_field(key: str, value: Any, schema: type[BaseModel] | None) -> Any:
 
 
 def coerce_json_strings(data: Any, schema: type[BaseModel] | None = None) -> Any:
-    """Parse JSON strings into dicts/lists, guided by schema when available.
+    """Parse stringified dicts/lists back into Python objects.
 
-    LLMs sometimes serialize nested objects as JSON strings instead of dicts.
-    When a schema is provided, string-typed fields are preserved even if they
-    contain valid JSON.
+    LLMs sometimes serialize nested objects as strings instead of dicts,
+    either as JSON (double quotes) or Python repr (single quotes).
+    When a schema is provided, str-typed fields are left untouched.
     """
     if isinstance(data, dict):
         return {k: _coerce_field(k, v, schema) for k, v in data.items()}
