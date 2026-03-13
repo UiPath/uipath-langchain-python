@@ -1061,9 +1061,8 @@ class TestNestedLlmCallsInTools:
 
         # LLM span should be child of tool span (not agent span)
         assert llm.parent.span_id == tool.context.span_id
-        # Model span should be child of tool span (reparented for inner calls
-        # because server may drop the intermediate LLM call span)
-        assert model.parent.span_id == tool.context.span_id
+        # Model span should be child of LLM call span
+        assert model.parent.span_id == llm.context.span_id
         # Tool span should be child of agent span
         assert tool.parent.span_id == agent.context.span_id
 
@@ -1174,3 +1173,60 @@ class TestNestedLlmCallsInTools:
         assert llm_in_tool is not None
         assert llm_independent is not None
         assert llm_in_tool is not llm_independent
+
+    def test_nested_llm_does_not_clobber_current_llm_span(
+        self, tracer, callback, span_exporter
+    ) -> None:
+        """Inner tool LLM call must not overwrite current_llm_span used by outer guardrails."""
+        from unittest.mock import patch
+
+        agent_run_id = uuid4()
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # Outer LLM call starts (sets current_llm_span)
+            outer_llm_id = uuid4()
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=None,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=outer_llm_id,
+                    parent_run_id=None,
+                )
+
+            outer_llm_span = callback._state.current_llm_span
+            assert outer_llm_span is not None
+
+            # Outer LLM ends
+            callback.on_llm_end(None, run_id=outer_llm_id)
+
+            # Tool starts
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "analyze_files"}, "{}", run_id=tool_run_id)
+
+            # Inner LLM call inside tool
+            inner_llm_id = uuid4()
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=tool_run_id,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=inner_llm_id,
+                    parent_run_id=None,
+                )
+                # current_llm_span should still be the outer one (not overwritten)
+                assert callback._state.current_llm_span is outer_llm_span
+
+                callback.on_llm_end(None, run_id=inner_llm_id)
+
+            # current_llm_span still preserved after inner call ends
+            assert callback._state.current_llm_span is outer_llm_span
+
+            callback.on_tool_end("result", run_id=tool_run_id)
+            agent_span.end()

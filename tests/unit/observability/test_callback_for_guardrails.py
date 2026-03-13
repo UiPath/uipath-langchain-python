@@ -1965,3 +1965,424 @@ class TestCompleteResumedEscalationOutputs:
                 )
                 assert span_data["attributes"]["reviewOutcome"] == "Approved"
                 assert span_data["attributes"]["reviewStatus"] == "Completed"
+
+
+class TestNestedCallGuardrailIsolation:
+    """Tests that inner tool LLM calls don't corrupt outer agentic loop guardrail state.
+
+    Scenario: Outer LLM with guardrails -> tool with inner LLM -> next outer LLM with guardrails.
+    The inner LLM call must not close, overwrite, or consume spans/containers belonging to the outer loop.
+    """
+
+    def _make_mock_guardrail(self, name: str, scope: GuardrailScope) -> MagicMock:
+        g = MagicMock()
+        g.name = name
+        g.description = f"{name} description"
+        g.enabled_for_evals = True
+        g.guardrail_type = "deterministic"
+        g.selector.scopes = [scope]
+        return g
+
+    def _fire_guardrail_pass(
+        self,
+        callback: LlmOpsInstrumentationCallback,
+        node_name: str,
+        guardrail: MagicMock,
+        scope: GuardrailScope,
+        stage: ExecutionStage,
+    ) -> None:
+        """Fire a guardrail evaluation that passes (validation_result=True)."""
+        run_id = uuid4()
+        callback.on_chain_start(
+            {},
+            {},
+            run_id=run_id,
+            metadata={
+                "langgraph_node": node_name,
+                "guardrail": guardrail,
+                "node_type": "guardrail_evaluation",
+                "scope": scope,
+                "execution_stage": stage,
+                "action_type": "Skip",
+            },
+        )
+        callback.on_chain_end(
+            {INNER_STATE_KEY: {GUARDRAIL_VALIDATION_RESULT_KEY: True}},
+            run_id=run_id,
+        )
+
+    def test_inner_llm_preserves_guardrail_containers(
+        self, callback, tracer, span_exporter
+    ) -> None:
+        """Inner tool LLM call must not close AGENT_PRE or LLM_PRE containers."""
+        agent_run_id = uuid4()
+        guard = self._make_mock_guardrail("input_guard", GuardrailScope.LLM)
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # LLM PRE guardrail fires (creates LLM span + container)
+            self._fire_guardrail_pass(
+                callback,
+                "llm_pre_execution_input_guard",
+                guard,
+                GuardrailScope.LLM,
+                ExecutionStage.PRE_EXECUTION,
+            )
+
+            # LLM PRE container should exist
+            llm_pre_key = (GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION)
+            assert llm_pre_key in callback._state.guardrail_containers
+
+            # The guardrail created an early LLM span
+            assert callback._state.current_llm_span is not None
+            outer_llm_span = callback._state.current_llm_span
+            assert callback._state.llm_span_from_guardrail is True
+
+            # Outer LLM call starts (reuses guardrail-created span)
+            outer_llm_id = uuid4()
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=None,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=outer_llm_id,
+                    parent_run_id=None,
+                )
+
+            # LLM PRE container should have been closed by on_chat_model_start
+            assert llm_pre_key not in callback._state.guardrail_containers
+            # Guardrail flag consumed
+            assert callback._state.llm_span_from_guardrail is False
+            # current_llm_span still set (was reused, not replaced)
+            assert callback._state.current_llm_span is outer_llm_span
+
+            # Outer LLM ends
+            callback.on_llm_end(None, run_id=outer_llm_id)
+
+            # Tool starts (e.g., Analyze_Files)
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "analyze_files"}, "{}", run_id=tool_run_id)
+
+            # LLM POST guardrail fires (creates POST container)
+            post_guard = self._make_mock_guardrail("output_guard", GuardrailScope.LLM)
+            self._fire_guardrail_pass(
+                callback,
+                "llm_post_execution_output_guard",
+                post_guard,
+                GuardrailScope.LLM,
+                ExecutionStage.POST_EXECUTION,
+            )
+            llm_post_key = (GuardrailScope.LLM, ExecutionStage.POST_EXECUTION)
+            assert llm_post_key in callback._state.guardrail_containers
+
+            # Inner LLM call inside tool — must NOT close the POST container
+            inner_llm_id = uuid4()
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=tool_run_id,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=inner_llm_id,
+                    parent_run_id=None,
+                )
+                # POST container must still be open
+                assert llm_post_key in callback._state.guardrail_containers
+                callback.on_llm_end(None, run_id=inner_llm_id)
+
+            # POST container still intact after inner call ends
+            assert llm_post_key in callback._state.guardrail_containers
+
+            # Close POST container manually (simulating normal phase transition)
+            callback._guardrail_instrumentor.close_container(
+                GuardrailScope.LLM, ExecutionStage.POST_EXECUTION
+            )
+            callback.on_tool_end("result", run_id=tool_run_id)
+            agent_span.end()
+
+        spans = span_exporter.get_finished_spans()
+        llm_spans = [s for s in spans if s.name == "LLM call"]
+        # Two LLM spans: outer (from guardrail) + inner (from tool)
+        assert len(llm_spans) == 2
+
+        # Verify LLM PRE container was child of outer LLM span
+        llm_pre_spans = [
+            s for s in spans if s.attributes.get("type") == "llmPreGuardrails"
+        ]
+        assert len(llm_pre_spans) == 1
+        assert (
+            llm_pre_spans[0].parent.span_id == outer_llm_span.get_span_context().span_id
+        )
+
+    def test_inner_llm_does_not_consume_guardrail_llm_span(
+        self, callback, tracer, span_exporter
+    ) -> None:
+        """Inner LLM call must not reuse an LLM span created by outer guardrails."""
+        agent_run_id = uuid4()
+        guard = self._make_mock_guardrail("input_guard", GuardrailScope.LLM)
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # LLM PRE guardrail fires → creates early LLM span
+            self._fire_guardrail_pass(
+                callback,
+                "llm_pre_execution_input_guard",
+                guard,
+                GuardrailScope.LLM,
+                ExecutionStage.PRE_EXECUTION,
+            )
+            assert callback._state.llm_span_from_guardrail is True
+            guardrail_llm_span = callback._state.current_llm_span
+            assert guardrail_llm_span is not None
+
+            # Tool starts before outer LLM call (edge case)
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "analyze_files"}, "{}", run_id=tool_run_id)
+
+            # Inner LLM call — must NOT consume the guardrail LLM span
+            inner_llm_id = uuid4()
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=tool_run_id,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=inner_llm_id,
+                    parent_run_id=None,
+                )
+                # Flag must still be True — inner call didn't consume it
+                assert callback._state.llm_span_from_guardrail is True
+                # current_llm_span still the guardrail-created one
+                assert callback._state.current_llm_span is guardrail_llm_span
+
+                callback.on_llm_end(None, run_id=inner_llm_id)
+
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+            # Now outer LLM call starts — SHOULD consume the guardrail span
+            outer_llm_id = uuid4()
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=None,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=outer_llm_id,
+                    parent_run_id=None,
+                )
+            # Flag consumed by outer call
+            assert callback._state.llm_span_from_guardrail is False
+            # current_llm_span is the same guardrail-created span (reused)
+            assert callback._state.current_llm_span is guardrail_llm_span
+
+            callback.on_llm_end(None, run_id=outer_llm_id)
+            agent_span.end()
+
+    def test_full_flow_outer_guardrails_tool_inner_llm_outer_guardrails(
+        self, callback, tracer, span_exporter
+    ) -> None:
+        """Full multi-turn flow: outer LLM+guardrails → tool+inner LLM → outer LLM+guardrails.
+
+        Verifies that all guardrail containers and spans parent correctly across the full sequence.
+        Each turn has PRE+POST guardrails to exercise the full lifecycle (POST clears current_llm_span).
+        """
+        agent_run_id = uuid4()
+        llm_pre_guard = self._make_mock_guardrail("llm_pre_guard", GuardrailScope.LLM)
+        llm_post_guard = self._make_mock_guardrail("llm_post_guard", GuardrailScope.LLM)
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+
+            # === Turn 1: Outer LLM with PRE + POST guardrails ===
+            self._fire_guardrail_pass(
+                callback,
+                "llm_pre_execution_llm_pre_guard",
+                llm_pre_guard,
+                GuardrailScope.LLM,
+                ExecutionStage.PRE_EXECUTION,
+            )
+            turn1_llm_span = callback._state.current_llm_span
+
+            outer_llm_1 = uuid4()
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=None,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=outer_llm_1,
+                    parent_run_id=None,
+                )
+                callback.on_llm_end(None, run_id=outer_llm_1)
+
+            # POST guardrail fires after LLM ends
+            self._fire_guardrail_pass(
+                callback,
+                "llm_post_execution_llm_post_guard",
+                llm_post_guard,
+                GuardrailScope.LLM,
+                ExecutionStage.POST_EXECUTION,
+            )
+            # Close POST container (clears current_llm_span)
+            callback._guardrail_instrumentor.close_container(
+                GuardrailScope.LLM, ExecutionStage.POST_EXECUTION
+            )
+            assert callback._state.current_llm_span is None
+
+            # === Tool with inner LLM ===
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "analyze_files"}, "{}", run_id=tool_run_id)
+
+            inner_llm = uuid4()
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=tool_run_id,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=inner_llm,
+                    parent_run_id=None,
+                )
+                # Inner call must not set current_llm_span
+                assert callback._state.current_llm_span is None
+                callback.on_llm_end(None, run_id=inner_llm)
+
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+            # current_llm_span still None after inner call
+            assert callback._state.current_llm_span is None
+
+            # === Turn 2: Outer LLM with PRE guardrail again ===
+            self._fire_guardrail_pass(
+                callback,
+                "llm_pre_execution_llm_pre_guard",
+                llm_pre_guard,
+                GuardrailScope.LLM,
+                ExecutionStage.PRE_EXECUTION,
+            )
+            turn2_llm_span = callback._state.current_llm_span
+            # Must be a new span (current_llm_span was None, so guardrail created fresh)
+            assert turn2_llm_span is not None
+            assert turn2_llm_span is not turn1_llm_span
+
+            outer_llm_2 = uuid4()
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=None,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[]],
+                    run_id=outer_llm_2,
+                    parent_run_id=None,
+                )
+                callback.on_llm_end(None, run_id=outer_llm_2)
+
+            agent_span.end()
+
+        spans = span_exporter.get_finished_spans()
+
+        agent = next(s for s in spans if s.attributes.get("type") == "agentRun")
+        tool = next(s for s in spans if s.attributes.get("type") == "toolCall")
+        llm_spans = [s for s in spans if s.name == "LLM call"]
+        model_spans = [s for s in spans if s.name == "Model run"]
+        llm_pre_containers = [
+            s for s in spans if s.attributes.get("type") == "llmPreGuardrails"
+        ]
+
+        # 3 LLM spans: turn1 outer, inner tool, turn2 outer
+        assert len(llm_spans) == 3
+        # 3 model spans (one per LLM call)
+        assert len(model_spans) == 3
+        # 2 LLM PRE containers (one per outer turn)
+        assert len(llm_pre_containers) == 2
+
+        # Both outer LLM spans should parent to agent
+        outer_llm_spans = [
+            s for s in llm_spans if s.parent.span_id == agent.context.span_id
+        ]
+        assert len(outer_llm_spans) == 2
+
+        # Inner LLM span should parent to tool span
+        inner_llm_spans = [
+            s for s in llm_spans if s.parent.span_id == tool.context.span_id
+        ]
+        assert len(inner_llm_spans) == 1
+
+        # All model spans parent to their respective LLM spans
+        llm_span_ids = {s.context.span_id for s in llm_spans}
+        for m in model_spans:
+            assert m.parent.span_id in llm_span_ids
+
+        # Both PRE containers parent to their respective outer LLM spans
+        outer_llm_ids = {s.context.span_id for s in outer_llm_spans}
+        for c in llm_pre_containers:
+            assert c.parent.span_id in outer_llm_ids
+
+    def test_inner_llm_does_not_capture_prompts(
+        self, callback, tracer, span_exporter
+    ) -> None:
+        """Inner tool LLM call must not set prompts_captured or overwrite userPrompt."""
+        from langchain_core.messages import HumanMessage
+
+        agent_run_id = uuid4()
+
+        with tracer.start_agent_run("TestAgent") as agent_span:
+            callback.set_agent_span(agent_span, agent_run_id)
+            assert callback._state.prompts_captured is False
+
+            # Tool starts
+            tool_run_id = uuid4()
+            callback.on_tool_start({"name": "analyze_files"}, "{}", run_id=tool_run_id)
+
+            # Inner LLM call with messages — must NOT capture prompts
+            inner_llm_id = uuid4()
+            inner_msg = HumanMessage(content="inner tool prompt")
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=tool_run_id,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[inner_msg]],
+                    run_id=inner_llm_id,
+                    parent_run_id=None,
+                )
+                callback.on_llm_end(None, run_id=inner_llm_id)
+
+            # prompts_captured must still be False
+            assert callback._state.prompts_captured is False
+
+            callback.on_tool_end("result", run_id=tool_run_id)
+
+            # Outer LLM call — SHOULD capture prompts
+            outer_llm_id = uuid4()
+            outer_msg = HumanMessage(content="outer user prompt")
+            with patch(
+                "uipath_agents._observability.llmops.callback.get_current_run_id",
+                return_value=None,
+            ):
+                callback.on_chat_model_start(
+                    {"kwargs": {"model": "gpt-4"}},
+                    [[outer_msg]],
+                    run_id=outer_llm_id,
+                    parent_run_id=None,
+                )
+                callback.on_llm_end(None, run_id=outer_llm_id)
+
+            assert callback._state.prompts_captured is True
+            agent_span.end()
+
+        spans = span_exporter.get_finished_spans()
+        agent = next(s for s in spans if s.attributes.get("type") == "agentRun")
+        # userPrompt should be the outer prompt, not the inner one
+        assert "outer user prompt" in agent.attributes.get("userPrompt", "")

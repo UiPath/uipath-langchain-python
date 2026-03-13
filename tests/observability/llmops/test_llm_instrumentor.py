@@ -111,7 +111,7 @@ def _make_instrumentor(
 
 
 class TestModelRunParenting:
-    """Model run parents under llm_span for top-level calls, under tool span for inner calls."""
+    """Model run always parents under llm_span, regardless of call depth."""
 
     def test_top_level_call_parents_model_under_llm_span(self) -> None:
         """When parent is agent_span (top-level), model run nests under llm_span."""
@@ -136,11 +136,12 @@ class TestModelRunParenting:
         model_call = mock_factory.start_model_run.call_args
         assert model_call.kwargs["parent_span"] is llm_span
 
-    def test_inner_call_parents_model_under_tool_span(self) -> None:
-        """When parent is a tool span (not agent_span), model run nests under tool span."""
+    def test_inner_call_parents_model_under_llm_span(self) -> None:
+        """When parent is a tool span (inner call), model run still nests under llm_span."""
         agent_span = MagicMock(name="agent_span")
         tool_span = MagicMock(name="tool_span")
         instrumentor, mock_factory, state = _make_instrumentor(agent_span, tool_span)
+        llm_span = mock_factory.start_llm_call.return_value
 
         run_id = uuid4()
         with (
@@ -157,7 +158,7 @@ class TestModelRunParenting:
             )
 
         model_call = mock_factory.start_model_run.call_args
-        assert model_call.kwargs["parent_span"] is tool_span
+        assert model_call.kwargs["parent_span"] is llm_span
 
     def test_guardrail_path_parents_model_under_llm_span(self) -> None:
         """When reusing guardrail-created llm span, parent stays None → model under llm_span."""

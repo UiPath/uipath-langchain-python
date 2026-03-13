@@ -73,21 +73,29 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
         parent_run_id: Optional[UUID],
         serialized: Dict[str, Any],
         input_text: Optional[str] = None,
-    ) -> None:
+    ) -> bool:
         """Create nested LLM call + model run spans.
 
         If LLM span was created early by llm_pre guardrails, reuses it.
+        Returns True if this is a nested call (inside a tool execution).
         """
-        # Close agent_pre container before LLM starts
-        self._close_container(GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION)
+        parent_span = self._state.get_span_or_root(parent_run_id)
+        # Nested = inside a tool execution; don't touch shared guardrail/LLM state
+        is_nested = parent_span is not None and parent_span is not self._agent_span
+
+        if not is_nested:
+            # Close agent_pre container before LLM starts
+            self._close_container(GuardrailScope.AGENT, ExecutionStage.PRE_EXECUTION)
 
         model_name = extract_model_name(serialized)
         max_tokens, temperature = extract_settings(serialized)
 
-        # Check if llmCall was created early by guardrails
-        # Only reuse if the flag indicates it was created by guardrails
-        parent = None  # Resolved parent; set in non-guardrail path
-        if self._state.current_llm_span and self._state.llm_span_from_guardrail:
+        # Check if llmCall was created early by guardrails (outer loop only)
+        if (
+            not is_nested
+            and self._state.current_llm_span
+            and self._state.llm_span_from_guardrail
+        ):
             llm_span = self._state.current_llm_span
             if input_text:
                 llm_span.set_attribute("input", input_text)
@@ -95,33 +103,30 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
             self._state.llm_span_from_guardrail = False
             # Keep current_llm_span set for llm_post guardrails to use
         else:
-            parent = self._state.get_span_or_root(parent_run_id)
             llm_span = self._span_factory.start_llm_call(
                 input=input_text,
-                parent_span=parent,
+                parent_span=parent_span,
             )
-            # Set current_llm_span for HITL to access if needed
-            self._state.current_llm_span = llm_span
+            if not is_nested:
+                # Set current_llm_span for HITL to access if needed
+                self._state.current_llm_span = llm_span
 
         self._spans[run_id] = llm_span
 
-        # Close llm_pre container before model span
-        self._close_container(GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION)
+        if not is_nested:
+            # Close llm_pre container before model span
+            self._close_container(GuardrailScope.LLM, ExecutionStage.PRE_EXECUTION)
 
-        # For inner calls (nested inside a tool), parent the model run directly
-        # under the tool span. The LLMOps server may drop the intermediate
-        # "LLM call" span, so this ensures the "Model run" always has a valid
-        # parent in the server trace.
-        is_inner_call = parent is not None and parent is not self._agent_span
         model_span, license_token = self._span_factory.start_model_run(
             model_name,
             max_tokens=max_tokens,
             temperature=temperature,
-            parent_span=parent if is_inner_call else llm_span,
+            parent_span=llm_span,
         )
         self._license_tokens[run_id] = license_token
         self._spans[self._model_span_key(run_id)] = model_span
         SpanHierarchyManager.push(run_id, model_span)
+        return is_nested
 
     def on_llm_start(
         self,
@@ -170,11 +175,11 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
                     except Exception:
                         input_text = str(content)
 
-            self._start_llm_and_model_spans(
+            is_nested = self._start_llm_and_model_spans(
                 run_id, parent_run_id, serialized, input_text=input_text
             )
 
-            if self._agent_span and not self._state.prompts_captured:
+            if not is_nested and self._agent_span and not self._state.prompts_captured:
                 self._capture_interpolated_prompts(messages)
         except Exception:
             logger.exception("Error in on_chat_model_start callback")
@@ -233,8 +238,6 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
                     self._span_factory.end_span_ok(llm_span)
                 llm_span = None
 
-            self._close_container(GuardrailScope.LLM, ExecutionStage.POST_EXECUTION)
-
         except Exception:
             logger.exception("Error in on_llm_end callback")
         finally:
@@ -270,8 +273,6 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
             llm_span = self._spans.pop(run_id, None)
             if llm_span:
                 self._span_factory.end_span_error(llm_span, exc)
-
-            self._close_container(GuardrailScope.LLM, ExecutionStage.POST_EXECUTION)
 
         except Exception:
             logger.exception("Error in on_llm_error callback")

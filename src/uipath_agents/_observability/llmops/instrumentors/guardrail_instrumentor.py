@@ -627,10 +627,12 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                     and self._state.current_llm_span is None
                 ):
                     self._state.current_llm_span = self._span_factory.start_llm_call(
-                        parent_span=self._agent_span,
+                        parent_span=self._state.get_span_or_root(parent_run_id),
                     )
                     self._state.llm_span_from_guardrail = True
-                parent = self._state.current_llm_span or self._agent_span
+                parent = self._state.current_llm_span or self._state.get_span_or_root(
+                    parent_run_id
+                )
             elif scope == GuardrailScope.TOOL:
                 if (
                     execution_stage == ExecutionStage.PRE_EXECUTION
@@ -641,7 +643,7 @@ class GuardrailSpanInstrumentor(BaseSpanInstrumentor):
                     self._state.current_tool_span = self._span_factory.start_tool_call(
                         tool_name=tool_name,
                         tool_type_value=get_tool_type_value(tool_type),
-                        parent_span=self._agent_span,
+                        parent_span=self._state.get_span_or_root(parent_run_id),
                     )
                     self._state.tool_span_from_guardrail = True
                 # Use existing tool span as parent for PRE_EXECUTION
