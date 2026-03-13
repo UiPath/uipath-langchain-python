@@ -1,6 +1,11 @@
 """Tests for agent/messages/message_utils.py module."""
 
+from typing import Any, Union
+
 from langchain.messages import AIMessage, HumanMessage, ToolCall
+from langchain_core.messages import BaseMessage
+
+MessageItem = Union[BaseMessage, list[str], tuple[str, str], str, dict[str, Any]]
 from langchain_core.messages.content import (
     ContentBlock,
     create_text_block,
@@ -223,7 +228,7 @@ class TestReplaceToolCalls:
             id="msg-from-llm",
         )
 
-        messages: list = [
+        messages: list[MessageItem] = [
             HumanMessage(content="do something", id="msg-human"),
             original_ai_message,
         ]
@@ -237,7 +242,8 @@ class TestReplaceToolCalls:
         updated_ai_message = replace_tool_calls(original_ai_message, reviewed_tool_calls)
 
         # Simulate what Command(update={"messages": [updated_ai_message]}) does
-        result_messages = add_messages(messages, [updated_ai_message])
+        new_messages: list[MessageItem] = [updated_ai_message]
+        result_messages = add_messages(messages, new_messages)
 
         # There must be exactly one AIMessage — not a duplicate
         ai_messages = [m for m in result_messages if isinstance(m, AIMessage)]
