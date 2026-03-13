@@ -834,3 +834,13 @@ class TestCoerceJsonStrings:
         # analysisTask MUST remain a string — it's a str field
         assert isinstance(result["analysisTask"], str)
         assert result["analysisTask"] == '{"instruction": "summarize the document"}'
+
+    def test_python_repr_dict_string_coerced(self) -> None:
+        """LLMs sometimes emit Python repr instead of JSON (single quotes).
+
+        str({"size": "99353"}) produces "{'size': '99353'}" which is NOT
+        valid JSON but should still be coerced to a dict.
+        """
+        data = {"Metadata": "{'size': '99353'}"}
+        result = coerce_json_strings(data)
+        assert result["Metadata"] == {"size": "99353"}

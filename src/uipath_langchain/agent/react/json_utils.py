@@ -1,3 +1,4 @@
+import ast
 import json
 import sys
 from typing import Any, ForwardRef, Union, get_args, get_origin
@@ -260,5 +261,12 @@ def coerce_json_strings(data: Any, schema: type[BaseModel] | None = None) -> Any
             if isinstance(parsed, (dict, list)):
                 return parsed
         except (json.JSONDecodeError, TypeError):
+            pass
+        # LLMs sometimes emit Python repr (single quotes) instead of JSON
+        try:
+            parsed = ast.literal_eval(data)
+            if isinstance(parsed, (dict, list)):
+                return parsed
+        except (ValueError, SyntaxError):
             pass
     return data
