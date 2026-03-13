@@ -179,8 +179,7 @@ def handle_semantic_search(
         and resource.settings.folder_path_prefix.value
     )
 
-    # store folder_path_prefix from agent state before tool.ainvoke validates the args.
-    _resolved_arg_folder_prefix: list[str | None] = [None]
+    _resolved_arg_folder_prefix: str | None = None
 
     input_model = create_model("SemanticSearchInput", **schema_fields)
 
@@ -195,7 +194,7 @@ def handle_semantic_search(
         query: Optional[str] = None,
     ) -> dict[str, Any]:
         resolved_folder_path_prefix = (
-            static_folder_path_prefix or _resolved_arg_folder_prefix[0]
+            static_folder_path_prefix or _resolved_arg_folder_prefix
         )
 
         retriever = ContextGroundingRetriever(
@@ -227,7 +226,8 @@ def handle_semantic_search(
             call["args"] = handle_static_args(
                 cast(ArgumentPropertiesMixin, tool), state, call["args"]
             )
-            _resolved_arg_folder_prefix[0] = _resolve_folder_path_prefix_from_state(
+            nonlocal _resolved_arg_folder_prefix
+            _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
                 resource, dict(state)
             )
             return await tool.ainvoke(call)
@@ -313,8 +313,7 @@ def handle_deep_rag(
 
     input_model = create_model("DeepRagInput", **schema_fields)
 
-    # store folder_path_prefix from agent state before tool.ainvoke validates the args.
-    _resolved_arg_folder_prefix: list[str | None] = [None]
+    _resolved_arg_folder_prefix: str | None = None
 
     @mockable(
         name=resource.name,
@@ -329,7 +328,7 @@ def handle_deep_rag(
         actual_prompt = prompt or query
         glob_pattern = build_glob_pattern(
             folder_path_prefix=static_folder_path_prefix
-            or _resolved_arg_folder_prefix[0],
+            or _resolved_arg_folder_prefix,
             file_extension=file_extension,
         )
 
@@ -351,10 +350,11 @@ def handle_deep_rag(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
+        nonlocal _resolved_arg_folder_prefix
         call["args"] = handle_static_args(
             cast(ArgumentPropertiesMixin, tool), state, call["args"]
         )
-        _resolved_arg_folder_prefix[0] = _resolve_folder_path_prefix_from_state(
+        _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
             resource, dict(state)
         )
         return await tool.ainvoke(call)
@@ -446,8 +446,7 @@ def handle_batch_transform(
     )
     input_model = create_model("BatchTransformInput", **schema_fields)
 
-    # store folder_path_prefix from agent state before tool.ainvoke validates the args.
-    _resolved_arg_folder_prefix: list[str | None] = [None]
+    _resolved_arg_folder_prefix: str | None = None
 
     @mockable(
         name=resource.name,
@@ -463,7 +462,7 @@ def handle_batch_transform(
         actual_prompt = prompt or query
         glob_pattern = build_glob_pattern(
             folder_path_prefix=static_folder_path_prefix
-            or _resolved_arg_folder_prefix[0],
+            or _resolved_arg_folder_prefix,
             file_extension=None,
         )
 
@@ -509,7 +508,8 @@ def handle_batch_transform(
         call["args"] = handle_static_args(
             cast(ArgumentPropertiesMixin, tool), state, call["args"]
         )
-        _resolved_arg_folder_prefix[0] = _resolve_folder_path_prefix_from_state(
+        nonlocal _resolved_arg_folder_prefix
+        _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
             resource, dict(state)
         )
         return await job_attachment_wrapper(tool, call, state)
