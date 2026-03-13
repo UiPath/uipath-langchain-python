@@ -96,11 +96,13 @@ class AwsBedrockCompletionsPassthroughClient:
                 self.header_capture.set(dict(headers))
 
     def get_client(self):
-        client = boto3.client(
-            "bedrock-runtime",
-            region_name="none",
+        session = boto3.Session(
             aws_access_key_id="none",
             aws_secret_access_key="none",
+            region_name="none",
+        )
+        client = session.client(
+            "bedrock-runtime",
             config=botocore.config.Config(
                 retries={
                     "total_max_attempts": 1,

@@ -1,5 +1,5 @@
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from langchain_aws import ChatBedrock
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -43,8 +43,8 @@ class TestGenerate:
             "UIPATH_ACCESS_TOKEN": "token",
         },
     )
-    @patch("uipath_langchain.chat.bedrock.boto3.client", return_value=MagicMock())
-    def test_generate_converts_file_blocks(self, _mock_boto):
+    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    def test_generate_converts_file_blocks(self, mock_session_cls):
         chat = UiPathChatBedrock()
 
         messages: list[BaseMessage] = [
