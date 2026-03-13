@@ -1,7 +1,9 @@
+import copy
 import logging
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, AsyncGenerator
 
+from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
@@ -10,9 +12,12 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 
-from uipath_langchain.agent.tools.base_uipath_structured_tool import (
-    BaseUiPathStructuredTool,
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.static_args import handle_static_args
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
 )
+from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 
 from ..utils import sanitize_tool_name
 from .mcp_client import McpClient, SessionInfoFactory
@@ -73,6 +78,8 @@ async def create_mcp_tools(
         f"(dynamic_tools={dynamic_tools.value})"
     )
 
+    config_tools_by_name = {t.name: t for t in config.available_tools}
+
     if dynamic_tools in (DynamicToolsMode.SCHEMA, DynamicToolsMode.ALL):
         logger.info(f"Fetching tools from MCP server '{config.slug}' via list_tools")
         result = await mcpClient.list_tools()
@@ -96,15 +103,24 @@ async def create_mcp_tools(
                 f"Filtered to {len(server_tools)} tools matching availableTools"
             )
 
-        mcp_tools = [
-            AgentMcpTool(
-                name=tool.name,
-                description=tool.description or "",
-                input_schema=tool.inputSchema,
-                output_schema=tool.outputSchema,
+        mcp_tools = []
+        for tool in server_tools:
+            config_tool = config_tools_by_name.get(tool.name)
+            argument_properties = config_tool.argument_properties if config_tool else {}
+            server_schema = tool.inputSchema
+            if config_tool:
+                server_schema = _merge_descriptions_from_config(
+                    server_schema, config_tool.input_schema
+                )
+            mcp_tools.append(
+                AgentMcpTool(
+                    name=tool.name,
+                    description=tool.description or "",
+                    inputSchema=server_schema,
+                    outputSchema=tool.outputSchema,
+                    argumentProperties=argument_properties,
+                )
             )
-            for tool in server_tools
-        ]
     else:
         mcp_tools = config.available_tools
         logger.info(
@@ -112,8 +128,9 @@ async def create_mcp_tools(
             f"server '{config.slug}'"
         )
 
-    return [
-        BaseUiPathStructuredTool(
+    tools: list[BaseTool] = []
+    for mcp_tool in mcp_tools:
+        tool = StructuredToolWithArgumentProperties(
             name=sanitize_tool_name(mcp_tool.name),
             description=mcp_tool.description,
             args_schema=mcp_tool.input_schema,
@@ -124,9 +141,12 @@ async def create_mcp_tools(
                 "folder_path": config.folder_path,
                 "slug": config.slug,
             },
+            argument_properties=mcp_tool.argument_properties,
         )
-        for mcp_tool in mcp_tools
-    ]
+        if mcp_tool.argument_properties:
+            tool.set_tool_wrappers(awrapper=_mcp_tool_wrapper)
+        tools.append(tool)
+    return tools
 
 
 def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
@@ -218,3 +238,48 @@ async def create_mcp_tools_and_clients(
         )
 
     return tools, clients
+
+
+async def _mcp_tool_wrapper(
+    tool: BaseTool,
+    call: ToolCall,
+    state: AgentGraphState,
+) -> ToolWrapperReturnType:
+    """Wrapper that injects static argument values before MCP tool execution."""
+    call["args"] = handle_static_args(tool, state, call["args"])
+    return await tool.ainvoke(call)
+
+
+def _merge_descriptions_from_config(
+    server_schema: dict[str, Any],
+    config_schema: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge property descriptions from config schema into server schema.
+
+    For each property that exists in both schemas, if the config schema
+    has a description, it overwrites the server schema's description.
+    This preserves prompt overrides that were configured in agent.json.
+
+    Args:
+        server_schema: The fresh schema from the MCP server.
+        config_schema: The schema from the agent config with prompt overrides.
+
+    Returns:
+        A copy of the server schema with config descriptions merged in.
+    """
+    server_props = server_schema.get("properties", {})
+    config_props = config_schema.get("properties", {})
+
+    if not config_props or not server_props:
+        return server_schema
+
+    merged_schema = copy.deepcopy(server_schema)
+    merged_props = merged_schema["properties"]
+
+    for prop_name, config_prop in config_props.items():
+        if prop_name not in merged_props:
+            continue
+        if "description" in config_prop:
+            merged_props[prop_name]["description"] = config_prop["description"]
+
+    return merged_schema

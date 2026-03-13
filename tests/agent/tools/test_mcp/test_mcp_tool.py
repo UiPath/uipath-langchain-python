@@ -1005,3 +1005,384 @@ class TestCreateMcpToolsFromConfig:
                     raise RuntimeError("boom")
 
             mock_client.dispose.assert_awaited_once()
+
+
+class TestMcpToolArgumentProperties:
+    """Test that argument_properties from config are applied to MCP tools."""
+
+    @pytest.fixture
+    def mock_mcp_client(self):
+        """Create a mock McpClient."""
+        return MagicMock(spec=McpClient)
+
+    @pytest.mark.asyncio
+    async def test_none_mode_passes_argument_properties_to_tool(self, mock_mcp_client):
+        """Test that in none mode, argument_properties from config are set on the tool."""
+        resource = AgentMcpResourceConfig(
+            name="test_server",
+            description="Test",
+            folder_path="/Shared",
+            slug="test",
+            available_tools=[
+                AgentMcpTool(
+                    name="divide",
+                    description="Divide two numbers",
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "number", "title": "A"},
+                            "b": {"type": "number", "title": "B"},
+                        },
+                        "required": ["a", "b"],
+                    },
+                    argument_properties={
+                        "$['a']": {
+                            "variant": "static",
+                            "value": 76,
+                            "isSensitive": False,
+                        }
+                    },
+                ),
+            ],
+        )
+
+        tools = await create_mcp_tools(resource, mock_mcp_client)
+
+        assert len(tools) == 1
+        tool = tools[0]
+        assert hasattr(tool, "argument_properties")
+        assert "$['a']" in tool.argument_properties
+
+    @pytest.mark.asyncio
+    async def test_none_mode_sets_wrapper_when_argument_properties_present(
+        self, mock_mcp_client
+    ):
+        """Test that a tool wrapper is set when argument_properties are present."""
+        resource = AgentMcpResourceConfig(
+            name="test_server",
+            description="Test",
+            folder_path="/Shared",
+            slug="test",
+            available_tools=[
+                AgentMcpTool(
+                    name="divide",
+                    description="Divide two numbers",
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "number"},
+                            "b": {"type": "number"},
+                        },
+                        "required": ["a", "b"],
+                    },
+                    argument_properties={
+                        "$['a']": {
+                            "variant": "static",
+                            "value": 76,
+                            "isSensitive": False,
+                        }
+                    },
+                ),
+            ],
+        )
+
+        tools = await create_mcp_tools(resource, mock_mcp_client)
+
+        tool = tools[0]
+        assert tool.awrapper is not None
+
+    @pytest.mark.asyncio
+    async def test_none_mode_no_wrapper_when_no_argument_properties(
+        self, mock_mcp_client
+    ):
+        """Test that no wrapper is set when argument_properties are empty."""
+        resource = AgentMcpResourceConfig(
+            name="test_server",
+            description="Test",
+            folder_path="/Shared",
+            slug="test",
+            available_tools=[
+                AgentMcpTool(
+                    name="power",
+                    description="Power function",
+                    input_schema={"type": "object", "properties": {}},
+                    argument_properties={},
+                ),
+            ],
+        )
+
+        tools = await create_mcp_tools(resource, mock_mcp_client)
+
+        tool = tools[0]
+        assert tool.awrapper is None
+
+    @pytest.mark.asyncio
+    async def test_schema_mode_carries_over_argument_properties(self, mock_mcp_client):
+        """Test that schema mode carries argument_properties from config to server tools."""
+        mock_mcp_client.list_tools = AsyncMock(
+            return_value=ListToolsResult(
+                tools=[
+                    Tool(
+                        name="divide",
+                        description="Divide from server",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "a": {"type": "number"},
+                                "b": {"type": "number"},
+                            },
+                            "required": ["a", "b"],
+                        },
+                    ),
+                ]
+            )
+        )
+
+        resource = AgentMcpResourceConfig(
+            name="test_server",
+            description="Test",
+            folder_path="/Shared",
+            slug="test",
+            dynamic_tools=DynamicToolsMode.SCHEMA,
+            available_tools=[
+                AgentMcpTool(
+                    name="divide",
+                    description="Divide (stale)",
+                    input_schema={"type": "object", "properties": {}},
+                    argument_properties={
+                        "$['a']": {
+                            "variant": "static",
+                            "value": 76,
+                            "isSensitive": False,
+                        }
+                    },
+                ),
+            ],
+        )
+
+        tools = await create_mcp_tools(resource, mock_mcp_client)
+
+        assert len(tools) == 1
+        tool = tools[0]
+        assert hasattr(tool, "argument_properties")
+        assert "$['a']" in tool.argument_properties
+        assert tool.awrapper is not None
+
+    @pytest.mark.asyncio
+    async def test_all_mode_carries_over_argument_properties_for_matching_tools(
+        self, mock_mcp_client
+    ):
+        """Test that all mode applies argument_properties for tools that match config."""
+        mock_mcp_client.list_tools = AsyncMock(
+            return_value=ListToolsResult(
+                tools=[
+                    Tool(
+                        name="divide",
+                        description="Divide from server",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "a": {"type": "number"},
+                                "b": {"type": "number"},
+                            },
+                        },
+                    ),
+                    Tool(
+                        name="new_tool",
+                        description="New tool not in config",
+                        inputSchema={"type": "object", "properties": {}},
+                    ),
+                ]
+            )
+        )
+
+        resource = AgentMcpResourceConfig(
+            name="test_server",
+            description="Test",
+            folder_path="/Shared",
+            slug="test",
+            dynamic_tools=DynamicToolsMode.ALL,
+            available_tools=[
+                AgentMcpTool(
+                    name="divide",
+                    description="Divide (stale)",
+                    input_schema={"type": "object", "properties": {}},
+                    argument_properties={
+                        "$['a']": {
+                            "variant": "static",
+                            "value": 76,
+                            "isSensitive": False,
+                        }
+                    },
+                ),
+            ],
+        )
+
+        tools = await create_mcp_tools(resource, mock_mcp_client)
+
+        assert len(tools) == 2
+        divide_tool = next(t for t in tools if t.name == "divide")
+        new_tool = next(t for t in tools if t.name == "new_tool")
+
+        # divide should have argument_properties carried over
+        assert "$['a']" in divide_tool.argument_properties
+        assert divide_tool.awrapper is not None
+
+        # new_tool should have empty argument_properties
+        assert not new_tool.argument_properties
+        assert new_tool.awrapper is None
+
+
+class TestMergeDescriptionsFromConfig:
+    """Test _merge_descriptions_from_config helper function."""
+
+    def test_merges_description_from_config(self):
+        """Test that config descriptions are merged into server schema."""
+        from uipath_langchain.agent.tools.mcp.mcp_tool import (
+            _merge_descriptions_from_config,
+        )
+
+        server_schema = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "number", "title": "A"},
+                "b": {"type": "number", "title": "B"},
+            },
+        }
+        config_schema = {
+            "type": "object",
+            "properties": {
+                "b": {
+                    "type": "number",
+                    "title": "B",
+                    "description": "This is the dividend.",
+                },
+            },
+        }
+
+        result = _merge_descriptions_from_config(server_schema, config_schema)
+
+        assert result["properties"]["b"]["description"] == "This is the dividend."
+        assert "description" not in result["properties"]["a"]
+
+    def test_does_not_modify_server_schema_in_place(self):
+        """Test that the original server schema is not mutated."""
+        from uipath_langchain.agent.tools.mcp.mcp_tool import (
+            _merge_descriptions_from_config,
+        )
+
+        server_schema = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "number"},
+            },
+        }
+        config_schema = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "number", "description": "Override"},
+            },
+        }
+
+        result = _merge_descriptions_from_config(server_schema, config_schema)
+
+        assert "description" not in server_schema["properties"]["a"]
+        assert result["properties"]["a"]["description"] == "Override"
+
+    def test_skips_config_properties_not_in_server(self):
+        """Test that config properties missing from server are ignored."""
+        from uipath_langchain.agent.tools.mcp.mcp_tool import (
+            _merge_descriptions_from_config,
+        )
+
+        server_schema = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "number"},
+            },
+        }
+        config_schema = {
+            "type": "object",
+            "properties": {
+                "removed_field": {"type": "string", "description": "Gone"},
+            },
+        }
+
+        result = _merge_descriptions_from_config(server_schema, config_schema)
+
+        assert "removed_field" not in result["properties"]
+
+    def test_returns_server_schema_when_no_config_properties(self):
+        """Test that server schema is returned as-is when config has no properties."""
+        from uipath_langchain.agent.tools.mcp.mcp_tool import (
+            _merge_descriptions_from_config,
+        )
+
+        server_schema = {
+            "type": "object",
+            "properties": {"a": {"type": "number"}},
+        }
+        config_schema = {"type": "object", "properties": {}}
+
+        result = _merge_descriptions_from_config(server_schema, config_schema)
+
+        assert result is server_schema  # same object, no copy needed
+
+    @pytest.mark.asyncio
+    async def test_schema_mode_merges_descriptions(self):
+        """Test that schema mode merges prompt descriptions from config into server schema."""
+        mock_mcp_client = MagicMock(spec=McpClient)
+        mock_mcp_client.list_tools = AsyncMock(
+            return_value=ListToolsResult(
+                tools=[
+                    Tool(
+                        name="divide",
+                        description="Divide from server",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "a": {"type": "number", "title": "A"},
+                                "b": {"type": "number", "title": "B"},
+                            },
+                            "required": ["a", "b"],
+                        },
+                    ),
+                ]
+            )
+        )
+
+        resource = AgentMcpResourceConfig(
+            name="test_server",
+            description="Test",
+            folder_path="/Shared",
+            slug="test",
+            dynamic_tools=DynamicToolsMode.SCHEMA,
+            available_tools=[
+                AgentMcpTool(
+                    name="divide",
+                    description="Divide (stale)",
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "number", "title": "A"},
+                            "b": {
+                                "type": "number",
+                                "title": "B",
+                                "description": "This is the dividend.",
+                            },
+                        },
+                    },
+                ),
+            ],
+        )
+
+        tools = await create_mcp_tools(resource, mock_mcp_client)
+
+        tool = tools[0]
+        # Server schema should have config description merged in
+        assert (
+            tool.args_schema["properties"]["b"]["description"]
+            == "This is the dividend."
+        )
+        # Server description for tool itself should be used (not stale)
+        assert tool.description == "Divide from server"
