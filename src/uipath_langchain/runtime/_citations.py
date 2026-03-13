@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -108,10 +109,11 @@ def _make_source(
         if citation not in source_numbers:
             source_numbers[citation] = next_number
             next_number += 1
+        mime_type, _ = mimetypes.guess_type(citation.title)
         return UiPathConversationCitationSourceMedia(
             title=citation.title,
             number=source_numbers[citation],
-            mime_type=None,
+            mime_type=mime_type,
             download_url=citation.reference,
             page_number=citation.page_number,
         ), next_number
