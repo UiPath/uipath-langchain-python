@@ -167,12 +167,8 @@ class McpClient(UiPathDisposableProtocol):
         await self._stack.__aenter__()
 
         # Create HTTP client with SSL, proxy, and redirect settings
-        default_client_kwargs = get_httpx_client_kwargs()
-        client_kwargs = {
-            **default_client_kwargs,
-            "headers": self._headers,
-            "timeout": self._timeout,
-        }
+        client_kwargs = get_httpx_client_kwargs(headers=self._headers)
+        client_kwargs["timeout"] = self._timeout
         self._http_client = await self._stack.enter_async_context(
             httpx.AsyncClient(**client_kwargs)
         )
