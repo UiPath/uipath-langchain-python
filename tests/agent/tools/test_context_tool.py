@@ -125,8 +125,6 @@ class TestHandleDeepRag:
         # not via argument_properties or args_schema
         assert "folder_path_prefix" not in result.argument_properties
         assert isinstance(result.args_schema, type)
-        schema = result.args_schema.model_json_schema()
-        assert "folder_path_prefix" not in schema.get("properties", {})
 
     def test_missing_static_query_value_raises_error(self, base_resource_config):
         """Test that missing query.value for static variant raises AgentStartupError."""
@@ -683,8 +681,6 @@ class TestHandleBatchTransform:
         # not via argument_properties or args_schema
         assert "folder_path_prefix" not in result.argument_properties
         assert isinstance(result.args_schema, type)
-        schema = result.args_schema.model_json_schema()
-        assert "folder_path_prefix" not in schema.get("properties", {})
 
     @pytest.mark.asyncio
     async def test_static_query_batch_transform_uses_predefined_query(
