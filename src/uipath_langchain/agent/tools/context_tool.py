@@ -70,6 +70,7 @@ def _build_folder_path_prefix_arg_props(
     at the resource level but does set settings.folder_path_prefix
     with variant="argument".
     """
+    assert resource.settings is not None
     assert resource.settings.folder_path_prefix is not None
     argument_path = (resource.settings.folder_path_prefix.value or "").strip("{}")
     return {
@@ -83,12 +84,14 @@ def _build_folder_path_prefix_arg_props(
 
 def is_static_query(resource: AgentContextResourceConfig) -> bool:
     """Check if the resource configuration uses a static query variant."""
+    assert resource.settings is not None
     if resource.settings.query is None or resource.settings.query.variant is None:
         return False
     return resource.settings.query.variant.lower() == "static"
 
 
 def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
+    assert resource.settings is not None
     tool_name = sanitize_tool_name(resource.name)
     retrieval_mode = resource.settings.retrieval_mode.lower()
     if retrieval_mode == AgentContextRetrievalMode.DEEP_RAG.value.lower():
@@ -102,6 +105,7 @@ def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
 def handle_semantic_search(
     tool_name: str, resource: AgentContextResourceConfig
 ) -> StructuredTool:
+    assert resource.settings is not None
     ensure_valid_fields(resource)
 
     assert resource.settings.query.variant is not None
@@ -172,6 +176,7 @@ def handle_semantic_search(
 def handle_deep_rag(
     tool_name: str, resource: AgentContextResourceConfig
 ) -> StructuredTool:
+    assert resource.settings is not None
     ensure_valid_fields(resource)
 
     assert resource.settings.query.variant is not None
@@ -291,6 +296,7 @@ def handle_deep_rag(
 def handle_batch_transform(
     tool_name: str, resource: AgentContextResourceConfig
 ) -> StructuredTool:
+    assert resource.settings is not None
     ensure_valid_fields(resource)
 
     assert resource.settings.query is not None
@@ -458,6 +464,7 @@ def handle_batch_transform(
 
 
 def ensure_valid_fields(resource_config: AgentContextResourceConfig):
+    assert resource_config.settings is not None
     if not resource_config.settings.query.variant:
         raise AgentStartupError(
             code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,

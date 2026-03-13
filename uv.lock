@@ -3076,6 +3076,15 @@ wheels = [
 ]
 
 [[package]]
+name = "sqlparse"
+version = "0.5.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/76/437d71068094df0726366574cf3432a4ed754217b436eb7429415cf2d480/sqlparse-0.5.5.tar.gz", hash = "sha256:e20d4a9b0b8585fdf63b10d30066c7c94c5d7a7ec47c889a2d83a3caa93ff28e", size = 120815, upload-time = "2025-12-19T07:17:45.073Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/49/4b/359f28a903c13438ef59ebeee215fb25da53066db67b305c125f1c6d2a25/sqlparse-0.5.5-py3-none-any.whl", hash = "sha256:12a08b3bf3eec877c519589833aed092e2444e68240a3577e8e26148acc7b1ba", size = 46138, upload-time = "2025-12-19T07:17:46.573Z" },
+]
+
+[[package]]
 name = "sse-starlette"
 version = "3.2.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3280,7 +3289,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.10.10"
+version = "2.10.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -3303,9 +3312,9 @@ dependencies = [
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/55/afaab06bdec6383eb7af76cc6138dfe1ea07a29d887556e8e10ff303cb13/uipath-2.10.10.tar.gz", hash = "sha256:542799a16bfeb7c8024e70cb9fed2466ccdcf2d597edc19e9d28bfd91adde0a3", size = 2455323, upload-time = "2026-03-06T22:14:51.499Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d4/3a/3a93f5c54078b993e6cecdae6069ebafe122fceb639b1f59ad0aa3f1b765/uipath-2.10.13.tar.gz", hash = "sha256:13795c00dfb7391f248efb6ae4b96f096a4a8131d0df5f8ec0b7f265be1d0e10", size = 2456921, upload-time = "2026-03-13T07:51:16.484Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/f9/ab060e44b4bc784e93a1c33ad3f1eb4c19e55b3b824c4021457e881a28c3/uipath-2.10.10-py3-none-any.whl", hash = "sha256:2935fc7902fa1295774b42f7512ab278c7ae6a18cb02a99fb0167f9cb1fda880", size = 357294, upload-time = "2026-03-06T22:14:49.511Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/f9/c8745f866a39047f529ee0413aedd8fbf81f7ffd5dd46862cb5e6221d58d/uipath-2.10.13-py3-none-any.whl", hash = "sha256:fc1c8503b9cc3538cf3003cb10e1e3e736529aba4272086066402fde21154b65", size = 357769, upload-time = "2026-03-13T07:51:14.599Z" },
 ]
 
 [[package]]
@@ -3324,7 +3333,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.8.17"
+version = "0.8.18"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -3416,18 +3425,19 @@ dev = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.0.18"
+version = "0.0.23"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic-function-models" },
+    { name = "sqlparse" },
     { name = "tenacity" },
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/26/eb/848292baafcb7273b189004161b754e46431bb28a711b7f359a2b7642b27/uipath_platform-0.0.18.tar.gz", hash = "sha256:0d0cf196ffc06de90c3ec12a7b52d88b81f38a34e361eb81690ff88cd2a9a0bd", size = 264141, upload-time = "2026-03-09T16:24:11.158Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/61/c1/f1cfd23d977fc2fec2e880dac42b1fdb78c28fef80008ebf4bd43ca9b12f/uipath_platform-0.0.23.tar.gz", hash = "sha256:a84d9da29865155080efcc837f6c2b2186d480e34fc877dec06f3ec315c1e52c", size = 269669, upload-time = "2026-03-13T07:50:06.953Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/36/69/a96b8c66d4a0ed5d5ac1a3e44a5836d1b9e4151519a884b67d8db18fb3d8/uipath_platform-0.0.18-py3-none-any.whl", hash = "sha256:9f46b0b01254b95b18cc753bd91f5a5802d0a15e7284224d6f9a1309bb71b6bf", size = 159073, upload-time = "2026-03-09T16:24:09.717Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/32/167abe3730ab8c0dd89abee6ebea6e1a35e0a1548be620a491a60bc7cc0d/uipath_platform-0.0.23-py3-none-any.whl", hash = "sha256:e2ea4d9341540a5a02baca8e07ba05dfb8947f2d525f8677834f81c735826772", size = 161946, upload-time = "2026-03-13T07:50:04.956Z" },
 ]
 
 [[package]]
