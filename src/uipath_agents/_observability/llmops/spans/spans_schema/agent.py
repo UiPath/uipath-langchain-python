@@ -4,6 +4,8 @@ Handles agent run and agent output spans.
 """
 
 import json
+import logging
+import threading
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Generator, Optional
 
@@ -30,6 +32,8 @@ from .base import (
     uipath_source_context,
 )
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "AgentSpanSchema",
 ]
@@ -54,6 +58,18 @@ class AgentSpanSchema:
         self._tracer = tracer
         self._upsert_started = upsert_started_fn
         self._upsert_complete = upsert_complete_fn
+
+    def _fire_and_forget_upsert(self, span: Span) -> threading.Thread:
+        def _upsert() -> None:
+            try:
+                if self._upsert_started:
+                    self._upsert_started(span)
+            except Exception:
+                logger.debug("Background upsert_started failed", exc_info=True)
+
+        thread = threading.Thread(target=_upsert, daemon=True)
+        thread.start()
+        return thread
 
     @contextmanager
     def start_agent_run(
@@ -112,6 +128,7 @@ class AgentSpanSchema:
         )
 
         agent_span: Optional[Span] = None
+        upsert_thread: Optional[threading.Thread] = None
         final_status: int = SpanStatus.OK
         # Use start_span + use_span(end_on_exit=False) so the caller
         # controls when span.end() fires. This prevents
@@ -123,7 +140,7 @@ class AgentSpanSchema:
                 agent_span = span
                 apply_attributes(span, attrs)
                 if self._upsert_started:
-                    self._upsert_started(span)
+                    upsert_thread = self._fire_and_forget_upsert(span)
 
                 try:
                     yield span
@@ -136,6 +153,8 @@ class AgentSpanSchema:
         finally:
             reference_id_context.reset(token)
             uipath_source_context.reset(source_token)
+            if upsert_thread is not None:
+                upsert_thread.join()
             # Only upsert if the caller ended the span. Suspended spans
             # are intentionally left open (is_recording=True).
             if (

@@ -57,6 +57,14 @@ class TestBuildAgentGraph:
         ):
             yield
 
+    @pytest.fixture(autouse=True)
+    def mock_get_flags(self):
+        with patch(
+            "uipath_agents.agent_graph_builder.graph.get_flags",
+            return_value={},
+        ):
+            yield
+
     async def test_builds_graph_with_minimal_config(self):
         """Test that graph is built with minimal configuration."""
         agent_def = create_test_agent_definition()
@@ -835,6 +843,14 @@ class TestBuildAgentGraphParallelToolCalls:
             "uipath_agents.agent_graph_builder.graph.create_mcp_tools_and_clients",
             new_callable=AsyncMock,
             return_value=([], []),
+        ):
+            yield
+
+    @pytest.fixture(autouse=True)
+    def mock_get_flags(self):
+        with patch(
+            "uipath_agents.agent_graph_builder.graph.get_flags",
+            return_value={},
         ):
             yield
 

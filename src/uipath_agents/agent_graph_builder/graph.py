@@ -1,5 +1,6 @@
 """Agent graph construction - wrapper delegating to uipath_langchain.agent.graph."""
 
+import asyncio
 from typing import Any, Sequence
 
 from langgraph.graph.state import CompiledStateGraph, StateGraph
@@ -22,7 +23,8 @@ from uipath_langchain.agent.tools.mcp import create_mcp_tools_and_clients
 
 from uipath_agents.agent_graph_builder.version import supports_parallel_tool_calls
 
-from .config import AgentExecutionType, get_thinking_messages_limit
+from .._config import get_flags
+from .config import _FF_MODEL_SETTINGS, AgentExecutionType, get_thinking_messages_limit
 from .llm_utils import create_llm
 from .message_utils import create_message_factory
 from .session_info_debug_state import SessionInfoDebugStateFactory
@@ -69,15 +71,27 @@ async def build_agent_graph(
         if agent_definition.settings.byom_properties
         else None
     )
-    llm = create_llm(
-        model=agent_definition.settings.model,
-        temperature=agent_definition.settings.temperature,
-        max_tokens=agent_definition.settings.max_tokens,
-        execution_type=execution_type,
-        byo_connection_id=byo_connection_id,
-        disable_streaming=(not agent_definition.is_conversational),
-        is_conversational=bool(agent_definition.is_conversational),
+
+    flags_task = asyncio.get_running_loop().run_in_executor(
+        None, get_flags, [_FF_MODEL_SETTINGS]
     )
+
+    try:
+        llm = create_llm(
+            model=agent_definition.settings.model,
+            temperature=agent_definition.settings.temperature,
+            max_tokens=agent_definition.settings.max_tokens,
+            execution_type=execution_type,
+            byo_connection_id=byo_connection_id,
+            disable_streaming=(not agent_definition.is_conversational),
+            is_conversational=bool(agent_definition.is_conversational),
+        )
+    finally:
+        try:
+            await flags_task
+        except Exception:
+            pass
+
     tools = await create_tools_from_resources(agent_definition, llm)
     session_info_factory = (
         SessionInfoDebugStateFactory()

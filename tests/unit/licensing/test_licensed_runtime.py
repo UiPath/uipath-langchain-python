@@ -154,6 +154,8 @@ class TestLicensedRuntimeStartupLicensing:
             "uipath_agents._licensing.licensed_runtime.register_licensing_async"
         ) as mock_license:
             await runtime.execute({"input": "test"})
+            if runtime._licensing_task:
+                await runtime._licensing_task
             mock_license.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -172,6 +174,8 @@ class TestLicensedRuntimeStartupLicensing:
             "uipath_agents._licensing.licensed_runtime.register_licensing_async"
         ) as mock_license:
             await runtime.execute({"input": "first"})
+            if runtime._licensing_task:
+                await runtime._licensing_task
             await runtime.execute({"input": "second"})
             mock_license.assert_awaited_once()
 
@@ -216,6 +220,8 @@ class TestLicensedRuntimeStartupLicensing:
         ) as mock_license:
             async for _ in runtime.stream({"input": "test"}):
                 pass
+            if runtime._licensing_task:
+                await runtime._licensing_task
             mock_license.assert_awaited_once()
 
 

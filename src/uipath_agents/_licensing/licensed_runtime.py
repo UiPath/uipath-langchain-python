@@ -8,6 +8,7 @@ Handles two licensing modes:
 - Per-exchange conversational consumption after each successful execution
 """
 
+import asyncio
 import logging
 from typing import Any, AsyncGenerator, Dict, Optional
 
@@ -113,6 +114,8 @@ class LicensedRuntime:
         self._execution_type = execution_type
         self._startup_licensed = is_resume
 
+        self._licensing_task: asyncio.Task[None] | None = None
+
         self._log_initialization(agent_definition, is_resume)
 
         self._consumption_handler: ConversationalConsumptionHandler | None = None
@@ -130,7 +133,7 @@ class LicensedRuntime:
         input: Dict[str, Any] | None = None,
         options: UiPathExecuteOptions | None = None,
     ) -> UiPathRuntimeResult:
-        await self._register_startup_licensing()
+        self._register_startup_licensing()
         self._reset_tool_tracker()
 
         result = await self._delegate.execute(input, options)
@@ -145,7 +148,7 @@ class LicensedRuntime:
         input: Dict[str, Any] | None = None,
         options: UiPathStreamOptions | None = None,
     ) -> AsyncGenerator[UiPathRuntimeEvent, None]:
-        await self._register_startup_licensing()
+        self._register_startup_licensing()
         self._reset_tool_tracker()
 
         final_result: Optional[UiPathRuntimeResult] = None
@@ -161,6 +164,11 @@ class LicensedRuntime:
         return await self._delegate.get_schema()
 
     async def dispose(self) -> None:
+        if self._licensing_task and not self._licensing_task.done():
+            try:
+                await self._licensing_task
+            except Exception:
+                pass
         await self._delegate.dispose()
 
     def get_agent_model(self) -> str | None:
@@ -194,10 +202,15 @@ class LicensedRuntime:
             licensing_context,
         )
 
-    async def _register_startup_licensing(self) -> None:
+    def _register_startup_licensing(self) -> None:
         if self._startup_licensed:
             return
         self._startup_licensed = True
+        self._licensing_task = asyncio.create_task(
+            self._do_register_startup_licensing()
+        )
+
+    async def _do_register_startup_licensing(self) -> None:
         try:
             await register_licensing_async(
                 self._agent_definition, job_key=UiPathConfig.job_key
