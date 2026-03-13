@@ -89,6 +89,7 @@ def _resolve_folder_path_prefix_from_state(
 
 def _resolve_file_extension(resource: AgentContextResourceConfig) -> str | None:
     """Resolve file extension from settings, returning None for 'All' or empty."""
+    assert resource.settings is not None
     if resource.settings.file_extension and resource.settings.file_extension.value:
         ext = resource.settings.file_extension.value
         if ext.lower() == "all":
@@ -121,6 +122,7 @@ def is_static_query(resource: AgentContextResourceConfig) -> bool:
 
 def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
     tool_name = sanitize_tool_name(resource.name)
+    assert resource.settings is not None
     retrieval_mode = resource.settings.retrieval_mode.lower()
     if retrieval_mode == AgentContextRetrievalMode.DEEP_RAG.value.lower():
         return handle_deep_rag(tool_name, resource)
@@ -134,11 +136,14 @@ def handle_semantic_search(
     tool_name: str, resource: AgentContextResourceConfig
 ) -> StructuredTool:
     ensure_valid_fields(resource)
+    assert resource.settings is not None
 
     assert resource.settings.query.variant is not None
 
     file_extension = _resolve_file_extension(resource)
     static_folder_path_prefix = _resolve_static_folder_path_prefix(resource)
+    result_count = resource.settings.result_count
+    threshold = resource.settings.threshold
 
     static = is_static_query(resource)
     prompt = resource.settings.query.value if static else None
@@ -200,8 +205,8 @@ def handle_semantic_search(
         retriever = ContextGroundingRetriever(
             index_name=resource.index_name,
             folder_path=get_execution_folder_path(),
-            number_of_results=resource.settings.result_count,
-            threshold=resource.settings.threshold,
+            number_of_results=result_count,
+            threshold=threshold,
             scope_folder=resolved_folder_path_prefix,
             scope_extension=file_extension,
         )
@@ -268,6 +273,7 @@ def handle_deep_rag(
     tool_name: str, resource: AgentContextResourceConfig
 ) -> StructuredToolWithArgumentProperties:
     ensure_valid_fields(resource)
+    assert resource.settings is not None
 
     assert resource.settings.query.variant is not None
 
@@ -380,6 +386,7 @@ def handle_batch_transform(
     tool_name: str, resource: AgentContextResourceConfig
 ) -> StructuredToolWithArgumentProperties:
     ensure_valid_fields(resource)
+    assert resource.settings is not None
 
     assert resource.settings.query is not None
     assert resource.settings.query.variant is not None
@@ -532,6 +539,7 @@ def handle_batch_transform(
 
 
 def ensure_valid_fields(resource_config: AgentContextResourceConfig):
+    assert resource_config.settings is not None
     if not resource_config.settings.query.variant:
         raise AgentStartupError(
             code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
