@@ -10,8 +10,8 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 
-from uipath_langchain.agent.tools.base_uipath_structured_tool import (
-    BaseUiPathStructuredTool,
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
 )
 
 from ..utils import sanitize_tool_name
@@ -73,6 +73,8 @@ async def create_mcp_tools(
         f"(dynamic_tools={dynamic_tools.value})"
     )
 
+    config_tools_by_name = {t.name: t for t in config.available_tools}
+
     if dynamic_tools in (DynamicToolsMode.SCHEMA, DynamicToolsMode.ALL):
         logger.info(f"Fetching tools from MCP server '{config.slug}' via list_tools")
         result = await mcpClient.list_tools()
@@ -96,15 +98,19 @@ async def create_mcp_tools(
                 f"Filtered to {len(server_tools)} tools matching availableTools"
             )
 
-        mcp_tools = [
-            AgentMcpTool(
-                name=tool.name,
-                description=tool.description or "",
-                input_schema=tool.inputSchema,
-                output_schema=tool.outputSchema,
+        mcp_tools = []
+        for tool in server_tools:
+            config_tool = config_tools_by_name.get(tool.name)
+            argument_properties = config_tool.argument_properties if config_tool else {}
+            mcp_tools.append(
+                AgentMcpTool(
+                    name=tool.name,
+                    description=tool.description or "",
+                    input_schema=tool.inputSchema,
+                    output_schema=tool.outputSchema,
+                    argument_properties=argument_properties,
+                )
             )
-            for tool in server_tools
-        ]
     else:
         mcp_tools = config.available_tools
         logger.info(
@@ -112,21 +118,25 @@ async def create_mcp_tools(
             f"server '{config.slug}'"
         )
 
-    return [
-        BaseUiPathStructuredTool(
-            name=sanitize_tool_name(mcp_tool.name),
-            description=mcp_tool.description,
-            args_schema=mcp_tool.input_schema,
-            coroutine=build_mcp_tool(mcp_tool, mcpClient),
-            metadata={
-                "tool_type": "mcp",
-                "display_name": mcp_tool.name,
-                "folder_path": config.folder_path,
-                "slug": config.slug,
-            },
+    tools: list[BaseTool] = []
+    for mcp_tool in mcp_tools:
+        tools.append(
+            StructuredToolWithArgumentProperties(
+                name=sanitize_tool_name(mcp_tool.name),
+                description=mcp_tool.description,
+                args_schema=mcp_tool.input_schema,
+                coroutine=build_mcp_tool(mcp_tool, mcpClient),
+                output_type=Any,
+                metadata={
+                    "tool_type": "mcp",
+                    "display_name": mcp_tool.name,
+                    "folder_path": config.folder_path,
+                    "slug": config.slug,
+                },
+                argument_properties=mcp_tool.argument_properties,
+            )
         )
-        for mcp_tool in mcp_tools
-    ]
+    return tools
 
 
 def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
