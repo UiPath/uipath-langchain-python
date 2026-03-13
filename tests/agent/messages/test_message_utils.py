@@ -1,11 +1,12 @@
 """Tests for agent/messages/message_utils.py module."""
 
-from langchain.messages import AIMessage, ToolCall
+from langchain.messages import AIMessage, HumanMessage, ToolCall
 from langchain_core.messages.content import (
     ContentBlock,
     create_text_block,
     create_tool_call,
 )
+from langgraph.graph.message import add_messages
 
 from uipath_langchain.agent.messages.message_utils import replace_tool_calls
 
@@ -178,6 +179,75 @@ class TestReplaceToolCalls:
         ]
         assert len(tool_call_blocks) == 1
         assert tool_call_blocks[0]["name"] == "new_tool"
+
+    def test_replace_tool_calls_preserves_message_id(self):
+        """Test that the original message id is preserved after replacement."""
+        original_tool_calls = [ToolCall(name="old_tool", args={}, id="old_id")]
+        original_content_blocks: list[ContentBlock] = [
+            create_text_block("Test message"),
+            create_tool_call(name="old_tool", args={}, id="old_id"),
+        ]
+        original_message = AIMessage(
+            content_blocks=original_content_blocks,
+            tool_calls=original_tool_calls,
+            id="msg-original-id",
+        )
+
+        new_tool_calls = [ToolCall(name="new_tool", args={}, id="new_id")]
+
+        result = replace_tool_calls(original_message, new_tool_calls)
+
+        assert result.id == "msg-original-id"
+
+    def test_replace_tool_calls_updated_args_visible_via_add_messages(self):
+        """Test that updated tool call args are visible after add_messages processes them.
+
+        Reproduces the HITL bug: when a human reviews and updates activity input
+        during an escalation, the activity must execute with the reviewed args.
+        Without id preservation, add_messages appends a duplicate AIMessage
+        instead of replacing the original, causing the tool to run with stale args.
+        """
+        original_tool_calls = [
+            ToolCall(
+                name="my_activity", args={"input": "original_value"}, id="call_1"
+            )
+        ]
+        original_ai_message = AIMessage(
+            content_blocks=[
+                create_text_block("I will invoke the activity"),
+                create_tool_call(
+                    name="my_activity", args={"input": "original_value"}, id="call_1"
+                ),
+            ],
+            tool_calls=original_tool_calls,
+            id="msg-from-llm",
+        )
+
+        messages: list = [
+            HumanMessage(content="do something", id="msg-human"),
+            original_ai_message,
+        ]
+
+        # Simulate HITL review: human changes the input
+        reviewed_tool_calls = [
+            ToolCall(
+                name="my_activity", args={"input": "reviewed_value"}, id="call_1"
+            )
+        ]
+        updated_ai_message = replace_tool_calls(original_ai_message, reviewed_tool_calls)
+
+        # Simulate what Command(update={"messages": [updated_ai_message]}) does
+        result_messages = add_messages(messages, [updated_ai_message])
+
+        # There must be exactly one AIMessage — not a duplicate
+        ai_messages = [m for m in result_messages if isinstance(m, AIMessage)]
+        assert len(ai_messages) == 1, (
+            f"Expected 1 AIMessage but got {len(ai_messages)}; "
+            "add_messages appended instead of replacing (id mismatch)"
+        )
+
+        # The surviving AIMessage must carry the reviewed args
+        assert ai_messages[0].tool_calls[0]["args"] == {"input": "reviewed_value"}
 
     def test_replace_tool_calls_content_blocks(self):
         """Test that non-tool content blocks are preserved."""
