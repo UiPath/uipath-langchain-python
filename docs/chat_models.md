@@ -29,7 +29,7 @@ llm = ChatOpenAI(
 You can simply change `ChatOpenAi` with `UiPathAzureChatOpenAI`, you don't have to provide an OpenAI token.
 
 ```python
-from uipath_langchain.chat.models import UiPathAzureChatOpenAI
+from uipath_langchain_client.clients.openai.chat_models import UiPathAzureChatOpenAI
 
 llm = UiPathAzureChatOpenAI(
     model="gpt-4.1-mini-2025-04-14",
@@ -69,7 +69,7 @@ llm = ChatAnthropic(
 You can replace it with `UiPathChat` like so:
 
 ```python
-from uipath_langchain.chat.models import UiPathChat
+from uipath_langchain_client import UiPathChat
 
 llm = UiPathChat(
     model="anthropic.claude-3-opus-20240229-v1:0",

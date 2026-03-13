@@ -6,7 +6,7 @@ from typing import List, Dict, Optional
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import interrupt, Command
 from uipath.platform import UiPath
-from uipath_langchain.chat import UiPathChat
+from uipath_langchain_client import UiPathChat
 from uipath.platform.common import CreateTask
 from email_organizer.outlook_client import OutlookClient
 from difflib import SequenceMatcher
