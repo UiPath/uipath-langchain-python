@@ -154,6 +154,7 @@ class InstrumentedRuntime:
                 result = await self._delegate.execute(input, options)
             except Exception as e:
                 self._resume_final_status = SpanStatus.ERROR
+                self._callback.fail_pending_suspended_spans(e)
                 if saved_context:
                     self._handle_resume_error(saved_context, e)
                 raise
@@ -218,6 +219,7 @@ class InstrumentedRuntime:
                     yield event
             except Exception as e:
                 self._resume_final_status = SpanStatus.ERROR
+                self._callback.fail_pending_suspended_spans(e)
                 if saved_context:
                     self._handle_resume_error(saved_context, e)
                 raise

@@ -675,11 +675,16 @@ class ToolSpanInstrumentor(BaseSpanInstrumentor):
             if child_span:
                 SpanHierarchyManager.pop(run_id)
                 self._span_factory.end_span_error(child_span, exc)
+                if child_span is self._state.pending_process_span:
+                    self._state.pending_process_span = None
 
             span = self._spans.pop(run_id, None)
             if span:
                 SpanHierarchyManager.pop(run_id)
                 self._span_factory.end_span_error(span, exc)
+                if span is self._state.pending_tool_span:
+                    self._state.pending_tool_span = None
+                    self._state.pending_tool_name = None
 
         except Exception:
             logger.exception("Error in on_tool_error callback")

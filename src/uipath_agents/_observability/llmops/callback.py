@@ -442,6 +442,25 @@ class LlmOpsInstrumentationCallback(BaseCallbackHandler):
 
     # --- Cleanup ---
 
+    def fail_pending_suspended_spans(self, error: BaseException) -> None:
+        """Mark pending suspended tool/process spans as failed.
+
+        Called when trigger creation fails after a GraphInterrupt upserted
+        spans as UNSET ("running"). Ends them with ERROR status so they
+        don't remain permanently stuck as "running" in LLMOps traces.
+        """
+        if self._state.pending_process_span:
+            self._state.span_factory.end_span_error(
+                self._state.pending_process_span, error
+            )
+            self._state.pending_process_span = None
+        if self._state.pending_tool_span:
+            self._state.span_factory.end_span_error(
+                self._state.pending_tool_span, error
+            )
+            self._state.pending_tool_span = None
+        self._state.pending_tool_name = None
+
     def cleanup(self) -> None:
         """Clean up all spans and state."""
         # End orphaned spans
