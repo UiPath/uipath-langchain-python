@@ -20,15 +20,54 @@ from uipath.platform.context_grounding import (
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.tools.context_tool import (
+    _normalize_folder_prefix,
     build_glob_pattern,
     create_context_tool,
     handle_batch_transform,
     handle_deep_rag,
     handle_semantic_search,
 )
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
+)
 from uipath_langchain.agent.tools.structured_tool_with_output_type import (
     StructuredToolWithOutputType,
 )
+
+
+def _make_context_resource(
+    name="test_tool",
+    description="Test tool",
+    index_name="test-index",
+    folder_path="/test/folder",
+    query_value=None,
+    query_variant="static",
+    citation_mode_value=None,
+    retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+    folder_path_prefix=None,
+    **kwargs,
+):
+    """Helper to create an AgentContextResourceConfig."""
+    return AgentContextResourceConfig(
+        name=name,
+        description=description,
+        resource_type="context",
+        index_name=index_name,
+        folder_path=folder_path,
+        settings=AgentContextSettings(
+            result_count=1,
+            retrieval_mode=retrieval_mode,
+            query=AgentContextQuerySetting(
+                value=query_value,
+                description="some description",
+                variant=query_variant,
+            ),
+            citation_mode=citation_mode_value,
+            folder_path_prefix=folder_path_prefix,
+        ),
+        is_enabled=True,
+        **kwargs,
+    )
 
 
 class TestHandleDeepRag:
@@ -37,37 +76,7 @@ class TestHandleDeepRag:
     @pytest.fixture
     def base_resource_config(self):
         """Fixture for base resource configuration."""
-
-        def _create_config(
-            name="test_deep_rag",
-            description="Test Deep RAG tool",
-            index_name="test-index",
-            folder_path="/test/folder",
-            query_value=None,
-            query_variant="static",
-            citation_mode_value=None,
-            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
-        ):
-            return AgentContextResourceConfig(
-                name=name,
-                description=description,
-                resource_type="context",
-                index_name=index_name,
-                folder_path=folder_path,
-                settings=AgentContextSettings(
-                    result_count=1,
-                    retrieval_mode=retrieval_mode,
-                    query=AgentContextQuerySetting(
-                        value=query_value,
-                        description="some description",
-                        variant=query_variant,
-                    ),
-                    citation_mode=citation_mode_value,
-                ),
-                is_enabled=True,
-            )
-
-        return _create_config
+        return _make_context_resource
 
     def test_successful_deep_rag_creation(self, base_resource_config):
         """Test successful creation of Deep RAG tool with all required fields."""
@@ -78,15 +87,44 @@ class TestHandleDeepRag:
 
         result = handle_deep_rag("test_deep_rag", resource)
 
-        assert isinstance(result, StructuredToolWithOutputType)
+        assert isinstance(result, StructuredToolWithArgumentProperties)
         assert result.name == "test_deep_rag"
-        assert result.description == "Test Deep RAG tool"
+        assert result.description == "Test tool"
         assert hasattr(result.args_schema, "model_json_schema")
         assert result.args_schema.model_json_schema()["properties"] == {}
         assert issubclass(result.output_type, DeepRagContent)
         schema = result.output_type.model_json_schema()
         assert "deepRagId" in schema["properties"]
         assert schema["properties"]["deepRagId"]["type"] == "string"
+
+    def test_deep_rag_has_tool_wrapper(self, base_resource_config):
+        """Test that Deep RAG tool has a tool wrapper for static args resolution."""
+        resource = base_resource_config(
+            citation_mode_value=AgentContextValueSetting(value="Inline"),
+            query_value="some query",
+        )
+
+        result = handle_deep_rag("test_deep_rag", resource)
+
+        assert result.awrapper is not None
+
+    def test_deep_rag_with_folder_path_prefix_from_settings(self, base_resource_config):
+        """Test that folder_path_prefix with argument variant is resolved in wrapper, not via argument_properties."""
+        resource = base_resource_config(
+            citation_mode_value=AgentContextValueSetting(value="Inline"),
+            query_value="some query",
+            folder_path_prefix=AgentContextQuerySetting(
+                value="{deepRagFolderPrefix}", variant="argument"
+            ),
+        )
+
+        result = handle_deep_rag("test_deep_rag", resource)
+
+        assert isinstance(result, StructuredToolWithArgumentProperties)
+        # folder_path_prefix is resolved directly in the wrapper from state,
+        # not via argument_properties or args_schema
+        assert "folder_path_prefix" not in result.argument_properties
+        assert isinstance(result.args_schema, type)
 
     def test_missing_static_query_value_raises_error(self, base_resource_config):
         """Test that missing query.value for static variant raises AgentStartupError."""
@@ -139,7 +177,7 @@ class TestHandleDeepRag:
 
         result = handle_deep_rag("test_deep_rag", resource)
 
-        assert isinstance(result, StructuredToolWithOutputType)
+        assert isinstance(result, StructuredToolWithArgumentProperties)
 
     def test_tool_name_preserved(self, base_resource_config):
         """Test that the sanitized tool name is correctly applied."""
@@ -228,9 +266,9 @@ class TestHandleDeepRag:
 
         result = handle_deep_rag("test_deep_rag", resource)
 
-        assert isinstance(result, StructuredToolWithOutputType)
+        assert isinstance(result, StructuredToolWithArgumentProperties)
         assert result.name == "test_deep_rag"
-        assert result.description == "Test Deep RAG tool"
+        assert result.description == "Test tool"
         assert result.args_schema is not None  # Dynamic has input schema
         assert issubclass(result.output_type, DeepRagContent)
 
@@ -300,44 +338,23 @@ class TestCreateContextTool:
     @pytest.fixture
     def semantic_search_config(self):
         """Fixture for semantic search configuration."""
-        return AgentContextResourceConfig(
+        return _make_context_resource(
             name="test_semantic_search",
             description="Test semantic search",
-            resource_type="context",
-            index_name="test-index",
-            folder_path="/test/folder",
-            settings=AgentContextSettings(
-                result_count=10,
-                retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
-                query=AgentContextQuerySetting(
-                    value=None,
-                    description="Query for semantic search",
-                    variant="dynamic",
-                ),
-            ),
-            is_enabled=True,
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="dynamic",
         )
 
     @pytest.fixture
     def deep_rag_config(self):
         """Fixture for deep RAG configuration."""
-        return AgentContextResourceConfig(
+        return _make_context_resource(
             name="test_deep_rag",
             description="Test Deep RAG",
-            resource_type="context",
-            index_name="test-index",
-            folder_path="/test/folder",
-            settings=AgentContextSettings(
-                result_count=5,
-                retrieval_mode=AgentContextRetrievalMode.DEEP_RAG,
-                query=AgentContextQuerySetting(
-                    value="test query",
-                    description="Test query description",
-                    variant="static",
-                ),
-                citation_mode=AgentContextValueSetting(value="Inline"),
-            ),
-            is_enabled=True,
+            retrieval_mode=AgentContextRetrievalMode.DEEP_RAG,
+            query_value="test query",
+            query_variant="static",
+            citation_mode_value=AgentContextValueSetting(value="Inline"),
         )
 
     def test_create_semantic_search_tool(self, semantic_search_config):
@@ -352,7 +369,7 @@ class TestCreateContextTool:
         """Test that deep_rag retrieval mode creates Deep RAG tool."""
         result = create_context_tool(deep_rag_config)
 
-        assert isinstance(result, StructuredToolWithOutputType)
+        assert isinstance(result, StructuredToolWithArgumentProperties)
         assert result.name == "test_deep_rag"
         assert hasattr(result.args_schema, "model_json_schema")
         assert result.args_schema.model_json_schema()["properties"] == {}
@@ -361,14 +378,14 @@ class TestCreateContextTool:
     def test_case_insensitive_retrieval_mode(self, deep_rag_config):
         """Test that retrieval mode matching is case-insensitive."""
         # Test with uppercase
-        deep_rag_config.settings.retrieval_mode = "DEEP_RAG"
+        deep_rag_config.settings.retrieval_mode = "DEEPRAG"
         result = create_context_tool(deep_rag_config)
-        assert isinstance(result, StructuredToolWithOutputType)
+        assert isinstance(result, StructuredToolWithArgumentProperties)
 
         # Test with mixed case
-        deep_rag_config.settings.retrieval_mode = "Deep_Rag"
+        deep_rag_config.settings.retrieval_mode = "deeprag"
         result = create_context_tool(deep_rag_config)
-        assert isinstance(result, StructuredToolWithOutputType)
+        assert isinstance(result, StructuredToolWithArgumentProperties)
 
 
 class TestHandleSemanticSearch:
@@ -377,22 +394,11 @@ class TestHandleSemanticSearch:
     @pytest.fixture
     def semantic_config(self):
         """Fixture for semantic search configuration."""
-        return AgentContextResourceConfig(
+        return _make_context_resource(
             name="semantic_tool",
             description="Semantic search tool",
-            resource_type="context",
-            index_name="test-index",
-            folder_path="/test/folder",
-            settings=AgentContextSettings(
-                result_count=5,
-                retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
-                query=AgentContextQuerySetting(
-                    value=None,
-                    description="Query for semantic search",
-                    variant="dynamic",
-                ),
-            ),
-            is_enabled=True,
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="dynamic",
         )
 
     def test_semantic_search_tool_creation(self, semantic_config):
@@ -445,22 +451,12 @@ class TestHandleSemanticSearch:
 
     def test_static_query_semantic_search_creation(self):
         """Test successful creation of semantic search tool with static query."""
-        resource = AgentContextResourceConfig(
+        resource = _make_context_resource(
             name="semantic_tool",
             description="Semantic search tool",
-            resource_type="context",
-            index_name="test-index",
-            folder_path="/test/folder",
-            settings=AgentContextSettings(
-                result_count=5,
-                retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
-                query=AgentContextQuerySetting(
-                    value="predefined static query",
-                    description="Static query for semantic search",
-                    variant="static",
-                ),
-            ),
-            is_enabled=True,
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_value="predefined static query",
+            query_variant="static",
         )
 
         result = handle_semantic_search("semantic_tool", resource)
@@ -474,22 +470,12 @@ class TestHandleSemanticSearch:
     @pytest.mark.asyncio
     async def test_static_query_uses_predefined_query(self):
         """Test that static query variant uses the predefined query value."""
-        resource = AgentContextResourceConfig(
+        resource = _make_context_resource(
             name="semantic_tool",
             description="Semantic search tool",
-            resource_type="context",
-            index_name="test-index",
-            folder_path="/test/folder",
-            settings=AgentContextSettings(
-                result_count=5,
-                retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
-                query=AgentContextQuerySetting(
-                    value="predefined static query",
-                    description="Static query for semantic search",
-                    variant="static",
-                ),
-            ),
-            is_enabled=True,
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_value="predefined static query",
+            query_variant="static",
         )
 
         mock_documents = [
@@ -512,13 +498,20 @@ class TestHandleSemanticSearch:
             assert "documents" in result
             assert len(result["documents"]) == 1
 
+    @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
-    def test_semantic_search_uses_execution_folder_path(self, semantic_config):
+    async def test_semantic_search_uses_execution_folder_path(self, semantic_config):
         """Test that ContextGroundingRetriever receives folder_path from the execution environment."""
         with patch(
             "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
         ) as mock_retriever_class:
-            handle_semantic_search("semantic_tool", semantic_config)
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.return_value = []
+            mock_retriever_class.return_value = mock_retriever
+
+            tool = handle_semantic_search("semantic_tool", semantic_config)
+            assert tool.coroutine is not None
+            await tool.coroutine(query="test query")
 
             call_kwargs = mock_retriever_class.call_args[1]
             assert call_kwargs["folder_path"] == "/Shared/TestFolder"
@@ -561,7 +554,7 @@ class TestHandleBatchTransform:
         """Test successful creation of batch transform tool with static query."""
         result = handle_batch_transform("batch_transform_tool", batch_transform_config)
 
-        assert isinstance(result, StructuredToolWithOutputType)
+        assert isinstance(result, StructuredToolWithArgumentProperties)
         assert result.name == "batch_transform_tool"
         assert result.description == "Batch transform tool"
         assert result.args_schema is not None  # Has destination_path parameter
@@ -611,7 +604,7 @@ class TestHandleBatchTransform:
 
         result = handle_batch_transform("batch_transform_tool", resource)
 
-        assert isinstance(result, StructuredToolWithOutputType)
+        assert isinstance(result, StructuredToolWithArgumentProperties)
         assert result.name == "batch_transform_tool"
         assert result.args_schema is not None
         output_schema = result.output_type.model_json_schema()
@@ -651,6 +644,43 @@ class TestHandleBatchTransform:
         assert "properties" in schema
         assert "query" in schema["properties"]
         assert "destination_path" in schema["properties"]
+
+    def test_batch_transform_with_folder_path_prefix_from_settings(self):
+        """Test that batch transform builds argument_properties from settings."""
+        resource = AgentContextResourceConfig(
+            name="batch_transform_tool",
+            description="Batch transform tool",
+            resource_type="context",
+            index_name="test-index",
+            folder_path="/test/folder",
+            settings=AgentContextSettings(
+                result_count=5,
+                retrieval_mode=AgentContextRetrievalMode.BATCH_TRANSFORM,
+                query=AgentContextQuerySetting(
+                    value="transform query",
+                    description="Static query",
+                    variant="static",
+                ),
+                web_search_grounding=AgentContextValueSetting(value="enabled"),
+                output_columns=[
+                    AgentContextOutputColumn(
+                        name="output_col1", description="First output column"
+                    ),
+                ],
+                folder_path_prefix=AgentContextQuerySetting(
+                    value="{batchFolderPrefix}", variant="argument"
+                ),
+            ),
+            is_enabled=True,
+        )
+
+        result = handle_batch_transform("batch_transform_tool", resource)
+
+        assert isinstance(result, StructuredToolWithArgumentProperties)
+        # folder_path_prefix is resolved directly in the wrapper from state,
+        # not via argument_properties or args_schema
+        assert "folder_path_prefix" not in result.argument_properties
+        assert isinstance(result.args_schema, type)
 
     @pytest.mark.asyncio
     async def test_static_query_batch_transform_uses_predefined_query(
@@ -907,3 +937,97 @@ class TestBuildGlobPattern:
     def test_unsupported_extension_still_works(self):
         """Extensions outside the named set are handled identically."""
         assert build_glob_pattern("data", "xlsx") == "data/*.xlsx"
+
+    # --- Trailing file-matching globs stripped ---
+
+    def test_prefix_with_trailing_star(self):
+        """Trailing /* is stripped since extension is appended separately."""
+        assert build_glob_pattern("documents/*", "pdf") == "documents/*.pdf"
+
+    def test_prefix_with_trailing_double_star(self):
+        """Trailing /** is stripped."""
+        assert build_glob_pattern("documents/**", "pdf") == "documents/*.pdf"
+
+    def test_prefix_with_trailing_double_star_star(self):
+        """Trailing /**/* is stripped."""
+        assert build_glob_pattern("documents/**/*", "pdf") == "documents/*.pdf"
+
+    def test_match_all_glob_treated_as_no_prefix(self):
+        """/**/* is a match-all pattern and should be treated as no prefix."""
+        assert build_glob_pattern("/**/*", "pdf") == "**/*.pdf"
+
+    def test_star_slash_star_treated_as_no_prefix(self):
+        """*/* is a match-all pattern and should be treated as no prefix."""
+        assert build_glob_pattern("*/*", "pdf") == "**/*.pdf"
+
+    def test_double_star_slash_star_treated_as_no_prefix(self):
+        """**/* is a match-all pattern and should be treated as no prefix."""
+        assert build_glob_pattern("**/*", "pdf") == "**/*.pdf"
+
+
+class TestNormalizeFolderPrefix:
+    """Test cases for _normalize_folder_prefix function."""
+
+    # --- None / empty ---
+
+    def test_none_returns_double_star(self):
+        assert _normalize_folder_prefix(None) == "**"
+
+    def test_empty_string_returns_double_star(self):
+        assert _normalize_folder_prefix("") == "**"
+
+    def test_only_slashes_returns_double_star(self):
+        assert _normalize_folder_prefix("///") == "**"
+
+    # --- Leading/trailing slash stripping ---
+
+    def test_strips_leading_slash(self):
+        assert _normalize_folder_prefix("/documents") == "documents"
+
+    def test_strips_trailing_slash(self):
+        assert _normalize_folder_prefix("documents/") == "documents"
+
+    def test_strips_both_slashes(self):
+        assert _normalize_folder_prefix("/documents/") == "documents"
+
+    # --- Trailing glob stripping ---
+
+    def test_strips_trailing_star(self):
+        assert _normalize_folder_prefix("documents/*") == "documents"
+
+    def test_strips_trailing_double_star(self):
+        assert _normalize_folder_prefix("documents/**") == "documents"
+
+    def test_strips_trailing_double_star_star(self):
+        assert _normalize_folder_prefix("documents/**/*") == "documents"
+
+    def test_nested_prefix_strips_trailing_glob(self):
+        assert _normalize_folder_prefix("folder/subfolder/*") == "folder/subfolder"
+
+    def test_nested_prefix_strips_trailing_double_star_star(self):
+        assert _normalize_folder_prefix("folder/subfolder/**/*") == "folder/subfolder"
+
+    # --- Match-all patterns become ** ---
+
+    def test_star_slash_star_returns_double_star(self):
+        assert _normalize_folder_prefix("*/*") == "**"
+
+    def test_double_star_slash_star_returns_double_star(self):
+        assert _normalize_folder_prefix("**/*") == "**"
+
+    def test_slash_double_star_slash_star_returns_double_star(self):
+        assert _normalize_folder_prefix("/**/*") == "**"
+
+    # --- Preserves valid prefixes ---
+
+    def test_simple_prefix(self):
+        assert _normalize_folder_prefix("folder") == "folder"
+
+    def test_nested_prefix(self):
+        assert _normalize_folder_prefix("folder/subfolder") == "folder/subfolder"
+
+    def test_double_star_prefix_preserved(self):
+        assert _normalize_folder_prefix("**/documents") == "**/documents"
+
+    def test_double_star_nested_prefix_preserved(self):
+        assert _normalize_folder_prefix("**/docs/reports") == "**/docs/reports"
