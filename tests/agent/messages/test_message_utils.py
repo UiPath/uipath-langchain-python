@@ -4,8 +4,6 @@ from typing import Any, Union
 
 from langchain.messages import AIMessage, HumanMessage, ToolCall
 from langchain_core.messages import BaseMessage
-
-MessageItem = Union[BaseMessage, list[str], tuple[str, str], str, dict[str, Any]]
 from langchain_core.messages.content import (
     ContentBlock,
     create_text_block,
@@ -14,6 +12,8 @@ from langchain_core.messages.content import (
 from langgraph.graph.message import add_messages
 
 from uipath_langchain.agent.messages.message_utils import replace_tool_calls
+
+MessageItem = Union[BaseMessage, list[str], tuple[str, str], str, dict[str, Any]]
 
 
 class TestReplaceToolCalls:
@@ -213,9 +213,7 @@ class TestReplaceToolCalls:
         instead of replacing the original, causing the tool to run with stale args.
         """
         original_tool_calls = [
-            ToolCall(
-                name="my_activity", args={"input": "original_value"}, id="call_1"
-            )
+            ToolCall(name="my_activity", args={"input": "original_value"}, id="call_1")
         ]
         original_ai_message = AIMessage(
             content_blocks=[
@@ -235,11 +233,11 @@ class TestReplaceToolCalls:
 
         # Simulate HITL review: human changes the input
         reviewed_tool_calls = [
-            ToolCall(
-                name="my_activity", args={"input": "reviewed_value"}, id="call_1"
-            )
+            ToolCall(name="my_activity", args={"input": "reviewed_value"}, id="call_1")
         ]
-        updated_ai_message = replace_tool_calls(original_ai_message, reviewed_tool_calls)
+        updated_ai_message = replace_tool_calls(
+            original_ai_message, reviewed_tool_calls
+        )
 
         # Simulate what Command(update={"messages": [updated_ai_message]}) does
         new_messages: list[MessageItem] = [updated_ai_message]
