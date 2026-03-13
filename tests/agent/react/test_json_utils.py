@@ -3,6 +3,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, RootModel
 
 from uipath_langchain.agent.react.json_utils import (
+    coerce_json_strings,
     extract_values_by_paths,
     get_json_paths_by_type,
 )
@@ -323,3 +324,148 @@ class TestJsonPathsWithAliasedFields:
         model = create_model(schema)
         paths = get_json_paths_by_type(model, "__Job_attachment")
         assert paths == ["$._files[*]"]
+
+
+# -- coerce_json_strings: no schema (blind coercion) --------------------------
+
+
+class TestCoerceJsonStringsNoSchema:
+    """Without a schema, all parseable strings are coerced."""
+
+    def test_no_coercion_needed(self) -> None:
+        data = {"name": "test", "count": 42}
+        assert coerce_json_strings(data) == data
+
+    def test_json_object_string(self) -> None:
+        data = {"metadata": '{"size": "99353"}'}
+        assert coerce_json_strings(data) == {"metadata": {"size": "99353"}}
+
+    def test_python_repr_string(self) -> None:
+        data = {"metadata": "{'size': '99353'}"}
+        assert coerce_json_strings(data) == {"metadata": {"size": "99353"}}
+
+    def test_nested_in_dict(self) -> None:
+        data = {"attachment": {"metadata": '{"size": 1024}', "name": "file.pdf"}}
+        assert coerce_json_strings(data) == {
+            "attachment": {"metadata": {"size": 1024}, "name": "file.pdf"}
+        }
+
+    def test_in_list_items(self) -> None:
+        data = {
+            "items": [
+                {"metadata": '{"size": 100}', "name": "a.pdf"},
+                {"metadata": {"size": 200}, "name": "b.pdf"},
+            ]
+        }
+        assert coerce_json_strings(data) == {
+            "items": [
+                {"metadata": {"size": 100}, "name": "a.pdf"},
+                {"metadata": {"size": 200}, "name": "b.pdf"},
+            ]
+        }
+
+    def test_invalid_string_unchanged(self) -> None:
+        data = {"metadata": "not valid json"}
+        assert coerce_json_strings(data) == data
+
+    def test_json_array_string(self) -> None:
+        data = {"tags": "[1, 2, 3]"}
+        assert coerce_json_strings(data) == {"tags": [1, 2, 3]}
+
+    def test_plain_string_unchanged(self) -> None:
+        data = {"name": "hello world"}
+        assert coerce_json_strings(data) == data
+
+    def test_empty_dict(self) -> None:
+        assert coerce_json_strings({}) == {}
+
+    def test_dict_value_unchanged(self) -> None:
+        data = {"metadata": {"already": "a dict"}}
+        assert coerce_json_strings(data) == data
+
+    def test_json_primitives_unchanged(self) -> None:
+        """JSON primitives (numbers, booleans) stay as strings."""
+        data = {"value": "42", "flag": "true"}
+        assert coerce_json_strings(data) == data
+
+    def test_non_dict_passthrough(self) -> None:
+        assert coerce_json_strings(42) == 42
+        assert coerce_json_strings(None) is None
+        assert coerce_json_strings(True) is True
+
+
+# -- coerce_json_strings: with schema -----------------------------------------
+
+
+class TestCoerceJsonStringsWithSchema:
+    """With a schema, str-typed fields are protected from coercion."""
+
+    def test_str_field_preserved_dict_field_coerced(self) -> None:
+        """The real-world Analyze_Files scenario."""
+
+        class AttachmentInput(BaseModel):
+            ID: str
+            FullName: str
+            MimeType: str
+            Metadata: dict[str, Any] | None = None
+
+        class AnalyzeFilesInput(BaseModel):
+            analysisTask: str
+            attachments: list[AttachmentInput]
+
+        data = {
+            "analysisTask": '{"instruction": "summarize the document"}',
+            "attachments": [
+                {
+                    "ID": "550e8400-e29b-41d4-a716-446655440000",
+                    "FullName": "report.pdf",
+                    "MimeType": "application/pdf",
+                    "Metadata": '{"size": "99353"}',
+                }
+            ],
+        }
+        result = coerce_json_strings(data, AnalyzeFilesInput)
+
+        assert result["attachments"][0]["Metadata"] == {"size": "99353"}
+        assert isinstance(result["analysisTask"], str)
+        assert result["analysisTask"] == '{"instruction": "summarize the document"}'
+
+    def test_python_repr_with_schema(self) -> None:
+        """Single-quoted Python repr is coerced for dict fields."""
+
+        class Inner(BaseModel):
+            Metadata: dict[str, Any] | None = None
+
+        class Outer(BaseModel):
+            item: Inner
+
+        data = {"item": {"Metadata": "{'size': '99353'}"}}
+        result = coerce_json_strings(data, Outer)
+        assert result["item"]["Metadata"] == {"size": "99353"}
+
+    def test_unknown_field_coerced(self) -> None:
+        """Fields not in the schema fall back to blind coercion."""
+
+        class Schema(BaseModel):
+            name: str
+
+        data = {"name": "test", "extra": '{"a": 1}'}
+        result = coerce_json_strings(data, Schema)
+        assert result["name"] == "test"
+        assert result["extra"] == {"a": 1}
+
+    def test_nested_model_field_recurses(self) -> None:
+        """BaseModel-typed fields recurse with child schema."""
+
+        class Child(BaseModel):
+            value: str
+            data: dict[str, Any] | None = None
+
+        class Parent(BaseModel):
+            child: Child
+
+        result = coerce_json_strings(
+            {"child": {"value": '{"x": 1}', "data": '{"y": 2}'}}, Parent
+        )
+        assert result["child"]["value"] == '{"x": 1}'
+        assert result["child"]["data"] == {"y": 2}
