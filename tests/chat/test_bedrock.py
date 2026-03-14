@@ -1,12 +1,38 @@
+import logging
 import os
 from unittest.mock import patch
 
+import botocore
 from langchain_aws import ChatBedrock
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.messages.content import create_file_block
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from uipath_langchain.chat.bedrock import UiPathChatBedrock
+from uipath_langchain.chat.bedrock import (
+    AwsBedrockCompletionsPassthroughClient,
+    UiPathChatBedrock,
+)
+
+
+class TestGetClientSkipsImds:
+    def test_client_creation_does_not_trigger_credential_resolution(self, caplog):
+        passthrough = AwsBedrockCompletionsPassthroughClient(
+            model="anthropic.claude-haiku-4-5-20251001",
+            token="test-token",
+            api_flavor="converse",
+        )
+
+        with caplog.at_level(logging.DEBUG, logger="botocore"):
+            client = passthrough.get_client()
+
+        assert caplog.records
+        credential_log_records = [
+            r for r in caplog.records if r.name.startswith("botocore.credentials")
+        ]
+        assert not credential_log_records, (
+            f"Unexpected credential resolution: {[r.getMessage() for r in credential_log_records]}"
+        )
+        assert client._request_signer._signature_version == botocore.UNSIGNED
 
 
 class TestConvertFileBlocksToAnthropicDocuments:
