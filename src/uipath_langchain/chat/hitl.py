@@ -137,7 +137,7 @@ def request_approval(
     )
 
 
-def request_tool_confirmation(
+def request_conversational_tool_confirmation(
     call: ToolCall, tool: BaseTool
 ) -> ConfirmationResult | None:
     """Check whether a tool requires user confirmation and request approval"""

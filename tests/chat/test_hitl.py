@@ -11,7 +11,7 @@ from uipath_langchain.chat.hitl import (
     CONVERSATIONAL_APPROVED_TOOL_ARGS,
     ConfirmationResult,
     request_approval,
-    request_tool_confirmation,
+    request_conversational_tool_confirmation,
 )
 
 
@@ -28,25 +28,25 @@ def _make_call(args: dict[str, Any] | None = None) -> ToolCall:
 
 
 class TestCheckToolConfirmation:
-    """Tests for request_tool_confirmation."""
+    """Tests for request_conversational_tool_confirmation."""
 
     def test_returns_none_when_no_metadata(self):
         """No metadata → no confirmation needed."""
         tool = MockTool()
         call = _make_call()
-        assert request_tool_confirmation(call, tool) is None
+        assert request_conversational_tool_confirmation(call, tool) is None
 
     def test_returns_none_when_flag_not_set(self):
         """Metadata exists but flag is missing → no confirmation needed."""
         tool = MockTool(metadata={"other_key": True})
         call = _make_call()
-        assert request_tool_confirmation(call, tool) is None
+        assert request_conversational_tool_confirmation(call, tool) is None
 
     def test_returns_none_when_flag_false(self):
         """Flag explicitly False → no confirmation needed."""
         tool = MockTool(metadata={"require_conversational_confirmation": False})
         call = _make_call()
-        assert request_tool_confirmation(call, tool) is None
+        assert request_conversational_tool_confirmation(call, tool) is None
 
     @patch("uipath_langchain.chat.hitl.request_approval", return_value=None)
     def test_cancelled_returns_tool_message(self, mock_approval):
@@ -54,7 +54,7 @@ class TestCheckToolConfirmation:
         tool = MockTool(metadata={"require_conversational_confirmation": True})
         call = _make_call()
 
-        result = request_tool_confirmation(call, tool)
+        result = request_conversational_tool_confirmation(call, tool)
 
         assert result is not None
         assert isinstance(result, ConfirmationResult)
@@ -77,7 +77,7 @@ class TestCheckToolConfirmation:
         tool = MockTool(metadata={"require_conversational_confirmation": True})
         call = _make_call({"query": "test"})
 
-        result = request_tool_confirmation(call, tool)
+        result = request_conversational_tool_confirmation(call, tool)
 
         assert result is not None
         assert result.cancelled is None
@@ -93,7 +93,7 @@ class TestCheckToolConfirmation:
         tool = MockTool(metadata={"require_conversational_confirmation": True})
         call = _make_call({"query": "original"})
 
-        result = request_tool_confirmation(call, tool)
+        result = request_conversational_tool_confirmation(call, tool)
 
         assert result is not None
         assert result.cancelled is None

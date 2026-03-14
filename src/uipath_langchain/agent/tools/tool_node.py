@@ -22,7 +22,7 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
-from uipath_langchain.chat.hitl import request_tool_confirmation
+from uipath_langchain.chat.hitl import request_conversational_tool_confirmation
 
 # the type safety can be improved with generics
 ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
@@ -82,11 +82,12 @@ class UiPathToolNode(RunnableCallable):
             return None
 
         # prompt user for approval if tool requires confirmation
-        confirmation = request_tool_confirmation(call, self.tool)
-
-        # user rejected the tool call
-        if confirmation is not None and confirmation.cancelled:
-            return self._process_result(call, confirmation.cancelled)
+        conversational_confirmation = request_conversational_tool_confirmation(
+            call, self.tool
+        )
+        if conversational_confirmation and conversational_confirmation.cancelled:
+            # tool confirmation rejected
+            return self._process_result(call, conversational_confirmation.cancelled)
 
         try:
             if self.wrapper:
@@ -97,9 +98,9 @@ class UiPathToolNode(RunnableCallable):
             else:
                 result = self.tool.invoke(call)
             output = self._process_result(call, result)
-            # HITL approved - apply confirmation metadata to tool result message
-            if confirmation is not None:
-                confirmation.annotate_result(output)
+            if conversational_confirmation:
+                # HITL approved - apply confirmation metadata to tool result message
+                conversational_confirmation.annotate_result(output)
             return output
         except GraphBubbleUp:
             # LangGraph uses exceptions for interrupt control flow — re-raise so
@@ -117,11 +118,12 @@ class UiPathToolNode(RunnableCallable):
             return None
 
         # prompt user for approval if tool requires confirmation
-        confirmation = request_tool_confirmation(call, self.tool)
-
-        # user rejected the tool call
-        if confirmation is not None and confirmation.cancelled:
-            return self._process_result(call, confirmation.cancelled)
+        conversational_confirmation = request_conversational_tool_confirmation(
+            call, self.tool
+        )
+        if conversational_confirmation and conversational_confirmation.cancelled:
+            # tool confirmation rejected
+            return self._process_result(call, conversational_confirmation.cancelled)
 
         try:
             if self.awrapper:
@@ -132,9 +134,9 @@ class UiPathToolNode(RunnableCallable):
             else:
                 result = await self.tool.ainvoke(call)
             output = self._process_result(call, result)
-            # HITL approved - apply confirmation metadata to tool result message
-            if confirmation is not None:
-                confirmation.annotate_result(output)
+            if conversational_confirmation:
+                # HITL approved - apply confirmation metadata to tool result message
+                conversational_confirmation.annotate_result(output)
             return output
         except GraphBubbleUp:
             # LangGraph uses exceptions for interrupt control flow — re-raise so
