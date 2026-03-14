@@ -108,6 +108,7 @@ class AwsBedrockCompletionsPassthroughClient:
                     "total_max_attempts": 1,
                 },
                 read_timeout=300,
+                signature_version=botocore.UNSIGNED,
             ),
         )
         client.meta.events.register(
