@@ -22,6 +22,7 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
+from uipath_langchain.chat.hitl import request_tool_confirmation
 
 # the type safety can be improved with generics
 ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
@@ -80,6 +81,13 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
 
+        # prompt user for approval if tool requires confirmation
+        confirmation = request_tool_confirmation(call, self.tool)
+
+        # user rejected the tool call
+        if confirmation is not None and confirmation.cancelled:
+            return self._process_result(call, confirmation.cancelled)
+
         try:
             if self.wrapper:
                 inputs = self._prepare_wrapper_inputs(
@@ -88,7 +96,11 @@ class UiPathToolNode(RunnableCallable):
                 result = self.wrapper(*inputs)
             else:
                 result = self.tool.invoke(call)
-            return self._process_result(call, result)
+            output = self._process_result(call, result)
+            # HITL approved - apply confirmation metadata to tool result message
+            if confirmation is not None:
+                confirmation.annotate_result(output)
+            return output
         except GraphBubbleUp:
             # LangGraph uses exceptions for interrupt control flow — re-raise so
             # handle_tool_errors doesn't swallow expected interrupts as errors.
@@ -104,6 +116,13 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
 
+        # prompt user for approval if tool requires confirmation
+        confirmation = request_tool_confirmation(call, self.tool)
+
+        # user rejected the tool call
+        if confirmation is not None and confirmation.cancelled:
+            return self._process_result(call, confirmation.cancelled)
+
         try:
             if self.awrapper:
                 inputs = self._prepare_wrapper_inputs(
@@ -112,7 +131,11 @@ class UiPathToolNode(RunnableCallable):
                 result = await self.awrapper(*inputs)
             else:
                 result = await self.tool.ainvoke(call)
-            return self._process_result(call, result)
+            output = self._process_result(call, result)
+            # HITL approved - apply confirmation metadata to tool result message
+            if confirmation is not None:
+                confirmation.annotate_result(output)
+            return output
         except GraphBubbleUp:
             # LangGraph uses exceptions for interrupt control flow — re-raise so
             # handle_tool_errors doesn't swallow expected interrupts as errors.
