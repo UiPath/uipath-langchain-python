@@ -86,10 +86,10 @@ class UiPathToolNode(RunnableCallable):
         conversational_confirmation = request_conversational_tool_confirmation(
             call, self.tool
         )
-        if conversational_confirmation and conversational_confirmation.cancelled:
-            # tool confirmation rejected
-            return self._process_result(call, conversational_confirmation.cancelled)
         if conversational_confirmation:
+            if conversational_confirmation.cancelled:
+                # tool confirmation rejected
+                return self._process_result(call, conversational_confirmation.cancelled)
             add_interrupt_offset()  # HITL consumed 1 interrupt slot
 
         try:
@@ -124,10 +124,10 @@ class UiPathToolNode(RunnableCallable):
         conversational_confirmation = request_conversational_tool_confirmation(
             call, self.tool
         )
-        if conversational_confirmation and conversational_confirmation.cancelled:
-            # tool confirmation rejected
-            return self._process_result(call, conversational_confirmation.cancelled)
         if conversational_confirmation:
+            if conversational_confirmation.cancelled:
+                # tool confirmation rejected
+                return self._process_result(call, conversational_confirmation.cancelled)
             add_interrupt_offset()  # HITL consumed 1 interrupt slot
 
         try:
