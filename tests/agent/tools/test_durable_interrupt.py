@@ -9,6 +9,8 @@ from langgraph._internal._constants import CONFIG_KEY_SCRATCHPAD
 
 from uipath_langchain.agent.tools.durable_interrupt import (
     _durable_state,
+    _interrupt_offset,
+    add_interrupt_offset,
     durable_interrupt,
 )
 
@@ -33,10 +35,12 @@ PATCH_INTERRUPT = "uipath_langchain.agent.tools.durable_interrupt.decorator.inte
 
 @pytest.fixture(autouse=True)
 def _reset_durable_state() -> Generator[None]:
-    """Reset per-node counter between tests for isolation."""
-    token = _durable_state.set(None)
+    """Reset per-node counter and offset between tests for isolation."""
+    state_token = _durable_state.set(None)
+    offset_token = _interrupt_offset.set(0)
     yield
-    _durable_state.reset(token)
+    _durable_state.reset(state_token)
+    _interrupt_offset.reset(offset_token)
 
 
 class TestAsyncFirstExecution:
@@ -511,3 +515,161 @@ class TestWrapperTypeMatchesFunction:
             return "value"
 
         assert not asyncio.iscoroutinefunction(my_sync_fn)
+
+
+class TestInterruptOffsetWithPriorInterrupts:
+    """Offset accounts for prior interrupt() calls (e.g. HITL) in the same node."""
+
+    @patch(PATCH_INTERRUPT)
+    @patch(PATCH_GET_CONFIG)
+    def test_offset_skips_hitl_resume_slot(
+        self, mock_get_config: MagicMock, mock_interrupt: MagicMock
+    ) -> None:
+        """With resume=["hitl_value"] and offset=1, durable's idx=1, 1 < 1 is False → body runs."""
+        scratchpad = FakeScratchpad(resume=["hitl_value"])
+        mock_get_config.return_value = _make_config(scratchpad)
+        mock_interrupt.side_effect = lambda v: v
+
+        action = MagicMock(return_value="job-started")
+
+        @durable_interrupt
+        def start_job() -> str:
+            return action()
+
+        add_interrupt_offset()
+        result = start_job()
+
+        action.assert_called_once()
+        mock_interrupt.assert_called_once_with("job-started")
+
+    @patch(PATCH_INTERRUPT, return_value="durable-result")
+    @patch(PATCH_GET_CONFIG)
+    def test_offset_full_resume(
+        self, mock_get_config: MagicMock, mock_interrupt: MagicMock
+    ) -> None:
+        """With resume=["hitl_value", "durable_result"] and offset=1, durable reads index 1."""
+        scratchpad = FakeScratchpad(resume=["hitl_value", "durable_result"])
+        mock_get_config.return_value = _make_config(scratchpad)
+
+        action = MagicMock()
+
+        @durable_interrupt
+        def start_job() -> Any:
+            return action()
+
+        add_interrupt_offset()
+        result = start_job()
+
+        action.assert_not_called()  # body skipped — idx=1 < len(resume)=2
+        mock_interrupt.assert_called_once_with(None)
+        assert result == "durable-result"
+
+    @patch(PATCH_INTERRUPT, return_value="resumed")
+    @patch(PATCH_GET_CONFIG)
+    def test_offset_resets_on_scratchpad_change(
+        self, mock_get_config: MagicMock, mock_interrupt: MagicMock
+    ) -> None:
+        """After consuming offset on first scratchpad, a new scratchpad starts at 0."""
+        sp1 = FakeScratchpad(resume=["hitl", "durable"])
+        mock_get_config.return_value = _make_config(sp1)
+
+        @durable_interrupt
+        def task_a() -> str:
+            return "should-not-run"
+
+        add_interrupt_offset()
+        task_a()  # consumes offset, idx=1
+
+        # New scratchpad — offset should have been consumed/reset
+        sp2 = FakeScratchpad(resume=["val"])
+        mock_get_config.return_value = _make_config(sp2)
+
+        action = MagicMock()
+
+        @durable_interrupt
+        def task_b() -> Any:
+            return action()
+
+        task_b()  # idx should be 0, not 1
+
+        action.assert_not_called()  # idx=0 < len(resume)=1 → skipped
+
+    @patch(PATCH_INTERRUPT)
+    @patch(PATCH_GET_CONFIG)
+    def test_offset_with_multiple_durable_interrupts(
+        self, mock_get_config: MagicMock, mock_interrupt: MagicMock
+    ) -> None:
+        """HITL + two durable_interrupts: offset shifts both indices correctly."""
+        # resume[0] = HITL value, resume[1] = durable_a result
+        # durable_a at idx=1 → resumed, durable_b at idx=2 → body runs
+        scratchpad = FakeScratchpad(resume=["hitl_approval", "durable_a_result"])
+        mock_get_config.return_value = _make_config(scratchpad)
+        mock_interrupt.side_effect = lambda v: f"interrupt({v})"
+
+        action_a = MagicMock()
+        action_b = MagicMock(return_value="job-B")
+
+        @durable_interrupt
+        def durable_a() -> Any:
+            return action_a()
+
+        @durable_interrupt
+        def durable_b() -> str:
+            return action_b()
+
+        add_interrupt_offset()
+        result_a = durable_a()  # idx=1, 1 < 2 → skipped
+        result_b = durable_b()  # idx=2, 2 < 2 → False → body runs
+
+        action_a.assert_not_called()
+        action_b.assert_called_once()
+        assert result_a == "interrupt(None)"
+        assert result_b == "interrupt(job-B)"
+
+    @patch(PATCH_INTERRUPT)
+    @patch(PATCH_GET_CONFIG)
+    def test_multiple_offsets_accumulate(
+        self, mock_get_config: MagicMock, mock_interrupt: MagicMock
+    ) -> None:
+        """Two prior interrupt() calls → offset accumulates to 2."""
+        # resume[0] = first confirmation, resume[1] = second confirmation
+        # durable at idx=2 → body runs (2 < 2 is False)
+        scratchpad = FakeScratchpad(resume=["confirm_1", "confirm_2"])
+        mock_get_config.return_value = _make_config(scratchpad)
+        mock_interrupt.side_effect = lambda v: v
+
+        action = MagicMock(return_value="job-started")
+
+        @durable_interrupt
+        def start_job() -> str:
+            return action()
+
+        add_interrupt_offset()  # first confirmation
+        add_interrupt_offset()  # second confirmation
+        result = start_job()
+
+        action.assert_called_once()  # idx=2, 2 < 2 → False → body runs
+        mock_interrupt.assert_called_once_with("job-started")
+
+    @patch(PATCH_INTERRUPT, return_value="durable-result")
+    @patch(PATCH_GET_CONFIG)
+    def test_multiple_offsets_full_resume(
+        self, mock_get_config: MagicMock, mock_interrupt: MagicMock
+    ) -> None:
+        """Two prior interrupts fully resumed + durable resumed → body skipped."""
+        scratchpad = FakeScratchpad(resume=["confirm_1", "confirm_2", "durable-result"])
+        mock_get_config.return_value = _make_config(scratchpad)
+
+        action = MagicMock()
+
+        @durable_interrupt
+        def start_job() -> Any:
+            return action()
+
+        add_interrupt_offset()
+        add_interrupt_offset()
+        result = start_job()
+
+        action.assert_not_called()  # idx=2, 2 < 3 → True → skipped
+        mock_interrupt.assert_called_once_with(None)
+        assert result == "durable-result"

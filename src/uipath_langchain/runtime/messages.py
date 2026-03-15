@@ -39,8 +39,6 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
-from uipath_langchain.chat.hitl import CONVERSATIONAL_APPROVED_TOOL_ARGS
-
 from ._citations import CitationStreamProcessor, extract_citations_from_text
 
 logger = logging.getLogger(__name__)
@@ -436,16 +434,6 @@ class UiPathChatMessagesMapper:
                 pass
 
         events: list[UiPathConversationMessageEvent] = []
-
-        # emit startToolCall for tools requiring confirmation after it's approved
-        approved_args = message.response_metadata.get(CONVERSATIONAL_APPROVED_TOOL_ARGS)
-        if approved_args is not None:
-            tool_call = ToolCall(
-                name=message.name or "", args=approved_args, id=message.tool_call_id
-            )
-            events.append(
-                self.map_tool_call_to_tool_call_start_event(message_id, tool_call)
-            )
 
         events.append(
             UiPathConversationMessageEvent(

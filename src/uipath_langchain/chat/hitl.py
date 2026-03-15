@@ -32,6 +32,14 @@ class ConfirmationResult(NamedTuple):
             messages = output.get("messages")
             if messages:
                 msg = messages[0]
+        else:
+            # Tools with @durable_interrupt return a Command whose messages
+            # are nested under output.update["messages"].
+            update = getattr(output, "update", None)
+            if isinstance(update, dict):
+                messages = update.get("messages")
+                if messages:
+                    msg = messages[0]
         if msg is None:
             return
         if self.approved_args is not None:
@@ -185,6 +193,11 @@ def requires_approval(
             approved_args = request_approval(tool_args, _created_tool[0])
             if approved_args is None:
                 return {"meta": CANCELLED_MESSAGE}
+            from uipath_langchain.agent.tools.durable_interrupt import (
+                add_interrupt_offset,
+            )
+
+            add_interrupt_offset()  # request_approval consumed 1 interrupt slot
             _patch_span_input(approved_args)
             return fn(**approved_args)
 
