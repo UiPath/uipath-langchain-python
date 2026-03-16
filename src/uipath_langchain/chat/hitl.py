@@ -12,8 +12,6 @@ from uipath.core.chat import (
     UiPathConversationToolCallConfirmationValue,
 )
 
-from uipath_langchain.agent.tools.durable_interrupt import add_interrupt_offset
-
 CANCELLED_MESSAGE = "Cancelled by user"
 
 CONVERSATIONAL_APPROVED_TOOL_ARGS = "conversational_approved_tool_args"
@@ -129,6 +127,10 @@ def request_approval(
             input_value=tool_args,
         )
     )
+    # Lazy import to avoid circular dependency:
+    # hitl -> agent.tools.durable_interrupt -> agent.tools -> tool_node -> hitl
+    from uipath_langchain.agent.tools.durable_interrupt import add_interrupt_offset
+
     # Workaround for langgraph#6792 — remove when subgraph @task + interrupt()
     # checkpoint caching is fixed upstream
     add_interrupt_offset()
