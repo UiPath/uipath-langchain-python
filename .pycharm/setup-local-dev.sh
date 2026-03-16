@@ -31,17 +31,12 @@ add_uv_sources() {
     # Check if [tool.uv.sources] section already exists
     if grep -q "^\[tool\.uv\.sources\]" "$pyproject_file"; then
         echo -e "${YELLOW}[tool.uv.sources] section already exists in $(basename "$pyproject_file")${NC}"
-        echo "  Verifying content..."
-
-        # Check if the expected content is present
-        if echo "$sources_content" | while IFS= read -r line; do
-            if [ -n "$line" ]; then
-                if ! grep -q "$line" "$pyproject_file"; then
-                    echo -e "${YELLOW}  Warning: Expected line not found: $line${NC}"
-                fi
-            fi
-        done; then
-            echo -e "${GREEN}  Content looks correct${NC}"
+        # Ensure uipath points to monorepo package path (uipath-python is a monorepo)
+        if grep -q 'uipath = { path = "../uipath-python", editable = true }' "$pyproject_file"; then
+            echo -e "${GREEN}  Updating uipath path to ../uipath-python/packages/uipath${NC}"
+            sed -i '' 's|uipath = { path = "../uipath-python", editable = true }|uipath = { path = "../uipath-python/packages/uipath", editable = true }|g' "$pyproject_file"
+        else
+            echo "  Content looks correct"
         fi
     else
         echo -e "${GREEN}Adding [tool.uv.sources] section to $(basename "$pyproject_file")${NC}"
@@ -78,7 +73,7 @@ $section_content
 echo -e "${GREEN}Step 1: Updating uipath-agents-python/pyproject.toml${NC}"
 AGENTS_PYPROJECT="$WORKSPACE_ROOT/uipath-agents-python/pyproject.toml"
 AGENTS_SOURCES='[tool.uv.sources]
-uipath = { path = "../uipath-python", editable = true }
+uipath = { path = "../uipath-python/packages/uipath", editable = true }
 uipath-langchain = { path = "../uipath-langchain-python", editable = true }'
 
 add_uv_sources "$AGENTS_PYPROJECT" "$AGENTS_SOURCES"
@@ -110,7 +105,7 @@ echo ""
 echo -e "${GREEN}Step 3: Updating uipath-langchain-python/pyproject.toml${NC}"
 LANGCHAIN_PYPROJECT="$WORKSPACE_ROOT/uipath-langchain-python/pyproject.toml"
 LANGCHAIN_SOURCES='[tool.uv.sources]
-uipath = { path = "../uipath-python", editable = true }'
+uipath = { path = "../uipath-python/packages/uipath", editable = true }'
 
 add_uv_sources "$LANGCHAIN_PYPROJECT" "$LANGCHAIN_SOURCES"
 
