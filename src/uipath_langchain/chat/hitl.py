@@ -158,7 +158,7 @@ def request_conversational_tool_confirmation(
     )
     if approved_args is None:
         cancelled_msg = ToolMessage(
-            content={"meta": CANCELLED_MESSAGE},
+            content=json.dumps({"meta": CANCELLED_MESSAGE}),
             name=call["name"],
             tool_call_id=call["id"],
         )
@@ -193,7 +193,7 @@ def requires_approval(
         def wrapper(**tool_args: Any) -> Any:
             approved_args = request_approval(tool_args, _created_tool[0])
             if approved_args is None:
-                return {"meta": CANCELLED_MESSAGE}
+                return json.dumps({"meta": CANCELLED_MESSAGE})
 
             _patch_span_input(approved_args)
             return fn(**approved_args)
