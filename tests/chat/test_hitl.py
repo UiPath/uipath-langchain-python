@@ -1,5 +1,6 @@
 """Tests for hitl.py module."""
 
+import json
 from typing import Any
 from unittest.mock import patch
 
@@ -60,7 +61,7 @@ class TestCheckToolConfirmation:
         assert isinstance(result, ConfirmationResult)
         assert result.cancelled is not None
         assert isinstance(result.cancelled, ToolMessage)
-        assert result.cancelled.content == CANCELLED_MESSAGE
+        assert result.cancelled.content == json.dumps({"meta": CANCELLED_MESSAGE})
         assert result.cancelled.name == "mock_tool"
         assert result.cancelled.tool_call_id == "call_1"
         assert result.args_modified is False

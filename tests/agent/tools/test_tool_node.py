@@ -1,5 +1,6 @@
 """Tests for tool_node.py module."""
 
+import json
 from typing import Any, Dict
 from unittest.mock import patch
 
@@ -533,7 +534,7 @@ class TestToolNodeConfirmation:
         assert isinstance(result, dict)
         msg = result["messages"][0]
         assert isinstance(msg, ToolMessage)
-        assert msg.content == CANCELLED_MESSAGE
+        assert msg.content == json.dumps({"meta": CANCELLED_MESSAGE})
 
     @patch(
         "uipath_langchain.chat.hitl.request_approval",
@@ -568,7 +569,6 @@ class TestToolNodeConfirmation:
         assert result is not None
         assert isinstance(result, dict)
         msg = result["messages"][0]
-        import json
 
         assert isinstance(msg.content, str)
         wrapped = json.loads(msg.content)
@@ -588,7 +588,7 @@ class TestToolNodeConfirmation:
         assert result is not None
         assert isinstance(result, dict)
         msg = result["messages"][0]
-        assert msg.content == CANCELLED_MESSAGE
+        assert msg.content == json.dumps({"meta": CANCELLED_MESSAGE})
 
     @patch(
         "uipath_langchain.chat.hitl.request_approval",
@@ -605,7 +605,6 @@ class TestToolNodeConfirmation:
         assert result is not None
         assert isinstance(result, dict)
         msg = result["messages"][0]
-        import json
 
         assert isinstance(msg.content, str)
         wrapped = json.loads(msg.content)
