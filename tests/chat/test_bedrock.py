@@ -1,12 +1,100 @@
+import logging
 import os
 from unittest.mock import patch
 
+import botocore
 from langchain_aws import ChatBedrock
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.messages.content import create_file_block
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from uipath_langchain.chat.bedrock import UiPathChatBedrock
+from uipath_langchain.chat.bedrock import (
+    AwsBedrockCompletionsPassthroughClient,
+    UiPathChatBedrock,
+    UiPathChatBedrockConverse,
+)
+
+
+class TestGetClientSkipsImds:
+    def _assert_no_credential_resolution(self, caplog, client):
+        assert caplog.records
+        credential_log_records = [
+            r for r in caplog.records if r.name.startswith("botocore.credentials")
+        ]
+        assert not credential_log_records, (
+            f"Unexpected credential resolution: {[r.getMessage() for r in credential_log_records]}"
+        )
+        assert client._request_signer._signature_version == botocore.UNSIGNED
+
+    def test_get_client_does_not_trigger_credential_resolution(self, caplog):
+        passthrough = AwsBedrockCompletionsPassthroughClient(
+            model="anthropic.claude-haiku-4-5-20251001",
+            token="test-token",
+            api_flavor="converse",
+        )
+
+        with caplog.at_level(logging.DEBUG, logger="botocore"):
+            client = passthrough.get_client()
+
+        self._assert_no_credential_resolution(caplog, client)
+
+    def test_get_bedrock_client_does_not_trigger_credential_resolution(self, caplog):
+        passthrough = AwsBedrockCompletionsPassthroughClient(
+            model="anthropic.claude-haiku-4-5-20251001",
+            token="test-token",
+            api_flavor="converse",
+        )
+
+        with caplog.at_level(logging.DEBUG, logger="botocore"):
+            client = passthrough.get_bedrock_client()
+
+        self._assert_no_credential_resolution(caplog, client)
+
+    @patch.dict(
+        os.environ,
+        {
+            "UIPATH_URL": "https://example.com",
+            "UIPATH_ORGANIZATION_ID": "org",
+            "UIPATH_TENANT_ID": "tenant",
+            "UIPATH_ACCESS_TOKEN": "token",
+        },
+    )
+    def test_uipath_chat_bedrock_converse_init_does_not_trigger_credential_resolution(
+        self, caplog
+    ):
+        with caplog.at_level(logging.DEBUG, logger="botocore"):
+            UiPathChatBedrockConverse()
+
+        assert caplog.records
+        credential_log_records = [
+            r for r in caplog.records if r.name.startswith("botocore.credentials")
+        ]
+        assert not credential_log_records, (
+            f"Unexpected credential resolution: {[r.getMessage() for r in credential_log_records]}"
+        )
+
+    @patch.dict(
+        os.environ,
+        {
+            "UIPATH_URL": "https://example.com",
+            "UIPATH_ORGANIZATION_ID": "org",
+            "UIPATH_TENANT_ID": "tenant",
+            "UIPATH_ACCESS_TOKEN": "token",
+        },
+    )
+    def test_uipath_chat_bedrock_init_does_not_trigger_credential_resolution(
+        self, caplog
+    ):
+        with caplog.at_level(logging.DEBUG, logger="botocore"):
+            UiPathChatBedrock()
+
+        assert caplog.records
+        credential_log_records = [
+            r for r in caplog.records if r.name.startswith("botocore.credentials")
+        ]
+        assert not credential_log_records, (
+            f"Unexpected credential resolution: {[r.getMessage() for r in credential_log_records]}"
+        )
 
 
 class TestConvertFileBlocksToAnthropicDocuments:
