@@ -12,6 +12,8 @@ from uipath.core.chat import (
     UiPathConversationToolCallConfirmationValue,
 )
 
+from uipath_langchain.agent.tools.durable_interrupt import add_interrupt_offset
+
 CANCELLED_MESSAGE = "Cancelled by user"
 
 CONVERSATIONAL_APPROVED_TOOL_ARGS = "conversational_approved_tool_args"
@@ -127,6 +129,9 @@ def request_approval(
             input_value=tool_args,
         )
     )
+    # Workaround for langgraph#6792 — remove when subgraph @task + interrupt()
+    # checkpoint caching is fixed upstream
+    add_interrupt_offset()
 
     # The resume payload from CAS has shape:
     #   {"type": "uipath_cas_tool_call_confirmation",
@@ -145,6 +150,7 @@ def request_approval(
     )
 
 
+# for conversational low code agents
 def request_conversational_tool_confirmation(
     call: ToolCall, tool: BaseTool
 ) -> ConfirmationResult | None:
@@ -176,6 +182,7 @@ def request_conversational_tool_confirmation(
     )
 
 
+# for conversational coded agents
 def requires_approval(
     func: Callable[..., Any] | None = None,
     *,

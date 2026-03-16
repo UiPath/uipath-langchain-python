@@ -22,7 +22,6 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
-from uipath_langchain.agent.tools.durable_interrupt import add_interrupt_offset
 from uipath_langchain.chat.hitl import request_conversational_tool_confirmation
 
 # the type safety can be improved with generics
@@ -90,7 +89,6 @@ class UiPathToolNode(RunnableCallable):
             if conversational_confirmation.cancelled:
                 # tool confirmation rejected
                 return self._process_result(call, conversational_confirmation.cancelled)
-            add_interrupt_offset()  # HITL consumed 1 interrupt slot
 
         try:
             if self.wrapper:
@@ -128,7 +126,6 @@ class UiPathToolNode(RunnableCallable):
             if conversational_confirmation.cancelled:
                 # tool confirmation rejected
                 return self._process_result(call, conversational_confirmation.cancelled)
-            add_interrupt_offset()  # HITL consumed 1 interrupt slot
 
         try:
             if self.awrapper:
