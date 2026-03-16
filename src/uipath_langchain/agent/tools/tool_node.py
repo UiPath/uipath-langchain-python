@@ -135,7 +135,7 @@ class UiPathToolNode(RunnableCallable):
                 inputs = self._prepare_wrapper_inputs(
                     self.awrapper, self.tool, call, state
                 )
-                
+
                 result = await self.awrapper(*inputs)
             else:
                 result = await self.tool.ainvoke(call)

@@ -537,7 +537,7 @@ class TestInterruptOffsetWithPriorInterrupts:
             return action()
 
         add_interrupt_offset()
-        result = start_job()
+        start_job()
 
         action.assert_called_once()
         mock_interrupt.assert_called_once_with("job-started")
@@ -646,7 +646,7 @@ class TestInterruptOffsetWithPriorInterrupts:
 
         add_interrupt_offset()  # first confirmation
         add_interrupt_offset()  # second confirmation
-        result = start_job()
+        start_job()
 
         action.assert_called_once()  # idx=2, 2 < 2 → False → body runs
         mock_interrupt.assert_called_once_with("job-started")
