@@ -158,7 +158,7 @@ def request_conversational_tool_confirmation(
     )
     if approved_args is None:
         cancelled_msg = ToolMessage(
-            content=CANCELLED_MESSAGE,
+            content={"meta": CANCELLED_MESSAGE},
             name=call["name"],
             tool_call_id=call["id"],
         )
@@ -194,11 +194,7 @@ def requires_approval(
             approved_args = request_approval(tool_args, _created_tool[0])
             if approved_args is None:
                 return {"meta": CANCELLED_MESSAGE}
-            from uipath_langchain.agent.tools.durable_interrupt import (
-                add_interrupt_offset,
-            )
 
-            add_interrupt_offset()  # request_approval consumed 1 interrupt slot
             _patch_span_input(approved_args)
             return fn(**approved_args)
 
