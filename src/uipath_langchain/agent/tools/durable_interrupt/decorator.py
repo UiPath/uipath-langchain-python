@@ -45,27 +45,17 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 # Tracks (scratchpad identity, call index) per node execution.
 # Resets automatically when the scratchpad changes (new node execution).
-
-# ContextVars so parallel graph branches each get isolated state.
-# (scratchpad_id, next_index) for sequencing multiple @durable_interrupt
-# calls in one node.  Resets on scratchpad change (new node execution).
 _durable_state: contextvars.ContextVar[tuple[int, int] | None] = contextvars.ContextVar(
     "_durable_interrupt_state", default=None
 )
-
-# Number of interrupt() calls before the first @durable_interrupt (e.g. HITL).
-# Consumed and reset inside _next_durable_index on scratchpad change.
+# Number of interrupt() calls before the first @durable_interrupt
 _interrupt_offset: contextvars.ContextVar[int] = contextvars.ContextVar(
     "_durable_interrupt_offset", default=0
 )
 
 
 def add_interrupt_offset(n: int = 1) -> None:
-    """Increment durable_interrupt's starting index offset by n.
-
-    Each interrupt() call that fires before @durable_interrupt in the same
-    node should call this so the offset accumulates correctly.
-    """
+    """Increment durable_interrupt's starting index offset by n"""
     _interrupt_offset.set(_interrupt_offset.get(0) + n)
 
 
@@ -87,7 +77,7 @@ def _next_durable_index() -> tuple[Any, int]:
 
     if state is None or state[0] != sp_id:
         idx = _interrupt_offset.get(0)
-        _interrupt_offset.set(0)  # consume offset; reset for safety
+        _interrupt_offset.set(0)  # consume offset
     else:
         idx = state[1]
 
