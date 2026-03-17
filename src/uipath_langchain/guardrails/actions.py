@@ -68,11 +68,9 @@ class LogAction(GuardrailAction):
         """Handle validation result by logging it."""
         if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
             log_level = self.severity_level
-            log_level_name = logging.getLevelName(log_level)
             message = self.message or f"Failed: {result.reason}"
             logger = logging.getLogger(__name__)
-            logger.log(log_level, message)
-            print(f"[{log_level_name}][GUARDRAIL] [{guardrail_name}] {message}")
+            logger.log(log_level, "[GUARDRAIL] [%s] %s", guardrail_name, message)
         return None
 
 
