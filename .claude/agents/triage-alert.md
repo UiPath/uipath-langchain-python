@@ -12,6 +12,7 @@ You receive:
 - **TicketId**: Jira ticket ID (e.g., `SRE-536459`) or full URL
 - **Environment** (optional override): `stg`, `alp`, or `prd`. If not provided, infer from the alert.
 - **Ago** (optional): time window override, e.g. `48h` or `7d`
+- **InvestigationDir**: absolute path to the investigation subfolder (e.g., `<repo>/.ai-workspace/investigations/SRE-536459-20260312-143052/`). All output files go here. The directory is already created by the orchestrator.
 
 ## Workflow
 
@@ -52,7 +53,7 @@ pwsh <repo>/uipath-agents-python/scripts/get-alert-failures.ps1 \
   -<Env> \
   [-StartTime <windowStartTime> -EndTime <windowEndTime>] \
   [-Ago <offset>] \
-  1><repo>/.ai-workspace/investigations/alert-failures-<ticket>.json 2>/dev/null
+  1><investigation-dir>/alert-failures-<ticket>.json 2>/dev/null
 ```
 
 Determine `<repo>` from your working directory.
@@ -69,11 +70,11 @@ Choose the time window based on available information:
 </time_window_strategy>
 
 If the script exits non-zero, read the output file for the `{"error": "..."}` JSON, report the
-error, and stop. Ensure the `<repo>/.ai-workspace/investigations/` directory exists before writing.
+error, and stop. The `<investigation-dir>/` directory is already created by the orchestrator.
 
 ### 4. Parse and Analyze
 
-Use `python3 -c` via Bash to parse `<repo>/.ai-workspace/investigations/alert-failures-<ticket>.json`. Extract:
+Use `python3 -c` via Bash to parse `<investigation-dir>/alert-failures-<ticket>.json`. Extract:
 
 - `totalFailures`: total count
 - `uniqueCategories`: number of distinct failure types
@@ -110,7 +111,7 @@ Look for:
 
 ### 5. Write Triage Report
 
-Write to `<repo>/.ai-workspace/investigations/triage-<ticket>.md` with this structure:
+Write to `<investigation-dir>/triage-<ticket>.md` with this structure:
 
 ```markdown
 # Alert Triage: <ticket>
@@ -175,7 +176,7 @@ Categories that likely do NOT need investigation:
 
 ## Raw Data Reference
 
-- Failures JSON: `<repo>/.ai-workspace/investigations/alert-failures-<ticket>.json`
+- Failures JSON: `<investigation-dir>/alert-failures-<ticket>.json`
 ```
 
 ### 6. Write Machine-Readable Investigation Plan
@@ -183,7 +184,7 @@ Categories that likely do NOT need investigation:
 In addition to the markdown report, write a JSON file for the orchestrator to consume directly.
 This avoids the orchestrator having to parse markdown tables.
 
-Write to `<repo>/.ai-workspace/investigations/triage-plan-<ticket>.json`:
+Write to `<investigation-dir>/triage-plan-<ticket>.json`:
 
 ```json
 {
@@ -253,8 +254,8 @@ Summary for an alert with 3 categories:
 > | 3 | TimeoutError — LLM call exceeded 30s | 3 | `7f421663-...` |
 >
 > Recommended for investigation: categories 1 and 2 (category 3 is likely transient).
-> Triage report: `.ai-workspace/investigations/triage-SRE-536459.md`
-> Investigation plan: `.ai-workspace/investigations/triage-plan-SRE-536459.json`
+> Triage report: `<investigation-dir>/triage-SRE-536459.md`
+> Investigation plan: `<investigation-dir>/triage-plan-SRE-536459.json`
 </example>
 </examples>
 

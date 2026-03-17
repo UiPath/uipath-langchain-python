@@ -15,6 +15,31 @@ uv run mypy .                    # Type check
 uv run pytest tests/             # Test
 ```
 
+## Architecture (`src/uipath_agents/`)
+
+- `agent_graph_builder/` - Agent graph construction (config, graph, LLM utils, message utils, session debug state)
+- `_bts/` - BTS runtime (attributes, callbacks, helpers, runtime, state, storage)
+- `_cli/` - CLI integration (cli_pull, constants, runtime/)
+- `_config/` - Configuration loading and feature flags
+- `_errors/` - Error handling and exception mapping
+- `_licensing/` - License consumption tracking and licensed runtime
+- `_observability/` - Azure Monitor OpenTelemetry (event emitter, exporters/, llmops/instrumentors, llmops/spans, tracing)
+- `_services/` - Flags and licensing services
+- `voice/` - Voice agent runtime (graph, job_runtime)
+- `middlewares.py` - Middleware registration
+- `preload.py` - Preload module discovery
+- `runtime.py` - Runtime factory registration
+
+## Testing
+
+Tests in `./tests` organized as:
+- `unit/` - Unit tests (agent_graph_builder, bts, cli, config, errors, observability, services, voice)
+- `integration/` - Trace parity tests with golden files
+- `e2e/` - End-to-end tests requiring UiPath authentication
+- `observability/` - LLMOps observability tests
+
+Markers: `e2e` (requires auth), `slow` (long-running)
+
 ## Code Style
 
 - ALWAYS add typing annotations to each function or class, including return types

@@ -28,6 +28,21 @@ Parse the arguments from: $ARGUMENTS
 You are the orchestrator. You coordinate two types of subagents and aggregate their outputs
 into a final report with actionable Jira tickets.
 
+### Phase 0: Create Investigation Directory
+
+Before spawning any subagents, generate a unique investigation directory to keep all files
+from this investigation together. The folder name combines the ticket ID and a timestamp:
+
+```
+<repo>/.ai-workspace/investigations/<ticket>-<YYYYMMDD-HHmmss>/
+```
+
+For example: `.ai-workspace/investigations/SRE-536459-20260312-143052/`
+
+Generate the timestamp at the start of the orchestration (use `date +%Y%m%d-%H%M%S` via Bash).
+Create the directory with `mkdir -p`. Pass this path as the `InvestigationDir` input to ALL
+subagents so every file lands in the same subfolder.
+
 ### Phase 1: Triage
 
 Spawn a single **triage-alert** subagent. Tell it to read its own instructions from the
@@ -37,53 +52,81 @@ agent definition file — do NOT copy the file contents into the prompt.
 Task(
   subagent_type="general-purpose",
   description="Triage alert <ticket>",
-  prompt="Read your instructions from <repo>/.claude/agents/triage-alert.md and execute them.\n\nInputs:\n- TicketId: <ticket>\n- Environment: <env or 'auto-detect'>\n- Ago: <ago or 'auto-detect'>"
+  prompt="Read your instructions from <repo>/.claude/agents/triage-alert.md and execute them.\n\nInputs:\n- TicketId: <ticket>\n- Environment: <env or 'auto-detect'>\n- Ago: <ago or 'auto-detect'>\n- InvestigationDir: <investigation-dir>"
 )
 ```
 
 Wait for completion. The triage agent writes:
-- `.ai-workspace/investigations/triage-<ticket>.md` — the triage report (human-readable)
-- `.ai-workspace/investigations/triage-plan-<ticket>.json` — machine-readable investigation plan
-- `.ai-workspace/investigations/alert-failures-<ticket>.json` — raw failure data
+- `<investigation-dir>/triage-<ticket>.md` — the triage report (human-readable)
+- `<investigation-dir>/triage-plan-<ticket>.json` — machine-readable investigation plan
+- `<investigation-dir>/alert-failures-<ticket>.json` — raw failure data
 
 ### Phase 2: Read Investigation Plan
 
 After triage completes, read the **JSON plan file** directly:
 
 ```
-Read(".ai-workspace/investigations/triage-plan-<ticket>.json")
+Read("<investigation-dir>/triage-plan-<ticket>.json")
 ```
 
 This gives you structured data with no markdown parsing needed:
 - `environment` / `envFlag` — environment name and PowerShell flag
 - `ago` — time window to pass to investigation agents
-- `investigate[]` — ALL categories to investigate, each with `jobKey`, `severity`, `signature`
+- `investigate[]` — ALL categories to investigate, each with `jobKey`, `severity`, `signature`, `count`
 - `deduplicated[]` — true duplicate categories (same error, same org, different wrapper) that
   are covered by another category's investigation
 
 If the plan file is missing (triage agent wrote v1 format), fall back to reading the
 triage markdown report and parsing the Recommended Investigation Plan table.
 
-Investigate ALL categories in `investigate[]`. There is **no cap** — every non-deduplicated
-category gets its own investigation agent. Even single-occurrence failures may turn out to be
-real SDK bugs, so do not skip any.
+### Phase 3: User Selection of Investigation Scope
 
-### Phase 3: Parallel Investigation
+Before spawning any investigation agents, present the triage results to the user so they
+can decide how many categories to investigate. This avoids spending Claude usage quota on
+sporadic, low-occurrence problems.
 
-For each investigation target, spawn an **investigate-job** subagent. Tell each subagent
-to read its own instructions from the agent definition file — do NOT copy the file contents
-into the prompt. Launch ALL of them in a single message to maximize parallelism.
+Sort all categories from `investigate[]` in **descending order by occurrence count** and
+display them as a numbered table:
+
+```
+Triage found <N> failure categories (excluding deduplicated ones):
+
+| #  | Occurrences | Orgs | Signature                                         |
+|----|-------------|------|---------------------------------------------------|
+| 1  | 74          | 5    | EnrichedException | POST 400 orchestrator_/.../... |
+| 2  | 31          | 3    | Exception | ContextGroundingIndex not found        |
+| 3  | 12          | 1    | ReadTimeoutError | timeout                          |
+| ...| ...         | ...  | ...                                               |
+
+Each investigation spawns a subagent that consumes Claude usage quota.
+How many of the top categories should I investigate? (e.g., "3" to investigate
+the top 3 by occurrence count, or "all" for every category)
+```
+
+Use AskUserQuestion to get the user's answer. Accept:
+- A number (e.g., `3`) — investigate the top N categories by occurrence count
+- `all` — investigate every category (no cap)
+
+Take the first **X** categories (by descending occurrence count) and proceed to Phase 4.
+The remaining categories are listed in the final report as "not investigated — below
+user-selected cutoff" with their occurrence count and signature for reference.
+
+### Phase 4: Parallel Investigation
+
+For each of the selected investigation targets, spawn an **investigate-job** subagent. Tell
+each subagent to read its own instructions from the agent definition file — do NOT copy the
+file contents into the prompt. Launch ALL of them in a single message to maximize parallelism.
 
 ```
 Task(
   subagent_type="general-purpose",
   description="Investigate <signature-short>",
-  prompt="Read your instructions from <repo>/.claude/agents/investigate-job.md and execute them.\n\nInputs:\n- JobKey: <jobKey>\n- Environment: <envFlag>\n- Ago: <ago>"
+  prompt="Read your instructions from <repo>/.claude/agents/investigate-job.md and execute them.\n\nInputs:\n- JobKey: <jobKey>\n- Environment: <envFlag>\n- Ago: <ago>\n- InvestigationDir: <investigation-dir>"
 )
 ```
 
 Wait for ALL investigation agents to complete. Each writes:
-- `.ai-workspace/investigations/investigation-<jobkey>.md`
+- `<investigation-dir>/investigation-<jobkey>.md`
 
 #### Failure Policy
 
@@ -92,7 +135,7 @@ Wait for ALL investigation agents to complete. Each writes:
 - If **>30%** of investigations fail: pause and ask the user whether to continue with partial
   results or abort. Something may be wrong with the data collection scripts or Azure access.
 
-### Phase 4: Aggregate Results
+### Phase 5: Aggregate Results
 
 Use the **subagent return summaries** (from the Task results) for initial aggregation.
 Each investigation agent returns a concise summary with outcome, root cause category,
@@ -126,13 +169,38 @@ For each investigated category, classify and prioritize:
 | Major | Affects single org or limited scope, reproducible bug |
 | Minor | Edge case, cosmetic, or has easy workaround |
 
-### Phase 5: Duplicate Detection & Ticket Proposals
+### Phase 6: Write Final Report
+
+Write the aggregated report to `<investigation-dir>/alert-report-<ticket>.md`.
+
+Read the report template from `.claude/templates/alert-report.md`
+and fill in all sections. Include:
+- Executive summary with classification breakdown
+- Each investigated category with outcome, root cause, classification, priority
+- Deduplicated categories with which investigation covers them (from the triage plan's `deduplicated[]` array)
+- Uninvestigated categories (below the user-selected cutoff) with their occurrence count and signature
+- Cross-cutting observations
+- Recommendations
+
+The report is written **before** any ticket actions so that the user has full context
+when deciding which tickets to create.
+
+### Phase 7: Present Results
+
+Show the user a concise summary:
+- How many categories were investigated
+- Top findings
+- Path to the full report
+- Any categories that need manual follow-up
+- Which categories are candidates for Jira tickets (Platform Bug / SDK Bug)
+
+### Phase 8: Duplicate Detection & Ticket Proposals
 
 This phase is critical. Creating unnecessary tickets that get marked as duplicates wastes
 engineering time and erodes trust in automated investigation. Be conservative: when in doubt,
 do NOT create a ticket.
 
-#### Step 5a: Search for Existing Tickets
+#### Step 8a: Search for Existing Tickets
 
 For EACH category classified as Platform Bug or SDK Bug, search for potential duplicates.
 Cast a wide net — false negatives (missing a duplicate) are much worse than false positives
@@ -168,7 +236,7 @@ All searches use `cloudId="uipath.atlassian.net"` and `maxResults=10`.
 For each search hit, read the ticket summary and description (fetch the issue if needed) to
 determine if it genuinely covers the same root cause.
 
-#### Step 5b: Classify Each Match
+#### Step 8b: Classify Each Match
 
 | Verdict | Meaning | Action |
 |---------|---------|--------|
@@ -177,7 +245,7 @@ determine if it genuinely covers the same root cause.
 | **STALE MATCH** | A ticket exists but is Done/Closed and the issue has regressed | Flag for user review — may need reopening |
 | **NO MATCH** | No relevant existing ticket found across all searches | Candidate for creation, pending user approval |
 
-#### Step 5c: Present Proposals to User
+#### Step 8c: Present Proposals to User
 
 Do NOT create any tickets automatically. Present all proposals to the user using
 AskUserQuestion and let them decide.
@@ -207,7 +275,7 @@ Use AskUserQuestion with options:
 
 If the user chooses to pick, present each ticket individually for approval.
 
-#### Step 5d: Create Approved Tickets
+#### Step 8d: Create Approved Tickets
 
 Only after explicit user approval, create each ticket:
 
@@ -227,7 +295,7 @@ Read the ticket description template from `.claude/templates/bug-ticket.md`
 and fill in the placeholders. If you need detailed evidence from an investigation report,
 read the specific investigation file at this point.
 
-#### Step 5e: Link & Comment on Existing Tickets
+#### Step 8e: Link & Comment on Existing Tickets
 
 For categories where an existing ticket was found (EXACT DUPLICATE), add a comment to that
 ticket with new evidence. Use this format:
@@ -243,25 +311,9 @@ This issue is still occurring. <N> new failures detected in the last <period>.
 <Brief root cause confirmation from investigation>
 ```
 
-### Phase 6: Write Final Report
+### Phase 9: Comment on SRE Ticket
 
-After all ticket decisions are finalized, write the aggregated report to
-`.ai-workspace/investigations/alert-report-<ticket>.md`.
-
-Read the report template from `.claude/templates/alert-report.md`
-and fill in all sections. Include:
-- Executive summary with classification breakdown
-- Each investigated category with outcome, root cause, classification, priority, ticket action
-- Deduplicated categories with which investigation covers them (from the triage plan's `deduplicated[]` array)
-- Proposed and created tickets (with final verdicts)
-- Cross-cutting observations
-- Recommendations
-
-Write the report **once** with all information, including ticket decisions from Phase 5.
-
-### Phase 7: Comment on SRE Ticket
-
-After the report is written, add a summary comment to the original SRE alert ticket:
+After ticket actions are complete, add a summary comment to the original SRE alert ticket:
 
 ```
 mcp__atlassian__addCommentToJiraIssue(
@@ -272,16 +324,7 @@ mcp__atlassian__addCommentToJiraIssue(
 ```
 
 Read the comment template from `.claude/templates/sre-comment.md`
-and fill in the placeholders.
-
-### Phase 8: Present Results
-
-Show the user a concise summary:
-- How many categories were investigated
-- Ticket actions taken (created / updated existing / skipped)
-- Top findings
-- Path to the full report
-- Any categories that need manual follow-up
+and fill in the placeholders. Include references to any created or updated tickets.
 
 ## Guidelines
 
@@ -295,7 +338,7 @@ Show the user a concise summary:
 - The triage agent already filtered out "User" ErrorCategory failures. All failures in the
   data are non-user errors, but investigation may still reveal user misconfiguration as the
   true root cause.
-- All reports go in `.ai-workspace/investigations/`.
+- All reports go in `<investigation-dir>/` (the ticket+timestamp subfolder).
 - **Templates live in `.claude/templates/`.** Read them when needed, don't memorize their contents.
 
 ### Ticket Creation Principles

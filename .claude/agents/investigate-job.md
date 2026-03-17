@@ -11,21 +11,48 @@ You receive:
 - **JobKey** (UUID)
 - **Environment**: `stg`, `alp`, or `prd` (or `-Stg`, `-Alp`, `-Prd`)
 - **Ago** (optional): time window, defaults to `24h`
+- **InvestigationDir**: absolute path to the investigation subfolder (e.g., `<repo>/.ai-workspace/investigations/SRE-536459-20260312-143052/`). All output files go here. The directory is already created by the orchestrator.
 
 ## Workflow
 
 ### 1. Collect Data
 
-Run the inline logs script to gather container logs and agent telemetry:
+Run the inline logs script to gather container logs and agent telemetry. Redirect stdout
+directly to a file — the JSON payloads can be very large and capturing them through the
+Bash tool risks truncation.
 
+Determine `<repo>` from your working directory. The `<investigation-dir>` is already created
+by the orchestrator, but ensure it exists as a safety check:
+
+```bash
+mkdir -p <investigation-dir>
 ```
+
+Then run the script, redirecting stdout to the data file:
+
+```bash
 pwsh <repo>/uipath-agents-python/scripts/get-agent-logs-inline.ps1 \
   -JobKey <key> -<Env> [-Ago <offset>] \
-  1><repo>/.ai-workspace/investigations/investigate-<jobkey>.json 2>/dev/null
+  1><investigation-dir>/investigate-<jobkey>.json 2>/dev/null
 ```
 
-Determine `<repo>` from your working directory. If the script exits non-zero, read the
-output file for the `{"error": "..."}` JSON, report the error, and stop.
+If the script exits non-zero, read the output file for the `{"error": "..."}` JSON,
+report the error, and stop.
+
+### 1a. Validate Data
+
+Before proceeding, verify the data file is non-empty and contains valid JSON:
+
+```bash
+python3 -c "import json, os; f='<path>'; s=os.path.getsize(f); assert s > 0, f'Empty file ({s} bytes)'; d=json.load(open(f)); print(f'OK: {len(d.get(\"timeline\",[]))} timeline entries, {d.get(\"logCount\",0)} container logs')"
+```
+
+If validation fails, **do not continue with analysis**. Report back:
+- Outcome: UNKNOWN
+- Root cause: "Data collection failed — script produced no output"
+- Include the script's stderr output if available
+
+Do NOT fabricate or guess analysis results when data is missing.
 
 ### 2. Parse the JSON
 
@@ -34,6 +61,12 @@ Use `python3 -c` via Bash (not the Read tool -- the files are too large). Extrac
 - Run intervals and whether any were resumes
 - The merged `timeline` array (container logs + agent telemetry sorted chronologically)
 - The `agentTelemetry` metadata (operationIds, eventCount)
+
+Record which data sources are present:
+- **Container logs**: check `logCount > 0`
+- **Agent telemetry**: check `agentTelemetry.eventCount > 0`
+
+Both, one, or neither may be available. Note which sources you have — this goes in the report.
 
 ### 3. Analyze
 
@@ -93,8 +126,7 @@ Map HTTP dependency URLs to services:
 
 ### 4. Write Investigation Report
 
-Write to `<repo>/.ai-workspace/investigations/investigation-<jobkey>.md` with this structure.
-Ensure the directory exists before writing. Determine `<repo>` from your working directory.
+Write to `<investigation-dir>/investigation-<jobkey>.md` with this structure.
 
 ```markdown
 # Job Investigation: <jobkey>
@@ -120,6 +152,13 @@ Ensure the directory exists before writing. Determine `<repo>` from your working
 | Engine | ... |
 | Max Memory | ... MB |
 | Duration | ... seconds |
+
+## Data Sources
+
+| Source | Available | Entry Count |
+|--------|-----------|-------------|
+| Container logs (Log Analytics) | Yes/No | N |
+| Agent telemetry (AppInsights) | Yes/No | N |
 
 ## Root Cause
 
@@ -217,3 +256,9 @@ The caller reads the file for details -- keep the response message short.
   If evidence is ambiguous, say so rather than guessing.
 - The `operation_Id` is scoped to agents AppInsights. It cannot correlate with container logs.
   Cross-source correlation is temporal only (via the merged timeline).
+- **Never fabricate analysis.** If the data collection script fails or produces empty output,
+  report "UNKNOWN — insufficient data" and stop. Do not infer, guess, or hallucinate
+  timeline entries, error details, or root causes. An honest "no data" is infinitely more
+  useful than a plausible-sounding but unsupported analysis.
+- **Always populate the Data Sources table** in the report. If a source has 0 entries,
+  mark it as "No" so readers know what evidence backs the analysis.
