@@ -15,12 +15,12 @@ from uipath_langchain.guardrails import (
     PIIDetectionEntity,
     GuardrailExecutionStage,
     LogAction,
-    PIIDetectionEntityType,
     UiPathDeterministicGuardrailMiddleware,
     UiPathPIIDetectionMiddleware,
     UiPathPromptInjectionMiddleware,
 )
 from uipath_langchain.guardrails.actions import LoggingSeverityLevel
+from uipath_langchain.guardrails.enums import PIIDetectionEntityType
 
 
 # Define input schema for the agent
@@ -102,12 +102,13 @@ agent = create_agent(
                 PIIDetectionEntity(PIIDetectionEntityType.PHONE_NUMBER, 0.5),
             ],
             tools=[analyze_joke_syntax],
+            enabled_for_evals=False,
         ),
         *UiPathPromptInjectionMiddleware(
             name="Prompt Injection Detection",
-            scopes=[GuardrailScope.LLM],
             action=BlockAction(),
             threshold=0.5,
+            enabled_for_evals=False,
         ),
         # Custom FilterAction example: demonstrates how developers can implement their own actions
         *UiPathDeterministicGuardrailMiddleware(
@@ -121,6 +122,7 @@ agent = create_agent(
             ),
             stage=GuardrailExecutionStage.PRE,
             name="Joke Content Validator",
+            enabled_for_evals=False,
         ),
         *UiPathDeterministicGuardrailMiddleware(
             tools=[analyze_joke_syntax],

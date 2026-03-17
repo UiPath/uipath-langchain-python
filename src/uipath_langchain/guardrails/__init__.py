@@ -7,8 +7,14 @@ that integrate with UiPath's guardrails service.
 from uipath.agent.models.agent import AgentGuardrailSeverityLevel
 from uipath.core.guardrails import GuardrailScope
 
-from .actions import BlockAction, LogAction
-from .enums import GuardrailExecutionStage, PIIDetectionEntityType
+from .actions import BlockAction, LogAction, LoggingSeverityLevel
+from .decorators import (
+    RuleFunction,
+    deterministic_guardrail,
+    pii_detection_guardrail,
+    prompt_injection_guardrail,
+)
+from .enums import GuardrailExecutionStage
 from .middlewares import (
     UiPathDeterministicGuardrailMiddleware,
     UiPathPIIDetectionMiddleware,
@@ -17,15 +23,19 @@ from .middlewares import (
 from .models import GuardrailAction, PIIDetectionEntity
 
 __all__ = [
-    "PIIDetectionEntityType",
+    "PIIDetectionEntity",
     "GuardrailExecutionStage",
     "GuardrailScope",
-    "PIIDetectionEntity",
     "GuardrailAction",
     "LogAction",
     "BlockAction",
+    "LoggingSeverityLevel",
     "UiPathPIIDetectionMiddleware",
     "UiPathPromptInjectionMiddleware",
     "UiPathDeterministicGuardrailMiddleware",
+    "pii_detection_guardrail",
+    "prompt_injection_guardrail",
+    "deterministic_guardrail",
+    "RuleFunction",
     "AgentGuardrailSeverityLevel",  # Re-export for convenience
 ]
