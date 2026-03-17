@@ -65,6 +65,7 @@ class UiPathDeterministicGuardrailMiddleware:
             rules=[],
             action=CustomFilterAction(...),
             stage=GuardrailExecutionStage.POST,
+            enabled_for_evals=False,
         )
 
         agent = create_agent(
@@ -91,6 +92,8 @@ class UiPathDeterministicGuardrailMiddleware:
             - GuardrailExecutionStage.PRE_AND_POST: Validate both input and output
         name: Optional name for the guardrail (defaults to "Deterministic Guardrail")
         description: Optional description for the guardrail
+        enabled_for_evals: Whether this guardrail is enabled for evaluation scenarios.
+            Defaults to True.
     """
 
     def __init__(
@@ -102,6 +105,7 @@ class UiPathDeterministicGuardrailMiddleware:
         *,
         name: str = "Deterministic Guardrail",
         description: str | None = None,
+        enabled_for_evals: bool = True,
     ):
         """Initialize deterministic guardrail middleware."""
         if not tools:
@@ -112,6 +116,8 @@ class UiPathDeterministicGuardrailMiddleware:
             raise ValueError(
                 f"stage must be an instance of GuardrailExecutionStage, got {type(stage)}"
             )
+        if not isinstance(enabled_for_evals, bool):
+            raise ValueError("enabled_for_evals must be a boolean")
 
         for i, rule in enumerate(rules):
             if not callable(rule):
@@ -139,6 +145,7 @@ class UiPathDeterministicGuardrailMiddleware:
         self.action = action
         self._stage = stage
         self._name = name
+        self.enabled_for_evals = enabled_for_evals
         self._description = description or "Deterministic guardrail with custom rules"
 
         self._middleware_instances = self._create_middleware_instances()
