@@ -314,7 +314,11 @@ def _compute_field_sources_for_guardrail(
     field_sources = []
 
     # Deterministic guardrails have one single tool
-    if guardrail.selector.match_names and len(guardrail.selector.match_names) > 0:
+    if (
+        guardrail.selector is not None
+        and guardrail.selector.match_names
+        and len(guardrail.selector.match_names) > 0
+    ):
         match_name = guardrail.selector.match_names[0]
         matching_tool = next(
             (
@@ -343,7 +347,9 @@ def _compute_field_sources_for_guardrail(
 
     # If we reach here, either match_names is not specified/empty, or no matching tool was found
     tool_name: str | None = (
-        guardrail.selector.match_names[0] if guardrail.selector.match_names else None
+        guardrail.selector.match_names[0]
+        if guardrail.selector is not None and guardrail.selector.match_names
+        else None
     )
     raise AgentStartupError(
         code=AgentStartupErrorCode.INVALID_GUARDRAIL_CONFIG,
@@ -520,7 +526,11 @@ def build_guardrails_with_actions(
             # Validate that DeterministicGuardrails only have TOOL scope
             non_tool_scopes = [
                 scope
-                for scope in converted_guardrail.selector.scopes
+                for scope in (
+                    converted_guardrail.selector.scopes
+                    if converted_guardrail.selector is not None
+                    else []
+                )
                 if scope != GuardrailScope.TOOL
             ]
 

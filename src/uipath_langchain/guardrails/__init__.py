@@ -1,31 +1,69 @@
-"""UiPath Guardrails middleware for LangChain agents.
+"""UiPath Guardrails for LangChain agents.
 
-This module provides a developer-friendly API for configuring guardrails
-that integrate with UiPath's guardrails service.
+Platform guardrail decorators plus LangChain/LangGraph adapter auto-registration.
 """
 
 from uipath.agent.models.agent import AgentGuardrailSeverityLevel
-from uipath.core.guardrails import GuardrailScope
+from uipath.platform.guardrails.decorators import (
+    BlockAction,
+    CustomValidator,
+    GuardrailAction,
+    GuardrailBlockException,
+    GuardrailExclude,
+    GuardrailExecutionStage,
+    GuardrailTargetAdapter,
+    GuardrailValidatorBase,
+    LogAction,
+    LoggingSeverityLevel,
+    PIIDetectionEntity,
+    PIIDetectionEntityType,
+    PIIValidator,
+    PromptInjectionValidator,
+    RuleFunction,
+    guardrail,
+    register_guardrail_adapter,
+)
 
-from .actions import BlockAction, LogAction
-from .enums import GuardrailExecutionStage, PIIDetectionEntityType
+from ._langchain_adapter import LangChainGuardrailAdapter
 from .middlewares import (
     UiPathDeterministicGuardrailMiddleware,
     UiPathPIIDetectionMiddleware,
     UiPathPromptInjectionMiddleware,
 )
-from .models import GuardrailAction, PIIDetectionEntity
+
+# Auto-register the LangChain adapter so @guardrail knows how to wrap
+# BaseTool, BaseChatModel, StateGraph, and CompiledStateGraph.
+register_guardrail_adapter(LangChainGuardrailAdapter())
 
 __all__ = [
+    # Decorator
+    "guardrail",
+    # Validators
+    "GuardrailValidatorBase",
+    "PIIValidator",
+    "PromptInjectionValidator",
+    "CustomValidator",
+    "RuleFunction",
+    # Models & enums
+    "PIIDetectionEntity",
     "PIIDetectionEntityType",
     "GuardrailExecutionStage",
-    "GuardrailScope",
-    "PIIDetectionEntity",
     "GuardrailAction",
+    # Actions
     "LogAction",
     "BlockAction",
+    "LoggingSeverityLevel",
+    # Exception
+    "GuardrailBlockException",
+    # Exclude marker
+    "GuardrailExclude",
+    # Adapter registry
+    "GuardrailTargetAdapter",
+    "register_guardrail_adapter",
+    # Middlewares (unchanged)
     "UiPathPIIDetectionMiddleware",
     "UiPathPromptInjectionMiddleware",
     "UiPathDeterministicGuardrailMiddleware",
-    "AgentGuardrailSeverityLevel",  # Re-export for convenience
+    # Re-exports for backwards compat
+    "AgentGuardrailSeverityLevel",
 ]

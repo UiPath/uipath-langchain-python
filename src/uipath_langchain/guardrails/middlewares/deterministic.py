@@ -15,10 +15,14 @@ from uipath.core.guardrails import (
     GuardrailValidationResult,
     GuardrailValidationResultType,
 )
+from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
+
+from uipath_langchain.agent.exceptions import AgentRuntimeError
 
 from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction
 from ._utils import (
+    convert_block_exception,
     create_modified_tool_request,
     create_modified_tool_result,
     sanitize_tool_name,
@@ -65,6 +69,7 @@ class UiPathDeterministicGuardrailMiddleware:
             rules=[],
             action=CustomFilterAction(...),
             stage=GuardrailExecutionStage.POST,
+            enabled_for_evals=False,
         )
 
         agent = create_agent(
@@ -91,6 +96,8 @@ class UiPathDeterministicGuardrailMiddleware:
             - GuardrailExecutionStage.PRE_AND_POST: Validate both input and output
         name: Optional name for the guardrail (defaults to "Deterministic Guardrail")
         description: Optional description for the guardrail
+        enabled_for_evals: Whether this guardrail is enabled for evaluation scenarios.
+            Defaults to True.
     """
 
     def __init__(
@@ -102,6 +109,7 @@ class UiPathDeterministicGuardrailMiddleware:
         *,
         name: str = "Deterministic Guardrail",
         description: str | None = None,
+        enabled_for_evals: bool = True,
     ):
         """Initialize deterministic guardrail middleware."""
         if not tools:
@@ -112,6 +120,8 @@ class UiPathDeterministicGuardrailMiddleware:
             raise ValueError(
                 f"stage must be an instance of GuardrailExecutionStage, got {type(stage)}"
             )
+        if not isinstance(enabled_for_evals, bool):
+            raise ValueError("enabled_for_evals must be a boolean")
 
         for i, rule in enumerate(rules):
             if not callable(rule):
@@ -139,6 +149,7 @@ class UiPathDeterministicGuardrailMiddleware:
         self.action = action
         self._stage = stage
         self._name = name
+        self.enabled_for_evals = enabled_for_evals
         self._description = description or "Deterministic guardrail with custom rules"
 
         self._middleware_instances = self._create_middleware_instances()
@@ -233,7 +244,12 @@ class UiPathDeterministicGuardrailMiddleware:
             if result.result != GuardrailValidationResultType.VALIDATION_FAILED:
                 return request, input_data, tool_result
 
-        modified_data = self._handle_validation_result(result, data_for_action)
+        try:
+            modified_data = self._handle_validation_result(result, data_for_action)
+        except GuardrailBlockException as exc:
+            raise convert_block_exception(exc) from exc
+        except AgentRuntimeError:
+            raise
 
         if stage == GuardrailExecutionStage.PRE:
             if modified_data is not None and isinstance(modified_data, dict):
