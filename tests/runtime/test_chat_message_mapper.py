@@ -1720,19 +1720,16 @@ class TestMapLangChainAIMessageCitations:
         assert source.page_number == "3"
 
 
-class TestConfirmationToolStartAlwaysEmitted:
-    """startToolCall is always emitted, even for confirmation tools.
-
-    The client-side state machine handles suppressing the tool call UI
-    when a ToolCallConfirmation interrupt follows.
-    """
+class TestConfirmationToolMetadata:
+    """Confirmation tools emit startToolCall with requiresConfirmation metadata."""
 
     @pytest.mark.asyncio
-    async def test_start_tool_call_emitted_for_confirmation_tool(self):
-        """AIMessageChunk with confirmation tool should still emit startToolCall."""
+    async def test_confirmation_tool_has_requires_confirmation_metadata(self):
+        """startToolCall for confirmation tools includes requiresConfirmation in metadata."""
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        mapper.tool_names_requiring_confirmation = {"confirm_tool"}
 
         first_chunk = AIMessageChunk(
             content="",
@@ -1751,15 +1748,51 @@ class TestConfirmationToolStartAlwaysEmitted:
             for e in result
             if e.tool_call is not None and e.tool_call.start is not None
         ]
-        assert len(tool_start_events) == 1
-        assert tool_start_events[0].tool_call.start.tool_name == "confirm_tool"
+        assert len(tool_start_events) >= 1
+        event = tool_start_events[0]
+        assert event.tool_call is not None
+        assert event.tool_call.start is not None
+        assert event.tool_call.start.tool_name == "confirm_tool"
+        assert event.tool_call.start.metadata == {"requiresConfirmation": True}
 
     @pytest.mark.asyncio
-    async def test_mixed_tools_all_emit_start_tool_call(self):
-        """All tools in one AIMessage emit startToolCall, including confirmation tools."""
+    async def test_normal_tool_has_no_confirmation_metadata(self):
+        """startToolCall for normal tools has no metadata."""
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        mapper.tool_names_requiring_confirmation = {"other_tool"}
+
+        first_chunk = AIMessageChunk(
+            content="",
+            id="msg-2",
+            tool_calls=[{"id": "tc-2", "name": "normal_tool", "args": {}}],
+        )
+        await mapper.map_event(first_chunk)
+
+        last_chunk = AIMessageChunk(content="", id="msg-2")
+        object.__setattr__(last_chunk, "chunk_position", "last")
+        result = await mapper.map_event(last_chunk)
+
+        assert result is not None
+        tool_start_events = [
+            e
+            for e in result
+            if e.tool_call is not None and e.tool_call.start is not None
+        ]
+        assert len(tool_start_events) >= 1
+        event = tool_start_events[0]
+        assert event.tool_call is not None
+        assert event.tool_call.start is not None
+        assert event.tool_call.start.metadata is None
+
+    @pytest.mark.asyncio
+    async def test_mixed_tools_only_confirmation_has_metadata(self):
+        """In mixed tool calls, only confirmation tools get the metadata flag."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        mapper.tool_names_requiring_confirmation = {"confirm_tool"}
 
         first_chunk = AIMessageChunk(
             content="",
@@ -1776,10 +1809,12 @@ class TestConfirmationToolStartAlwaysEmitted:
         result = await mapper.map_event(last_chunk)
 
         assert result is not None
-        tool_start_names = [
-            e.tool_call.start.tool_name
-            for e in result
-            if e.tool_call is not None and e.tool_call.start is not None
-        ]
-        assert "normal_tool" in tool_start_names
-        assert "confirm_tool" in tool_start_names
+        tool_starts = {}
+        for e in result:
+            tc = e.tool_call
+            if tc is not None and tc.start is not None:
+                tool_starts[tc.start.tool_name] = tc.start
+        assert "normal_tool" in tool_starts
+        assert "confirm_tool" in tool_starts
+        assert tool_starts["normal_tool"].metadata is None
+        assert tool_starts["confirm_tool"].metadata == {"requiresConfirmation": True}
