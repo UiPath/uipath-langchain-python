@@ -14,7 +14,10 @@ from uipath.core.guardrails import (
 )
 from uipath.platform import UiPath
 from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailScope
+from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
 from uipath.platform.guardrails.guardrails import NumberParameterValue
+
+from uipath_langchain.agent.exceptions import AgentRuntimeError
 
 from ..models import GuardrailAction
 from ._utils import extract_text_from_messages
@@ -37,6 +40,7 @@ class UiPathPromptInjectionMiddleware:
         middleware = UiPathPromptInjectionMiddleware(
             action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
             threshold=0.5,
+            enabled_for_evals=True,
         )
         ```
 
@@ -47,6 +51,8 @@ class UiPathPromptInjectionMiddleware:
         threshold: Detection threshold (0.0 to 1.0)
         name: Optional name for the guardrail (defaults to "Prompt Injection Detection")
         description: Optional description for the guardrail
+        enabled_for_evals: Whether this guardrail is enabled for evaluation scenarios.
+            Defaults to True.
     """
 
     def __init__(
@@ -57,12 +63,15 @@ class UiPathPromptInjectionMiddleware:
         scopes: Sequence[GuardrailScope] | None = None,
         name: str = "Prompt Injection Detection",
         description: str | None = None,
+        enabled_for_evals: bool = True,
     ):
         """Initialize prompt injection detection guardrail middleware."""
         if not isinstance(action, GuardrailAction):
             raise ValueError("action must be an instance of GuardrailAction")
         if not 0.0 <= threshold <= 1.0:
             raise ValueError(f"Threshold must be between 0.0 and 1.0, got {threshold}")
+        if not isinstance(enabled_for_evals, bool):
+            raise ValueError("enabled_for_evals must be a boolean")
 
         scopes_list = list(scopes) if scopes is not None else [GuardrailScope.LLM]
         if scopes_list != [GuardrailScope.LLM]:
@@ -75,6 +84,7 @@ class UiPathPromptInjectionMiddleware:
         self.action = action
         self.threshold = threshold
         self._name = name
+        self.enabled_for_evals = enabled_for_evals
         self._description = (
             description
             or f"Detects prompt injection attempts with threshold {threshold}"
@@ -118,7 +128,7 @@ class UiPathPromptInjectionMiddleware:
             id=str(uuid4()),
             name=self._name,
             description=self._description,
-            enabled_for_evals=True,
+            enabled_for_evals=self.enabled_for_evals,
             selector=GuardrailSelector(scopes=self.scopes),
             guardrail_type="builtInValidator",
             validator_type="prompt_injection",
@@ -168,6 +178,8 @@ class UiPathPromptInjectionMiddleware:
                         if isinstance(msg.content, str) and text in msg.content:
                             msg.content = msg.content.replace(text, modified_text, 1)
                             break
+        except (AgentRuntimeError, GuardrailBlockException):
+            raise
         except Exception as e:
             logger.error(
                 f"Error evaluating prompt injection guardrail: {e}", exc_info=True
