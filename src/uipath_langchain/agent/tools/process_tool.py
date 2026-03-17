@@ -13,6 +13,7 @@ from uipath.platform.common import WaitJobRaw
 from uipath.platform.orchestrator import JobState
 
 from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.job_attachments import get_job_attachments
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
@@ -24,7 +25,6 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
 
-from .durable_interrupt import durable_interrupt
 from .utils import sanitize_tool_name
 
 
