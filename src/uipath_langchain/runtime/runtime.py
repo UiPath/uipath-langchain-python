@@ -493,6 +493,7 @@ class UiPathLangGraphRuntime:
     def _get_tool_names_requiring_confirmation(self) -> set[str]:
         names: set[str] = set()
         for node_name, node_spec in self.graph.nodes.items():
+            # langgraph's processing node.bound -> runnable.tool -> baseTool (if tool node)
             tool = getattr(getattr(node_spec, "bound", None), "tool", None)
             if tool is None:
                 continue
