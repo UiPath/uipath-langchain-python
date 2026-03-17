@@ -48,15 +48,6 @@ F = TypeVar("F", bound=Callable[..., Any])
 _durable_state: contextvars.ContextVar[tuple[int, int] | None] = contextvars.ContextVar(
     "_durable_interrupt_state", default=None
 )
-# Number of interrupt() calls before the first @durable_interrupt
-_interrupt_offset: contextvars.ContextVar[int] = contextvars.ContextVar(
-    "_durable_interrupt_offset", default=0
-)
-
-
-def add_interrupt_offset(n: int = 1) -> None:
-    """Increment durable_interrupt's starting index offset by n"""
-    _interrupt_offset.set(_interrupt_offset.get(0) + n)
 
 
 def _next_durable_index() -> tuple[Any, int]:
@@ -76,8 +67,7 @@ def _next_durable_index() -> tuple[Any, int]:
     state = _durable_state.get()
 
     if state is None or state[0] != sp_id:
-        idx = _interrupt_offset.get(0)
-        _interrupt_offset.set(0)  # consume offset
+        idx = 0
     else:
         idx = state[1]
 

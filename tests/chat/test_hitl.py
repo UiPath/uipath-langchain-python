@@ -146,7 +146,7 @@ class TestAnnotateResult:
 class TestRequestApprovalTruthiness:
     """Tests for the truthiness fix in request_approval."""
 
-    @patch("uipath_langchain.chat.hitl.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     def test_empty_dict_input_preserved(self, mock_interrupt):
         """Empty dict from user edits should not be replaced by original args."""
         mock_interrupt.return_value = {"value": {"approved": True, "input": {}}}
@@ -154,7 +154,7 @@ class TestRequestApprovalTruthiness:
         result = request_approval({"query": "test", "tool_call_id": "c1"}, tool)
         assert result == {}
 
-    @patch("uipath_langchain.chat.hitl.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     def test_empty_list_input_preserved(self, mock_interrupt):
         """Empty list from user edits should not be replaced by original args."""
         mock_interrupt.return_value = {"value": {"approved": True, "input": []}}
@@ -162,7 +162,7 @@ class TestRequestApprovalTruthiness:
         result = request_approval({"query": "test", "tool_call_id": "c1"}, tool)
         assert result == []
 
-    @patch("uipath_langchain.chat.hitl.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     def test_none_input_falls_back_to_original(self, mock_interrupt):
         """None input should fall back to original tool_args."""
         mock_interrupt.return_value = {"value": {"approved": True, "input": None}}
@@ -170,7 +170,7 @@ class TestRequestApprovalTruthiness:
         result = request_approval({"query": "test", "tool_call_id": "c1"}, tool)
         assert result == {"query": "test"}
 
-    @patch("uipath_langchain.chat.hitl.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     def test_missing_input_falls_back_to_original(self, mock_interrupt):
         """Missing input key should fall back to original tool_args."""
         mock_interrupt.return_value = {"value": {"approved": True}}
@@ -178,7 +178,7 @@ class TestRequestApprovalTruthiness:
         result = request_approval({"query": "test", "tool_call_id": "c1"}, tool)
         assert result == {"query": "test"}
 
-    @patch("uipath_langchain.chat.hitl.interrupt")
+    @patch("uipath_langchain.agent.tools.durable_interrupt.decorator.interrupt")
     def test_rejected_returns_none(self, mock_interrupt):
         """Rejected approval returns None."""
         mock_interrupt.return_value = {"value": {"approved": False}}

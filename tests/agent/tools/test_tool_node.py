@@ -15,7 +15,6 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
-from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
     UiPathToolNode,
@@ -73,9 +72,10 @@ class FilteredState(BaseModel):
     session_id: str = "test_session"
 
 
-class MockState(AgentGraphState):
+class MockState(BaseModel):
     """Mock state for testing."""
 
+    messages: list[Any] = []
     user_id: str = "test_user"
     session_id: str = "test_session"
 
@@ -316,7 +316,8 @@ class TestUiPathToolNode:
         node = UiPathToolNode(failing_tool, handle_tool_errors=False)
 
         with pytest.raises(ValueError) as exc_info:
-            node._func(state)
+            node._func(state)  # type: ignore[arg-type]
+
         assert "Tool execution failed: test input" in str(exc_info.value)
 
     async def test_async_tool_error_propagates_when_handle_errors_false(self):
@@ -333,7 +334,8 @@ class TestUiPathToolNode:
         node = UiPathToolNode(failing_tool, handle_tool_errors=False)
 
         with pytest.raises(ValueError) as exc_info:
-            await node._afunc(state)
+            await node._afunc(state)  # type: ignore[arg-type]
+
         assert "Async tool execution failed: test input" in str(exc_info.value)
 
     def test_tool_error_captured_when_handle_errors_true(self):
@@ -349,7 +351,8 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(failing_tool, handle_tool_errors=True)
 
-        result = node._func(state)
+        result = node._func(state)  # type: ignore[arg-type]
+
         assert result is not None
         assert isinstance(result, dict)
         assert "messages" in result
@@ -375,7 +378,8 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(failing_tool, handle_tool_errors=True)
 
-        result = await node._afunc(state)
+        result = await node._afunc(state)  # type: ignore[arg-type]
+
         assert result is not None
         assert isinstance(result, dict)
         assert "messages" in result

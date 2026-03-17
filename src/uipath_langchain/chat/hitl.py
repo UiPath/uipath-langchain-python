@@ -7,7 +7,6 @@ from typing import Annotated, Any, Callable, NamedTuple
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId
 from langchain_core.tools import tool as langchain_tool
-from langgraph.types import interrupt
 from uipath.core.chat import (
     UiPathConversationToolCallConfirmationValue,
 )
@@ -119,21 +118,20 @@ def request_approval(
     if tool_call_schema is not None:
         input_schema = tool_call_schema.model_json_schema()
 
-    response = interrupt(
-        UiPathConversationToolCallConfirmationValue(
+    # Lazy import to avoid circular dependency:
+    # hitl -> agent.tools.durable_interrupt -> agent.tools -> tool_node -> hitl
+    from uipath_langchain.agent.tools.durable_interrupt import durable_interrupt
+
+    @durable_interrupt
+    def ask_confirmation():
+        return UiPathConversationToolCallConfirmationValue(
             tool_call_id=tool_call_id,
             tool_name=tool.name,
             input_schema=input_schema,
             input_value=tool_args,
         )
-    )
-    # Lazy import to avoid circular dependency:
-    # hitl -> agent.tools.durable_interrupt -> agent.tools -> tool_node -> hitl
-    from uipath_langchain.agent.tools.durable_interrupt import add_interrupt_offset
 
-    # Workaround for langgraph#6792 — remove when subgraph @task + interrupt()
-    # checkpoint caching is fixed upstream
-    add_interrupt_offset()
+    response = ask_confirmation()
 
     # The resume payload from CAS has shape:
     #   {"type": "uipath_cas_tool_call_confirmation",

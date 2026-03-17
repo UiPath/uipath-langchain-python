@@ -433,9 +433,7 @@ class UiPathChatMessagesMapper:
                 # Keep as string if not valid JSON
                 pass
 
-        events: list[UiPathConversationMessageEvent] = []
-
-        events.append(
+        events = [
             UiPathConversationMessageEvent(
                 message_id=message_id,
                 tool_call=UiPathConversationToolCallEvent(
@@ -447,7 +445,7 @@ class UiPathChatMessagesMapper:
                     ),
                 ),
             )
-        )
+        ]
 
         if is_last_tool_call:
             events.append(self.map_to_message_end_event(message_id))
