@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
+from pydantic import BaseModel
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
@@ -315,7 +316,7 @@ class TestUiPathToolNode:
         node = UiPathToolNode(failing_tool, handle_tool_errors=False)
 
         with pytest.raises(ValueError) as exc_info:
-            node._func(state)  # type: ignore[arg-type]
+            node._func(state)
 
         assert "Tool execution failed: test input" in str(exc_info.value)
 
@@ -333,7 +334,7 @@ class TestUiPathToolNode:
         node = UiPathToolNode(failing_tool, handle_tool_errors=False)
 
         with pytest.raises(ValueError) as exc_info:
-            await node._afunc(state)  # type: ignore[arg-type]
+            await node._afunc(state)
 
         assert "Async tool execution failed: test input" in str(exc_info.value)
 
@@ -350,7 +351,7 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(failing_tool, handle_tool_errors=True)
 
-        result = node._func(state)  # type: ignore[arg-type]
+        result = node._func(state)
 
         assert result is not None
         assert isinstance(result, dict)
@@ -377,7 +378,7 @@ class TestUiPathToolNode:
 
         node = UiPathToolNode(failing_tool, handle_tool_errors=True)
 
-        result = await node._afunc(state)  # type: ignore[arg-type]
+        result = await node._afunc(state)
 
         assert result is not None
         assert isinstance(result, dict)
