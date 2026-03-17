@@ -23,8 +23,8 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
+from uipath_langchain.durable_interrupt import durable_interrupt
 
-from .durable_interrupt import durable_interrupt
 from .utils import sanitize_tool_name
 
 

@@ -170,7 +170,7 @@ class TestDurableInterruptAlignment:
 
     def test_single_durable_interrupt_returns_resume_value(self) -> None:
         """On resume, durable_interrupt returns the resume value directly."""
-        from uipath_langchain.agent.tools.durable_interrupt import (
+        from uipath_langchain.durable_interrupt import (
             _durable_state,
             durable_interrupt,
         )
@@ -196,7 +196,7 @@ class TestDurableInterruptAlignment:
 
     def test_two_durable_interrupts_return_sequential_resume_values(self) -> None:
         """Two @durable_interrupt calls return resume values by index."""
-        from uipath_langchain.agent.tools.durable_interrupt import (
+        from uipath_langchain.durable_interrupt import (
             _durable_state,
             durable_interrupt,
         )
@@ -224,7 +224,7 @@ class TestDurableInterruptAlignment:
 
     def test_partial_resume_first_returns_value_second_raises(self) -> None:
         """One resume value: first returns it, second runs body and raises GraphInterrupt."""
-        from uipath_langchain.agent.tools.durable_interrupt import (
+        from uipath_langchain.durable_interrupt import (
             _durable_state,
             durable_interrupt,
         )
@@ -256,7 +256,7 @@ class TestDurableInterruptAlignment:
 
     async def test_async_durable_interrupt_returns_resume_value(self) -> None:
         """Async variant: durable_interrupt returns resume value directly."""
-        from uipath_langchain.agent.tools.durable_interrupt import (
+        from uipath_langchain.durable_interrupt import (
             _durable_state,
             durable_interrupt,
         )

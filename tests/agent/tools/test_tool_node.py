@@ -9,12 +9,12 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
-from pydantic import BaseModel
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
     UiPathToolNode,
@@ -72,10 +72,9 @@ class FilteredState(BaseModel):
     session_id: str = "test_session"
 
 
-class MockState(BaseModel):
+class MockState(AgentGraphState):
     """Mock state for testing."""
 
-    messages: list[Any] = []
     user_id: str = "test_user"
     session_id: str = "test_session"
 

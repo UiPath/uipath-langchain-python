@@ -11,6 +11,8 @@ from uipath.core.chat import (
     UiPathConversationToolCallConfirmationValue,
 )
 
+from uipath_langchain.durable_interrupt import durable_interrupt
+
 CANCELLED_MESSAGE = "Cancelled by user"
 
 CONVERSATIONAL_APPROVED_TOOL_ARGS = "conversational_approved_tool_args"
@@ -117,10 +119,6 @@ def request_approval(
     )  # doesn't include InjectedToolCallId (tool id from claude/oai/etc.)
     if tool_call_schema is not None:
         input_schema = tool_call_schema.model_json_schema()
-
-    # Lazy import to avoid circular dependency:
-    # hitl -> agent.tools.durable_interrupt -> agent.tools -> tool_node -> hitl
-    from uipath_langchain.agent.tools.durable_interrupt import durable_interrupt
 
     @durable_interrupt
     def ask_confirmation():

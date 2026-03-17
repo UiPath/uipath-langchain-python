@@ -29,10 +29,6 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.durable_interrupt import (
-    SkipInterruptValue,
-    durable_interrupt,
-)
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     BATCH_TRANSFORM_OUTPUT_SCHEMA,
     add_query_field_to_schema,
@@ -43,6 +39,10 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 )
 from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
+from uipath_langchain.durable_interrupt import (
+    SkipInterruptValue,
+    durable_interrupt,
+)
 
 
 class ReadyEphemeralIndex(SkipInterruptValue):

@@ -38,9 +38,9 @@ from uipath_langchain.agent.tools.static_args import (
     ArgumentPropertiesMixin,
     handle_static_args,
 )
+from uipath_langchain.durable_interrupt import durable_interrupt
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
-from .durable_interrupt import durable_interrupt
 from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )

@@ -23,9 +23,9 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
     ToolWrapperReturnType,
 )
+from uipath_langchain.durable_interrupt import durable_interrupt
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
-from .durable_interrupt import durable_interrupt
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import (
     resolve_task_title,
