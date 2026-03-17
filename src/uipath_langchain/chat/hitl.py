@@ -11,7 +11,7 @@ from uipath.core.chat import (
     UiPathConversationToolCallConfirmationValue,
 )
 
-from uipath_langchain.durable_interrupt import durable_interrupt
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
 
 CANCELLED_MESSAGE = "Cancelled by user"
 
