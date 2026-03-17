@@ -58,6 +58,7 @@ class UiPathChatMessagesMapper:
         """Initialize the mapper with empty state."""
         self.runtime_id = runtime_id
         self.storage = storage
+        self.tool_names_requiring_confirmation: set[str] = set()
         self.current_message: AIMessageChunk
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
@@ -493,6 +494,10 @@ class UiPathChatMessagesMapper:
     def map_tool_call_to_tool_call_start_event(
         self, message_id: str, tool_call: ToolCall
     ) -> UiPathConversationMessageEvent:
+        metadata = None
+        if tool_call["name"] in self.tool_names_requiring_confirmation:
+            metadata = {"requiresConfirmation": True}
+
         return UiPathConversationMessageEvent(
             message_id=message_id,
             tool_call=UiPathConversationToolCallEvent(
@@ -501,6 +506,7 @@ class UiPathChatMessagesMapper:
                     tool_name=tool_call["name"],
                     timestamp=self.get_timestamp(),
                     input=tool_call["args"],
+                    metadata=metadata,
                 ),
             ),
         )
