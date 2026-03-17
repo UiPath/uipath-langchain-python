@@ -35,6 +35,7 @@ _VALIDATOR_ALLOWED_STAGES = {
     "pii_detection": {ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION},
     "harmful_content": {ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION},
     "intellectual_property": {ExecutionStage.POST_EXECUTION},
+    "user_prompt_attacks": {ExecutionStage.PRE_EXECUTION},
 }
 
 
