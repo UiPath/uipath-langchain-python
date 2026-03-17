@@ -169,7 +169,9 @@ class TestCreateInitNodeNonConversational:
         assert not isinstance(result["messages"], Overwrite)
         assert len(result["messages"]) == 2
 
-    async def test_non_conversational_default_behavior(self, system_message, user_message):
+    async def test_non_conversational_default_behavior(
+        self, system_message, user_message
+    ):
         """Default behavior (no is_conversational param) should be non-conversational."""
         messages = [system_message, user_message]
         init_node = create_init_node(messages, input_schema=None)

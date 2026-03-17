@@ -78,10 +78,7 @@ async def _build_tool_for_resource(
         return create_process_tool(resource)
 
     elif isinstance(resource, AgentContextResourceConfig):
-        # Skip Data Fabric contexts - handled separately via create_datafabric_tools()
-        retrieval_mode = resource.settings.retrieval_mode
-        mode_value = retrieval_mode.value if hasattr(retrieval_mode, 'value') else str(retrieval_mode)
-        if mode_value.lower() == "datafabric":
+        if resource.is_datafabric:
             logger.info(
                 "Skipping Data Fabric context '%s' - handled separately",
                 resource.name,

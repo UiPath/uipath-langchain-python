@@ -152,15 +152,29 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
             lines.append(f"| {field_name} | {field_type} |")
 
             sql_type = field.sql_type.name.lower() if field.sql_type else ""
-            if not numeric_field and sql_type in ("int", "decimal", "float", "double", "bigint"):
+            if not numeric_field and sql_type in (
+                "int",
+                "decimal",
+                "float",
+                "double",
+                "bigint",
+            ):
                 numeric_field = field_name
-            if not text_field and sql_type in ("varchar", "nvarchar", "text", "string", "ntext"):
+            if not text_field and sql_type in (
+                "varchar",
+                "nvarchar",
+                "text",
+                "string",
+                "ntext",
+            ):
                 text_field = field_name
 
         lines.append("")
 
         group_field = text_field or (field_names[0] if field_names else "Category")
-        agg_field = numeric_field or (field_names[1] if len(field_names) > 1 else "Amount")
+        agg_field = numeric_field or (
+            field_names[1] if len(field_names) > 1 else "Amount"
+        )
         filter_field = text_field or (field_names[0] if field_names else "Name")
         fields_sample = ", ".join(field_names[:5]) if field_names else "*"
 
@@ -168,12 +182,24 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
         lines.append("")
         lines.append("| User Intent | SQL Pattern |")
         lines.append("|-------------|-------------|")
-        lines.append(f"| 'Show all {display_name.lower()}' | `SELECT {fields_sample} FROM {display_name} LIMIT 100` |")
-        lines.append(f"| 'Find by X' | `SELECT {fields_sample} FROM {display_name} WHERE {filter_field} = 'value' LIMIT 100` |")
-        lines.append(f"| 'Top N by Y' | `SELECT {fields_sample} FROM {display_name} ORDER BY {agg_field} DESC LIMIT N` |")
-        lines.append(f"| 'Count by X' | `SELECT {group_field}, COUNT(*) as count FROM {display_name} GROUP BY {group_field}` |")
-        lines.append(f"| 'Top N segments' | `SELECT {group_field}, COUNT(*) as count FROM {display_name} GROUP BY {group_field} ORDER BY count DESC LIMIT N` |")
-        lines.append(f"| 'Sum/Avg of Y' | `SELECT SUM({agg_field}) as total FROM {display_name}` |")
+        lines.append(
+            f"| 'Show all {display_name.lower()}' | `SELECT {fields_sample} FROM {display_name} LIMIT 100` |"
+        )
+        lines.append(
+            f"| 'Find by X' | `SELECT {fields_sample} FROM {display_name} WHERE {filter_field} = 'value' LIMIT 100` |"
+        )
+        lines.append(
+            f"| 'Top N by Y' | `SELECT {fields_sample} FROM {display_name} ORDER BY {agg_field} DESC LIMIT N` |"
+        )
+        lines.append(
+            f"| 'Count by X' | `SELECT {group_field}, COUNT(*) as count FROM {display_name} GROUP BY {group_field}` |"
+        )
+        lines.append(
+            f"| 'Top N segments' | `SELECT {group_field}, COUNT(*) as count FROM {display_name} GROUP BY {group_field} ORDER BY count DESC LIMIT N` |"
+        )
+        lines.append(
+            f"| 'Sum/Avg of Y' | `SELECT SUM({agg_field}) as total FROM {display_name}` |"
+        )
         lines.append("")
 
     return "\n".join(lines)
@@ -205,7 +231,7 @@ def _filter_datafabric_contexts(
         for resource in resources
         if isinstance(resource, AgentContextResourceConfig)
         and resource.is_enabled
-        and resource.settings.retrieval_mode.lower() == "datafabric"
+        and resource.is_datafabric
     ]
 
 
@@ -222,7 +248,7 @@ def get_datafabric_entity_identifiers_from_resources(
     """
     identifiers: list[str] = []
     for context in _filter_datafabric_contexts(resources):
-        identifiers.extend(context.settings.entity_identifiers or [])
+        identifiers.extend(context.datafabric_entity_identifiers)
     return identifiers
 
 
@@ -252,7 +278,9 @@ def create_datafabric_query_tool() -> BaseTool:
             )
             total_count = len(records)
             truncated = total_count > _MAX_RECORDS_IN_RESPONSE
-            returned_records = records[:_MAX_RECORDS_IN_RESPONSE] if truncated else records
+            returned_records = (
+                records[:_MAX_RECORDS_IN_RESPONSE] if truncated else records
+            )
 
             result: dict[str, Any] = {
                 "records": returned_records,
