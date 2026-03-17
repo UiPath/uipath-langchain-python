@@ -20,7 +20,7 @@ class TestComputeVendorAndApiFlavor:
         model = {
             "modelName": "gpt-4",
             "vendor": "OpenAi",
-            "apiFlavor": "OpenAIResponses",
+            "apiFlavor": "OpenAiResponses",
         }
 
         vendor, api_flavor = _compute_vendor_and_api_flavor(model)
@@ -57,11 +57,11 @@ class TestComputeVendorAndApiFlavor:
     # ========== Only api_flavor present (vendor is null) ==========
 
     def test_only_api_flavor_openai_responses(self):
-        """Test deriving vendor from OpenAIResponses api_flavor."""
+        """Test deriving vendor from OpenAiResponses api_flavor."""
         model = {
             "modelName": "gpt-4",
             "vendor": None,
-            "apiFlavor": "OpenAIResponses",
+            "apiFlavor": "OpenAiResponses",
         }
 
         vendor, api_flavor = _compute_vendor_and_api_flavor(model)
@@ -138,7 +138,7 @@ class TestComputeVendorAndApiFlavor:
         """Test when vendor key is missing entirely (not just None)."""
         model = {
             "modelName": "gpt-4",
-            "apiFlavor": "OpenAIResponses",
+            "apiFlavor": "OpenAiResponses",
         }
 
         vendor, api_flavor = _compute_vendor_and_api_flavor(model)
@@ -286,7 +286,7 @@ class TestComputeVendorAndApiFlavor:
         model = {
             "modelName": "some-model",
             "vendor": "UnknownVendor",
-            "apiFlavor": "OpenAIResponses",
+            "apiFlavor": "OpenAiResponses",
         }
 
         with pytest.raises(ValueError) as exc_info:
