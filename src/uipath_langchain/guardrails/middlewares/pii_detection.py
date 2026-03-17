@@ -31,6 +31,8 @@ from uipath.platform.guardrails import (
     MapEnumParameterValue,
 )
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
+
 from ..models import GuardrailAction, PIIDetectionEntity
 from ._utils import (
     create_modified_tool_request,
@@ -70,6 +72,7 @@ class UiPathPIIDetectionMiddleware:
                 PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5),
                 PIIDetectionEntity(PIIDetectionEntityType.ADDRESS, 0.7),
             ],
+            enabled_for_evals=True,
         )
 
         # PII detection for specific tools (using tool reference directly)
@@ -78,6 +81,7 @@ class UiPathPIIDetectionMiddleware:
             action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
             entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5)],
             tools=[analyze_joke_syntax],
+            enabled_for_evals=False,
         )
 
         agent = create_agent(
@@ -97,6 +101,8 @@ class UiPathPIIDetectionMiddleware:
             If TOOL scope is not specified, this parameter is ignored.
         name: Optional name for the guardrail (defaults to "PII Detection")
         description: Optional description for the guardrail
+        enabled_for_evals: Whether this guardrail is enabled for evaluation scenarios.
+            Defaults to True.
     """
 
     def __init__(
@@ -108,6 +114,7 @@ class UiPathPIIDetectionMiddleware:
         tools: Sequence[str | BaseTool] | None = None,
         name: str = "PII Detection",
         description: str | None = None,
+        enabled_for_evals: bool = True,
     ):
         """Initialize PII detection guardrail middleware."""
         if not scopes:
@@ -116,6 +123,8 @@ class UiPathPIIDetectionMiddleware:
             raise ValueError("At least one entity must be specified")
         if not isinstance(action, GuardrailAction):
             raise ValueError("action must be an instance of GuardrailAction")
+        if not isinstance(enabled_for_evals, bool):
+            raise ValueError("enabled_for_evals must be a boolean")
 
         self._tool_names: list[str] | None = None
         if tools is not None:
@@ -144,6 +153,7 @@ class UiPathPIIDetectionMiddleware:
         self.action = action
         self.entities = list(entities)
         self._name = name
+        self.enabled_for_evals = enabled_for_evals
         self._description = (
             description
             or f"Detects PII entities: {', '.join(e.name for e in entities)}"
@@ -230,6 +240,8 @@ class UiPathPIIDetectionMiddleware:
                     )
                     if modified_input is not None and isinstance(modified_input, dict):
                         request = create_modified_tool_request(request, modified_input)
+                except AgentRuntimeError:
+                    raise
                 except Exception as e:
                     logger.error(
                         f"Error evaluating PII guardrail for tool '{tool_name}': {e}",
@@ -274,7 +286,7 @@ class UiPathPIIDetectionMiddleware:
             id=str(uuid4()),
             name=self._name,
             description=self._description,
-            enabled_for_evals=True,
+            enabled_for_evals=self.enabled_for_evals,
             selector=GuardrailSelector(**selector_kwargs),
             guardrail_type="builtInValidator",
             validator_type="pii_detection",
@@ -334,5 +346,7 @@ class UiPathPIIDetectionMiddleware:
                         if isinstance(msg.content, str) and text in msg.content:
                             msg.content = msg.content.replace(text, modified_text, 1)
                             break
+        except AgentRuntimeError:
+            raise
         except Exception as e:
             logger.error(f"Error evaluating PII guardrail: {e}", exc_info=True)
