@@ -3289,8 +3289,8 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.10.13"
-source = { registry = "https://pypi.org/simple" }
+version = "2.10.17"
+source = { editable = "../uipath-python/packages/uipath" }
 dependencies = [
     { name = "applicationinsights" },
     { name = "click" },
@@ -3312,23 +3312,89 @@ dependencies = [
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d4/3a/3a93f5c54078b993e6cecdae6069ebafe122fceb639b1f59ad0aa3f1b765/uipath-2.10.13.tar.gz", hash = "sha256:13795c00dfb7391f248efb6ae4b96f096a4a8131d0df5f8ec0b7f265be1d0e10", size = 2456921, upload-time = "2026-03-13T07:51:16.484Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c2/f9/c8745f866a39047f529ee0413aedd8fbf81f7ffd5dd46862cb5e6221d58d/uipath-2.10.13-py3-none-any.whl", hash = "sha256:fc1c8503b9cc3538cf3003cb10e1e3e736529aba4272086066402fde21154b65", size = 357769, upload-time = "2026-03-13T07:51:14.599Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "applicationinsights", specifier = ">=0.11.10" },
+    { name = "click", specifier = ">=8.3.1" },
+    { name = "coverage", specifier = ">=7.8.2" },
+    { name = "graphtty", specifier = "==0.1.8" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mermaid-builder", specifier = "==0.0.3" },
+    { name = "mockito", specifier = ">=1.5.4" },
+    { name = "pathlib", specifier = ">=1.0.1" },
+    { name = "pydantic-function-models", specifier = ">=0.1.11" },
+    { name = "pyjwt", specifier = ">=2.10.1" },
+    { name = "pysignalr", specifier = "==1.3.0" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "python-socketio", specifier = ">=5.15.0,<6.0.0" },
+    { name = "rich", specifier = ">=14.2.0" },
+    { name = "tenacity", specifier = ">=9.0.0" },
+    { name = "truststore", specifier = ">=0.10.1" },
+    { name = "uipath-core", editable = "../uipath-python/packages/uipath-core" },
+    { name = "uipath-platform", editable = "../uipath-python/packages/uipath-platform" },
+    { name = "uipath-runtime", editable = "../uipath-runtime-python" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "bandit", specifier = ">=1.8.2" },
+    { name = "filelock", specifier = ">=3.20.3" },
+    { name = "inflection", specifier = ">=0.5.1" },
+    { name = "mkdocs", specifier = ">=1.6.1" },
+    { name = "mkdocs-click", specifier = ">=0.9.0" },
+    { name = "mkdocs-llmstxt", specifier = ">=0.5.0" },
+    { name = "mkdocs-material", extras = ["imaging"], specifier = ">=9.7.0" },
+    { name = "mkdocs-open-in-new-tab", specifier = ">=1.0.8" },
+    { name = "mkdocs-simple-hooks", specifier = ">=0.1.5" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.30.1" },
+    { name = "mypy", specifier = ">=1.14.1" },
+    { name = "pre-commit", specifier = ">=4.5.1" },
+    { name = "pytest", specifier = ">=7.4.0" },
+    { name = "pytest-asyncio", specifier = ">=1.0.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "pytest-httpx", specifier = ">=0.35.0" },
+    { name = "pytest-mock", specifier = ">=3.11.1" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
+    { name = "pytest-trio", specifier = ">=0.8.0" },
+    { name = "ruff", specifier = ">=0.9.4" },
+    { name = "rust-just", specifier = ">=1.39.0" },
+    { name = "termynal", specifier = ">=0.13.1" },
+    { name = "tomli-w", specifier = ">=1.2.0" },
+    { name = "types-toml", specifier = ">=0.10.8" },
+    { name = "virtualenv", specifier = ">=20.36.1" },
 ]
 
 [[package]]
 name = "uipath-core"
-version = "0.5.6"
-source = { registry = "https://pypi.org/simple" }
+version = "0.5.7"
+source = { editable = "../uipath-python/packages/uipath-core" }
 dependencies = [
     { name = "opentelemetry-instrumentation" },
     { name = "opentelemetry-sdk" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ea/8a/d129d33a81865f99d9134391a52f8691f557d95a18a38df4d88917b3e235/uipath_core-0.5.6.tar.gz", hash = "sha256:bebaf2e62111e844739e4f4e4dc47c48bac93b7e6fce6754502a9f4979c41888", size = 112659, upload-time = "2026-03-04T18:04:42.963Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/8f/77ab712518aa2a8485a558a0de245ac425e07fd8b74cfa8951550f0aea63/uipath_core-0.5.6-py3-none-any.whl", hash = "sha256:4a741fc760605165b0541b3abb6ade728bfa386e000ace00054bc43995720e5b", size = 42047, upload-time = "2026-03-04T18:04:41.606Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "opentelemetry-instrumentation", specifier = ">=0.60b0,<1.0.0" },
+    { name = "opentelemetry-sdk", specifier = ">=1.39.0,<2.0.0" },
+    { name = "pydantic", specifier = ">=2.12.5,<3.0.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "bandit", specifier = ">=1.8.2" },
+    { name = "mypy", specifier = ">=1.14.1" },
+    { name = "pre-commit", specifier = ">=4.1.0" },
+    { name = "pytest", specifier = ">=7.4.0" },
+    { name = "pytest-asyncio", specifier = ">=1.0.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "pytest-httpx", specifier = ">=0.35.0" },
+    { name = "pytest-mock", specifier = ">=3.11.1" },
+    { name = "pytest-trio", specifier = ">=0.8.0" },
+    { name = "ruff", specifier = ">=0.9.4" },
+    { name = "rust-just", specifier = ">=1.39.0" },
 ]
 
 [[package]]
@@ -3400,10 +3466,10 @@ requires-dist = [
     { name = "openinference-instrumentation-langchain", specifier = ">=0.1.56" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.10.13,<2.11.0" },
-    { name = "uipath-core", specifier = ">=0.5.2,<0.6.0" },
-    { name = "uipath-platform", specifier = ">=0.0.23,<0.1.0" },
-    { name = "uipath-runtime", specifier = ">=0.9.1,<0.10.0" },
+    { name = "uipath", editable = "../uipath-python/packages/uipath" },
+    { name = "uipath-core", editable = "../uipath-python/packages/uipath-core" },
+    { name = "uipath-platform", editable = "../uipath-python/packages/uipath-platform" },
+    { name = "uipath-runtime", editable = "../uipath-runtime-python" },
 ]
 provides-extras = ["vertex", "bedrock"]
 
@@ -3425,8 +3491,8 @@ dev = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.0.23"
-source = { registry = "https://pypi.org/simple" }
+version = "0.0.25"
+source = { editable = "../uipath-python/packages/uipath-platform" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic-function-models" },
@@ -3435,21 +3501,56 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/61/c1/f1cfd23d977fc2fec2e880dac42b1fdb78c28fef80008ebf4bd43ca9b12f/uipath_platform-0.0.23.tar.gz", hash = "sha256:a84d9da29865155080efcc837f6c2b2186d480e34fc877dec06f3ec315c1e52c", size = 269669, upload-time = "2026-03-13T07:50:06.953Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/cf/32/167abe3730ab8c0dd89abee6ebea6e1a35e0a1548be620a491a60bc7cc0d/uipath_platform-0.0.23-py3-none-any.whl", hash = "sha256:e2ea4d9341540a5a02baca8e07ba05dfb8947f2d525f8677834f81c735826772", size = 161946, upload-time = "2026-03-13T07:50:04.956Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pydantic-function-models", specifier = ">=0.1.11" },
+    { name = "sqlparse", specifier = ">=0.5.5" },
+    { name = "tenacity", specifier = ">=9.0.0" },
+    { name = "truststore", specifier = ">=0.10.1" },
+    { name = "uipath-core", editable = "../uipath-python/packages/uipath-core" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "bandit", specifier = ">=1.8.2" },
+    { name = "mypy", specifier = ">=1.19.0" },
+    { name = "pre-commit", specifier = ">=4.1.0" },
+    { name = "pytest", specifier = ">=7.4.0" },
+    { name = "pytest-asyncio", specifier = ">=1.0.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "pytest-httpx", specifier = ">=0.35.0" },
+    { name = "pytest-mock", specifier = ">=3.11.1" },
+    { name = "pytest-trio", specifier = ">=0.8.0" },
+    { name = "ruff", specifier = ">=0.9.4" },
+    { name = "rust-just", specifier = ">=1.39.0" },
 ]
 
 [[package]]
 name = "uipath-runtime"
-version = "0.9.3"
-source = { registry = "https://pypi.org/simple" }
+version = "0.9.4"
+source = { editable = "../uipath-runtime-python" }
 dependencies = [
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/68/eb/774d503e174e17af84eabb9d315683c5616fb0da956f93f99cf79912a6ff/uipath_runtime-0.9.3.tar.gz", hash = "sha256:5010ede13919d6883a6373cd137c06c18de2b6e2e9fa6b65e11f2d255db444e5", size = 139338, upload-time = "2026-03-04T20:49:11.153Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/83/52dc4d5bf534368d753656881306dffeed658e5e7eefcb91fe6c3bd0dfac/uipath_runtime-0.9.3-py3-none-any.whl", hash = "sha256:20aefc8d9b23978032bec67d2057b5457059aaf1ea788a71d218ba8b6816ff98", size = 41766, upload-time = "2026-03-04T20:49:10.005Z" },
+
+[package.metadata]
+requires-dist = [{ name = "uipath-core", editable = "../uipath-python/packages/uipath-core" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "bandit", specifier = ">=1.8.2" },
+    { name = "mypy", specifier = ">=1.14.1" },
+    { name = "pre-commit", specifier = ">=4.1.0" },
+    { name = "pytest", specifier = ">=7.4.0" },
+    { name = "pytest-asyncio", specifier = ">=1.0.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
+    { name = "pytest-httpx", specifier = ">=0.35.0" },
+    { name = "pytest-mock", specifier = ">=3.11.1" },
+    { name = "pytest-trio", specifier = ">=0.8.0" },
+    { name = "ruff", specifier = ">=0.9.4" },
+    { name = "rust-just", specifier = ">=1.39.0" },
 ]
 
 [[package]]

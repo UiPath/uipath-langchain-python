@@ -22,6 +22,7 @@ from uipath_langchain.agent.tools.tool_node import (
     create_tool_node,
 )
 from uipath_langchain.chat.hitl import (
+    ARGS_MODIFIED_MESSAGE,
     CANCELLED_MESSAGE,
     CONVERSATIONAL_APPROVED_TOOL_ARGS,
 )
@@ -555,7 +556,7 @@ class TestToolNodeConfirmation:
         assert result is not None
         assert isinstance(result, dict)
         msg = result["messages"][0]
-        assert "args_modified_by_user" not in msg.content
+        assert ARGS_MODIFIED_MESSAGE not in msg.content
         assert "Mock result:" in msg.content
 
     @patch(
@@ -576,7 +577,7 @@ class TestToolNodeConfirmation:
 
         assert isinstance(msg.content, str)
         wrapped = json.loads(msg.content)
-        assert wrapped["meta"]["args_modified_by_user"] is True
+        assert wrapped["meta"]["message"] == ARGS_MODIFIED_MESSAGE
         assert wrapped["meta"]["executed_args"] == {"input_text": "edited"}
         assert "Mock result: edited" in wrapped["result"]
 
@@ -612,7 +613,7 @@ class TestToolNodeConfirmation:
 
         assert isinstance(msg.content, str)
         wrapped = json.loads(msg.content)
-        assert wrapped["meta"]["args_modified_by_user"] is True
+        assert wrapped["meta"]["message"] == ARGS_MODIFIED_MESSAGE
         assert wrapped["meta"]["executed_args"] == {"input_text": "async edited"}
         assert "Async mock result: async edited" in wrapped["result"]
 

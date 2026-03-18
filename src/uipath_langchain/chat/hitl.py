@@ -14,6 +14,7 @@ from uipath.core.chat import (
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 
 CANCELLED_MESSAGE = "Cancelled by user"
+ARGS_MODIFIED_MESSAGE = "User has modified the tool arguments"
 
 CONVERSATIONAL_APPROVED_TOOL_ARGS = "conversational_approved_tool_args"
 REQUIRE_CONVERSATIONAL_CONFIRMATION = "require_conversational_confirmation"
@@ -55,7 +56,7 @@ class ConfirmationResult(NamedTuple):
             msg.content = json.dumps(
                 {
                     "meta": {
-                        "args_modified_by_user": True,
+                        "message": ARGS_MODIFIED_MESSAGE,
                         "executed_args": self.approved_args,
                     },
                     "result": result_value,

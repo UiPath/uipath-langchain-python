@@ -113,6 +113,12 @@ addopts = "-ra -q"
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
 
+[tool.uv.sources]
+uipath = { path = "../uipath-python/packages/uipath", editable = true }
+uipath-core = { path = "../uipath-python/packages/uipath-core", editable = true }
+uipath-platform = { path = "../uipath-python/packages/uipath-platform", editable = true }
+uipath-runtime = { path = "../uipath-runtime-python", editable = true }
+
 [[tool.uv.index]]
 name = "testpypi"
 url = "https://test.pypi.org/simple/"
