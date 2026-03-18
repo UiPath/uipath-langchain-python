@@ -33,11 +33,11 @@ from .utils import sanitize_tool_name
 _START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]] = {
     (404, "1002"): (
         "Could not find process for tool '{tool}'. Please check if the process is deployed in the configured folder.",
-        UiPathErrorCategory.USER,
+        UiPathErrorCategory.DEPLOYMENT,
     ),
     (400, "1100"): (
         "Could not find folder for tool '{tool}'. Please check if the folder exists and is accessible by the robot.",
-        UiPathErrorCategory.USER,
+        UiPathErrorCategory.DEPLOYMENT,
     ),
     (409, None): (
         "Cannot start process for tool '{tool}': {message}",
