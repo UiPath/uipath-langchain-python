@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.documents import Document
-from uipath_langchain.agent.react.types import AgentGraphState
 from uipath.agent.models.agent import (
     AgentContextOutputColumn,
     AgentContextQuerySetting,
@@ -20,6 +19,7 @@ from uipath.platform.context_grounding import (
 )
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.context_tool import (
     _normalize_folder_prefix,
     build_glob_pattern,
