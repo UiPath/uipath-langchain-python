@@ -83,6 +83,63 @@ def build_agent_messages(
     ]
 
 
+def extract_system_prompt(agent_definition: LowCodeAgentDefinition) -> str:
+    """Extract system prompt as a plain string for deep agents.
+
+    Deep agents need just the system prompt string (not LangChain Message objects).
+    Applies the standard AGENT_SYSTEM_PROMPT_TEMPLATE with agent name and current date.
+
+    Args:
+        agent_definition: Agent definition containing messages.
+
+    Returns:
+        The formatted system prompt string.
+
+    Raises:
+        ValueError: If no system message is found.
+    """
+    system_message = next(
+        (msg for msg in agent_definition.messages if msg.role == "system"),
+        None,
+    )
+    if system_message is None:
+        raise ValueError("Agent configuration must contain a system message")
+
+    return apply_system_prompt_template(
+        _build_message_content(system_message, {}),
+        agent_definition.name or "",
+    )
+
+
+def build_user_message(
+    agent_definition: LowCodeAgentDefinition,
+    input_arguments: dict[str, Any],
+) -> str:
+    """Build the interpolated user message for deep agents.
+
+    Takes the user message template from agent.json and interpolates
+    input variables (e.g., {{topic}}) with actual values.
+
+    Args:
+        agent_definition: Agent definition containing message templates.
+        input_arguments: Input data to interpolate into the template.
+
+    Returns:
+        The interpolated user message string.
+
+    Raises:
+        ValueError: If no user message is found.
+    """
+    user_message = next(
+        (msg for msg in agent_definition.messages if msg.role == "user"),
+        None,
+    )
+    if user_message is None:
+        raise ValueError("Agent configuration must contain a user message")
+
+    return _build_message_content(user_message, input_arguments)
+
+
 def create_message_factory(
     agent_definition: LowCodeAgentDefinition,
     input_model: type[BaseModel],

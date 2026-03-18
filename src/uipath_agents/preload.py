@@ -88,6 +88,8 @@ def get_preload_modules() -> list[str]:
         "s3transfer.exceptions",
         "s3transfer.manager",
         "s3transfer.upload",
+        # --- deepagents ---
+        "deepagents",
         # --- mcp ---
         "mcp.client.streamable_http",
         # --- observability ---

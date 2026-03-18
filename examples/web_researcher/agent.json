@@ -1,0 +1,313 @@
+{
+  "id": "6fb9fac3-e263-4563-a8b7-5cc1abb97b05",
+  "version": "1.1.0",
+  "name": "WebResearcher",
+  "metadata": {
+    "storageVersion": "44.0.0",
+    "isConversational": false,
+    "targetRuntime": "pythonAgent",
+    "showProjectCreationExperience": true
+  },
+  "messages": [
+    {
+      "role": "system",
+      "content": "\n  You are an expert research analyst. Your job is to produce comprehensive, well-structured research documents on any given topic using web search.\n\n  **Workflow:**\n\n  1. **PLAN** — Decompose the topic into 3-4 distinct sub-questions and angles worth investigating. More sub-questions with focused scope is better than fewer broad ones. Consider: key concepts, recent developments, major players, contrasting viewpoints, real-world applications, statistics, and open questions.\n\n  2. **RESEARCH** — Investigate each sub-question thoroughly. Use varied and specific search queries — do not rely on a single broad search. Explore different facets, follow leads from initial results, and seek out authoritative\n  sources.\n\n  3. **REVIEW** — Evaluate what you have gathered. Identify gaps in coverage, contradictions between sources, claims lacking evidence, and perspectives that are underrepresented.\n\n  4. **GAP FILL** — Conduct targeted follow-up searches to address weaknesses found during review. Prioritize filling the most important gaps first.\n\n  5. **ASSEMBLE** — Synthesize all findings into a single, well-organized document with clear sections, key takeaways, and source attribution where possible. \n\n  **Quality Standards:**\n  - Breadth: cover the topic from multiple angles, not just the most obvious one.\n  - Depth: go beyond surface-level summaries — include specific data, examples, and expert perspectives.\n  - Balance: represent different viewpoints fairly.\n  - Accuracy: cross-check important claims across multiple sources.\n\n  **Output Rules:**\n  - Your final message becomes the output. Return the complete report as your last response — do not summarize.\n  - The final report should be at most 10,000 tokens — comprehensive but focused. Prioritize evidence, data, and key insights over exhaustive enumeration.",
+      "contentTokens": [
+        {
+          "type": "simpleText",
+          "rawString": "\n  You are an expert research analyst. Your job is to produce comprehensive, well-structured research documents on any given topic using web search.\n\n  **Workflow:**\n\n  1. **PLAN** — Decompose the topic into 3-4 distinct sub-questions and angles worth investigating. More sub-questions with focused scope is better than fewer broad ones. Consider: key concepts, recent developments, major players, contrasting viewpoints, real-world applications, statistics, and open questions.\n\n  2. **RESEARCH** — Investigate each sub-question thoroughly. Use varied and specific search queries — do not rely on a single broad search. Explore different facets, follow leads from initial results, and seek out authoritative\n  sources.\n\n  3. **REVIEW** — Evaluate what you have gathered. Identify gaps in coverage, contradictions between sources, claims lacking evidence, and perspectives that are underrepresented.\n\n  4. **GAP FILL** — Conduct targeted follow-up searches to address weaknesses found during review. Prioritize filling the most important gaps first.\n\n  5. **ASSEMBLE** — Synthesize all findings into a single, well-organized document with clear sections, key takeaways, and source attribution where possible. \n\n  **Quality Standards:**\n  - Breadth: cover the topic from multiple angles, not just the most obvious one.\n  - Depth: go beyond surface-level summaries — include specific data, examples, and expert perspectives.\n  - Balance: represent different viewpoints fairly.\n  - Accuracy: cross-check important claims across multiple sources.\n\n  **Output Rules:**\n  - Your final message becomes the output. Return the complete report as your last response — do not summarize.\n  - The final report should be at most 10,000 tokens — comprehensive but focused. Prioritize evidence, data, and key insights over exhaustive enumeration."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "{{input.prompt}}",
+      "contentTokens": [
+        {
+          "type": "variable",
+          "rawString": "input.prompt"
+        }
+      ]
+    }
+  ],
+  "inputSchema": {
+    "type": "object",
+    "required": [
+      "prompt"
+    ],
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "The research prompt or question to investigate and produce a report on."
+      }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "content": {
+        "type": "string",
+        "description": "Output content"
+      }
+    }
+  },
+  "settings": {
+    "model": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "maxTokens": 32000,
+    "temperature": 0,
+    "engine": "basic-v2",
+    "maxIterations": 100,
+    "deepAgent": { "enabled": true }
+  },
+  "resources": [
+    {
+      "$resourceType": "tool",
+      "name": "Web Search",
+      "description": "Web search executes a search of the public domain using a natural language search query. The search results are available in the output. Web search offers near-real time search results, but certain time sensitive data like stock prices or weather will not consistently be current. There could be a few days lag. Be sure to pass in date/time and/or location as arguments in the query if required.",
+      "location": "external",
+      "type": "integration",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Search Engine",
+            "description": "The search engine to use",
+            "enum": [
+              "GoogleCustomSearch"
+            ],
+            "oneOf": [
+              {
+                "const": "GoogleCustomSearch",
+                "title": "GoogleCustomSearch"
+              }
+            ]
+          },
+          "query": {
+            "type": "string",
+            "title": "Search",
+            "description": "The natural language query to search the web for"
+          },
+          "num": {
+            "type": "integer",
+            "title": "Number of results",
+            "description": "The number of results. Default to 10."
+          },
+          "start": {
+            "type": "integer",
+            "title": "Start",
+            "description": "First result index (pagination)."
+          },
+          "siteSearch": {
+            "type": "string",
+            "title": "Site Search",
+            "description": "Restrict or exclude results for a domain."
+          },
+          "siteSearchFilter": {
+            "type": "string",
+            "title": "Site Search Filter",
+            "description": "Either \"i\" (include) or \"e\" (exclude)."
+          }
+        },
+        "required": [
+          "provider",
+          "query"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "formattedResults": {
+            "type": "string",
+            "title": "Formatted results",
+            "description": "The search results string containing title, URL, and snippet"
+          },
+          "results[*]": {
+            "type": "array",
+            "title": "Results",
+            "items": {
+              "$ref": "#/definitions/results[*]"
+            }
+          }
+        },
+        "definitions": {
+          "results[*]": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "title": "Result title",
+                "description": "The title of a search result item."
+              },
+              "snippet": {
+                "type": "string",
+                "title": "Result snippet",
+                "description": "A brief summary or excerpt of a search result item."
+              },
+              "url": {
+                "type": "string",
+                "title": "Result url",
+                "description": "The web address of the search result."
+              }
+            }
+          }
+        }
+      },
+      "settings": {},
+      "properties": {
+        "toolPath": "/v2/webSearch",
+        "objectName": "v2::webSearch",
+        "toolDisplayName": "Web Search",
+        "toolDescription": "Web search executes a search of the public domain using a natural language search query. The search results are available in the output. Web search offers near-real time search results, but certain time sensitive data like stock prices or weather will not consistently be current. There could be a few days lag. Be sure to pass in date/time and/or location as arguments in the query if required.",
+        "method": "POST",
+        "connection": {
+          "id": "3f8e599f-b653-40a7-a03a-88f91ebf40e4",
+          "name": "UiPath GenAI Activities",
+          "elementInstanceId": 0,
+          "apiBaseUri": "",
+          "state": "enabled",
+          "isDefault": false,
+          "connector": {
+            "key": "uipath-uipath-airdk",
+            "name": "UiPath GenAI Activities",
+            "image": "https://alpha.uipath.com/elements_/scaleunit_/3854d037-4ab5-4881-909b-968c433f6d88/v3/element/elements/uipath-uipath-airdk/image",
+            "enabled": true
+          },
+          "folder": {
+            "key": "f867f9d2-365d-40ec-bdcd-ea0df740e58c",
+            "path": "cd3b9828-d967-4fb2-9237-a256325f6362.f867f9d2-365d-40ec-bdcd-ea0df740e58c"
+          },
+          "solutionProperties": {
+            "resourceKey": "3f8e599f-b653-40a7-a03a-88f91ebf40e4"
+          }
+        },
+        "parameters": [
+          {
+            "name": "provider",
+            "displayName": "Search Engine",
+            "type": "string",
+            "fieldLocation": "body",
+            "fieldVariant": "static",
+            "value": "GoogleCustomSearch",
+            "description": "The search engine to use",
+            "dynamic": false,
+            "position": "primary",
+            "sortOrder": 1,
+            "required": true,
+            "enumValues": [
+              {
+                "name": "GoogleCustomSearch",
+                "value": "GoogleCustomSearch"
+              }
+            ],
+            "loadReferenceOptionsByDefault": null,
+            "dynamicBehavior": [],
+            "reference": null,
+            "isCascading": false
+          },
+          {
+            "name": "query",
+            "displayName": "Search",
+            "type": "string",
+            "fieldLocation": "body",
+            "fieldVariant": "dynamic",
+            "value": "{{prompt}}",
+            "description": "The natural language query to search the web for",
+            "dynamic": true,
+            "position": "primary",
+            "sortOrder": 2,
+            "required": true,
+            "enumValues": null,
+            "loadReferenceOptionsByDefault": null,
+            "dynamicBehavior": [],
+            "reference": null,
+            "isCascading": false
+          },
+          {
+            "name": "num",
+            "displayName": "Number of results",
+            "type": "integer",
+            "fieldLocation": "body",
+            "fieldVariant": "dynamic",
+            "value": "{{prompt}}",
+            "description": "The number of results. Default to 10.",
+            "dynamic": true,
+            "position": "secondary",
+            "sortOrder": 3,
+            "required": false,
+            "enumValues": null,
+            "loadReferenceOptionsByDefault": null,
+            "dynamicBehavior": [],
+            "reference": null,
+            "isCascading": false
+          },
+          {
+            "name": "siteSearch",
+            "displayName": "Site Search",
+            "type": "string",
+            "fieldLocation": "body",
+            "fieldVariant": "dynamic",
+            "value": "{{prompt}}",
+            "description": "Restrict or exclude results for a domain.",
+            "dynamic": true,
+            "position": "secondary",
+            "sortOrder": 4,
+            "required": false,
+            "enumValues": null,
+            "loadReferenceOptionsByDefault": null,
+            "dynamicBehavior": [],
+            "reference": null,
+            "isCascading": false
+          },
+          {
+            "name": "siteSearchFilter",
+            "displayName": "Site Search Filter",
+            "type": "string",
+            "fieldLocation": "body",
+            "fieldVariant": "dynamic",
+            "value": "{{prompt}}",
+            "description": "Either \"i\" (include) or \"e\" (exclude).",
+            "dynamic": true,
+            "position": "secondary",
+            "sortOrder": 5,
+            "required": false,
+            "enumValues": null,
+            "loadReferenceOptionsByDefault": null,
+            "dynamicBehavior": [],
+            "reference": null,
+            "isCascading": false
+          },
+          {
+            "name": "start",
+            "displayName": "Start",
+            "type": "integer",
+            "fieldLocation": "body",
+            "fieldVariant": "dynamic",
+            "value": "{{prompt}}",
+            "description": "First result index (pagination).",
+            "dynamic": true,
+            "position": "secondary",
+            "sortOrder": 6,
+            "required": false,
+            "enumValues": null,
+            "loadReferenceOptionsByDefault": null,
+            "dynamicBehavior": [],
+            "reference": null,
+            "isCascading": false
+          }
+        ],
+        "bodyStructure": {
+          "contentType": "json"
+        }
+      },
+      "guardrail": {
+        "policies": []
+      },
+      "iconUrl": "https://alpha.uipath.com/elements_/scaleunit_/3854d037-4ab5-4881-909b-968c433f6d88/v3/element/elements/uipath-uipath-airdk/image",
+      "id": "bdc67f96-4cd4-40bf-b624-4b82f812b4f2",
+      "isPreview": false,
+      "isEnabled": true
+    }
+  ],
+  "features": []
+}

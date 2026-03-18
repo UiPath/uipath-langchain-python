@@ -1,8 +1,12 @@
 """Agent graph construction - wrapper delegating to uipath_langchain.agent.graph."""
 
 import asyncio
+from functools import partial
 from typing import Any, Sequence
 
+from langchain.agents.structured_output import ToolStrategy
+from langchain_core.language_models import BaseChatModel
+from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
@@ -24,9 +28,20 @@ from uipath_langchain.agent.tools.mcp import create_mcp_tools_and_clients
 from uipath_agents.agent_graph_builder.version import supports_parallel_tool_calls
 
 from .._config import get_flags
-from .config import _FF_MODEL_SETTINGS, AgentExecutionType, get_thinking_messages_limit
+from .config import (
+    _FF_MODEL_SETTINGS,
+    AgentExecutionType,
+    get_thinking_messages_limit,
+    is_deep_agent_enabled,
+)
+from .deep import create_deep_agent_graph
+from .deep_agent_prompts import get_deep_agent_meta_prompt
 from .llm_utils import create_llm
-from .message_utils import create_message_factory
+from .message_utils import (
+    build_user_message,
+    create_message_factory,
+    extract_system_prompt,
+)
 from .session_info_debug_state import SessionInfoDebugStateFactory
 
 AGENT_MAX_ITERATIONS_DEFAULT = 25
@@ -108,6 +123,22 @@ async def build_agent_graph(
         terminate_on_close=execution_type != AgentExecutionType.PLAYGROUND,
     )
     tools.extend(mcp_tools)
+
+    if is_deep_agent_enabled(agent_definition):
+        return _build_deep_agent(agent_definition, llm, tools), list(mcp_clients)
+
+    return _build_shallow_agent(agent_definition, llm, tools, execution_type), list(
+        mcp_clients
+    )
+
+
+def _build_shallow_agent(
+    agent_definition: LowCodeAgentDefinition,
+    llm: BaseChatModel,
+    tools: list[BaseTool],
+    execution_type: AgentExecutionType,
+) -> StateGraph[Any, Any, Any, Any]:
+    """Build a standard (shallow) ReAct agent."""
     input_model = resolve_input_model(agent_definition.input_schema)
     output_model = resolve_output_model(agent_definition.output_schema)
 
@@ -128,7 +159,7 @@ async def build_agent_graph(
         ),
     )
 
-    graph = create_agent(
+    return create_agent(
         model=llm,
         tools=tools,
         messages=messages,
@@ -137,4 +168,33 @@ async def build_agent_graph(
         config=agent_config,
         guardrails=guardrails,
     )
-    return graph, list(mcp_clients)
+
+
+def _build_deep_agent(
+    agent_definition: LowCodeAgentDefinition,
+    llm: BaseChatModel,
+    tools: list[BaseTool],
+) -> StateGraph[Any, Any, Any, Any]:
+    """Build a deep agent graph from agent definition."""
+    if agent_definition.guardrails:
+        raise NotImplementedError("Guardrails are not yet supported for deep agents.")
+
+    meta_prompt = get_deep_agent_meta_prompt()
+    system_prompt = extract_system_prompt(agent_definition)
+    system_prompt = system_prompt + "\n\n" + meta_prompt
+
+    response_format: ToolStrategy[Any] = ToolStrategy(agent_definition.output_schema)
+
+    input_model = resolve_input_model(agent_definition.input_schema)
+    output_model = resolve_output_model(agent_definition.output_schema)
+
+    return create_deep_agent_graph(
+        model=llm,
+        tools=tools,
+        system_prompt=system_prompt,
+        backend=None,
+        response_format=response_format,
+        input_schema=input_model,
+        output_schema=output_model,
+        build_user_message=partial(build_user_message, agent_definition),
+    )

@@ -5,6 +5,7 @@ import logging
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
+from uipath.agent.models.agent import LowCodeAgentDefinition
 from uipath.runtime import UiPathRuntimeContext
 
 from .._config import get_flags
@@ -13,6 +14,12 @@ logger = logging.getLogger(__name__)
 
 _FF_MODEL_SETTINGS = "ModelConfigurableSettings"
 _DEFAULT_THINKING_MESSAGES_LIMIT = 0
+
+
+def is_deep_agent_enabled(agent_definition: LowCodeAgentDefinition) -> bool:
+    """Check if deep agent mode is enabled via settings.deepAgent.enabled."""
+    deep_agent_setting = getattr(agent_definition.settings, "deepAgent", None)
+    return bool(deep_agent_setting and deep_agent_setting.get("enabled", False))
 
 
 class AgentExecutionType(StrEnum):
