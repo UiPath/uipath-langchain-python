@@ -22,8 +22,8 @@ from uipath.core.chat import (
 
 logger = logging.getLogger(__name__)
 
-_TAG_RE = re.compile(r'<uip:cite\s+((?:[a-z_]+="[^"]*"\s*)+)/\s*>')
-_ATTR_RE = re.compile(r'([a-z_]+)="([^"]*)"')
+_TAG_RE = re.compile(r'<uip:cite\s+((?:[a-z_]+="(?:[^"\\]|\\.)*"\s*)+)/\s*>')
+_ATTR_RE = re.compile(r'([a-z_]+)="((?:[^"\\]|\\.)*)"')
 
 
 @dataclass(frozen=True)  # frozen to make hashable / de-dupe sources
@@ -45,7 +45,9 @@ def _parse_citations(text: str) -> list[tuple[str, _ParsedCitation | None]]:
         raw_attributes = match.group(1)
 
         # title="foo" url="https://..." -> [("title","foo"), ("url","https://...")]
-        attributes = dict(_ATTR_RE.findall(raw_attributes))
+        attributes = {
+            k: v.replace('\\"', '"') for k, v in _ATTR_RE.findall(raw_attributes)
+        }
 
         title = attributes.get("title", "")
         url = attributes.get("url")
