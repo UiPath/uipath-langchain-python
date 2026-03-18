@@ -1,6 +1,7 @@
 """Tests for context_tool.py module."""
 
 import os
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -38,7 +39,7 @@ from uipath_langchain.agent.tools.structured_tool_with_output_type import (
 
 def _capturing_wrapper():
     """Return (captured_dict, wrapper) that records call["args"] on each invoke."""
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
     async def wrapper(tool, call, state):
         captured["args"] = dict(call["args"])
@@ -1060,7 +1061,7 @@ class TestContextToolWrapperHITL:
             query_value="query",
         )
         tool = create_context_tool(resource)
-        call = {"name": tool.name, "args": {"query": "reviewed query"}, "id": "c"}
+        call: dict[str, Any] = {"name": tool.name, "args": {"query": "reviewed query"}, "id": "c"}
         try:
             with patch(
                 "uipath_langchain.agent.tools.context_tool.handle_static_args",
@@ -1069,7 +1070,7 @@ class TestContextToolWrapperHITL:
                 "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever",
                 return_value=AsyncMock(ainvoke=AsyncMock(return_value=[])),
             ):
-                await tool.awrapper(tool, call, AgentGraphState())
+                await tool.awrapper(tool, call, AgentGraphState())  # type: ignore[attr-defined]
         except Exception:
             pass  # only care about arg routing, not actual tool execution
 
@@ -1088,7 +1089,7 @@ class TestContextToolWrapperHITL:
             citation_mode_value=AgentContextValueSetting(value=CitationMode.INLINE),
         )
         tool = create_context_tool(resource)
-        call = {"name": tool.name, "args": {"query": "reviewed query"}, "id": "c"}
+        call: dict[str, Any] = {"name": tool.name, "args": {"query": "reviewed query"}, "id": "c"}
         try:
             with patch(
                 "uipath_langchain.agent.tools.context_tool.handle_static_args",
@@ -1097,7 +1098,7 @@ class TestContextToolWrapperHITL:
                 "uipath_langchain.agent.tools.context_tool.handle_deep_rag",
                 new=AsyncMock(return_value=""),
             ):
-                await tool.awrapper(tool, call, AgentGraphState())
+                await tool.awrapper(tool, call, AgentGraphState())  # type: ignore[attr-defined]
         except Exception:
             pass
 
@@ -1137,7 +1138,7 @@ class TestContextToolWrapperHITL:
             "uipath_langchain.agent.tools.context_tool.handle_static_args",
             return_value={"query": "static query", "hidden": "injected"},
         ):
-            await tool.awrapper(tool, call, AgentGraphState())
+            await tool.awrapper(tool, call, AgentGraphState())  # type: ignore[attr-defined]
 
         assert captured["args"]["query"] == "reviewed query"
         assert captured["args"]["hidden"] == "injected"

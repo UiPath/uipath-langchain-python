@@ -1,6 +1,7 @@
 """Tests for batch_transform_tool.py module."""
 
 import uuid
+from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -611,7 +612,7 @@ class TestCreateBatchTransformTool:
 
 def _capturing_wrapper():
     """Return (captured_dict, wrapper) that records call["args"] on each invoke."""
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
     async def wrapper(tool, call, state):
         captured["args"] = dict(call["args"])
@@ -659,7 +660,7 @@ class TestBatchTransformToolWrapperHITL:
             "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.handle_static_args",
             return_value={"query": "static query", "hidden": "injected"},
         ):
-            await tool.awrapper(tool, call, AgentGraphState())
+            await tool.awrapper(tool, call, AgentGraphState())  # type: ignore[attr-defined]
 
         assert captured["args"]["query"] == "reviewed query"
         assert captured["args"]["hidden"] == "injected"

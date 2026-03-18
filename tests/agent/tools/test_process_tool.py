@@ -1,6 +1,7 @@
 """Tests for process_tool.py."""
 
 import os
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -363,7 +364,7 @@ class TestProcessToolSpanContext:
 
 def _capturing_wrapper():
     """Return (captured_dict, wrapper) where wrapper records call args on invoke."""
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
     async def wrapper(tool, call, state):
         captured["args"] = dict(call["args"])
@@ -389,7 +390,7 @@ class TestProcessToolWrapperHITL:
             "uipath_langchain.agent.tools.process_tool.handle_static_args",
             return_value={"name": "static-value", "hidden": "injected"},
         ):
-            await tool.awrapper(tool, call, AgentGraphState())
+            await tool.awrapper(tool, call, AgentGraphState())  # type: ignore[attr-defined]
 
         assert captured["args"]["name"] == "reviewed-value"  # HITL value wins
         assert captured["args"]["hidden"] == "injected"       # hidden static preserved
