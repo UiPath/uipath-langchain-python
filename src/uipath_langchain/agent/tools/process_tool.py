@@ -32,7 +32,7 @@ from .utils import sanitize_tool_name
 
 _START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]] = {
     (404, "1002"): (
-        "Could not find process for tool '{tool}'. Please check the your configuration.",
+        "Could not find process for tool '{tool}'. Please check if the process is deployed in the configured folder.",
         UiPathErrorCategory.USER,
     ),
     (400, "1100"): (
