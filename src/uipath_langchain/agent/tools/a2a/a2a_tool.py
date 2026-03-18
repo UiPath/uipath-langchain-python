@@ -25,6 +25,7 @@ from a2a.types import (
     TextPart,
 )
 from langchain_core.tools import BaseTool
+from pydantic import BaseModel, Field
 from uipath.agent.models.agent import AgentA2aResourceConfig
 
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
@@ -33,6 +34,12 @@ from uipath_langchain.agent.tools.base_uipath_structured_tool import (
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
 logger = getLogger(__name__)
+
+
+class A2aToolInput(BaseModel):
+    """Input schema for A2A agent tool."""
+
+    message: str = Field(description="The message to send to the remote agent.")
 
 
 def _extract_text(obj: Task | Message) -> str:
@@ -240,6 +247,7 @@ def _create_a2a_singleton_tool(config: AgentA2aResourceConfig) -> BaseTool:
         name=tool_name,
         description=tool_description,
         coroutine=_send,
+        args_schema=A2aToolInput,
         metadata={
             "tool_type": "a2a",
             "display_name": raw_name,
