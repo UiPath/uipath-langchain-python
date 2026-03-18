@@ -11,6 +11,8 @@ from .exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 def raise_for_enriched(
     e: EnrichedException,
     known_errors: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]],
+    *,
+    title: str,
     **context: str,
 ) -> None:
     """Raise AgentRuntimeError if the exception matches a known error pattern.
@@ -33,10 +35,10 @@ def raise_for_enriched(
             raise_for_enriched(
                 e,
                 {
-                    (404, "1002"): ("Process '{process}' not found.", UiPathErrorCategory.USER),
+                    (404, "1002"): ("Process not found.", UiPathErrorCategory.DEPLOYMENT),
                     (409, None): ("Conflict: {message}", UiPathErrorCategory.DEPLOYMENT),
                 },
-                process=name,
+                title=f"Failed to execute tool '{tool_name}'",
             )
             raise
     """
@@ -56,7 +58,7 @@ def raise_for_enriched(
     detail = template.format_map(defaultdict(lambda: "<unknown>", context))
     raise AgentRuntimeError(
         code=AgentRuntimeErrorCode.HTTP_ERROR,
-        title=detail,
+        title=title,
         detail=detail,
         category=category,
         status=e.status_code,

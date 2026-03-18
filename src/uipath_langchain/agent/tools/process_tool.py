@@ -92,6 +92,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
                     raise_for_enriched(
                         e,
                         _START_JOBS_ERRORS,
+                        title=f"Failed to execute tool '{resource.name}'",
                         tool=resource.name,
                     )
                     raise
