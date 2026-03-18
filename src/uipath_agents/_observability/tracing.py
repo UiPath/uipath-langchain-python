@@ -48,6 +48,12 @@ def _httpx_request_hook(span: Span, request: Any) -> None:
     license_ref_id = license_ref_id_context.get()
     if license_ref_id:
         request.headers["X-UiPath-License-RefId"] = license_ref_id
+        logger.info(
+            "httpx_request_hook: injected X-UiPath-License-RefId=%s on %s %s",
+            license_ref_id,
+            request.method,
+            request.url,
+        )
 
 
 def configure_telemetry(trace_manager: UiPathTraceManager | None = None) -> None:

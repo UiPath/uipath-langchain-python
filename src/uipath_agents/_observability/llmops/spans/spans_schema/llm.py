@@ -3,6 +3,7 @@
 Handles LLM call and model run spans.
 """
 
+import logging
 import uuid
 from contextvars import Token
 from typing import Callable, Optional, Tuple
@@ -20,6 +21,8 @@ from ..span_attributes import (
 )
 from ..span_name import SpanName
 from .base import apply_attributes, create_span, license_ref_id_context
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "LlmSpanSchema",
@@ -103,6 +106,7 @@ class LlmSpanSchema:
 
         license_ref_id = str(uuid.uuid4())
         license_token = license_ref_id_context.set(license_ref_id)
+        logger.info("start_model_run: generated licenseRefId=%s", license_ref_id)
 
         # Model run: type="completion", has model and nested settings
         settings = None

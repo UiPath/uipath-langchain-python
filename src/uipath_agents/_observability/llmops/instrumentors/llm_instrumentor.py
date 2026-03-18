@@ -64,8 +64,16 @@ class LlmSpanInstrumentor(BaseSpanInstrumentor):
         if token is not None:
             try:
                 license_ref_id_context.reset(token)
+                logger.info(
+                    "_reset_license_token: cleared licenseRefId context for run_id=%s",
+                    run_id,
+                )
             except ValueError:
                 license_ref_id_context.set(None)
+                logger.info(
+                    "_reset_license_token: ValueError resetting token for run_id=%s, forced to None",
+                    run_id,
+                )
 
     def _start_llm_and_model_spans(
         self,
