@@ -26,6 +26,7 @@ from uipath.platform.context_grounding import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model as create_model_from_schema,
@@ -40,7 +41,6 @@ from uipath_langchain.agent.tools.static_args import (
 )
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
-from .durable_interrupt import durable_interrupt
 from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
