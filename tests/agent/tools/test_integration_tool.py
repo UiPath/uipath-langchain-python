@@ -1106,5 +1106,5 @@ class TestIntegrationToolWrapperHITL:
         ):
             await tool.awrapper(tool, call, AgentGraphState())
 
-        assert call["args"]["issueIdOrKey"] == "AL-8"   # HITL value wins
-        assert call["args"]["api_key"] == "secret"       # hidden static preserved
+        assert call["args"]["issueIdOrKey"] == "AL-8"  # HITL value wins
+        assert call["args"]["api_key"] == "secret"  # hidden static preserved

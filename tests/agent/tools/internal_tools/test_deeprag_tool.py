@@ -390,7 +390,9 @@ class TestDeepRagToolWrapperHITL:
     def resource_config(self):
         settings = AgentInternalDeepRagSettings(
             context_type="attachment",
-            query=AgentContextQuerySetting(description="Enter query", variant="dynamic"),
+            query=AgentContextQuerySetting(
+                description="Enter query", variant="dynamic"
+            ),
             folder_path_prefix=None,
             citation_mode=DeepRagCitationModeSetting(value=CitationMode.INLINE),
             file_extension=DeepRagFileExtensionSetting(value=DeepRagFileExtension.PDF),
@@ -398,7 +400,10 @@ class TestDeepRagToolWrapperHITL:
         return AgentInternalToolResourceConfig(
             name="deeprag",
             description="DeepRAG tool",
-            input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
             output_schema={"type": "object", "properties": {}},
             properties=AgentInternalDeepRagToolProperties(
                 tool_type=AgentInternalToolType.DEEP_RAG, settings=settings
@@ -406,12 +411,13 @@ class TestDeepRagToolWrapperHITL:
         )
 
     @pytest.mark.asyncio
-    async def test_hitl_args_take_precedence_over_static_config(
-        self, resource_config
-    ):
+    async def test_hitl_args_take_precedence_over_static_config(self, resource_config):
         """HITL-reviewed value wins; hidden static params are still injected."""
         captured, wrapper = _capturing_wrapper()
-        with patch("uipath_langchain.agent.wrappers.get_job_attachment_wrapper", return_value=wrapper):
+        with patch(
+            "uipath_langchain.agent.wrappers.get_job_attachment_wrapper",
+            return_value=wrapper,
+        ):
             tool = create_deeprag_tool(resource_config, AsyncMock())
 
         call = {"name": tool.name, "args": {"query": "reviewed query"}, "id": "c"}

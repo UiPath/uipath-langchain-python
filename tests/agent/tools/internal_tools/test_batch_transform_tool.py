@@ -628,12 +628,16 @@ class TestBatchTransformToolWrapperHITL:
     def resource_config(self):
         settings = AgentInternalBatchTransformSettings(
             context_type="attachment",
-            query=AgentContextQuerySetting(description="Enter query", variant="dynamic"),
+            query=AgentContextQuerySetting(
+                description="Enter query", variant="dynamic"
+            ),
             folder_path_prefix=None,
             file_extension=BatchTransformFileExtensionSetting(
                 value=BatchTransformFileExtension.CSV
             ),
-            output_columns=[AgentContextOutputColumn(name="col", description="a column")],
+            output_columns=[
+                AgentContextOutputColumn(name="col", description="a column")
+            ],
             web_search_grounding=BatchTransformWebSearchGroundingSetting(
                 value=BatchTransformWebSearchGrounding.DISABLED
             ),
@@ -641,7 +645,10 @@ class TestBatchTransformToolWrapperHITL:
         return AgentInternalToolResourceConfig(
             name="batch_transform",
             description="Batch Transform tool",
-            input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
             output_schema={"type": "object", "properties": {}},
             properties=AgentInternalBatchTransformToolProperties(
                 tool_type=AgentInternalToolType.BATCH_TRANSFORM, settings=settings
@@ -652,7 +659,10 @@ class TestBatchTransformToolWrapperHITL:
     async def test_hitl_args_take_precedence_over_static_config(self, resource_config):
         """HITL-reviewed value wins; hidden static params are still injected."""
         captured, wrapper = _capturing_wrapper()
-        with patch("uipath_langchain.agent.wrappers.get_job_attachment_wrapper", return_value=wrapper):
+        with patch(
+            "uipath_langchain.agent.wrappers.get_job_attachment_wrapper",
+            return_value=wrapper,
+        ):
             tool = create_batch_transform_tool(resource_config, AsyncMock())
 
         call = {"name": tool.name, "args": {"query": "reviewed query"}, "id": "c"}

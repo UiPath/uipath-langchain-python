@@ -606,7 +606,10 @@ class TestAnalyzeFilesToolWrapperHITL:
         return AgentInternalToolResourceConfig(
             name="analyze_files",
             description="Analyze files",
-            input_schema={"type": "object", "properties": {"analysisTask": {"type": "string"}}},
+            input_schema={
+                "type": "object",
+                "properties": {"analysisTask": {"type": "string"}},
+            },
             output_schema={"type": "object", "properties": {}},
             properties=AgentInternalAnalyzeFilesToolProperties(
                 tool_type=AgentInternalToolType.ANALYZE_FILES
@@ -619,7 +622,10 @@ class TestAnalyzeFilesToolWrapperHITL:
         mock_llm = AsyncMock()
         mock_llm.model_copy = Mock(return_value=mock_llm)
         captured, wrapper = _capturing_wrapper()
-        with patch("uipath_langchain.agent.wrappers.get_job_attachment_wrapper", return_value=wrapper):
+        with patch(
+            "uipath_langchain.agent.wrappers.get_job_attachment_wrapper",
+            return_value=wrapper,
+        ):
             tool = create_analyze_file_tool(resource_config, mock_llm)
 
         call = {"name": tool.name, "args": {"analysisTask": "reviewed task"}, "id": "c"}

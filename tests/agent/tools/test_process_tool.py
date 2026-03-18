@@ -382,7 +382,10 @@ class TestProcessToolWrapperHITL:
     ):
         """HITL-reviewed value wins; hidden static params are still injected."""
         captured, wrapper = _capturing_wrapper()
-        with patch("uipath_langchain.agent.wrappers.get_job_attachment_wrapper", return_value=wrapper):
+        with patch(
+            "uipath_langchain.agent.wrappers.get_job_attachment_wrapper",
+            return_value=wrapper,
+        ):
             tool = create_process_tool(process_resource_with_inputs)
 
         call = {"name": tool.name, "args": {"name": "reviewed-value"}, "id": "c"}
@@ -393,4 +396,4 @@ class TestProcessToolWrapperHITL:
             await tool.awrapper(tool, call, AgentGraphState())  # type: ignore[attr-defined]
 
         assert captured["args"]["name"] == "reviewed-value"  # HITL value wins
-        assert captured["args"]["hidden"] == "injected"       # hidden static preserved
+        assert captured["args"]["hidden"] == "injected"  # hidden static preserved
