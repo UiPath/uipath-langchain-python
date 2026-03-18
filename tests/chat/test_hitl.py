@@ -8,6 +8,7 @@ from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 
 from uipath_langchain.chat.hitl import (
+    ARGS_MODIFIED_MESSAGE,
     CANCELLED_MESSAGE,
     CONVERSATIONAL_APPROVED_TOOL_ARGS,
     ConfirmationResult,
@@ -138,7 +139,7 @@ class TestAnnotateResult:
 
         assert isinstance(msg.content, str)
         wrapped = json.loads(msg.content)
-        assert wrapped["meta"]["args_modified_by_user"] is True
+        assert wrapped["meta"]["message"] == ARGS_MODIFIED_MESSAGE
         assert wrapped["meta"]["executed_args"] == {"query": "edited"}
         assert wrapped["result"] == "result"
 

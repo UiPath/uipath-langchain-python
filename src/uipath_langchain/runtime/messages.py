@@ -391,16 +391,11 @@ class UiPathChatMessagesMapper:
                             self.current_message.id
                         )
 
-                        # if tool requires confirmation, we skip start tool call
-                        if (
-                            tool_call["name"]
-                            not in self.tool_names_requiring_confirmation
-                        ):
-                            events.append(
-                                self.map_tool_call_to_tool_call_start_event(
-                                    self.current_message.id, tool_call
-                                )
+                        events.append(
+                            self.map_tool_call_to_tool_call_start_event(
+                                self.current_message.id, tool_call
                             )
+                        )
 
                 if self.storage is not None:
                     await self.storage.set_value(
@@ -499,6 +494,10 @@ class UiPathChatMessagesMapper:
     def map_tool_call_to_tool_call_start_event(
         self, message_id: str, tool_call: ToolCall
     ) -> UiPathConversationMessageEvent:
+        metadata = None
+        if tool_call["name"] in self.tool_names_requiring_confirmation:
+            metadata = {"requiresConfirmation": True}
+
         return UiPathConversationMessageEvent(
             message_id=message_id,
             tool_call=UiPathConversationToolCallEvent(
@@ -507,6 +506,7 @@ class UiPathChatMessagesMapper:
                     tool_name=tool_call["name"],
                     timestamp=self.get_timestamp(),
                     input=tool_call["args"],
+                    metadata=metadata,
                 ),
             ),
         )
