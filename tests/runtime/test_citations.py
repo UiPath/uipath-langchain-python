@@ -556,6 +556,34 @@ class TestCitationStreamProcessor:
         assert cited[0].data == "<uip "
         assert cited[0].citation.end.sources[0].url == "https://example.com"
 
+    def test_escaped_quotes_in_title(self):
+        """Citation with backslash-escaped quotes in title is parsed correctly."""
+        proc = CitationStreamProcessor()
+        text = r'Some text.<uip:cite title="The Peculiar Journey of \"Orange\"" url="https://example.com" />'
+        events = proc.add_chunk(text)
+        events.extend(proc.finalize())
+        cited = [e for e in events if e.citation is not None]
+        assert len(cited) == 1
+        assert cited[0].data == "Some text."
+        source = cited[0].citation.end.sources[0]
+        assert isinstance(source, UiPathConversationCitationSourceUrl)
+        assert source.url == "https://example.com"
+        assert source.title == 'The Peculiar Journey of "Orange"'
+
+    def test_escaped_quotes_in_title_streamed(self):
+        """Escaped quotes in title still work when streamed across chunks."""
+        proc = CitationStreamProcessor()
+        events = proc.add_chunk(r'Text.<uip:cite title="Say \"hi')
+        # "Text." is emitted immediately; the partial tag is buffered
+        assert len(events) == 1
+        assert events[0].data == "Text."
+        assert events[0].citation is None
+        events = proc.add_chunk(r' there\"" url="https://x.com" />')
+        events.extend(proc.finalize())
+        cited = [e for e in events if e.citation is not None]
+        assert len(cited) == 1
+        assert cited[0].citation.end.sources[0].title == 'Say "hi there"'
+
 
 class TestExtractCitationsFromText:
     """Test cases for extract_citations_from_text function."""
@@ -688,6 +716,35 @@ class TestExtractCitationsFromText:
         cleaned, citations = extract_citations_from_text(text)
         assert cleaned == "UiPath reported earnings"
         assert citations == []
+
+    def test_escaped_quotes_in_title(self):
+        """Citation with escaped quotes in title is parsed and unescaped."""
+        text = (
+            r'A fact<uip:cite title="The \"Real\" Story" url="https://example.com" />'
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "A fact"
+        assert len(citations) == 1
+        source = citations[0].sources[0]
+        assert isinstance(source, UiPathConversationCitationSourceUrl)
+        assert source.title == 'The "Real" Story'
+        assert source.url == "https://example.com"
+
+    def test_escaped_quotes_in_title_debug_dump_repro(self):
+        """Reproduce the exact tag from the debug dump that was failing."""
+        text = (
+            r'some text.<uip:cite title="The Peculiar Journey of \"Orange\"" '
+            r'url="https://www.vocabulary.com/articles/wordroutes/the-peculiar-journey-of-orange/" />'
+        )
+        cleaned, citations = extract_citations_from_text(text)
+        assert cleaned == "some text."
+        assert len(citations) == 1
+        source = citations[0].sources[0]
+        assert source.title == 'The Peculiar Journey of "Orange"'
+        assert (
+            source.url
+            == "https://www.vocabulary.com/articles/wordroutes/the-peculiar-journey-of-orange/"
+        )
 
     def test_different_sources_get_different_numbers(self):
         """Different sources get incrementing numbers."""
