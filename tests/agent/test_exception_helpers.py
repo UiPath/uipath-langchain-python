@@ -13,7 +13,7 @@ from uipath_langchain.agent.exceptions.helpers import raise_for_enriched
 
 def _make_enriched(
     status: int,
-    body: dict | None = None,
+    body: dict[str, object] | None = None,
     url: str = "https://cloud.uipath.com/org/tenant/orchestrator_/api/v1",
 ) -> EnrichedException:
     content = json.dumps(body).encode() if body else b""
