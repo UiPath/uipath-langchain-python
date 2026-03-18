@@ -174,9 +174,7 @@ def _create_a2a_singleton_tool(config: AgentA2aResourceConfig) -> BaseTool:
                     sdk = UiPath()
                     _http_client = httpx.AsyncClient(
                         timeout=120,
-                        headers={
-                            "Authorization": f"Bearer {sdk._config.secret}"
-                        },
+                        headers={"Authorization": f"Bearer {sdk._config.secret}"},
                     )
                     _client = await ClientFactory.connect(
                         a2a_url,
@@ -223,9 +221,7 @@ def _create_a2a_singleton_tool(config: AgentA2aResourceConfig) -> BaseTool:
                     task, update = event
                     _task_id = task.id
                     _context_id = task.context_id
-                    state = (
-                        task.status.state.value if task.status else "unknown"
-                    )
+                    state = task.status.state.value if task.status else "unknown"
                     if update is None:
                         text = _extract_text(task)
                         break
