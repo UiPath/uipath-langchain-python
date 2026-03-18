@@ -336,9 +336,14 @@ def create_integration_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
+        original_args = dict(call["args"])
         call["args"] = handle_static_args(
             cast(ArgumentPropertiesMixin, tool), state, call["args"]
         )
+        # Re-apply the original call args on top so that values explicitly provided
+        # by the caller (e.g. HITL-reviewed inputs) take precedence over static
+        # argument configuration.
+        call["args"].update(original_args)
         return await tool.ainvoke(call)
 
     tool = StructuredToolWithArgumentProperties(

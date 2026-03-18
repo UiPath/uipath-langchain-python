@@ -228,9 +228,11 @@ def handle_semantic_search(
             call: ToolCall,
             state: AgentGraphState,
         ) -> ToolWrapperReturnType:
+            original_args = dict(call["args"])
             call["args"] = handle_static_args(
                 cast(ArgumentPropertiesMixin, tool), state, call["args"]
             )
+            call["args"].update(original_args)
             nonlocal _resolved_arg_folder_prefix
             _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
                 resource, dict(state)
@@ -356,9 +358,11 @@ def handle_deep_rag(
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
         nonlocal _resolved_arg_folder_prefix
+        original_args = dict(call["args"])
         call["args"] = handle_static_args(
             cast(ArgumentPropertiesMixin, tool), state, call["args"]
         )
+        call["args"].update(original_args)
         _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
             resource, dict(state)
         )
@@ -510,9 +514,11 @@ def handle_batch_transform(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
+        original_args = dict(call["args"])
         call["args"] = handle_static_args(
             cast(ArgumentPropertiesMixin, tool), state, call["args"]
         )
+        call["args"].update(original_args)
         nonlocal _resolved_arg_folder_prefix
         _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
             resource, dict(state)

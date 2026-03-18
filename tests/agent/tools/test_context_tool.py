@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.documents import Document
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath.agent.models.agent import (
     AgentContextOutputColumn,
     AgentContextQuerySetting,
@@ -33,6 +34,17 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 from uipath_langchain.agent.tools.structured_tool_with_output_type import (
     StructuredToolWithOutputType,
 )
+
+
+def _capturing_wrapper():
+    """Return (captured_dict, wrapper) that records call["args"] on each invoke."""
+    captured: dict = {}
+
+    async def wrapper(tool, call, state):
+        captured["args"] = dict(call["args"])
+        return {}
+
+    return captured, wrapper
 
 
 def _make_context_resource(
@@ -1031,3 +1043,101 @@ class TestNormalizeFolderPrefix:
 
     def test_double_star_nested_prefix_preserved(self):
         assert _normalize_folder_prefix("**/docs/reports") == "**/docs/reports"
+
+
+class TestContextToolWrapperHITL:
+    """Ensure HITL-reviewed args take precedence over static arg configuration."""
+
+    # --- semantic search wrapper ---
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_hitl_args_take_precedence(self):
+        """Semantic-search wrapper: HITL value wins; hidden static is preserved."""
+        # query_variant="argument" triggers arg_props so the HITL wrapper is set up.
+        resource = _make_context_resource(
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="argument",
+            query_value="query",
+        )
+        tool = create_context_tool(resource)
+        call = {"name": tool.name, "args": {"query": "reviewed query"}, "id": "c"}
+        try:
+            with patch(
+                "uipath_langchain.agent.tools.context_tool.handle_static_args",
+                return_value={"query": "static query", "hidden": "injected"},
+            ), patch(
+                "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever",
+                return_value=AsyncMock(ainvoke=AsyncMock(return_value=[])),
+            ):
+                await tool.awrapper(tool, call, AgentGraphState())
+        except Exception:
+            pass  # only care about arg routing, not actual tool execution
+
+        assert call["args"]["query"] == "reviewed query"
+        assert call["args"]["hidden"] == "injected"
+
+    # --- deep-rag wrapper ---
+
+    @pytest.mark.asyncio
+    async def test_deep_rag_hitl_args_take_precedence(self):
+        """Deep-rag wrapper: HITL value wins; hidden static is preserved."""
+        resource = _make_context_resource(
+            retrieval_mode=AgentContextRetrievalMode.DEEP_RAG,
+            query_variant="argument",
+            query_value="query",
+            citation_mode_value=AgentContextValueSetting(value=CitationMode.INLINE),
+        )
+        tool = create_context_tool(resource)
+        call = {"name": tool.name, "args": {"query": "reviewed query"}, "id": "c"}
+        try:
+            with patch(
+                "uipath_langchain.agent.tools.context_tool.handle_static_args",
+                return_value={"query": "static query", "hidden": "injected"},
+            ), patch(
+                "uipath_langchain.agent.tools.context_tool.handle_deep_rag",
+                new=AsyncMock(return_value=""),
+            ):
+                await tool.awrapper(tool, call, AgentGraphState())
+        except Exception:
+            pass
+
+        assert call["args"]["query"] == "reviewed query"
+        assert call["args"]["hidden"] == "injected"
+
+    # --- batch-transform wrapper ---
+
+    @pytest.mark.asyncio
+    async def test_batch_transform_hitl_args_take_precedence(self):
+        """Batch-transform wrapper: HITL value wins; hidden static is preserved."""
+        resource = AgentContextResourceConfig(
+            name="test_tool",
+            description="Test tool",
+            resource_type="context",
+            index_name="test-index",
+            folder_path="/test/folder",
+            settings=AgentContextSettings(
+                result_count=1,
+                retrieval_mode=AgentContextRetrievalMode.BATCH_TRANSFORM,
+                query=AgentContextQuerySetting(
+                    value="query", description="desc", variant="argument"
+                ),
+                web_search_grounding=AgentContextValueSetting(value="enabled"),
+                output_columns=[
+                    AgentContextOutputColumn(name="col", description="a column")
+                ],
+            ),
+            is_enabled=True,
+        )
+        captured, wrapper = _capturing_wrapper()
+        with patch("uipath_langchain.agent.wrappers.get_job_attachment_wrapper", return_value=wrapper):
+            tool = create_context_tool(resource)
+
+        call = {"name": tool.name, "args": {"query": "reviewed query"}, "id": "c"}
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.handle_static_args",
+            return_value={"query": "static query", "hidden": "injected"},
+        ):
+            await tool.awrapper(tool, call, AgentGraphState())
+
+        assert captured["args"]["query"] == "reviewed query"
+        assert captured["args"]["hidden"] == "injected"

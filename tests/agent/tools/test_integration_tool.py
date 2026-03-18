@@ -1,6 +1,6 @@
 """Tests for integration_tool.py module."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from uipath.agent.models.agent import (
@@ -13,6 +13,7 @@ from uipath.agent.models.agent import (
 from uipath.platform.connections import ActivityParameterLocationInfo, Connection
 
 from uipath_langchain.agent.exceptions import AgentStartupError
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.integration_tool import (
     _is_param_name_to_jsonpath,
     _param_name_to_segments,
@@ -1055,3 +1056,55 @@ class TestIsParamNameToJsonpath:
 
     def test_escapes_backslashes(self):
         assert _is_param_name_to_jsonpath("path\\to") == "$['path\\\\to']"
+
+
+def _make_jira_resource(parameters=None):
+    """Helper: create an integration tool resource config for Jira-like tests."""
+    connection = Connection(
+        id="jira-conn-id", name="Jira Connection", element_instance_id=1
+    )
+    properties = AgentIntegrationToolProperties(
+        method="POST",
+        tool_path="/issue/{issueIdOrKey}",
+        object_name="issue",
+        tool_display_name="Update Issue",
+        tool_description="Update a Jira issue",
+        connection=connection,
+        parameters=parameters or [],
+    )
+    return AgentIntegrationToolResourceConfig(
+        name="update_jira_issue",
+        description="Update a Jira issue",
+        properties=properties,
+        input_schema={
+            "type": "object",
+            "properties": {"issueIdOrKey": {"type": "string"}},
+        },
+    )
+
+
+class TestIntegrationToolWrapperHITL:
+    """Ensure HITL-reviewed args take precedence over static arg configuration."""
+
+    @pytest.fixture
+    def tool(self):
+        mock_uipath = MagicMock()
+        mock_uipath.connections.invoke_activity_async = AsyncMock(return_value={})
+        with patch(
+            "uipath_langchain.agent.tools.integration_tool.UiPath",
+            return_value=mock_uipath,
+        ):
+            return create_integration_tool(_make_jira_resource())
+
+    @pytest.mark.asyncio
+    async def test_hitl_args_take_precedence_over_static_config(self, tool):
+        """HITL-reviewed value wins; hidden static params are still injected."""
+        call = {"name": tool.name, "args": {"issueIdOrKey": "AL-8"}, "id": "c"}
+        with patch(
+            "uipath_langchain.agent.tools.integration_tool.handle_static_args",
+            return_value={"issueIdOrKey": "AL-141", "api_key": "secret"},
+        ):
+            await tool.awrapper(tool, call, AgentGraphState())
+
+        assert call["args"]["issueIdOrKey"] == "AL-8"   # HITL value wins
+        assert call["args"]["api_key"] == "secret"       # hidden static preserved

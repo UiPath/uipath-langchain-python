@@ -13,6 +13,7 @@ from uipath.agent.models.agent import (
 )
 
 from uipath_langchain.agent.multimodal import FileInfo
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
     _resolve_job_attachment_arguments,
@@ -581,3 +582,51 @@ class TestResolveJobAttachmentArguments:
         assert len(result) == 1
         assert result[0].url == "https://blob.storage.com/files/doc1.pdf"
         mock_uipath_client.attachments.get_blob_file_access_uri_async.assert_called_once()
+
+
+def _capturing_wrapper():
+    """Return (captured_dict, wrapper) that records call["args"] on each invoke."""
+    captured: dict = {}
+
+    async def wrapper(tool, call, state):
+        captured["args"] = dict(call["args"])
+        return {}
+
+    return captured, wrapper
+
+
+class TestAnalyzeFilesToolWrapperHITL:
+    """Ensure HITL-reviewed args take precedence over static arg configuration."""
+
+    @pytest.fixture
+    def resource_config(self):
+        llm = AsyncMock()
+        llm.model_copy = Mock(return_value=llm)
+        return AgentInternalToolResourceConfig(
+            name="analyze_files",
+            description="Analyze files",
+            input_schema={"type": "object", "properties": {"analysisTask": {"type": "string"}}},
+            output_schema={"type": "object", "properties": {}},
+            properties=AgentInternalAnalyzeFilesToolProperties(
+                tool_type=AgentInternalToolType.ANALYZE_FILES
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_hitl_args_take_precedence_over_static_config(self, resource_config):
+        """HITL-reviewed value wins; hidden static params are still injected."""
+        mock_llm = AsyncMock()
+        mock_llm.model_copy = Mock(return_value=mock_llm)
+        captured, wrapper = _capturing_wrapper()
+        with patch("uipath_langchain.agent.wrappers.get_job_attachment_wrapper", return_value=wrapper):
+            tool = create_analyze_file_tool(resource_config, mock_llm)
+
+        call = {"name": tool.name, "args": {"analysisTask": "reviewed task"}, "id": "c"}
+        with patch(
+            "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.handle_static_args",
+            return_value={"analysisTask": "static task", "hidden": "injected"},
+        ):
+            await tool.awrapper(tool, call, AgentGraphState())
+
+        assert captured["args"]["analysisTask"] == "reviewed task"
+        assert captured["args"]["hidden"] == "injected"

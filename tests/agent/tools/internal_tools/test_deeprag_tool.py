@@ -20,6 +20,7 @@ from uipath.platform.context_grounding.context_grounding_index import (
     ContextGroundingIndex,
 )
 
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.internal_tools.deeprag_tool import (
     create_deeprag_tool,
 )
@@ -368,3 +369,56 @@ class TestCreateDeepRagTool:
         assert tool.coroutine is not None
         with pytest.raises(ValueError, match="Attachment ID is required"):
             await tool.coroutine(attachment=mock_attachment)
+
+
+def _capturing_wrapper():
+    """Return (captured_dict, wrapper) that records call["args"] on each invoke."""
+    captured: dict = {}
+
+    async def wrapper(tool, call, state):
+        captured["args"] = dict(call["args"])
+        return {}
+
+    return captured, wrapper
+
+
+class TestDeepRagToolWrapperHITL:
+    """Ensure HITL-reviewed args take precedence over static arg configuration."""
+
+    @pytest.fixture
+    def resource_config(self):
+        settings = AgentInternalDeepRagSettings(
+            context_type="attachment",
+            query=AgentContextQuerySetting(description="Enter query", variant="dynamic"),
+            folder_path_prefix=None,
+            citation_mode=DeepRagCitationModeSetting(value=CitationMode.INLINE),
+            file_extension=DeepRagFileExtensionSetting(value=DeepRagFileExtension.PDF),
+        )
+        return AgentInternalToolResourceConfig(
+            name="deeprag",
+            description="DeepRAG tool",
+            input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+            output_schema={"type": "object", "properties": {}},
+            properties=AgentInternalDeepRagToolProperties(
+                tool_type=AgentInternalToolType.DEEP_RAG, settings=settings
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_hitl_args_take_precedence_over_static_config(
+        self, resource_config
+    ):
+        """HITL-reviewed value wins; hidden static params are still injected."""
+        captured, wrapper = _capturing_wrapper()
+        with patch("uipath_langchain.agent.wrappers.get_job_attachment_wrapper", return_value=wrapper):
+            tool = create_deeprag_tool(resource_config, AsyncMock())
+
+        call = {"name": tool.name, "args": {"query": "reviewed query"}, "id": "c"}
+        with patch(
+            "uipath_langchain.agent.tools.internal_tools.deeprag_tool.handle_static_args",
+            return_value={"query": "static query", "hidden": "injected"},
+        ):
+            await tool.awrapper(tool, call, AgentGraphState())
+
+        assert captured["args"]["query"] == "reviewed query"
+        assert captured["args"]["hidden"] == "injected"

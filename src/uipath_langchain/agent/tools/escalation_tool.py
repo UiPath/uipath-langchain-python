@@ -261,7 +261,9 @@ def create_escalation_tool(
         tool.metadata["_call_id"] = call.get("id")
         tool.metadata["_call_args"] = dict(call.get("args", {}))
 
+        original_args = dict(call["args"])
         call["args"] = handle_static_args(resource, state, call["args"])
+        call["args"].update(original_args)
         result = await tool.ainvoke(call["args"])
 
         if result["action"] == EscalationAction.END:

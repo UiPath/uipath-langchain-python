@@ -161,7 +161,9 @@ def create_deeprag_tool(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
+        original_args = dict(call["args"])
         call["args"] = handle_static_args(resource, state, call["args"])
+        call["args"].update(original_args)
         return await job_attachment_wrapper(tool, call, state)
 
     tool = StructuredToolWithArgumentProperties(

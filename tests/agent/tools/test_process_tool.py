@@ -12,6 +12,7 @@ from uipath.agent.models.agent import (
 from uipath.platform.common import WaitJob
 from uipath.platform.orchestrator import Job
 
+from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.process_tool import create_process_tool
 
 
@@ -358,3 +359,37 @@ class TestProcessToolSpanContext:
 
         call_kwargs = mock_client.processes.invoke_async.call_args[1]
         assert call_kwargs["parent_span_id"] is None
+
+
+def _capturing_wrapper():
+    """Return (captured_dict, wrapper) where wrapper records call args on invoke."""
+    captured: dict = {}
+
+    async def wrapper(tool, call, state):
+        captured["args"] = dict(call["args"])
+        return {}
+
+    return captured, wrapper
+
+
+class TestProcessToolWrapperHITL:
+    """Ensure HITL-reviewed args take precedence over static arg configuration."""
+
+    @pytest.mark.asyncio
+    async def test_hitl_args_take_precedence_over_static_config(
+        self, process_resource_with_inputs
+    ):
+        """HITL-reviewed value wins; hidden static params are still injected."""
+        captured, wrapper = _capturing_wrapper()
+        with patch("uipath_langchain.agent.wrappers.get_job_attachment_wrapper", return_value=wrapper):
+            tool = create_process_tool(process_resource_with_inputs)
+
+        call = {"name": tool.name, "args": {"name": "reviewed-value"}, "id": "c"}
+        with patch(
+            "uipath_langchain.agent.tools.process_tool.handle_static_args",
+            return_value={"name": "static-value", "hidden": "injected"},
+        ):
+            await tool.awrapper(tool, call, AgentGraphState())
+
+        assert captured["args"]["name"] == "reviewed-value"  # HITL value wins
+        assert captured["args"]["hidden"] == "injected"       # hidden static preserved
