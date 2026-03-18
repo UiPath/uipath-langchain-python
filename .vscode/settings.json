@@ -16,10 +16,6 @@
       "source.organizeImports": "explicit"
     }
   },
-  "workbench.colorCustomizations": {
-    "titleBar.activeBackground": "#0099cc",
-    "titleBar.inactiveBackground": "#0099cc"
-  },
   "python.testing.pytestArgs": [
     "tests"
   ],
