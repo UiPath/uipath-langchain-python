@@ -3333,7 +3333,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.8.27"
+version = "0.8.28"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -3402,7 +3402,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "uipath", specifier = ">=2.10.19,<2.11.0" },
     { name = "uipath-core", specifier = ">=0.5.2,<0.6.0" },
-    { name = "uipath-platform", specifier = ">=0.0.23,<0.1.0" },
+    { name = "uipath-platform", specifier = ">=0.0.27,<0.1.0" },
     { name = "uipath-runtime", specifier = ">=0.9.1,<0.10.0" },
 ]
 provides-extras = ["vertex", "bedrock"]

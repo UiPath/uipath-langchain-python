@@ -40,6 +40,7 @@ uv build
   - `tools/` — Structured tools: context, escalation, extraction, integration, process, MCP adapters, durable interrupts. All inherit from `BaseUiPathStructuredTool`.
   - `guardrails/` — Input/output validation within agent execution
   - `multimodal/` — Multimodal invoke support
+  - `exceptions/` — Structured error types (`AgentRuntimeError`, `AgentStartupError`) and helpers for agent error handling
   - `wrappers/` — Agent decorators and wrappers
 
 - **`chat/`** — LLM provider interfaces for OpenAI, Azure OpenAI, AWS Bedrock, Google Vertex AI. Uses **lazy imports** via `__getattr__` in `__init__.py` to keep CLI startup fast. Includes `hitl.py` with the `requires_approval` decorator for human-in-the-loop workflows. Factory pattern via `chat_model_factory.py`.
@@ -77,3 +78,5 @@ The package registers two entry points consumed by the `uipath` CLI:
 - **Linting**: Ruff with rules E, F, B, I. Line length 88. mypy with pydantic plugin for type checking.
 
 - **Bedrock/Vertex imports**: `bedrock.py` and `vertex.py` have per-file E402 ignores for conditional imports.
+
+- **Exception handling in `agent/`**: Use the error types and helpers from `agent/exceptions/`. Do not raise raw exceptions or invent new error types. New error codes may be defined.
