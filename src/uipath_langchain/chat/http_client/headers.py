@@ -22,6 +22,24 @@ from uipath.platform.common.constants import (
     HEADER_TRACE_ID,
 )
 
+_RUNTIME_TO_PLAYGROUND: dict[str, str] = {
+    "agentsruntime": "agentsplayground",
+    "conversationalagentsruntime": "conversationalagentsplayground",
+}
+
+
+def _apply_debug_override(agenthub_config: str) -> str:
+    """Override runtime agenthub config to playground when rooted to a debug job.
+
+    When this job is rooted to a debug session (e.g. Maestro solution debug
+    calls a deployed agent), switch the licensing header from runtime to
+    playground so the developer's LLM call debug quota is used instead of
+    requiring consumables (such as Agent Units).
+    """
+    if UiPathConfig.is_rooted_to_debug_job:
+        return _RUNTIME_TO_PLAYGROUND.get(agenthub_config, agenthub_config)
+    return agenthub_config
+
 
 def build_uipath_headers(
     *,
@@ -44,7 +62,7 @@ def build_uipath_headers(
     """
     headers: dict[str, str] = {}
     if agenthub_config:
-        headers[HEADER_AGENTHUB_CONFIG] = agenthub_config
+        headers[HEADER_AGENTHUB_CONFIG] = _apply_debug_override(agenthub_config)
     if byo_connection_id:
         headers[HEADER_LLMGATEWAY_BYO_CONNECTION_ID] = byo_connection_id
     if process_key := os.getenv(ENV_PROCESS_KEY):

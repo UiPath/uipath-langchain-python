@@ -73,3 +73,56 @@ class TestBuildUiPathHeaders:
         ):
             headers = build_uipath_headers()
         assert "x-uipath-licensing-context" not in headers
+
+    def test_debug_override_agents_runtime_to_playground(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "uipath.platform.common._config.ConfigurationManager.is_rooted_to_debug_job",
+                new_callable=PropertyMock,
+                return_value=True,
+            ),
+        ):
+            headers = build_uipath_headers(agenthub_config="agentsruntime")
+        assert headers["x-uipath-agenthub-config"] == "agentsplayground"
+
+    def test_debug_override_conversational_runtime_to_playground(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "uipath.platform.common._config.ConfigurationManager.is_rooted_to_debug_job",
+                new_callable=PropertyMock,
+                return_value=True,
+            ),
+        ):
+            headers = build_uipath_headers(
+                agenthub_config="conversationalagentsruntime"
+            )
+        assert (
+            headers["x-uipath-agenthub-config"]
+            == "conversationalagentsplayground"
+        )
+
+    def test_no_debug_override_when_not_debug_job(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "uipath.platform.common._config.ConfigurationManager.is_rooted_to_debug_job",
+                new_callable=PropertyMock,
+                return_value=False,
+            ),
+        ):
+            headers = build_uipath_headers(agenthub_config="agentsruntime")
+        assert headers["x-uipath-agenthub-config"] == "agentsruntime"
+
+    def test_debug_override_does_not_affect_evals(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "uipath.platform.common._config.ConfigurationManager.is_rooted_to_debug_job",
+                new_callable=PropertyMock,
+                return_value=True,
+            ),
+        ):
+            headers = build_uipath_headers(agenthub_config="agentsevals")
+        assert headers["x-uipath-agenthub-config"] == "agentsevals"
