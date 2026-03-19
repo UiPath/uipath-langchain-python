@@ -1,4 +1,5 @@
 from langchain_core.language_models import BaseChatModel
+from uipath.platform.common import UiPathConfig
 from uipath_langchain.chat.chat_model_factory import get_chat_model
 
 from uipath_agents.agent_graph_builder.config import AgentExecutionType
@@ -7,7 +8,21 @@ from uipath_agents.agent_graph_builder.config import AgentExecutionType
 def _get_agenthub_config(
     execution_type: AgentExecutionType, *, is_conversational: bool = False
 ) -> str:
-    """Map the execution type to the AgentHub config."""
+    """Map the execution type to the AgentHub config.
+
+    When isDebug is set in internalArguments (Maestro debug calls an Agent),
+    return the playground variant for licensing purposes. The agent is
+    deployed to a solution debug folder (command="run") but the parent
+    Orchestrator job is a debug session — use the developer's LLM call debug
+    quota instead of requiring consumables (such as Agent Units).
+    """
+    if UiPathConfig.is_rooted_to_debug_job:
+        return (
+            "conversationalagentsplayground"
+            if is_conversational
+            else "agentsplayground"
+        )
+
     match execution_type:
         case AgentExecutionType.PLAYGROUND:
             return (
