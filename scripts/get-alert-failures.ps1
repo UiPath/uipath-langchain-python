@@ -156,7 +156,8 @@ Write-Status "Querying AgentRun.Failed events..."
 
 # One row per failure: AgentRun.Failed joined with deduplicated exception info
 $failuresQuery = @"
-let ErrorPrefix = "An unexpected error occurred during agent execution, please try again later or contact your Administrator.\nError Details:\n";
+let ExecutionPrefix = "An unexpected error occurred during agent execution, please try again later or contact your Administrator.\nError Details:\n";
+let StartupPrefix = "An unexpected error occurred during agent startup, please try again later or contact your Administrator.\nError Details:\n";
 customEvents
 | where name == "AgentRun.Failed" and customDimensions["Runtime"] == "URT"
 | extend
@@ -164,7 +165,7 @@ customEvents
     OrganizationId = tostring(customDimensions["CloudOrganizationId"]),
     TenantId = tostring(customDimensions["CloudTenantId"]),
     AgentRunSource = tostring(customDimensions["AgentRunSource"]),
-    ErrorMessage = trim(ErrorPrefix, tostring(customDimensions["ErrorMessage"])),
+    ErrorMessage = trim(StartupPrefix, trim(ExecutionPrefix, tostring(customDimensions["ErrorMessage"]))),
     JobKey = tostring(customDimensions["JobKey"]),
     Region = cloud_RoleName
 | where ErrorCategory !in ("User")
@@ -259,8 +260,12 @@ function Get-NormalizedSignature {
         return "$shortType | context overflow"
     }
 
+    # Strip generic error prefixes that hide the actual error details
+    $msg = $ErrorMessage
+    $msg = $msg -replace '(?s)^An unexpected error occurred during agent (execution|startup), please try again later or contact your Administrator\.\s*Error Details:\s*', ''
+
     # Generic: use error type + first line of message, normalized
-    $firstLine = ($ErrorMessage -split "`n")[0].Trim()
+    $firstLine = ($msg -split "`n")[0].Trim()
     $firstLine = $firstLine -replace '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<id>'
     if ($firstLine.Length -gt 120) { $firstLine = $firstLine.Substring(0, 120) + "..." }
     return "$shortType | $firstLine"
