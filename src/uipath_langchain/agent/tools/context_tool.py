@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.documents import Document
@@ -40,17 +40,13 @@ from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     BATCH_TRANSFORM_OUTPUT_SCHEMA,
 )
-from uipath_langchain.agent.tools.static_args import (
-    ArgumentPropertiesMixin,
-    handle_static_args,
-)
+from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
 from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
 from .structured_tool_with_output_type import StructuredToolWithOutputType
-from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
 
 logger = logging.getLogger(__name__)
@@ -251,9 +247,6 @@ def handle_semantic_search(
             call: ToolCall,
             state: AgentGraphState,
         ) -> ToolWrapperReturnType:
-            call["args"] = handle_static_args(
-                cast(ArgumentPropertiesMixin, tool), state, call["args"]
-            )
             nonlocal _resolved_arg_folder_prefix
             _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
                 resource, dict(state)
@@ -379,9 +372,6 @@ def handle_deep_rag(
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
         nonlocal _resolved_arg_folder_prefix
-        call["args"] = handle_static_args(
-            cast(ArgumentPropertiesMixin, tool), state, call["args"]
-        )
         _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
             resource, dict(state)
         )
@@ -533,9 +523,6 @@ def handle_batch_transform(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(
-            cast(ArgumentPropertiesMixin, tool), state, call["args"]
-        )
         nonlocal _resolved_arg_folder_prefix
         _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
             resource, dict(state)
@@ -557,7 +544,7 @@ def handle_batch_transform(
             "output_schema": output_model,
         },
     )
-    tool.set_tool_wrappers(awrapper=context_batch_transform_wrapper)
+    tool.set_tool_wrappers(awrapper=job_attachment_wrapper)
     return tool
 
 

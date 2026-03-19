@@ -2,10 +2,8 @@
 
 import copy
 import re
-from typing import Any, cast
+from typing import Any
 
-from langchain.tools import BaseTool
-from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
@@ -26,14 +24,6 @@ from uipath_langchain.agent.exceptions import (
     raise_for_enriched,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.static_args import (
-    ArgumentPropertiesMixin,
-    handle_static_args,
-)
-from uipath_langchain.agent.tools.tool_node import (
-    ToolWrapperReturnType,
-)
 
 from .schema_editing import strip_matching_enums
 from .structured_tool_with_argument_properties import (
@@ -351,16 +341,6 @@ def create_integration_tool(
 
         return result
 
-    async def integration_tool_wrapper(
-        tool: BaseTool,
-        call: ToolCall,
-        state: AgentGraphState,
-    ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(
-            cast(ArgumentPropertiesMixin, tool), state, call["args"]
-        )
-        return await tool.ainvoke(call)
-
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
@@ -375,6 +355,5 @@ def create_integration_tool(
         },
         argument_properties=argument_properties,
     )
-    tool.set_tool_wrappers(awrapper=integration_tool_wrapper)
 
     return tool
