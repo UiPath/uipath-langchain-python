@@ -97,6 +97,57 @@ class TestGetClientSkipsImds:
         )
 
 
+class TestSslVerification:
+    def test_get_client_verifies_ssl_by_default(self):
+        passthrough = AwsBedrockCompletionsPassthroughClient(
+            model="anthropic.claude-haiku-4-5-20251001",
+            token="test-token",
+            api_flavor="converse",
+        )
+        client = passthrough.get_client()
+        assert client.meta.endpoint_url.startswith("https")
+        assert client._endpoint.http_session._verify is True
+
+    def test_get_bedrock_client_verifies_ssl_by_default(self):
+        passthrough = AwsBedrockCompletionsPassthroughClient(
+            model="anthropic.claude-haiku-4-5-20251001",
+            token="test-token",
+            api_flavor="converse",
+        )
+        client = passthrough.get_bedrock_client()
+        assert client._endpoint.http_session._verify is True
+
+    @patch.dict(os.environ, {"UIPATH_DISABLE_SSL_VERIFY": "true"})
+    def test_get_client_disables_ssl_when_env_set(self):
+        passthrough = AwsBedrockCompletionsPassthroughClient(
+            model="anthropic.claude-haiku-4-5-20251001",
+            token="test-token",
+            api_flavor="converse",
+        )
+        client = passthrough.get_client()
+        assert client._endpoint.http_session._verify is False
+
+    @patch.dict(os.environ, {"UIPATH_DISABLE_SSL_VERIFY": "true"})
+    def test_get_bedrock_client_disables_ssl_when_env_set(self):
+        passthrough = AwsBedrockCompletionsPassthroughClient(
+            model="anthropic.claude-haiku-4-5-20251001",
+            token="test-token",
+            api_flavor="converse",
+        )
+        client = passthrough.get_bedrock_client()
+        assert client._endpoint.http_session._verify is False
+
+    @patch.dict(os.environ, {"UIPATH_DISABLE_SSL_VERIFY": "1"})
+    def test_get_client_disables_ssl_with_numeric_value(self):
+        passthrough = AwsBedrockCompletionsPassthroughClient(
+            model="anthropic.claude-haiku-4-5-20251001",
+            token="test-token",
+            api_flavor="converse",
+        )
+        client = passthrough.get_client()
+        assert client._endpoint.http_session._verify is False
+
+
 class TestConvertFileBlocksToAnthropicDocuments:
     def test_converts_pdf_file_block_to_document(self):
         messages: list[BaseMessage] = [

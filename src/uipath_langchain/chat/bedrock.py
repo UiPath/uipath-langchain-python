@@ -7,7 +7,7 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
-from uipath.platform.common import EndpointManager, resource_override
+from uipath.platform.common import EndpointManager, is_ssl_verification_disabled, resource_override
 
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .http_client.header_capture import HeaderCapture
@@ -108,10 +108,15 @@ class AwsBedrockCompletionsPassthroughClient:
             **overrides,
         )
 
+    def _get_verify(self) -> bool:
+        """Return False when SSL verification is disabled, True otherwise."""
+        return not is_ssl_verification_disabled()
+
     def get_client(self):
         session = self._build_session()
         client = session.client(
             "bedrock-runtime",
+            verify=self._get_verify(),
             config=self._unsigned_config(
                 retries={"total_max_attempts": 1},
                 read_timeout=300,
@@ -129,6 +134,7 @@ class AwsBedrockCompletionsPassthroughClient:
         session = self._build_session()
         return session.client(
             "bedrock",
+            verify=self._get_verify(),
             config=self._unsigned_config(),
         )
 
