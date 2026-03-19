@@ -1,13 +1,13 @@
 [project]
 name = "uipath-langchain"
-version = "0.8.28"
+version = "0.8.27"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
-    "uipath>=2.10.20, <2.11.0",
+    "uipath>=2.10.19, <2.11.0",
     "uipath-core>=0.5.2, <0.6.0",
-    "uipath-platform>=0.0.29, <0.1.0",
+    "uipath-platform>=0.0.23, <0.1.0",
     "uipath-runtime>=0.9.1, <0.10.0",
     "langgraph>=1.0.0, <2.0.0",
     "langchain-core>=1.2.11, <2.0.0",
@@ -118,8 +118,3 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
-
-[tool.uv.sources]
-uipath = { path = "../uipath-python/packages/uipath", editable = true }
-uipath-core = { path = "../uipath-python/packages/uipath-core", editable = true }
-uipath-platform = { path = "../uipath-python/packages/uipath-platform", editable = true }
