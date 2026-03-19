@@ -3,10 +3,7 @@
 import os
 from urllib.parse import quote
 
-from uipath.platform.common._config import (
-    UiPathConfig,
-    apply_debug_licensing_override,
-)
+from uipath.platform.common._config import UiPathConfig
 from uipath.platform.common.constants import (
     ENV_FOLDER_KEY,
     ENV_JOB_KEY,
@@ -47,7 +44,7 @@ def build_uipath_headers(
     """
     headers: dict[str, str] = {}
     if agenthub_config:
-        headers[HEADER_AGENTHUB_CONFIG] = apply_debug_licensing_override(agenthub_config)
+        headers[HEADER_AGENTHUB_CONFIG] = agenthub_config
     if byo_connection_id:
         headers[HEADER_LLMGATEWAY_BYO_CONNECTION_ID] = byo_connection_id
     if process_key := os.getenv(ENV_PROCESS_KEY):
