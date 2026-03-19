@@ -17,6 +17,25 @@ from .types import APIFlavor, LLMProvider
 
 logger = logging.getLogger(__name__)
 
+# Module-level storage for the current license ref ID.
+# Set by uipath-agents when a model_run span starts, read by the
+# transport to inject X-UiPath-License-RefId on LLM calls.
+# A plain global is used because the LangChain callback (which sets the
+# value) and the httpx transport (which reads it) run on different
+# threads, so neither ContextVar nor threading.local work.
+_current_license_ref_id: str | None = None
+
+
+def set_license_ref_id(value: str | None) -> None:
+    """Set the license ref ID for injection on LLM requests."""
+    global _current_license_ref_id
+    _current_license_ref_id = value
+
+
+def _get_license_ref_id() -> str | None:
+    """Read the current license ref ID."""
+    return _current_license_ref_id
+
 
 def _rewrite_openai_url(
     original_url: str, params: httpx.QueryParams
@@ -45,6 +64,13 @@ def _rewrite_openai_url(
     return httpx.URL(new_url_str)
 
 
+def _inject_license_ref_id(request: httpx.Request) -> None:
+    """Inject X-UiPath-License-RefId header if a model_run span is active."""
+    license_ref_id = _get_license_ref_id()
+    if license_ref_id:
+        request.headers["X-UiPath-License-RefId"] = license_ref_id
+
+
 class UiPathURLRewriteTransport(httpx.AsyncHTTPTransport):
     def __init__(self, verify: bool = True, **kwargs):
         super().__init__(verify=verify, **kwargs)
@@ -53,6 +79,7 @@ class UiPathURLRewriteTransport(httpx.AsyncHTTPTransport):
         new_url = _rewrite_openai_url(str(request.url), request.url.params)
         if new_url:
             request.url = new_url
+        _inject_license_ref_id(request)
 
         return await super().handle_async_request(request)
 
@@ -65,6 +92,7 @@ class UiPathSyncURLRewriteTransport(httpx.HTTPTransport):
         new_url = _rewrite_openai_url(str(request.url), request.url.params)
         if new_url:
             request.url = new_url
+        _inject_license_ref_id(request)
 
         return super().handle_request(request)
 
