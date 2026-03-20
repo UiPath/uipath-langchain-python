@@ -183,6 +183,7 @@ def _apply_const_schema_modification(
         field_name: str,
         value: Any,
     ) -> None:
+        _inline_ref_if_present(schema, properties_object, field_name)
         field_schema = properties_object[field_name]
         field_schema = _skip_anyof_inlining_ref(schema, field_schema)
         schema_type = field_schema.get("type")
