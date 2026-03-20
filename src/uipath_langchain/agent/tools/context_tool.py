@@ -23,11 +23,16 @@ from uipath.platform.context_grounding import (
     CitationMode,
     DeepRagContent,
 )
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
-from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+from uipath_langchain.agent.exceptions import (
+    AgentStartupError,
+    AgentStartupErrorCode,
+    raise_for_enriched,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model as create_model_from_schema,
 )
@@ -49,6 +54,15 @@ from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
 
 logger = logging.getLogger(__name__)
+
+_CONTEXT_GROUNDING_ERRORS: dict[
+    tuple[int, str | None], tuple[str, UiPathErrorCategory]
+] = {
+    (400, None): (
+        "Context grounding returned an error for index '{index}': {message}",
+        UiPathErrorCategory.USER,
+    ),
+}
 
 
 def _build_arg_props_from_settings(
@@ -213,7 +227,16 @@ def handle_semantic_search(
 
         actual_query = prompt or query
         assert actual_query is not None
-        docs = await retriever.ainvoke(actual_query)
+        try:
+            docs = await retriever.ainvoke(actual_query)
+        except EnrichedException as e:
+            raise_for_enriched(
+                e,
+                _CONTEXT_GROUNDING_ERRORS,
+                title=f"Failed to search context index '{resource.index_name}'",
+                index=resource.index_name or "<unknown>",
+            )
+            raise
         return {
             "documents": [
                 {"metadata": doc.metadata, "page_content": doc.page_content}
