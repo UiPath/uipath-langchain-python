@@ -94,6 +94,26 @@ cd uipath-langchain-python/samples/ticket-classification
 
 The Ticket Classification Agent utilizes HITL (Human In The Loop) technology, allowing the system to incorporate feedback directly from supervisory personnel. We'll leverage UiPath [Action Center](https://docs.uipath.com/action-center/automation-suite/2023.4/user-guide/introduction) for this functionality.
 
+There are two ways to configure the escalation app:
+
+#### Option A: Use App Bindings (recommended — no code changes required)
+
+After publishing the agent package, you can override the escalation app directly from the **Package Requirements** tab in UiPath, without modifying any code. This is made possible by the `bindings.json` file included in this sample.
+
+![app-binding-package-requirements](../../docs/sample_images/ticket-classification/app-binding-package-requirements.png)
+
+In the **Package Requirements** tab, select the app you want to use as the escalation app. The app you bind **must respect the following contract** expected by the agent code:
+
+- **Inputs:**
+  - `AgentOutput` (string) — the classification summary sent to the reviewer
+  - `AgentName` (string) — the name of the agent creating the task
+- **Output:**
+  - `Answer` (boolean) — `true` to approve, `false` to reject
+
+> This approach allows you to use any compatible UiPath App as the escalation interface, swapping it out without redeploying or editing code.
+
+#### Option B: Deploy the pre-built solution app
+
 Follow these steps to deploy the pre-built application using [UiPath Solutions Management](https://docs.uipath.com/solutions-management/automation-cloud/latest/user-guide/solutions-management-overview):
 
 1. **Upload Solution Package**
