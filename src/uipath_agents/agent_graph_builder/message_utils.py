@@ -45,6 +45,22 @@ def apply_system_prompt_template(system_prompt_content: str, agent_name: str) ->
     )
 
 
+def inject_memory_examples(system_prompt: str, memory_examples: str) -> str:
+    """Append memory examples to the system prompt.
+
+    Args:
+        system_prompt: The fully constructed system prompt.
+        memory_examples: Formatted memory examples from format_memory_results().
+
+    Returns:
+        System prompt with memory examples appended. Returns unchanged if
+        memory_examples is empty.
+    """
+    if not memory_examples:
+        return system_prompt
+    return system_prompt + memory_examples
+
+
 def build_agent_messages(
     agent_messages: List[AgentMessage],
     input_arguments: dict[str, Any],

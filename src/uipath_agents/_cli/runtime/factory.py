@@ -379,6 +379,23 @@ class AgentsRuntimeFactory(UiPathLangGraphRuntimeFactory):
         # Reconstruct the agent definition
         return AgentDefinition.model_validate(agent_dict)
 
+    def _get_memory_config(
+        self, agent_definition: AgentDefinition
+    ) -> tuple[bool, str | None]:
+        """Extract memory configuration from agent definition.
+
+        Args:
+            agent_definition: The loaded agent definition.
+
+        Returns:
+            Tuple of (is_memory_enabled, memory_resource_name).
+        """
+        # Check escalation resources for memory enablement
+        for resource in agent_definition.resources:
+            if hasattr(resource, "is_agent_memory_enabled") and resource.is_agent_memory_enabled:
+                return True, resource.name
+        return False, None
+
     def _merge_system_model_into_existing_schema(
         self, existing_schema: dict[str, Any] | None, system_model: type[BaseModel]
     ) -> dict[str, Any]:
