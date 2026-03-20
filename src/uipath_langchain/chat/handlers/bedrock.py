@@ -1,5 +1,6 @@
-"""AWS Bedrock payload handler."""
+"""AWS Bedrock payload handlers."""
 
+import logging
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -9,6 +10,9 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
 from .base import ModelPayloadHandler
+
+logger = logging.getLogger(__name__)
+
 
 # --- Converse API constants ---
 
@@ -68,12 +72,11 @@ INVOKE_ERROR_MESSAGES: dict[str, tuple[str, str]] = {
 }
 
 
-class BedrockPayloadHandler(ModelPayloadHandler):
-    """Payload handler for AWS Bedrock Converse and Invoke APIs.
+class BedrockInvokePayloadHandler(ModelPayloadHandler):
+    """Payload handler for ``ChatBedrock`` (AWS Bedrock Invoke API).
 
-    Automatically detects the API format from response metadata:
-    - Converse API uses ``stopReason`` (camelCase)
-    - Invoke API uses ``stop_reason`` (snake_case)
+    - Supports ``disable_parallel_tool_use``; ``strict`` is not supported.
+    - Stop reason field: ``stop_reason`` (snake_case).
     """
 
     def get_tool_binding_kwargs(
@@ -83,16 +86,24 @@ class BedrockPayloadHandler(ModelPayloadHandler):
         parallel_tool_calls: bool = True,
         strict_mode: bool = False,
     ) -> dict[str, Any]:
-        return {
-            "tool_choice": tool_choice,
-        }
+        thinking_enabled = (
+            getattr(self.model, "model_kwargs", {}).get("thinking", {}).get("type")
+            == "enabled"
+        )
+        # Anthropic models via Invoke API don't support forced tool use with extended thinking
+        if thinking_enabled and tool_choice == "any":
+            logger.warning(
+                "Thinking is enabled for the model, but tool_choice is 'any'. "
+                "Changing tool_choice to 'auto' to keep the same behaviour as ChatAnthropicBedrock."
+            )
+            tool_choice = "auto"
+        kwargs: dict[str, Any] = {"tool_choice": tool_choice}
+        if not parallel_tool_calls:
+            kwargs["disable_parallel_tool_use"] = True
+        return kwargs
 
     def check_stop_reason(self, response: AIMessage) -> None:
-        """Check Bedrock stop reason and raise exception for faulty terminations.
-
-        Handles both API formats:
-        - Converse: checks ``stopReason`` (camelCase) in response_metadata
-        - Invoke: checks ``stop_reason`` (snake_case) in response_metadata
+        """Check ``stop_reason`` (snake_case) and raise for faulty terminations.
 
         Args:
             response: The AIMessage response from the model.
@@ -100,31 +111,67 @@ class BedrockPayloadHandler(ModelPayloadHandler):
         Raises:
             ChatModelError: If the stop reason indicates a faulty termination.
         """
-        metadata = response.response_metadata
-
-        # --- Converse API: stopReason (camelCase) ---
-        stop_reason = metadata.get("stopReason")
-        if stop_reason:
-            if stop_reason in CONVERSE_FAULTY_REASONS:
-                title, detail = CONVERSE_ERROR_MESSAGES.get(
-                    stop_reason,
-                    (
-                        f"Model stopped with reason: {stop_reason}",
-                        f"The model terminated with stop reason '{stop_reason}'.",
-                    ),
-                )
-                raise ChatModelError(
-                    code=ChatModelErrorCode.UNSUCCESSFUL_STOP_REASON,
-                    title=title,
-                    detail=detail,
-                    category=UiPathErrorCategory.USER,
-                )
-            return
-
-        # --- Invoke API: stop_reason (snake_case) ---
-        stop_reason = metadata.get("stop_reason")
+        stop_reason = response.response_metadata.get("stop_reason")
         if stop_reason and stop_reason in INVOKE_FAULTY_REASONS:
             title, detail = INVOKE_ERROR_MESSAGES.get(
+                stop_reason,
+                (
+                    f"Model stopped with reason: {stop_reason}",
+                    f"The model terminated with stop reason '{stop_reason}'.",
+                ),
+            )
+            raise ChatModelError(
+                code=ChatModelErrorCode.UNSUCCESSFUL_STOP_REASON,
+                title=title,
+                detail=detail,
+                category=UiPathErrorCategory.USER,
+            )
+
+
+class BedrockConversePayloadHandler(ModelPayloadHandler):
+    """Payload handler for ``ChatBedrockConverse`` (AWS Bedrock Converse API).
+
+    - Supports ``strict``; ``parallel_tool_calls`` is not supported.
+    - Stop reason field: ``stopReason`` (camelCase).
+    """
+
+    def get_tool_binding_kwargs(
+        self,
+        tools: Sequence[BaseTool],
+        tool_choice: Literal["auto", "any"],
+        parallel_tool_calls: bool = True,
+        strict_mode: bool = False,
+    ) -> dict[str, Any]:
+        thinking_enabled = (
+            getattr(self.model, "additional_model_request_fields", {})
+            .get("thinking", {})
+            .get("type")
+            == "enabled"
+        )
+        # Anthropic models via Converse API don't support forced tool use with extended thinking
+        if thinking_enabled and tool_choice == "any":
+            logger.warning(
+                "Thinking is enabled for the model, but tool_choice is 'any'. "
+                "Changing tool_choice to 'auto' to keep the same behaviour as ChatAnthropicBedrock."
+            )
+            tool_choice = "auto"
+        kwargs: dict[str, Any] = {"tool_choice": tool_choice}
+        if strict_mode:
+            kwargs["strict"] = True
+        return kwargs
+
+    def check_stop_reason(self, response: AIMessage) -> None:
+        """Check ``stopReason`` (camelCase) and raise for faulty terminations.
+
+        Args:
+            response: The AIMessage response from the model.
+
+        Raises:
+            ChatModelError: If the stop reason indicates a faulty termination.
+        """
+        stop_reason = response.response_metadata.get("stopReason")
+        if stop_reason and stop_reason in CONVERSE_FAULTY_REASONS:
+            title, detail = CONVERSE_ERROR_MESSAGES.get(
                 stop_reason,
                 (
                     f"Model stopped with reason: {stop_reason}",
