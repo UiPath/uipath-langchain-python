@@ -17,8 +17,15 @@ from uipath.platform.context_grounding import (
     CitationMode,
     DeepRagContent,
 )
+from uipath.platform.errors import EnrichedException
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    AgentStartupError,
+    AgentStartupErrorCode,
+)
 from uipath_langchain.agent.tools.context_tool import (
     _normalize_folder_prefix,
     build_glob_pattern,
@@ -1031,3 +1038,58 @@ class TestNormalizeFolderPrefix:
 
     def test_double_star_nested_prefix_preserved(self):
         assert _normalize_folder_prefix("**/docs/reports") == "**/docs/reports"
+
+
+class TestSemanticSearchErrorHandling:
+    """Test error handling for semantic search HTTP failures."""
+
+    @pytest.fixture
+    def semantic_config(self):
+        return _make_context_resource(
+            name="test_search",
+            description="Test search",
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="dynamic",
+        )
+
+    @pytest.mark.asyncio
+    async def test_400_raises_agent_runtime_error_with_user_category(
+        self, semantic_config, make_enriched_exception
+    ):
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.side_effect = make_enriched_exception(
+                400, "One or more validation errors occurred."
+            )
+            mock_retriever_class.return_value = mock_retriever
+
+            tool = handle_semantic_search("test_search", semantic_config)
+            assert tool.coroutine is not None
+
+            with pytest.raises(AgentRuntimeError) as exc_info:
+                await tool.coroutine(query="test query")
+            assert exc_info.value.error_info.category == UiPathErrorCategory.USER
+            assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+                AgentRuntimeErrorCode.HTTP_ERROR
+            )
+
+    @pytest.mark.asyncio
+    async def test_non_400_enriched_exception_propagates(
+        self, semantic_config, make_enriched_exception
+    ):
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.side_effect = make_enriched_exception(
+                500, "Internal Server Error"
+            )
+            mock_retriever_class.return_value = mock_retriever
+
+            tool = handle_semantic_search("test_search", semantic_config)
+            assert tool.coroutine is not None
+
+            with pytest.raises(EnrichedException):
+                await tool.coroutine(query="test query")
