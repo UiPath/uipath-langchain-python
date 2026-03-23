@@ -1,0 +1,14 @@
+[project]
+name = "template-agent"
+version = "0.0.1"
+description = "template-agent"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+dependencies = [
+    "ddgs>=9.11.4",
+    "langchain-community>=0.4.1",
+    "uipath-langchain[bedrock,vertex]",
+]
+requires-python = ">=3.11"
+
+[tool.uv.sources]
+uipath-langchain = { path = "../../", editable = true }

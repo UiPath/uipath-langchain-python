@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "id": "DefaultEvaluationSet",
+  "name": "Default Evaluation Set",
+  "evaluatorRefs": [
+    "evaluator-llm-judge-output",
+    "evaluator-tool-call-order"
+  ],
+  "evaluations": [
+    {
+      "id": "ada5a2c1-976c-470b-964f-eb70a5e61eb4",
+      "name": "Current time tool should be called before web search",
+      "inputs": {
+        "query": "search the web using current time as input"
+      },
+      "evaluationCriterias": {
+        "evaluator-tool-call-order": null
+      },
+      "createdAt": "2026-03-23T17:10:17.394Z",
+      "updatedAt": "2026-03-23T17:10:40.659Z"
+    },
+    {
+      "id": "cf113553-5055-4cbf-a97f-e3801b05acd8",
+      "name": "UiPath details",
+      "inputs": {
+        "query": "tell me about UiPath"
+      },
+      "evaluationCriterias": {
+        "evaluator-llm-judge-output": {
+          "expectedOutput": "{\n  \"response\": \"# UiPath Overview: **UiPath** is a global software company and a leading platform for **Robotic Process Automation (RPA)** and **Agentic Automation**. Here are the key details:\\\\n\\\\n## Company Background\\\\n- **Founded:** 2005 by Daniel Dines and Marius Tirca\\\\n- **Headquarters:** New York City, United States\\\\n- **Status:** Public company\\\\n- **Funding:** Raised $1.96B from investors like Accel, Coatue, and Alkeon Capital Management\\\\n\\\\n## What It Does\\\\nUiPath specializes in automating repetitive, routine business tasks by using software robots that mimic human actions across digital systems. The platform helps organizations:\\\\n- Automate end-to-end business processes\\\\n- Reduce manual work and improve efficiency\\\\n- Enhance enterprise digital transformation\\\\n\\\\n## Core Offerings\\\\n- **RPA (Robotic Process Automation):** Build, manage, and deploy bots to automate repetitive tasks\\\\n- **AI Integration:** Advanced AI capabilities through collaborations with NVIDIA, OpenAI, Google, Microsoft, and Snowflake\\\\n- **UiPath Studio Web:** Browser-based tool for building cross-platform automations with templates and collaboration features\\\\n- **Agentic Automation:** AI agents that can orchestrate workflows with robots and human effort\\\\n\\\\n## Business Model Evolution\\\\n- **Shifting to consumption-based pricing:** Moving from traditional \\\"per-user seat\\\" licensing to \\\"pay-per-action\\\" models\\\\n- This reflects the changing value proposition as AI agents become more capable\\\\n\\\\n## Recent Developments\\\\n- Announced acquisition of **WorkFusion** (a pioneer in AI agents for financial crime compliance)\\\\n- Expanding AI capabilities and partnerships with major tech companies\\\\n- Offering globally recognized certification programs for automation expertise\\\\n\\\\nUiPath is positioned as one of the leading enterprise automation platforms for digital transformation\"\n}"
+        }
+      },
+      "createdAt": "2026-04-08T15:19:44.377Z",
+      "updatedAt": "2026-04-08T15:21:50.470Z"
+    }
+  ],
+  "fileName": "evaluation-set-default.json",
+  "updatedAt": "2026-04-08T15:21:50.470Z",
+  "selectedEntrypoint": "agent"
+}
