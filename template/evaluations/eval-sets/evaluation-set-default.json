@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "id": "DefaultEvaluationSet",
+  "name": "Default Evaluation Set",
+  "evaluatorRefs": [
+    "evaluator-tool-call-order-1774285735846"
+  ],
+  "evaluations": [
+    {
+      "id": "ada5a2c1-976c-470b-964f-eb70a5e61eb4",
+      "name": "Current time tool should be called before web search",
+      "inputs": {
+        "query": "search the web using current time as input",
+        "refine": false
+      },
+      "evaluationCriterias": {
+        "evaluator-tool-call-order-1774285735846": null
+      },
+      "createdAt": "2026-03-23T17:10:17.394Z",
+      "updatedAt": "2026-03-23T17:10:40.659Z"
+    }
+  ],
+  "fileName": "evaluation-set-default.json",
+  "updatedAt": "2026-03-23T17:10:40.659Z",
+  "selectedEntrypoint": "agent"
+}

@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "fileName": "tool-call-order-1774285735846.json",
+  "id": "evaluator-tool-call-order-1774285735846",
+  "description": "Verify tool calls occur in expected order",
+  "evaluatorTypeId": "uipath-tool-call-order",
+  "evaluatorConfig": {
+    "strict": true,
+    "name": "Tool Call Order",
+    "defaultEvaluationCriteria": {
+      "toolCallsOrder": [
+        "get_current_time",
+        "web_search"
+      ]
+    }
+  },
+  "createdAt": "2026-03-23T17:08:55.847Z",
+  "updatedAt": "2026-03-23T17:09:12.666Z"
+}
