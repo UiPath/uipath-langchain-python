@@ -4,7 +4,7 @@ from langchain_core.language_models import BaseChatModel
 
 from .anthropic import AnthropicPayloadHandler
 from .base import DefaultModelPayloadHandler, ModelPayloadHandler
-from .bedrock import BedrockPayloadHandler
+from .bedrock import BedrockConversePayloadHandler, BedrockInvokePayloadHandler
 from .gemini import GeminiPayloadHandler
 from .openai import OpenAIPayloadHandler
 
@@ -23,14 +23,16 @@ def get_payload_handler(model: BaseChatModel) -> ModelPayloadHandler:
         A ModelPayloadHandler instance for the model.
     """
 
-    model_mro = [m.__name__ for m in type(model).mro()]
+    model_mro = set([m.__name__ for m in type(model).mro()])
 
-    if "AzureChatOpenAI" in model_mro or "ChatOpenAI" in model_mro:
-        return OpenAIPayloadHandler()
+    if "BaseChatOpenAI" in model_mro:
+        return OpenAIPayloadHandler(model)
     if "ChatAnthropic" in model_mro:
-        return AnthropicPayloadHandler()
+        return AnthropicPayloadHandler(model)
     if "ChatGoogleGenerativeAI" in model_mro:
-        return GeminiPayloadHandler()
-    if "ChatBedrock" in model_mro or "ChatBedrockConverse" in model_mro:
-        return BedrockPayloadHandler()
-    return DefaultModelPayloadHandler()
+        return GeminiPayloadHandler(model)
+    if "ChatBedrockConverse" in model_mro:
+        return BedrockConversePayloadHandler(model)
+    if "ChatBedrock" in model_mro:
+        return BedrockInvokePayloadHandler(model)
+    return DefaultModelPayloadHandler(model)

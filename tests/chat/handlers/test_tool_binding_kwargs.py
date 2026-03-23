@@ -2,11 +2,15 @@
 
 from unittest.mock import Mock
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
 from uipath_langchain.chat.handlers.anthropic import AnthropicPayloadHandler
 from uipath_langchain.chat.handlers.base import DefaultModelPayloadHandler
-from uipath_langchain.chat.handlers.bedrock import BedrockPayloadHandler
+from uipath_langchain.chat.handlers.bedrock import (
+    BedrockConversePayloadHandler,
+    BedrockInvokePayloadHandler,
+)
 from uipath_langchain.chat.handlers.gemini import GeminiPayloadHandler
 from uipath_langchain.chat.handlers.openai import OpenAIPayloadHandler
 
@@ -30,7 +34,7 @@ class TestDefaultGetToolBindingKwargs:
     """DefaultModelPayloadHandler returns only tool_choice."""
 
     def setup_method(self):
-        self.handler = DefaultModelPayloadHandler()
+        self.handler = DefaultModelPayloadHandler(Mock(spec=BaseChatModel))
         self.tools = _make_tools("tool_a")
 
     def test_tool_choice_auto(self):
@@ -65,7 +69,7 @@ class TestOpenAIGetToolBindingKwargs:
     """OpenAIPayloadHandler returns tool_choice, parallel_tool_calls, strict."""
 
     def setup_method(self):
-        self.handler = OpenAIPayloadHandler()
+        self.handler = OpenAIPayloadHandler(Mock(spec=BaseChatModel))
         self.tools = _make_tools("tool_a")
 
     def test_tool_choice_auto(self):
@@ -123,7 +127,7 @@ class TestAnthropicGetToolBindingKwargs:
     """AnthropicPayloadHandler returns tool_choice, parallel_tool_calls, strict."""
 
     def setup_method(self):
-        self.handler = AnthropicPayloadHandler()
+        self.handler = AnthropicPayloadHandler(Mock(spec=BaseChatModel))
         self.tools = _make_tools("tool_a")
 
     def test_tool_choice_auto(self):
@@ -181,7 +185,7 @@ class TestGeminiGetToolBindingKwargs:
     """GeminiPayloadHandler returns a nested tool_config dict."""
 
     def setup_method(self):
-        self.handler = GeminiPayloadHandler()
+        self.handler = GeminiPayloadHandler(Mock(spec=BaseChatModel))
         self.tools = _make_tools("get_weather", "search")
 
     def test_mode_auto(self):
@@ -224,15 +228,15 @@ class TestGeminiGetToolBindingKwargs:
 
 
 # ---------------------------------------------------------------------------
-# Bedrock handler
+# Bedrock Invoke handler (ChatBedrock)
 # ---------------------------------------------------------------------------
 
 
-class TestBedrockGetToolBindingKwargs:
-    """BedrockPayloadHandler returns only tool_choice."""
+class TestBedrockInvokeGetToolBindingKwargs:
+    """BedrockInvokePayloadHandler: tool_choice + optional disable_parallel_tool_use."""
 
     def setup_method(self):
-        self.handler = BedrockPayloadHandler()
+        self.handler = BedrockInvokePayloadHandler(Mock(spec=BaseChatModel))
         self.tools = _make_tools("tool_a")
 
     def test_tool_choice_auto(self):
@@ -255,25 +259,73 @@ class TestBedrockGetToolBindingKwargs:
         assert "tool_choice" in result
 
     def test_parallel_tool_calls_not_included(self):
-        """Bedrock does not support parallel_tool_calls in binding kwargs."""
+        """Invoke API uses disable_parallel_tool_use, not parallel_tool_calls."""
         result = self.handler.get_tool_binding_kwargs(
             tools=self.tools, tool_choice="auto", parallel_tool_calls=True
         )
         assert "parallel_tool_calls" not in result
 
     def test_strict_mode_not_included(self):
-        """Bedrock does not support strict mode in binding kwargs."""
+        """Invoke API does not support strict mode."""
         result = self.handler.get_tool_binding_kwargs(
             tools=self.tools, tool_choice="auto", strict_mode=True
         )
         assert "strict" not in result
 
-    def test_only_tool_choice_returned(self):
-        """Ensure exactly one key is returned regardless of input params."""
+    def test_only_tool_choice_returned_when_parallel_true(self):
+        """With parallel_tool_calls=True no extra keys are added."""
         result = self.handler.get_tool_binding_kwargs(
             tools=self.tools,
             tool_choice="any",
             parallel_tool_calls=True,
             strict_mode=True,
+        )
+        assert list(result.keys()) == ["tool_choice"]
+
+
+# ---------------------------------------------------------------------------
+# Bedrock Converse handler (ChatBedrockConverse)
+# ---------------------------------------------------------------------------
+
+
+class TestBedrockConverseGetToolBindingKwargs:
+    """BedrockConversePayloadHandler: tool_choice + optional strict."""
+
+    def setup_method(self):
+        self.handler = BedrockConversePayloadHandler(Mock(spec=BaseChatModel))
+        self.tools = _make_tools("tool_a")
+
+    def test_tool_choice_auto(self):
+        result = self.handler.get_tool_binding_kwargs(
+            tools=self.tools, tool_choice="auto"
+        )
+        assert result == {"tool_choice": "auto"}
+
+    def test_tool_choice_any(self):
+        result = self.handler.get_tool_binding_kwargs(
+            tools=self.tools, tool_choice="any"
+        )
+        assert result == {"tool_choice": "any"}
+
+    def test_strict_mode_included(self):
+        result = self.handler.get_tool_binding_kwargs(
+            tools=self.tools, tool_choice="auto", strict_mode=True
+        )
+        assert result == {"tool_choice": "auto", "strict": True}
+
+    def test_parallel_tool_calls_not_included(self):
+        """Converse API does not support parallel_tool_calls."""
+        result = self.handler.get_tool_binding_kwargs(
+            tools=self.tools, tool_choice="auto", parallel_tool_calls=False
+        )
+        assert "parallel_tool_calls" not in result
+        assert "disable_parallel_tool_use" not in result
+
+    def test_only_tool_choice_returned_when_strict_false(self):
+        result = self.handler.get_tool_binding_kwargs(
+            tools=self.tools,
+            tool_choice="any",
+            parallel_tool_calls=False,
+            strict_mode=False,
         )
         assert list(result.keys()) == ["tool_choice"]
