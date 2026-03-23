@@ -10,7 +10,7 @@
     "defaultEvaluationCriteria": {
       "toolCallsOrder": [
         "get_current_time",
-        "web_search"
+        "get_weather"
       ]
     }
   },
