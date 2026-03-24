@@ -209,7 +209,9 @@ def remove_asterisk_from_properties(fields: dict[str, Any]) -> dict[str, Any]:
         k = k.replace("[*]", "")
         definitions[k] = value
         fix_types(value)
-    if "definitions" in fields:
+    if "$defs" in fields:
+        fields["$defs"] = definitions
+    elif "definitions" in fields:
         fields["definitions"] = definitions
 
     fix_types(fields)
