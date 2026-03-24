@@ -142,9 +142,9 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         strict_mode: bool = False,
     ) -> dict[str, Any]:
         thinking_enabled = (
-            (
-                getattr(self.model, "additional_model_request_fields", None) or {}
-            ).get("thinking")
+            (getattr(self.model, "additional_model_request_fields", None) or {}).get(
+                "thinking"
+            )
             or {}
         ).get("type") == "enabled"
         # Anthropic models via Converse API don't support forced tool use with extended thinking
