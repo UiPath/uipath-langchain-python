@@ -92,9 +92,12 @@ class QueryCapabilities:
         "COUNT(column_name)", "SUM", "AVG", "MIN", "MAX",
     ])
     allowed_expressions: list[str] = field(default_factory=lambda: [
-        "CASE/WHEN", "CAST", "COALESCE", "NULLIF",
+        "CASE/WHEN (in SELECT and ORDER BY only)",
+        "CAST", "NULLIF",
         "ROUND", "ABS", "LOWER", "UPPER", "TRIM",
-        "arithmetic (+, -, *, /)", "string concat (||)",
+        "SUBSTRING", "CHAR_LENGTH",
+        "arithmetic (+, -, *, /) in SELECT only",
+        "string concat (||)",
     ])
     allowed_predicates: list[str] = field(default_factory=lambda: [
         "=", "<>", ">", "<", ">=", "<=",
@@ -104,26 +107,28 @@ class QueryCapabilities:
     disallowed: list[str] = field(default_factory=lambda: [
         "SELECT *",
         "COUNT(*) — use COUNT(column_name)",
-        "COUNT(DISTINCT ...) — no DISTINCT in aggregates",
-        "subqueries in any clause",
-        "UNION / INTERSECT / EXCEPT",
+        "COALESCE / IFNULL — use CASE WHEN x IS NULL THEN default ELSE x END",
+        "SUBSTR / LENGTH / CONCAT — use SUBSTRING / CHAR_LENGTH / ||",
+        "subqueries in WHERE — use derived tables in FROM",
         "CTE (WITH clause)",
         "window functions (ROW_NUMBER, RANK, PARTITION BY)",
-        "RIGHT JOIN / FULL OUTER JOIN / CROSS JOIN",
-        "self-joins",
+        "FULL OUTER JOIN / CROSS JOIN / self-joins",
+        "UNION ALL — only UNION (deduplicating) works",
         "more than 4 tables in JOIN chain",
-        "INSERT / UPDATE / DELETE / DDL",
-        "ORDER BY columns not in SELECT",
-        "HAVING without GROUP BY",
-        "OFFSET without LIMIT",
+        "CASE WHEN in WHERE — only in SELECT and ORDER BY",
+        "arithmetic in WHERE — only in SELECT",
+        "date functions — use LIKE on date strings",
+        "INSERT / UPDATE / DELETE / DDL — read-only",
     ])
     critical_rules: list[str] = field(default_factory=lambda: [
         "ALWAYS use explicit column names — never SELECT *",
         "Use COUNT(column_name) — never COUNT(*) or COUNT(1)",
         "LIMIT is REQUIRED on every query without a WHERE clause",
         "All non-aggregated columns in SELECT must appear in GROUP BY",
-        "Only LEFT JOIN is supported",
         "Maximum 4 tables in a JOIN chain",
+        "Use SUBSTRING not SUBSTR, CHAR_LENGTH not LENGTH, || not CONCAT",
+        "Use CASE WHEN for null handling — COALESCE does not work",
+        "Verify string values against sample data for exact casing and format",
     ])
 
     def to_dict(self) -> dict[str, Any]:
