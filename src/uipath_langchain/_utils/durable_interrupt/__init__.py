@@ -1,6 +1,9 @@
 """Durable interrupt package for side-effect-safe interrupt/resume in LangGraph."""
 
-from .decorator import _durable_state, durable_interrupt
+from .decorator import (
+    _durable_state,
+    durable_interrupt,
+)
 from .skip_interrupt import SkipInterruptValue
 
 __all__ = [

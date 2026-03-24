@@ -21,6 +21,7 @@ from uipath.platform.common import WaitEscalation
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.static_args import (
     handle_static_args,
@@ -31,7 +32,6 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..react.types import AgentGraphState
-from .durable_interrupt import durable_interrupt
 from .tool_node import ToolWrapperReturnType
 from .utils import (
     resolve_task_title,
