@@ -1,10 +1,8 @@
 """Vertex Gemini payload handler."""
 
-from collections.abc import Sequence
-from typing import Any, Literal
+from typing import Any
 
 from langchain_core.messages import AIMessage
-from langchain_core.tools import BaseTool
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ..exceptions import ChatModelError, ChatModelErrorCode
@@ -113,26 +111,12 @@ FINISH_REASON_MESSAGES: dict[str, tuple[str, str]] = {
 }
 
 
-class GeminiPayloadHandler(ModelPayloadHandler):
+class VertexGeminiPayloadHandler(ModelPayloadHandler):
     """Payload handler for Google Vertex AI Gemini API."""
 
-    def get_tool_binding_kwargs(
-        self,
-        tools: Sequence[BaseTool],
-        tool_choice: Literal["auto", "any"],
-        parallel_tool_calls: bool = True,
-        strict_mode: bool = False,
-    ) -> dict[str, Any]:
-        mode = tool_choice.upper()
-        if strict_mode:
-            mode = "VALIDATED"
-        return {
-            "tool_config": {
-                "function_calling_config": {
-                    "mode": mode,
-                }
-            }
-        }
+    def get_required_tool_choice(self) -> str | dict[str, Any]:
+        """Get tool_choice value for Vertex Gemini API."""
+        return "any"
 
     def check_stop_reason(self, response: AIMessage) -> None:
         """Check Vertex Gemini finishReason and raise exception for faulty terminations.
