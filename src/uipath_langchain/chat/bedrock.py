@@ -7,7 +7,11 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
-from uipath.platform.common import EndpointManager, resource_override
+from uipath.platform.common import (
+    EndpointManager,
+    get_ca_bundle_path,
+    resource_override,
+)
 
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .http_client.header_capture import HeaderCapture
@@ -110,8 +114,10 @@ class AwsBedrockCompletionsPassthroughClient:
 
     def get_client(self):
         session = self._build_session()
+        ca_bundle = get_ca_bundle_path()
         client = session.client(
             "bedrock-runtime",
+            verify=ca_bundle if ca_bundle is not None else False,
             config=self._unsigned_config(
                 retries={"total_max_attempts": 1},
                 read_timeout=300,
@@ -127,8 +133,10 @@ class AwsBedrockCompletionsPassthroughClient:
 
     def get_bedrock_client(self):
         session = self._build_session()
+        ca_bundle = get_ca_bundle_path()
         return session.client(
             "bedrock",
+            verify=ca_bundle if ca_bundle is not None else False,
             config=self._unsigned_config(),
         )
 
