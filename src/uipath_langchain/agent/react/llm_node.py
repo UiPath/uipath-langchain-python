@@ -18,7 +18,13 @@ from uipath_langchain.agent.tools.static_args import (
 )
 from uipath_langchain.chat.handlers import get_payload_handler
 
-from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ..exceptions import (
+    LLM_KNOWN_ERRORS,
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    normalize_to_enriched,
+    raise_for_enriched,
+)
 from ..messages.message_utils import replace_tool_calls
 from .constants import (
     DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
@@ -113,7 +119,20 @@ def create_llm_node(
 
         llm = model.bind_tools(static_schema_tools, **binding_kwargs)
 
-        response = await llm.ainvoke(messages)
+        try:
+            response = await llm.ainvoke(messages)
+        except Exception as e:
+            enriched = normalize_to_enriched(e)
+            if enriched is not None:
+                raise_for_enriched(
+                    enriched,
+                    LLM_KNOWN_ERRORS,
+                    title="LLM request failed",
+                )
+                # Raise enriched (not original) so the generic mapper sees
+                # an EnrichedException with a proper status code.
+                raise enriched from e
+            raise
         if not isinstance(response, AIMessage):
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,

@@ -1,8 +1,10 @@
 """Tests for LLM node tool call filtering functionality."""
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
@@ -10,9 +12,33 @@ from langchain_core.messages.content import create_text_block, create_tool_call
 from langchain_core.tools import BaseTool
 from langchain_openai import AzureChatOpenAI
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
+from uipath.platform.errors import EnrichedException
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from uipath_langchain.agent.react.llm_node import create_llm_node
 from uipath_langchain.agent.react.types import AgentGraphState
+
+
+def _openai_error(status_code: int, body: dict | None = None) -> Exception:
+    """Build a fake OpenAI APIStatusError with a real httpx.Response."""
+    content = json.dumps(body).encode() if body else b""
+    response = httpx.Response(
+        status_code=status_code,
+        content=content,
+        headers={"content-type": "application/json"} if content else {},
+        request=httpx.Request("POST", "/llm/v1/chat/completions"),
+    )
+    return type(
+        "_FakeLLMError",
+        (Exception,),
+        {
+            "status_code": status_code,
+            "response": response,
+            "body": body,
+            "code": (body.get("error", {}) or {}).get("code") if body else None,
+        },
+    )()
 
 
 class _StubAzureChatOpenAI(AzureChatOpenAI):
@@ -302,6 +328,117 @@ class TestLLMNodeToolCallFiltering:
         response_message = result["messages"][0]
         assert len(response_message.tool_calls) == 1
         assert response_message.tool_calls[0]["name"] == RAISE_ERROR_TOOL.name
+
+    @pytest.mark.asyncio
+    async def test_llm_license_error_raises_deployment_error(self):
+        """403/10000 from LLM Gateway raises AgentRuntimeError with DEPLOYMENT category."""
+        self.mock_model.ainvoke = AsyncMock(
+            side_effect=_openai_error(
+                403, {"errorCode": "10000", "message": "License not available"}
+            )
+        )
+
+        llm_node = create_llm_node(self.mock_model, [self.regular_tool])
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await llm_node(self.test_state)
+        assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.HTTP_ERROR
+        )
+
+    @pytest.mark.asyncio
+    async def test_llm_context_length_exceeded_raises_user_error(self):
+        """400/context_length_exceeded from LLM Gateway raises AgentRuntimeError with USER category."""
+        self.mock_model.ainvoke = AsyncMock(
+            side_effect=_openai_error(
+                400,
+                {
+                    "error": {
+                        "message": None,
+                        "type": "invalid_request_error",
+                        "code": "context_length_exceeded",
+                        "param": "input",
+                    }
+                },
+            )
+        )
+
+        llm_node = create_llm_node(self.mock_model, [self.regular_tool])
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await llm_node(self.test_state)
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.HTTP_ERROR
+        )
+
+    @pytest.mark.asyncio
+    async def test_llm_unknown_error_raises_enriched(self):
+        """Unrecognized LLM errors are normalized to EnrichedException."""
+        original_error = _openai_error(500, {})
+        self.mock_model.ainvoke = AsyncMock(side_effect=original_error)
+
+        llm_node = create_llm_node(self.mock_model, [self.regular_tool])
+
+        with pytest.raises(EnrichedException) as exc_info:
+            await llm_node(self.test_state)
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.__cause__ is original_error
+
+    @pytest.mark.asyncio
+    async def test_llm_non_http_error_propagates(self):
+        """Errors without HTTP attributes propagate unchanged."""
+        original_error = RuntimeError("connection reset")
+        self.mock_model.ainvoke = AsyncMock(side_effect=original_error)
+
+        llm_node = create_llm_node(self.mock_model, [self.regular_tool])
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await llm_node(self.test_state)
+        assert exc_info.value is original_error
+
+    @pytest.mark.asyncio
+    async def test_bedrock_license_error_raises_deployment_error(self):
+        """403/10000 from Bedrock raises AgentRuntimeError with DEPLOYMENT category."""
+        self.mock_model.ainvoke = AsyncMock(
+            side_effect=type(
+                "_BedrockError",
+                (Exception,),
+                {
+                    "response": {
+                        "ResponseMetadata": {"HTTPStatusCode": 403},
+                        "Error": {
+                            "Code": "10000",
+                            "Message": "License not available",
+                        },
+                    }
+                },
+            )()
+        )
+
+        llm_node = create_llm_node(self.mock_model, [self.regular_tool])
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await llm_node(self.test_state)
+        assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
+
+    @pytest.mark.asyncio
+    async def test_vertex_unknown_error_raises_enriched(self):
+        """Unrecognized Vertex errors are normalized to EnrichedException."""
+        self.mock_model.ainvoke = AsyncMock(
+            side_effect=type(
+                "_VertexError",
+                (Exception,),
+                {"code": 500, "status": "INTERNAL", "message": "Server error"},
+            )()
+        )
+
+        llm_node = create_llm_node(self.mock_model, [self.regular_tool])
+
+        with pytest.raises(EnrichedException) as exc_info:
+            await llm_node(self.test_state)
+        assert exc_info.value.status_code == 500
 
     @pytest.mark.asyncio
     async def test_multiple_raise_error_calls_keeps_only_first(self):
