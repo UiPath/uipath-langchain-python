@@ -25,7 +25,7 @@ from uipath_langchain.agent.exceptions import (
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 
-from .schema_editing import strip_matching_enums
+from .schema_editing import strip_enum
 from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -139,15 +139,14 @@ def _is_param_name_to_jsonpath(param_name: str) -> str:
     return "$" + "".join(parts)
 
 
-def strip_template_enums_from_schema(
+def strip_enums_from_schema(
     schema: dict[str, Any],
     parameters: list[AgentIntegrationToolParameter],
 ) -> dict[str, Any]:
-    """Remove {{template}} enum values only from argument-variant parameter fields.
+    """Remove enum constraints from fields in the schema that were configured with static args.
 
-    For each parameter with fieldVariant 'argument', navigates the schema to the
-    corresponding field (supporting nested objects, arrays, and $ref resolution)
-    and strips enum values matching the {{...}} pattern.
+    We strip them so that the tool's args_schema does not enforce them at
+    validation time; we add our own enum constraints only visible to the LLM.
 
     The function deep-copies the schema so the original is never mutated.
 
@@ -156,17 +155,14 @@ def strip_template_enums_from_schema(
         parameters: List of integration tool parameters from resource.properties.
 
     Returns:
-        A cleaned copy of the schema with template enum values removed
-        only from argument-variant fields.
+        A cleaned copy of the schema with enum constraints removed
+        from configured fields.
     """
     schema = copy.deepcopy(schema)
 
     for param in parameters:
-        if param.field_variant != "argument":
-            continue
-
         segments = _param_name_to_segments(param.name)
-        strip_matching_enums(schema, segments, _TEMPLATE_PATTERN)
+        strip_enum(schema, segments)
 
     return schema
 
@@ -299,7 +295,7 @@ def create_integration_tool(
 
     activity_metadata = convert_to_activity_metadata(resource)
 
-    cleaned_input_schema = strip_template_enums_from_schema(
+    cleaned_input_schema = strip_enums_from_schema(
         resource.input_schema, resource.properties.parameters
     )
     input_model = create_model(cleaned_input_schema)

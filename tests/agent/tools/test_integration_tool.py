@@ -26,7 +26,7 @@ from uipath_langchain.agent.tools.integration_tool import (
     convert_to_activity_metadata,
     create_integration_tool,
     remove_asterisk_from_properties,
-    strip_template_enums_from_schema,
+    strip_enums_from_schema,
 )
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
@@ -494,8 +494,8 @@ class TestConvertIntegrationParametersToArgumentProperties:
             convert_integration_parameters_to_argument_properties(params)
 
 
-class TestStripTemplateEnumsFromSchema:
-    """Test cases for strip_template_enums_from_schema function."""
+class TestStripEnumsFromSchema:
+    """Test cases for strip_enums_from_schema function."""
 
     def test_strips_enum_with_single_template_value(self):
         """An enum containing only a single template value is removed entirely."""
@@ -518,81 +518,40 @@ class TestStripTemplateEnumsFromSchema:
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
         assert "enum" not in result["properties"]["opportunityID"]
 
-    def test_preserves_enum_without_templates(self):
-        """An enum with only real values is left unchanged."""
+    def test_strips_static_variant_enum(self):
+        """Static-variant param's enum is stripped — StaticArgsHandler handles enforcement separately."""
         schema = {
             "type": "object",
             "properties": {
-                "status": {
+                "title": {
                     "type": "string",
-                    "enum": ["open", "closed"],
-                }
-            },
-        }
-
-        result = strip_template_enums_from_schema(schema, [])
-
-        assert result["properties"]["status"]["enum"] == ["open", "closed"]
-
-    def test_strips_template_preserves_real_values_in_mixed_enum(self):
-        """Templates are removed but real values are kept in a mixed enum."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "kind": {
-                    "type": "string",
-                    "enum": ["real", "{{template}}"],
-                }
+                    "enum": ["Custom title"],
+                },
             },
         }
         parameters = [
             AgentIntegrationToolParameter(
-                name="kind",
+                name="title",
                 type="string",
-                value="{{template}}",
+                value="Custom title",
                 field_location="body",
-                field_variant="argument",
+                field_variant="static",
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
-        assert result["properties"]["kind"]["enum"] == ["real"]
-
-    def test_strips_empty_enum_after_removal(self):
-        """When all enum values are templates the enum key is removed."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "field": {
-                    "type": "string",
-                    "enum": ["{{a}}", "{{b}}"],
-                }
-            },
-        }
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="field",
-                type="string",
-                value="{{a}}",
-                field_location="body",
-                field_variant="argument",
-            ),
-        ]
-
-        result = strip_template_enums_from_schema(schema, parameters)
-
-        assert "enum" not in result["properties"]["field"]
+        assert "enum" not in result["properties"]["title"]
 
     def test_handles_schema_without_properties(self):
         """A schema with no properties key is returned unchanged."""
         schema = {"type": "object"}
 
-        result = strip_template_enums_from_schema(schema, [])
+        result = strip_enums_from_schema(schema, [])
 
         assert result == {"type": "object"}
 
@@ -619,90 +578,12 @@ class TestStripTemplateEnumsFromSchema:
 
         id_field = schema["properties"]["id"]  # type: ignore[index]
         original_enum = id_field["enum"][:]
-        strip_template_enums_from_schema(schema, parameters)
+        strip_enums_from_schema(schema, parameters)
 
         assert id_field["enum"] == original_enum
 
-    def test_handles_non_string_enum_values(self):
-        """Non-string enum values are never treated as templates."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer",
-                    "enum": [1, 2, 3],
-                }
-            },
-        }
-
-        result = strip_template_enums_from_schema(schema, [])
-
-        assert result["properties"]["count"]["enum"] == [1, 2, 3]
-
-    def test_strips_enum_only_for_argument_variant_top_level(self):
-        """Only argument-variant param's enum is stripped; dynamic param's enum is preserved."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "opportunityID": {
-                    "type": "string",
-                    "enum": ["{{opportunityID}}"],
-                },
-                "parse": {
-                    "type": "string",
-                    "enum": ["none", "full"],
-                },
-            },
-        }
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="opportunityID",
-                type="string",
-                value="{{opportunityID}}",
-                field_location="body",
-                field_variant="argument",
-            ),
-            AgentIntegrationToolParameter(
-                name="parse",
-                type="string",
-                value="{{prompt}}",
-                field_location="body",
-                field_variant="dynamic",
-            ),
-        ]
-
-        result = strip_template_enums_from_schema(schema, parameters)
-
-        assert "enum" not in result["properties"]["opportunityID"]
-        assert result["properties"]["parse"]["enum"] == ["none", "full"]
-
-    def test_preserves_static_variant_enum(self):
-        """Static-variant param's enum is never stripped even if values look like templates."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "enum": ["Custom title"],
-                },
-            },
-        }
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="title",
-                type="string",
-                value="Custom title",
-                field_location="body",
-                field_variant="static",
-            ),
-        ]
-
-        result = strip_template_enums_from_schema(schema, parameters)
-
-        assert result["properties"]["title"]["enum"] == ["Custom title"]
-
-    def test_strips_enum_on_nested_argument_field(self):
-        """Argument-variant param's enum is stripped even when nested inside objects."""
+    def test_strips_enum_on_nested_fields(self):
+        """Enums are stripped from nested fields for all parameter variants."""
         schema = {
             "type": "object",
             "properties": {
@@ -738,14 +619,12 @@ class TestStripTemplateEnumsFromSchema:
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
         assert (
             "enum" not in result["properties"]["attachment"]["properties"]["title_link"]
         )
-        assert result["properties"]["attachment"]["properties"]["title"]["enum"] == [
-            "Custom title"
-        ]
+        assert "enum" not in result["properties"]["attachment"]["properties"]["title"]
 
     def test_strips_enum_on_array_nested_field(self):
         """Argument-variant param inside an array is correctly navigated and stripped."""
@@ -776,11 +655,11 @@ class TestStripTemplateEnumsFromSchema:
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
-        assert result["properties"]["items"]["items"]["properties"]["status"][
-            "enum"
-        ] == ["active"]
+        assert (
+            "enum" not in result["properties"]["items"]["items"]["properties"]["status"]
+        )
 
     def test_handles_ref_resolution(self):
         """Argument-variant param with $ref in schema path is resolved and enum stripped."""
@@ -813,11 +692,11 @@ class TestStripTemplateEnumsFromSchema:
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
         # The $ref is inlined and modified on the inlined copy
         config_props = result["properties"]["config"]["properties"]
-        assert config_props["mode"]["enum"] == ["auto"]
+        assert "enum" not in config_props["mode"]
 
     def test_skips_argument_param_when_schema_path_not_found(self):
         """If the schema path for an argument param doesn't exist, skip silently."""
@@ -837,7 +716,7 @@ class TestStripTemplateEnumsFromSchema:
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
         assert result == schema
 
