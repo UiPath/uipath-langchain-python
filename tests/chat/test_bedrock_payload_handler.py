@@ -231,3 +231,56 @@ class TestBedrockConverseCheckStopReason:
         """Converse handler must not react to stop_reason (snake_case)."""
         msg = AIMessage(content="", response_metadata={"stop_reason": "max_tokens"})
         self.handler.check_stop_reason(msg)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# Null-safety: thinking_enabled detection
+# ---------------------------------------------------------------------------
+
+
+class TestBedrockInvokeThinkingNullSafety:
+    """model_kwargs or its nested values may be None — must not raise."""
+
+    def test_model_kwargs_is_none(self) -> None:
+        model = type("FakeChatBedrock", (), {})()
+        model.model_kwargs = None
+        handler = BedrockInvokePayloadHandler(model)  # type: ignore[arg-type]
+        result = handler.get_tool_binding_kwargs([], "any")
+        assert result["tool_choice"] == "any"
+
+    def test_thinking_value_is_none(self) -> None:
+        model = type("FakeChatBedrock", (), {})()
+        model.model_kwargs = {"thinking": None}
+        handler = BedrockInvokePayloadHandler(model)  # type: ignore[arg-type]
+        result = handler.get_tool_binding_kwargs([], "any")
+        assert result["tool_choice"] == "any"
+
+    def test_model_kwargs_attribute_missing(self) -> None:
+        model = type("FakeChatBedrock", (), {})()
+        handler = BedrockInvokePayloadHandler(model)  # type: ignore[arg-type]
+        result = handler.get_tool_binding_kwargs([], "any")
+        assert result["tool_choice"] == "any"
+
+
+class TestBedrockConverseThinkingNullSafety:
+    """additional_model_request_fields or its nested values may be None — must not raise."""
+
+    def test_additional_fields_is_none(self) -> None:
+        model = type("FakeChatBedrockConverse", (), {})()
+        model.additional_model_request_fields = None
+        handler = BedrockConversePayloadHandler(model)  # type: ignore[arg-type]
+        result = handler.get_tool_binding_kwargs([], "any")
+        assert result["tool_choice"] == "any"
+
+    def test_thinking_value_is_none(self) -> None:
+        model = type("FakeChatBedrockConverse", (), {})()
+        model.additional_model_request_fields = {"thinking": None}
+        handler = BedrockConversePayloadHandler(model)  # type: ignore[arg-type]
+        result = handler.get_tool_binding_kwargs([], "any")
+        assert result["tool_choice"] == "any"
+
+    def test_additional_fields_attribute_missing(self) -> None:
+        model = type("FakeChatBedrockConverse", (), {})()
+        handler = BedrockConversePayloadHandler(model)  # type: ignore[arg-type]
+        result = handler.get_tool_binding_kwargs([], "any")
+        assert result["tool_choice"] == "any"

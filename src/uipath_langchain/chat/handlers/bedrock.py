@@ -87,9 +87,8 @@ class BedrockInvokePayloadHandler(ModelPayloadHandler):
         strict_mode: bool = False,
     ) -> dict[str, Any]:
         thinking_enabled = (
-            getattr(self.model, "model_kwargs", {}).get("thinking", {}).get("type")
-            == "enabled"
-        )
+            (getattr(self.model, "model_kwargs", None) or {}).get("thinking") or {}
+        ).get("type") == "enabled"
         # Anthropic models via Invoke API don't support forced tool use with extended thinking
         if thinking_enabled and tool_choice == "any":
             logger.warning(
@@ -143,11 +142,11 @@ class BedrockConversePayloadHandler(ModelPayloadHandler):
         strict_mode: bool = False,
     ) -> dict[str, Any]:
         thinking_enabled = (
-            getattr(self.model, "additional_model_request_fields", {})
-            .get("thinking", {})
-            .get("type")
-            == "enabled"
-        )
+            (
+                getattr(self.model, "additional_model_request_fields", None) or {}
+            ).get("thinking")
+            or {}
+        ).get("type") == "enabled"
         # Anthropic models via Converse API don't support forced tool use with extended thinking
         if thinking_enabled and tool_choice == "any":
             logger.warning(
