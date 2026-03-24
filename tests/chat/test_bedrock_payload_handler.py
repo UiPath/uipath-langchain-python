@@ -244,20 +244,20 @@ class TestBedrockInvokeThinkingNullSafety:
     def test_model_kwargs_is_none(self) -> None:
         model = type("FakeChatBedrock", (), {})()
         model.model_kwargs = None
-        handler = BedrockInvokePayloadHandler(model)  # type: ignore[arg-type]
+        handler = BedrockInvokePayloadHandler(model)
         result = handler.get_tool_binding_kwargs([], "any")
         assert result["tool_choice"] == "any"
 
     def test_thinking_value_is_none(self) -> None:
         model = type("FakeChatBedrock", (), {})()
         model.model_kwargs = {"thinking": None}
-        handler = BedrockInvokePayloadHandler(model)  # type: ignore[arg-type]
+        handler = BedrockInvokePayloadHandler(model)
         result = handler.get_tool_binding_kwargs([], "any")
         assert result["tool_choice"] == "any"
 
     def test_model_kwargs_attribute_missing(self) -> None:
         model = type("FakeChatBedrock", (), {})()
-        handler = BedrockInvokePayloadHandler(model)  # type: ignore[arg-type]
+        handler = BedrockInvokePayloadHandler(model)
         result = handler.get_tool_binding_kwargs([], "any")
         assert result["tool_choice"] == "any"
 
@@ -268,19 +268,19 @@ class TestBedrockConverseThinkingNullSafety:
     def test_additional_fields_is_none(self) -> None:
         model = type("FakeChatBedrockConverse", (), {})()
         model.additional_model_request_fields = None
-        handler = BedrockConversePayloadHandler(model)  # type: ignore[arg-type]
+        handler = BedrockConversePayloadHandler(model)
         result = handler.get_tool_binding_kwargs([], "any")
         assert result["tool_choice"] == "any"
 
     def test_thinking_value_is_none(self) -> None:
         model = type("FakeChatBedrockConverse", (), {})()
         model.additional_model_request_fields = {"thinking": None}
-        handler = BedrockConversePayloadHandler(model)  # type: ignore[arg-type]
+        handler = BedrockConversePayloadHandler(model)
         result = handler.get_tool_binding_kwargs([], "any")
         assert result["tool_choice"] == "any"
 
     def test_additional_fields_attribute_missing(self) -> None:
         model = type("FakeChatBedrockConverse", (), {})()
-        handler = BedrockConversePayloadHandler(model)  # type: ignore[arg-type]
+        handler = BedrockConversePayloadHandler(model)
         result = handler.get_tool_binding_kwargs([], "any")
         assert result["tool_choice"] == "any"
