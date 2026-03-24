@@ -3979,7 +3979,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.9.11"
+version = "0.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -4047,6 +4047,12 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "uipath", specifier = ">=2.10.29,<2.11.0" },
     { name = "uipath-core", specifier = ">=0.5.2,<0.6.0" },
+    { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.5.10" },
+    { name = "uipath-langchain-client", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.5.10" },
+    { name = "uipath-langchain-client", extras = ["aws"], marker = "extra == 'bedrock'", specifier = ">=1.5.10" },
+    { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.5.10" },
+    { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.5.10" },
+    { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.5.10" },
     { name = "uipath-platform", specifier = ">=0.1.10,<0.2.0" },
     { name = "uipath-runtime", specifier = ">=0.10.0,<0.11.0" },
 ]
@@ -4070,15 +4076,15 @@ dev = [
 
 [[package]]
 name = "uipath-langchain-client"
-version = "1.5.7"
+version = "1.5.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
     { name = "uipath-llm-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/26/38/8a4003db8c3ad6e77f38974e01b8359b0981b1b53763a12ebce191212c8d/uipath_langchain_client-1.5.7.tar.gz", hash = "sha256:7490385861f24899962fae3996bd88d0b706fd7ed8071ae6ef8724af8bd1265f", size = 27641, upload-time = "2026-03-23T13:34:59.921Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/63/83/671e9547fc0e3eea608e2111eb9f24d1d630866ed9b2a0fa2e2bea45bd80/uipath_langchain_client-1.5.10.tar.gz", hash = "sha256:4833550f9a183c1e87b112fc9f402b75e3ff5fdbcc34970c8132489ab0a5d103", size = 27841, upload-time = "2026-03-26T17:20:30.558Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/b1/a05083ebaee6c9ad4b8ade002713931857743fc803d2498a3131866986aa/uipath_langchain_client-1.5.7-py3-none-any.whl", hash = "sha256:f49583b5b681fad663952c5372712a3e08ada522dc795fcc59c16f1fdb51cb8e", size = 37854, upload-time = "2026-03-23T13:34:58.62Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/ad/4858e2631e03090c18a681b01a53f81d7b2c36b940cb245d26d0685f2a81/uipath_langchain_client-1.5.10-py3-none-any.whl", hash = "sha256:70035b5cc13234c7688aa7eb1f36db87b141226ed8ab7599be631b760f31a9d2", size = 37909, upload-time = "2026-03-26T17:20:29.722Z" },
 ]
 
 [package.optional-dependencies]
@@ -4111,7 +4117,7 @@ vertexai = [
 
 [[package]]
 name = "uipath-llm-client"
-version = "1.5.7"
+version = "1.5.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -4120,9 +4126,9 @@ dependencies = [
     { name = "tenacity" },
     { name = "uipath-platform" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c3/81/1d1c3e99399bcb58f326f69a864d8cafca5a59f4cacb5b5802b963cda909/uipath_llm_client-1.5.7.tar.gz", hash = "sha256:bb0f197d225461c5dbeadf803c637e5f216ccd9158b69c84a759e2c63f0fe9d8", size = 20979626, upload-time = "2026-03-23T12:56:29.492Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/e1/c6d67a85c304e3dc14927dd57ff05416ab34087352d55b0191066f921dc8/uipath_llm_client-1.5.10.tar.gz", hash = "sha256:aab34401ddfe0e3f2d506ee233b1a5fb24bd12935244463bd084b0f8b7061bc0", size = 20981627, upload-time = "2026-03-26T17:01:34.93Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/00/0b/c2c54264eef564fe0fe7c609d3322f63e5e9945979ef0a3b50717afa84bb/uipath_llm_client-1.5.7-py3-none-any.whl", hash = "sha256:a222ddea2378a65e9b3b5e6bc9fa8485dde569bbd81dc2dd7c6b9601871271f3", size = 42835, upload-time = "2026-03-23T12:56:27.698Z" },
+    { url = "https://files.pythonhosted.org/packages/54/db/e3b2a305b28c0ad5aa94f61138e1413ad863010a7356ee234c360fa07bf3/uipath_llm_client-1.5.10-py3-none-any.whl", hash = "sha256:8c143bcf9b05c7a4fef08060781e4854b2ac282dd1b50b264fb1bd321bd07386", size = 42918, upload-time = "2026-03-26T17:01:33.005Z" },
 ]
 
 [[package]]
@@ -4152,15 +4158,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/75/64/69462ee01a5607ce36b1fa152c52ac72fb28abe0aa049394406fc0b31525/uipath_runtime-0.10.0.tar.gz", hash = "sha256:d27d58e2252f506c8c0e00f814b37c3863150e8ffcde8e4c6ab14bd98febd3df", size = 139626, upload-time = "2026-03-24T19:42:43.738Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7f/ed/9c0e97a078b96e4d3742ea3515cb30886b08579cd08077cd42a159adf70d/uipath_runtime-0.10.0-py3-none-any.whl", hash = "sha256:4f52df0b56f54e70fcf34fbf74e223d02b97b5a6fd6d8f64bc06782bb5484b07", size = 42097, upload-time = "2026-03-24T19:42:42.359Z" },
-]
-
-[[package]]
-name = "uritemplate"
-version = "4.2.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/98/60/f174043244c5306c9988380d2cb10009f91563fc4b31293d27e17201af56/uritemplate-4.2.0.tar.gz", hash = "sha256:480c2ed180878955863323eea31b0ede668795de182617fef9c6ca09e6ec9d0e", size = 33267, upload-time = "2025-06-02T15:12:06.318Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a9/99/3ae339466c9183ea5b8ae87b34c0b897eda475d2aec2307cae60e5cd4f29/uritemplate-4.2.0-py3-none-any.whl", hash = "sha256:962201ba1c4edcab02e60f9a0d3821e82dfc5d2d6662a21abd533879bdb8a686", size = 11488, upload-time = "2025-06-02T15:12:03.405Z" },
 ]
 
 [[package]]

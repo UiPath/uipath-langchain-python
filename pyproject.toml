@@ -1,6 +1,6 @@
 [project]
 name = "uipath-langchain"
-version = "1.0.0"
+version = "0.10.0"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -21,7 +21,7 @@ dependencies = [
     "jsonpath-ng>=1.7.0",
     "mcp==1.26.0",
     "langchain-mcp-adapters==0.2.1",
-    "uipath-langchain-client[openai]>=1.5.7",
+    "uipath-langchain-client[openai]>=1.5.10",
 ]
 
 classifiers = [
@@ -38,17 +38,17 @@ maintainers = [
 
 [project.optional-dependencies]
 anthropic = [
-    "uipath-langchain-client[anthropic]>=1.5.7",
+    "uipath-langchain-client[anthropic]>=1.5.10",
 ]
 vertex = [
-    "uipath-langchain-client[google]>=1.5.7",
-    "uipath-langchain-client[vertexai]>=1.5.7",
+    "uipath-langchain-client[google]>=1.5.10",
+    "uipath-langchain-client[vertexai]>=1.5.10",
 ]
 bedrock = [
-    "uipath-langchain-client[aws]>=1.5.7",
+    "uipath-langchain-client[aws]>=1.5.10",
 ]
 all = [
-    "uipath-langchain-client[all]>=1.5.7",
+    "uipath-langchain-client[all]>=1.5.10",
 ]
 
 [project.entry-points."uipath.middlewares"]
