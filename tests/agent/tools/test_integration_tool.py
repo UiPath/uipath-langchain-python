@@ -25,6 +25,7 @@ from uipath_langchain.agent.tools.integration_tool import (
     convert_integration_parameters_to_argument_properties,
     convert_to_activity_metadata,
     create_integration_tool,
+    remove_asterisk_from_properties,
     strip_template_enums_from_schema,
 )
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
@@ -1126,3 +1127,65 @@ class TestIntegrationToolErrorHandling:
 
         with pytest.raises(EnrichedException):
             await tool.ainvoke({"query": "test"})
+
+
+class TestRemoveAsteriskFromProperties:
+    """Test cases for remove_asterisk_from_properties function."""
+
+    def test_cleans_defs_keys(self) -> None:
+        """$defs keys are cleaned alongside $ref values."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "items[*]": {"$ref": "#/$defs/Record[*]"},
+            },
+            "$defs": {
+                "Record[*]": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+        }
+        cleaned = remove_asterisk_from_properties(schema)
+
+        assert "[*]" not in cleaned["properties"]["items"]["$ref"]
+        assert "Record" in cleaned["$defs"]
+        assert "Record[*]" not in cleaned["$defs"]
+
+    def test_cleans_definitions_keyword(self) -> None:
+        """Correctly cleans keys when using 'definitions' keyword."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "items[*]": {"$ref": "#/definitions/Record[*]"},
+            },
+            "definitions": {
+                "Record[*]": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+        }
+        cleaned = remove_asterisk_from_properties(schema)
+
+        assert "Record" in cleaned["definitions"]
+        assert "Record[*]" not in cleaned["definitions"]
+
+    def test_no_asterisks_passthrough(self) -> None:
+        """Schema without asterisks is returned unchanged."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "owner": {"$ref": "#/$defs/Contact"},
+            },
+            "$defs": {
+                "Contact": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+        }
+        cleaned = remove_asterisk_from_properties(schema)
+
+        assert cleaned["properties"]["owner"]["$ref"] == "#/$defs/Contact"
+        assert "Contact" in cleaned["$defs"]
