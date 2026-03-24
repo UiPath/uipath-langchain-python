@@ -167,3 +167,82 @@ class TestGenerate:
             },
         }
         assert result == fake_result
+
+
+class TestBedrockSslConfiguration:
+    def _make_passthrough(self):
+        return AwsBedrockCompletionsPassthroughClient(
+            model="anthropic.claude-haiku-4-5-20251001",
+            token="test-token",
+            api_flavor="converse",
+        )
+
+    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    @patch.dict(os.environ, {"SSL_CERT_FILE": "/tmp/test-ca-bundle.pem"}, clear=False)
+    def test_get_client_uses_ssl_cert_file(self, mock_session_cls):
+        os.environ.pop("REQUESTS_CA_BUNDLE", None)
+        os.environ.pop("UIPATH_DISABLE_SSL_VERIFY", None)
+        mock_session = mock_session_cls.return_value
+
+        self._make_passthrough().get_client()
+
+        mock_session.client.assert_called_once()
+        _, kwargs = mock_session.client.call_args
+        assert kwargs["verify"] == "/tmp/test-ca-bundle.pem"
+
+    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    @patch.dict(os.environ, {"SSL_CERT_FILE": "/tmp/test-ca-bundle.pem"}, clear=False)
+    def test_get_bedrock_client_uses_ssl_cert_file(self, mock_session_cls):
+        os.environ.pop("REQUESTS_CA_BUNDLE", None)
+        os.environ.pop("UIPATH_DISABLE_SSL_VERIFY", None)
+        mock_session = mock_session_cls.return_value
+
+        self._make_passthrough().get_bedrock_client()
+
+        mock_session.client.assert_called_once()
+        _, kwargs = mock_session.client.call_args
+        assert kwargs["verify"] == "/tmp/test-ca-bundle.pem"
+
+    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    @patch.dict(
+        os.environ,
+        {
+            "SSL_CERT_FILE": "/tmp/ssl-cert.pem",
+            "REQUESTS_CA_BUNDLE": "/tmp/requests-ca.pem",
+        },
+        clear=False,
+    )
+    def test_ssl_cert_file_takes_priority_over_requests_ca_bundle(
+        self, mock_session_cls
+    ):
+        os.environ.pop("UIPATH_DISABLE_SSL_VERIFY", None)
+        mock_session = mock_session_cls.return_value
+
+        self._make_passthrough().get_client()
+
+        _, kwargs = mock_session.client.call_args
+        assert kwargs["verify"] == "/tmp/ssl-cert.pem"
+
+    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    @patch.dict(os.environ, {"UIPATH_DISABLE_SSL_VERIFY": "true"}, clear=False)
+    def test_disable_ssl_verify(self, mock_session_cls):
+        mock_session = mock_session_cls.return_value
+
+        self._make_passthrough().get_client()
+
+        _, kwargs = mock_session.client.call_args
+        assert kwargs["verify"] is False
+
+    @patch("uipath_langchain.chat.bedrock.boto3.Session")
+    def test_default_uses_certifi(self, mock_session_cls):
+        import certifi
+
+        os.environ.pop("SSL_CERT_FILE", None)
+        os.environ.pop("REQUESTS_CA_BUNDLE", None)
+        os.environ.pop("UIPATH_DISABLE_SSL_VERIFY", None)
+        mock_session = mock_session_cls.return_value
+
+        self._make_passthrough().get_client()
+
+        _, kwargs = mock_session.client.call_args
+        assert kwargs["verify"] == certifi.where()
