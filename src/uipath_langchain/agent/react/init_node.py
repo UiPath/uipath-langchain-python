@@ -22,34 +22,31 @@ async def _build_schema_context(entities: list) -> str:
         format_schemas_for_context,
     )
 
+    ecp_enabled = False
     try:
         from uipath.core.feature_flags import FeatureFlags
 
-        flag_value = FeatureFlags.is_flag_enabled("EnableEntityContextPackEnrichment")
-        with open("/tmp/init_node_debug.log", "a") as _dbg:
-            _dbg.write(f"[ECP] flag value: {flag_value}\n")
-            _dbg.write(f"[ECP] all flags: {FeatureFlags._flags if hasattr(FeatureFlags, '_flags') else 'no _flags attr'}\n")
+        ecp_enabled = FeatureFlags.is_flag_enabled(
+            "EnableEntityContextPackEnrichment"
+        )
+    except Exception:
+        logger.info("Feature flags unavailable, using basic schema context")
 
-        if flag_value:
+    if ecp_enabled:
+        try:
             from uipath_langchain.agent.tools.datafabric_tool import (
                 build_entity_context_packs,
                 format_ecp_for_context,
             )
 
-            with open("/tmp/init_node_debug.log", "a") as _dbg:
-                _dbg.write("[ECP] Building enriched ECPs\n")
+            logger.info("Building enriched Entity Context Packs")
             context_packs = await build_entity_context_packs(entities)
-            with open("/tmp/init_node_ecp.json", "w") as _ef:
-                import json
-                _ef.write(json.dumps([p.to_dict() for p in context_packs], indent=2, default=str))
             return format_ecp_for_context(context_packs)
-    except Exception as e:
-        with open("/tmp/init_node_debug.log", "a") as _dbg:
-            _dbg.write(f"[ECP] EXCEPTION: {type(e).__name__}: {e}\n")
-        logger.warning(
-            "ECP enrichment failed, falling back to basic schema",
-            exc_info=True,
-        )
+        except Exception:
+            logger.warning(
+                "ECP enrichment failed, falling back to basic schema",
+                exc_info=True,
+            )
 
     return format_schemas_for_context(entities)
 
@@ -64,9 +61,6 @@ def create_init_node(
     async def graph_state_init(state: Any) -> Any:
         # --- Data Fabric schema fetch (INIT-time) ---
         schema_context: str | None = None
-        # Debug: write to file since robot swallows stdout/stderr
-        with open("/tmp/init_node_debug.log", "a") as _dbg:
-            _dbg.write(f"[INIT_NODE] resources_for_init present: {resources_for_init is not None}\n")
         if resources_for_init:
             from uipath_langchain.agent.tools.datafabric_tool import (
                 fetch_entity_schemas,
@@ -76,27 +70,13 @@ def create_init_node(
             entity_identifiers = get_datafabric_entity_identifiers_from_resources(
                 resources_for_init
             )
-            with open("/tmp/init_node_debug.log", "a") as _dbg:
-                _dbg.write(f"[INIT_NODE] entity_identifiers: {entity_identifiers}\n")
             if entity_identifiers:
                 logger.info(
                     "Fetching Data Fabric schemas for %d identifier(s)",
                     len(entity_identifiers),
                 )
                 entities = await fetch_entity_schemas(entity_identifiers)
-                with open("/tmp/init_node_debug.log", "a") as _dbg:
-                    _dbg.write(f"[INIT_NODE] fetched {len(entities)} entities\n")
                 schema_context = await _build_schema_context(entities)
-                with open("/tmp/init_node_debug.log", "a") as _dbg:
-                    _dbg.write(f"[INIT_NODE] schema_context length: {len(schema_context) if schema_context else 0}\n")
-                with open("/tmp/init_node_schema.txt", "w") as _sf:
-                    _sf.write(schema_context or "")
-                if schema_context:
-                    logger.info(
-                        "Schema context length: %d chars, starts with: %.200s",
-                        len(schema_context),
-                        schema_context,
-                    )
 
         # --- Resolve messages ---
         resolved_messages: Sequence[SystemMessage | HumanMessage] | Overwrite
@@ -110,10 +90,15 @@ def create_init_node(
         else:
             resolved_messages = list(messages)
 
-        # Debug: dump the full system prompt the LLM will see
-        _msgs = resolved_messages.value if isinstance(resolved_messages, Overwrite) else resolved_messages
+        # Log the full system prompt for debugging
+        _msgs = (
+            resolved_messages.value
+            if isinstance(resolved_messages, Overwrite)
+            else resolved_messages
+        )
         for _m in _msgs:
             if isinstance(_m, SystemMessage):
+                logger.debug("Full system prompt:\n%s", _m.content)
                 with open("/tmp/init_node_full_system_prompt.txt", "w") as _fp:
                     _fp.write(str(_m.content))
                 break

@@ -1,4 +1,4 @@
-"""Entity Context Pack - Rich metadata for prod Text2SQL optimization.
+"""Entity Context Pack — rich metadata for Text2SQL optimization.
 
 Builds ECPs from Data Fabric entity metadata + sample data at INIT time.
 No LLM generation — synonyms from field.description, samples from DF API,
@@ -10,15 +10,11 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
-from uipath.platform.entities import Entity, FieldMetadata
+from uipath.platform.entities import Entity
 
 logger = logging.getLogger(__name__)
-
-_PROMPTS_DIR = Path(__file__).parent
 
 # --- Type classification sets ---
 
@@ -38,6 +34,7 @@ _CATEGORICAL_TYPES = frozenset({
 
 
 # --- Dataclasses ---
+# to_dict() methods use sparse serialization (omit falsy fields) to save tokens.
 
 
 @dataclass
@@ -57,11 +54,7 @@ class ColumnContext:
     reference_entity: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to JSON-compatible dict."""
-        d: dict[str, Any] = {
-            "name": self.name,
-            "type": self.type,
-        }
+        d: dict[str, Any] = {"name": self.name, "type": self.type}
         if self.description:
             d["description"] = self.description
         if self.synonyms:
@@ -74,10 +67,74 @@ class ColumnContext:
             d["is_foreign_key"] = True
             if self.reference_entity:
                 d["reference_entity"] = self.reference_entity
-        d["is_numeric"] = self.is_numeric
-        d["is_temporal"] = self.is_temporal
-        d["is_categorical"] = self.is_categorical
+        if self.is_numeric:
+            d["is_numeric"] = True
+        if self.is_temporal:
+            d["is_temporal"] = True
+        if self.is_categorical:
+            d["is_categorical"] = True
         return d
+
+
+@dataclass
+class QueryCapabilities:
+    """Structured SQL capabilities for LLM parsing.
+
+    Intentionally duplicates some sql_constraints.txt content in a
+    machine-parseable format alongside the free-text rules.
+    """
+
+    allowed_clauses: list[str] = field(default_factory=lambda: [
+        "SELECT", "WHERE", "GROUP BY", "HAVING", "ORDER BY",
+        "LIMIT", "OFFSET", "DISTINCT", "LEFT JOIN",
+    ])
+    allowed_aggregations: list[str] = field(default_factory=lambda: [
+        "COUNT(column_name)", "SUM", "AVG", "MIN", "MAX",
+    ])
+    allowed_expressions: list[str] = field(default_factory=lambda: [
+        "CASE/WHEN", "CAST", "COALESCE", "NULLIF",
+        "ROUND", "ABS", "LOWER", "UPPER", "TRIM",
+        "arithmetic (+, -, *, /)", "string concat (||)",
+    ])
+    allowed_predicates: list[str] = field(default_factory=lambda: [
+        "=", "<>", ">", "<", ">=", "<=",
+        "BETWEEN", "IN", "LIKE", "IS NULL", "IS NOT NULL",
+        "AND", "OR",
+    ])
+    disallowed: list[str] = field(default_factory=lambda: [
+        "SELECT *",
+        "COUNT(*) — use COUNT(column_name)",
+        "COUNT(DISTINCT ...) — no DISTINCT in aggregates",
+        "subqueries in any clause",
+        "UNION / INTERSECT / EXCEPT",
+        "CTE (WITH clause)",
+        "window functions (ROW_NUMBER, RANK, PARTITION BY)",
+        "RIGHT JOIN / FULL OUTER JOIN / CROSS JOIN",
+        "self-joins",
+        "more than 4 tables in JOIN chain",
+        "INSERT / UPDATE / DELETE / DDL",
+        "ORDER BY columns not in SELECT",
+        "HAVING without GROUP BY",
+        "OFFSET without LIMIT",
+    ])
+    critical_rules: list[str] = field(default_factory=lambda: [
+        "ALWAYS use explicit column names — never SELECT *",
+        "Use COUNT(column_name) — never COUNT(*) or COUNT(1)",
+        "LIMIT is REQUIRED on every query without a WHERE clause",
+        "All non-aggregated columns in SELECT must appear in GROUP BY",
+        "Only LEFT JOIN is supported",
+        "Maximum 4 tables in a JOIN chain",
+    ])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "allowed_clauses": self.allowed_clauses,
+            "allowed_aggregations": self.allowed_aggregations,
+            "allowed_expressions": self.allowed_expressions,
+            "allowed_predicates": self.allowed_predicates,
+            "disallowed": self.disallowed,
+            "critical_rules": self.critical_rules,
+        }
 
 
 @dataclass
@@ -89,9 +146,9 @@ class EntityContextPack:
     description: str | None = None
     columns: list[ColumnContext] = field(default_factory=list)
     row_count: int | None = None
+    query_capabilities: QueryCapabilities = field(default_factory=QueryCapabilities)
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to JSON-compatible dict."""
         d: dict[str, Any] = {
             "entity_name": self.entity_name,
             "display_name": self.display_name,
@@ -101,6 +158,7 @@ class EntityContextPack:
         if self.row_count is not None:
             d["row_count"] = self.row_count
         d["columns"] = [c.to_dict() for c in self.columns]
+        d["query_capabilities"] = self.query_capabilities.to_dict()
         return d
 
 
@@ -110,11 +168,7 @@ class EntityContextPack:
 def classify_field_type(sql_type_name: str) -> tuple[bool, bool, bool]:
     """Classify a SQL type into (is_numeric, is_temporal, is_categorical)."""
     t = sql_type_name.lower().strip()
-    return (
-        t in _NUMERIC_TYPES,
-        t in _TEMPORAL_TYPES,
-        t in _CATEGORICAL_TYPES,
-    )
+    return (t in _NUMERIC_TYPES, t in _TEMPORAL_TYPES, t in _CATEGORICAL_TYPES)
 
 
 def extract_synonyms(field_name: str, description: str | None) -> list[str]:
@@ -129,18 +183,17 @@ def extract_synonyms(field_name: str, description: str | None) -> list[str]:
     name_lower = field_name.lower()
     synonyms: set[str] = set()
 
-    # Extract parenthetical content: "Total enrollment (K-12 students)"
     parens = re.findall(r"\(([^)]+)\)", description)
     for p in parens:
         p_stripped = p.strip()
         if p_stripped and p_stripped.lower() != name_lower:
             synonyms.add(p_stripped)
 
-    # Split on delimiters
-    parts = re.split(r"[,;]|\bor\b|\baka\b|\balso known as\b", description, flags=re.IGNORECASE)
+    parts = re.split(
+        r"[,;]|\bor\b|\baka\b|\balso known as\b", description, flags=re.IGNORECASE
+    )
     for part in parts:
         token = part.strip().strip(".")
-        # Only keep short phrases (likely synonyms, not full sentences)
         if (
             token
             and len(token.split()) <= 4
@@ -152,7 +205,7 @@ def extract_synonyms(field_name: str, description: str | None) -> list[str]:
     return sorted(synonyms)
 
 
-async def fetch_sample_rows(
+async def _fetch_sample_rows(
     entity_key: str, limit: int = 5
 ) -> list[dict[str, Any]]:
     """Fetch sample rows from Data Fabric using list_records API."""
@@ -162,8 +215,8 @@ async def fetch_sample_rows(
     try:
         records = await sdk.entities.list_records_async(entity_key, limit=limit)
         return [record.model_dump(exclude={"id"}) for record in records]
-    except Exception as e:
-        logger.warning(f"Failed to fetch sample rows for '{entity_key}': {e}")
+    except Exception:
+        logger.warning("Failed to fetch sample rows for '%s'", entity_key, exc_info=True)
         return []
 
 
@@ -186,10 +239,12 @@ def _extract_column_examples(
     return examples
 
 
+# --- Builders ---
+
+
 async def build_entity_context_pack(entity: Entity) -> EntityContextPack:
     """Build a full ECP from an Entity, including sample data from DF API."""
-    # Fetch sample rows concurrently with building column metadata
-    sample_rows = await fetch_sample_rows(entity.id)
+    sample_rows = await _fetch_sample_rows(entity.id)
 
     columns: list[ColumnContext] = []
     for f in entity.fields or []:
@@ -236,9 +291,7 @@ async def build_entity_context_packs(
     packs: list[EntityContextPack] = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
-            logger.warning(
-                f"Failed to build ECP for '{entities[i].name}': {result}"
-            )
+            logger.warning("Failed to build ECP for '%s': %s", entities[i].name, result)
         else:
             packs.append(result)
     return packs
@@ -247,46 +300,31 @@ async def build_entity_context_packs(
 # --- Formatting ---
 
 
-@lru_cache(maxsize=1)
-def _load_sql_constraints() -> str:
-    """Load SQL constraints from sql_constraints.txt."""
-    constraints_path = _PROMPTS_DIR / "sql_constraints.txt"
-    try:
-        return constraints_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        logger.warning(f"SQL constraints file not found: {constraints_path}")
-        return ""
-
-
 def format_ecp_for_context(context_packs: list[EntityContextPack]) -> str:
     """Format ECPs as JSON for injection into agent system prompt.
 
-    Produces: SQL constraints + ECP JSON block.
-    The system_prompt.txt (SQL expert guidelines) is NOT included here —
-    it goes into the Studio Web system message at design time.
+    Produces: SQL generation guidelines + SQL constraints + ECP JSON block.
     """
     if not context_packs:
         return ""
 
+    from .datafabric_tool import _load_sql_constraints, _load_system_prompt
+
     lines: list[str] = []
+
+    system_prompt = _load_system_prompt()
+    if system_prompt:
+        lines.extend(["## SQL Query Generation Guidelines", "", system_prompt, ""])
 
     sql_constraints = _load_sql_constraints()
     if sql_constraints:
-        lines.append("## SQL Constraints")
-        lines.append("")
-        lines.append(sql_constraints)
-        lines.append("")
+        lines.extend(["## SQL Constraints", "", sql_constraints, ""])
 
     ecp_json = json.dumps(
         [pack.to_dict() for pack in context_packs],
         indent=2,
         default=str,
     )
-
-    lines.append("## Entity Context Packs")
-    lines.append("")
-    lines.append("```json")
-    lines.append(ecp_json)
-    lines.append("```")
+    lines.extend(["## Entity Context Packs", "", "```json", ecp_json, "```"])
 
     return "\n".join(lines)
