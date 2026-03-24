@@ -192,11 +192,12 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
         lines.append(
             f"| 'Top N by Y' | `SELECT {fields_sample} FROM {sql_table} ORDER BY {agg_field} DESC LIMIT N` |"
         )
+        count_col = field_names[0] if field_names else "id"
         lines.append(
-            f"| 'Count by X' | `SELECT {group_field}, COUNT(*) as count FROM {sql_table} GROUP BY {group_field}` |"
+            f"| 'Count by X' | `SELECT {group_field}, COUNT({count_col}) as count FROM {sql_table} GROUP BY {group_field}` |"
         )
         lines.append(
-            f"| 'Top N segments' | `SELECT {group_field}, COUNT(*) as count FROM {sql_table} GROUP BY {group_field} ORDER BY count DESC LIMIT N` |"
+            f"| 'Top N segments' | `SELECT {group_field}, COUNT({count_col}) as count FROM {sql_table} GROUP BY {group_field} ORDER BY count DESC LIMIT N` |"
         )
         lines.append(
             f"| 'Sum/Avg of Y' | `SELECT SUM({agg_field}) as total FROM {sql_table}` |"

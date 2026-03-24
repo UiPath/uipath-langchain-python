@@ -3378,7 +3378,6 @@ dev = [
     { name = "pytest-mock" },
     { name = "ruff" },
     { name = "rust-just" },
-    { name = "uipath-langchain" },
     { name = "virtualenv" },
 ]
 
@@ -3421,7 +3420,6 @@ dev = [
     { name = "pytest-mock", specifier = ">=3.11.1" },
     { name = "ruff", specifier = ">=0.9.4" },
     { name = "rust-just", specifier = ">=1.39.0" },
-    { name = "uipath-langchain", editable = "." },
     { name = "virtualenv", specifier = ">=20.36.1" },
 ]
 
