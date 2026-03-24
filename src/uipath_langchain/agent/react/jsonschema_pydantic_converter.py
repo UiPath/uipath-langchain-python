@@ -1,12 +1,10 @@
 import inspect
-import json
 import sys
 from types import ModuleType
 from typing import Any, Type
 
 from jsonschema_pydantic_converter import transform_with_modules
 from pydantic import BaseModel, PydanticUndefinedAnnotation
-from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 
@@ -39,16 +37,14 @@ def create_model(
     except PydanticUndefinedAnnotation as e:
         # Strip the __ prefix the converter adds to forward references
         # so the user sees the original type name from their JSON schema.
-        type_name = e.name.lstrip("_") if e.name else e.name
-        schema_json = json.dumps(schema, indent=2, default=str)
+        type_name = e.name.lstrip("_") if e.name else None
         raise AgentStartupError(
-            code=AgentStartupErrorCode.INVALID_AGENT_CONFIG,
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
             title="Invalid schema",
             detail=(
-                f"Type '{type_name}' could not be resolved while "
-                f"processing this JSON schema:\n{schema_json}"
+                f"Type '{type_name}' could not be resolved. "
+                f"Check that all $ref targets have matching entries in $defs."
             ),
-            category=UiPathErrorCategory.SYSTEM,
         ) from e
 
     pseudo_module = _get_or_create_dynamic_module()
