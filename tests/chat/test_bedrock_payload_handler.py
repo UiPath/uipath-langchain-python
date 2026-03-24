@@ -261,6 +261,13 @@ class TestBedrockInvokeThinkingNullSafety:
         result = handler.get_tool_binding_kwargs([], "any")
         assert result["tool_choice"] == "any"
 
+    def test_thinking_value_is_non_dict_truthy(self) -> None:
+        model = type("FakeChatBedrock", (), {})()
+        model.model_kwargs = {"thinking": "enabled"}
+        handler = BedrockInvokePayloadHandler(model)
+        result = handler.get_tool_binding_kwargs([], "any")
+        assert result["tool_choice"] == "any"
+
 
 class TestBedrockConverseThinkingNullSafety:
     """additional_model_request_fields or its nested values may be None — must not raise."""
@@ -275,6 +282,13 @@ class TestBedrockConverseThinkingNullSafety:
     def test_thinking_value_is_none(self) -> None:
         model = type("FakeChatBedrockConverse", (), {})()
         model.additional_model_request_fields = {"thinking": None}
+        handler = BedrockConversePayloadHandler(model)
+        result = handler.get_tool_binding_kwargs([], "any")
+        assert result["tool_choice"] == "any"
+
+    def test_thinking_value_is_non_dict_truthy(self) -> None:
+        model = type("FakeChatBedrockConverse", (), {})()
+        model.additional_model_request_fields = {"thinking": "enabled"}
         handler = BedrockConversePayloadHandler(model)
         result = handler.get_tool_binding_kwargs([], "any")
         assert result["tool_choice"] == "any"
