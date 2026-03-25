@@ -1,5 +1,6 @@
 """State initialization node for the ReAct Agent graph."""
 
+import logging
 from typing import Any, Callable, Sequence
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -10,20 +11,51 @@ from .job_attachments import (
     get_job_attachments,
     parse_attachments_from_conversation_messages,
 )
+from .types import AgentResources
+
+logger = logging.getLogger(__name__)
 
 
 def create_init_node(
     messages: Sequence[SystemMessage | HumanMessage]
-    | Callable[[Any], Sequence[SystemMessage | HumanMessage]],
+    | Callable[..., Sequence[SystemMessage | HumanMessage]],
     input_schema: type[BaseModel] | None,
     is_conversational: bool = False,
+    resources_for_init: AgentResources | None = None,
 ):
-    def graph_state_init(state: Any) -> Any:
+    async def graph_state_init(state: Any) -> Any:
+        # --- Data Fabric schema fetch (INIT-time) ---
+        schema_context: str | None = None
+        if resources_for_init:
+            from uipath_langchain.agent.tools.datafabric_tool import (
+                fetch_entity_schemas,
+                format_schemas_for_context,
+                get_datafabric_entity_identifiers_from_resources,
+            )
+
+            entity_identifiers = get_datafabric_entity_identifiers_from_resources(
+                resources_for_init
+            )
+            if entity_identifiers:
+                logger.info(
+                    "Fetching Data Fabric schemas for %d identifier(s)",
+                    len(entity_identifiers),
+                )
+                entities = await fetch_entity_schemas(entity_identifiers)
+                schema_context = format_schemas_for_context(entities)
+
+        # --- Resolve messages ---
         resolved_messages: Sequence[SystemMessage | HumanMessage] | Overwrite
         if callable(messages):
-            resolved_messages = list(messages(state))
+            if schema_context:
+                resolved_messages = list(
+                    messages(state, additional_context=schema_context)
+                )
+            else:
+                resolved_messages = list(messages(state))
         else:
             resolved_messages = list(messages)
+
         if is_conversational:
             # For conversational agents we need to reorder the messages so that the system message is first, followed by
             # the initial user message. When resuming the conversation, the state will have the entire message history,

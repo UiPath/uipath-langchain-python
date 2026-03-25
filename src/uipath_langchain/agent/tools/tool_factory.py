@@ -19,6 +19,7 @@ from uipath.agent.models.agent import (
 from uipath_langchain.chat.hitl import REQUIRE_CONVERSATIONAL_CONFIRMATION
 
 from .context_tool import create_context_tool
+from .datafabric_tool import create_datafabric_tools
 from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
 from .integration_tool import create_integration_tool
@@ -32,9 +33,22 @@ logger = getLogger(__name__)
 async def create_tools_from_resources(
     agent: LowCodeAgentDefinition, llm: BaseChatModel
 ) -> list[BaseTool]:
+    """Create tools from agent resources including Data Fabric tools.
+
+    Args:
+        agent: The agent definition.
+        llm: The language model for tool creation.
+
+    Returns:
+        List of BaseTool instances.
+    """
     tools: list[BaseTool] = []
 
     logger.info("Creating tools for agent '%s' from resources", agent.name)
+
+    # Register the generic Data Fabric query tool (no fetching/schema here)
+    tools.extend(create_datafabric_tools(agent))
+
     for resource in agent.resources:
         if not resource.is_enabled:
             logger.info(
@@ -75,6 +89,12 @@ async def _build_tool_for_resource(
         return create_process_tool(resource)
 
     elif isinstance(resource, AgentContextResourceConfig):
+        if resource.is_datafabric:
+            logger.info(
+                "Skipping Data Fabric context '%s' - handled separately",
+                resource.name,
+            )
+            return None
         return create_context_tool(resource)
 
     elif isinstance(resource, AgentEscalationResourceConfig):

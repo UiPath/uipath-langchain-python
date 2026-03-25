@@ -1,0 +1,205 @@
+# SQL Query Constraints for SQLite
+
+## SUPPORTED SCENARIOS
+
+### 1. Single-Entity Baselines
+- Simple projections with explicit column names (NO SELECT *)
+- Single-field predicates: =, <>, >, <, >=, <=, BETWEEN, IN, LIKE
+- WHERE clauses with AND/OR & parentheses
+- IS NULL / IS NOT NULL
+
+**Examples:**
+- SELECT id, name FROM Customer
+- SELECT id, name FROM Customer WHERE age >= 21 AND (region='APAC' OR vip=1)
+- SELECT id, name FROM Customer WHERE deleted_at IS NULL
+
+### 2. Multi-Entity Joins (≤4 adapters)
+- LEFT JOIN chains via entity model (up to 4 tables)
+- Optional adapters pruned
+- Shared intermediates
+- Null-preserving semantics
+
+**Examples:**
+- SELECT o.id, c.name FROM Order o LEFT JOIN Customer c ON o.customer_id = c.id
+- Fields spanning 3-4 adapters with proper LEFT JOIN chains
+
+### 3. Predicate Distribution & Pushdown
+- Adapter-scoped predicates pushed down
+- Cross-adapter/global predicates at root
+- Empty IN () treated as FALSE
+
+**Examples:**
+- SELECT c.id, c.name FROM Customer c WHERE c.country='IN' AND c.total>1000
+- SELECT id FROM Customer WHERE id IN ()  -- evaluates to FALSE
+
+### 4. Aggregations & Grouping (Basic)
+- GROUP BY entity fields
+- Aggregate functions: SUM, AVG, MIN, MAX, COUNT(column_name)
+- Simple expressions in aggregates
+- HAVING on aggregates or plain fields
+
+**Examples:**
+- SELECT country, COUNT(id) FROM Customer GROUP BY country
+- SELECT dept, SUM(price*qty) as total FROM LineItem GROUP BY dept
+- SELECT country, COUNT(id) as cnt FROM Customer GROUP BY country HAVING COUNT(id)>10
+
+### 5. Expressions (Minimal)
+- CASE (simple/searched) in SELECT/WHERE/ORDER BY
+- Arithmetic: +, -, *, / (SQLite-compatible)
+- Functions: COALESCE, NULLIF, ||
+- String functions: LOWER, UPPER, TRIM, LTRIM, RTRIM
+- Math functions: ROUND, ABS
+- Note: CEIL/FLOOR may have limited adapter support
+
+**Examples:**
+- SELECT CASE WHEN age>=18 THEN 'Adult' ELSE 'Minor' END AS segment FROM Customer
+- SELECT COALESCE(nickname, name) as display_name FROM Customer
+- SELECT ROUND(amount, 2) FROM Payments
+
+### 6. Casting & Coercion (Basic)
+- CAST among common scalar types
+- Implicit numeric widening where adapter accepts
+- Explicit casts preferred at root
+
+**Examples:**
+- SELECT CAST(amount AS DECIMAL(12,2)) FROM Payments
+- SELECT CAST(id AS TEXT) FROM Customer
+
+### 7. Ordering & Pagination
+- ORDER BY fields/aliases/expressions
+- Multi-column ORDER BY
+- LIMIT/OFFSET for pagination
+- Note: Pagination without ORDER BY may produce non-deterministic results
+
+**Examples:**
+- SELECT id, price*qty AS amt FROM LineItem ORDER BY amt DESC LIMIT 50 OFFSET 100
+- SELECT id, name FROM Customer ORDER BY name LIMIT 10
+
+### 8. DISTINCT
+- SELECT DISTINCT with explicit column names
+- DISTINCT with ORDER BY on projected items/aliases
+
+**Examples:**
+- SELECT DISTINCT country FROM Customer ORDER BY country
+- SELECT DISTINCT dept, location FROM Employee
+
+### 9. Metadata Remapping & Aliasing
+- Physical column remaps per adapter
+- Alias reuse consistent across clauses
+- Column aliases can be used in ORDER BY
+
+**Examples:**
+- SELECT name AS customer_name FROM Customer ORDER BY customer_name
+
+---
+
+## UNSUPPORTED SCENARIOS
+
+### 1. METADATA_RESOLUTION
+- Unknown table/entity names
+- Unknown column/field names
+- Ambiguous column references without table prefix
+- Field not in SELECT but used in ORDER BY (without alias)
+
+**Examples:**
+- SELECT name FROM UnknownTable  -- ❌
+- SELECT unknown_column FROM Customer  -- ❌
+- SELECT id FROM Customer ORDER BY name  -- ❌ (name not in SELECT)
+
+### 2. PROHIBITED_SQL_PATTERNS
+- SELECT * FROM table  -- ❌ Must use explicit column names
+- Subqueries in FROM, WHERE, or SELECT
+- UNION/UNION ALL/INTERSECT/EXCEPT
+- Common Table Expressions (WITH/CTE)
+- Window functions (ROW_NUMBER, RANK, PARTITION BY)
+- Self-joins
+- RIGHT JOIN or FULL OUTER JOIN (only LEFT JOIN supported)
+- CROSS JOIN
+
+**Examples:**
+- SELECT * FROM Customer  -- ❌
+- SELECT id FROM (SELECT * FROM Customer)  -- ❌
+- SELECT id FROM Customer UNION SELECT id FROM Order  -- ❌
+- WITH cte AS (SELECT id FROM Customer) SELECT * FROM cte  -- ❌
+
+### 3. COMPLEX_AGGREGATIONS
+- Nested aggregations: COUNT(DISTINCT(...)), SUM(DISTINCT(...))
+- Aggregations without GROUP BY on non-aggregated columns
+- HAVING without GROUP BY
+- COUNT(*) not allowed, use COUNT(column_name) instead
+
+**Examples:**
+- SELECT COUNT(DISTINCT dept) FROM Employee  -- ❌
+- SELECT name, COUNT(id) FROM Employee  -- ❌ (name not in GROUP BY)
+- SELECT AVG(salary) FROM Employee HAVING AVG(salary) > 50000  -- ❌ (no GROUP BY)
+
+### 4. ADVANCED_JOINS
+- More than 4 tables in JOIN chain
+- RIGHT JOIN
+- FULL OUTER JOIN
+- CROSS JOIN
+- Self-joins
+- Non-equi joins (theta joins)
+
+**Examples:**
+- SELECT * FROM t1 RIGHT JOIN t2  -- ❌
+- SELECT * FROM t1, t2  -- ❌ (implicit CROSS JOIN)
+- SELECT * FROM Employee e1 JOIN Employee e2 ON e1.manager_id = e2.id  -- ❌ (self-join)
+
+### 5. UNSUPPORTED_FUNCTIONS
+- Date/time manipulation functions (DATE_ADD, DATE_SUB, DATEDIFF)
+- JSON functions (JSON_EXTRACT, JSON_ARRAY)
+- Regex functions
+- User-defined functions (UDFs)
+- String aggregation (GROUP_CONCAT with complex separators)
+
+**Examples:**
+- SELECT DATE_ADD(created_at, INTERVAL 1 DAY) FROM Order  -- ❌
+- SELECT JSON_EXTRACT(data, '$.field') FROM Table  -- ❌
+
+### 6. COMPLEX_PREDICATES
+- Correlated subqueries in WHERE
+- EXISTS/NOT EXISTS
+- ANY/ALL operators
+- IN with subquery
+
+**Examples:**
+- SELECT id FROM Customer WHERE EXISTS (SELECT 1 FROM Order WHERE customer_id = Customer.id)  -- ❌
+- SELECT id FROM Customer WHERE id IN (SELECT customer_id FROM Order)  -- ❌
+
+### 7. MODIFICATIONS
+- INSERT, UPDATE, DELETE, MERGE
+- CREATE, ALTER, DROP (DDL)
+- TRUNCATE
+- Transactions (BEGIN, COMMIT, ROLLBACK)
+
+**Examples:**
+- INSERT INTO Customer VALUES (...)  -- ❌
+- UPDATE Customer SET name = 'John'  -- ❌
+- DELETE FROM Customer  -- ❌
+
+### 8. UNSUPPORTED_CLAUSES
+- HAVING without GROUP BY
+- LIMIT without explicit value (e.g., LIMIT ALL)
+- OFFSET without LIMIT
+- FOR UPDATE / FOR SHARE
+- INTO clause (SELECT INTO)
+
+**Examples:**
+- SELECT AVG(salary) FROM Employee HAVING AVG(salary) > 50000  -- ❌
+- SELECT id FROM Customer OFFSET 10  -- ❌ (no LIMIT)
+
+---
+
+## CRITICAL RULES
+
+1. **ALWAYS use explicit column names** - Never use SELECT *
+2. **Use COUNT(column_name)** - Never use COUNT(*)
+3. **Only LEFT JOIN** - No RIGHT JOIN, FULL OUTER JOIN, or CROSS JOIN
+4. **Maximum 4 tables** - No more than 4 tables in a JOIN chain
+5. **No subqueries** - No subqueries in any clause
+6. **No CTEs** - No WITH clauses
+7. **No window functions** - No ROW_NUMBER, RANK, PARTITION BY, etc.
+8. **Explicit GROUP BY** - All non-aggregated columns in SELECT must be in GROUP BY
+9. **Simple aggregations only** - No DISTINCT in aggregates
+10. **ORDER BY only selected columns** - Cannot ORDER BY columns not in SELECT list
