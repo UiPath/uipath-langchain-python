@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Literal, Sequence
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
 
@@ -12,6 +13,9 @@ class ModelPayloadHandler(ABC):
 
     Each handler provides provider-specific parameter values for LLM operations.
     """
+
+    def __init__(self, model: BaseChatModel):
+        self.model = model
 
     @abstractmethod
     def get_tool_binding_kwargs(

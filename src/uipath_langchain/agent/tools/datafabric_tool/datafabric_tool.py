@@ -131,8 +131,9 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
     lines.append("")
 
     for entity in entities:
+        sql_table = entity.name
         display_name = entity.display_name or entity.name
-        lines.append(f"### Entity: {display_name}")
+        lines.append(f"### Entity: {display_name} (SQL table: `{sql_table}`)")
         if entity.description:
             lines.append(f"_{entity.description}_")
         lines.append("")
@@ -146,7 +147,7 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
         for field in entity.fields or []:
             if field.is_hidden_field or field.is_system_field:
                 continue
-            field_name = field.display_name or field.name
+            field_name = field.name
             field_type = format_field_type(field)
             field_names.append(field_name)
             lines.append(f"| {field_name} | {field_type} |")
@@ -178,27 +179,28 @@ def format_schemas_for_context(entities: list[Entity]) -> str:
         filter_field = text_field or (field_names[0] if field_names else "Name")
         fields_sample = ", ".join(field_names[:5]) if field_names else "*"
 
-        lines.append(f"**Query Patterns for {display_name}:**")
+        lines.append(f"**Query Patterns for {sql_table}:**")
         lines.append("")
         lines.append("| User Intent | SQL Pattern |")
         lines.append("|-------------|-------------|")
         lines.append(
-            f"| 'Show all {display_name.lower()}' | `SELECT {fields_sample} FROM {display_name} LIMIT 100` |"
+            f"| 'Show all' | `SELECT {fields_sample} FROM {sql_table} LIMIT 100` |"
         )
         lines.append(
-            f"| 'Find by X' | `SELECT {fields_sample} FROM {display_name} WHERE {filter_field} = 'value' LIMIT 100` |"
+            f"| 'Find by X' | `SELECT {fields_sample} FROM {sql_table} WHERE {filter_field} = 'value' LIMIT 100` |"
         )
         lines.append(
-            f"| 'Top N by Y' | `SELECT {fields_sample} FROM {display_name} ORDER BY {agg_field} DESC LIMIT N` |"
+            f"| 'Top N by Y' | `SELECT {fields_sample} FROM {sql_table} ORDER BY {agg_field} DESC LIMIT N` |"
+        )
+        count_col = field_names[0] if field_names else "id"
+        lines.append(
+            f"| 'Count by X' | `SELECT {group_field}, COUNT({count_col}) as count FROM {sql_table} GROUP BY {group_field}` |"
         )
         lines.append(
-            f"| 'Count by X' | `SELECT {group_field}, COUNT(*) as count FROM {display_name} GROUP BY {group_field}` |"
+            f"| 'Top N segments' | `SELECT {group_field}, COUNT({count_col}) as count FROM {sql_table} GROUP BY {group_field} ORDER BY count DESC LIMIT N` |"
         )
         lines.append(
-            f"| 'Top N segments' | `SELECT {group_field}, COUNT(*) as count FROM {display_name} GROUP BY {group_field} ORDER BY count DESC LIMIT N` |"
-        )
-        lines.append(
-            f"| 'Sum/Avg of Y' | `SELECT SUM({agg_field}) as total FROM {display_name}` |"
+            f"| 'Sum/Avg of Y' | `SELECT SUM({agg_field}) as total FROM {sql_table}` |"
         )
         lines.append("")
 

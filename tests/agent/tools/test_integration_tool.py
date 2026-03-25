@@ -1,6 +1,6 @@
 """Tests for integration_tool.py module."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from uipath.agent.models.agent import (
@@ -11,14 +11,21 @@ from uipath.agent.models.agent import (
     AgentToolStaticArgumentProperties,
 )
 from uipath.platform.connections import ActivityParameterLocationInfo, Connection
+from uipath.platform.errors import EnrichedException
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentStartupError
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    AgentStartupError,
+)
 from uipath_langchain.agent.tools.integration_tool import (
     _is_param_name_to_jsonpath,
     _param_name_to_segments,
     convert_integration_parameters_to_argument_properties,
     convert_to_activity_metadata,
     create_integration_tool,
+    remove_asterisk_from_properties,
     strip_template_enums_from_schema,
 )
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
@@ -1055,3 +1062,130 @@ class TestIsParamNameToJsonpath:
 
     def test_escapes_backslashes(self):
         assert _is_param_name_to_jsonpath("path\\to") == "$['path\\\\to']"
+
+
+class TestIntegrationToolErrorHandling:
+    """Test error handling for integration tool HTTP failures."""
+
+    @pytest.fixture
+    def common_connection(self):
+        return Connection(
+            id="test-connection-id", name="Test Connection", element_instance_id=12345
+        )
+
+    @pytest.fixture
+    def resource(self, common_connection):
+        return AgentIntegrationToolResourceConfig(
+            name="test_tool",
+            description="Test tool",
+            properties=AgentIntegrationToolProperties(
+                method="POST",
+                tool_path="/api/test",
+                object_name="test_object",
+                tool_display_name="Test Tool",
+                tool_description="Test tool description",
+                connection=common_connection,
+                parameters=[],
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+        )
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_400_raises_agent_runtime_error_with_user_category(
+        self, mock_uipath_cls, resource, make_enriched_exception
+    ):
+        mock_sdk = MagicMock()
+        mock_sdk.connections.invoke_activity_async = AsyncMock(
+            side_effect=make_enriched_exception(400, "Bad Request")
+        )
+        mock_uipath_cls.return_value = mock_sdk
+
+        tool = create_integration_tool(resource)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.ainvoke({"query": "test"})
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.HTTP_ERROR
+        )
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_non_400_enriched_exception_propagates(
+        self, mock_uipath_cls, resource, make_enriched_exception
+    ):
+        original = make_enriched_exception(500, "Internal Server Error")
+        mock_sdk = MagicMock()
+        mock_sdk.connections.invoke_activity_async = AsyncMock(side_effect=original)
+        mock_uipath_cls.return_value = mock_sdk
+
+        tool = create_integration_tool(resource)
+
+        with pytest.raises(EnrichedException):
+            await tool.ainvoke({"query": "test"})
+
+
+class TestRemoveAsteriskFromProperties:
+    """Test cases for remove_asterisk_from_properties function."""
+
+    def test_cleans_defs_keys(self) -> None:
+        """$defs keys are cleaned alongside $ref values."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "items[*]": {"$ref": "#/$defs/Record[*]"},
+            },
+            "$defs": {
+                "Record[*]": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+        }
+        cleaned = remove_asterisk_from_properties(schema)
+
+        assert "[*]" not in cleaned["properties"]["items"]["$ref"]
+        assert "Record" in cleaned["$defs"]
+        assert "Record[*]" not in cleaned["$defs"]
+
+    def test_cleans_definitions_keyword(self) -> None:
+        """Correctly cleans keys when using 'definitions' keyword."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "items[*]": {"$ref": "#/definitions/Record[*]"},
+            },
+            "definitions": {
+                "Record[*]": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+        }
+        cleaned = remove_asterisk_from_properties(schema)
+
+        assert "Record" in cleaned["definitions"]
+        assert "Record[*]" not in cleaned["definitions"]
+
+    def test_no_asterisks_passthrough(self) -> None:
+        """Schema without asterisks is returned unchanged."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "owner": {"$ref": "#/$defs/Contact"},
+            },
+            "$defs": {
+                "Contact": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+        }
+        cleaned = remove_asterisk_from_properties(schema)
+
+        assert cleaned["properties"]["owner"]["$ref"] == "#/$defs/Contact"
+        assert "Contact" in cleaned["$defs"]

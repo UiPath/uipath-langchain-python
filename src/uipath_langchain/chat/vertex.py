@@ -193,23 +193,24 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         )
 
         header_capture = HeaderCapture(name=f"vertex_headers_{id(self)}")
-        client_kwargs = get_httpx_client_kwargs()
+        client_kwargs = get_httpx_client_kwargs(headers=headers)
         client_kwargs["timeout"] = 300.0
         verify = client_kwargs.get("verify", True)
+        merged_headers = client_kwargs.pop("headers", {})
 
         http_options = genai_types.HttpOptions(
             httpx_client=httpx.Client(
                 transport=_UrlRewriteTransport(
                     uipath_url, verify=verify, header_capture=header_capture
                 ),
-                headers=headers,
+                headers=merged_headers,
                 **client_kwargs,
             ),
             httpx_async_client=httpx.AsyncClient(
                 transport=_AsyncUrlRewriteTransport(
                     uipath_url, verify=verify, header_capture=header_capture
                 ),
-                headers=headers,
+                headers=merged_headers,
                 **client_kwargs,
             ),
         )

@@ -121,4 +121,15 @@ UNSUPPORTED SCENARIOS (Avoid these patterns):
     - JSON/ARRAY/MAP/GEOMETRY/BLOB operations
     - Complex timezone-aware timestamp operations
 
+RETRY BEHAVIOR:
+If a query fails with a validation error (e.g. missing LIMIT, SELECT *, COUNT(*)), DO NOT give up. Instead:
+1. Read the error message carefully
+2. Fix the query to comply with the constraint
+3. Call query_datafabric again with the corrected query
+
+Example: if "Queries without WHERE must include a LIMIT clause" is returned, add LIMIT 100 and retry:
+  Before:  SELECT name, department FROM Employee
+  After:   SELECT name, department FROM Employee LIMIT 100
+
+
 Return only the SQL query as plain text.

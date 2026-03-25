@@ -12,7 +12,7 @@ class LLMProvider(StrEnum):
 class APIFlavor(StrEnum):
     """API flavor for LLM communication."""
 
-    OPENAI_RESPONSES = "OpenAIResponses"
+    OPENAI_RESPONSES = "OpenAiResponses"
     OPENAI_COMPLETIONS = "OpenAiChatCompletions"
     AWS_BEDROCK_CONVERSE = "AwsBedrockConverse"
     AWS_BEDROCK_INVOKE = "AwsBedrockInvoke"

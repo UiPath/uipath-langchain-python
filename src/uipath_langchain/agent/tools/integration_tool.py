@@ -17,9 +17,14 @@ from uipath.agent.models.agent import (
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+from uipath_langchain.agent.exceptions import (
+    AgentStartupError,
+    AgentStartupErrorCode,
+    raise_for_enriched,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.static_args import (
@@ -35,6 +40,13 @@ from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
 from .utils import sanitize_dict_for_serialization, sanitize_tool_name
+
+_INTEGRATION_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]] = {
+    (400, None): (
+        "Integration service returned an error for tool '{tool}': {message}",
+        UiPathErrorCategory.USER,
+    ),
+}
 
 
 def convert_integration_parameters_to_argument_properties(
@@ -197,7 +209,9 @@ def remove_asterisk_from_properties(fields: dict[str, Any]) -> dict[str, Any]:
         k = k.replace("[*]", "")
         definitions[k] = value
         fix_types(value)
-    if "definitions" in fields:
+    if "$defs" in fields:
+        fields["$defs"] = definitions
+    elif "definitions" in fields:
         fields["definitions"] = definitions
 
     fix_types(fields)
@@ -326,7 +340,13 @@ def create_integration_tool(
                 connection_id=connection_id,
                 activity_input=sanitize_dict_for_serialization(kwargs),
             )
-        except Exception:
+        except EnrichedException as e:
+            raise_for_enriched(
+                e,
+                _INTEGRATION_ERRORS,
+                title=f"Failed to execute tool '{resource.name}'",
+                tool=resource.name,
+            )
             raise
 
         return result

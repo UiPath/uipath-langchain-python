@@ -18,6 +18,7 @@ from uipath.platform.documents import (
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
@@ -25,7 +26,6 @@ from uipath_langchain.agent.tools.tool_node import (
 )
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
-from .durable_interrupt import durable_interrupt
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import (
     resolve_task_title,

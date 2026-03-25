@@ -33,6 +33,9 @@ from uipath_langchain.agent.react.utils import create_guardrails_state_with_inpu
 _VALIDATOR_ALLOWED_STAGES = {
     "prompt_injection": {ExecutionStage.PRE_EXECUTION},
     "pii_detection": {ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION},
+    "harmful_content": {ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION},
+    "intellectual_property": {ExecutionStage.POST_EXECUTION},
+    "user_prompt_attacks": {ExecutionStage.PRE_EXECUTION},
 }
 
 
