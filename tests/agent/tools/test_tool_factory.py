@@ -73,6 +73,7 @@ def context_resource() -> AgentContextResourceConfig:
     """Create a context tool resource config."""
     return AgentContextResourceConfig(
         resource_type=AgentResourceType.CONTEXT,
+        context_type="index",
         name="test_context",
         description="Test context description",
         index_name="test_index",

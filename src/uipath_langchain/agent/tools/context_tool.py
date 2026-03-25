@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
+    AgentContextType,
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
 )
@@ -130,21 +131,27 @@ def is_static_query(resource: AgentContextResourceConfig) -> bool:
     return resource.settings.query.variant.lower() == "static"
 
 
-def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
-    tool_name = sanitize_tool_name(resource.name)
+def create_context_tool(
+    resource: AgentContextResourceConfig,
+) -> StructuredTool | BaseTool:
+    assert resource.context_type is not None
+
+    if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
+        from .datafabric_tool import create_datafabric_query_tool
+
+        return create_datafabric_query_tool()
+
     assert resource.settings is not None
+    tool_name = sanitize_tool_name(resource.name)
     retrieval_mode = resource.settings.retrieval_mode.lower()
+
     if retrieval_mode == AgentContextRetrievalMode.DEEP_RAG.value.lower():
         return handle_deep_rag(tool_name, resource)
-    elif retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
+
+    if retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
         return handle_batch_transform(tool_name, resource)
-    elif retrieval_mode == AgentContextRetrievalMode.DATA_FABRIC.value.lower():
-        raise ValueError(
-            "Data Fabric context should be handled via create_datafabric_tools(), "
-            "not create_context_tool()"
-        )
-    else:
-        return handle_semantic_search(tool_name, resource)
+
+    return handle_semantic_search(tool_name, resource)
 
 
 def handle_semantic_search(
