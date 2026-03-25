@@ -1,7 +1,7 @@
 """UiPath ReAct Agent implementation"""
 
 from .agent import create_agent
-from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState
+from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState, AgentResources
 from .utils import resolve_input_model, resolve_output_model
 
 __all__ = [
@@ -11,4 +11,5 @@ __all__ = [
     "AgentGraphNode",
     "AgentGraphState",
     "AgentGraphConfig",
+    "AgentResources",
 ]

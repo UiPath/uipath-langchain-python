@@ -142,6 +142,11 @@ def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
         return handle_deep_rag(tool_name, resource)
     elif retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
         return handle_batch_transform(tool_name, resource)
+    elif retrieval_mode == AgentContextRetrievalMode.DATA_FABRIC.value.lower():
+        raise ValueError(
+            "Data Fabric context should be handled via create_datafabric_tools(), "
+            "not create_context_tool()"
+        )
     else:
         return handle_semantic_search(tool_name, resource)
 
