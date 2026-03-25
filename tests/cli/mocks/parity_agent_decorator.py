@@ -224,7 +224,7 @@ async def joke_node(state: Input) -> Output:
 
 
 # Build wrapper graph with custom input/output schemas
-builder = StateGraph(Input, input=Input, output=Output)
+builder = StateGraph(Input, input_schema=Input, output_schema=Output)
 builder.add_node("joke", joke_node)
 builder.add_edge(START, "joke")
 builder.add_edge("joke", END)

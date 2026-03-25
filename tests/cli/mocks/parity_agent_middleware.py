@@ -220,13 +220,13 @@ async def joke_node(state: Input) -> Output:
     messages = [
         HumanMessage(content=f"Generate a family-friendly joke based on the topic: {state.topic}")
     ]
-    result = await agent.ainvoke({"messages": messages})
+    result = await agent.ainvoke({"messages": messages})  # type: ignore[arg-type]
     joke = result["messages"][-1].content
     return Output(joke=joke)
 
 
 # Build wrapper graph with custom input/output schemas
-builder = StateGraph(Input, input=Input, output=Output)
+builder = StateGraph(Input, input_schema=Input, output_schema=Output)
 builder.add_node("joke", joke_node)
 builder.add_edge(START, "joke")
 builder.add_edge("joke", END)
