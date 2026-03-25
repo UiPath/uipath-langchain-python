@@ -24,32 +24,19 @@ def create_init_node(
     resources_for_init: AgentResources | None = None,
 ):
     async def graph_state_init(state: Any) -> Any:
-        # --- Data Fabric schema fetch (INIT-time) ---
-        schema_context: str | None = None
+        # --- Gather init-time context from registered providers ---
+        additional_context: str | None = None
         if resources_for_init:
-            from uipath_langchain.agent.tools.datafabric_tool import (
-                fetch_entity_schemas,
-                format_schemas_for_context,
-                get_datafabric_entity_identifiers_from_resources,
-            )
+            from .init_context_registry import gather_init_context
 
-            entity_identifiers = get_datafabric_entity_identifiers_from_resources(
-                resources_for_init
-            )
-            if entity_identifiers:
-                logger.info(
-                    "Fetching Data Fabric schemas for %d identifier(s)",
-                    len(entity_identifiers),
-                )
-                entities = await fetch_entity_schemas(entity_identifiers)
-                schema_context = format_schemas_for_context(entities)
+            additional_context = await gather_init_context(resources_for_init)
 
         # --- Resolve messages ---
         resolved_messages: Sequence[SystemMessage | HumanMessage] | Overwrite
         if callable(messages):
-            if schema_context:
+            if additional_context:
                 resolved_messages = list(
-                    messages(state, additional_context=schema_context)
+                    messages(state, additional_context=additional_context)
                 )
             else:
                 resolved_messages = list(messages(state))

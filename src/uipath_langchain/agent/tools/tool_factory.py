@@ -19,7 +19,6 @@ from uipath.agent.models.agent import (
 from uipath_langchain.chat.hitl import REQUIRE_CONVERSATIONAL_CONFIRMATION
 
 from .context_tool import create_context_tool
-from .datafabric_tool import create_datafabric_tools
 from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
 from .integration_tool import create_integration_tool
@@ -46,9 +45,6 @@ async def create_tools_from_resources(
 
     logger.info("Creating tools for agent '%s' from resources", agent.name)
 
-    # Register the generic Data Fabric query tool (no fetching/schema here)
-    tools.extend(create_datafabric_tools(agent))
-
     for resource in agent.resources:
         if not resource.is_enabled:
             logger.info(
@@ -66,8 +62,8 @@ async def create_tools_from_resources(
         tool = await _build_tool_for_resource(resource, llm)
         if tool is not None:
             if isinstance(tool, list):
-                tools.extend(tool)
-            else:
+                tools.extend(t for t in tool if t not in tools)
+            elif tool not in tools:
                 tools.append(tool)
 
                 if agent.is_conversational:
@@ -89,12 +85,6 @@ async def _build_tool_for_resource(
         return create_process_tool(resource)
 
     elif isinstance(resource, AgentContextResourceConfig):
-        if resource.is_datafabric:
-            logger.info(
-                "Skipping Data Fabric context '%s' - handled separately",
-                resource.name,
-            )
-            return None
         return create_context_tool(resource)
 
     elif isinstance(resource, AgentEscalationResourceConfig):
