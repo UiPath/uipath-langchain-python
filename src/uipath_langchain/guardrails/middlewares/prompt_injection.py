@@ -16,6 +16,8 @@ from uipath.platform import UiPath
 from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailScope
 from uipath.platform.guardrails.guardrails import NumberParameterValue
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
+
 from ..models import GuardrailAction
 from ._utils import extract_text_from_messages
 
@@ -175,6 +177,8 @@ class UiPathPromptInjectionMiddleware:
                         if isinstance(msg.content, str) and text in msg.content:
                             msg.content = msg.content.replace(text, modified_text, 1)
                             break
+        except AgentRuntimeError:
+            raise
         except Exception as e:
             logger.error(
                 f"Error evaluating prompt injection guardrail: {e}", exc_info=True

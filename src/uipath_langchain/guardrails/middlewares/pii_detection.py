@@ -31,6 +31,8 @@ from uipath.platform.guardrails import (
     MapEnumParameterValue,
 )
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
+
 from ..models import GuardrailAction, PIIDetectionEntity
 from ._utils import (
     create_modified_tool_request,
@@ -238,6 +240,8 @@ class UiPathPIIDetectionMiddleware:
                     )
                     if modified_input is not None and isinstance(modified_input, dict):
                         request = create_modified_tool_request(request, modified_input)
+                except AgentRuntimeError:
+                    raise
                 except Exception as e:
                     logger.error(
                         f"Error evaluating PII guardrail for tool '{tool_name}': {e}",
@@ -342,5 +346,7 @@ class UiPathPIIDetectionMiddleware:
                         if isinstance(msg.content, str) and text in msg.content:
                             msg.content = msg.content.replace(text, modified_text, 1)
                             break
+        except AgentRuntimeError:
+            raise
         except Exception as e:
             logger.error(f"Error evaluating PII guardrail: {e}", exc_info=True)

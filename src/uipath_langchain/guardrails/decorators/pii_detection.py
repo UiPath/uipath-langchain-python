@@ -16,6 +16,8 @@ from uipath.platform.guardrails import (
     MapEnumParameterValue,
 )
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
+
 from ..enums import GuardrailExecutionStage
 from ..middlewares._utils import create_modified_tool_result
 from ..models import GuardrailAction, PIIDetectionEntity
@@ -74,6 +76,8 @@ def _wrap_tool_with_pii_guardrail(
             )
             if modified is not None and isinstance(modified, dict):
                 return _rewrap_input(tool_input, modified)
+        except AgentRuntimeError:
+            raise
         except Exception as e:
             logger.error(
                 f"Error evaluating PII guardrail (pre) for tool '{tool.name}': {e}",
@@ -94,6 +98,8 @@ def _wrap_tool_with_pii_guardrail(
                 if isinstance(result, (ToolMessage, Command)):
                     return create_modified_tool_result(result, modified)
                 return modified
+        except AgentRuntimeError:
+            raise
         except Exception as e:
             logger.error(
                 f"Error evaluating PII guardrail (post) for tool '{tool.name}': {e}",
