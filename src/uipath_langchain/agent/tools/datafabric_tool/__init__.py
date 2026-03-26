@@ -14,6 +14,7 @@ from .datafabric_tool import (
     fetch_entity_schemas,
     get_datafabric_contexts,
     get_datafabric_entity_identifiers_from_resources,
+    get_datafabric_query_routing_context,
 )
 from .schema_context import format_schemas_for_context
 

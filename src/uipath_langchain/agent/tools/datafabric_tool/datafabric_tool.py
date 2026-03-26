@@ -9,7 +9,6 @@ Schema building and formatting is in ``schema_context.py``.
 """
 
 import logging
-from functools import lru_cache
 from typing import Any, Sequence
 
 from langchain_core.tools import BaseTool
@@ -104,24 +103,66 @@ def get_datafabric_entity_identifiers_from_resources(
     return identifiers
 
 
+def get_datafabric_query_routing_context(
+    resources: Sequence[BaseAgentResourceConfig],
+) -> "QueryRoutingContext | None":
+    """Build query routing context from DF entity set items.
+
+    Maps each entity to its folder so the backend can resolve
+    entities at folder level instead of tenant level.
+    """
+    from uipath.platform.entities import EntityRouting, QueryRoutingContext
+
+    routings: list[EntityRouting] = []
+    for context in _filter_datafabric_contexts(resources):
+        for item in context.entity_set or []:
+            routings.append(
+                EntityRouting(
+                    entity_name=item.name,
+                    folder_id=item.folder_id,
+                )
+            )
+    if not routings:
+        return None
+    return QueryRoutingContext(entity_routings=routings)
+
+
 # --- Generic Tool Creation ---
 
 _MAX_RECORDS_IN_RESPONSE = 50
 
 
-@lru_cache(maxsize=1)
-def create_datafabric_query_tool() -> BaseTool:
-    """Create the ``query_datafabric`` tool (singleton via lru_cache)."""
+_datafabric_tool_instance: BaseTool | None = None
+
+
+def create_datafabric_query_tool(
+    routing_context: "QueryRoutingContext | None" = None,
+) -> BaseTool:
+    """Create the ``query_datafabric`` tool.
+
+    Returns a cached instance. The routing_context from the first call
+    is captured by the closure and used for all subsequent queries.
+    """
+    global _datafabric_tool_instance
+    if _datafabric_tool_instance is not None:
+        return _datafabric_tool_instance
 
     async def _query_datafabric(sql_query: str) -> dict[str, Any]:
         from uipath.platform import UiPath
+        import json as _json
 
         logger.debug(f"query_datafabric called with SQL: {sql_query}")
+
+        # Debug: dump routing context and query
+        with open("/tmp/df_query_debug.txt", "a") as _f:
+            _f.write(f"SQL: {sql_query}\n")
+            _f.write(f"routing_context: {routing_context.model_dump(by_alias=True) if routing_context else None}\n\n")
 
         sdk = UiPath()
         try:
             records = await sdk.entities.query_entity_records_async(
                 sql_query=sql_query,
+                routing_context=routing_context,
             )
             total_count = len(records)
             truncated = total_count > _MAX_RECORDS_IN_RESPONSE
@@ -141,9 +182,13 @@ def create_datafabric_query_tool() -> BaseTool:
                     f"Showing {len(returned_records)} of {total_count} records. "
                     "Use more specific filters or LIMIT to narrow results."
                 )
+            with open("/tmp/df_query_debug.txt", "a") as _f:
+                _f.write(f"Result: {total_count} records, truncated={truncated}\n\n")
             return result
         except Exception as e:
             logger.error(f"SQL query failed: {e}")
+            with open("/tmp/df_query_debug.txt", "a") as _f:
+                _f.write(f"Error: {e}\n\n")
             return {
                 "records": [],
                 "total_count": 0,
@@ -151,7 +196,7 @@ def create_datafabric_query_tool() -> BaseTool:
                 "sql_query": sql_query,
             }
 
-    return BaseUiPathStructuredTool(
+    _datafabric_tool_instance = BaseUiPathStructuredTool(
         name="query_datafabric",
         description=(
             "Execute a SQL SELECT query against Data Fabric entities. "
@@ -162,3 +207,4 @@ def create_datafabric_query_tool() -> BaseTool:
         coroutine=_query_datafabric,
         metadata={"tool_type": "datafabric_sql"},
     )
+    return _datafabric_tool_instance

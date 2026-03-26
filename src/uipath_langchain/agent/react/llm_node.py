@@ -114,6 +114,17 @@ def create_llm_node(
         llm = model.bind_tools(static_schema_tools, **binding_kwargs)
 
         response = await llm.ainvoke(messages)
+
+        # Debug: dump every LLM response
+        with open("/tmp/df_query_debug.txt", "a") as _f:
+            _f.write(f"--- LLM Response ---\n")
+            if response.tool_calls:
+                for tc in response.tool_calls:
+                    _f.write(f"Tool call: {tc.get('name')} args={tc.get('args')}\n")
+            elif response.content:
+                _f.write(f"Content: {response.content}\n")
+            _f.write("\n")
+
         if not isinstance(response, AIMessage):
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,

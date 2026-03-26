@@ -141,9 +141,13 @@ def create_context_tool(
     assert resource.context_type is not None
 
     if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
-        from .datafabric_tool import create_datafabric_query_tool
+        from .datafabric_tool import (
+            create_datafabric_query_tool,
+            get_datafabric_query_routing_context,
+        )
 
-        return create_datafabric_query_tool()
+        routing_context = get_datafabric_query_routing_context([resource])
+        return create_datafabric_query_tool(routing_context=routing_context)
 
     assert resource.settings is not None
     tool_name = sanitize_tool_name(resource.name)
