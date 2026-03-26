@@ -388,6 +388,22 @@ class TestConvertIntegrationParametersToArgumentProperties:
         assert "$['search_query']" not in result
         assert "$['api_key']" in result
 
+    def test_dynamic_parameter_skipped(self):
+        """Parameters with no fieldVariant are skipped."""
+        params = [
+            AgentIntegrationToolParameter(
+                name="search_query",
+                type="string",
+                value="test",
+                field_location="query",
+                field_variant="dynamic",
+            ),
+        ]
+
+        result = convert_integration_parameters_to_argument_properties(params)
+
+        assert "$['search_query']" not in result
+
     def test_empty_parameters(self):
         """Empty list returns empty dict."""
         result = convert_integration_parameters_to_argument_properties([])
