@@ -4,8 +4,7 @@ import uuid
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages.tool import ToolCall
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentInternalDeepRagToolProperties,
     AgentInternalToolResourceConfig,
@@ -28,15 +27,12 @@ from uipath_langchain._utils.durable_interrupt import (
 )
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     add_query_field_to_schema,
 )
-from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
-from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
 
@@ -156,14 +152,6 @@ def create_deeprag_tool(
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 
-    async def deeprag_tool_wrapper(
-        tool: BaseTool,
-        call: ToolCall,
-        state: AgentGraphState,
-    ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(resource, state, call["args"])
-        return await job_attachment_wrapper(tool, call, state)
-
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
@@ -178,5 +166,5 @@ def create_deeprag_tool(
             "output_schema": output_model,
         },
     )
-    tool.set_tool_wrappers(awrapper=deeprag_tool_wrapper)
+    tool.set_tool_wrappers(awrapper=job_attachment_wrapper)
     return tool

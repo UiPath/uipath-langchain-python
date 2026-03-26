@@ -23,9 +23,6 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.tools.static_args import (
-    handle_static_args,
-)
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -261,7 +258,6 @@ def create_escalation_tool(
         tool.metadata["_call_id"] = call.get("id")
         tool.metadata["_call_args"] = dict(call.get("args", {}))
 
-        call["args"] = handle_static_args(resource, state, call["args"])
         result = await tool.ainvoke(call["args"])
 
         if result["action"] == EscalationAction.END:

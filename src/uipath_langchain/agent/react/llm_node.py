@@ -8,24 +8,22 @@ from langchain_core.messages import (
     AnyMessage,
     ToolCall,
 )
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 from uipath.agent.react import RAISE_ERROR_TOOL
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.tools.static_args import (
-    apply_static_argument_properties_to_schema,
-)
 from uipath_langchain.chat.handlers import get_payload_handler
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..messages.message_utils import replace_tool_calls
+from ..tools.static_args import StaticArgsHandler
 from .constants import (
     DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
     DEFAULT_MAX_LLM_MESSAGES,
 )
 from .types import FLOW_CONTROL_TOOLS, AgentGraphState
-from .utils import count_consecutive_thinking_messages, extract_input_data_from_state
+from .utils import count_consecutive_thinking_messages
 
 
 def _filter_control_flow_tool_calls(
@@ -81,6 +79,7 @@ def create_llm_node(
     """
     bindable_tools = list(tools) if tools else []
     payload_handler = get_payload_handler(model)
+    static_args_handler = StaticArgsHandler()
 
     async def llm_node(state: StateT):
         messages: list[AnyMessage] = state.messages
@@ -93,8 +92,8 @@ def create_llm_node(
                 category=UiPathErrorCategory.USER,
             )
 
-        static_schema_tools = _apply_tool_argument_properties(
-            bindable_tools, state, input_schema
+        static_schema_tools = static_args_handler.initialize(
+            bindable_tools, state, input_schema or type(state)
         )
         current_tool_choice: Literal["auto", "any"] = tool_choice
         if current_tool_choice == "auto" and (
@@ -131,22 +130,7 @@ def create_llm_node(
             if len(filtered_tool_calls) != len(response.tool_calls):
                 response = replace_tool_calls(response, filtered_tool_calls)
 
+        static_args_handler.apply_to_response(response.tool_calls)
         return {"messages": [response]}
 
     return llm_node
-
-
-def _apply_tool_argument_properties(
-    tools: list[BaseTool],
-    state: StateT,
-    input_schema: type[InputT] | None = None,
-) -> list[BaseTool]:
-    """Apply dynamic schema modifications to tools based on their argument_properties."""
-
-    agent_input = extract_input_data_from_state(state, input_schema or type(state))
-    return [
-        apply_static_argument_properties_to_schema(tool, agent_input)
-        if isinstance(tool, StructuredTool)
-        else tool
-        for tool in tools
-    ]

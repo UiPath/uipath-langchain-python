@@ -2,21 +2,22 @@
 
 import copy
 import logging
-from typing import Any, Iterator, Mapping, TypeVar
+from typing import Any, Iterator, Mapping, Sequence, TypeVar
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
-from langchain_core.tools import StructuredTool
+from langchain_core.messages import ToolCall
+from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
 from uipath.agent.models.agent import (
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
     AgentToolStaticArgumentProperties,
     AgentToolTextBuilderArgumentProperties,
-    BaseAgentResourceConfig,
 )
 from uipath.agent.utils.text_tokens import build_string_from_tokens
 
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.react.utils import extract_input_data_from_state
 from uipath_langchain.agent.tools.schema_editing import (
     SchemaModificationError,
     apply_static_value_to_schema,
@@ -38,7 +39,7 @@ class ToolStaticArgument(BaseModel):
     is_sensitive: bool
 
 
-def _resolve_argument_properties_to_static_arguments(
+def _resolve_argument_properties(
     argument_properties: Mapping[str, AgentToolArgumentProperties],
     agent_input: dict[str, Any],
 ) -> dict[str, ToolStaticArgument]:
@@ -92,17 +93,17 @@ def _resolve_argument_properties_to_static_arguments(
 ToolT = TypeVar("ToolT", bound=StructuredTool)
 
 
-def apply_static_argument_properties_to_schema(
+def _apply_static_arguments_to_schema(
     tool: ToolT,
-    agent_input: dict[str, Any],
+    static_args: dict[str, ToolStaticArgument],
 ) -> ToolT:
-    """Modify tool schema based on static argumentProperties.
+    """Modify tool schema based on pre-resolved static arguments.
 
     Args:
         tool: The tool to modify
-        agent_input: The agent input to use for resolving argument variants
+        static_args: The mapping from JSON paths to static arguments
     """
-    if not isinstance(tool, ArgumentPropertiesMixin) or not tool.argument_properties:
+    if not static_args:
         return tool
 
     if isinstance(tool.args_schema, dict):
@@ -112,9 +113,6 @@ def apply_static_argument_properties_to_schema(
     else:
         return tool
 
-    static_args = _resolve_argument_properties_to_static_arguments(
-        tool.argument_properties, agent_input
-    )
     for json_path, static_arg in static_args.items():
         try:
             apply_static_value_to_schema(
@@ -132,33 +130,6 @@ def apply_static_argument_properties_to_schema(
     modified_tool.args_schema = create_model(modified_json_schema)
 
     return modified_tool
-
-
-def resolve_static_args(
-    resource: BaseAgentResourceConfig | ArgumentPropertiesMixin,
-    agent_input: dict[str, Any],
-) -> dict[str, Any]:
-    """Resolves static arguments for a given resource with a given input.
-
-    Args:
-        resource: The agent resource configuration or tool with argument_properties.
-        agent_input: The input arguments passed to the agent.
-
-    Returns:
-        A dictionary of expanded arguments to be used in the tool call.
-    """
-
-    if hasattr(resource, "argument_properties"):
-        # TODO: MCP tools don't inherit from BaseAgentResourceConfig; will need to handle separately
-        static_arguments = _resolve_argument_properties_to_static_arguments(
-            resource.argument_properties, agent_input
-        )
-        return {
-            json_path: static_argument.value
-            for json_path, static_argument in static_arguments.items()
-        }
-    else:
-        return {}  # to be implemented for other resource types in the future
 
 
 def apply_static_args(
@@ -189,28 +160,63 @@ def apply_static_args(
                 # The array is empty. Updating it with jsonpath will leave it empty.
                 # We instead replace the empty array with a single static value
                 array_expr.update_or_create(sanitized_args, [value])
-                return sanitized_args
+                continue
 
         expr.update_or_create(sanitized_args, value)
 
     return sanitized_args
 
 
-def handle_static_args(
-    resource: BaseAgentResourceConfig | ArgumentPropertiesMixin,
-    state: BaseModel,
-    input_args: dict[str, Any],
-) -> dict[str, Any]:
-    """Resolves and applies static arguments for a tool call.
-    Args:
-        resource: The agent resource configuration or tool with argument_properties.
-        state: The current agent state.
-        input_args: The original input arguments to the tool.
-    Returns:
-        A dictionary of input arguments with static arguments applied.
-    """
+class StaticArgsHandler:
+    """Resolves and applies static args to tool schemas and tool calls."""
 
-    static_args = resolve_static_args(resource, dict(state))
-    sanitized_static_args = sanitize_dict_for_serialization(static_args)
-    merged_args = apply_static_args(sanitized_static_args, input_args)
-    return merged_args
+    _sanitized_static_values: dict[str, dict[str, Any]] | None
+    _processed_tools: list[BaseTool] | None
+
+    def __init__(self) -> None:
+        self._sanitized_static_values = None
+        self._processed_tools = None
+
+    def initialize(
+        self,
+        tools: Sequence[BaseTool],
+        state: BaseModel,
+        input_schema: type[BaseModel],
+    ) -> list[BaseTool]:
+        """Resolves static args with the agent input and returns the schema-modified tools. Initializes once."""
+        if self._processed_tools is not None:
+            return self._processed_tools
+
+        agent_input = extract_input_data_from_state(state, input_schema)
+
+        self._processed_tools = []
+        self._sanitized_static_values = {}
+        for tool in tools:
+            if isinstance(tool, ArgumentPropertiesMixin) and tool.argument_properties:
+                static_args = _resolve_argument_properties(
+                    tool.argument_properties, agent_input
+                )
+                self._sanitized_static_values[tool.name] = (
+                    sanitize_dict_for_serialization(
+                        {k: sa.value for k, sa in static_args.items()}
+                    )
+                )
+                self._processed_tools.append(
+                    _apply_static_arguments_to_schema(tool, static_args)
+                    if isinstance(tool, StructuredTool)
+                    else tool
+                )
+            else:
+                self._processed_tools.append(tool)
+
+        return self._processed_tools
+
+    def apply_to_response(self, tool_calls: list[ToolCall]) -> None:
+        """Applies cached static args to tool calls in-place."""
+        if not tool_calls or not self._sanitized_static_values:
+            return
+
+        for tool_call in tool_calls:
+            static_values = self._sanitized_static_values.get(tool_call["name"])
+            if static_values:
+                tool_call["args"] = apply_static_args(static_values, tool_call["args"])

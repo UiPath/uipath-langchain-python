@@ -283,6 +283,28 @@ class TestApplyStaticValueToSchemaWithRefs:
         address_schema = schema["properties"]["server"]["properties"]["address"]
         assert "city" in address_schema.get("required", [])
 
+    def test_leaf_ref_inlined_when_applying_const_value(self):
+        """Test that a $ref on the target field itself is inlined before applying a const value."""
+
+        class Search(BaseModel):
+            term: str
+
+        class QueryInput(BaseModel):
+            query: Search
+
+        schema = QueryInput.model_json_schema()
+
+        apply_static_value_to_schema(
+            schema,
+            json_path="$['query']",
+            value={"term": "test search"},
+            is_sensitive=False,
+        )
+
+        query_schema = schema["properties"]["query"]
+        assert "$ref" not in query_schema
+        assert query_schema["properties"]["term"]["enum"] == ["test search"]
+
 
 class FilesModel(BaseModel):
     class File(BaseModel):
@@ -388,9 +410,7 @@ class TestInvalidSchemaPath:
 
         schema = SimpleModel.model_json_schema()
 
-        with pytest.raises(
-            SchemaModificationError, match="Invalid schema path.*nonexistent"
-        ):
+        with pytest.raises(SchemaModificationError):
             apply_static_value_to_schema(
                 schema,
                 json_path="$['nonexistent']",

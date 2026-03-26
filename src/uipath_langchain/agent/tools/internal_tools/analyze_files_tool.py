@@ -11,9 +11,8 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
-from langchain_core.messages.tool import ToolCall
 from langchain_core.runnables.config import var_child_runnable_config
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
 )
@@ -27,12 +26,9 @@ from uipath_langchain.agent.exceptions import (
 )
 from uipath_langchain.agent.multimodal import FileInfo, build_file_content_block
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
-from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 from uipath_langchain.chat.helpers import (
     append_content_blocks_to_message,
@@ -107,14 +103,6 @@ def create_analyze_file_tool(
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 
-    async def analyze_file_tool_wrapper(
-        tool: BaseTool,
-        call: ToolCall,
-        state: AgentGraphState,
-    ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(resource, state, call["args"])
-        return await job_attachment_wrapper(tool, call, state)
-
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
@@ -129,7 +117,7 @@ def create_analyze_file_tool(
             "output_schema": output_model,
         },
     )
-    tool.set_tool_wrappers(awrapper=analyze_file_tool_wrapper)
+    tool.set_tool_wrappers(awrapper=job_attachment_wrapper)
     return tool
 
 
