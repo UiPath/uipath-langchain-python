@@ -16,6 +16,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.chat.handlers import get_payload_handler
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ..exceptions.licensing import raise_for_provider_http_error
 from ..messages.message_utils import replace_tool_calls
 from ..tools.static_args import StaticArgsHandler
 from .constants import (
@@ -112,7 +113,14 @@ def create_llm_node(
 
         llm = model.bind_tools(static_schema_tools, **binding_kwargs)
 
-        response = await llm.ainvoke(messages)
+        try:
+            response = await llm.ainvoke(messages)
+        except Exception as e:
+            # LLM errors arrive as provider-specific exceptions (OpenAI, Bedrock,
+            # Vertex). Convert to a structured AgentRuntimeError with the HTTP
+            # status code so upstream handlers can categorise (e.g. 403 → licensing).
+            raise_for_provider_http_error(e)
+            raise
         if not isinstance(response, AIMessage):
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
