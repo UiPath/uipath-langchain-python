@@ -9,7 +9,6 @@ Schema building and formatting is in ``schema_context.py``.
 """
 
 import logging
-from functools import lru_cache
 from typing import Any, Sequence
 
 from langchain_core.tools import BaseTool
@@ -18,7 +17,7 @@ from uipath.agent.models.agent import (
     BaseAgentResourceConfig,
     LowCodeAgentDefinition,
 )
-from uipath.platform.entities import Entity
+from uipath.platform.entities import Entity, EntityRouting, QueryRoutingContext
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
 from .models import DataFabricQueryInput
@@ -104,14 +103,45 @@ def get_datafabric_entity_identifiers_from_resources(
     return identifiers
 
 
+def build_routing_context(
+    contexts: list[AgentContextResourceConfig],
+) -> QueryRoutingContext | None:
+    """Build a QueryRoutingContext from Data Fabric context resources.
+
+    Args:
+        contexts: Data Fabric context resource configs.
+
+    Returns:
+        A QueryRoutingContext if any entity routings exist, otherwise None.
+    """
+    routings: list[EntityRouting] = []
+    for context in contexts:
+        if context.entity_set:
+            for item in context.entity_set:
+                routings.append(
+                    EntityRouting(
+                        entity_name=item.name,
+                        folder_id=item.folder_id,
+                    )
+                )
+    if not routings:
+        return None
+    return QueryRoutingContext(entity_routings=routings)
+
+
 # --- Generic Tool Creation ---
 
 _MAX_RECORDS_IN_RESPONSE = 50
 
 
-@lru_cache(maxsize=1)
-def create_datafabric_query_tool() -> BaseTool:
-    """Create the ``query_datafabric`` tool (singleton via lru_cache)."""
+def create_datafabric_query_tool(
+    routing_context: QueryRoutingContext | None = None,
+) -> BaseTool:
+    """Create the ``query_datafabric`` tool.
+
+    Args:
+        routing_context: Optional routing context for multi-folder entity queries.
+    """
 
     async def _query_datafabric(sql_query: str) -> dict[str, Any]:
         from uipath.platform import UiPath
@@ -122,6 +152,7 @@ def create_datafabric_query_tool() -> BaseTool:
         try:
             records = await sdk.entities.query_entity_records_async(
                 sql_query=sql_query,
+                routing_context=routing_context,
             )
             total_count = len(records)
             truncated = total_count > _MAX_RECORDS_IN_RESPONSE
@@ -162,3 +193,20 @@ def create_datafabric_query_tool() -> BaseTool:
         coroutine=_query_datafabric,
         metadata={"tool_type": "datafabric_sql"},
     )
+
+
+def create_datafabric_tools(agent: LowCodeAgentDefinition) -> list[BaseTool]:
+    """Create Data Fabric tools for an agent when Data Fabric context is configured.
+
+    Args:
+        agent: The agent definition.
+
+    Returns:
+        A list containing the generic Data Fabric query tool when at least one
+        Data Fabric context resource is enabled, otherwise an empty list.
+    """
+    datafabric_contexts = get_datafabric_contexts(agent)
+    if not datafabric_contexts:
+        return []
+    routing_context = build_routing_context(datafabric_contexts)
+    return [create_datafabric_query_tool(routing_context=routing_context)]

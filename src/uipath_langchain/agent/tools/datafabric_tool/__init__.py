@@ -11,6 +11,7 @@ from uipath_langchain.agent.react.init_context_registry import (
 
 from .datafabric_tool import (
     create_datafabric_query_tool,
+    create_datafabric_tools,
     fetch_entity_schemas,
     get_datafabric_contexts,
     get_datafabric_entity_identifiers_from_resources,
@@ -18,6 +19,7 @@ from .datafabric_tool import (
 from .schema_context import format_schemas_for_context
 
 __all__ = [
+    "create_datafabric_tools",
     "create_datafabric_query_tool",
     "fetch_entity_schemas",
     "format_schemas_for_context",
