@@ -5,6 +5,7 @@ from langchain_core.language_models import BaseChatModel
 from .anthropic import AnthropicPayloadHandler
 from .base import DefaultModelPayloadHandler, ModelPayloadHandler
 from .bedrock import BedrockConversePayloadHandler, BedrockInvokePayloadHandler
+from .fireworks import FireworksPayloadHandler
 from .gemini import GeminiPayloadHandler
 from .openai import OpenAIPayloadHandler
 
@@ -35,4 +36,6 @@ def get_payload_handler(model: BaseChatModel) -> ModelPayloadHandler:
         return BedrockConversePayloadHandler(model)
     if "ChatBedrock" in model_mro:
         return BedrockInvokePayloadHandler(model)
+    if "ChatFireworks" in model_mro:
+        return FireworksPayloadHandler(model)
     return DefaultModelPayloadHandler(model)

@@ -9,7 +9,7 @@ dependencies = [
     "langchain-openai>=1.0.0",
     "langgraph-checkpoint-sqlite>=3.0.0",
     "python-dotenv>=1.0.1",
-    "uipath-langchain",
+    "uipath-langchain[all]",
     "pydantic>=2.10.6",
     "aiohttp>=3.11.12",
     "typing-extensions>=4.12.2",
