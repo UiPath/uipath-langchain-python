@@ -1212,14 +1212,14 @@ wheels = [
 
 [[package]]
 name = "jsonschema-pydantic-converter"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/17/86/81f6997a2f33a5d7a1ec69f5409e1e17515f0ba9a93b024f3ba6e925b6ad/jsonschema_pydantic_converter-0.3.0.tar.gz", hash = "sha256:501e6f2aed2dbc86f969f3c050afa696b0e39fad3e5f3775e5c44d06747b613a", size = 67059, upload-time = "2026-03-08T22:21:43.138Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/91/b0/8eaae31bb1d1c863404032e48b81842f5abe3b8697be32fb0543a0cce4b1/jsonschema_pydantic_converter-0.4.0.tar.gz", hash = "sha256:abc137b036146ed336f49af9659a76b080a89febc0e836be20025bf3d5f2eaaa", size = 68801, upload-time = "2026-03-25T15:24:29.882Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cf/8d/8c010e18950fbe05f9ba61b234b0befc0484891e9f0f1e8b03793216f4a0/jsonschema_pydantic_converter-0.3.0-py3-none-any.whl", hash = "sha256:6b0be5a33e207a946bf1e4c30d39c0e270129d5645ee41bb4ec911852b273b67", size = 19989, upload-time = "2026-03-08T22:21:41.704Z" },
+    { url = "https://files.pythonhosted.org/packages/72/d8/950e57f3238965778e40c0170f510860533e0abc09afb186d9c1d7d712e8/jsonschema_pydantic_converter-0.4.0-py3-none-any.whl", hash = "sha256:34a07cbc4be2d0bfec2b23518857bb2d7acf189acc3b018d757ac74f76950aa2", size = 20186, upload-time = "2026-03-25T15:24:28.69Z" },
 ]
 
 [[package]]
@@ -3333,7 +3333,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.9.7"
+version = "0.9.8"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -3387,7 +3387,7 @@ requires-dist = [
     { name = "google-generativeai", marker = "extra == 'vertex'", specifier = ">=0.8.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
-    { name = "jsonschema-pydantic-converter", specifier = ">=0.3.0" },
+    { name = "jsonschema-pydantic-converter", specifier = ">=0.4.0" },
     { name = "langchain", specifier = ">=1.0.0,<2.0.0" },
     { name = "langchain-aws", marker = "extra == 'bedrock'", specifier = ">=0.2.35" },
     { name = "langchain-core", specifier = ">=1.2.11,<2.0.0" },
