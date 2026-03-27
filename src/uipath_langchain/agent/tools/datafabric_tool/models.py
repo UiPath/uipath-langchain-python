@@ -83,6 +83,18 @@ class SQLContext(BaseModel):
 
 
 class DataFabricQueryInput(BaseModel):
+    """Input schema for natural language queries against Data Fabric entities."""
+
+    user_query: str = Field(
+        ...,
+        description=(
+            "Natural language question about the data in Data Fabric entities. "
+            "The tool will translate this to SQL, execute, and return an answer."
+        ),
+    )
+
+
+class DataFabricExecuteSqlInput(BaseModel):
     """Input schema for SQL queries against Data Fabric entities."""
 
     sql_query: str = Field(
