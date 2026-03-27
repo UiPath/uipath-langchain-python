@@ -11,6 +11,8 @@ from uipath.agent.models.agent import (
     AgentEscalationRecipient,
     AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
+    ArgumentEmailRecipient,
+    ArgumentGroupNameRecipient,
     AssetRecipient,
     StandardRecipient,
 )
@@ -46,6 +48,7 @@ class EscalationAction(str, Enum):
 
 async def resolve_recipient_value(
     recipient: AgentEscalationRecipient,
+    input_args: dict[str, Any] | None = None,
 ) -> TaskRecipient | None:
     """Resolve recipient value based on recipient type."""
     if isinstance(recipient, AssetRecipient):
@@ -56,6 +59,18 @@ async def resolve_recipient_value(
         elif recipient.type == AgentEscalationRecipientType.ASSET_GROUP_NAME:
             type = TaskRecipientType.GROUP_NAME
         return TaskRecipient(value=value, type=type, displayName=value)
+
+    if isinstance(recipient, ArgumentEmailRecipient):
+        value = (input_args or {}).get(recipient.argument_name)
+        return TaskRecipient(
+            value=value, type=TaskRecipientType.EMAIL, displayName=value
+        )
+
+    if isinstance(recipient, ArgumentGroupNameRecipient):
+        value = (input_args or {}).get(recipient.argument_name)
+        return TaskRecipient(
+            value=value, type=TaskRecipientType.GROUP_NAME, displayName=value
+        )
 
     if isinstance(recipient, StandardRecipient):
         type = TaskRecipientType(recipient.type)
@@ -157,7 +172,7 @@ def create_escalation_tool(
 
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
         recipient: TaskRecipient | None = (
-            await resolve_recipient_value(channel.recipients[0])
+            await resolve_recipient_value(channel.recipients[0], input_args=kwargs)
             if channel.recipients
             else None
         )
