@@ -1763,7 +1763,7 @@ class TestEscalateAction:
 
         await create_task_fn(state)
 
-        mock_resolve_recipient.assert_called_once_with(recipient)
+        mock_resolve_recipient.assert_called_once_with(recipient, input_args={})
         call_kwargs = mock_client.tasks.create_async.call_args[1]
         assert call_kwargs["recipient"] == expected_value
 

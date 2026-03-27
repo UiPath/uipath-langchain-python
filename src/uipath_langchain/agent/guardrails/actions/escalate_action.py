@@ -115,10 +115,20 @@ class EscalateAction(GuardrailAction):
                 return {}
 
             # Lazy import to avoid circular dependency with escalation_tool
+            from ...react.types import AgentGraphState
             from ...tools.escalation_tool import resolve_recipient_value
+            from ...tools.utils import sanitize_dict_for_serialization
 
-            # Resolve recipient value (handles both StandardRecipient and AssetRecipient)
-            task_recipient = await resolve_recipient_value(self.recipient)
+            internal_fields = set(AgentGraphState.model_fields.keys())
+            state_dict = sanitize_dict_for_serialization(dict(state))
+            input_args = {
+                k: v for k, v in state_dict.items() if k not in internal_fields
+            }
+
+            # Resolve recipient value (handles StandardRecipient, AssetRecipient, and argument-based recipients)
+            task_recipient = await resolve_recipient_value(
+                self.recipient, input_args=input_args
+            )
 
             if isinstance(self.recipient, StandardRecipient):
                 metadata["escalation_data"]["assigned_to"] = (
