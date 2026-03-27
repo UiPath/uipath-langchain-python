@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.documents import Document
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field, create_model
@@ -133,13 +134,16 @@ def is_static_query(resource: AgentContextResourceConfig) -> bool:
 
 def create_context_tool(
     resource: AgentContextResourceConfig,
+    llm: BaseChatModel | None = None,
 ) -> StructuredTool | BaseTool:
     assert resource.context_type is not None
 
     if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
+        if llm is None:
+            raise ValueError("Data Fabric entity set tools require an LLM instance")
         from .datafabric_tool import create_datafabric_query_tool
 
-        return create_datafabric_query_tool()
+        return create_datafabric_query_tool(resource, llm)
 
     assert resource.settings is not None
     tool_name = sanitize_tool_name(resource.name)
