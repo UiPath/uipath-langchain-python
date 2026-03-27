@@ -1,0 +1,34 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	translate_email_language(translate_email_language)
+	extract_order_id(extract_order_id)
+	get_order_details(get_order_details)
+	auto_reject(auto_reject)
+	categorize_email(categorize_email)
+	analyze_email_sentiment(analyze_email_sentiment)
+	get_answer_to_query(get_answer_to_query)
+	human_review(human_review)
+	reply_to_email(reply_to_email)
+	step_end(step_end)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> translate_email_language;
+	analyze_email_sentiment --> get_answer_to_query;
+	auto_reject --> step_end;
+	categorize_email --> analyze_email_sentiment;
+	extract_order_id -. &nbsp;order_id_missing&nbsp; .-> auto_reject;
+	extract_order_id -. &nbsp;order_id_available&nbsp; .-> get_order_details;
+	get_answer_to_query -. &nbsp;very_negative_sentiment&nbsp; .-> human_review;
+	get_answer_to_query -. &nbsp;agent_can_proceed_sentiment&nbsp; .-> reply_to_email;
+	get_order_details --> categorize_email;
+	human_review --> reply_to_email;
+	reply_to_email --> step_end;
+	translate_email_language --> extract_order_id;
+	step_end --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
