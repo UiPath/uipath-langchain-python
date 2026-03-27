@@ -8,6 +8,7 @@ from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
+from typing_extensions import deprecated
 from uipath.agent.models.agent import (
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
@@ -130,6 +131,33 @@ def _apply_static_arguments_to_schema(
     modified_tool.args_schema = create_model(modified_json_schema)
 
     return modified_tool
+
+
+@deprecated(
+    "Use StaticArgsHandler to modify LLM tool calls directly."
+    "Applying static args in the tool node conflicts with guardrails"
+)
+def resolve_static_args(
+    tool: ArgumentPropertiesMixin,
+    agent_input: dict[str, Any],
+) -> dict[str, Any]:
+    """Resolves static arguments for a given resource with a given input.
+
+    Args:
+        tool: The tool with argument_properties.
+        agent_input: The input arguments passed to the agent.
+
+    Returns:
+        A dictionary of expanded arguments to be used in the tool call.
+    """
+
+    static_arguments = _resolve_argument_properties(
+        tool.argument_properties, agent_input
+    )
+    return {
+        json_path: static_argument.value
+        for json_path, static_argument in static_arguments.items()
+    }
 
 
 def apply_static_args(
