@@ -1,5 +1,6 @@
 """Escalation tool creation for Action Center integration."""
 
+import logging
 from enum import Enum
 from typing import Any, Literal
 
@@ -14,6 +15,7 @@ from uipath.agent.models.agent import (
     AssetRecipient,
     StandardRecipient,
 )
+from uipath.agent.utils.text_tokens import safe_get_nested
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
@@ -39,6 +41,27 @@ from .utils import (
     sanitize_tool_name,
 )
 
+try:
+    from uipath.agent.models.agent import (  # type: ignore[attr-defined]
+        ArgumentEmailRecipient,
+        ArgumentGroupNameRecipient,
+    )
+except ImportError:
+    # Added in uipath>=2.10.43; define stubs for older installed versions
+
+    class ArgumentEmailRecipient:  # type: ignore[no-redef]
+        """Stub for ArgumentEmailRecipient (requires uipath>=2.10.43)."""
+
+        pass
+
+    class ArgumentGroupNameRecipient:  # type: ignore[no-redef]
+        """Stub for ArgumentGroupNameRecipient (requires uipath>=2.10.43)."""
+
+        pass
+
+
+logger = logging.getLogger(__name__)
+
 
 class EscalationAction(str, Enum):
     """Actions that can be taken after an escalation completes."""
@@ -49,6 +72,7 @@ class EscalationAction(str, Enum):
 
 async def resolve_recipient_value(
     recipient: AgentEscalationRecipient,
+    input_args: dict[str, Any] | None = None,
 ) -> TaskRecipient | None:
     """Resolve recipient value based on recipient type."""
     if isinstance(recipient, AssetRecipient):
@@ -59,6 +83,26 @@ async def resolve_recipient_value(
         elif recipient.type == AgentEscalationRecipientType.ASSET_GROUP_NAME:
             type = TaskRecipientType.GROUP_NAME
         return TaskRecipient(value=value, type=type, displayName=value)
+
+    if isinstance(recipient, ArgumentEmailRecipient):
+        value = safe_get_nested(input_args or {}, recipient.argument_name)
+        if not value:
+            raise ValueError(
+                f"Argument '{recipient.argument_name}' has no value in agent input."
+            )
+        return TaskRecipient(
+            value=value, type=TaskRecipientType.EMAIL, displayName=value
+        )
+
+    if isinstance(recipient, ArgumentGroupNameRecipient):
+        value = safe_get_nested(input_args or {}, recipient.argument_name)
+        if not value:
+            raise ValueError(
+                f"Argument '{recipient.argument_name}' has no value in agent input."
+            )
+        return TaskRecipient(
+            value=value, type=TaskRecipientType.GROUP_NAME, displayName=value
+        )
 
     if isinstance(recipient, StandardRecipient):
         type = TaskRecipientType(recipient.type)
@@ -159,8 +203,11 @@ def create_escalation_tool(
     _bts_context: dict[str, Any] = {}
 
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
+        agent_input: dict[str, Any] = (
+            tool.metadata.get("agent_input") if tool.metadata else None
+        ) or {}
         recipient: TaskRecipient | None = (
-            await resolve_recipient_value(channel.recipients[0])
+            await resolve_recipient_value(channel.recipients[0], input_args=agent_input)
             if channel.recipients
             else None
         )
@@ -252,11 +299,13 @@ def create_escalation_tool(
         if tool.metadata is None:
             raise RuntimeError("Tool metadata is required for task_title resolution")
 
+        state_dict = sanitize_dict_for_serialization(dict(state))
         tool.metadata["task_title"] = resolve_task_title(
             channel.task_title,
-            sanitize_dict_for_serialization(dict(state)),
+            state_dict,
             default_title="Escalation Task",
         )
+        tool.metadata["agent_input"] = state_dict
 
         tool.metadata["_call_id"] = call.get("id")
         tool.metadata["_call_args"] = dict(call.get("args", {}))
