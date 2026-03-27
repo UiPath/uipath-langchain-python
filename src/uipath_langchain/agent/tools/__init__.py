@@ -1,6 +1,12 @@
 """Tool creation and management for LowCode agents."""
 
 from .context_tool import create_context_tool
+from .datafabric_tool import (
+    fetch_entity_schemas,
+    format_schemas_for_context,
+    get_datafabric_contexts,
+    get_datafabric_entity_identifiers_from_resources,
+)
 from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
 from .integration_tool import create_integration_tool
@@ -22,6 +28,10 @@ __all__ = [
     "create_escalation_tool",
     "create_ixp_extraction_tool",
     "create_ixp_escalation_tool",
+    "fetch_entity_schemas",
+    "format_schemas_for_context",
+    "get_datafabric_contexts",
+    "get_datafabric_entity_identifiers_from_resources",
     "UiPathToolNode",
     "ToolWrapperMixin",
 ]

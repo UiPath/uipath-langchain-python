@@ -32,9 +32,19 @@ logger = getLogger(__name__)
 async def create_tools_from_resources(
     agent: LowCodeAgentDefinition, llm: BaseChatModel
 ) -> list[BaseTool]:
+    """Create tools from agent resources including Data Fabric tools.
+
+    Args:
+        agent: The agent definition.
+        llm: The language model for tool creation.
+
+    Returns:
+        List of BaseTool instances.
+    """
     tools: list[BaseTool] = []
 
     logger.info("Creating tools for agent '%s' from resources", agent.name)
+
     for resource in agent.resources:
         if not resource.is_enabled:
             logger.info(
@@ -52,8 +62,8 @@ async def create_tools_from_resources(
         tool = await _build_tool_for_resource(resource, llm)
         if tool is not None:
             if isinstance(tool, list):
-                tools.extend(tool)
-            else:
+                tools.extend(t for t in tool if t not in tools)
+            elif tool not in tools:
                 tools.append(tool)
 
                 if agent.is_conversational:
