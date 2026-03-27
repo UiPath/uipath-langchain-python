@@ -37,7 +37,7 @@ class PIIDetectionEntityType(str, Enum):
 
 
 class GuardrailExecutionStage(str, Enum):
-    """Execution stage for deterministic guardrails."""
+    """Execution stage for guardrails."""
 
     PRE = "pre"  # Pre-execution only
     POST = "post"  # Post-execution only
