@@ -6,9 +6,7 @@ and retries on errors — all within a single outer tool call.
 """
 
 import asyncio
-import json
 import logging
-from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from langchain_core.language_models import BaseChatModel
@@ -31,25 +29,6 @@ from . import prompt_builder
 from .models import DataFabricExecuteSqlInput
 
 logger = logging.getLogger(__name__)
-
-_DEBUG_FILE = "/tmp/df_subgraph_debug.txt"
-
-
-def _debug_log(section: str, data: Any) -> None:
-    """Append debug info to /tmp/df_subgraph_debug.txt."""
-    try:
-        timestamp = datetime.now(timezone.utc).isoformat()
-        with open(_DEBUG_FILE, "a") as f:
-            f.write(f"\n{'=' * 80}\n")
-            f.write(f"[{timestamp}] {section}\n")
-            f.write(f"{'=' * 80}\n")
-            if isinstance(data, str):
-                f.write(data)
-            else:
-                f.write(json.dumps(data, indent=2, default=str))
-            f.write("\n")
-    except Exception:
-        pass
 
 
 # --- State ---
@@ -115,20 +94,24 @@ def _create_execute_sql_tool(
 def build_inner_system_message(
     entities: list[Entity],
     resource_description: str = "",
+    base_system_prompt: str = "",
 ) -> SystemMessage:
     """Build the system message for the inner sub-graph LLM.
 
     Args:
         entities: List of Entity objects whose schemas should be included.
         resource_description: Optional description of the resource/entity set.
+        base_system_prompt: Optional system prompt from the outer agent.
     """
     return SystemMessage(
-        content=prompt_builder.build(entities, resource_description)
+        content=prompt_builder.build(
+            entities, resource_description, base_system_prompt
+        )
     )
 
 
-# --- Sub-graph builder ---
-class DataFabricGraphBuilder:
+# --- Sub-graph ---
+class DataFabricGraph:
     """Builds and compiles the inner ReAct sub-graph.
 
     Each graph node is a method — no closures inside closures.
@@ -139,36 +122,23 @@ class DataFabricGraphBuilder:
         llm: BaseChatModel,
         entities: list[Entity],
         routing_context: QueryRoutingOverrideContext,
-        max_iterations: int = 5,
+        max_iterations: int = 25,
         resource_description: str = "",
+        base_system_prompt: str = "",
     ) -> None:
         self._max_iterations = max_iterations
         self._execute_sql_tool = _create_execute_sql_tool(routing_context, entities)
-        self._system_message = build_inner_system_message(entities, resource_description)
+        self._system_message = build_inner_system_message(
+            entities, resource_description, base_system_prompt
+        )
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
             [self._execute_sql_tool]
         )
-        _debug_log("INIT — Tool description", {
-            "tool_name": self._execute_sql_tool.name,
-            "tool_description": self._execute_sql_tool.description,
-            "tool_args_schema": self._execute_sql_tool.args_schema.model_json_schema()
-            if self._execute_sql_tool.args_schema else None,
-        })
-        _debug_log("INIT — System message", self._system_message.content)
 
     async def llm_node(self, state: DataFabricSubgraphState) -> dict[str, Any]:
         """Invoke the inner LLM with the current message history."""
         messages = [self._system_message] + list(state.messages)
-        _debug_log(f"LLM_NODE — Input (iteration={state.iteration_count})", [
-            {"role": type(m).__name__, "content": str(m.content),
-             **({"tool_calls": m.tool_calls} if hasattr(m, "tool_calls") and m.tool_calls else {})}
-            for m in messages
-        ])
         response = await self._inner_llm.ainvoke(messages)
-        _debug_log("LLM_NODE — Response", {
-            "content": str(response.content) if response.content else None,
-            "tool_calls": response.tool_calls if hasattr(response, "tool_calls") else None,
-        })
         return {"messages": [response]}
 
     async def tool_node(self, state: DataFabricSubgraphState) -> dict[str, Any]:
@@ -188,10 +158,6 @@ class DataFabricGraphBuilder:
     async def _execute_tool_call(self, tool_call: dict[str, Any]) -> ToolMessage:
         """Execute a single tool call and wrap the result."""
         args = tool_call.get("args", {})
-        _debug_log("TOOL_CALL — Input", {
-            "tool_call_id": tool_call.get("id"),
-            "args": args,
-        })
         try:
             result = await self._execute_sql_tool.ainvoke(args)
         except ValueError as e:
@@ -201,7 +167,6 @@ class DataFabricGraphBuilder:
                 "error": str(e),
                 "sql_query": args.get("sql_query", ""),
             }
-        _debug_log("TOOL_CALL — Result", result)
         return ToolMessage(
             content=str(result),
             tool_call_id=tool_call["id"],
@@ -247,28 +212,3 @@ class DataFabricGraphBuilder:
         graph.add_edge("termination", END)
 
         return graph.compile()
-
-
-def create_datafabric_subgraph(
-    llm: BaseChatModel,
-    entities: list[Entity],
-    routing_context: QueryRoutingOverrideContext,
-    max_iterations: int = 5,
-    resource_description: str = "",
-) -> CompiledStateGraph:
-    """Create a compiled LangGraph sub-graph for Data Fabric SQL execution.
-
-    Args:
-        llm: The chat model to use inside the sub-graph.
-        entities: Entity objects whose schemas should be provided as context.
-        routing_context: Routing context forwarded to the SDK query.
-        max_iterations: Maximum tool-call iterations before forced termination.
-        resource_description: Optional description of the resource/entity set.
-
-    Returns:
-        A compiled ``StateGraph`` ready to be invoked.
-    """
-    builder = DataFabricGraphBuilder(
-        llm, entities, routing_context, max_iterations, resource_description
-    )
-    return builder.compile()

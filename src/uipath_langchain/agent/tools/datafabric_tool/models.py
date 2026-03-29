@@ -71,8 +71,9 @@ class EntitySQLContext(BaseModel):
 class SQLContext(BaseModel):
     """Top-level container for the full schema context injected into the system prompt."""
 
+    base_system_prompt: str | None = None
     resource_description: str | None = None
-    system_prompt: str | None = None
+    sql_expert_system_prompt: str | None = None
     constraints: str | None = None
     entity_contexts: list[EntitySQLContext]
 

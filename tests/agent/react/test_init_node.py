@@ -16,7 +16,6 @@ class MockState(BaseModel):
     messages: list[Any] = []
 
 
-@pytest.mark.asyncio
 class TestCreateInitNodeConversational:
     """Test cases for create_init_node with is_conversational=True."""
 
@@ -44,7 +43,7 @@ class TestCreateInitNodeConversational:
         """Fixture for state with no messages."""
         return MockState(messages=[])
 
-    async def test_conversational_empty_state_returns_overwrite(
+    def test_conversational_empty_state_returns_overwrite(
         self, system_message, user_message
     ):
         """Conversational mode with empty state should use Overwrite with new messages."""
@@ -54,7 +53,7 @@ class TestCreateInitNodeConversational:
         )
         state = MockState(messages=[])
 
-        result = await init_node(state)
+        result = init_node(state)
 
         assert "messages" in result
         assert isinstance(result["messages"], Overwrite)
@@ -64,7 +63,7 @@ class TestCreateInitNodeConversational:
         assert overwrite_value[0] == system_message
         assert overwrite_value[1] == user_message
 
-    async def test_conversational_resume_replaces_system_message(
+    def test_conversational_resume_replaces_system_message(
         self, new_system_message, user_message
     ):
         """Conversational mode should replace old SystemMessage when resuming."""
@@ -80,7 +79,7 @@ class TestCreateInitNodeConversational:
             new_messages, input_schema=None, is_conversational=True
         )
 
-        result = await init_node(state)
+        result = init_node(state)
 
         assert isinstance(result["messages"], Overwrite)
         overwrite_value = result["messages"].value
@@ -90,7 +89,7 @@ class TestCreateInitNodeConversational:
         assert overwrite_value[1] == user_message
         assert overwrite_value[2] == old_human_message
 
-    async def test_conversational_resume_preserves_non_system_first_message(
+    def test_conversational_resume_preserves_non_system_first_message(
         self, system_message, user_message
     ):
         """Conversational mode should preserve all messages if first is not SystemMessage."""
@@ -103,7 +102,7 @@ class TestCreateInitNodeConversational:
             new_messages, input_schema=None, is_conversational=True
         )
 
-        result = await init_node(state)
+        result = init_node(state)
 
         assert isinstance(result["messages"], Overwrite)
         overwrite_value = result["messages"].value
@@ -113,10 +112,10 @@ class TestCreateInitNodeConversational:
         assert overwrite_value[1] == user_message
         assert overwrite_value[2] == existing_human_message
 
-    async def test_conversational_with_callable_messages(self):
+    def test_conversational_with_callable_messages(self):
         """Conversational mode should work with callable message generators."""
 
-        def message_generator(state, **kwargs):
+        def message_generator(state):
             return [
                 SystemMessage(
                     content=f"System for state with {len(state.messages)} messages"
@@ -129,7 +128,7 @@ class TestCreateInitNodeConversational:
             message_generator, input_schema=None, is_conversational=True
         )
 
-        result = await init_node(state)
+        result = init_node(state)
 
         assert isinstance(result["messages"], Overwrite)
         overwrite_value = result["messages"].value
@@ -137,7 +136,6 @@ class TestCreateInitNodeConversational:
         assert "System for state with 0 messages" in overwrite_value[0].content
 
 
-@pytest.mark.asyncio
 class TestCreateInitNodeNonConversational:
     """Test cases for create_init_node with is_conversational=False (default)."""
 
@@ -151,7 +149,7 @@ class TestCreateInitNodeNonConversational:
         """Fixture for a user message."""
         return HumanMessage(content="Hello")
 
-    async def test_non_conversational_returns_list_not_overwrite(
+    def test_non_conversational_returns_list_not_overwrite(
         self, system_message, user_message
     ):
         """Non-conversational mode should return list, not Overwrite."""
@@ -161,7 +159,7 @@ class TestCreateInitNodeNonConversational:
         )
         state = MockState(messages=[])
 
-        result = await init_node(state)
+        result = init_node(state)
 
         assert "messages" in result
         # Non-conversational mode returns a list (for add_messages reducer to append)
@@ -169,25 +167,22 @@ class TestCreateInitNodeNonConversational:
         assert not isinstance(result["messages"], Overwrite)
         assert len(result["messages"]) == 2
 
-    async def test_non_conversational_default_behavior(
-        self, system_message, user_message
-    ):
+    def test_non_conversational_default_behavior(self, system_message, user_message):
         """Default behavior (no is_conversational param) should be non-conversational."""
         messages = [system_message, user_message]
         init_node = create_init_node(messages, input_schema=None)
         state = MockState(messages=[])
 
-        result = await init_node(state)
+        result = init_node(state)
 
         assert isinstance(result["messages"], list)
         assert not isinstance(result["messages"], Overwrite)
 
 
-@pytest.mark.asyncio
 class TestCreateInitNodeInnerState:
     """Test cases for init node inner_state initialization."""
 
-    async def test_returns_inner_state_with_job_attachments(self):
+    def test_returns_inner_state_with_job_attachments(self):
         """Init node should return inner_state with job_attachments dict."""
         messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content="System"),
@@ -198,13 +193,13 @@ class TestCreateInitNodeInnerState:
         )
         state = MockState(messages=[])
 
-        result = await init_node(state)
+        result = init_node(state)
 
         assert "inner_state" in result
         assert "job_attachments" in result["inner_state"]
         assert isinstance(result["inner_state"]["job_attachments"], dict)
 
-    async def test_inner_state_present_in_conversational_mode(self):
+    def test_inner_state_present_in_conversational_mode(self):
         """Inner state should also be present in conversational mode."""
         messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content="System"),
@@ -215,12 +210,12 @@ class TestCreateInitNodeInnerState:
         )
         state = MockState(messages=[])
 
-        result = await init_node(state)
+        result = init_node(state)
 
         assert "inner_state" in result
         assert "job_attachments" in result["inner_state"]
 
-    async def test_conversational_merges_attachments_from_preserved_messages(self):
+    def test_conversational_merges_attachments_from_preserved_messages(self):
         """Conversational mode should merge attachments from preserved message metadata."""
         attachment_id = "a940a416-b97b-4146-3089-08de5f4d0a87"
         old_system_message = SystemMessage(content="Old system")
@@ -245,14 +240,14 @@ class TestCreateInitNodeInnerState:
             new_messages, input_schema=None, is_conversational=True
         )
 
-        result = await init_node(state)
+        result = init_node(state)
 
         job_attachments = result["inner_state"]["job_attachments"]
         assert attachment_id in job_attachments
         assert job_attachments[attachment_id].full_name == "document.pdf"
         assert job_attachments[attachment_id].mime_type == "application/pdf"
 
-    async def test_initial_message_count_in_non_conversational_mode(self):
+    def test_initial_message_count_in_non_conversational_mode(self):
         """Non-conversational mode should set initial_message_count."""
         messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content="System"),
@@ -263,13 +258,13 @@ class TestCreateInitNodeInnerState:
         )
         state = MockState(messages=[])
 
-        result = await init_node(state)
+        result = init_node(state)
 
         assert "initial_message_count" in result["inner_state"]
         # In non-conversational mode, messages is a list
         assert result["inner_state"]["initial_message_count"] == 2
 
-    async def test_initial_message_count_in_conversational_mode(self):
+    def test_initial_message_count_in_conversational_mode(self):
         """Conversational mode should set initial_message_count based on Overwrite."""
         messages: list[SystemMessage | HumanMessage] = [
             SystemMessage(content="System"),
@@ -281,7 +276,7 @@ class TestCreateInitNodeInnerState:
         )
         state = MockState(messages=[])
 
-        result = await init_node(state)
+        result = init_node(state)
 
         assert "initial_message_count" in result["inner_state"]
         assert result["inner_state"]["initial_message_count"] == 3

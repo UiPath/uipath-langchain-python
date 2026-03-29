@@ -14,8 +14,10 @@ from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
     AgentContextType,
+    AgentMessageRole,
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
+    LowCodeAgentDefinition,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
@@ -132,9 +134,21 @@ def is_static_query(resource: AgentContextResourceConfig) -> bool:
     return resource.settings.query.variant.lower() == "static"
 
 
+def _extract_system_prompt(agent: LowCodeAgentDefinition | None) -> str:
+    """Extract system prompt from agent definition messages."""
+    if agent is None:
+        return ""
+    return "\n\n".join(
+        msg.content
+        for msg in agent.messages
+        if msg.role == AgentMessageRole.SYSTEM and msg.content
+    )
+
+
 def create_context_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel | None = None,
+    agent: LowCodeAgentDefinition | None = None,
 ) -> StructuredTool | BaseTool | None:
     assert resource.context_type is not None
 
@@ -142,8 +156,13 @@ def create_context_tool(
         if llm is None:
             raise ValueError("Data Fabric entity set tools require an LLM instance")
         from .datafabric_tool import create_datafabric_query_tool
+        from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
 
-        return create_datafabric_query_tool(resource, llm)
+        return create_datafabric_query_tool(
+            resource,
+            llm,
+            agent_config={BASE_SYSTEM_PROMPT: _extract_system_prompt(agent)},
+        )
 
     elif resource.context_type == AgentContextType.INDEX:
         assert resource.settings is not None

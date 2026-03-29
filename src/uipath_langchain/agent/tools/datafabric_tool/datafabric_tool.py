@@ -28,6 +28,7 @@ from .models import DataFabricQueryInput
 
 logger = logging.getLogger(__name__)
 
+BASE_SYSTEM_PROMPT = "base_system_prompt"
 
 class NLQueryHandler:
     """Manages lazy initialization and invocation of the Data Fabric sub-graph.
@@ -42,11 +43,13 @@ class NLQueryHandler:
         routing_context: QueryRoutingOverrideContext,
         llm: BaseChatModel,
         resource_description: str = "",
+        base_system_prompt: str = "",
     ) -> None:
         self._entity_identifiers = entity_identifiers
         self._routing_context = routing_context
         self._llm = llm
         self._resource_description = resource_description
+        self._base_system_prompt = base_system_prompt
         self._compiled: CompiledStateGraph | None = None
         self._init_lock = asyncio.Lock()
 
@@ -63,7 +66,7 @@ class NLQueryHandler:
             if self._compiled is not None:
                 return self._compiled
 
-            from .datafabric_subgraph import create_datafabric_subgraph
+            from .datafabric_subgraph import DataFabricGraph
 
             entities = await fetch_entity_schemas(self._entity_identifiers)
             if not entities:
@@ -71,12 +74,14 @@ class NLQueryHandler:
                     "No Data Fabric entity schemas could be fetched. "
                     "Check entity identifiers and permissions."
                 )
-            self._compiled = create_datafabric_subgraph(
+            datafabric_graph = DataFabricGraph(
                 llm=self._llm,
                 entities=entities,
                 routing_context=self._routing_context,
                 resource_description=self._resource_description,
+                base_system_prompt=self._base_system_prompt,
             )
+            self._compiled = datafabric_graph.compile()
             return self._compiled
 
     async def __call__(self, user_query: str) -> str:
@@ -86,19 +91,6 @@ class NLQueryHandler:
         result_state = await compiled_graph.ainvoke(
             {"messages": [HumanMessage(content=user_query)]}
         )
-
-        # Debug: log full message history
-        from .datafabric_subgraph import _debug_log
-
-        _debug_log("FINAL — All messages", [
-            {
-                "role": type(m).__name__,
-                "content": str(m.content) if m.content else None,
-                **({"tool_calls": m.tool_calls} if hasattr(m, "tool_calls") and m.tool_calls else {}),
-            }
-            for m in result_state["messages"]
-        ])
-
         for msg in reversed(result_state["messages"]):
             if isinstance(msg, AIMessage) and msg.content:
                 return msg.content
@@ -150,18 +142,23 @@ def _build_routing_context(
 def create_datafabric_query_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel,
+    agent_config: dict[str, str] | None = None,
 ) -> BaseTool:
     """Create the ``query_datafabric`` agentic tool.
 
     Args:
         resource: The Data Fabric context resource configuration.
         llm: The language model for the inner SQL generation loop.
+        agent_config: Optional dict with agent-level config.
+            Key ``base_system_prompt`` carries the outer agent's system prompt.
     """
+    config = agent_config or {}
     handler = NLQueryHandler(
         entity_identifiers=resource.datafabric_entity_identifiers,
         routing_context=_build_routing_context(resource),
         llm=llm,
         resource_description=resource.description or "",
+        base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
     )
     return BaseUiPathStructuredTool(
         name="query_datafabric",

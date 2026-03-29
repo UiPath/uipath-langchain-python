@@ -1,10 +1,9 @@
 from enum import StrEnum
-from typing import Annotated, Any, Hashable, Literal, Optional, Sequence
+from typing import Annotated, Any, Hashable, Literal, Optional
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
-from uipath.agent.models.agent import BaseAgentResourceConfig
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.platform.attachments import Attachment
 
@@ -14,8 +13,6 @@ from uipath_langchain.agent.react.reducers import (
 )
 
 FLOW_CONTROL_TOOLS = [END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name]
-
-AgentResources = Sequence[BaseAgentResourceConfig]
 
 
 class InnerAgentGraphState(BaseModel):

@@ -35,9 +35,9 @@ def _load_sql_constraints() -> str:
 
 
 @lru_cache(maxsize=1)
-def _load_system_prompt() -> str:
-    """Load SQL generation strategy from system_prompt.txt."""
-    prompt_path = _PROMPTS_DIR / "system_prompt.txt"
+def _load_sql_expert_system_prompt() -> str:
+    """Load SQL generation strategy from sql_expert_system_prompt.txt."""
+    prompt_path = _PROMPTS_DIR / "sql_expert_system_prompt.txt"
     try:
         return prompt_path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -125,11 +125,13 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
 def build_sql_context(
     entities: list[Entity],
     resource_description: str = "",
+    base_system_prompt: str = "",
 ) -> SQLContext:
     """Build the full SQL context from entities, prompts, and constraints."""
     return SQLContext(
+        base_system_prompt=base_system_prompt or None,
         resource_description=resource_description or None,
-        system_prompt=_load_system_prompt(),
+        sql_expert_system_prompt=_load_sql_expert_system_prompt(),
         constraints=_load_sql_constraints(),
         entity_contexts=[build_entity_context(e) for e in entities],
     )
@@ -142,10 +144,16 @@ def format_sql_context(ctx: SQLContext) -> str:
     """Format a SQLContext as text for system prompt injection."""
     lines: list[str] = []
 
-    if ctx.system_prompt:
+    if ctx.base_system_prompt:
+        lines.append("## Agent Instructions")
+        lines.append("")
+        lines.append(ctx.base_system_prompt)
+        lines.append("")
+
+    if ctx.sql_expert_system_prompt:
         lines.append("## SQL Query Generation Guidelines")
         lines.append("")
-        lines.append(ctx.system_prompt)
+        lines.append(ctx.sql_expert_system_prompt)
         lines.append("")
 
     if ctx.constraints:
@@ -197,15 +205,17 @@ def format_sql_context(ctx: SQLContext) -> str:
 def build(
     entities: list[Entity],
     resource_description: str = "",
+    base_system_prompt: str = "",
 ) -> str:
     """Build the full SQL prompt text for the inner sub-graph LLM.
 
-    Combines resource description, SQL guidelines, constraints,
-    entity schemas, and query patterns into a single prompt string.
+    Combines agent system prompt, resource description, SQL guidelines,
+    constraints, entity schemas, and query patterns into a single prompt string.
 
     Args:
         entities: List of Entity objects with schema information.
         resource_description: Optional description of the resource/entity set.
+        base_system_prompt: Optional system prompt from the outer agent.
 
     Returns:
         Formatted prompt string for the inner LLM system message.
@@ -213,5 +223,5 @@ def build(
     if not entities:
         return ""
 
-    ctx = build_sql_context(entities, resource_description)
+    ctx = build_sql_context(entities, resource_description, base_system_prompt)
     return format_sql_context(ctx)
