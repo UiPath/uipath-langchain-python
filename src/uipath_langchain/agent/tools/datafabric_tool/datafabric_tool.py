@@ -3,29 +3,25 @@
 This module provides:
 1. An agentic ``query_datafabric`` tool with inner LLM sub-graph
 2. Entity schema fetching from the Data Fabric API
-3. Helpers to extract entity identifiers from agent definitions
 
 The tool accepts natural language queries, runs an inner LangGraph
 sub-graph for SQL generation + execution + self-correction, and
 returns a natural language answer.
 
-Schema building and formatting is in ``schema_context.py``.
+SQL prompt building is in ``sql_prompt_builder.py``.
 Sub-graph definition is in ``datafabric_subgraph.py``.
 """
 
 import asyncio
 import logging
-from typing import Any, Sequence
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
-from uipath.agent.models.agent import (
-    AgentContextResourceConfig,
-    BaseAgentResourceConfig,
-    LowCodeAgentDefinition,
-)
-from uipath.platform.entities import Entity
+from langgraph.graph.state import CompiledStateGraph
+from uipath.agent.models.agent import AgentContextResourceConfig
+from uipath.platform.entities import Entity, EntityRouting, QueryRoutingOverrideContext
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
 from .models import DataFabricQueryInput
@@ -33,102 +29,122 @@ from .models import DataFabricQueryInput
 logger = logging.getLogger(__name__)
 
 
-# --- Schema Fetching ---
+class NLQueryHandler:
+    """Manages lazy initialization and invocation of the Data Fabric sub-graph.
+
+    On first call, fetches entity schemas from the DF API and compiles
+    the inner LangGraph sub-graph. Subsequent calls reuse the cached graph.
+    """
+
+    def __init__(
+        self,
+        entity_identifiers: list[str],
+        routing_context: QueryRoutingOverrideContext,
+        llm: BaseChatModel,
+        resource_description: str = "",
+    ) -> None:
+        self._entity_identifiers = entity_identifiers
+        self._routing_context = routing_context
+        self._llm = llm
+        self._resource_description = resource_description
+        self._compiled: CompiledStateGraph | None = None
+        self._init_lock = asyncio.Lock()
+
+    async def _ensure_datafabric_graph(self) -> CompiledStateGraph:
+        """Lazy-init: fetch schemas + build sub-graph on first call.
+
+        Uses asyncio.Lock because the outer agent supports parallel
+        tool calls — two concurrent invocations could race on first call.
+        """
+        if self._compiled is not None:
+            return self._compiled
+
+        async with self._init_lock:
+            if self._compiled is not None:
+                return self._compiled
+
+            from .datafabric_subgraph import create_datafabric_subgraph
+
+            entities = await fetch_entity_schemas(self._entity_identifiers)
+            if not entities:
+                raise ValueError(
+                    "No Data Fabric entity schemas could be fetched. "
+                    "Check entity identifiers and permissions."
+                )
+            self._compiled = create_datafabric_subgraph(
+                llm=self._llm,
+                entities=entities,
+                routing_context=self._routing_context,
+                resource_description=self._resource_description,
+            )
+            return self._compiled
+
+    async def __call__(self, user_query: str) -> str:
+        logger.debug("query_datafabric called with: %s", user_query)
+
+        compiled_graph = await self._ensure_datafabric_graph()
+        result_state = await compiled_graph.ainvoke(
+            {"messages": [HumanMessage(content=user_query)]}
+        )
+
+        # Debug: log full message history
+        from .datafabric_subgraph import _debug_log
+
+        _debug_log("FINAL — All messages", [
+            {
+                "role": type(m).__name__,
+                "content": str(m.content) if m.content else None,
+                **({"tool_calls": m.tool_calls} if hasattr(m, "tool_calls") and m.tool_calls else {}),
+            }
+            for m in result_state["messages"]
+        ])
+
+        for msg in reversed(result_state["messages"]):
+            if isinstance(msg, AIMessage) and msg.content:
+                return msg.content
+
+        return "Unable to generate an answer from the available data."
+
+
+async def _fetch_single_entity(sdk: Any, identifier: str) -> Entity | None:
+    """Fetch a single entity by identifier, returning None on failure."""
+    try:
+        entity = await sdk.entities.retrieve_async(identifier)
+        logger.info("Fetched schema for entity '%s'", entity.display_name)
+        return entity
+    except Exception:
+        logger.warning("Failed to fetch entity '%s'", identifier, exc_info=True)
+        return None
 
 
 async def fetch_entity_schemas(entity_identifiers: list[str]) -> list[Entity]:
-    """Fetch entity metadata from Data Fabric concurrently.
-
-    Args:
-        entity_identifiers: List of entity identifiers to fetch.
-
-    Returns:
-        List of Entity objects with full schema information.
-    """
+    """Fetch entity metadata from Data Fabric concurrently."""
     from uipath.platform import UiPath
 
     sdk = UiPath()
-
-    async def _fetch_single(identifier: str) -> Entity | None:
-        try:
-            entity = await sdk.entities.retrieve_async(identifier)
-            logger.info("Fetched schema for entity '%s'", entity.display_name)
-            return entity
-        except Exception:
-            logger.warning("Failed to fetch entity '%s'", identifier, exc_info=True)
-            return None
-
-    results = await asyncio.gather(*[_fetch_single(eid) for eid in entity_identifiers])
+    results = await asyncio.gather(
+        *[_fetch_single_entity(sdk, eid) for eid in entity_identifiers]
+    )
     return [e for e in results if e is not None]
-
-
-# --- Data Fabric Context Detection ---
-
-
-def get_datafabric_contexts(
-    agent: LowCodeAgentDefinition,
-) -> list[AgentContextResourceConfig]:
-    """Extract Data Fabric context resources from agent definition."""
-    return _filter_datafabric_contexts(agent.resources)
-
-
-def _filter_datafabric_contexts(
-    resources: Sequence[BaseAgentResourceConfig],
-) -> list[AgentContextResourceConfig]:
-    """Filter resources to only Data Fabric context configs."""
-    return [
-        resource
-        for resource in resources
-        if isinstance(resource, AgentContextResourceConfig)
-        and resource.is_enabled
-        and resource.is_datafabric
-    ]
-
-
-def get_datafabric_entity_identifiers_from_resources(
-    resources: Sequence[BaseAgentResourceConfig],
-) -> list[str]:
-    """Extract Data Fabric entity identifiers from a sequence of resource configs."""
-    identifiers: list[str] = []
-    for context in _filter_datafabric_contexts(resources):
-        identifiers.extend(context.datafabric_entity_identifiers)
-    return identifiers
-
-
-# --- Routing Context ---
 
 
 def _build_routing_context(
     resource: AgentContextResourceConfig,
-) -> Any:
+) -> QueryRoutingOverrideContext:
     """Build query routing context from entity set items.
 
     Maps each entity to its folder so the backend resolves
     entities at folder level instead of tenant level.
-
-    Returns None if routing models are unavailable or no entity set exists.
     """
-    try:
-        from uipath.platform.entities import EntityRouting, QueryRoutingOverrideContext
-    except ImportError:
-        return None
-
-    if not resource.entity_set:
-        return None
-
-    routings = [
-        EntityRouting(
-            entity_name=item.name,
-            folder_id=item.folder_id,
-        )
-        for item in resource.entity_set
-    ]
-    if not routings:
-        return None
-    return QueryRoutingOverrideContext(entity_routings=routings)
+    return QueryRoutingOverrideContext(
+        entity_routings=[
+            EntityRouting(entity_name=item.name, folder_id=item.folder_id)
+            for item in resource.entity_set
+        ]
+    )
 
 
-# --- Agentic Tool Creation ---
+# --- Tool Creation ---
 
 
 def create_datafabric_query_tool(
@@ -137,76 +153,16 @@ def create_datafabric_query_tool(
 ) -> BaseTool:
     """Create the ``query_datafabric`` agentic tool.
 
-    The tool accepts natural language queries, runs an inner LangGraph
-    sub-graph for SQL generation + execution + self-correction, and
-    returns a natural language answer.
-
-    Schemas are fetched lazily on first invocation and cached.
-
     Args:
         resource: The Data Fabric context resource configuration.
         llm: The language model for the inner SQL generation loop.
     """
-    entity_identifiers = resource.datafabric_entity_identifiers
-    routing_context = _build_routing_context(resource)
-
-    _cache: dict[str, Any] = {}
-    _init_lock = asyncio.Lock()
-
-    async def _ensure_subgraph() -> Any:
-        """Lazy-init: fetch schemas + build sub-graph on first call."""
-        if "compiled" not in _cache:
-            async with _init_lock:
-                if "compiled" not in _cache:
-                    from .datafabric_subgraph import create_datafabric_subgraph
-
-                    entities = await fetch_entity_schemas(entity_identifiers)
-                    if not entities:
-                        raise ValueError(
-                            "No Data Fabric entity schemas could be fetched. "
-                            "Check entity identifiers and permissions."
-                        )
-                    _cache["compiled"] = create_datafabric_subgraph(
-                        llm=llm,
-                        entities=entities,
-                        routing_context=routing_context,
-                    )
-        return _cache["compiled"]
-
-    async def _query_datafabric(user_query: str) -> str:
-        logger.debug("query_datafabric called with: %s", user_query)
-
-        compiled_graph = await _ensure_subgraph()
-
-        from .datafabric_subgraph import DataFabricSubgraphState
-
-        initial_state = DataFabricSubgraphState(
-            messages=[HumanMessage(content=user_query)],
-        )
-
-        result_state = await compiled_graph.ainvoke(initial_state)
-
-        # Debug: dump full agent output
-        import json as _json
-
-        with open("/tmp/df_agent_debug.txt", "w") as _f:
-            _f.write(f"User query: {user_query}\n\n")
-            _f.write(f"Routing context: {routing_context}\n\n")
-            for i, msg in enumerate(result_state["messages"]):
-                _f.write(f"--- Message {i} ({type(msg).__name__}) ---\n")
-                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                    for tc in msg.tool_calls:
-                        _f.write(f"Tool call: {tc.get('name')} args={tc.get('args')}\n")
-                if hasattr(msg, "content") and msg.content:
-                    _f.write(f"Content: {msg.content}\n")
-                _f.write("\n")
-
-        for msg in reversed(result_state["messages"]):
-            if isinstance(msg, AIMessage) and msg.content:
-                return msg.content
-
-        return "Unable to generate an answer from the available data."
-
+    handler = NLQueryHandler(
+        entity_identifiers=resource.datafabric_entity_identifiers,
+        routing_context=_build_routing_context(resource),
+        llm=llm,
+        resource_description=resource.description or "",
+    )
     return BaseUiPathStructuredTool(
         name="query_datafabric",
         description=(
@@ -215,6 +171,6 @@ def create_datafabric_query_tool(
             "execute the query, and return a natural language answer."
         ),
         args_schema=DataFabricQueryInput,
-        coroutine=_query_datafabric,
+        coroutine=handler,
         metadata={"tool_type": "datafabric_sql"},
     )

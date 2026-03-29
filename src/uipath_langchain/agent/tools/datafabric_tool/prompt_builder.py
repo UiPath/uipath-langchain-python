@@ -11,8 +11,8 @@ from pathlib import Path
 from uipath.platform.entities import Entity
 
 from .models import (
-    EntityContext,
     EntitySchema,
+    EntitySQLContext,
     FieldSchema,
     QueryPattern,
     SQLContext,
@@ -48,7 +48,7 @@ def _load_system_prompt() -> str:
 # --- Build ---
 
 
-def build_entity_context(entity: Entity) -> EntityContext:
+def build_entity_context(entity: Entity) -> EntitySQLContext:
     """Convert an Entity SDK object to schema + derived query patterns."""
     field_schemas: list[FieldSchema] = []
     numeric_field: str | None = None
@@ -63,7 +63,6 @@ def build_entity_context(entity: Entity) -> EntityContext:
             display_name=field.display_name,
             type=type_name,
             description=field.description,
-            is_primary_key=field.is_primary_key,
             is_foreign_key=field.is_foreign_key,
             is_required=field.is_required,
             is_unique=field.is_unique,
@@ -120,12 +119,16 @@ def build_entity_context(entity: Entity) -> EntityContext:
         record_count=entity.record_count,
         fields=field_schemas,
     )
-    return EntityContext(entity_schema=schema, query_patterns=query_patterns)
+    return EntitySQLContext(entity_schema=schema, query_patterns=query_patterns)
 
 
-def build_sql_context(entities: list[Entity]) -> SQLContext:
+def build_sql_context(
+    entities: list[Entity],
+    resource_description: str = "",
+) -> SQLContext:
     """Build the full SQL context from entities, prompts, and constraints."""
     return SQLContext(
+        resource_description=resource_description or None,
         system_prompt=_load_system_prompt(),
         constraints=_load_sql_constraints(),
         entity_contexts=[build_entity_context(e) for e in entities],
@@ -151,7 +154,14 @@ def format_sql_context(ctx: SQLContext) -> str:
         lines.append(ctx.constraints)
         lines.append("")
 
-    lines.append("## Available Data Fabric Entities")
+    if ctx.resource_description:
+        lines.append("## Entity set description")
+        lines.append("")
+        lines.append(ctx.resource_description)
+        lines.append("")
+
+
+    lines.append("## All available Data Fabric Entities")
     lines.append("")
 
     for entity_ctx in ctx.entity_contexts:
@@ -184,17 +194,24 @@ def format_sql_context(ctx: SQLContext) -> str:
 # --- Public API ---
 
 
-def format_schemas_for_context(entities: list[Entity]) -> str:
-    """Format entity schemas for injection into agent system prompt.
+def build(
+    entities: list[Entity],
+    resource_description: str = "",
+) -> str:
+    """Build the full SQL prompt text for the inner sub-graph LLM.
+
+    Combines resource description, SQL guidelines, constraints,
+    entity schemas, and query patterns into a single prompt string.
 
     Args:
         entities: List of Entity objects with schema information.
+        resource_description: Optional description of the resource/entity set.
 
     Returns:
-        Formatted string describing entity schemas and SQL guidance.
+        Formatted prompt string for the inner LLM system message.
     """
     if not entities:
         return ""
 
-    ctx = build_sql_context(entities)
+    ctx = build_sql_context(entities, resource_description)
     return format_sql_context(ctx)

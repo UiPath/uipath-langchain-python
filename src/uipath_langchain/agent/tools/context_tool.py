@@ -135,7 +135,7 @@ def is_static_query(resource: AgentContextResourceConfig) -> bool:
 def create_context_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel | None = None,
-) -> StructuredTool | BaseTool:
+) -> StructuredTool | BaseTool | None:
     assert resource.context_type is not None
 
     if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
@@ -145,18 +145,20 @@ def create_context_tool(
 
         return create_datafabric_query_tool(resource, llm)
 
-    assert resource.settings is not None
-    tool_name = sanitize_tool_name(resource.name)
-    retrieval_mode = resource.settings.retrieval_mode.lower()
+    elif resource.context_type == AgentContextType.INDEX:
+        assert resource.settings is not None
+        tool_name = sanitize_tool_name(resource.name)
+        retrieval_mode = resource.settings.retrieval_mode.lower()
 
-    if retrieval_mode == AgentContextRetrievalMode.DEEP_RAG.value.lower():
-        return handle_deep_rag(tool_name, resource)
+        if retrieval_mode == AgentContextRetrievalMode.DEEP_RAG.value.lower():
+            return handle_deep_rag(tool_name, resource)
 
-    if retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
-        return handle_batch_transform(tool_name, resource)
+        if retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
+            return handle_batch_transform(tool_name, resource)
 
-    return handle_semantic_search(tool_name, resource)
+        return handle_semantic_search(tool_name, resource)
 
+    return None
 
 def handle_semantic_search(
     tool_name: str, resource: AgentContextResourceConfig

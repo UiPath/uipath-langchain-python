@@ -32,7 +32,7 @@ logger = getLogger(__name__)
 async def create_tools_from_resources(
     agent: LowCodeAgentDefinition, llm: BaseChatModel
 ) -> list[BaseTool]:
-    """Create tools from agent resources including Data Fabric tools.
+    """Create tools from agent resources.
 
     Args:
         agent: The agent definition.
@@ -79,7 +79,8 @@ async def create_tools_from_resources(
 
 
 async def _build_tool_for_resource(
-    resource: BaseAgentResourceConfig, llm: BaseChatModel
+    resource: BaseAgentResourceConfig,
+    llm: BaseChatModel,
 ) -> BaseTool | list[BaseTool] | None:
     if isinstance(resource, AgentProcessToolResourceConfig):
         return create_process_tool(resource)

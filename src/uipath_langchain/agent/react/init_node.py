@@ -24,22 +24,10 @@ def create_init_node(
     resources_for_init: AgentResources | None = None,
 ):
     async def graph_state_init(state: Any) -> Any:
-        # --- Gather init-time context from registered providers ---
-        additional_context: str | None = None
-        if resources_for_init:
-            from .init_context_registry import gather_init_context
-
-            additional_context = await gather_init_context(resources_for_init)
-
         # --- Resolve messages ---
         resolved_messages: Sequence[SystemMessage | HumanMessage] | Overwrite
         if callable(messages):
-            if additional_context:
-                resolved_messages = list(
-                    messages(state, additional_context=additional_context)
-                )
-            else:
-                resolved_messages = list(messages(state))
+            resolved_messages = list(messages(state))
         else:
             resolved_messages = list(messages)
 

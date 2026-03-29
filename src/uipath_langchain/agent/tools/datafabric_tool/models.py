@@ -16,7 +16,6 @@ class FieldSchema(BaseModel):
     display_name: str | None = None
     type: str
     description: str | None = None
-    is_primary_key: bool = False
     is_foreign_key: bool = False
     is_required: bool = False
     is_unique: bool = False
@@ -24,10 +23,8 @@ class FieldSchema(BaseModel):
 
     @property
     def display_type(self) -> str:
-        """Type string with PK/required modifiers for markdown display."""
+        """Type string with modifiers for markdown display."""
         modifiers = []
-        if self.is_primary_key:
-            modifiers.append("PK")
         if self.is_required:
             modifiers.append("required")
         if modifiers:
@@ -64,8 +61,8 @@ class QueryPattern(BaseModel):
     sql: str
 
 
-class EntityContext(BaseModel):
-    """Entity schema enriched with query patterns for LLM consumption."""
+class EntitySQLContext(BaseModel):
+    """Entity schema enriched with query patterns for SQL generation."""
 
     entity_schema: EntitySchema
     query_patterns: list[QueryPattern]
@@ -74,9 +71,10 @@ class EntityContext(BaseModel):
 class SQLContext(BaseModel):
     """Top-level container for the full schema context injected into the system prompt."""
 
+    resource_description: str | None = None
     system_prompt: str | None = None
     constraints: str | None = None
-    entity_contexts: list[EntityContext]
+    entity_contexts: list[EntitySQLContext]
 
 
 # --- Tool input ---
