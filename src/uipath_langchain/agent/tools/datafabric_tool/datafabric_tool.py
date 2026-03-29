@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 BASE_SYSTEM_PROMPT = "base_system_prompt"
 
+
 class NLQueryHandler:
     """Manages lazy initialization and invocation of the Data Fabric sub-graph.
 
@@ -50,10 +51,10 @@ class NLQueryHandler:
         self._llm = llm
         self._resource_description = resource_description
         self._base_system_prompt = base_system_prompt
-        self._compiled: CompiledStateGraph | None = None
+        self._compiled: CompiledStateGraph[Any] | None = None
         self._init_lock = asyncio.Lock()
 
-    async def _ensure_datafabric_graph(self) -> CompiledStateGraph:
+    async def _ensure_datafabric_graph(self) -> CompiledStateGraph[Any]:
         """Lazy-init: fetch schemas + build sub-graph on first call.
 
         Uses asyncio.Lock because the outer agent supports parallel
@@ -93,7 +94,7 @@ class NLQueryHandler:
         )
         for msg in reversed(result_state["messages"]):
             if isinstance(msg, AIMessage) and msg.content:
-                return msg.content
+                return str(msg.content)
 
         return "Unable to generate an answer from the available data."
 
@@ -131,7 +132,7 @@ def _build_routing_context(
     return QueryRoutingOverrideContext(
         entity_routings=[
             EntityRouting(entity_name=item.name, folder_id=item.folder_id)
-            for item in resource.entity_set
+            for item in (resource.entity_set or [])
         ]
     )
 

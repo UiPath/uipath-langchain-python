@@ -14,6 +14,7 @@ from langchain_core.messages import (
     AIMessage,
     AnyMessage,
     SystemMessage,
+    ToolCall,
     ToolMessage,
 )
 from langchain_core.tools import BaseTool
@@ -104,9 +105,7 @@ def build_inner_system_message(
         base_system_prompt: Optional system prompt from the outer agent.
     """
     return SystemMessage(
-        content=prompt_builder.build(
-            entities, resource_description, base_system_prompt
-        )
+        content=prompt_builder.build(entities, resource_description, base_system_prompt)
     )
 
 
@@ -155,7 +154,7 @@ class DataFabricGraph:
             "iteration_count": state.iteration_count + len(last.tool_calls),
         }
 
-    async def _execute_tool_call(self, tool_call: dict[str, Any]) -> ToolMessage:
+    async def _execute_tool_call(self, tool_call: ToolCall) -> ToolMessage:
         """Execute a single tool call and wrap the result."""
         args = tool_call.get("args", {})
         try:
@@ -196,7 +195,7 @@ class DataFabricGraph:
             return "termination"
         return END
 
-    def compile(self) -> CompiledStateGraph:
+    def compile(self) -> CompiledStateGraph[Any]:
         """Build and compile the StateGraph."""
         graph = StateGraph(DataFabricSubgraphState)
 

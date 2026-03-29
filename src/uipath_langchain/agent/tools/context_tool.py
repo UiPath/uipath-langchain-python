@@ -179,6 +179,7 @@ def create_context_tool(
 
     return None
 
+
 def handle_semantic_search(
     tool_name: str, resource: AgentContextResourceConfig
 ) -> StructuredTool:

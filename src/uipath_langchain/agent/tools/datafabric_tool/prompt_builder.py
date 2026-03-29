@@ -168,7 +168,6 @@ def format_sql_context(ctx: SQLContext) -> str:
         lines.append(ctx.resource_description)
         lines.append("")
 
-
     lines.append("## All available Data Fabric Entities")
     lines.append("")
 
