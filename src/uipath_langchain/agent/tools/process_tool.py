@@ -3,29 +3,40 @@
 import json
 from typing import Any
 
-from langchain.tools import BaseTool
-from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import AgentProcessToolResourceConfig, AgentToolType
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.common import WaitJobRaw
+from uipath.platform.errors import EnrichedException
 from uipath.platform.orchestrator import JobState
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain.agent.exceptions import raise_for_enriched
 from uipath_langchain.agent.react.job_attachments import get_job_attachments
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
-from uipath_langchain.agent.tools.tool_node import (
-    ToolWrapperReturnType,
-)
 
-from .durable_interrupt import durable_interrupt
 from .utils import sanitize_tool_name
+
+_START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]] = {
+    (404, "1002"): (
+        "Could not find process for tool '{tool}'. Please check if the process is deployed in the configured folder.",
+        UiPathErrorCategory.DEPLOYMENT,
+    ),
+    (400, "1100"): (
+        "Could not find folder for tool '{tool}'. Please check if the folder exists and is accessible by the robot.",
+        UiPathErrorCategory.DEPLOYMENT,
+    ),
+    (409, None): (
+        "Cannot start process for tool '{tool}': {message}",
+        UiPathErrorCategory.DEPLOYMENT,
+    ),
+}
 
 
 def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredTool:
@@ -61,14 +72,23 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
             @durable_interrupt
             async def start_job():
                 client = UiPath()
-                job = await client.processes.invoke_async(
-                    name=process_name,
-                    input_arguments=input_arguments,
-                    folder_path=folder_path,
-                    attachments=attachments,
-                    parent_span_id=parent_span_id,
-                    parent_operation_id=parent_operation_id,
-                )
+                try:
+                    job = await client.processes.invoke_async(
+                        name=process_name,
+                        input_arguments=input_arguments,
+                        folder_path=folder_path,
+                        attachments=attachments,
+                        parent_span_id=parent_span_id,
+                        parent_operation_id=parent_operation_id,
+                    )
+                except EnrichedException as e:
+                    raise_for_enriched(
+                        e,
+                        _START_JOBS_ERRORS,
+                        title=f"Failed to execute tool '{resource.name}'",
+                        tool=resource.name,
+                    )
+                    raise
 
                 if job.key:
                     bts_key = (
@@ -99,14 +119,6 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
 
-    async def process_tool_wrapper(
-        tool: BaseTool,
-        call: ToolCall,
-        state: AgentGraphState,
-    ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(resource, state, call["args"])
-        return await job_attachment_wrapper(tool, call, state)
-
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
@@ -124,6 +136,6 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
         },
         argument_properties=resource.argument_properties,
     )
-    tool.set_tool_wrappers(awrapper=process_tool_wrapper)
+    tool.set_tool_wrappers(awrapper=job_attachment_wrapper)
 
     return tool

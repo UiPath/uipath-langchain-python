@@ -2,10 +2,8 @@
 
 import copy
 import re
-from typing import Any, cast
+from typing import Any
 
-from langchain.tools import BaseTool
-from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
@@ -17,24 +15,28 @@ from uipath.agent.models.agent import (
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.connections import ActivityMetadata, ActivityParameterLocationInfo
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+from uipath_langchain.agent.exceptions import (
+    AgentStartupError,
+    AgentStartupErrorCode,
+    raise_for_enriched,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.static_args import (
-    ArgumentPropertiesMixin,
-    handle_static_args,
-)
-from uipath_langchain.agent.tools.tool_node import (
-    ToolWrapperReturnType,
-)
 
-from .schema_editing import strip_matching_enums
+from .schema_editing import strip_enum
 from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
 from .utils import sanitize_dict_for_serialization, sanitize_tool_name
+
+_INTEGRATION_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]] = {
+    (400, None): (
+        "Integration service returned an error for tool '{tool}': {message}",
+        UiPathErrorCategory.USER,
+    ),
+}
 
 
 def convert_integration_parameters_to_argument_properties(
@@ -137,15 +139,14 @@ def _is_param_name_to_jsonpath(param_name: str) -> str:
     return "$" + "".join(parts)
 
 
-def strip_template_enums_from_schema(
+def strip_enums_from_schema(
     schema: dict[str, Any],
     parameters: list[AgentIntegrationToolParameter],
 ) -> dict[str, Any]:
-    """Remove {{template}} enum values only from argument-variant parameter fields.
+    """Remove enum constraints from fields in the schema that were configured with static args.
 
-    For each parameter with fieldVariant 'argument', navigates the schema to the
-    corresponding field (supporting nested objects, arrays, and $ref resolution)
-    and strips enum values matching the {{...}} pattern.
+    We strip them so that the tool's args_schema does not enforce them at
+    validation time; we add our own enum constraints only visible to the LLM.
 
     The function deep-copies the schema so the original is never mutated.
 
@@ -154,17 +155,14 @@ def strip_template_enums_from_schema(
         parameters: List of integration tool parameters from resource.properties.
 
     Returns:
-        A cleaned copy of the schema with template enum values removed
-        only from argument-variant fields.
+        A cleaned copy of the schema with enum constraints removed
+        from configured fields.
     """
     schema = copy.deepcopy(schema)
 
     for param in parameters:
-        if param.field_variant != "argument":
-            continue
-
         segments = _param_name_to_segments(param.name)
-        strip_matching_enums(schema, segments, _TEMPLATE_PATTERN)
+        strip_enum(schema, segments)
 
     return schema
 
@@ -197,7 +195,9 @@ def remove_asterisk_from_properties(fields: dict[str, Any]) -> dict[str, Any]:
         k = k.replace("[*]", "")
         definitions[k] = value
         fix_types(value)
-    if "definitions" in fields:
+    if "$defs" in fields:
+        fields["$defs"] = definitions
+    elif "definitions" in fields:
         fields["definitions"] = definitions
 
     fix_types(fields)
@@ -295,7 +295,7 @@ def create_integration_tool(
 
     activity_metadata = convert_to_activity_metadata(resource)
 
-    cleaned_input_schema = strip_template_enums_from_schema(
+    cleaned_input_schema = strip_enums_from_schema(
         resource.input_schema, resource.properties.parameters
     )
     input_model = create_model(cleaned_input_schema)
@@ -326,20 +326,16 @@ def create_integration_tool(
                 connection_id=connection_id,
                 activity_input=sanitize_dict_for_serialization(kwargs),
             )
-        except Exception:
+        except EnrichedException as e:
+            raise_for_enriched(
+                e,
+                _INTEGRATION_ERRORS,
+                title=f"Failed to execute tool '{resource.name}'",
+                tool=resource.name,
+            )
             raise
 
         return result
-
-    async def integration_tool_wrapper(
-        tool: BaseTool,
-        call: ToolCall,
-        state: AgentGraphState,
-    ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(
-            cast(ArgumentPropertiesMixin, tool), state, call["args"]
-        )
-        return await tool.ainvoke(call)
 
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,
@@ -355,6 +351,5 @@ def create_integration_tool(
         },
         argument_properties=argument_properties,
     )
-    tool.set_tool_wrappers(awrapper=integration_tool_wrapper)
 
     return tool

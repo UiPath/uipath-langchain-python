@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, Literal
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph._internal._runnable import RunnableCallable
+from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command
 from pydantic import BaseModel
 from uipath.platform.resume_triggers import is_no_content_marker
@@ -21,6 +22,7 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
+from uipath_langchain.chat.hitl import request_conversational_tool_confirmation
 
 # the type safety can be improved with generics
 ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
@@ -79,6 +81,15 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
 
+        # prompt user for approval if tool requires confirmation
+        conversational_confirmation = request_conversational_tool_confirmation(
+            call, self.tool
+        )
+        if conversational_confirmation:
+            if conversational_confirmation.cancelled:
+                # tool confirmation rejected
+                return self._process_result(call, conversational_confirmation.cancelled)
+
         try:
             if self.wrapper:
                 inputs = self._prepare_wrapper_inputs(
@@ -87,7 +98,16 @@ class UiPathToolNode(RunnableCallable):
                 result = self.wrapper(*inputs)
             else:
                 result = self.tool.invoke(call)
-            return self._process_result(call, result)
+            output = self._process_result(call, result)
+            if conversational_confirmation:
+                # HITL approved - apply confirmation metadata to tool result message
+                conversational_confirmation.annotate_result(output)
+            return output
+        except GraphBubbleUp:
+            # LangGraph uses exceptions for interrupt control flow — re-raise so
+            # handle_tool_errors doesn't swallow expected interrupts as errors.
+            # https://langchain-ai.github.io/langgraph/concepts/human_in_the_loop/
+            raise
         except Exception as e:
             if self.handle_tool_errors:
                 return self._process_error_result(call, e)
@@ -98,15 +118,34 @@ class UiPathToolNode(RunnableCallable):
         if call is None:
             return None
 
+        # prompt user for approval if tool requires confirmation
+        conversational_confirmation = request_conversational_tool_confirmation(
+            call, self.tool
+        )
+        if conversational_confirmation:
+            if conversational_confirmation.cancelled:
+                # tool confirmation rejected
+                return self._process_result(call, conversational_confirmation.cancelled)
+
         try:
             if self.awrapper:
                 inputs = self._prepare_wrapper_inputs(
                     self.awrapper, self.tool, call, state
                 )
+
                 result = await self.awrapper(*inputs)
             else:
                 result = await self.tool.ainvoke(call)
-            return self._process_result(call, result)
+            output = self._process_result(call, result)
+            if conversational_confirmation:
+                # HITL approved - apply confirmation metadata to tool result message
+                conversational_confirmation.annotate_result(output)
+            return output
+        except GraphBubbleUp:
+            # LangGraph uses exceptions for interrupt control flow — re-raise so
+            # handle_tool_errors doesn't swallow expected interrupts as errors.
+            # https://langchain-ai.github.io/langgraph/concepts/human_in_the_loop/
+            raise
         except Exception as e:
             if self.handle_tool_errors:
                 return self._process_error_result(call, e)

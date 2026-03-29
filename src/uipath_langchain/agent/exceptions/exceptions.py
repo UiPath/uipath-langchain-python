@@ -29,6 +29,7 @@ class AgentRuntimeErrorCode(str, Enum):
 
     UNEXPECTED_ERROR = "UNEXPECTED_ERROR"
     HTTP_ERROR = "HTTP_ERROR"
+    LICENSE_NOT_AVAILABLE = "LICENSE_NOT_AVAILABLE"
 
     # Routing
     ROUTING_ERROR = "ROUTING_ERROR"
@@ -44,6 +45,8 @@ class AgentRuntimeErrorCode(str, Enum):
 
     # State
     STATE_ERROR = "STATE_ERROR"
+
+    FILE_ERROR = "FILE_ERROR"
 
     LLM_INVALID_RESPONSE = "LLM_INVALID_RESPONSE"
     TOOL_INVALID_WRAPPER_STATE = "TOOL_INVALID_WRAPPER_STATE"
@@ -69,6 +72,12 @@ class AgentStartupErrorCode(str, Enum):
 
     # Guardrail configuration errors
     INVALID_GUARDRAIL_CONFIG = "INVALID_GUARDRAIL_CONFIG"
+
+    # Agent configuration errors (agent.json structure)
+    INVALID_AGENT_CONFIG = "INVALID_AGENT_CONFIG"
+
+    # Input validation errors (user input doesn't match schema)
+    INPUT_VALIDATION_ERROR = "INPUT_VALIDATION_ERROR"
 
 
 class AgentRuntimeError(UiPathBaseRuntimeError):

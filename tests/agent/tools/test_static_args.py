@@ -1,21 +1,19 @@
 """Tests for static_args.py module."""
 
 from typing import Any
-from unittest.mock import MagicMock
 
-import pytest
+from langchain_core.messages import ToolCall
 from pydantic import BaseModel, Field
 from uipath.agent.models.agent import (
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
     AgentToolStaticArgumentProperties,
-    BaseAgentResourceConfig,
 )
 
 from uipath_langchain.agent.tools.static_args import (
     ArgumentPropertiesMixin,
+    StaticArgsHandler,
     apply_static_args,
-    apply_static_argument_properties_to_schema,
     resolve_static_args,
 )
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
@@ -23,129 +21,255 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 )
 
 
-class TestResolveStaticArgs:
-    """Test cases for resolve_static_args function."""
+class SimpleInput(BaseModel):
+    """Simple input model for testing."""
 
-    def test_resolve_static_args_with_argument_properties(self):
-        """Test resolve_static_args with an object that has argument_properties."""
+    host: str
+    port: int = Field(default=8080)
+    api_key: str
 
-        class ResourceWithProps(ArgumentPropertiesMixin):
-            argument_properties = {
+
+def _create_tool(
+    name: str,
+    argument_properties: dict[str, AgentToolArgumentProperties],
+    args_schema: type[BaseModel] = SimpleInput,
+) -> StructuredToolWithArgumentProperties:
+    async def tool_fn(**kwargs: Any) -> str:
+        return "ok"
+
+    return StructuredToolWithArgumentProperties(
+        name=name,
+        description="A test tool",
+        args_schema=args_schema,
+        coroutine=tool_fn,
+        output_type=None,
+        argument_properties=argument_properties,
+    )
+
+
+class EmptyInput(BaseModel):
+    """Empty input schema for tests that don't need agent input."""
+
+    pass
+
+
+def _make_tool_call(name: str, args: dict[str, Any] | None = None) -> ToolCall:
+    return ToolCall(name=name, args=args or {}, id="1", type="tool_call")
+
+
+class TestStaticArgsHandler:
+    """Test cases for StaticArgsHandler."""
+
+    def test_initialize_resolves_static_argument_properties(self):
+        """Test that initialize resolves static argument properties."""
+        tool = _create_tool(
+            "test_tool",
+            {
                 "$['host']": AgentToolStaticArgumentProperties(
                     is_sensitive=False, value="api.example.com"
                 ),
-            }
+            },
+        )
+        handler = StaticArgsHandler()
+        handler.initialize([tool], EmptyInput(), EmptyInput)
 
-        result = resolve_static_args(ResourceWithProps(), {"unused": "input"})
+        call = _make_tool_call("test_tool")
+        handler.apply_to_response([call])
+        assert call["args"]["host"] == "api.example.com"
 
-        assert result == {"$['host']": "api.example.com"}
+    def test_initialize_extracts_from_agent_input(self):
+        """Test that initialize resolves AgentToolArgumentArgumentProperties from agent input."""
 
-    def test_resolve_static_args_with_static_values_of_different_types(self):
-        """Test resolve_static_args resolves string, integer, and object static values."""
+        class InputSchema(BaseModel):
+            userId: str
+            searchQuery: str
 
-        class ResourceWithProps(ArgumentPropertiesMixin):
-            argument_properties = {
-                "$['connection_id']": AgentToolStaticArgumentProperties(
-                    is_sensitive=False, value="12345"
-                ),
-                "$['timeout']": AgentToolStaticArgumentProperties(
-                    is_sensitive=False, value=30
-                ),
-                "$['config']": AgentToolStaticArgumentProperties(
-                    is_sensitive=False, value={"enabled": True, "retries": 3}
-                ),
-            }
-
-        result = resolve_static_args(ResourceWithProps(), {"unused": "input"})
-
-        assert result == {
-            "$['connection_id']": "12345",
-            "$['timeout']": 30,
-            "$['config']": {"enabled": True, "retries": 3},
-        }
-
-    def test_resolve_static_args_with_argument_properties_extracts_from_agent_input(
-        self,
-    ):
-        """Test resolve_static_args resolves AgentToolArgumentArgumentProperties from agent_input."""
-
-        class ResourceWithProps(ArgumentPropertiesMixin):
-            argument_properties = {
+        tool = _create_tool(
+            "test_tool",
+            {
                 "$['user_id']": AgentToolArgumentArgumentProperties(
                     is_sensitive=False, argument_path="userId"
                 ),
                 "$['query']": AgentToolArgumentArgumentProperties(
                     is_sensitive=False, argument_path="searchQuery"
                 ),
-            }
+            },
+        )
+        handler = StaticArgsHandler()
+        state = InputSchema(userId="user123", searchQuery="test search")
+        handler.initialize([tool], state, InputSchema)
 
-        agent_input = {
-            "userId": "user123",
-            "searchQuery": "test search",
-            "unused_arg": "not_used",
-        }
+        call = _make_tool_call("test_tool")
+        handler.apply_to_response([call])
+        assert call["args"]["user_id"] == "user123"
+        assert call["args"]["query"] == "test search"
 
-        result = resolve_static_args(ResourceWithProps(), agent_input)
+    def test_initialize_with_mixed_static_and_argument_properties(self):
+        """Test initialize with both static and argument properties."""
 
-        assert result == {
-            "$['user_id']": "user123",
-            "$['query']": "test search",
-        }
+        class InputSchema(BaseModel):
+            userId: str
 
-    def test_resolve_static_args_with_mixed_static_and_argument_properties(self):
-        """Test resolve_static_args with both static and argument properties."""
-
-        class ResourceWithProps(ArgumentPropertiesMixin):
-            argument_properties = {
+        tool = _create_tool(
+            "test_tool",
+            {
                 "$['api_key']": AgentToolStaticArgumentProperties(
                     is_sensitive=False, value="secret_key"
                 ),
                 "$['user_id']": AgentToolArgumentArgumentProperties(
                     is_sensitive=False, argument_path="userId"
                 ),
-                "$['version']": AgentToolStaticArgumentProperties(
-                    is_sensitive=False, value="v1"
-                ),
-            }
+            },
+        )
+        handler = StaticArgsHandler()
+        handler.initialize([tool], InputSchema(userId="user456"), InputSchema)
 
-        agent_input = {"userId": "user456"}
+        call = _make_tool_call("test_tool")
+        handler.apply_to_response([call])
+        assert call["args"]["api_key"] == "secret_key"
+        assert call["args"]["user_id"] == "user456"
 
-        result = resolve_static_args(ResourceWithProps(), agent_input)
+    def test_initialize_skips_missing_argument_values(self):
+        """Test that argument properties referencing missing agent input keys are skipped."""
 
-        assert result == {
-            "$['api_key']": "secret_key",
-            "$['user_id']": "user456",
-            "$['version']": "v1",
-        }
+        class InputSchema(BaseModel):
+            existingArg: str
+            missingArg: str = ""
 
-    def test_resolve_static_args_skips_missing_argument_values(self):
-        """Test that argument properties referencing missing agent_input keys are skipped."""
-
-        class ResourceWithProps(ArgumentPropertiesMixin):
-            argument_properties = {
+        tool = _create_tool(
+            "test_tool",
+            {
                 "$['existing_param']": AgentToolArgumentArgumentProperties(
                     is_sensitive=False, argument_path="existingArg"
                 ),
                 "$['missing_param']": AgentToolArgumentArgumentProperties(
-                    is_sensitive=False, argument_path="missingArg"
+                    is_sensitive=False, argument_path="nonExistentField"
                 ),
-            }
+            },
+        )
+        handler = StaticArgsHandler()
+        handler.initialize([tool], InputSchema(existingArg="exists"), InputSchema)
 
-        agent_input = {"existingArg": "exists"}
+        call = _make_tool_call("test_tool")
+        handler.apply_to_response([call])
+        assert call["args"]["existing_param"] == "exists"
+        assert "missing_param" not in call["args"]
 
-        result = resolve_static_args(ResourceWithProps(), agent_input)
+    def test_apply_to_response_merges_with_existing_args(self):
+        """Test that apply_to_response merges static args with existing tool call args."""
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="api.example.com"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        handler.initialize([tool], EmptyInput(), EmptyInput)
 
-        assert result == {"$['existing_param']": "exists"}
-        assert "$['missing_param']" not in result
+        call = _make_tool_call("test_tool", {"port": 8080, "path": "/api"})
+        handler.apply_to_response([call])
+        assert call["args"] == {
+            "host": "api.example.com",
+            "port": 8080,
+            "path": "/api",
+        }
 
-    def test_resolve_static_args_with_unknown_resource_type(self):
-        """Test resolve_static_args with unknown resource type returns empty dict."""
-        mock_resource = MagicMock(spec=BaseAgentResourceConfig)
-        agent_input = {"input_arg": "input_value"}
+    def test_apply_to_response_ignores_unknown_tools(self):
+        """Test that apply_to_response ignores tool calls for tools without static args."""
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="api.example.com"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        handler.initialize([tool], EmptyInput(), EmptyInput)
 
-        result = resolve_static_args(mock_resource, agent_input)
+        call = _make_tool_call("other_tool", {"query": "hello"})
+        handler.apply_to_response([call])
+        assert call["args"] == {"query": "hello"}
 
-        assert result == {}
+    def test_initialize_caches_results(self):
+        """Test that initialize returns cached tools on subsequent calls."""
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="api.example.com"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        tools_first = handler.initialize([tool], EmptyInput(), EmptyInput)
+        tools_second = handler.initialize([tool], EmptyInput(), EmptyInput)
+        assert tools_first is tools_second
+
+    def test_initialize_returns_schema_modified_tools(self):
+        """Test that initialize returns tools with schema modifications applied."""
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="api.example.com"
+                ),
+                "$['api_key']": AgentToolStaticArgumentProperties(
+                    is_sensitive=True, value="secret-key-123"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        processed_tools = handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        assert len(processed_tools) == 1
+        modified_tool = processed_tools[0]
+        assert modified_tool is not tool
+        assert isinstance(modified_tool.args_schema, type) and issubclass(
+            modified_tool.args_schema, BaseModel
+        )
+        assert isinstance(modified_tool, StructuredToolWithArgumentProperties)
+        schema = modified_tool.args_schema.model_json_schema()
+        assert "pre-configured" in schema["properties"]["api_key"]["description"]
+        assert "api_key" not in schema["required"]
+        host_def = schema["$defs"]["Host"]
+        assert host_def["enum"] == ["api.example.com"]
+
+    def test_initialize_returns_original_tool_when_no_static_args(self):
+        """Test that tools without static argument properties are returned as-is."""
+        tool = _create_tool("test_tool", {})
+        handler = StaticArgsHandler()
+        processed_tools = handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        assert len(processed_tools) == 1
+        assert processed_tools[0] is tool
+
+    def test_initialize_skips_nonexistent_schema_fields(self):
+        """Test that static properties referencing nonexistent schema fields are skipped."""
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['nonexistent_field']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="test"
+                ),
+                "$['host']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="api.example.com"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        processed_tools = handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        modified_tool = processed_tools[0]
+        assert isinstance(modified_tool.args_schema, type) and issubclass(
+            modified_tool.args_schema, BaseModel
+        )
+        schema = modified_tool.args_schema.model_json_schema()
+        host_def = schema["$defs"]["Host"]
+        assert host_def["enum"] == ["api.example.com"]
+        assert "nonexistent_field" not in schema["properties"]
 
 
 class TestApplyStaticArgs:
@@ -341,99 +465,117 @@ class TestApplyStaticArgs:
         assert result == expected
 
 
-class SimpleInput(BaseModel):
-    """Simple input model for testing."""
+class TestResolveStaticArgs:
+    """Test cases for resolve_static_args function."""
 
-    host: str
-    port: int = Field(default=8080)
-    api_key: str
+    def test_resolve_static_args_with_argument_properties(self):
+        """Test resolve_static_args with an object that has argument_properties."""
 
-
-class TestApplyStaticArgumentPropertiesToSchema:
-    """Test cases for apply_static_argument_properties_to_schema function."""
-
-    def create_test_tool(
-        self, argument_properties: dict[str, AgentToolArgumentProperties]
-    ) -> StructuredToolWithArgumentProperties:
-        """Create a test tool for testing."""
-
-        async def tool_fn(host: str, port: int = 8080, api_key: str = "") -> str:
-            return f"{host}:{port}"
-
-        return StructuredToolWithArgumentProperties(
-            name="test_tool",
-            description="A test tool",
-            args_schema=SimpleInput,
-            coroutine=tool_fn,
-            output_type=None,
-            argument_properties=argument_properties,
-        )
-
-    @pytest.fixture
-    def agent_input(self) -> dict[str, Any]:
-        """Common agent input for tests."""
-        return {"user_id": "user123", "query": "test query"}
-
-    def test_returns_original_tool_when_no_properties(
-        self, agent_input: dict[str, Any]
-    ) -> None:
-        """Test that the original tool is returned when argument_properties is empty."""
-        tool = self.create_test_tool({})
-        result = apply_static_argument_properties_to_schema(tool, agent_input)
-
-        assert result is tool
-
-    def test_returns_modified_tool_with_static_properties(
-        self, agent_input: dict[str, Any]
-    ) -> None:
-        """Test that a modified tool is returned when static properties are provided."""
-        tool = self.create_test_tool(
-            {
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
                 "$['host']": AgentToolStaticArgumentProperties(
-                    is_sensitive=False,
-                    value="api.example.com",
+                    is_sensitive=False, value="api.example.com"
                 ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {"unused": "input"})
+
+        assert result == {"$['host']": "api.example.com"}
+
+    def test_resolve_static_args_with_static_values_of_different_types(self):
+        """Test resolve_static_args resolves string, integer, and object static values."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['connection_id']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="12345"
+                ),
+                "$['timeout']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value=30
+                ),
+                "$['config']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value={"enabled": True, "retries": 3}
+                ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {"unused": "input"})
+
+        assert result == {
+            "$['connection_id']": "12345",
+            "$['timeout']": 30,
+            "$['config']": {"enabled": True, "retries": 3},
+        }
+
+    def test_resolve_static_args_with_argument_properties_extracts_from_agent_input(
+        self,
+    ):
+        """Test resolve_static_args resolves AgentToolArgumentArgumentProperties from agent_input."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['user_id']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="userId"
+                ),
+                "$['query']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="searchQuery"
+                ),
+            }
+
+        agent_input = {
+            "userId": "user123",
+            "searchQuery": "test search",
+            "unused_arg": "not_used",
+        }
+
+        result = resolve_static_args(ResourceWithProps(), agent_input)
+
+        assert result == {
+            "$['user_id']": "user123",
+            "$['query']": "test search",
+        }
+
+    def test_resolve_static_args_with_mixed_static_and_argument_properties(self):
+        """Test resolve_static_args with both static and argument properties."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
                 "$['api_key']": AgentToolStaticArgumentProperties(
-                    is_sensitive=True,
-                    value="secret-key-123",
+                    is_sensitive=False, value="secret_key"
+                ),
+                "$['user_id']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="userId"
+                ),
+                "$['version']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="v1"
                 ),
             }
-        )
 
-        result = apply_static_argument_properties_to_schema(tool, agent_input)
+        agent_input = {"userId": "user456"}
 
-        # Should return a different tool instance
-        assert result is not tool
-        assert result.name == tool.name
-        assert result.description == tool.description
-        assert isinstance(result.args_schema, type(BaseModel))
-        schema = result.args_schema.model_json_schema()
+        result = resolve_static_args(ResourceWithProps(), agent_input)
 
-        assert "pre-configured" in schema["properties"]["api_key"]["description"]
-        assert "api_key" not in schema["required"]
-        host_def = schema["$defs"]["Host"]
-        assert host_def["enum"] == ["api.example.com"]
+        assert result == {
+            "$['api_key']": "secret_key",
+            "$['user_id']": "user456",
+            "$['version']": "v1",
+        }
 
-    def test_skips_invalid_argument_properties(
-        self, agent_input: dict[str, Any]
-    ) -> None:
-        tool = self.create_test_tool(
-            {
-                "$['nonexistent_field']": AgentToolStaticArgumentProperties(
-                    is_sensitive=False,
-                    value="test",
+    def test_resolve_static_args_skips_missing_argument_values(self):
+        """Test that argument properties referencing missing agent_input keys are skipped."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['existing_param']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="existingArg"
                 ),
-                "$['host']": AgentToolStaticArgumentProperties(
-                    is_sensitive=False,
-                    value="api.example.com",
+                "$['missing_param']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="missingArg"
                 ),
             }
-        )
 
-        result = apply_static_argument_properties_to_schema(tool, agent_input)
+        agent_input = {"existingArg": "exists"}
 
-        assert isinstance(result.args_schema, type(BaseModel))
-        schema = result.args_schema.model_json_schema()
-        host_def = schema["$defs"]["Host"]
-        assert host_def["enum"] == ["api.example.com"]
-        assert "nonexistent_field" not in schema["properties"]
+        result = resolve_static_args(ResourceWithProps(), agent_input)
+
+        assert result == {"$['existing_param']": "exists"}
+        assert "$['missing_param']" not in result

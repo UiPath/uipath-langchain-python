@@ -59,6 +59,7 @@ class UiPathChatMessagesMapper:
         self.runtime_id = runtime_id
         self.storage = storage
         self.current_message: AIMessageChunk | AIMessage
+        self.tool_names_requiring_confirmation: set[str] = set()
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
         self._citation_stream_processor = CitationStreamProcessor()
@@ -423,11 +424,17 @@ class UiPathChatMessagesMapper:
                         tool_call_id_to_message_id_map[tool_call_id] = (
                             self.current_message.id
                         )
-                        events.append(
-                            self.map_tool_call_to_tool_call_start_event(
-                                self.current_message.id, tool_call
+
+                        # if tool requires confirmation, we skip start tool call
+                        if (
+                            tool_call["name"]
+                            not in self.tool_names_requiring_confirmation
+                        ):
+                            events.append(
+                                self.map_tool_call_to_tool_call_start_event(
+                                    self.current_message.id, tool_call
+                                )
                             )
-                        )
 
                 if self.storage is not None:
                     await self.storage.set_value(
@@ -701,7 +708,7 @@ class UiPathChatMessagesMapper:
             role="assistant",
             content_parts=content_parts,
             tool_calls=uipath_tool_calls,
-            interrupts=[],  # TODO: Interrupts
+            interrupts=[],
         )
 
 

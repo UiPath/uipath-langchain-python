@@ -11,6 +11,7 @@ from uipath_langchain.agent.react.job_attachments import (
     get_job_attachments,
     replace_job_attachment_ids,
 )
+from uipath_langchain.agent.react.json_utils import coerce_json_strings
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import AsyncToolWrapperWithState
 
@@ -73,18 +74,21 @@ def get_job_attachment_wrapper(
         input_args = call["args"]
         modified_input_args = input_args
 
+        schema = None
         if isinstance(tool.args_schema, type) and issubclass(
             tool.args_schema, BaseModel
         ):
+            schema = tool.args_schema
             errors: list[str] = []
-            paths = get_job_attachment_paths(tool.args_schema)
+            paths = get_job_attachment_paths(schema)
             modified_input_args = replace_job_attachment_ids(
                 paths, input_args, state.inner_state.job_attachments, errors
             )
 
             if errors:
                 return {"error": "\n".join(errors)}
-        call["args"] = modified_input_args
+
+        call["args"] = coerce_json_strings(modified_input_args, schema)
         tool_result = await tool.ainvoke(call)
         job_attachments_dict = {}
         if output_type is not None:

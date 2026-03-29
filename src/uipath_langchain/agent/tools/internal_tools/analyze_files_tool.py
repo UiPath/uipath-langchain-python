@@ -1,4 +1,4 @@
-import asyncio
+import mimetypes
 import uuid
 from typing import Any, cast
 
@@ -11,23 +11,24 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
-from langchain_core.messages.tool import ToolCall
 from langchain_core.runnables.config import var_child_runnable_config
-from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.multimodal import FileInfo, build_file_content_block
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.static_args import handle_static_args
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
-from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 from uipath_langchain.chat.helpers import (
     append_content_blocks_to_message,
@@ -77,8 +78,16 @@ def create_analyze_file_tool(
         if not files:
             return {"analysisResult": "No attachments provided to analyze."}
 
-        human_message = HumanMessage(content=analysis_task)
-        human_message_with_files = await add_files_to_message(human_message, files)
+        try:
+            human_message = HumanMessage(content=analysis_task)
+            human_message_with_files = await add_files_to_message(human_message, files)
+        except ValueError as exc:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.FILE_ERROR,
+                title="File attachment too large",
+                detail=str(exc),
+                category=UiPathErrorCategory.USER,
+            ) from exc
 
         messages: list[AnyMessage] = [
             SystemMessage(content=ANALYZE_FILES_SYSTEM_MESSAGE),
@@ -87,18 +96,12 @@ def create_analyze_file_tool(
         config = var_child_runnable_config.get(None)
         result = await non_streaming_llm.ainvoke(messages, config=config)
 
+        del messages, human_message_with_files, files
+
         analysis_result = extract_text_content(result)
         return {"analysisResult": analysis_result}
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
-
-    async def analyze_file_tool_wrapper(
-        tool: BaseTool,
-        call: ToolCall,
-        state: AgentGraphState,
-    ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(resource, state, call["args"])
-        return await job_attachment_wrapper(tool, call, state)
 
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,
@@ -114,7 +117,7 @@ def create_analyze_file_tool(
             "output_schema": output_model,
         },
     )
-    tool.set_tool_wrappers(awrapper=analyze_file_tool_wrapper)
+    tool.set_tool_wrappers(awrapper=job_attachment_wrapper)
     return tool
 
 
@@ -140,10 +143,15 @@ async def _resolve_job_attachment_arguments(
             continue
 
         attachment_id = uuid.UUID(attachment_id_value)
-        mime_type = getattr(attachment, "MimeType", "")
-
         blob_info = await client.attachments.get_blob_file_access_uri_async(
             key=attachment_id
+        )
+
+        input_mime_type = getattr(attachment, "MimeType", None)
+        mime_type = (
+            input_mime_type
+            if input_mime_type
+            else (mimetypes.guess_type(blob_info.name)[0] or "")
         )
 
         file_info = FileInfo(
@@ -172,9 +180,10 @@ async def add_files_to_message(
     if not files:
         return message
 
-    file_content_blocks: list[DataContentBlock] = await asyncio.gather(
-        *[build_file_content_block(file) for file in files]
-    )
+    file_content_blocks: list[DataContentBlock] = []
+    for file in files:
+        block = await build_file_content_block(file)
+        file_content_blocks.append(block)
     return append_content_blocks_to_message(
         message, cast(list[ContentBlock], file_content_blocks)
     )

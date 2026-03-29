@@ -7,7 +7,11 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
-from uipath.platform.common import EndpointManager, resource_override
+from uipath.platform.common import (
+    EndpointManager,
+    get_ca_bundle_path,
+    resource_override,
+)
 
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .http_client.header_capture import HeaderCapture
@@ -95,16 +99,27 @@ class AwsBedrockCompletionsPassthroughClient:
             if self.header_capture:
                 self.header_capture.set(dict(headers))
 
-    def get_client(self):
-        client = boto3.client(
-            "bedrock-runtime",
-            region_name="none",
+    def _build_session(self):
+        return boto3.Session(
             aws_access_key_id="none",
             aws_secret_access_key="none",
-            config=botocore.config.Config(
-                retries={
-                    "total_max_attempts": 1,
-                },
+            region_name="none",
+        )
+
+    def _unsigned_config(self, **overrides):
+        return botocore.config.Config(
+            signature_version=botocore.UNSIGNED,
+            **overrides,
+        )
+
+    def get_client(self):
+        session = self._build_session()
+        ca_bundle = get_ca_bundle_path()
+        client = session.client(
+            "bedrock-runtime",
+            verify=ca_bundle if ca_bundle is not None else False,
+            config=self._unsigned_config(
+                retries={"total_max_attempts": 1},
                 read_timeout=300,
             ),
         )
@@ -115,6 +130,15 @@ class AwsBedrockCompletionsPassthroughClient:
             "after-call.bedrock-runtime.*", self._capture_response_headers
         )
         return client
+
+    def get_bedrock_client(self):
+        session = self._build_session()
+        ca_bundle = get_ca_bundle_path()
+        return session.client(
+            "bedrock",
+            verify=ca_bundle if ca_bundle is not None else False,
+            config=self._unsigned_config(),
+        )
 
     def _modify_request(self, request, **kwargs):
         """Intercept boto3 request and redirect to LLM Gateway."""
@@ -183,8 +207,8 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
             byo_connection_id=byo_connection_id,
         )
 
-        client = passthrough_client.get_client()
-        kwargs["client"] = client
+        kwargs["client"] = passthrough_client.get_client()
+        kwargs["bedrock_client"] = passthrough_client.get_bedrock_client()
         kwargs["model"] = model_name
         super().__init__(**kwargs)
         self.model = model_name
@@ -248,8 +272,8 @@ class UiPathChatBedrock(ChatBedrock):
             header_capture=header_capture,
         )
 
-        client = passthrough_client.get_client()
-        kwargs["client"] = client
+        kwargs["client"] = passthrough_client.get_client()
+        kwargs["bedrock_client"] = passthrough_client.get_bedrock_client()
         kwargs["model"] = model_name
         kwargs["header_capture"] = header_capture
         super().__init__(**kwargs)

@@ -2,6 +2,15 @@
 
 from dataclasses import dataclass
 
+MAX_FILE_SIZE_BYTES: int = 30 * 1024 * 1024  # 30MB
+
+IMAGE_MIME_TYPES: set[str] = {
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+}
+
 
 @dataclass
 class FileInfo:
@@ -10,11 +19,3 @@ class FileInfo:
     url: str
     name: str
     mime_type: str
-
-
-IMAGE_MIME_TYPES: set[str] = {
-    "image/png",
-    "image/jpeg",
-    "image/gif",
-    "image/webp",
-}
