@@ -1,12 +1,14 @@
 """Tests for multimodal — file download, size limits, and content block creation."""
 
 import base64
+import io
 
 import httpx
 import pytest
+from PIL import Image
 from pytest_httpx import HTTPXMock
 
-from uipath_langchain.agent.multimodal.invoke import build_file_content_block
+from uipath_langchain.agent.multimodal.invoke import build_file_content_blocks_for
 from uipath_langchain.agent.multimodal.types import MAX_FILE_SIZE_BYTES, FileInfo
 from uipath_langchain.agent.multimodal.utils import (
     download_file_base64,
@@ -14,6 +16,17 @@ from uipath_langchain.agent.multimodal.utils import (
 )
 
 FILE_URL = "https://blob.storage.example.com/file.pdf"
+
+
+def _make_tiff(num_pages: int = 1, width: int = 2, height: int = 2) -> bytes:
+    """Create a minimal valid TIFF image with the given number of pages."""
+    frames = [
+        Image.new("RGBA", (width, height), color=(i * 40, 0, 0, 255))
+        for i in range(num_pages)
+    ]
+    buf = io.BytesIO()
+    frames[0].save(buf, format="TIFF", save_all=True, append_images=frames[1:])
+    return buf.getvalue()
 
 
 class _ChunkedStream(httpx.AsyncByteStream):
@@ -148,26 +161,28 @@ class TestDownloadFileBase64:
         assert result == base64.b64encode(content).decode("utf-8")
 
 
-class TestBuildFileContentBlock:
-    """Tests for build_file_content_block — size limit enforced during download."""
+class TestBuildFileContentBlocksFor:
+    """Tests for build_file_content_blocks_for — size limit enforced during download."""
 
     async def test_small_image_succeeds(self, httpx_mock: HTTPXMock) -> None:
         content = b"tiny image bytes"
         httpx_mock.add_response(url=FILE_URL, content=content)
         file_info = FileInfo(url=FILE_URL, name="photo.png", mime_type="image/png")
 
-        block = await build_file_content_block(file_info)
+        blocks = await build_file_content_blocks_for(file_info)
 
-        assert block["type"] == "image"
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "image"
 
     async def test_small_pdf_succeeds(self, httpx_mock: HTTPXMock) -> None:
         content = b"tiny pdf bytes"
         httpx_mock.add_response(url=FILE_URL, content=content)
         file_info = FileInfo(url=FILE_URL, name="doc.pdf", mime_type="application/pdf")
 
-        block = await build_file_content_block(file_info)
+        blocks = await build_file_content_blocks_for(file_info)
 
-        assert block["type"] == "file"
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "file"
 
     async def test_rejects_file_exceeding_default_limit(
         self, httpx_mock: HTTPXMock
@@ -178,7 +193,7 @@ class TestBuildFileContentBlock:
         file_info = FileInfo(url=FILE_URL, name="huge.pdf", mime_type="application/pdf")
 
         with pytest.raises(ValueError, match="exceeds"):
-            await build_file_content_block(file_info)
+            await build_file_content_blocks_for(file_info)
 
     async def test_rejects_file_exceeding_custom_limit(
         self, httpx_mock: HTTPXMock
@@ -189,7 +204,7 @@ class TestBuildFileContentBlock:
         file_info = FileInfo(url=FILE_URL, name="big.png", mime_type="image/png")
 
         with pytest.raises(ValueError, match="exceeds"):
-            await build_file_content_block(file_info, max_size=10)
+            await build_file_content_blocks_for(file_info, max_size=10)
 
     async def test_file_within_custom_limit_succeeds(
         self, httpx_mock: HTTPXMock
@@ -198,9 +213,10 @@ class TestBuildFileContentBlock:
         httpx_mock.add_response(url=FILE_URL, content=content)
         file_info = FileInfo(url=FILE_URL, name="small.png", mime_type="image/png")
 
-        block = await build_file_content_block(file_info, max_size=1000)
+        blocks = await build_file_content_blocks_for(file_info, max_size=1000)
 
-        assert block["type"] == "image"
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "image"
 
     async def test_unsupported_mime_type_raises(self, httpx_mock: HTTPXMock) -> None:
         content = b"some data"
@@ -208,7 +224,7 @@ class TestBuildFileContentBlock:
         file_info = FileInfo(url=FILE_URL, name="data.csv", mime_type="text/csv")
 
         with pytest.raises(ValueError, match="Unsupported"):
-            await build_file_content_block(file_info)
+            await build_file_content_blocks_for(file_info)
 
     async def test_error_includes_filename(self, httpx_mock: HTTPXMock) -> None:
         """ValueError from download includes the filename for debuggability."""
@@ -219,4 +235,72 @@ class TestBuildFileContentBlock:
         )
 
         with pytest.raises(ValueError, match="report.pdf"):
-            await build_file_content_block(file_info, max_size=100)
+            await build_file_content_blocks_for(file_info, max_size=100)
+
+    async def test_single_page_tiff_returns_one_png_block(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        tiff_bytes = _make_tiff(num_pages=1)
+        httpx_mock.add_response(url=FILE_URL, content=tiff_bytes)
+        file_info = FileInfo(url=FILE_URL, name="scan.tiff", mime_type="image/tiff")
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "image"
+        assert blocks[0]["mime_type"] == "image/png"
+
+    async def test_multi_page_tiff_returns_one_block_per_page(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        tiff_bytes = _make_tiff(num_pages=3)
+        httpx_mock.add_response(url=FILE_URL, content=tiff_bytes)
+        file_info = FileInfo(url=FILE_URL, name="doc.tiff", mime_type="image/tiff")
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert len(blocks) == 3
+        for block in blocks:
+            assert block["type"] == "image"
+            assert block["mime_type"] == "image/png"
+
+    async def test_tiff_x_tiff_mime_type_accepted(self, httpx_mock: HTTPXMock) -> None:
+        tiff_bytes = _make_tiff(num_pages=1)
+        httpx_mock.add_response(url=FILE_URL, content=tiff_bytes)
+        file_info = FileInfo(url=FILE_URL, name="scan.tif", mime_type="image/x-tiff")
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "image"
+
+    async def test_tiff_rejects_exceeding_size_limit(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        tiff_bytes = _make_tiff(num_pages=1)
+        httpx_mock.add_response(url=FILE_URL, content=tiff_bytes)
+        file_info = FileInfo(url=FILE_URL, name="big.tiff", mime_type="image/tiff")
+
+        with pytest.raises(ValueError, match="exceeds"):
+            await build_file_content_blocks_for(file_info, max_size=10)
+
+    async def test_tiff_error_includes_filename(self, httpx_mock: HTTPXMock) -> None:
+        tiff_bytes = _make_tiff(num_pages=1)
+        httpx_mock.add_response(url=FILE_URL, content=tiff_bytes)
+        file_info = FileInfo(url=FILE_URL, name="report.tiff", mime_type="image/tiff")
+
+        with pytest.raises(ValueError, match="report.tiff"):
+            await build_file_content_blocks_for(file_info, max_size=10)
+
+    async def test_tiff_png_blocks_contain_valid_base64(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        tiff_bytes = _make_tiff(num_pages=1)
+        httpx_mock.add_response(url=FILE_URL, content=tiff_bytes)
+        file_info = FileInfo(url=FILE_URL, name="scan.tiff", mime_type="image/tiff")
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        png_bytes = base64.b64decode(blocks[0]["base64"])
+        img = Image.open(io.BytesIO(png_bytes))
+        assert img.format == "PNG"

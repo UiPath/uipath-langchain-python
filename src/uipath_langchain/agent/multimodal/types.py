@@ -11,6 +11,11 @@ IMAGE_MIME_TYPES: set[str] = {
     "image/webp",
 }
 
+TIFF_MIME_TYPES: set[str] = {
+    "image/tiff",
+    "image/x-tiff",
+}
+
 
 @dataclass
 class FileInfo:
