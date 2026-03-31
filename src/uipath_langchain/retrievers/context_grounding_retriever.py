@@ -17,6 +17,7 @@ class ContextGroundingRetriever(BaseRetriever):
     threshold: float = 0.0
     scope_folder: str | None = None
     scope_extension: str | None = None
+    resolved_index_id: str | None = None
 
     def _build_scope(self) -> UnifiedSearchScope | None:
         if self.scope_folder or self.scope_extension:
@@ -44,6 +45,7 @@ class ContextGroundingRetriever(BaseRetriever):
             folder_key=self.folder_key,
         )
 
+        self.resolved_index_id = getattr(result, "index_id", None)
         values = result.semantic_results.values if result.semantic_results else []
 
         return [
@@ -80,6 +82,7 @@ class ContextGroundingRetriever(BaseRetriever):
             folder_key=self.folder_key,
         )
 
+        self.resolved_index_id = getattr(result, "index_id", None)
         values = result.semantic_results.values if result.semantic_results else []
 
         return [
