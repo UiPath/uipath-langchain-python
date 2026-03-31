@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 import uuid
 from typing import Any, cast
@@ -37,6 +38,8 @@ from uipath_langchain.chat.helpers import (
     append_content_blocks_to_message,
     extract_text_content,
 )
+
+logger = logging.getLogger("uipath")
 
 ANALYZE_FILES_SYSTEM_MESSAGE = (
     "Process the provided files to complete the given task. "
@@ -80,6 +83,13 @@ def create_analyze_file_tool(
         files = await _resolve_job_attachment_arguments(attachments)
         if not files:
             return {"analysisResult": "No attachments provided to analyze."}
+
+        try:
+            client = UiPath()
+            deployed_policy = await client.automation_ops.get_deployed_policy_async()
+            logger.info("AutomationOps deployed policy response: %s", deployed_policy)
+        except Exception:
+            logger.exception("Failed to fetch AutomationOps deployed policy")
 
         try:
             human_message = HumanMessage(content=analysis_task)
