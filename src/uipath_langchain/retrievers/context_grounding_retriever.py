@@ -45,7 +45,7 @@ class ContextGroundingRetriever(BaseRetriever):
             folder_key=self.folder_key,
         )
 
-        self.resolved_index_id = getattr(result, "index_id", None)
+        self.resolved_index_id = result.index_id
         values = result.semantic_results.values if result.semantic_results else []
 
         return [
@@ -82,7 +82,7 @@ class ContextGroundingRetriever(BaseRetriever):
             folder_key=self.folder_key,
         )
 
-        self.resolved_index_id = getattr(result, "index_id", None)
+        self.resolved_index_id = result.index_id
         values = result.semantic_results.values if result.semantic_results else []
 
         return [
