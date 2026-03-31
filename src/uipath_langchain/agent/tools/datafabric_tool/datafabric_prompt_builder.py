@@ -8,11 +8,10 @@ the tool's performance characteristics and scoring in production.
 """
 
 import logging
-from functools import lru_cache
-from pathlib import Path
 
 from uipath.platform.entities import Entity
 
+from .datafabric_prompts import SQL_CONSTRAINTS, SQL_EXPERT_SYSTEM_PROMPT
 from .models import (
     EntitySchema,
     EntitySQLContext,
@@ -22,33 +21,6 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
-
-_PROMPTS_DIR = Path(__file__).parent
-
-
-@lru_cache(maxsize=1)
-def _load_sql_constraints() -> str:
-    """Load SQL constraints from sql_constraints.txt."""
-    constraints_path = _PROMPTS_DIR / "sql_constraints.txt"
-    try:
-        return constraints_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        logger.warning("SQL constraints file not found: %s", constraints_path)
-        return ""
-
-
-@lru_cache(maxsize=1)
-def _load_sql_expert_system_prompt() -> str:
-    """Load SQL generation strategy from sql_expert_system_prompt.txt."""
-    prompt_path = _PROMPTS_DIR / "sql_expert_system_prompt.txt"
-    try:
-        return prompt_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        logger.warning("System prompt file not found: %s", prompt_path)
-        return ""
-
-
-# --- Build ---
 
 
 def build_entity_context(entity: Entity) -> EntitySQLContext:
@@ -134,13 +106,10 @@ def build_sql_context(
     return SQLContext(
         base_system_prompt=base_system_prompt or None,
         resource_description=resource_description or None,
-        sql_expert_system_prompt=_load_sql_expert_system_prompt(),
-        constraints=_load_sql_constraints(),
+        sql_expert_system_prompt=SQL_EXPERT_SYSTEM_PROMPT,
+        constraints=SQL_CONSTRAINTS,
         entity_contexts=[build_entity_context(e) for e in entities],
     )
-
-
-# --- Format ---
 
 
 def format_sql_context(ctx: SQLContext) -> str:
@@ -199,9 +168,6 @@ def format_sql_context(ctx: SQLContext) -> str:
         lines.append("")
 
     return "\n".join(lines)
-
-
-# --- Public API ---
 
 
 def build(

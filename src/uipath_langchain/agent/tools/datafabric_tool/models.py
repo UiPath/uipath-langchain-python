@@ -6,9 +6,6 @@ NUMERIC_TYPES = frozenset({"int", "decimal", "float", "double", "bigint"})
 TEXT_TYPES = frozenset({"varchar", "nvarchar", "text", "string", "ntext"})
 
 
-# --- Schema layer (raw metadata) ---
-
-
 class FieldSchema(BaseModel):
     """Structured representation of a Data Fabric entity field."""
 
@@ -51,9 +48,6 @@ class EntitySchema(BaseModel):
     fields: list[FieldSchema]
 
 
-# --- Context layer (schema + derived presentation data) ---
-
-
 class QueryPattern(BaseModel):
     """A SQL query pattern example derived from an entity's fields."""
 
@@ -76,9 +70,6 @@ class SQLContext(BaseModel):
     sql_expert_system_prompt: str | None = None
     constraints: str | None = None
     entity_contexts: list[EntitySQLContext]
-
-
-# --- Tool input ---
 
 
 class DataFabricQueryInput(BaseModel):

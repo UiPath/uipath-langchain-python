@@ -151,6 +151,7 @@ def create_context_tool(
     agent: LowCodeAgentDefinition | None = None,
 ) -> StructuredTool | BaseTool | None:
     assert resource.context_type is not None
+    tool_name = sanitize_tool_name(resource.name)
 
     if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
         if llm is None:
@@ -161,23 +162,20 @@ def create_context_tool(
         return create_datafabric_query_tool(
             resource,
             llm,
+            tool_name=tool_name,
             agent_config={BASE_SYSTEM_PROMPT: _extract_system_prompt(agent)},
         )
 
-    elif resource.context_type == AgentContextType.INDEX:
-        assert resource.settings is not None
-        tool_name = sanitize_tool_name(resource.name)
-        retrieval_mode = resource.settings.retrieval_mode.lower()
+    assert resource.settings is not None
+    retrieval_mode = resource.settings.retrieval_mode.lower()
 
-        if retrieval_mode == AgentContextRetrievalMode.DEEP_RAG.value.lower():
-            return handle_deep_rag(tool_name, resource)
+    if retrieval_mode == AgentContextRetrievalMode.DEEP_RAG.value.lower():
+        return handle_deep_rag(tool_name, resource)
 
-        if retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
-            return handle_batch_transform(tool_name, resource)
+    if retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
+        return handle_batch_transform(tool_name, resource)
 
-        return handle_semantic_search(tool_name, resource)
-
-    return None
+    return handle_semantic_search(tool_name, resource)
 
 
 def handle_semantic_search(

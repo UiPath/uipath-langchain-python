@@ -139,6 +139,7 @@ def _build_routing_context(
 def create_datafabric_query_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel,
+    tool_name: str = "query_datafabric",
     agent_config: dict[str, str] | None = None,
 ) -> BaseTool:
     """Create the ``query_datafabric`` agentic tool.
@@ -146,6 +147,7 @@ def create_datafabric_query_tool(
     Args:
         resource: The Data Fabric context resource configuration.
         llm: The language model for the inner SQL generation loop.
+        tool_name: Sanitized tool name from the resource.
         agent_config: Optional dict with agent-level config.
             Key ``base_system_prompt`` carries the outer agent's system prompt.
     """
@@ -158,7 +160,7 @@ def create_datafabric_query_tool(
         base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
     )
     return BaseUiPathStructuredTool(
-        name="query_datafabric",
+        name=tool_name,
         description=(
             "Query Data Fabric entities using natural language. "
             "Describe what data you need and the tool will translate it to SQL, "
