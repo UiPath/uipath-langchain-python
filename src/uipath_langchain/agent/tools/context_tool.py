@@ -6,14 +6,18 @@ from typing import Any, Optional
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.documents import Document
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
+    AgentContextType,
+    AgentMessageRole,
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
+    LowCodeAgentDefinition,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
@@ -130,16 +134,48 @@ def is_static_query(resource: AgentContextResourceConfig) -> bool:
     return resource.settings.query.variant.lower() == "static"
 
 
-def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
+def _extract_system_prompt(agent: LowCodeAgentDefinition | None) -> str:
+    """Extract system prompt from agent definition messages."""
+    if agent is None:
+        return ""
+    return "\n\n".join(
+        msg.content
+        for msg in agent.messages
+        if msg.role == AgentMessageRole.SYSTEM and msg.content
+    )
+
+
+def create_context_tool(
+    resource: AgentContextResourceConfig,
+    llm: BaseChatModel | None = None,
+    agent: LowCodeAgentDefinition | None = None,
+) -> StructuredTool | BaseTool | None:
+    assert resource.context_type is not None
     tool_name = sanitize_tool_name(resource.name)
+
+    if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
+        if llm is None:
+            raise ValueError("Data Fabric entity set tools require an LLM instance")
+        from .datafabric_tool import create_datafabric_query_tool
+        from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
+
+        return create_datafabric_query_tool(
+            resource,
+            llm,
+            tool_name=tool_name,
+            agent_config={BASE_SYSTEM_PROMPT: _extract_system_prompt(agent)},
+        )
+
     assert resource.settings is not None
     retrieval_mode = resource.settings.retrieval_mode.lower()
+
     if retrieval_mode == AgentContextRetrievalMode.DEEP_RAG.value.lower():
         return handle_deep_rag(tool_name, resource)
-    elif retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
+
+    if retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
         return handle_batch_transform(tool_name, resource)
-    else:
-        return handle_semantic_search(tool_name, resource)
+
+    return handle_semantic_search(tool_name, resource)
 
 
 def handle_semantic_search(

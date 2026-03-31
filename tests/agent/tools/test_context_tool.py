@@ -52,6 +52,7 @@ def _make_context_resource(
     citation_mode_value=None,
     retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
     folder_path_prefix=None,
+    context_type="index",
     **kwargs,
 ):
     """Helper to create an AgentContextResourceConfig."""
@@ -59,6 +60,7 @@ def _make_context_resource(
         name=name,
         description=description,
         resource_type="context",
+        context_type=context_type,
         index_name=index_name,
         folder_path=folder_path,
         settings=AgentContextSettings(
