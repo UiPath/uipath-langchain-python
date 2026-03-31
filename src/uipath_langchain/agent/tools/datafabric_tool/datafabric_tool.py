@@ -8,7 +8,7 @@ The tool accepts natural language queries, runs an inner LangGraph
 sub-graph for SQL generation + execution + self-correction, and
 returns a natural language answer.
 
-SQL prompt building is in ``sql_prompt_builder.py``.
+Prompt building is in ``datafabric_prompt_builder.py``.
 Sub-graph definition is in ``datafabric_subgraph.py``.
 """
 
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 BASE_SYSTEM_PROMPT = "base_system_prompt"
 
 
-class NLQueryHandler:
+class DataFabricTextQueryHandler:
     """Manages lazy initialization and invocation of the Data Fabric sub-graph.
 
     On first call, fetches entity schemas from the DF API and compiles
@@ -75,14 +75,13 @@ class NLQueryHandler:
                     "No Data Fabric entity schemas could be fetched. "
                     "Check entity identifiers and permissions."
                 )
-            datafabric_graph = DataFabricGraph(
+            self._compiled = DataFabricGraph.create(
                 llm=self._llm,
                 entities=entities,
                 routing_context=self._routing_context,
                 resource_description=self._resource_description,
                 base_system_prompt=self._base_system_prompt,
             )
-            self._compiled = datafabric_graph.compile()
             return self._compiled
 
     async def __call__(self, user_query: str) -> str:
@@ -137,9 +136,6 @@ def _build_routing_context(
     )
 
 
-# --- Tool Creation ---
-
-
 def create_datafabric_query_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel,
@@ -154,7 +150,7 @@ def create_datafabric_query_tool(
             Key ``base_system_prompt`` carries the outer agent's system prompt.
     """
     config = agent_config or {}
-    handler = NLQueryHandler(
+    handler = DataFabricTextQueryHandler(
         entity_identifiers=resource.datafabric_entity_identifiers,
         routing_context=_build_routing_context(resource),
         llm=llm,

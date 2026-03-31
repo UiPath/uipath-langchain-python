@@ -25,14 +25,13 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 from uipath.platform.entities import Entity, QueryRoutingOverrideContext
 
-from ..sql_tool import SqlTool
-from . import prompt_builder
+from ..datafabric_query_tool import DataFabricQueryTool
+from . import datafabric_prompt_builder
 from .models import DataFabricExecuteSqlInput
 
 logger = logging.getLogger(__name__)
 
 
-# --- State ---
 class DataFabricSubgraphState(BaseModel):
     """State for the inner Data Fabric ReAct sub-graph."""
 
@@ -40,8 +39,7 @@ class DataFabricSubgraphState(BaseModel):
     iteration_count: int = 0
 
 
-# --- SQL Executor ---
-class SqlExecutor:
+class QueryExecutor:
     """Executes SQL queries against Data Fabric."""
 
     def __init__(self, routing_context: QueryRoutingOverrideContext) -> None:
@@ -72,48 +70,11 @@ class SqlExecutor:
             }
 
 
-def _create_execute_sql_tool(
-    routing_context: QueryRoutingOverrideContext,
-    entities: list[Entity],
-) -> BaseTool:
-    """Create the inner ``execute_sql`` tool for the sub-graph."""
-    entity_names = ", ".join(e.name for e in entities)
-    return SqlTool(
-        name="execute_sql",
-        description=(
-            f"Execute a SQL SELECT query against Data Fabric entities: {entity_names}. "
-            "Refer to the entity schemas in the system message for available "
-            "tables and columns. Retry with a corrected query on errors."
-        ),
-        args_schema=DataFabricExecuteSqlInput,
-        coroutine=SqlExecutor(routing_context),
-        metadata={"tool_type": "datafabric_sql"},
-    )
-
-
-# --- System message builder ---
-def build_inner_system_message(
-    entities: list[Entity],
-    resource_description: str = "",
-    base_system_prompt: str = "",
-) -> SystemMessage:
-    """Build the system message for the inner sub-graph LLM.
-
-    Args:
-        entities: List of Entity objects whose schemas should be included.
-        resource_description: Optional description of the resource/entity set.
-        base_system_prompt: Optional system prompt from the outer agent.
-    """
-    return SystemMessage(
-        content=prompt_builder.build(entities, resource_description, base_system_prompt)
-    )
-
-
-# --- Sub-graph ---
 class DataFabricGraph:
-    """Builds and compiles the inner ReAct sub-graph.
+    """Inner ReAct sub-graph for Data Fabric SQL execution.
 
-    Each graph node is a method — no closures inside closures.
+    Each graph node is a method. The graph is compiled during __init__
+    and available via the ``compiled`` property.
     """
 
     def __init__(
@@ -126,13 +87,30 @@ class DataFabricGraph:
         base_system_prompt: str = "",
     ) -> None:
         self._max_iterations = max_iterations
-        self._execute_sql_tool = _create_execute_sql_tool(routing_context, entities)
-        self._system_message = build_inner_system_message(
-            entities, resource_description, base_system_prompt
+        self._execute_sql_tool = self._create_execute_sql_tool(
+            routing_context, entities
+        )
+        self._system_message = SystemMessage(
+            content=datafabric_prompt_builder.build(
+                entities, resource_description, base_system_prompt
+            )
         )
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
             [self._execute_sql_tool]
         )
+
+        # Build and compile the graph
+        graph = StateGraph(DataFabricSubgraphState)
+        graph.add_node("inner_llm", self.llm_node)
+        graph.add_node("inner_tool", self.tool_node)
+        graph.add_node("termination", self.termination_node)
+        graph.add_edge(START, "inner_llm")
+        graph.add_conditional_edges(
+            "inner_llm", self.router, ["inner_tool", "termination", END]
+        )
+        graph.add_edge("inner_tool", "inner_llm")
+        graph.add_edge("termination", END)
+        self.compiled_graph: CompiledStateGraph[Any] = graph.compile()
 
     async def llm_node(self, state: DataFabricSubgraphState) -> dict[str, Any]:
         """Invoke the inner LLM with the current message history."""
@@ -195,19 +173,41 @@ class DataFabricGraph:
             return "termination"
         return END
 
-    def compile(self) -> CompiledStateGraph[Any]:
-        """Build and compile the StateGraph."""
-        graph = StateGraph(DataFabricSubgraphState)
-
-        graph.add_node("inner_llm", self.llm_node)
-        graph.add_node("inner_tool", self.tool_node)
-        graph.add_node("termination", self.termination_node)
-
-        graph.add_edge(START, "inner_llm")
-        graph.add_conditional_edges(
-            "inner_llm", self.router, ["inner_tool", "termination", END]
+    def _create_execute_sql_tool(
+        self,
+        routing_context: QueryRoutingOverrideContext,
+        entities: list[Entity],
+    ) -> BaseTool:
+        """Create the inner ``execute_sql`` tool."""
+        entity_names = ", ".join(e.name for e in entities)
+        return DataFabricQueryTool(
+            name="execute_sql",
+            description=(
+                f"Execute a SQL SELECT query against Data Fabric entities: {entity_names}. "
+                "Refer to the entity schemas in the system message for available "
+                "tables and columns. Retry with a corrected query on errors."
+            ),
+            args_schema=DataFabricExecuteSqlInput,
+            coroutine=QueryExecutor(routing_context),
+            metadata={"tool_type": "datafabric_sql"},
         )
-        graph.add_edge("inner_tool", "inner_llm")
-        graph.add_edge("termination", END)
 
-        return graph.compile()
+    @staticmethod
+    def create(
+        llm: BaseChatModel,
+        entities: list[Entity],
+        routing_context: QueryRoutingOverrideContext,
+        max_iterations: int = 25,
+        resource_description: str = "",
+        base_system_prompt: str = "",
+    ) -> CompiledStateGraph[Any]:
+        """Create and return a compiled Data Fabric sub-graph."""
+        graph = DataFabricGraph(
+            llm,
+            entities,
+            routing_context,
+            max_iterations,
+            resource_description,
+            base_system_prompt,
+        )
+        return graph.compiled_graph

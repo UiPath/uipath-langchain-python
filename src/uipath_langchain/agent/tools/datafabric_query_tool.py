@@ -1,4 +1,4 @@
-"""SQL tool with syntax validation via sqlparse."""
+"""Data Fabric query tool with SQL syntax validation via sqlparse."""
 
 from typing import Any
 
@@ -9,7 +9,7 @@ from langchain_core.runnables import RunnableConfig
 from .base_uipath_structured_tool import BaseUiPathStructuredTool
 
 
-def validate_sql(sql: str) -> str | None:
+def _validate_sql(sql: str) -> str | None:
     """Validate SQL syntax using sqlparse.
 
     Returns:
@@ -21,8 +21,8 @@ def validate_sql(sql: str) -> str | None:
     return None
 
 
-class SqlTool(BaseUiPathStructuredTool):
-    """Structured tool with SQL syntax validation.
+class DataFabricQueryTool(BaseUiPathStructuredTool):
+    """Data Fabric query tool with SQL syntax validation.
 
     Validates that the input SQL is parseable before delegating
     to the underlying coroutine. On validation failure, raises
@@ -37,7 +37,7 @@ class SqlTool(BaseUiPathStructuredTool):
         **kwargs: Any,
     ) -> Any:
         sql_query = kwargs.get("sql_query") or (args[0] if args else "")
-        error = validate_sql(sql_query)
+        error = _validate_sql(sql_query)
         if error:
             raise ValueError(error)
         return await super()._arun(

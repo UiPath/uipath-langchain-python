@@ -2,6 +2,9 @@
 
 Converts raw Entity SDK objects into structured Pydantic models (SQLContext),
 then formats them as text for system prompt injection.
+
+Note: This module will go through refinements as we better understand
+the tool's performance characteristics and scoring in production.
 """
 
 import logging
