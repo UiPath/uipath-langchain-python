@@ -8,7 +8,7 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 
 Guidance for working inside `src/uipath_langchain/agent/` — the ReAct agent orchestration layer.
 
-**Read first, code second.** Before changing anything, read the existing code in the subsystem you're modifying. Copy its patterns — don't invent new ones.
+**Read first, code second.** Before changing anything, read the existing code in the subsystem you're modifying. Follow established patterns unless you have a concrete reason to diverge — and if you do, discuss it first.
 
 ## Architectural Constraints
 
@@ -17,7 +17,8 @@ The agent module is designed so that subsystems can be composed into different l
 - **`tools/` must not know about the loop.** Tools are standalone capabilities — they receive input, do work, return output. They must not import from `react/` (except shared types in `react/types.py` and helpers in `react/utils.py`). A tool should work regardless of whether it's orchestrated by a ReAct loop, a plan-and-execute loop, or something else entirely.
 - **`guardrails/` must not know about the loop.** Guardrail evaluation and actions are generic validation — they inspect data, return pass/fail, and execute actions. The *wiring* of guardrails into a specific loop happens in `react/guardrails/`, not in `guardrails/` itself.
 - **`react/` is one loop implementation, not the only possible one.** It owns graph construction, routing, and node lifecycle. It composes tools and guardrails but those subsystems don't depend back on it.
-- **`exceptions/`, `multimodal/`, `messages/`, `wrappers/` are fully standalone.** They have no knowledge of the loop or each other.
+- **`exceptions/`, `multimodal/`, `messages/` are fully standalone.** They have no knowledge of the loop or each other.
+- **`wrappers/` are loop-agnostic but impose state contracts.** They don't import the loop, but they do depend on specific state fields existing (e.g., `inner_state.job_attachments`). When adding a wrapper, ensure the state fields it expects are documented in `react/types.py`.
 
 This means: if you're adding a tool and find yourself importing from `react/agent.py` or `react/router.py`, you're coupling the tool to the loop. Stop and rethink.
 
@@ -79,7 +80,7 @@ messages/*      ←  standalone (langchain_core.messages)
 
 The LangGraph state system has sharp edges. These rules prevent silent corruption:
 
-- **Never mutate state directly.** Return dicts from nodes; reducers compose the updates.
+- **Always return state updates as dicts from nodes** — LangGraph passes copies, so mutations on the state object are silently lost. The only way to update state is by returning dicts that the reducers merge.
 - New fields on `InnerAgentGraphState` **must** have a reducer via `Annotated[T, reducer_func]` — use `merge_dicts` for dicts, `merge_objects` for nested BaseModel fields.
 - To append messages: return `{"messages": [new_msg]}` — the `add_messages` reducer handles it.
 - To **replace** messages (rare): use `Overwrite` from `langgraph.types`.
@@ -93,7 +94,7 @@ The LangGraph state system has sharp edges. These rules prevent silent corruptio
 |-------|------------|
 | Import from `react/agent.py` in tools/ or guardrails/ | Import from `react/types.py` or `react/utils.py` |
 | Put routing logic in tool nodes | Return results; let the router decide |
-| Mutate `AgentGraphState.messages` directly | Return `{"messages": [...]}` from your node |
+| Mutate state object in a node (silently lost) | Return `{"messages": [...]}` dicts; let reducers merge |
 | Read env vars inside tool/node functions | Accept config through factory parameters |
 | Create tool classes | Use `create_<name>_tool()` factory functions |
 | Add `AgentGraphState` fields without reducers | Use `Annotated[T, reducer_func]` |
@@ -102,6 +103,29 @@ The LangGraph state system has sharp edges. These rules prevent silent corruptio
 | Add guardrail eval logic outside `guardrail_nodes.py` | Create a scope-specific creator there |
 | Put HITL logic in tool functions | Set `REQUIRE_CONVERSATIONAL_CONFIRMATION` metadata on the tool |
 | Skip registering new tools in `tool_factory.py` | Always add dispatch entry in `_build_tool_for_resource()` |
+
+---
+
+## Exception Handling
+
+Use the structured error types in `exceptions/` — never raise raw `Exception`, `ValueError`, or `RuntimeError`:
+
+- **Runtime errors** (during execution): `AgentRuntimeError(code=AgentRuntimeErrorCode.X, title=..., detail=..., category=...)`
+- **Startup errors** (during init): `AgentStartupError(code=AgentStartupErrorCode.X, title=..., detail=..., category=...)`
+- **HTTP errors from platform calls**: catch `EnrichedException`, map via `raise_for_enriched()` in `exceptions/helpers.py`
+- **LLM provider errors**: handled by `raise_for_provider_http_error()` in `exceptions/licensing.py`
+- Always chain exceptions: `raise AgentRuntimeError(...) from e`
+
+## Testing
+
+Tests live in `tests/agent/` mirroring the source structure. Before writing new tests, read `tests/agent/tools/test_process_tool.py` for the standard fixture and mocking patterns.
+
+Key conventions:
+- Use `pytest-httpx` (`HTTPXMock`) for HTTP mocking — never make real network calls
+- Use `monkeypatch.setenv()` / `monkeypatch.delenv()` for environment isolation
+- Async tests need no decorator (`asyncio_mode = "auto"`)
+- All test functions require type annotations
+- Mock SDK dependencies via `AsyncMock` / `MagicMock` — tools and nodes receive them through constructor params
 
 ---
 
