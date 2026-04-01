@@ -1,6 +1,6 @@
 ---
 name: develop-agent-module
-description: Use when modifying, extending, or debugging anything inside the agent/ module — the ReAct agent graph, tools, guardrails, exceptions, multimodal, or wrappers. Guides clean architecture, module boundaries, and correct integration patterns. Triggers on "add a node to the agent graph", "modify routing", "add a guardrail action", "change agent state", "fix agent exceptions", "add multimodal support", or any work touching files under src/uipath_langchain/agent/. Does NOT replace the add-tool skill for step-by-step tool creation — use both together when adding tools.
+description: Use when modifying, extending, or debugging anything inside the agent/ module — the ReAct agent graph, tools, guardrails, exceptions, multimodal, or wrappers. Guides clean architecture, module boundaries, and correct integration patterns. Triggers on "add a node to the agent graph", "modify routing", "add a guardrail action", "change agent state", "fix agent exceptions", "add multimodal support", or any work touching files under src/uipath_langchain/agent/.
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 ---
 
