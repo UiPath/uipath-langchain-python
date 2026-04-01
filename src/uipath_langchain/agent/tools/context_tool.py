@@ -274,7 +274,7 @@ def handle_semantic_search(
                 {"metadata": doc.metadata, "page_content": doc.page_content}
                 for doc in docs
             ],
-            "index_id": retriever.resolved_index_id,
+            "index_id": retriever.index_id,
         }
 
     if arg_props or has_arg_folder:
