@@ -63,7 +63,7 @@ def create_agent(
 
     Control flow tools (end_execution, raise_error) are auto-injected alongside regular tools.
     """
-    from ..tools import create_tool_node
+    from ..tools import create_tool_node, wrap_tools_with_error_handling
 
     if config is None:
         config = AgentGraphConfig()
@@ -76,9 +76,7 @@ def create_agent(
 
     init_node = create_init_node(messages, input_schema, config.is_conversational)
 
-    tool_nodes = create_tool_node(
-        agent_tools, handle_tool_errors=config.is_conversational
-    )
+    tool_nodes = create_tool_node(agent_tools)
 
     # for conversational agents we transform deeprag's citation format into cas's
     if config.is_conversational:
@@ -91,6 +89,13 @@ def create_agent(
     tool_nodes_with_guardrails = create_tools_guardrails_subgraph(
         tool_nodes, guardrails, input_schema=input_schema
     )
+
+    processed_tool_nodes = tool_nodes_with_guardrails
+    if config.is_conversational:
+        processed_tool_nodes = wrap_tools_with_error_handling(
+            tool_nodes_with_guardrails
+        )
+
     terminate_node = create_terminate_node(output_schema, config.is_conversational)
 
     CompleteAgentGraphState = create_state_with_input(
@@ -107,7 +112,7 @@ def create_agent(
     )
     builder.add_node(AgentGraphNode.INIT, init_with_guardrails_subgraph)
 
-    for tool_name, tool_node in tool_nodes_with_guardrails.items():
+    for tool_name, tool_node in processed_tool_nodes.items():
         builder.add_node(tool_name, tool_node)
 
     terminate_with_guardrails_subgraph = create_agent_terminate_guardrails_subgraph(
