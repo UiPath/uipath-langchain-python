@@ -310,5 +310,5 @@ def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, UiPathToolNode]:
                 awrapper=tool.awrapper,
             )
         else:
-            dict_mapping[tool.name] = UiPathToolNode(tool)
+            dict_mapping[tool.name] = UiPathToolNode(tool, wrapper=None, awrapper=None)
     return dict_mapping
