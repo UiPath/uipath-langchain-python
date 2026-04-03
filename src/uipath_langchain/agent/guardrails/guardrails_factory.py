@@ -315,8 +315,18 @@ def _compute_field_sources_for_guardrail(
 
     # Deterministic guardrails have one single tool
     if guardrail.selector.match_names and len(guardrail.selector.match_names) > 0:
+        match_name = guardrail.selector.match_names[0]
         matching_tool = next(
-            (t for t in tools if t.name == guardrail.selector.match_names[0]), None
+            (
+                t
+                for t in tools
+                if t.name == match_name
+                or (
+                    isinstance(t.metadata, dict)
+                    and t.metadata.get("display_name") == match_name
+                )
+            ),
+            None,
         )
 
         if matching_tool:
