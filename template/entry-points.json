@@ -1,0 +1,177 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "942647d9-add9-4f50-aad3-562058d1bfba",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "title": "Query",
+                        "type": "string"
+                    },
+                    "refine": {
+                        "default": false,
+                        "title": "Refine",
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "result": {
+                        "title": "Result",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "result"
+                ]
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "prepare",
+                        "name": "prepare",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "react_agent",
+                        "name": "react_agent",
+                        "type": "node",
+                        "subgraph": {
+                            "nodes": [
+                                {
+                                    "id": "__start__",
+                                    "name": "__start__",
+                                    "type": "__start__",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                },
+                                {
+                                    "id": "model",
+                                    "name": "model",
+                                    "type": "model",
+                                    "subgraph": null,
+                                    "metadata": {
+                                        "model_name": "gpt-4.1-mini-2025-04-14"
+                                    }
+                                },
+                                {
+                                    "id": "tools",
+                                    "name": "tools",
+                                    "type": "tool",
+                                    "subgraph": null,
+                                    "metadata": {
+                                        "tool_names": [
+                                            "get_current_time",
+                                            "web_search"
+                                        ],
+                                        "tool_count": 2
+                                    }
+                                },
+                                {
+                                    "id": "__end__",
+                                    "name": "__end__",
+                                    "type": "__end__",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                }
+                            ],
+                            "edges": [
+                                {
+                                    "source": "__start__",
+                                    "target": "model",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "__end__",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "model",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "tools",
+                                    "label": null
+                                },
+                                {
+                                    "source": "tools",
+                                    "target": "__end__",
+                                    "label": null
+                                },
+                                {
+                                    "source": "tools",
+                                    "target": "model",
+                                    "label": null
+                                }
+                            ]
+                        },
+                        "metadata": {}
+                    },
+                    {
+                        "id": "refine",
+                        "name": "refine",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "prepare",
+                        "label": null
+                    },
+                    {
+                        "source": "prepare",
+                        "target": "react_agent",
+                        "label": null
+                    },
+                    {
+                        "source": "react_agent",
+                        "target": "refine",
+                        "label": null
+                    },
+                    {
+                        "source": "refine",
+                        "target": "__end__",
+                        "label": null
+                    },
+                    {
+                        "source": "refine",
+                        "target": "react_agent",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}
