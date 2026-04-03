@@ -20,6 +20,7 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
     UiPathToolNode,
     create_tool_node,
+    wrap_tools_with_error_handling,
 )
 from uipath_langchain.chat.hitl import (
     CANCELLED_MESSAGE,
@@ -302,8 +303,8 @@ class TestUiPathToolNode:
             AgentRuntimeErrorCode.TOOL_INVALID_WRAPPER_STATE
         )
 
-    def test_tool_error_propagates_when_handle_errors_false(self, mock_state):
-        """Test that tool errors propagate when handle_tool_errors=False."""
+    def test_tool_error_propagates(self, mock_state):
+        """Test that tool errors propagate from UiPathToolNode."""
         failing_tool = MockFailingTool()
         tool_call = {
             "name": "mock_failing_tool",
@@ -313,15 +314,15 @@ class TestUiPathToolNode:
         ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
         state = MockState(messages=[ai_message])
 
-        node = UiPathToolNode(failing_tool, handle_tool_errors=False)
+        node = UiPathToolNode(failing_tool)
 
         with pytest.raises(ValueError) as exc_info:
             node._func(state)
 
         assert "Tool execution failed: test input" in str(exc_info.value)
 
-    async def test_async_tool_error_propagates_when_handle_errors_false(self):
-        """Test that async tool errors propagate when handle_tool_errors=False."""
+    async def test_async_tool_error_propagates(self):
+        """Test that async tool errors propagate from UiPathToolNode."""
         failing_tool = MockFailingTool()
         tool_call = {
             "name": "mock_failing_tool",
@@ -331,66 +332,12 @@ class TestUiPathToolNode:
         ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
         state = MockState(messages=[ai_message])
 
-        node = UiPathToolNode(failing_tool, handle_tool_errors=False)
+        node = UiPathToolNode(failing_tool)
 
         with pytest.raises(ValueError) as exc_info:
             await node._afunc(state)
 
         assert "Async tool execution failed: test input" in str(exc_info.value)
-
-    def test_tool_error_captured_when_handle_errors_true(self):
-        """Test that tool errors are captured as error ToolMessages when handle_tool_errors=True."""
-        failing_tool = MockFailingTool()
-        tool_call = {
-            "name": "mock_failing_tool",
-            "args": {"input_text": "test input"},
-            "id": "test_call_id",
-        }
-        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
-        state = MockState(messages=[ai_message])
-
-        node = UiPathToolNode(failing_tool, handle_tool_errors=True)
-
-        result = node._func(state)
-
-        assert result is not None
-        assert isinstance(result, dict)
-        assert "messages" in result
-        assert len(result["messages"]) == 1
-
-        tool_message = result["messages"][0]
-        assert isinstance(tool_message, ToolMessage)
-        assert tool_message.name == "mock_failing_tool"
-        assert tool_message.tool_call_id == "test_call_id"
-        assert tool_message.status == "error"
-        assert "Tool execution failed: test input" in tool_message.content
-
-    async def test_async_tool_error_captured_when_handle_errors_true(self):
-        """Test that async tool errors are captured as error ToolMessages when handle_tool_errors=True."""
-        failing_tool = MockFailingTool()
-        tool_call = {
-            "name": "mock_failing_tool",
-            "args": {"input_text": "test input"},
-            "id": "test_call_id",
-        }
-        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
-        state = MockState(messages=[ai_message])
-
-        node = UiPathToolNode(failing_tool, handle_tool_errors=True)
-
-        result = await node._afunc(state)
-
-        assert result is not None
-        assert isinstance(result, dict)
-        assert "messages" in result
-        assert len(result["messages"]) == 1
-
-        tool_message = result["messages"][0]
-        assert isinstance(tool_message, ToolMessage)
-        assert tool_message.name == "mock_failing_tool"
-        assert tool_message.tool_call_id == "test_call_id"
-        assert tool_message.status == "error"
-        assert "Async tool execution failed: test input" in tool_message.content
 
 
 class TestToolWrapperMixin:
@@ -464,30 +411,35 @@ class TestCreateToolNode:
 
         assert result == {}
 
-    def test_create_tool_node_with_handle_errors_false(self):
-        """Test creating tool nodes with handle_tool_errors=False."""
-        tools = [MockTool(name="mock_tool_1")]
+    async def test_wrap_tools_with_error_handling_captures_error(self):
+        """Test that wrap_tools_with_error_handling captures tool errors as error ToolMessages."""
+        failing_tool = MockFailingTool()
+        tool_call = {
+            "name": "mock_failing_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        state = AgentGraphState(messages=[ai_message])
 
-        result = create_tool_node(tools, handle_tool_errors=False)
+        node = UiPathToolNode(failing_tool)
+        wrapped_nodes = wrap_tools_with_error_handling({"mock_failing_tool": node})
+        wrapped = wrapped_nodes["mock_failing_tool"]
 
-        assert len(result) == 1
-        assert "mock_tool_1" in result
-        node = result["mock_tool_1"]
-        assert isinstance(node, UiPathToolNode)
-        assert node.handle_tool_errors is False
+        result = await wrapped.ainvoke(state)
 
-    def test_create_tool_node_with_handle_errors_true(self):
-        """Test creating tool nodes with handle_tool_errors=True."""
-        tools = [MockTool(name="mock_tool_1"), MockTool(name="mock_tool_2")]
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert len(result["messages"]) == 1
 
-        result = create_tool_node(tools, handle_tool_errors=True)
-
-        assert len(result) == 2
-        for tool_name in ["mock_tool_1", "mock_tool_2"]:
-            assert tool_name in result
-            node = result[tool_name]
-            assert isinstance(node, UiPathToolNode)
-            assert node.handle_tool_errors is True
+        tool_message = result["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        assert tool_message.name == "mock_failing_tool"
+        assert tool_message.tool_call_id == "test_call_id"
+        assert tool_message.status == "error"
+        assert isinstance(tool_message.content, str)
+        assert "Async tool execution failed: test input" in tool_message.content
 
 
 class TestToolNodeConfirmation:

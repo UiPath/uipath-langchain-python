@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from inspect import signature
-from typing import Any, Awaitable, Callable, Literal
+from typing import Any, Awaitable, Callable, Literal, Mapping
 
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
@@ -68,13 +68,11 @@ class UiPathToolNode(RunnableCallable):
         tool: BaseTool,
         wrapper: ToolWrapperType | None = None,
         awrapper: AsyncToolWrapperType | None = None,
-        handle_tool_errors: bool = False,
     ):
         super().__init__(func=self._func, afunc=self._afunc, name=tool.name)
         self.tool = tool
         self.wrapper = wrapper
         self.awrapper = awrapper
-        self.handle_tool_errors = handle_tool_errors
 
     def _func(self, state: AgentGraphState) -> OutputType:
         call = self._extract_tool_call(state)
@@ -90,28 +88,16 @@ class UiPathToolNode(RunnableCallable):
                 # tool confirmation rejected
                 return self._process_result(call, conversational_confirmation.cancelled)
 
-        try:
-            if self.wrapper:
-                inputs = self._prepare_wrapper_inputs(
-                    self.wrapper, self.tool, call, state
-                )
-                result = self.wrapper(*inputs)
-            else:
-                result = self.tool.invoke(call)
-            output = self._process_result(call, result)
-            if conversational_confirmation:
-                # HITL approved - apply confirmation metadata to tool result message
-                conversational_confirmation.annotate_result(output)
-            return output
-        except GraphBubbleUp:
-            # LangGraph uses exceptions for interrupt control flow — re-raise so
-            # handle_tool_errors doesn't swallow expected interrupts as errors.
-            # https://langchain-ai.github.io/langgraph/concepts/human_in_the_loop/
-            raise
-        except Exception as e:
-            if self.handle_tool_errors:
-                return self._process_error_result(call, e)
-            raise
+        if self.wrapper:
+            inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
+            result = self.wrapper(*inputs)
+        else:
+            result = self.tool.invoke(call)
+        output = self._process_result(call, result)
+        if conversational_confirmation:
+            # HITL approved - apply confirmation metadata to tool result message
+            conversational_confirmation.annotate_result(output)
+        return output
 
     async def _afunc(self, state: AgentGraphState) -> OutputType:
         call = self._extract_tool_call(state)
@@ -127,29 +113,16 @@ class UiPathToolNode(RunnableCallable):
                 # tool confirmation rejected
                 return self._process_result(call, conversational_confirmation.cancelled)
 
-        try:
-            if self.awrapper:
-                inputs = self._prepare_wrapper_inputs(
-                    self.awrapper, self.tool, call, state
-                )
-
-                result = await self.awrapper(*inputs)
-            else:
-                result = await self.tool.ainvoke(call)
-            output = self._process_result(call, result)
-            if conversational_confirmation:
-                # HITL approved - apply confirmation metadata to tool result message
-                conversational_confirmation.annotate_result(output)
-            return output
-        except GraphBubbleUp:
-            # LangGraph uses exceptions for interrupt control flow — re-raise so
-            # handle_tool_errors doesn't swallow expected interrupts as errors.
-            # https://langchain-ai.github.io/langgraph/concepts/human_in_the_loop/
-            raise
-        except Exception as e:
-            if self.handle_tool_errors:
-                return self._process_error_result(call, e)
-            raise
+        if self.awrapper:
+            inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
+            result = await self.awrapper(*inputs)
+        else:
+            result = await self.tool.ainvoke(call)
+        output = self._process_result(call, result)
+        if conversational_confirmation:
+            # HITL approved - apply confirmation metadata to tool result message
+            conversational_confirmation.annotate_result(output)
+        return output
 
     def _extract_tool_call(self, state: AgentGraphState) -> ToolCall | None:
         """Extract the tool call from the state messages."""
@@ -170,16 +143,6 @@ class UiPathToolNode(RunnableCallable):
             return None
 
         return latest_ai_message.tool_calls[current_tool_call_index]
-
-    def _process_error_result(self, call: ToolCall, error: Exception) -> OutputType:
-        """Handle tool execution errors by creating an error ToolMessage."""
-        error_message = ToolMessage(
-            content=str(error),
-            name=call["name"],
-            tool_call_id=call["id"],
-            status="error",
-        )
-        return {"messages": [error_message]}
 
     def _process_result(
         self, call: ToolCall, result: dict[str, Any] | Command[Any] | ToolMessage | None
@@ -242,6 +205,78 @@ class UiPathToolNode(RunnableCallable):
         return model_type.model_validate(state, from_attributes=True)
 
 
+def _get_tool_error_result(
+    e: Exception, state: AgentGraphState, tool_name: str
+) -> OutputType | None:
+    """Build an error ToolMessage for the current tool call, or return None to re-raise."""
+    latest_ai_message = find_latest_ai_message(state.messages)
+    if latest_ai_message is None:
+        return None
+    try:
+        idx = extract_current_tool_call_index(state.messages, tool_name)
+    except Exception:
+        return None
+    if idx is None:
+        return None
+    call = latest_ai_message.tool_calls[idx]
+    return {
+        "messages": [
+            ToolMessage(
+                content=str(e),
+                name=call["name"],
+                tool_call_id=call["id"],
+                status="error",
+            )
+        ]
+    }
+
+
+def wrap_tools_with_error_handling(
+    tool_nodes: Mapping[str, RunnableCallable],
+) -> dict[str, RunnableCallable]:
+    """Wrap tool nodes to catch errors and return them as ToolMessages, rather than failing the entire graph execution."""
+    return {
+        tool_name: _wrap_tool_error_handling(tool_node, tool_name)
+        for tool_name, tool_node in tool_nodes.items()
+    }
+
+
+def _wrap_tool_error_handling(
+    tool_node: RunnableCallable,
+    tool_name: str,
+) -> RunnableCallable:
+    """Wrap a tool node to catch errors and return them as ToolMessages, rather than failing the entire graph execution.
+
+    Catch and re-raise GraphBubbleUp, since LangGraph uses exceptions for interrupt control flow.
+    This is so we don't swallow expected interrupts as tool errors.
+    (https://langchain-ai.github.io/langgraph/concepts/human_in_the_loop/)
+    """
+
+    def _func(state: AgentGraphState) -> OutputType:
+        try:
+            return tool_node.invoke(state)
+        except GraphBubbleUp:
+            raise
+        except Exception as e:
+            result = _get_tool_error_result(e, state, tool_name)
+            if result is None:
+                raise
+            return result
+
+    async def _afunc(state: AgentGraphState) -> OutputType:
+        try:
+            return await tool_node.ainvoke(state)
+        except GraphBubbleUp:
+            raise
+        except Exception as e:
+            result = _get_tool_error_result(e, state, tool_name)
+            if result is None:
+                raise
+            return result
+
+    return RunnableCallable(func=_func, afunc=_afunc, name=tool_name)
+
+
 class ToolWrapperMixin:
     wrapper: ToolWrapperType | None = None
     awrapper: AsyncToolWrapperType | None = None
@@ -256,23 +291,15 @@ class ToolWrapperMixin:
         self.awrapper = awrapper
 
 
-def create_tool_node(
-    tools: Sequence[BaseTool], handle_tool_errors: bool = False
-) -> dict[str, UiPathToolNode]:
+def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, UiPathToolNode]:
     """Create individual ToolNode for each tool.
 
     Args:
         tools: Sequence of tools to create nodes for.
-        handle_tool_errors: If True, catch tool execution errors and return them as error ToolMessages
-            instead of letting exceptions propagate.
 
     Returns:
-        Dict mapping tool.name -> ReactToolNode([tool]).
+        Dict mapping tool.name -> UiPathToolNode.
         Each tool gets its own dedicated node for middleware composition.
-
-    Note:
-        handle_tool_errors=False delegates error handling to LangGraph's error boundary.
-        handle_tool_errors=True will cause errors to be caught and converted to ToolMessages with status="error".
     """
     dict_mapping: dict[str, UiPathToolNode] = {}
     for tool in tools:
@@ -281,10 +308,7 @@ def create_tool_node(
                 tool,
                 wrapper=tool.wrapper,
                 awrapper=tool.awrapper,
-                handle_tool_errors=handle_tool_errors,
             )
         else:
-            dict_mapping[tool.name] = UiPathToolNode(
-                tool, wrapper=None, awrapper=None, handle_tool_errors=handle_tool_errors
-            )
+            dict_mapping[tool.name] = UiPathToolNode(tool, wrapper=None, awrapper=None)
     return dict_mapping

@@ -84,7 +84,11 @@ def create_llm_node(
 
     async def llm_node(state: StateT):
         messages: list[AnyMessage] = state.messages
-        agent_ai_messages = sum(1 for msg in messages if isinstance(msg, AIMessage))
+        initial_count = state.inner_state.initial_message_count or 0
+        current_turn_messages = messages[initial_count:]
+        agent_ai_messages = sum(
+            1 for msg in current_turn_messages if isinstance(msg, AIMessage)
+        )
         if agent_ai_messages >= llm_messages_limit:
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.TERMINATION_MAX_ITERATIONS,
