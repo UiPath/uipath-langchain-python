@@ -13,21 +13,27 @@ from langchain_core.messages import (
 from langchain_core.messages.content import create_file_block, create_image_block
 
 from .types import MAX_FILE_SIZE_BYTES, FileInfo
-from .utils import download_file_base64, is_image, is_pdf, sanitize_filename
+from .utils import (
+    download_file_base64,
+    is_image,
+    is_pdf,
+    is_tiff,
+    sanitize_filename,
+    stream_tiff_to_content_blocks,
+)
 
 logger = logging.getLogger("uipath")
 
 
-async def build_file_content_block(
+async def build_file_content_blocks_for(
     file_info: FileInfo,
     *,
     max_size: int = MAX_FILE_SIZE_BYTES,
-) -> DataContentBlock:
-    """Build a LangChain content block for a file attachment.
+) -> list[DataContentBlock]:
+    """Build LangChain content blocks for a single file attachment.
 
-    Downloads the file with size enforcement and creates the content block.
-    Size validation happens during download (via Content-Length check and
-    streaming guard) to avoid loading oversized files into memory.
+    Handles all supported MIME types in one place: images, PDFs, and
+    TIFFs (multi-page, converted to individual PNG blocks).
 
     Args:
         file_info: File URL, name, and MIME type.
@@ -35,25 +41,33 @@ async def build_file_content_block(
             enforce payload limits; base64 encoding adds ~30% overhead.
 
     Returns:
-        A DataContentBlock for the file (image or PDF).
+        A list of DataContentBlock instances for the file.
 
     Raises:
         ValueError: If the MIME type is not supported or the file exceeds
             the size limit for LLM payloads.
     """
+    if is_tiff(file_info.mime_type):
+        try:
+            return await stream_tiff_to_content_blocks(file_info.url, max_size=max_size)
+        except ValueError as exc:
+            raise ValueError(f"File '{file_info.name}': {exc}") from exc
+
     try:
         base64_file = await download_file_base64(file_info.url, max_size=max_size)
     except ValueError as exc:
         raise ValueError(f"File '{file_info.name}': {exc}") from exc
 
     if is_image(file_info.mime_type):
-        return create_image_block(base64=base64_file, mime_type=file_info.mime_type)
+        return [create_image_block(base64=base64_file, mime_type=file_info.mime_type)]
     if is_pdf(file_info.mime_type):
-        return create_file_block(
-            base64=base64_file,
-            mime_type=file_info.mime_type,
-            filename=sanitize_filename(file_info.name),
-        )
+        return [
+            create_file_block(
+                base64=base64_file,
+                mime_type=file_info.mime_type,
+                filename=sanitize_filename(file_info.name),
+            )
+        ]
 
     raise ValueError(f"Unsupported mime_type={file_info.mime_type}")
 
@@ -75,8 +89,8 @@ async def build_file_content_blocks(files: list[FileInfo]) -> list[DataContentBl
 
     file_content_blocks: list[DataContentBlock] = []
     for file in files:
-        block = await build_file_content_block(file)
-        file_content_blocks.append(block)
+        blocks = await build_file_content_blocks_for(file)
+        file_content_blocks.extend(blocks)
     return file_content_blocks
 
 
@@ -111,8 +125,8 @@ async def llm_call_with_files(
 
     content_blocks: list[Any] = []
     for file_info in files:
-        content_block = await build_file_content_block(file_info)
-        content_blocks.append(content_block)
+        blocks = await build_file_content_blocks_for(file_info)
+        content_blocks.extend(blocks)
 
     file_message = HumanMessage(content_blocks=content_blocks)
     all_messages = list(messages) + [file_message]

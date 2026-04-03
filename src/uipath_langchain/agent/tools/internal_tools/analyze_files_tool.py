@@ -24,7 +24,10 @@ from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
-from uipath_langchain.agent.multimodal import FileInfo, build_file_content_block
+from uipath_langchain.agent.multimodal import (
+    FileInfo,
+    build_file_content_blocks_for,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
@@ -182,8 +185,8 @@ async def add_files_to_message(
 
     file_content_blocks: list[DataContentBlock] = []
     for file in files:
-        block = await build_file_content_block(file)
-        file_content_blocks.append(block)
+        blocks = await build_file_content_blocks_for(file)
+        file_content_blocks.extend(blocks)
     return append_content_blocks_to_message(
         message, cast(list[ContentBlock], file_content_blocks)
     )
