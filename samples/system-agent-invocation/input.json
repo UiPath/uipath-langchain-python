@@ -1,0 +1,12 @@
+{
+  "system_agent_name": "low-code-convert-agent",
+  "entrypoint": "agent",
+  "system_agent_input": {
+    "source_project_id": "168ea8be-6f8d-4785-a962-c10b3b20f7ba",
+    "target_solution_id": "bdef7d66-6882-4848-1ad5-08de31825521",
+    "new_project_name": "converted ixp file",
+    "author": "radu.mocanu@email.com",
+    "description": "description for example project"
+  },
+  "folder_path": "radu.mocanu@uipath.com's workspace"
+}
