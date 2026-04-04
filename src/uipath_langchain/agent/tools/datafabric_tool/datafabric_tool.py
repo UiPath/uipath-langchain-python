@@ -21,7 +21,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from uipath.agent.models.agent import AgentContextResourceConfig
-from uipath.platform.entities import Entity, EntityRouting, QueryRoutingOverrideContext
+from uipath.platform.entities import Entity
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
 from .models import DataFabricQueryInput
@@ -41,13 +41,13 @@ class DataFabricTextQueryHandler:
     def __init__(
         self,
         entity_identifiers: list[str],
-        routing_context: QueryRoutingOverrideContext,
+        folders_map: dict[str, str],
         llm: BaseChatModel,
         resource_description: str = "",
         base_system_prompt: str = "",
     ) -> None:
         self._entity_identifiers = entity_identifiers
-        self._routing_context = routing_context
+        self._folders_map = folders_map
         self._llm = llm
         self._resource_description = resource_description
         self._base_system_prompt = base_system_prompt
@@ -78,7 +78,7 @@ class DataFabricTextQueryHandler:
             self._compiled = DataFabricGraph.create(
                 llm=self._llm,
                 entities=entities,
-                routing_context=self._routing_context,
+                folders_map=self._folders_map,
                 resource_description=self._resource_description,
                 base_system_prompt=self._base_system_prompt,
             )
@@ -120,20 +120,27 @@ async def fetch_entity_schemas(entity_identifiers: list[str]) -> list[Entity]:
     return [e for e in results if e is not None]
 
 
-def _build_routing_context(
+def _build_folders_map(
     resource: AgentContextResourceConfig,
-) -> QueryRoutingOverrideContext:
-    """Build query routing context from entity set items.
+) -> dict[str, str]:
+    """Build an entity-name-to-folder-id map from entity set items.
 
-    Maps each entity to its folder so the backend resolves
-    entities at folder level instead of tenant level.
+    When entity resource overwrites are active, overridden folder_id
+    values are applied.
     """
-    return QueryRoutingOverrideContext(
-        entity_routings=[
-            EntityRouting(entity_name=item.name, folder_id=item.folder_id)
-            for item in (resource.entity_set or [])
-        ]
-    )
+    from uipath.platform.common._bindings import _resource_overwrites
+
+    context_overwrites = _resource_overwrites.get() or {}
+
+    folders_map: dict[str, str] = {}
+    for item in resource.entity_set or []:
+        overwrite = context_overwrites.get(f"entity.{item.id}")
+        if overwrite is not None:
+            folders_map[overwrite.resource_identifier] = overwrite.folder_identifier
+        else:
+            folders_map[item.name] = item.folder_id
+
+    return folders_map
 
 
 def create_datafabric_query_tool(
@@ -154,7 +161,7 @@ def create_datafabric_query_tool(
     config = agent_config or {}
     handler = DataFabricTextQueryHandler(
         entity_identifiers=resource.datafabric_entity_identifiers,
-        routing_context=_build_routing_context(resource),
+        folders_map=_build_folders_map(resource),
         llm=llm,
         resource_description=resource.description or "",
         base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
