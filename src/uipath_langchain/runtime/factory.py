@@ -4,12 +4,8 @@ from typing import Any, AsyncContextManager
 
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph, StateGraph
-from openinference.instrumentation.langchain import (
-    LangChainInstrumentor,
-    get_ancestor_spans,
-    get_current_span,
-)
-from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager
+from openinference.instrumentation.langchain import LangChainInstrumentor
+from uipath.core.tracing import UiPathTraceManager
 from uipath.platform.resume_triggers import (
     UiPathResumeTriggerHandler,
 )
@@ -59,8 +55,6 @@ class UiPathLangGraphRuntimeFactory:
         """Setup tracing and instrumentation."""
         _instrument_traceable_attributes()
         LangChainInstrumentor().instrument()
-        UiPathSpanUtils.register_current_span_provider(get_current_span)
-        UiPathSpanUtils.register_current_span_ancestors_provider(get_ancestor_spans)
 
     def _get_connection_string(self) -> str:
         """Get the database connection string."""
