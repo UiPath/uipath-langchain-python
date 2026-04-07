@@ -5,13 +5,15 @@ produce identical runtime behavior for each guardrail scenario. Every test runs
 twice — once with the middleware agent and once with the decorator agent — so any
 behavioral divergence between the two flavors is immediately visible.
 
-Scenarios covered (× 2 flavors = 12 test runs total):
-  1. test_happy_path                  — all guardrails configured, none trigger
-  2. test_agent_pii_block             — AGENT-scope PII → BlockAction
-  3. test_llm_prompt_injection_block  — LLM-scope prompt injection → BlockAction
-  4. test_tool_pii_block              — TOOL-scope PII → BlockAction
+Scenarios covered (× 2 flavors = 16 test runs total):
+  1. test_happy_path                     — all guardrails configured, none trigger
+  2. test_agent_pii_block                — AGENT-scope PII → BlockAction
+  3. test_llm_user_prompt_attacks_block  — LLM-scope user prompt attacks → BlockAction
+  4. test_tool_pii_block                 — TOOL-scope PII → BlockAction
   5. test_tool_deterministic_word_filter — deterministic PRE filter replaces "donkey"
   6. test_tool_deterministic_length_block — deterministic PRE block for joke > 1000 chars
+  7. test_harmful_content_block          — AGENT-scope harmful content → BlockAction
+  8. test_intellectual_property_log      — LLM-scope IP → LogAction (no block)
 
 Mock files:
   tests/cli/mocks/parity_agent_middleware.py
@@ -253,8 +255,8 @@ class TestGuardrailsParity:
             assert cause.error_info.status is None
 
     @pytest.mark.asyncio
-    async def test_llm_prompt_injection_block(self, agent_setup):
-        """LLM-scope prompt injection detected → BlockAction before LLM is invoked."""
+    async def test_llm_user_prompt_attacks_block(self, agent_setup):
+        """LLM-scope user prompt attacks detected → BlockAction before LLM is invoked."""
         flavor, script, langgraph_json = agent_setup
 
         llm_call_count = 0
@@ -268,7 +270,7 @@ class TestGuardrailsParity:
             # Only trigger on actual string input — the decorator factory PRE check
             # passes an empty dict {} which should not be treated as a violation.
             if (
-                guardrail.name == "LLM Prompt Injection Detection"
+                guardrail.name == "LLM User Prompt Attacks Detection"
                 and isinstance(text, str)
                 and text
             ):
@@ -291,7 +293,7 @@ class TestGuardrailsParity:
             )
             assert (
                 cause.error_info.title
-                == "Guardrail [LLM Prompt Injection Detection] blocked execution"
+                == "Guardrail [LLM User Prompt Attacks Detection] blocked execution"
             )
             assert cause.error_info.detail == "Guardrail triggered"
             assert cause.error_info.category == UiPathErrorCategory.USER
@@ -391,3 +393,77 @@ class TestGuardrailsParity:
             assert cause.error_info.detail == "Joke > 1000 chars"
             assert cause.error_info.category == UiPathErrorCategory.USER
             assert cause.error_info.status is None
+
+    @pytest.mark.asyncio
+    async def test_harmful_content_block(self, agent_setup):
+        """Harmful content (Violence) detected → BlockAction raises AgentRuntimeError.
+
+        For middleware: AGENT+LLM scope, before_agent catches the input message.
+        For decorator: AGENT-scope PRE guardrail evaluates the serialized input.
+        Both trigger on the word "violent" in the topic input.
+        """
+        flavor, script, langgraph_json = agent_setup
+
+        mock_llm = _make_tool_calling_llm(
+            joke="Why did the chicken cross the road?",
+            final_content="Here is a joke!",
+            call_id="call_hc_1",
+        )
+
+        def mock_evaluate(text, guardrail):
+            if (
+                guardrail.name == "Agent Harmful Content Detection"
+                and "violent" in str(text).lower()
+            ):
+                return _GUARDRAIL_FAILED
+            return _GUARDRAIL_PASSED
+
+        async with _patched_run(mock_llm, mock_evaluate) as temp_dir:
+            with pytest.raises(Exception) as exc_info:
+                await _run_agent(
+                    temp_dir,
+                    script,
+                    langgraph_json,
+                    flavor,
+                    {"topic": "tell me a violent joke"},
+                )
+            cause = exc_info.value.__cause__
+            assert isinstance(cause, AgentRuntimeError)
+            assert (
+                cause.error_info.code == "AGENT_RUNTIME.TERMINATION_GUARDRAIL_VIOLATION"
+            )
+            assert (
+                cause.error_info.title
+                == "Guardrail [Agent Harmful Content Detection] blocked execution"
+            )
+            assert cause.error_info.detail == "Guardrail triggered"
+            assert cause.error_info.category == UiPathErrorCategory.USER
+
+    @pytest.mark.asyncio
+    async def test_intellectual_property_log(self, agent_setup):
+        """LLM-scope IP detected (POST) → LogAction, agent completes normally."""
+        flavor, script, langgraph_json = agent_setup
+
+        mock_llm = _make_tool_calling_llm(
+            joke="Why did the banana go to the doctor?",
+            final_content="Why did the banana go to the doctor? Because it wasn't peeling well!",
+            call_id="call_ip_1",
+        )
+
+        def mock_evaluate(text, guardrail):
+            if guardrail.name == "LLM IP Detection" and isinstance(text, str) and text:
+                return _GUARDRAIL_FAILED
+            return _GUARDRAIL_PASSED
+
+        async with _patched_run(mock_llm, mock_evaluate) as temp_dir:
+            output_file, runtime, factory = await _run_agent(
+                temp_dir, script, langgraph_json, flavor, {"topic": "banana"}
+            )
+            # LogAction should not block — agent completes normally
+            assert os.path.exists(output_file), f"[{flavor}] Output file missing"
+            with open(output_file, encoding="utf-8") as fh:
+                output = json.load(fh)
+            assert "joke" in output, f"[{flavor}] 'joke' key missing from output"
+            assert output["joke"], f"[{flavor}] joke is empty"
+            await runtime.dispose()
+            await factory.dispose()

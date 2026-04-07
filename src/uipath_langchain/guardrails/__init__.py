@@ -13,6 +13,11 @@ from uipath.platform.guardrails.decorators import (
     GuardrailExecutionStage,
     GuardrailTargetAdapter,
     GuardrailValidatorBase,
+    HarmfulContentEntity,
+    HarmfulContentEntityType,
+    HarmfulContentValidator,
+    IntellectualPropertyEntityType,
+    IntellectualPropertyValidator,
     LogAction,
     LoggingSeverityLevel,
     PIIDetectionEntity,
@@ -20,6 +25,7 @@ from uipath.platform.guardrails.decorators import (
     PIIValidator,
     PromptInjectionValidator,
     RuleFunction,
+    UserPromptAttacksValidator,
     guardrail,
     register_guardrail_adapter,
 )
@@ -27,8 +33,11 @@ from uipath.platform.guardrails.decorators import (
 from ._langchain_adapter import LangChainGuardrailAdapter
 from .middlewares import (
     UiPathDeterministicGuardrailMiddleware,
+    UiPathHarmfulContentMiddleware,
+    UiPathIntellectualPropertyMiddleware,
     UiPathPIIDetectionMiddleware,
     UiPathPromptInjectionMiddleware,
+    UiPathUserPromptAttacksMiddleware,
 )
 
 # Auto-register the LangChain adapter so @guardrail knows how to wrap
@@ -40,11 +49,17 @@ __all__ = [
     "guardrail",
     # Validators
     "GuardrailValidatorBase",
+    "HarmfulContentValidator",
+    "IntellectualPropertyValidator",
     "PIIValidator",
     "PromptInjectionValidator",
+    "UserPromptAttacksValidator",
     "CustomValidator",
     "RuleFunction",
     # Models & enums
+    "HarmfulContentEntity",
+    "HarmfulContentEntityType",
+    "IntellectualPropertyEntityType",
     "PIIDetectionEntity",
     "PIIDetectionEntityType",
     "GuardrailExecutionStage",
@@ -60,9 +75,12 @@ __all__ = [
     # Adapter registry
     "GuardrailTargetAdapter",
     "register_guardrail_adapter",
-    # Middlewares (unchanged)
+    # Middlewares
+    "UiPathHarmfulContentMiddleware",
+    "UiPathIntellectualPropertyMiddleware",
     "UiPathPIIDetectionMiddleware",
     "UiPathPromptInjectionMiddleware",
+    "UiPathUserPromptAttacksMiddleware",
     "UiPathDeterministicGuardrailMiddleware",
     # Re-exports for backwards compat
     "AgentGuardrailSeverityLevel",

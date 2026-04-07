@@ -23,14 +23,21 @@ from uipath_langchain.guardrails import (
     GuardrailAction,
     GuardrailExclude,
     GuardrailExecutionStage,
+    HarmfulContentEntity,
+    HarmfulContentValidator,
+    IntellectualPropertyValidator,
     LogAction,
     LoggingSeverityLevel,
     PIIDetectionEntity,
     PIIValidator,
-    PromptInjectionValidator,
+    UserPromptAttacksValidator,
     guardrail,
 )
-from uipath_langchain.guardrails.enums import PIIDetectionEntityType
+from uipath_langchain.guardrails.enums import (
+    HarmfulContentEntityType,
+    IntellectualPropertyEntityType,
+    PIIDetectionEntityType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,10 +152,18 @@ def format_joke_for_display(
 
 
 @guardrail(
-    validator=PromptInjectionValidator(threshold=0.5),
+    validator=UserPromptAttacksValidator(),
     action=BlockAction(),
-    name="LLM Prompt Injection Detection",
+    name="LLM User Prompt Attacks Detection",
     stage=GuardrailExecutionStage.PRE,
+)
+@guardrail(
+    validator=IntellectualPropertyValidator(
+        entities=[IntellectualPropertyEntityType.TEXT],
+    ),
+    action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
+    name="LLM Intellectual Property Detection",
+    stage=GuardrailExecutionStage.POST,
 )
 @guardrail(
     validator=pii_email,
@@ -243,6 +258,14 @@ Remember to always include the 'joke' property in your output to match the requi
 # ---------------------------------------------------------------------------
 
 
+@guardrail(
+    validator=HarmfulContentValidator(
+        entities=[HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2)],
+    ),
+    action=BlockAction(),
+    name="Agent Harmful Content Detection",
+    stage=GuardrailExecutionStage.PRE,
+)
 @guardrail(
     validator=PIIValidator(
         entities=[PIIDetectionEntity(PIIDetectionEntityType.PERSON, threshold=0.5)],
