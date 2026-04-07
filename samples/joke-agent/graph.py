@@ -3,34 +3,43 @@
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
-from langgraph.constants import START, END
+from langgraph.constants import END, START
 from langgraph.graph import StateGraph
+from middleware import CustomFilterAction, LoggingMiddleware
 from pydantic import BaseModel
 from uipath.core.guardrails import GuardrailScope
 
-from middleware import CustomFilterAction, LoggingMiddleware
 from uipath_langchain.chat import UiPathChat
 from uipath_langchain.guardrails import (
     BlockAction,
-    PIIDetectionEntity,
     GuardrailExecutionStage,
+    HarmfulContentEntity,
     LogAction,
+    PIIDetectionEntity,
     UiPathDeterministicGuardrailMiddleware,
+    UiPathHarmfulContentMiddleware,
+    UiPathIntellectualPropertyMiddleware,
     UiPathPIIDetectionMiddleware,
-    UiPathPromptInjectionMiddleware,
+    UiPathUserPromptAttacksMiddleware,
 )
 from uipath_langchain.guardrails.actions import LoggingSeverityLevel
-from uipath_langchain.guardrails.enums import PIIDetectionEntityType
+from uipath_langchain.guardrails.enums import (
+    HarmfulContentEntityType,
+    IntellectualPropertyEntityType,
+    PIIDetectionEntityType,
+)
 
 
 # Define input schema for the agent
 class Input(BaseModel):
     """Input schema for the joke agent."""
+
     topic: str
 
 
 class Output(BaseModel):
     """Output schema for the joke agent."""
+
     joke: str
 
 
@@ -56,6 +65,7 @@ def analyze_joke_syntax(joke: str) -> str:
     letter_count = sum(1 for char in joke if char.isalpha())
 
     return f"Words number: {word_count}\nLetters: {letter_count}"
+
 
 # System prompt based on agent1.json
 SYSTEM_PROMPT = """You are an AI assistant designed to generate family-friendly jokes. Your process is as follows:
@@ -104,11 +114,24 @@ agent = create_agent(
             tools=[analyze_joke_syntax],
             enabled_for_evals=False,
         ),
-        *UiPathPromptInjectionMiddleware(
-            name="Prompt Injection Detection",
+        *UiPathUserPromptAttacksMiddleware(
+            name="User Prompt Attacks Detection",
             action=BlockAction(),
-            threshold=0.5,
             enabled_for_evals=False,
+        ),
+        *UiPathHarmfulContentMiddleware(
+            name="Harmful Content Detection",
+            scopes=[GuardrailScope.AGENT, GuardrailScope.LLM],
+            action=BlockAction(),
+            entities=[
+                HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2),
+            ],
+        ),
+        *UiPathIntellectualPropertyMiddleware(
+            name="Intellectual Property Detection",
+            scopes=[GuardrailScope.LLM],
+            action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
+            entities=[IntellectualPropertyEntityType.TEXT],
         ),
         # Custom FilterAction example: demonstrates how developers can implement their own actions
         *UiPathDeterministicGuardrailMiddleware(
@@ -142,7 +165,7 @@ agent = create_agent(
             ),
             stage=GuardrailExecutionStage.POST,
             name="Joke Content Always Filter",
-        )
+        ),
     ],
 )
 
@@ -152,7 +175,9 @@ async def joke_node(state: Input) -> Output:
     """Convert topic to messages, call agent, and extract joke."""
     # Convert topic to messages format
     messages = [
-        HumanMessage(content=f"Generate a family-friendly joke based on the topic: {state.topic}")
+        HumanMessage(
+            content=f"Generate a family-friendly joke based on the topic: {state.topic}"
+        )
     ]
 
     # Call the agent with messages

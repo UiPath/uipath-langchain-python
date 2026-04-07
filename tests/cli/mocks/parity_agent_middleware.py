@@ -6,14 +6,16 @@ used in test_guardrails_parity.py to verify 1:1 behavioral parity between the tw
 guardrail flavors.
 
 Guardrails configured:
-- "Agent PII Detection"        — AGENT scope, PII (PERSON), PRE, BlockAction
-- "LLM Prompt Injection Detection" — LLM scope, Prompt Injection, PRE, BlockAction
-- "LLM PII Detection"          — LLM scope, PII (EMAIL), PRE, LogAction(WARNING)
-- "Tool PII Detection"         — TOOL scope, PII (EMAIL, PHONE), PRE, LogAction(WARNING)
-- "Tool PII Block Detection"   — TOOL scope, PII (PERSON), PRE, BlockAction
-- "Joke Content Word Filter"   — TOOL scope, Deterministic, PRE, CustomFilterAction
-- "Joke Content Length Limiter"— TOOL scope, Deterministic, PRE, BlockAction
-- "Joke Content Always Filter" — TOOL scope, Deterministic (empty), POST, CustomFilterAction
+- "Agent PII Detection"            — AGENT scope, PII (PERSON), PRE, BlockAction
+- "Agent Harmful Content Detection"— AGENT+LLM scope, HarmfulContent (Violence), BlockAction
+- "LLM User Prompt Attacks Detection" — LLM scope, UserPromptAttacks, PRE, BlockAction
+- "LLM PII Detection"              — LLM scope, PII (EMAIL), PRE, LogAction(WARNING)
+- "LLM IP Detection"               — LLM scope, IntellectualProperty (Text), POST, LogAction
+- "Tool PII Detection"             — TOOL scope, PII (EMAIL, PHONE), PRE, LogAction(WARNING)
+- "Tool PII Block Detection"       — TOOL scope, PII (PERSON), PRE, BlockAction
+- "Joke Content Word Filter"       — TOOL scope, Deterministic, PRE, CustomFilterAction
+- "Joke Content Length Limiter"    — TOOL scope, Deterministic, PRE, BlockAction
+- "Joke Content Always Filter"     — TOOL scope, Deterministic (empty), POST, CustomFilterAction
 """
 
 import re
@@ -37,14 +39,21 @@ from uipath_langchain.guardrails import (
     BlockAction,
     GuardrailAction,
     GuardrailExecutionStage,
+    HarmfulContentEntity,
     LogAction,
     PIIDetectionEntity,
     UiPathDeterministicGuardrailMiddleware,
+    UiPathHarmfulContentMiddleware,
+    UiPathIntellectualPropertyMiddleware,
     UiPathPIIDetectionMiddleware,
-    UiPathPromptInjectionMiddleware,
+    UiPathUserPromptAttacksMiddleware,
 )
 from uipath_langchain.guardrails.actions import LoggingSeverityLevel
-from uipath_langchain.guardrails.enums import PIIDetectionEntityType
+from uipath_langchain.guardrails.enums import (
+    HarmfulContentEntityType,
+    IntellectualPropertyEntityType,
+    PIIDetectionEntityType,
+)
 
 # ---------------------------------------------------------------------------
 # Custom filter action (defined inline — no external middleware.py import)
@@ -155,11 +164,19 @@ agent = create_agent(
             action=BlockAction(),
             entities=[PIIDetectionEntity(PIIDetectionEntityType.PERSON, 0.5)],
         ),
-        # LLM scope Prompt Injection — BlockAction
-        *UiPathPromptInjectionMiddleware(
-            name="LLM Prompt Injection Detection",
+        # AGENT+LLM scope Harmful Content — BlockAction
+        *UiPathHarmfulContentMiddleware(
+            name="Agent Harmful Content Detection",
+            scopes=[GuardrailScope.AGENT, GuardrailScope.LLM],
             action=BlockAction(),
-            threshold=0.5,
+            entities=[
+                HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2),
+            ],
+        ),
+        # LLM scope User Prompt Attacks — BlockAction
+        *UiPathUserPromptAttacksMiddleware(
+            name="LLM User Prompt Attacks Detection",
+            action=BlockAction(),
         ),
         # LLM scope PII — LogAction
         *UiPathPIIDetectionMiddleware(
@@ -167,6 +184,13 @@ agent = create_agent(
             scopes=[GuardrailScope.LLM],
             action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
             entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5)],
+        ),
+        # LLM scope Intellectual Property — LogAction (POST only)
+        *UiPathIntellectualPropertyMiddleware(
+            name="LLM IP Detection",
+            scopes=[GuardrailScope.LLM],
+            action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
+            entities=[IntellectualPropertyEntityType.TEXT],
         ),
         # Tool scope PII — LogAction (email + phone)
         *UiPathPIIDetectionMiddleware(
