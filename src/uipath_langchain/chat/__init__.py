@@ -29,6 +29,16 @@ def __getattr__(name):
         from .hitl import requires_approval
 
         return requires_approval
+    if name in ("UiPathChatBedrock", "UiPathChatBedrockConverse"):
+        from .bedrock import UiPathChatBedrock, UiPathChatBedrockConverse
+
+        if name == "UiPathChatBedrock":
+            return UiPathChatBedrock
+        return UiPathChatBedrockConverse
+    if name == "UiPathChatVertex":
+        from .vertex import UiPathChatVertex
+
+        return UiPathChatVertex
     if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
         from . import supported_models
 
@@ -44,6 +54,9 @@ __all__ = [
     "UiPathChat",
     "UiPathAzureChatOpenAI",
     "UiPathChatOpenAI",
+    "UiPathChatBedrock",
+    "UiPathChatBedrockConverse",
+    "UiPathChatVertex",
     "OpenAIModels",
     "BedrockModels",
     "GeminiModels",
