@@ -3420,7 +3420,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.9.21"
+version = "0.9.22"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -3491,7 +3491,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "uipath", specifier = ">=2.10.29,<2.11.0" },
     { name = "uipath-core", specifier = ">=0.5.2,<0.6.0" },
-    { name = "uipath-platform", specifier = ">=0.1.20,<0.2.0" },
+    { name = "uipath-platform", specifier = ">=0.1.22,<0.2.0" },
     { name = "uipath-runtime", specifier = ">=0.10.0,<0.11.0" },
 ]
 provides-extras = ["vertex", "bedrock"]
@@ -3514,7 +3514,7 @@ dev = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.1.20"
+version = "0.1.22"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -3524,9 +3524,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/ee/2e186af89a13d546fa4e1fd4962e9abd2510d5bf1a1fb9d3ad890d6fde50/uipath_platform-0.1.20.tar.gz", hash = "sha256:137b8a5f25bcec9cf6eaa10e2608acd30f24438454100d2086d1444761acd2a9", size = 307758, upload-time = "2026-04-06T14:32:54.506Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/23/d9/6e665de2f1f6a9d61985dea29b13d39d0776a897e3282cfffa0f119fffe6/uipath_platform-0.1.22.tar.gz", hash = "sha256:ae49676269fd974f957919b21e4ca371aab62cf475a926f374bdd3122920544d", size = 306296, upload-time = "2026-04-08T14:38:46.069Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/85/28a6c0eee87bbd96f22562c8edc05f801d4d2f9d04a8ed4d71a4aad18b2a/uipath_platform-0.1.20-py3-none-any.whl", hash = "sha256:4b380e602dcf4969d8b68a32103c5907884f8f6d4d62deb20d6db84a7c8b0744", size = 197561, upload-time = "2026-04-06T14:32:52.946Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/4e/c26216544c3d20261f7f2858bf227e19edea125a349300dee0cb3ab2032b/uipath_platform-0.1.22-py3-none-any.whl", hash = "sha256:a9a395713d61ec90149c564c23a076d312a61bb62e5eaa8fcd69381b0210b88a", size = 196455, upload-time = "2026-04-08T14:38:44.253Z" },
 ]
 
 [[package]]
