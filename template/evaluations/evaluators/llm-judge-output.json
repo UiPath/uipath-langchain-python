@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "fileName": "llm-judge-output.json",
+  "id": "evaluator-llm-judge-output",
+  "description": "Use LLM to judge semantic similarity of outputs",
+  "evaluatorTypeId": "uipath-llm-judge-output-semantic-similarity",
+  "evaluatorConfig": {
+    "model": "anthropic.claude-haiku-4-5-20251001-v1:0",
+    "prompt": "As an expert evaluator, analyze the semantic similarity of these JSON contents to determine a score from 0-100. Focus on comparing the meaning and contextual equivalence of corresponding fields, accounting for alternative valid expressions, synonyms, and reasonable variations in language while maintaining high standards for accuracy and completeness. Provide your score with a justification, explaining briefly and concisely why you gave that score.\n----\nExpectedOutput:\n{{ExpectedOutput}}\n----\nActualOutput:\n{{ActualOutput}}",
+    "temperature": 0,
+    "maxTokens": 8000,
+    "targetOutputKey": "*",
+    "name": "LLM Judge Output",
+    "defaultEvaluationCriteria": {
+      "expectedOutput": {}
+    }
+  },
+  "createdAt": "2026-04-08T15:16:46.785Z",
+  "updatedAt": "2026-04-08T15:16:49.995Z"
+}
