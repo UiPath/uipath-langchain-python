@@ -48,25 +48,43 @@ print(f"Evaluation output: {json.dumps(eval_data, indent=2)[:500]}")
 eval_results = eval_data.get("evaluationSetResults", [])
 eval_by_name = {e["evaluationName"]: e for e in eval_results}
 
-assert "Current time tool should be called before web search" in eval_by_name, \
-    "Missing evaluation result for: Current time tool should be called before web search"
-assert "UiPath details" in eval_by_name, \
-    "Missing evaluation result for: UiPath details"
+EVAL_NAME = "Weather in Paris"
+assert EVAL_NAME in eval_by_name, \
+    f"Missing evaluation result for: {EVAL_NAME}"
 
 print(f"Found {len(eval_by_name)} evaluation results")
 
+eval_item = eval_by_name[EVAL_NAME]
+run_results_by_evaluator = {
+    r["evaluatorId"]: r for r in eval_item["evaluationRunResults"]
+}
+
 # Tool call order evaluator should have perfect score (1.0)
-tool_order = eval_by_name["Current time tool should be called before web search"]
-for run_result in tool_order["evaluationRunResults"]:
-    score = run_result["result"]["score"]
-    assert score == 1.0, f"Tool call order score should be 1.0, got: {score}"
+assert "evaluator-tool-call-order" in run_results_by_evaluator, \
+    "Missing evaluator result for: evaluator-tool-call-order"
+score = run_results_by_evaluator["evaluator-tool-call-order"]["result"]["score"]
+assert score == 1.0, f"Tool call order score should be 1.0, got: {score}"
 print("  ✓ tool call order: perfect score (1.0)")
 
+# Tool call arguments evaluator should have perfect score (1.0)
+assert "evaluator-tool-call-arguments" in run_results_by_evaluator, \
+    "Missing evaluator result for: evaluator-tool-call-arguments"
+score = run_results_by_evaluator["evaluator-tool-call-arguments"]["result"]["score"]
+assert score == 1.0, f"Tool call arguments score should be 1.0, got: {score}"
+print("  ✓ tool call arguments: perfect score (1.0)")
+
+# Tool call count evaluator should have perfect score (1.0)
+assert "evaluator-tool-call-count" in run_results_by_evaluator, \
+    "Missing evaluator result for: evaluator-tool-call-count"
+score = run_results_by_evaluator["evaluator-tool-call-count"]["result"]["score"]
+assert score == 1.0, f"Tool call count score should be 1.0, got: {score}"
+print("  ✓ tool call count: perfect score (1.0)")
+
 # LLM judge evaluator should score above 0.7
-llm_judge = eval_by_name["UiPath details"]
-for run_result in llm_judge["evaluationRunResults"]:
-    score = run_result["result"]["score"]
-    assert score > 0.7, f"LLM judge score should be > 0.7, got: {score}"
-    print(f"  ✓ llm judge output: score {score}")
+assert "evaluator-llm-judge-output" in run_results_by_evaluator, \
+    "Missing evaluator result for: evaluator-llm-judge-output"
+score = run_results_by_evaluator["evaluator-llm-judge-output"]["result"]["score"]
+assert score > 0.7, f"LLM judge score should be > 0.7, got: {score}"
+print(f"  ✓ llm judge output: score {score}")
 
 print("All validations passed successfully!")

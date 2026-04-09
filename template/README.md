@@ -15,7 +15,7 @@ A quickstart UiPath LangGraph agent. It answers user queries using live tools an
 | Tool               | Description                                      |
 | ------------------ | ------------------------------------------------ |
 | `get_current_time` | Returns the current UTC date and time (ISO 8601) |
-| `web_search`       | Searches the web via DuckDuckGo                  |
+| `get_weather`      | Returns weather data for a city (mock data)      |
 
 ### LLM Providers
 
@@ -43,7 +43,7 @@ flowchart TD
 ```json
 // Input
 {
-  "query": "What is the current UTC time?"
+  "query": "What's the weather like in London?"
 }
 
 // Output
@@ -64,7 +64,7 @@ uv run uipath debug agent --file input.json
 
 ## Evaluation
 
-The agent ships with a tool call order evaluator that verifies the ReAct node calls `get_current_time` **before** `web_search` when given a time-dependent query.
+The agent ships with a tool call order evaluator that verifies the ReAct node calls `get_current_time` **before** `get_weather` when given a time-and-weather query, and an LLM judge that checks weather output for semantic similarity.
 
 ```bash
 uv run uipath eval
