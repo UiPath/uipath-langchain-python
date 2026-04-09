@@ -1,5 +1,6 @@
 """Tool creation and management for LowCode agents."""
 
+from .a2a import create_a2a_agent_tools
 from .context_tool import create_context_tool
 from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
@@ -18,6 +19,7 @@ from .tool_node import (
 )
 
 __all__ = [
+    "create_a2a_agent_tools",
     "create_tools_from_resources",
     "create_tool_node",
     "create_context_tool",
