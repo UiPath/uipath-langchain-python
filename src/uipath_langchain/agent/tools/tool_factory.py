@@ -5,6 +5,7 @@ from logging import getLogger
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from uipath.agent.models.agent import (
+    AgentA2aResourceConfig,
     AgentContextResourceConfig,
     AgentEscalationResourceConfig,
     AgentIntegrationToolResourceConfig,
@@ -18,6 +19,7 @@ from uipath.agent.models.agent import (
 
 from uipath_langchain.chat.hitl import REQUIRE_CONVERSATIONAL_CONFIRMATION
 
+from .a2a import create_a2a_agent_tools
 from .context_tool import create_context_tool
 from .escalation_tool import create_escalation_tool
 from .extraction_tool import create_ixp_extraction_tool
@@ -95,5 +97,8 @@ async def _build_tool_for_resource(
 
     elif isinstance(resource, AgentIxpVsEscalationResourceConfig):
         return create_ixp_escalation_tool(resource)
+
+    elif isinstance(resource, AgentA2aResourceConfig):
+        return await create_a2a_agent_tools([resource])
 
     return None
