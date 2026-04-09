@@ -1,8 +1,7 @@
 """Data Fabric tool creation and resource detection.
 
-This module provides:
-1. An agentic ``query_datafabric`` tool with inner LLM sub-graph
-2. Entity schema fetching from the Data Fabric API
+This module provides an agentic ``query_datafabric`` tool with an inner
+LLM sub-graph.
 
 The tool accepts natural language queries, runs an inner LangGraph
 sub-graph for SQL generation + execution + self-correction, and
@@ -21,7 +20,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from uipath.agent.models.agent import AgentContextResourceConfig
-from uipath.platform.entities import Entity, EntityRouting, QueryRoutingOverrideContext
+from uipath.platform.entities import DataFabricEntityItem
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
 from .models import DataFabricQueryInput
@@ -34,20 +33,19 @@ BASE_SYSTEM_PROMPT = "base_system_prompt"
 class DataFabricTextQueryHandler:
     """Manages lazy initialization and invocation of the Data Fabric sub-graph.
 
-    On first call, fetches entity schemas from the DF API and compiles
-    the inner LangGraph sub-graph. Subsequent calls reuse the cached graph.
+    On first call, resolves entity schemas and routing via the platform
+    layer and compiles the inner LangGraph sub-graph. Subsequent calls
+    reuse the cached graph.
     """
 
     def __init__(
         self,
-        entity_identifiers: list[str],
-        routing_context: QueryRoutingOverrideContext,
+        entity_set: list[DataFabricEntityItem],
         llm: BaseChatModel,
         resource_description: str = "",
         base_system_prompt: str = "",
     ) -> None:
-        self._entity_identifiers = entity_identifiers
-        self._routing_context = routing_context
+        self._entity_set = entity_set
         self._llm = llm
         self._resource_description = resource_description
         self._base_system_prompt = base_system_prompt
@@ -55,7 +53,7 @@ class DataFabricTextQueryHandler:
         self._init_lock = asyncio.Lock()
 
     async def _ensure_datafabric_graph(self) -> CompiledStateGraph[Any]:
-        """Lazy-init: fetch schemas + build sub-graph on first call.
+        """Lazy-init: resolve entities + build sub-graph on first call.
 
         Uses asyncio.Lock because the outer agent supports parallel
         tool calls — two concurrent invocations could race on first call.
@@ -67,18 +65,21 @@ class DataFabricTextQueryHandler:
             if self._compiled is not None:
                 return self._compiled
 
+            from uipath.platform import UiPath
+
             from .datafabric_subgraph import DataFabricGraph
 
-            entities = await fetch_entity_schemas(self._entity_identifiers)
-            if not entities:
+            sdk = UiPath()
+            resolution = await sdk.entities.resolve_entity_set_async(self._entity_set)
+            if not resolution.entities:
                 raise ValueError(
                     "No Data Fabric entity schemas could be fetched. "
                     "Check entity identifiers and permissions."
                 )
             self._compiled = DataFabricGraph.create(
                 llm=self._llm,
-                entities=entities,
-                routing_context=self._routing_context,
+                entities=resolution.entities,
+                entities_service=resolution.entities_service,
                 resource_description=self._resource_description,
                 base_system_prompt=self._base_system_prompt,
             )
@@ -98,44 +99,6 @@ class DataFabricTextQueryHandler:
         return "Unable to generate an answer from the available data."
 
 
-async def _fetch_single_entity(sdk: Any, identifier: str) -> Entity | None:
-    """Fetch a single entity by identifier, returning None on failure."""
-    try:
-        entity = await sdk.entities.retrieve_async(identifier)
-        logger.info("Fetched schema for entity '%s'", entity.display_name)
-        return entity
-    except Exception:
-        logger.warning("Failed to fetch entity '%s'", identifier, exc_info=True)
-        return None
-
-
-async def fetch_entity_schemas(entity_identifiers: list[str]) -> list[Entity]:
-    """Fetch entity metadata from Data Fabric concurrently."""
-    from uipath.platform import UiPath
-
-    sdk = UiPath()
-    results = await asyncio.gather(
-        *[_fetch_single_entity(sdk, eid) for eid in entity_identifiers]
-    )
-    return [e for e in results if e is not None]
-
-
-def _build_routing_context(
-    resource: AgentContextResourceConfig,
-) -> QueryRoutingOverrideContext:
-    """Build query routing context from entity set items.
-
-    Maps each entity to its folder so the backend resolves
-    entities at folder level instead of tenant level.
-    """
-    return QueryRoutingOverrideContext(
-        entity_routings=[
-            EntityRouting(entity_name=item.name, folder_id=item.folder_id)
-            for item in (resource.entity_set or [])
-        ]
-    )
-
-
 def create_datafabric_query_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel,
@@ -152,9 +115,12 @@ def create_datafabric_query_tool(
             Key ``base_system_prompt`` carries the outer agent's system prompt.
     """
     config = agent_config or {}
+    entity_set = [
+        DataFabricEntityItem.model_validate(item.model_dump(by_alias=True))
+        for item in (resource.entity_set or [])
+    ]
     handler = DataFabricTextQueryHandler(
-        entity_identifiers=resource.datafabric_entity_identifiers,
-        routing_context=_build_routing_context(resource),
+        entity_set=entity_set,
         llm=llm,
         resource_description=resource.description or "",
         base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),

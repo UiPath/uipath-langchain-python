@@ -23,7 +23,7 @@ from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
-from uipath.platform.entities import Entity, QueryRoutingOverrideContext
+from uipath.platform.entities import EntitiesService, Entity
 
 from ..datafabric_query_tool import DataFabricQueryTool
 from . import datafabric_prompt_builder
@@ -42,18 +42,14 @@ class DataFabricSubgraphState(BaseModel):
 class QueryExecutor:
     """Executes SQL queries against Data Fabric."""
 
-    def __init__(self, routing_context: QueryRoutingOverrideContext) -> None:
-        from uipath.platform import UiPath
-
-        self._sdk = UiPath()
-        self._routing_context = routing_context
+    def __init__(self, entities_service: EntitiesService) -> None:
+        self._entities = entities_service
 
     async def __call__(self, sql_query: str) -> dict[str, Any]:
         logger.debug("execute_sql called with SQL: %s", sql_query)
         try:
-            records = await self._sdk.entities.query_entity_records_async(
+            records = await self._entities.query_entity_records_async(
                 sql_query=sql_query,
-                routing_context=self._routing_context,
             )
             return {
                 "records": records,
@@ -81,14 +77,14 @@ class DataFabricGraph:
         self,
         llm: BaseChatModel,
         entities: list[Entity],
-        routing_context: QueryRoutingOverrideContext,
+        entities_service: EntitiesService,
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
     ) -> None:
         self._max_iterations = max_iterations
         self._execute_sql_tool = self._create_execute_sql_tool(
-            routing_context, entities
+            entities_service, entities
         )
         self._system_message = SystemMessage(
             content=datafabric_prompt_builder.build(
@@ -175,7 +171,7 @@ class DataFabricGraph:
 
     def _create_execute_sql_tool(
         self,
-        routing_context: QueryRoutingOverrideContext,
+        entities_service: EntitiesService,
         entities: list[Entity],
     ) -> BaseTool:
         """Create the inner ``execute_sql`` tool."""
@@ -188,7 +184,7 @@ class DataFabricGraph:
                 "tables and columns. Retry with a corrected query on errors."
             ),
             args_schema=DataFabricExecuteSqlInput,
-            coroutine=QueryExecutor(routing_context),
+            coroutine=QueryExecutor(entities_service),
             metadata={"tool_type": "datafabric_sql"},
         )
 
@@ -196,7 +192,7 @@ class DataFabricGraph:
     def create(
         llm: BaseChatModel,
         entities: list[Entity],
-        routing_context: QueryRoutingOverrideContext,
+        entities_service: EntitiesService,
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
@@ -205,7 +201,7 @@ class DataFabricGraph:
         graph = DataFabricGraph(
             llm,
             entities,
-            routing_context,
+            entities_service,
             max_iterations,
             resource_description,
             base_system_prompt,
