@@ -1,0 +1,11 @@
+{
+  "employee_id": "EMP003",
+  "employee_name": "Michael Chen",
+  "department": "hr",
+  "expense_amount": 2500.00,
+  "expense_category": "travel",
+  "expense_description": "Round trip flight and 2-night hotel for annual conference in NYC",
+  "receipt_attached": true,
+  "expense_date": "2025-09-15",
+  "manager_email": "hr.director@company.com"
+}
