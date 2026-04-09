@@ -23,6 +23,7 @@ from uipath.agent.models.agent import (
 from uipath.core.guardrails.guardrails import FieldReference, FieldSource
 from uipath.platform.guardrails.guardrails import NumberParameterValue
 
+from tests.settings import agent_hub_dummy_settings
 from uipath_langchain.chat.openai import UiPathChatOpenAI
 
 
@@ -76,9 +77,11 @@ all_tools = [sentence_analyzer_tool]
 
 # Create LLM (will be mocked in tests)
 llm = UiPathChatOpenAI(
+    model_name="gpt-4o",
     temperature=0.0,
     max_tokens=500,
     use_responses_api=True,
+    settings=agent_hub_dummy_settings,
 )
 
 
