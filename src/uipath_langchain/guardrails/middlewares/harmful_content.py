@@ -1,4 +1,4 @@
-"""PII detection guardrail middleware."""
+"""Harmful content detection guardrail middleware."""
 
 import logging
 from typing import Any, Sequence
@@ -30,7 +30,7 @@ from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockExce
 
 from uipath_langchain.agent.exceptions import AgentRuntimeError
 
-from ..models import GuardrailAction, PIIDetectionEntity
+from ..models import GuardrailAction, HarmfulContentEntity
 from ._base import BuiltInGuardrailMiddlewareMixin
 from ._utils import (
     convert_block_exception,
@@ -41,80 +41,33 @@ from ._utils import (
 logger = logging.getLogger(__name__)
 
 
-class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
-    """Middleware for PII detection using UiPath guardrails.
+class UiPathHarmfulContentMiddleware(BuiltInGuardrailMiddlewareMixin):
+    """Middleware for harmful content detection using UiPath guardrails.
 
-    Example:
-        ```python
-        from langchain.agents import create_agent
-        from langchain_core.tools import tool
-        from uipath_langchain.guardrails import (
-            UiPathPIIDetectionMiddleware,
-            PIIDetectionEntity,
-            PIIDetectionEntityType,
-            LogAction,
-            GuardrailScope,
-        )
-        from uipath_langchain.guardrails.actions import LoggingSeverityLevel
-
-        @tool
-        def analyze_joke_syntax(joke: str) -> str:
-            \"\"\"Analyze the syntax of a joke.\"\"\"
-            return f"Words: {len(joke.split())}"
-
-        # PII detection for Agent and LLM scopes
-        middleware_agent_llm = UiPathPIIDetectionMiddleware(
-            scopes=[GuardrailScope.AGENT, GuardrailScope.LLM],
-            action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
-            entities=[
-                PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5),
-                PIIDetectionEntity(PIIDetectionEntityType.ADDRESS, 0.7),
-            ],
-            enabled_for_evals=True,
-        )
-
-        # PII detection for specific tools (using tool reference directly)
-        middleware_tool = UiPathPIIDetectionMiddleware(
-            scopes=[GuardrailScope.TOOL],
-            action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
-            entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5)],
-            tools=[analyze_joke_syntax],
-            enabled_for_evals=False,
-        )
-
-        agent = create_agent(
-            model=llm,
-            tools=[analyze_joke_syntax],
-            middleware=[*middleware_agent_llm, *middleware_tool],
-        )
-        ```
+    Supports all scopes (AGENT, LLM, TOOL) and both PRE and POST stages.
 
     Args:
-        scopes: List of scopes where the guardrail applies (Agent, LLM, Tool)
-        action: Action to take when PII is detected (LogAction or BlockAction)
-        entities: List of PII entities to detect with their thresholds
-        tools: Required when TOOL scope is specified. List of tool names or tool objects
-            to apply guardrail to. Must contain at least one tool.
-            Can be a mix of strings (tool names) or BaseTool objects.
-            If TOOL scope is not specified, this parameter is ignored.
-        name: Optional name for the guardrail (defaults to "PII Detection")
-        description: Optional description for the guardrail
+        scopes: List of scopes where the guardrail applies (Agent, LLM, Tool).
+        action: Action to take when harmful content is detected.
+        entities: List of harmful content entities to detect with their thresholds.
+        tools: Required when TOOL scope is specified. List of tool names or tool objects.
+        name: Optional name for the guardrail.
+        description: Optional description for the guardrail.
         enabled_for_evals: Whether this guardrail is enabled for evaluation scenarios.
-            Defaults to True.
     """
 
     def __init__(
         self,
         scopes: Sequence[GuardrailScope],
         action: GuardrailAction,
-        entities: Sequence[PIIDetectionEntity],
+        entities: Sequence[HarmfulContentEntity],
         *,
         tools: Sequence[str | BaseTool] | None = None,
-        name: str = "PII Detection",
+        name: str = "Harmful Content Detection",
         description: str | None = None,
         enabled_for_evals: bool = True,
     ):
-        """Initialize PII detection guardrail middleware."""
+        """Initialize harmful content detection guardrail middleware."""
         if not scopes:
             raise ValueError("At least one scope must be specified")
         if not entities:
@@ -134,7 +87,7 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
                     tool_name_list.append(sanitize_tool_name(tool_or_name))
                 else:
                     raise ValueError(
-                        f"tool_names must contain strings or BaseTool objects, got {type(tool_or_name)}"
+                        f"tools must contain strings or BaseTool objects, got {type(tool_or_name)}"
                     )
             self._tool_names = tool_name_list
 
@@ -142,9 +95,8 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         if GuardrailScope.TOOL in scopes_list:
             if self._tool_names is None or len(self._tool_names) == 0:
                 raise ValueError(
-                    "Tool scope is specified but tool_names is None or empty. "
-                    "Tool scope guardrails require at least one tool name to be specified. "
-                    "Please provide tool_names when using GuardrailScope.TOOL."
+                    "Tool scope is specified but tools is None or empty. "
+                    "Tool scope guardrails require at least one tool to be specified."
                 )
 
         self.scopes = scopes_list
@@ -154,7 +106,7 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         self.enabled_for_evals = enabled_for_evals
         self._description = (
             description
-            or f"Detects PII entities: {', '.join(e.name for e in entities)}"
+            or f"Detects harmful content: {', '.join(e.name for e in entities)}"
         )
 
         self._guardrail = self._create_guardrail()
@@ -244,7 +196,7 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
                     raise
                 except Exception as e:
                     logger.error(
-                        f"Error evaluating PII guardrail for tool '{tool_name}': {e}",
+                        f"Error evaluating harmful content guardrail for tool '{tool_name}': {e}",
                         exc_info=True,
                     )
 
@@ -263,17 +215,19 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
     def _create_guardrail(self) -> BuiltInValidatorGuardrail:
         """Create BuiltInValidatorGuardrail from configuration."""
         entity_names = [entity.name for entity in self.entities]
-        entity_thresholds = {entity.name: entity.threshold for entity in self.entities}
+        entity_thresholds: dict[str, float] = {
+            entity.name: entity.threshold for entity in self.entities
+        }
 
         validator_parameters = [
             EnumListParameterValue(
                 parameter_type="enum-list",
-                id="entities",
+                id="harmfulContentEntities",
                 value=entity_names,
             ),
             MapEnumParameterValue(
                 parameter_type="map-enum",
-                id="entityThresholds",
+                id="harmfulContentEntityThresholds",
                 value=entity_thresholds,
             ),
         ]
@@ -289,7 +243,7 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
             enabled_for_evals=self.enabled_for_evals,
             selector=GuardrailSelector(**selector_kwargs),
             guardrail_type="builtInValidator",
-            validator_type="pii_detection",
+            validator_type="harmful_content",
             validator_parameters=validator_parameters,
         )
 
@@ -302,7 +256,7 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
     def _extract_tool_input_data(
         self, request: ToolCallRequest
     ) -> str | dict[str, Any]:
-        """Extract tool input data from ToolCallRequest for guardrail evaluation."""
+        """Extract tool input data from ToolCallRequest."""
         tool_call = request.tool_call
         args = tool_call.get("args", {})
         if isinstance(args, dict):

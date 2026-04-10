@@ -6,14 +6,16 @@ Both agents are used in test_guardrails_in_langgraph.py to verify 1:1 behavioral
 parity between the two guardrail flavors.
 
 Guardrails configured:
-- "Agent PII Detection"            — AGENT scope, PII (PERSON), PRE, BlockAction
-- "LLM Prompt Injection Detection" — LLM scope, Prompt Injection, PRE, BlockAction
-- "LLM PII Detection"              — LLM scope, PII (EMAIL), PRE, LogAction(WARNING)
-- "Tool PII Detection"             — TOOL scope, PII (EMAIL, PHONE), PRE, LogAction(WARNING)
-- "Tool PII Block Detection"       — TOOL scope, PII (PERSON), PRE, BlockAction
-- "Joke Content Word Filter"       — TOOL scope, CustomValidator, PRE, CustomFilterAction
-- "Joke Content Length Limiter"    — TOOL scope, CustomValidator, PRE, BlockAction
-- "Joke Content Always Filter"     — TOOL scope, CustomValidator (always), POST, CustomFilterAction
+- "Agent PII Detection"                — AGENT scope, PII (PERSON), PRE, BlockAction
+- "Agent Harmful Content Detection"    — AGENT scope, HarmfulContent (Violence), PRE, BlockAction
+- "LLM User Prompt Attacks Detection"  — LLM scope, UserPromptAttacks, PRE, BlockAction
+- "LLM PII Detection"                  — LLM scope, PII (EMAIL), PRE, LogAction(WARNING)
+- "LLM IP Detection"                   — LLM scope, IntellectualProperty (Text), POST, LogAction
+- "Tool PII Detection"                 — TOOL scope, PII (EMAIL, PHONE), PRE, LogAction(WARNING)
+- "Tool PII Block Detection"           — TOOL scope, PII (PERSON), PRE, BlockAction
+- "Joke Content Word Filter"           — TOOL scope, CustomValidator, PRE, CustomFilterAction
+- "Joke Content Length Limiter"        — TOOL scope, CustomValidator, PRE, BlockAction
+- "Joke Content Always Filter"         — TOOL scope, CustomValidator (always), POST, CustomFilterAction
 """
 
 import re
@@ -37,14 +39,21 @@ from uipath_langchain.guardrails import (
     CustomValidator,
     GuardrailAction,
     GuardrailExecutionStage,
+    HarmfulContentEntity,
+    HarmfulContentValidator,
+    IntellectualPropertyValidator,
     LogAction,
     PIIDetectionEntity,
     PIIValidator,
-    PromptInjectionValidator,
+    UserPromptAttacksValidator,
     guardrail,
 )
 from uipath_langchain.guardrails.actions import LoggingSeverityLevel
-from uipath_langchain.guardrails.enums import PIIDetectionEntityType
+from uipath_langchain.guardrails.enums import (
+    HarmfulContentEntityType,
+    IntellectualPropertyEntityType,
+    PIIDetectionEntityType,
+)
 
 # ---------------------------------------------------------------------------
 # Custom filter action (defined inline)
@@ -175,9 +184,9 @@ Keep jokes appropriate for children, free from offensive language."""
 
 
 @guardrail(
-    validator=PromptInjectionValidator(threshold=0.5),
+    validator=UserPromptAttacksValidator(),
     action=BlockAction(),
-    name="LLM Prompt Injection Detection",
+    name="LLM User Prompt Attacks Detection",
     stage=GuardrailExecutionStage.PRE,
 )
 @guardrail(
@@ -187,6 +196,14 @@ Keep jokes appropriate for children, free from offensive language."""
     action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
     name="LLM PII Detection",
     stage=GuardrailExecutionStage.PRE,
+)
+@guardrail(
+    validator=IntellectualPropertyValidator(
+        entities=[IntellectualPropertyEntityType.TEXT],
+    ),
+    action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
+    name="LLM IP Detection",
+    stage=GuardrailExecutionStage.POST,
 )
 def create_llm():
     """Create LLM instance with guardrails."""
@@ -201,6 +218,14 @@ llm = create_llm()
 # ---------------------------------------------------------------------------
 
 
+@guardrail(
+    validator=HarmfulContentValidator(
+        entities=[HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2)],
+    ),
+    action=BlockAction(),
+    name="Agent Harmful Content Detection",
+    stage=GuardrailExecutionStage.PRE,
+)
 @guardrail(
     validator=PIIValidator(
         entities=[PIIDetectionEntity(PIIDetectionEntityType.PERSON, 0.5)]

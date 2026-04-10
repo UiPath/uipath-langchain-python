@@ -1,5 +1,9 @@
 """Models for UiPath guardrails configuration."""
 
-from uipath.platform.guardrails.decorators import GuardrailAction, PIIDetectionEntity
+from uipath.platform.guardrails.decorators import (
+    GuardrailAction,
+    HarmfulContentEntity,
+    PIIDetectionEntity,
+)
 
-__all__ = ["PIIDetectionEntity", "GuardrailAction"]
+__all__ = ["GuardrailAction", "HarmfulContentEntity", "PIIDetectionEntity"]
