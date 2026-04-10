@@ -1,15 +1,18 @@
 """Job attachment utilities for ReAct Agent."""
 
 import copy
+import logging
 import uuid
 from typing import Any, Sequence
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages import BaseMessage, HumanMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from uipath.platform.attachments import Attachment
 
 from .json_utils import extract_values_by_paths, get_json_paths_by_type
+
+logger = logging.getLogger(__name__)
 
 
 def get_job_attachments(
@@ -28,11 +31,21 @@ def get_job_attachments(
     job_attachment_paths = get_job_attachment_paths(schema)
     job_attachments = extract_values_by_paths(data, job_attachment_paths)
 
-    result = [
-        Attachment.model_validate(att, from_attributes=True)
-        for att in job_attachments
-        if att
-    ]
+    result: list[Attachment] = []
+    for att in job_attachments:
+        if not att:
+            continue
+        try:
+            result.append(Attachment.model_validate(att, from_attributes=True))
+        except ValidationError:
+            att_id = att.get("ID", "unknown") if isinstance(att, dict) else "unknown"
+            logger.warning(
+                "Skipping invalid job attachment (ID=%s): "
+                "could not validate as Attachment. "
+                "This may happen when file input IDs have not been "
+                "resolved to Orchestrator UUIDs.",
+                att_id,
+            )
 
     return result
 
