@@ -258,7 +258,8 @@ def create_llm_guardrails_subgraph(
     applicable_guardrails = [
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
-        if GuardrailScope.LLM in guardrail.selector.scopes
+        if guardrail.selector is not None
+        and GuardrailScope.LLM in guardrail.selector.scopes
         and not isinstance(guardrail, DeterministicGuardrail)
     ]
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
@@ -343,7 +344,8 @@ def create_agent_init_guardrails_subgraph(
     applicable_guardrails = [
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
-        if GuardrailScope.AGENT in guardrail.selector.scopes
+        if guardrail.selector is not None
+        and GuardrailScope.AGENT in guardrail.selector.scopes
         and not isinstance(guardrail, DeterministicGuardrail)
     ]
     applicable_guardrails = _filter_guardrails_by_stage(
@@ -387,7 +389,8 @@ def create_agent_terminate_guardrails_subgraph(
     applicable_guardrails = [
         (guardrail, _)
         for (guardrail, _) in (guardrails or [])
-        if GuardrailScope.AGENT in guardrail.selector.scopes
+        if guardrail.selector is not None
+        and GuardrailScope.AGENT in guardrail.selector.scopes
         and not isinstance(guardrail, DeterministicGuardrail)
     ]
     if applicable_guardrails is None or len(applicable_guardrails) == 0:
@@ -435,7 +438,8 @@ def create_tool_guardrails_subgraph(
     applicable_guardrails = [
         (guardrail, action)
         for (guardrail, action) in (guardrails or [])
-        if GuardrailScope.TOOL in guardrail.selector.scopes
+        if guardrail.selector is not None
+        and GuardrailScope.TOOL in guardrail.selector.scopes
         and guardrail.selector.match_names is not None
         and tool_name in guardrail.selector.match_names
     ]

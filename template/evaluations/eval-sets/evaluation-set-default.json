@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "id": "DefaultEvaluationSet",
+  "name": "Default Evaluation Set",
+  "evaluatorRefs": [
+    "evaluator-llm-judge-output",
+    "evaluator-tool-call-order",
+    "evaluator-tool-call-arguments",
+    "evaluator-tool-call-count"
+  ],
+  "evaluations": [
+    {
+      "id": "ada5a2c1-976c-470b-964f-eb70a5e61eb4",
+      "name": "Weather in Paris",
+      "inputs": {
+        "query": "Is it good weather for a walk in Paris?"
+      },
+      "evaluationCriterias": {
+        "evaluator-llm-judge-output": {
+          "expectedOutput": "{\n  \"response\": \"Yes, it's quite good weather for a walk in Paris! The current conditions are:**Temperature**: 18°C (64°F) - mild and pleasant spring weather **Wind**: 12 km/h (7 mph) - light, manageable breeze **Conditions**: Partly cloudy - perfect for a walk without being too sunny or too gray\"\n}"
+        },
+        "evaluator-tool-call-order": null,
+        "evaluator-tool-call-arguments": null,
+        "evaluator-tool-call-count": null
+      },
+      "createdAt": "2026-03-23T17:10:17.394Z",
+      "updatedAt": "2026-04-09T07:11:59.193Z"
+    }
+  ],
+  "fileName": "evaluation-set-default.json",
+  "updatedAt": "2026-04-09T07:11:59.193Z",
+  "selectedEntrypoint": "agent"
+}

@@ -1,0 +1,24 @@
+{
+  "version": "1.0",
+  "fileName": "tool-call-arguments.json",
+  "id": "evaluator-tool-call-arguments",
+  "description": "Verify tool call arguments match expected values",
+  "evaluatorTypeId": "uipath-tool-call-args",
+  "evaluatorConfig": {
+    "strict": false,
+    "subset": false,
+    "name": "Tool Call Arguments",
+    "defaultEvaluationCriteria": {
+      "toolCalls": [
+        {
+          "name": "get_weather",
+          "args": {
+            "city": "Paris"
+          }
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-04-09T07:09:28.326Z",
+  "updatedAt": "2026-04-09T07:09:31.178Z"
+}

@@ -177,6 +177,7 @@ cython_debug/
 
 **/uipath.db
 **/.uipath
+!template/.uipath/studio_metadata.json
 **/**.nupkg
 **/__uipath/
 **/.langgraph_api

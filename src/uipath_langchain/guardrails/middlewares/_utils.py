@@ -1,11 +1,26 @@
 """Shared utilities for guardrail middlewares."""
 
 import re
+from copy import deepcopy
 from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
+from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
+from uipath.runtime.errors import UiPathErrorCategory
+
+from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+
+
+def convert_block_exception(exc: GuardrailBlockException) -> AgentRuntimeError:
+    """Convert a :class:`GuardrailBlockException` to :class:`AgentRuntimeError`."""
+    return AgentRuntimeError(
+        code=AgentRuntimeErrorCode.TERMINATION_GUARDRAIL_VIOLATION,
+        title=exc.title,
+        detail=exc.detail,
+        category=UiPathErrorCategory.USER,
+    )
 
 
 def sanitize_tool_name(name: str) -> str:
@@ -21,7 +36,6 @@ def create_modified_tool_request(
     modified_args: dict[str, Any],
 ) -> ToolCallRequest:
     """Create a new ToolCallRequest with modified args."""
-    from copy import deepcopy
     from dataclasses import replace
 
     modified_tool_call = deepcopy(request.tool_call)
@@ -44,7 +58,6 @@ def create_modified_tool_result(
 ) -> ToolMessage | Command[Any]:
     """Create a new ToolMessage or Command with modified output."""
     import json
-    from copy import deepcopy
 
     original_content = None
     if isinstance(result, Command):

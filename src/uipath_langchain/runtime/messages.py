@@ -58,9 +58,9 @@ class UiPathChatMessagesMapper:
         """Initialize the mapper with empty state."""
         self.runtime_id = runtime_id
         self.storage = storage
+        self.current_message: AIMessageChunk | AIMessage
         self.tool_names_requiring_confirmation: set[str] = set()
         self.tool_confirmation_schemas: dict[str, Any] = {}
-        self.current_message: AIMessageChunk
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
         self._citation_stream_processor = CitationStreamProcessor()
@@ -257,9 +257,13 @@ class UiPathChatMessagesMapper:
         Returns:
             A UiPathConversationMessageEvent if the message should be emitted, None otherwise.
         """
-        # --- Streaming AIMessageChunk ---
+        # --- Streaming AIMessageChunk (check before AIMessage since it's a subclass) ---
         if isinstance(message, AIMessageChunk):
             return await self.map_ai_message_chunk_to_events(message)
+
+        # --- Full AIMessage (e.g. when PII-masking is enabled) ---
+        if isinstance(message, AIMessage):
+            return await self.map_ai_message_to_events(message)
 
         # --- ToolMessage ---
         if isinstance(message, ToolMessage):
@@ -336,8 +340,9 @@ class UiPathChatMessagesMapper:
                                 self._chunk_to_message_event(message.id, chunk)
                             )
                     case "tool_call_chunk":
-                        # Accumulate the message chunk
-                        self.current_message = self.current_message + message
+                        # Accumulate the message chunk. Note that we assume no interweaving of AIMessage and AIMessageChunks for a given message.
+                        if isinstance(self.current_message, AIMessageChunk):
+                            self.current_message = self.current_message + message
 
         elif isinstance(message.content, str) and message.content:
             # Fallback: raw string content on the chunk (rare when using content_blocks)
@@ -360,6 +365,35 @@ class UiPathChatMessagesMapper:
                 )
             else:
                 events.append(self.map_to_message_end_event(message.id))
+
+        return events
+
+    async def map_ai_message_to_events(
+        self, message: AIMessage
+    ) -> list[UiPathConversationMessageEvent]:
+        """Handle a full AIMessage (non-streaming)."""
+        if message.id is None or message.id in self.seen_message_ids:
+            return []
+
+        self.seen_message_ids.add(message.id)
+        self.current_message = message
+        self._citation_stream_processor = CitationStreamProcessor()
+
+        events: list[UiPathConversationMessageEvent] = []
+        events.append(self.map_to_message_start_event(message.id))
+
+        text = self._extract_text(message.content)
+        if text:
+            for chunk in self._citation_stream_processor.add_chunk(text):
+                events.append(self._chunk_to_message_event(message.id, chunk))
+            for chunk in self._citation_stream_processor.finalize():
+                events.append(self._chunk_to_message_event(message.id, chunk))
+            self._citation_stream_processor = CitationStreamProcessor()
+
+        if message.tool_calls:
+            events.extend(await self.map_current_message_to_start_tool_call_events())
+        else:
+            events.append(self.map_to_message_end_event(message.id))
 
         return events
 
@@ -549,7 +583,9 @@ class UiPathChatMessagesMapper:
             ),
             content_part=UiPathConversationContentPartEvent(
                 content_part_id=self.get_content_part_id(message_id),
-                start=UiPathConversationContentPartStartEvent(mime_type="text/plain"),
+                start=UiPathConversationContentPartStartEvent(
+                    mime_type="text/markdown"
+                ),
             ),
         )
 

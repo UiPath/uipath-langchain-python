@@ -32,9 +32,11 @@ logger = getLogger(__name__)
 async def create_tools_from_resources(
     agent: LowCodeAgentDefinition, llm: BaseChatModel
 ) -> list[BaseTool]:
+
     tools: list[BaseTool] = []
 
     logger.info("Creating tools for agent '%s' from resources", agent.name)
+
     for resource in agent.resources:
         if not resource.is_enabled:
             logger.info(
@@ -49,7 +51,7 @@ async def create_tools_from_resources(
             resource.name,
             type(resource).__name__,
         )
-        tool = await _build_tool_for_resource(resource, llm)
+        tool = await _build_tool_for_resource(resource, llm, agent=agent)
         if tool is not None:
             if isinstance(tool, list):
                 tools.extend(tool)
@@ -69,13 +71,15 @@ async def create_tools_from_resources(
 
 
 async def _build_tool_for_resource(
-    resource: BaseAgentResourceConfig, llm: BaseChatModel
+    resource: BaseAgentResourceConfig,
+    llm: BaseChatModel,
+    agent: LowCodeAgentDefinition | None = None,
 ) -> BaseTool | list[BaseTool] | None:
     if isinstance(resource, AgentProcessToolResourceConfig):
         return create_process_tool(resource)
 
     elif isinstance(resource, AgentContextResourceConfig):
-        return create_context_tool(resource)
+        return create_context_tool(resource, llm=llm, agent=agent)
 
     elif isinstance(resource, AgentEscalationResourceConfig):
         return create_escalation_tool(resource)

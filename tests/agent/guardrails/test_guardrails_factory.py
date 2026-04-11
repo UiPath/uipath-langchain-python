@@ -1179,6 +1179,7 @@ class TestConvertAgentCustomGuardrailToDeterministic:
 
         mock_tool = Mock(spec=BaseTool)
         mock_tool.name = "different_tool"
+        mock_tool.metadata = None
 
         agent_guardrail = AgentCustomGuardrail.model_validate(
             {

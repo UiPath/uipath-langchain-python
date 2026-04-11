@@ -1,6 +1,6 @@
 """Tests for integration_tool.py module."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from uipath.agent.models.agent import (
@@ -11,15 +11,22 @@ from uipath.agent.models.agent import (
     AgentToolStaticArgumentProperties,
 )
 from uipath.platform.connections import ActivityParameterLocationInfo, Connection
+from uipath.platform.errors import EnrichedException
+from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain.agent.exceptions import AgentStartupError
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    AgentStartupError,
+)
 from uipath_langchain.agent.tools.integration_tool import (
     _is_param_name_to_jsonpath,
     _param_name_to_segments,
     convert_integration_parameters_to_argument_properties,
     convert_to_activity_metadata,
     create_integration_tool,
-    strip_template_enums_from_schema,
+    remove_asterisk_from_properties,
+    strip_enums_from_schema,
 )
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
@@ -381,6 +388,22 @@ class TestConvertIntegrationParametersToArgumentProperties:
         assert "$['search_query']" not in result
         assert "$['api_key']" in result
 
+    def test_dynamic_parameter_skipped(self):
+        """Parameters with no fieldVariant are skipped."""
+        params = [
+            AgentIntegrationToolParameter(
+                name="search_query",
+                type="string",
+                value="test",
+                field_location="query",
+                field_variant="dynamic",
+            ),
+        ]
+
+        result = convert_integration_parameters_to_argument_properties(params)
+
+        assert "$['search_query']" not in result
+
     def test_empty_parameters(self):
         """Empty list returns empty dict."""
         result = convert_integration_parameters_to_argument_properties([])
@@ -487,8 +510,8 @@ class TestConvertIntegrationParametersToArgumentProperties:
             convert_integration_parameters_to_argument_properties(params)
 
 
-class TestStripTemplateEnumsFromSchema:
-    """Test cases for strip_template_enums_from_schema function."""
+class TestStripEnumsFromSchema:
+    """Test cases for strip_enums_from_schema function."""
 
     def test_strips_enum_with_single_template_value(self):
         """An enum containing only a single template value is removed entirely."""
@@ -511,81 +534,40 @@ class TestStripTemplateEnumsFromSchema:
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
         assert "enum" not in result["properties"]["opportunityID"]
 
-    def test_preserves_enum_without_templates(self):
-        """An enum with only real values is left unchanged."""
+    def test_strips_static_variant_enum(self):
+        """Static-variant param's enum is stripped — StaticArgsHandler handles enforcement separately."""
         schema = {
             "type": "object",
             "properties": {
-                "status": {
+                "title": {
                     "type": "string",
-                    "enum": ["open", "closed"],
-                }
-            },
-        }
-
-        result = strip_template_enums_from_schema(schema, [])
-
-        assert result["properties"]["status"]["enum"] == ["open", "closed"]
-
-    def test_strips_template_preserves_real_values_in_mixed_enum(self):
-        """Templates are removed but real values are kept in a mixed enum."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "kind": {
-                    "type": "string",
-                    "enum": ["real", "{{template}}"],
-                }
+                    "enum": ["Custom title"],
+                },
             },
         }
         parameters = [
             AgentIntegrationToolParameter(
-                name="kind",
+                name="title",
                 type="string",
-                value="{{template}}",
+                value="Custom title",
                 field_location="body",
-                field_variant="argument",
+                field_variant="static",
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
-        assert result["properties"]["kind"]["enum"] == ["real"]
-
-    def test_strips_empty_enum_after_removal(self):
-        """When all enum values are templates the enum key is removed."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "field": {
-                    "type": "string",
-                    "enum": ["{{a}}", "{{b}}"],
-                }
-            },
-        }
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="field",
-                type="string",
-                value="{{a}}",
-                field_location="body",
-                field_variant="argument",
-            ),
-        ]
-
-        result = strip_template_enums_from_schema(schema, parameters)
-
-        assert "enum" not in result["properties"]["field"]
+        assert "enum" not in result["properties"]["title"]
 
     def test_handles_schema_without_properties(self):
         """A schema with no properties key is returned unchanged."""
         schema = {"type": "object"}
 
-        result = strip_template_enums_from_schema(schema, [])
+        result = strip_enums_from_schema(schema, [])
 
         assert result == {"type": "object"}
 
@@ -612,90 +594,12 @@ class TestStripTemplateEnumsFromSchema:
 
         id_field = schema["properties"]["id"]  # type: ignore[index]
         original_enum = id_field["enum"][:]
-        strip_template_enums_from_schema(schema, parameters)
+        strip_enums_from_schema(schema, parameters)
 
         assert id_field["enum"] == original_enum
 
-    def test_handles_non_string_enum_values(self):
-        """Non-string enum values are never treated as templates."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer",
-                    "enum": [1, 2, 3],
-                }
-            },
-        }
-
-        result = strip_template_enums_from_schema(schema, [])
-
-        assert result["properties"]["count"]["enum"] == [1, 2, 3]
-
-    def test_strips_enum_only_for_argument_variant_top_level(self):
-        """Only argument-variant param's enum is stripped; dynamic param's enum is preserved."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "opportunityID": {
-                    "type": "string",
-                    "enum": ["{{opportunityID}}"],
-                },
-                "parse": {
-                    "type": "string",
-                    "enum": ["none", "full"],
-                },
-            },
-        }
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="opportunityID",
-                type="string",
-                value="{{opportunityID}}",
-                field_location="body",
-                field_variant="argument",
-            ),
-            AgentIntegrationToolParameter(
-                name="parse",
-                type="string",
-                value="{{prompt}}",
-                field_location="body",
-                field_variant="dynamic",
-            ),
-        ]
-
-        result = strip_template_enums_from_schema(schema, parameters)
-
-        assert "enum" not in result["properties"]["opportunityID"]
-        assert result["properties"]["parse"]["enum"] == ["none", "full"]
-
-    def test_preserves_static_variant_enum(self):
-        """Static-variant param's enum is never stripped even if values look like templates."""
-        schema = {
-            "type": "object",
-            "properties": {
-                "title": {
-                    "type": "string",
-                    "enum": ["Custom title"],
-                },
-            },
-        }
-        parameters = [
-            AgentIntegrationToolParameter(
-                name="title",
-                type="string",
-                value="Custom title",
-                field_location="body",
-                field_variant="static",
-            ),
-        ]
-
-        result = strip_template_enums_from_schema(schema, parameters)
-
-        assert result["properties"]["title"]["enum"] == ["Custom title"]
-
-    def test_strips_enum_on_nested_argument_field(self):
-        """Argument-variant param's enum is stripped even when nested inside objects."""
+    def test_strips_enum_on_nested_fields(self):
+        """Enums are stripped from nested fields for all parameter variants."""
         schema = {
             "type": "object",
             "properties": {
@@ -731,14 +635,12 @@ class TestStripTemplateEnumsFromSchema:
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
         assert (
             "enum" not in result["properties"]["attachment"]["properties"]["title_link"]
         )
-        assert result["properties"]["attachment"]["properties"]["title"]["enum"] == [
-            "Custom title"
-        ]
+        assert "enum" not in result["properties"]["attachment"]["properties"]["title"]
 
     def test_strips_enum_on_array_nested_field(self):
         """Argument-variant param inside an array is correctly navigated and stripped."""
@@ -769,11 +671,11 @@ class TestStripTemplateEnumsFromSchema:
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
-        assert result["properties"]["items"]["items"]["properties"]["status"][
-            "enum"
-        ] == ["active"]
+        assert (
+            "enum" not in result["properties"]["items"]["items"]["properties"]["status"]
+        )
 
     def test_handles_ref_resolution(self):
         """Argument-variant param with $ref in schema path is resolved and enum stripped."""
@@ -806,11 +708,11 @@ class TestStripTemplateEnumsFromSchema:
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
         # The $ref is inlined and modified on the inlined copy
         config_props = result["properties"]["config"]["properties"]
-        assert config_props["mode"]["enum"] == ["auto"]
+        assert "enum" not in config_props["mode"]
 
     def test_skips_argument_param_when_schema_path_not_found(self):
         """If the schema path for an argument param doesn't exist, skip silently."""
@@ -830,7 +732,7 @@ class TestStripTemplateEnumsFromSchema:
             ),
         ]
 
-        result = strip_template_enums_from_schema(schema, parameters)
+        result = strip_enums_from_schema(schema, parameters)
 
         assert result == schema
 
@@ -1055,3 +957,130 @@ class TestIsParamNameToJsonpath:
 
     def test_escapes_backslashes(self):
         assert _is_param_name_to_jsonpath("path\\to") == "$['path\\\\to']"
+
+
+class TestIntegrationToolErrorHandling:
+    """Test error handling for integration tool HTTP failures."""
+
+    @pytest.fixture
+    def common_connection(self):
+        return Connection(
+            id="test-connection-id", name="Test Connection", element_instance_id=12345
+        )
+
+    @pytest.fixture
+    def resource(self, common_connection):
+        return AgentIntegrationToolResourceConfig(
+            name="test_tool",
+            description="Test tool",
+            properties=AgentIntegrationToolProperties(
+                method="POST",
+                tool_path="/api/test",
+                object_name="test_object",
+                tool_display_name="Test Tool",
+                tool_description="Test tool description",
+                connection=common_connection,
+                parameters=[],
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+        )
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_400_raises_agent_runtime_error_with_user_category(
+        self, mock_uipath_cls, resource, make_enriched_exception
+    ):
+        mock_sdk = MagicMock()
+        mock_sdk.connections.invoke_activity_async = AsyncMock(
+            side_effect=make_enriched_exception(400, "Bad Request")
+        )
+        mock_uipath_cls.return_value = mock_sdk
+
+        tool = create_integration_tool(resource)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.ainvoke({"query": "test"})
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.HTTP_ERROR
+        )
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.integration_tool.UiPath")
+    async def test_non_400_enriched_exception_propagates(
+        self, mock_uipath_cls, resource, make_enriched_exception
+    ):
+        original = make_enriched_exception(500, "Internal Server Error")
+        mock_sdk = MagicMock()
+        mock_sdk.connections.invoke_activity_async = AsyncMock(side_effect=original)
+        mock_uipath_cls.return_value = mock_sdk
+
+        tool = create_integration_tool(resource)
+
+        with pytest.raises(EnrichedException):
+            await tool.ainvoke({"query": "test"})
+
+
+class TestRemoveAsteriskFromProperties:
+    """Test cases for remove_asterisk_from_properties function."""
+
+    def test_cleans_defs_keys(self) -> None:
+        """$defs keys are cleaned alongside $ref values."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "items[*]": {"$ref": "#/$defs/Record[*]"},
+            },
+            "$defs": {
+                "Record[*]": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+        }
+        cleaned = remove_asterisk_from_properties(schema)
+
+        assert "[*]" not in cleaned["properties"]["items"]["$ref"]
+        assert "Record" in cleaned["$defs"]
+        assert "Record[*]" not in cleaned["$defs"]
+
+    def test_cleans_definitions_keyword(self) -> None:
+        """Correctly cleans keys when using 'definitions' keyword."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "items[*]": {"$ref": "#/definitions/Record[*]"},
+            },
+            "definitions": {
+                "Record[*]": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+        }
+        cleaned = remove_asterisk_from_properties(schema)
+
+        assert "Record" in cleaned["definitions"]
+        assert "Record[*]" not in cleaned["definitions"]
+
+    def test_no_asterisks_passthrough(self) -> None:
+        """Schema without asterisks is returned unchanged."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "owner": {"$ref": "#/$defs/Contact"},
+            },
+            "$defs": {
+                "Contact": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                },
+            },
+        }
+        cleaned = remove_asterisk_from_properties(schema)
+
+        assert cleaned["properties"]["owner"]["$ref"] == "#/$defs/Contact"
+        assert "Contact" in cleaned["$defs"]

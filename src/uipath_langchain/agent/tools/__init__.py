@@ -10,7 +10,12 @@ from .process_tool import create_process_tool
 from .tool_factory import (
     create_tools_from_resources,
 )
-from .tool_node import ToolWrapperMixin, UiPathToolNode, create_tool_node
+from .tool_node import (
+    ToolWrapperMixin,
+    UiPathToolNode,
+    create_tool_node,
+    wrap_tools_with_error_handling,
+)
 
 __all__ = [
     "create_tools_from_resources",
@@ -24,4 +29,5 @@ __all__ = [
     "create_ixp_escalation_tool",
     "UiPathToolNode",
     "ToolWrapperMixin",
+    "wrap_tools_with_error_handling",
 ]

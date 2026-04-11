@@ -38,6 +38,10 @@ class StructuredToolWithWrapper(StructuredToolWithOutputType, ToolWrapperMixin):
     pass
 
 
+class EmptyInput(BaseModel):
+    pass
+
+
 def create_ixp_escalation_tool(
     resource: AgentIxpVsEscalationResourceConfig,
 ) -> StructuredTool:
@@ -148,7 +152,7 @@ def create_ixp_escalation_tool(
     tool = StructuredToolWithWrapper(
         name=tool_name,
         description=resource.description,
-        args_schema={},
+        args_schema=EmptyInput,
         coroutine=ixp_escalation_tool,
         output_type=OutputSchema,
         metadata={

@@ -2,18 +2,22 @@
 
 import logging
 import uuid
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.documents import Document
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel, Field, create_model
 from uipath.agent.models.agent import (
     AgentContextResourceConfig,
     AgentContextRetrievalMode,
+    AgentContextType,
+    AgentMessageRole,
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
+    LowCodeAgentDefinition,
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
@@ -23,11 +27,16 @@ from uipath.platform.context_grounding import (
     CitationMode,
     DeepRagContent,
 )
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
-from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+from uipath_langchain.agent.exceptions import (
+    AgentStartupError,
+    AgentStartupErrorCode,
+    raise_for_enriched,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model as create_model_from_schema,
 )
@@ -35,20 +44,25 @@ from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.internal_tools.schema_utils import (
     BATCH_TRANSFORM_OUTPUT_SCHEMA,
 )
-from uipath_langchain.agent.tools.static_args import (
-    ArgumentPropertiesMixin,
-    handle_static_args,
-)
+from uipath_langchain.agent.tools.tool_node import ToolWrapperReturnType
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
 from .structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
 from .structured_tool_with_output_type import StructuredToolWithOutputType
-from .tool_node import ToolWrapperReturnType
 from .utils import sanitize_tool_name
 
 logger = logging.getLogger(__name__)
+
+_CONTEXT_GROUNDING_ERRORS: dict[
+    tuple[int, str | None], tuple[str, UiPathErrorCategory]
+] = {
+    (400, None): (
+        "Context grounding returned an error for index '{index}': {message}",
+        UiPathErrorCategory.USER,
+    ),
+}
 
 
 def _build_arg_props_from_settings(
@@ -120,16 +134,48 @@ def is_static_query(resource: AgentContextResourceConfig) -> bool:
     return resource.settings.query.variant.lower() == "static"
 
 
-def create_context_tool(resource: AgentContextResourceConfig) -> StructuredTool:
+def _extract_system_prompt(agent: LowCodeAgentDefinition | None) -> str:
+    """Extract system prompt from agent definition messages."""
+    if agent is None:
+        return ""
+    return "\n\n".join(
+        msg.content
+        for msg in agent.messages
+        if msg.role == AgentMessageRole.SYSTEM and msg.content
+    )
+
+
+def create_context_tool(
+    resource: AgentContextResourceConfig,
+    llm: BaseChatModel | None = None,
+    agent: LowCodeAgentDefinition | None = None,
+) -> StructuredTool | BaseTool | None:
+    assert resource.context_type is not None
     tool_name = sanitize_tool_name(resource.name)
+
+    if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
+        if llm is None:
+            raise ValueError("Data Fabric entity set tools require an LLM instance")
+        from .datafabric_tool import create_datafabric_query_tool
+        from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
+
+        return create_datafabric_query_tool(
+            resource,
+            llm,
+            tool_name=tool_name,
+            agent_config={BASE_SYSTEM_PROMPT: _extract_system_prompt(agent)},
+        )
+
     assert resource.settings is not None
     retrieval_mode = resource.settings.retrieval_mode.lower()
+
     if retrieval_mode == AgentContextRetrievalMode.DEEP_RAG.value.lower():
         return handle_deep_rag(tool_name, resource)
-    elif retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
+
+    if retrieval_mode == AgentContextRetrievalMode.BATCH_TRANSFORM.value.lower():
         return handle_batch_transform(tool_name, resource)
-    else:
-        return handle_semantic_search(tool_name, resource)
+
+    return handle_semantic_search(tool_name, resource)
 
 
 def handle_semantic_search(
@@ -213,7 +259,16 @@ def handle_semantic_search(
 
         actual_query = prompt or query
         assert actual_query is not None
-        docs = await retriever.ainvoke(actual_query)
+        try:
+            docs = await retriever.ainvoke(actual_query)
+        except EnrichedException as e:
+            raise_for_enriched(
+                e,
+                _CONTEXT_GROUNDING_ERRORS,
+                title=f"Failed to search context index '{resource.index_name}'",
+                index=resource.index_name or "<unknown>",
+            )
+            raise
         return {
             "documents": [
                 {"metadata": doc.metadata, "page_content": doc.page_content}
@@ -228,9 +283,6 @@ def handle_semantic_search(
             call: ToolCall,
             state: AgentGraphState,
         ) -> ToolWrapperReturnType:
-            call["args"] = handle_static_args(
-                cast(ArgumentPropertiesMixin, tool), state, call["args"]
-            )
             nonlocal _resolved_arg_folder_prefix
             _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
                 resource, dict(state)
@@ -356,9 +408,6 @@ def handle_deep_rag(
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
         nonlocal _resolved_arg_folder_prefix
-        call["args"] = handle_static_args(
-            cast(ArgumentPropertiesMixin, tool), state, call["args"]
-        )
         _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
             resource, dict(state)
         )
@@ -510,9 +559,6 @@ def handle_batch_transform(
         call: ToolCall,
         state: AgentGraphState,
     ) -> ToolWrapperReturnType:
-        call["args"] = handle_static_args(
-            cast(ArgumentPropertiesMixin, tool), state, call["args"]
-        )
         nonlocal _resolved_arg_folder_prefix
         _resolved_arg_folder_prefix = _resolve_folder_path_prefix_from_state(
             resource, dict(state)
@@ -534,7 +580,7 @@ def handle_batch_transform(
             "output_schema": output_model,
         },
     )
-    tool.set_tool_wrappers(awrapper=context_batch_transform_wrapper)
+    tool.set_tool_wrappers(awrapper=job_attachment_wrapper)
     return tool
 
 
