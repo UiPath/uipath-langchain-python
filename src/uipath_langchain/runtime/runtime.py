@@ -68,6 +68,7 @@ class UiPathLangGraphRuntime:
         self.chat.tool_names_requiring_confirmation = (
             self._get_tool_names_requiring_confirmation()
         )
+        self.chat.tool_confirmation_schemas = self._get_tool_confirmation_schemas()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
     async def execute(
@@ -501,6 +502,22 @@ class UiPathLangGraphRuntime:
             if metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION):
                 names.add(getattr(tool, "name", node_name))
         return names
+
+    def _get_tool_confirmation_schemas(self) -> dict[str, Any]:
+        schemas: dict[str, Any] = {}
+        for node_name, node_spec in self.graph.nodes.items():
+            tool = getattr(getattr(node_spec, "bound", None), "tool", None)
+            if tool is None:
+                continue
+            metadata = getattr(tool, "metadata", None) or {}
+            if metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION):
+                tool_name = getattr(tool, "name", node_name)
+                tool_call_schema = getattr(tool, "tool_call_schema", None)
+                if tool_call_schema is not None:
+                    schemas[tool_name] = tool_call_schema.model_json_schema()
+                else:
+                    schemas[tool_name] = {}
+        return schemas
 
     def _is_middleware_node(self, node_name: str) -> bool:
         """Check if a node name represents a middleware node."""

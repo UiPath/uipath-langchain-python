@@ -60,6 +60,7 @@ class UiPathChatMessagesMapper:
         self.storage = storage
         self.current_message: AIMessageChunk | AIMessage
         self.tool_names_requiring_confirmation: set[str] = set()
+        self.tool_confirmation_schemas: dict[str, Any] = {}
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
         self._citation_stream_processor = CitationStreamProcessor()
@@ -425,16 +426,21 @@ class UiPathChatMessagesMapper:
                             self.current_message.id
                         )
 
-                        # if tool requires confirmation, we skip start tool call
-                        if (
-                            tool_call["name"]
-                            not in self.tool_names_requiring_confirmation
-                        ):
-                            events.append(
-                                self.map_tool_call_to_tool_call_start_event(
-                                    self.current_message.id, tool_call
-                                )
+                        tool_name = tool_call["name"]
+                        require_confirmation = (
+                            tool_name in self.tool_names_requiring_confirmation
+                        )
+                        input_schema = self.tool_confirmation_schemas.get(tool_name)
+                        events.append(
+                            self.map_tool_call_to_tool_call_start_event(
+                                self.current_message.id,
+                                tool_call,
+                                require_confirmation=require_confirmation
+                                if require_confirmation
+                                else None,
+                                input_schema=input_schema,
                             )
+                        )
 
                 if self.storage is not None:
                     await self.storage.set_value(
@@ -531,7 +537,12 @@ class UiPathChatMessagesMapper:
         return message_id, is_last
 
     def map_tool_call_to_tool_call_start_event(
-        self, message_id: str, tool_call: ToolCall
+        self,
+        message_id: str,
+        tool_call: ToolCall,
+        *,
+        require_confirmation: bool | None = None,
+        input_schema: Any | None = None,
     ) -> UiPathConversationMessageEvent:
         return UiPathConversationMessageEvent(
             message_id=message_id,
@@ -541,6 +552,8 @@ class UiPathChatMessagesMapper:
                     tool_name=tool_call["name"],
                     timestamp=self.get_timestamp(),
                     input=tool_call["args"],
+                    require_confirmation=require_confirmation,
+                    input_schema=input_schema,
                 ),
             ),
         )
