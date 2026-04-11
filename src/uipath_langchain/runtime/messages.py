@@ -59,6 +59,7 @@ class UiPathChatMessagesMapper:
         self.runtime_id = runtime_id
         self.storage = storage
         self.tool_names_requiring_confirmation: set[str] = set()
+        self.tool_confirmation_schemas: dict[str, Any] = {}
         self.current_message: AIMessageChunk
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
@@ -391,9 +392,19 @@ class UiPathChatMessagesMapper:
                             self.current_message.id
                         )
 
+                        tool_name = tool_call["name"]
+                        require_confirmation = (
+                            tool_name in self.tool_names_requiring_confirmation
+                        )
+                        input_schema = self.tool_confirmation_schemas.get(tool_name)
                         events.append(
                             self.map_tool_call_to_tool_call_start_event(
-                                self.current_message.id, tool_call
+                                self.current_message.id,
+                                tool_call,
+                                require_confirmation=require_confirmation
+                                if require_confirmation
+                                else None,
+                                input_schema=input_schema,
                             )
                         )
 
@@ -492,7 +503,12 @@ class UiPathChatMessagesMapper:
         return message_id, is_last
 
     def map_tool_call_to_tool_call_start_event(
-        self, message_id: str, tool_call: ToolCall
+        self,
+        message_id: str,
+        tool_call: ToolCall,
+        *,
+        require_confirmation: bool | None = None,
+        input_schema: Any | None = None,
     ) -> UiPathConversationMessageEvent:
         metadata = None
         if tool_call["name"] in self.tool_names_requiring_confirmation:
@@ -506,7 +522,8 @@ class UiPathChatMessagesMapper:
                     tool_name=tool_call["name"],
                     timestamp=self.get_timestamp(),
                     input=tool_call["args"],
-                    metadata=metadata,
+                    require_confirmation=require_confirmation,
+                    input_schema=input_schema,
                 ),
             ),
         )

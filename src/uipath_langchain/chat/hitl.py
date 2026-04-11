@@ -111,6 +111,13 @@ def request_approval(
     """Interrupt the graph to request user approval for a tool call.
 
     Returns the (possibly edited) tool arguments if approved, or None if rejected.
+
+    The confirmation data (inputSchema, inputValue) is now included in the
+    startToolCall event emitted by the mapper. The @durable_interrupt still
+    pauses the graph, but the interrupt value is simpler.
+
+    The resume payload comes as the confirmToolCall event body:
+      {"approved": bool, "input": <edited args | None>}
     """
     tool_call_id: str = tool_args.pop("tool_call_id")
 
@@ -123,6 +130,8 @@ def request_approval(
 
     @durable_interrupt
     def ask_confirmation():
+        # Keep emitting the full value for backward compat with older CAS versions
+        # that still use the interrupt-based flow.
         return UiPathConversationToolCallConfirmationValue(
             tool_call_id=tool_call_id,
             tool_name=tool.name,
@@ -132,13 +141,21 @@ def request_approval(
 
     response = ask_confirmation()
 
-    # The resume payload from CAS has shape:
-    #   {"type": "uipath_cas_tool_call_confirmation",
-    #    "value": {"approved": bool, "input": <edited args | None>}}
+    # The resume payload from CAS can come in two shapes:
+    # New (confirmToolCall): {"approved": bool, "input": <edited args | None>}
+    # Legacy (endInterrupt): {"type": "uipath_cas_tool_call_confirmation",
+    #                         "value": {"approved": bool, "input": <edited args | None>}}
     if not isinstance(response, dict):
         return tool_args
 
-    confirmation = response.get("value", response)
+    # Handle both new and legacy payload shapes
+    if "value" in response and "type" in response:
+        # Legacy endInterrupt payload
+        confirmation = response.get("value", response)
+    else:
+        # New confirmToolCall payload
+        confirmation = response
+
     if not confirmation.get("approved", True):
         return None
 
