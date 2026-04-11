@@ -1996,12 +1996,26 @@ class TestMapAiMessageToEvents:
         assert result[-1].end is not None
 
 
+def _require_confirmation_field_available() -> bool:
+    """Return True if the installed uipath-core exposes the require_confirmation field."""
+    try:
+        from uipath.core.chat.tool import (
+            UiPathConversationToolCallStartEvent,
+        )
+
+        return hasattr(UiPathConversationToolCallStartEvent, "require_confirmation")
+    except Exception:
+        return False
+
+
 class TestConfirmationToolDeferral:
     """Tests for deferring startToolCall events for confirmation tools."""
 
     @pytest.mark.asyncio
     async def test_confirmation_tool_has_requires_confirmation_metadata(self):
         """startToolCall for confirmation tools includes requiresConfirmation in metadata."""
+        if not _require_confirmation_field_available():
+            pytest.skip("requires uipath-core>=0.5.12 with require_confirmation field")
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
@@ -2029,11 +2043,13 @@ class TestConfirmationToolDeferral:
         assert event.tool_call is not None
         assert event.tool_call.start is not None
         assert event.tool_call.start.tool_name == "confirm_tool"
-        assert event.tool_call.start.require_confirmation is True
+        assert event.tool_call.start.require_confirmation is True  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_normal_tool_has_no_confirmation_metadata(self):
         """startToolCall for normal tools has no metadata."""
+        if not _require_confirmation_field_available():
+            pytest.skip("requires uipath-core>=0.5.12 with require_confirmation field")
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
@@ -2060,11 +2076,13 @@ class TestConfirmationToolDeferral:
         event = tool_start_events[0]
         assert event.tool_call is not None
         assert event.tool_call.start is not None
-        assert event.tool_call.start.require_confirmation is None
+        assert event.tool_call.start.require_confirmation is None  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_mixed_tools_only_confirmation_has_metadata(self):
         """In mixed tool calls, only confirmation tools get the metadata flag."""
+        if not _require_confirmation_field_available():
+            pytest.skip("requires uipath-core>=0.5.12 with require_confirmation field")
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
@@ -2092,5 +2110,5 @@ class TestConfirmationToolDeferral:
                 tool_starts[tc.start.tool_name] = tc.start
         assert "normal_tool" in tool_starts
         assert "confirm_tool" in tool_starts
-        assert tool_starts["normal_tool"].require_confirmation is None
-        assert tool_starts["confirm_tool"].require_confirmation is True
+        assert tool_starts["normal_tool"].require_confirmation is None  # type: ignore[attr-defined]
+        assert tool_starts["confirm_tool"].require_confirmation is True  # type: ignore[attr-defined]
