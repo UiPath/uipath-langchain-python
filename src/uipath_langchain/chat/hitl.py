@@ -149,11 +149,11 @@ def request_approval(
         return tool_args
 
     # Handle both new and legacy payload shapes
-    if "value" in response and "type" in response:
-        # Legacy endInterrupt payload
+    if "value" in response:
+        # Legacy endInterrupt payload: {"type": ..., "value": {"approved": ..., "input": ...}}
         confirmation = response.get("value", response)
     else:
-        # New confirmToolCall payload
+        # New confirmToolCall payload: {"approved": bool, "input": ...}
         confirmation = response
 
     if not confirmation.get("approved", True):

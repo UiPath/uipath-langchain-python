@@ -2029,7 +2029,7 @@ class TestConfirmationToolDeferral:
         assert event.tool_call is not None
         assert event.tool_call.start is not None
         assert event.tool_call.start.tool_name == "confirm_tool"
-        assert event.tool_call.start.metadata == {"requiresConfirmation": True}
+        assert event.tool_call.start.require_confirmation is True
 
     @pytest.mark.asyncio
     async def test_normal_tool_has_no_confirmation_metadata(self):
@@ -2060,7 +2060,7 @@ class TestConfirmationToolDeferral:
         event = tool_start_events[0]
         assert event.tool_call is not None
         assert event.tool_call.start is not None
-        assert event.tool_call.start.metadata is None
+        assert event.tool_call.start.require_confirmation is None
 
     @pytest.mark.asyncio
     async def test_mixed_tools_only_confirmation_has_metadata(self):
@@ -2092,5 +2092,5 @@ class TestConfirmationToolDeferral:
                 tool_starts[tc.start.tool_name] = tc.start
         assert "normal_tool" in tool_starts
         assert "confirm_tool" in tool_starts
-        assert tool_starts["normal_tool"].metadata is None
-        assert tool_starts["confirm_tool"].metadata == {"requiresConfirmation": True}
+        assert tool_starts["normal_tool"].require_confirmation is None
+        assert tool_starts["confirm_tool"].require_confirmation is True

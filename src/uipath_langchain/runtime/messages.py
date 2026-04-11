@@ -544,10 +544,6 @@ class UiPathChatMessagesMapper:
         require_confirmation: bool | None = None,
         input_schema: Any | None = None,
     ) -> UiPathConversationMessageEvent:
-        metadata = None
-        if tool_call["name"] in self.tool_names_requiring_confirmation:
-            metadata = {"requiresConfirmation": True}
-
         return UiPathConversationMessageEvent(
             message_id=message_id,
             tool_call=UiPathConversationToolCallEvent(
