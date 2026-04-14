@@ -6,6 +6,7 @@ and retries on errors — all within a single outer tool call.
 """
 
 import asyncio
+import json
 import logging
 from typing import Annotated, Any
 
@@ -37,6 +38,58 @@ class DataFabricSubgraphState(BaseModel):
 
     messages: Annotated[list[AnyMessage], add_messages] = []
     iteration_count: int = 0
+    last_sql: str | None = None
+    repeated_sql_count: int = 0
+
+
+_ERROR_HINTS: list[tuple[str, str]] = [
+    ("limit", "Add a LIMIT clause to the query."),
+    ("select *", "Specify explicit column names instead of SELECT *."),
+    ("count(*)", "Use COUNT(column_name) instead of COUNT(*)."),
+    ("count(1)", "Use COUNT(column_name) instead of COUNT(1)."),
+    ("unknown column", "Check column names against the entity schema above."),
+    ("no such column", "Check column names against the entity schema above."),
+    ("no such table", "Check table names against the entity schema above."),
+    ("right join", "Only LEFT JOIN is supported."),
+    ("full outer join", "Only LEFT JOIN is supported."),
+    ("cross join", "Only LEFT JOIN is supported."),
+    ("syntax error", "Check SQL syntax — ensure proper quoting and clause order."),
+]
+
+
+def _classify_error_hint(error_msg: str) -> str:
+    """Map a SQL error message to an actionable hint for the LLM."""
+    lower = error_msg.lower()
+    for pattern, hint in _ERROR_HINTS:
+        if pattern in lower:
+            return hint
+    return "Review the error and adjust the query accordingly."
+
+
+def _format_tool_result(result: dict[str, Any]) -> str:
+    """Format a SQL execution result as structured JSON for the LLM.
+
+    Provides clear status, row counts, sample data, and actionable hints
+    on errors — enabling targeted self-correction (SQL-CRAFT inspired).
+    """
+    structured: dict[str, Any] = {
+        "status": "error" if result.get("error") else "success",
+        "sql_query": result.get("sql_query", ""),
+    }
+    if result.get("error"):
+        structured["error_message"] = result["error"]
+        structured["hint"] = _classify_error_hint(result["error"])
+    else:
+        records = result.get("records", [])
+        structured["row_count"] = result.get("total_count", len(records))
+        structured["sample_rows"] = records[:5]
+        # Sanity-check hints
+        if structured["row_count"] == 0:
+            structured["hint"] = (
+                "Query returned 0 results. Verify filter conditions "
+                "are not too restrictive or column values are correct."
+            )
+    return json.dumps(structured, default=str)
 
 
 class QueryExecutor:
@@ -115,10 +168,48 @@ class DataFabricGraph:
         return {"messages": [response]}
 
     async def tool_node(self, state: DataFabricSubgraphState) -> dict[str, Any]:
-        """Execute all tool calls from the last AIMessage concurrently."""
+        """Execute all tool calls from the last AIMessage concurrently.
+
+        Tracks repeated SQL queries and terminates early if the LLM keeps
+        retrying the same failing query (convergence detection).
+        """
         last = state.messages[-1]
         if not isinstance(last, AIMessage) or not last.tool_calls:
             return {"iteration_count": state.iteration_count}
+
+        # Convergence detection: check if SQL is identical to last attempt
+        current_sql = last.tool_calls[0].get("args", {}).get("sql_query", "")
+        repeated = state.repeated_sql_count
+        last_sql = state.last_sql
+        if current_sql and current_sql == last_sql:
+            repeated += 1
+        else:
+            repeated = 0
+
+        if repeated >= 2:
+            logger.warning("Convergence detected: same SQL repeated %d times", repeated)
+            return {
+                "messages": [
+                    ToolMessage(
+                        content=json.dumps(
+                            {
+                                "status": "error",
+                                "error_message": (
+                                    "The same query has been attempted multiple times "
+                                    "with the same error. Try a fundamentally different "
+                                    "approach or simplify the query."
+                                ),
+                                "hint": "Rewrite the query using a different strategy.",
+                            }
+                        ),
+                        tool_call_id=last.tool_calls[0]["id"],
+                        name="execute_sql",
+                    )
+                ],
+                "iteration_count": state.iteration_count + 1,
+                "last_sql": current_sql,
+                "repeated_sql_count": repeated,
+            }
 
         tool_messages = await asyncio.gather(
             *[self._execute_tool_call(tc) for tc in last.tool_calls]
@@ -126,10 +217,12 @@ class DataFabricGraph:
         return {
             "messages": list(tool_messages),
             "iteration_count": state.iteration_count + len(last.tool_calls),
+            "last_sql": current_sql,
+            "repeated_sql_count": repeated,
         }
 
     async def _execute_tool_call(self, tool_call: ToolCall) -> ToolMessage:
-        """Execute a single tool call and wrap the result."""
+        """Execute a single tool call and wrap the result as structured JSON."""
         args = tool_call.get("args", {})
         try:
             result = await self._execute_sql_tool.ainvoke(args)
@@ -141,7 +234,7 @@ class DataFabricGraph:
                 "sql_query": args.get("sql_query", ""),
             }
         return ToolMessage(
-            content=str(result),
+            content=_format_tool_result(result),
             tool_call_id=tool_call["id"],
             name="execute_sql",
         )

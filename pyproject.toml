@@ -40,6 +40,7 @@ maintainers = [
 [project.optional-dependencies]
 vertex = ["langchain-google-genai>=2.0.0", "google-generativeai>=0.8.0"]
 bedrock = ["langchain-aws>=0.2.35", "boto3-stubs>=1.41.4"]
+optimize = ["dspy>=2.6"]
 
 [project.entry-points."uipath.middlewares"]
 register = "uipath_langchain.middlewares:register_middleware"

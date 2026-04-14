@@ -1,5 +1,6 @@
-"""Data Fabric query tool with SQL syntax validation via sqlparse."""
+"""Data Fabric query tool with SQL syntax and structural validation."""
 
+import re
 from typing import Any
 
 import sqlparse
@@ -8,9 +9,23 @@ from langchain_core.runnables import RunnableConfig
 
 from .base_uipath_structured_tool import BaseUiPathStructuredTool
 
+_SELECT_STAR_RE = re.compile(r"\bSELECT\s+\*\s+FROM\b", re.IGNORECASE)
+_COUNT_STAR_RE = re.compile(r"\bCOUNT\s*\(\s*(\*|1)\s*\)", re.IGNORECASE)
+_UNSUPPORTED_JOIN_RE = re.compile(
+    r"\b(RIGHT\s+JOIN|FULL\s+OUTER\s+JOIN|CROSS\s+JOIN)\b", re.IGNORECASE
+)
+_DML_RE = re.compile(
+    r"^\s*(INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE)\b", re.IGNORECASE
+)
+_HAS_WHERE_RE = re.compile(r"\bWHERE\b", re.IGNORECASE)
+_HAS_LIMIT_RE = re.compile(r"\bLIMIT\b", re.IGNORECASE)
+
 
 def _validate_sql(sql: str) -> str | None:
-    """Validate SQL syntax using sqlparse.
+    """Validate SQL syntax and structure.
+
+    Performs sqlparse parseability check followed by structural checks
+    that mirror backend constraints, giving faster local feedback.
 
     Returns:
         Error string if invalid, None if valid.
@@ -18,6 +33,28 @@ def _validate_sql(sql: str) -> str | None:
     parsed = sqlparse.parse(sql)
     if not parsed or not parsed[0].tokens:
         return "Empty or unparseable SQL query"
+
+    # DML/DDL rejection
+    if _DML_RE.search(sql):
+        return "Only SELECT queries are supported. INSERT/UPDATE/DELETE/DDL are not allowed."
+
+    # SELECT * rejection
+    if _SELECT_STAR_RE.search(sql):
+        return "SELECT * is not allowed. Use explicit column names instead of SELECT *."
+
+    # COUNT(*) / COUNT(1) rejection
+    if _COUNT_STAR_RE.search(sql):
+        return "COUNT(*) and COUNT(1) are not allowed. Use COUNT(column_name) instead."
+
+    # Unsupported JOIN types
+    match = _UNSUPPORTED_JOIN_RE.search(sql)
+    if match:
+        return f"{match.group(0).upper()} is not supported. Only LEFT JOIN is allowed."
+
+    # Missing LIMIT when no WHERE clause
+    if not _HAS_WHERE_RE.search(sql) and not _HAS_LIMIT_RE.search(sql):
+        return "Queries without a WHERE clause must include a LIMIT clause (e.g. LIMIT 100)."
+
     return None
 
 

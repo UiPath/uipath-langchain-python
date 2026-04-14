@@ -11,7 +11,7 @@ import logging
 
 from uipath.platform.entities import Entity
 
-from .datafabric_prompts import SQL_CONSTRAINTS, SQL_EXPERT_SYSTEM_PROMPT
+from .datafabric_prompts import SQL_GENERATION_GUIDE
 from .models import (
     EntitySchema,
     EntitySQLContext,
@@ -19,6 +19,7 @@ from .models import (
     QueryPattern,
     SQLContext,
 )
+from .optimizer.export import load_optimized_prompts
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,9 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
             display_name=field.display_name,
             type=type_name,
             description=field.description,
+            is_primary_key=field.is_primary_key,
             is_foreign_key=field.is_foreign_key,
+            is_external_field=field.is_external_field,
             is_required=field.is_required,
             is_unique=field.is_unique,
             nullable=not field.is_required,
@@ -102,69 +105,102 @@ def build_sql_context(
     resource_description: str = "",
     base_system_prompt: str = "",
 ) -> SQLContext:
-    """Build the full SQL context from entities, prompts, and constraints."""
+    """Build the full SQL context from entities, prompts, and constraints.
+
+    If an ``optimized_prompts.json`` file exists (produced by the DSPy
+    optimizer), its instruction and few-shot examples override the
+    default SQL_GENERATION_GUIDE.  Schema enrichment is always applied.
+    """
+    optimized = load_optimized_prompts()
+    if optimized:
+        instruction = optimized.get("optimized_instruction", SQL_GENERATION_GUIDE)
+        # Append few-shot examples to the instruction block
+        few_shots = optimized.get("few_shot_examples", [])
+        if few_shots:
+            parts = [instruction, "", "FEW-SHOT EXAMPLES:"]
+            for shot in few_shots:
+                parts.append(f"  Q: {shot.get('question', '')}")
+                parts.append(f"  SQL: {shot.get('sql', '')}")
+                parts.append("")
+            instruction = "\n".join(parts)
+        logger.info(
+            "Using DSPy-optimized prompts (accuracy: %.1f%%)",
+            optimized.get("optimization_metadata", {}).get("val_accuracy", 0) * 100,
+        )
+    else:
+        instruction = SQL_GENERATION_GUIDE
+
     return SQLContext(
         base_system_prompt=base_system_prompt or None,
         resource_description=resource_description or None,
-        sql_expert_system_prompt=SQL_EXPERT_SYSTEM_PROMPT,
-        constraints=SQL_CONSTRAINTS,
+        sql_expert_system_prompt=instruction,
+        constraints=None,
         entity_contexts=[build_entity_context(e) for e in entities],
     )
 
 
 def format_sql_context(ctx: SQLContext) -> str:
-    """Format a SQLContext as text for system prompt injection."""
+    """Format a SQLContext as text for system prompt injection.
+
+    Ordering is optimized for LLM attention: entity schemas first (primacy),
+    then query patterns, SQL rules, and finally agent instructions.
+    """
     lines: list[str] = []
 
-    if ctx.base_system_prompt:
-        lines.append("## Agent Instructions")
-        lines.append("")
-        lines.append(ctx.base_system_prompt)
-        lines.append("")
-
-    if ctx.sql_expert_system_prompt:
-        lines.append("## SQL Query Generation Guidelines")
-        lines.append("")
-        lines.append(ctx.sql_expert_system_prompt)
-        lines.append("")
-
-    if ctx.constraints:
-        lines.append("## SQL Constraints")
-        lines.append("")
-        lines.append(ctx.constraints)
-        lines.append("")
+    # 1. Entity schemas first (most critical — primacy effect)
+    lines.append("## Available Data Fabric Entities")
+    lines.append("")
 
     if ctx.resource_description:
-        lines.append("## Entity set description")
+        lines.append(f"_{ctx.resource_description}_")
         lines.append("")
-        lines.append(ctx.resource_description)
-        lines.append("")
-
-    lines.append("## All available Data Fabric Entities")
-    lines.append("")
 
     for entity_ctx in ctx.entity_contexts:
         entity = entity_ctx.entity_schema
-        lines.append(
+        header = (
             f"### Entity: {entity.display_name} (SQL table: `{entity.entity_name}`)"
         )
+        lines.append(header)
+        meta_parts: list[str] = []
         if entity.description:
-            lines.append(f"_{entity.description}_")
+            meta_parts.append(entity.description)
+        if entity.record_count is not None:
+            meta_parts.append(f"{entity.record_count:,} records")
+        if meta_parts:
+            lines.append(f"_{' | '.join(meta_parts)}_")
         lines.append("")
-        lines.append("| Field | Type |")
-        lines.append("|-------|------|")
+        lines.append("| Field | Type | Key | Description |")
+        lines.append("|-------|------|-----|-------------|")
 
         for field in entity.fields:
-            lines.append(f"| {field.name} | {field.display_type} |")
+            lines.append(
+                f"| {field.name} | {field.display_type} "
+                f"| {field.key_marker} | {field.short_description} |"
+            )
 
         lines.append("")
 
+        # Query patterns
         lines.append(f"**Query Patterns for {entity.entity_name}:**")
         lines.append("")
         lines.append("| User Intent | SQL Pattern |")
         lines.append("|-------------|-------------|")
         for p in entity_ctx.query_patterns:
             lines.append(f"| '{p.intent}' | `{p.sql}` |")
+        lines.append("")
+
+    # 2. SQL generation guide (consolidated rules + CoT)
+    if ctx.sql_expert_system_prompt:
+        lines.append("## SQL Query Generation Guide")
+        lines.append("")
+        lines.append(ctx.sql_expert_system_prompt)
+        lines.append("")
+
+    # 3. Agent instructions last (least critical)
+    if ctx.base_system_prompt:
+        lines.append("## Agent Instructions")
+        lines.append("")
+        lines.append(ctx.base_system_prompt)
         lines.append("")
 
     return "\n".join(lines)

@@ -13,7 +13,9 @@ class FieldSchema(BaseModel):
     display_name: str | None = None
     type: str
     description: str | None = None
+    is_primary_key: bool = False
     is_foreign_key: bool = False
+    is_external_field: bool = False
     is_required: bool = False
     is_unique: bool = False
     nullable: bool = True
@@ -27,6 +29,25 @@ class FieldSchema(BaseModel):
         if modifiers:
             return f"{self.type}, {', '.join(modifiers)}"
         return self.type
+
+    @property
+    def key_marker(self) -> str:
+        """Key indicator for schema display: PK, FK, or empty."""
+        if self.is_primary_key:
+            return "PK"
+        if self.is_foreign_key:
+            return "FK"
+        return ""
+
+    @property
+    def short_description(self) -> str:
+        """Truncated description for schema display, with display_name fallback."""
+        if self.description:
+            desc = self.description.strip()
+            return desc[:80] + "..." if len(desc) > 80 else desc
+        if self.display_name and self.display_name != self.name:
+            return self.display_name
+        return ""
 
     @property
     def is_numeric(self) -> bool:
