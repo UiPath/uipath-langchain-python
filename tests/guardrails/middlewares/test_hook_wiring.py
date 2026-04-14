@@ -12,6 +12,9 @@ Contracts under test:
 - ``UiPathHarmfulContentMiddleware``       — PRE+POST  (both before_* and after_* hooks)
 """
 
+from collections.abc import Iterable
+from typing import Any
+
 import pytest
 from uipath.platform.guardrails import GuardrailScope
 from uipath.platform.guardrails.decorators import (
@@ -27,9 +30,9 @@ from uipath_langchain.guardrails.middlewares import (
 )
 
 
-def _hook_names(middleware: object) -> list[str]:
+def _hook_names(middleware: Iterable[Any]) -> list[str]:
     """Return the ``name`` attribute of each AgentMiddleware instance."""
-    return [inst.name for inst in middleware]  # type: ignore[union-attr]
+    return [inst.name for inst in middleware]
 
 
 _LOG = LogAction()
