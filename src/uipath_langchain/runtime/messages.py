@@ -59,7 +59,7 @@ class UiPathChatMessagesMapper:
         self.runtime_id = runtime_id
         self.storage = storage
         self.current_message: AIMessageChunk | AIMessage
-        self.tool_confirmation_schemas: dict[str, Any] = {}
+        self.tools_requiring_confirmation: dict[str, Any] = {}
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
         self._citation_stream_processor = CitationStreamProcessor()
@@ -320,6 +320,7 @@ class UiPathChatMessagesMapper:
 
         events: list[UiPathConversationMessageEvent] = []
 
+        # For every new message_id, start a new message
         if message.id not in self.seen_message_ids:
             self.current_message = message
             self.seen_message_ids.add(message.id)
@@ -338,6 +339,7 @@ class UiPathChatMessagesMapper:
                                 self._chunk_to_message_event(message.id, chunk)
                             )
                     case "tool_call_chunk":
+                        # Accumulate the message chunk. Note that we assume no interweaving of AIMessage and AIMessageChunks for a given message.
                         # Skip the first chunk — it's already assigned as current_message above,
                         # so accumulating it with itself would duplicate fields via string concat
                         # (e.g. tool name "search_web" becomes "search_websearch_web").
@@ -431,9 +433,9 @@ class UiPathChatMessagesMapper:
 
                         tool_name = tool_call["name"]
                         require_confirmation = (
-                            tool_name in self.tool_confirmation_schemas
+                            tool_name in self.tools_requiring_confirmation
                         )
-                        input_schema = self.tool_confirmation_schemas.get(tool_name)
+                        input_schema = self.tools_requiring_confirmation.get(tool_name)
                         events.append(
                             self.map_tool_call_to_tool_call_start_event(
                                 self.current_message.id,

@@ -70,7 +70,7 @@ class TestToolConfirmationDiscovery:
         graph = _compile_graph_with_wrapped_tools([_ConfirmableTool(), _NormalTool()])
         runtime = UiPathLangGraphRuntime(graph)
 
-        schemas = runtime.chat.tool_confirmation_schemas
+        schemas = runtime.chat.tools_requiring_confirmation
         assert "needs_confirmation" in schemas
         assert "no_confirmation" not in schemas
 
@@ -78,7 +78,7 @@ class TestToolConfirmationDiscovery:
         graph = _compile_graph_with_wrapped_tools([_ConfirmableTool()])
         runtime = UiPathLangGraphRuntime(graph)
 
-        schema = runtime.chat.tool_confirmation_schemas["needs_confirmation"]
+        schema = runtime.chat.tools_requiring_confirmation["needs_confirmation"]
         assert "properties" in schema
         assert "query" in schema["properties"]
 
@@ -86,4 +86,4 @@ class TestToolConfirmationDiscovery:
         graph = _compile_graph_with_wrapped_tools([_NormalTool()])
         runtime = UiPathLangGraphRuntime(graph)
 
-        assert runtime.chat.tool_confirmation_schemas == {}
+        assert runtime.chat.tools_requiring_confirmation == {}

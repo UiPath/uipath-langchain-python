@@ -291,7 +291,7 @@ def _wrap_tool_error_handling(
 
 
 class ConversationalToolRunnableCallable(RunnableCallable):
-    """Preserves a reference to the underlying BaseTool for conversational HITL confirmation."""
+    """Preserves a reference to the underlying BaseTool for conversational tool confirmation."""
 
     def __init__(self, *, func: Any, afunc: Any, name: str, tool: BaseTool):
         super().__init__(func=func, afunc=afunc, name=name)

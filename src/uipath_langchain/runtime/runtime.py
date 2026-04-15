@@ -65,7 +65,7 @@ class UiPathLangGraphRuntime:
         self.entrypoint: str | None = entrypoint
         self.callbacks: list[BaseCallbackHandler] = callbacks or []
         self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
-        self.chat.tool_confirmation_schemas = self._get_tool_confirmation_info()
+        self.chat.tools_requiring_confirmation = self._get_tool_confirmation_info()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
     async def execute(

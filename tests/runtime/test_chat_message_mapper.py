@@ -2019,7 +2019,7 @@ class TestToolCallConfirmation:
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
-        mapper.tool_confirmation_schemas = {"confirm_tool": {}}
+        mapper.tools_requiring_confirmation = {"confirm_tool": {}}
 
         first_chunk = AIMessageChunk(
             content="",
@@ -2053,7 +2053,7 @@ class TestToolCallConfirmation:
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
-        mapper.tool_confirmation_schemas = {"other_tool": {}}
+        mapper.tools_requiring_confirmation = {"other_tool": {}}
 
         first_chunk = AIMessageChunk(
             content="",
@@ -2086,7 +2086,7 @@ class TestToolCallConfirmation:
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
-        mapper.tool_confirmation_schemas = {"confirm_tool": {}}
+        mapper.tools_requiring_confirmation = {"confirm_tool": {}}
 
         first_chunk = AIMessageChunk(
             content="",
