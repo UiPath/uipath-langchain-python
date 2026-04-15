@@ -7,16 +7,41 @@ from typing import Annotated, Any, Callable, NamedTuple
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId
 from langchain_core.tools import tool as langchain_tool
-from uipath.core.chat import (
-    UiPathConversationToolCallConfirmationValue,
-)
+from uipath.core.chat import UiPathConversationToolCallConfirmationEvent
 
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 
 CANCELLED_MESSAGE = "Cancelled by user"
+ARGS_MODIFIED_MESSAGE = "User has modified the tool arguments"
 
 CONVERSATIONAL_APPROVED_TOOL_ARGS = "conversational_approved_tool_args"
 REQUIRE_CONVERSATIONAL_CONFIRMATION = "require_conversational_confirmation"
+
+
+def _wrap_with_args_modified_meta(result: Any, approved_args: dict[str, Any]) -> str:
+    """Wrap a tool result with metadata indicating the user modified the args."""
+    try:
+        result_value = json.loads(result) if isinstance(result, str) else result
+    except (json.JSONDecodeError, TypeError):
+        result_value = result
+    return json.dumps(
+        {
+            "meta": {
+                "message": ARGS_MODIFIED_MESSAGE,
+                "executed_args": approved_args,
+            },
+            "result": result_value,
+        }
+    )
+
+
+def get_confirmation_schema(tool: Any) -> dict[str, Any] | None:
+    """Return the JSON input schema if this tool requires confirmation, else None."""
+    metadata = getattr(tool, "metadata", None) or {}
+    if not metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION):
+        return None
+    tool_call_schema = getattr(tool, "tool_call_schema", None)
+    return tool_call_schema.model_json_schema() if tool_call_schema is not None else {}
 
 
 class ConfirmationResult(NamedTuple):
@@ -47,20 +72,8 @@ class ConfirmationResult(NamedTuple):
             msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] = (
                 self.approved_args
             )
-        if self.args_modified:
-            try:
-                result_value = json.loads(msg.content)
-            except (json.JSONDecodeError, TypeError):
-                result_value = msg.content
-            msg.content = json.dumps(
-                {
-                    "meta": {
-                        "args_modified_by_user": True,
-                        "executed_args": self.approved_args,
-                    },
-                    "result": result_value,
-                }
-            )
+        if self.args_modified and self.approved_args is not None:
+            msg.content = _wrap_with_args_modified_meta(msg.content, self.approved_args)
 
 
 def _patch_span_input(approved_args: dict[str, Any]) -> None:
@@ -113,39 +126,24 @@ def request_approval(
     """
     tool_call_id: str = tool_args.pop("tool_call_id")
 
-    input_schema: dict[str, Any] = {}
-    tool_call_schema = getattr(
-        tool, "tool_call_schema", None
-    )  # doesn't include InjectedToolCallId (tool id from claude/oai/etc.)
-    if tool_call_schema is not None:
-        input_schema = tool_call_schema.model_json_schema()
-
     @durable_interrupt
     def ask_confirmation():
-        return UiPathConversationToolCallConfirmationValue(
-            tool_call_id=tool_call_id,
-            tool_name=tool.name,
-            input_schema=input_schema,
-            input_value=tool_args,
-        )
+        return {
+            "tool_call_id": tool_call_id,
+            "tool_name": tool.name,
+            "input": tool_args,
+        }
 
     response = ask_confirmation()
 
-    # The resume payload from CAS has shape:
-    #   {"type": "uipath_cas_tool_call_confirmation",
-    #    "value": {"approved": bool, "input": <edited args | None>}}
     if not isinstance(response, dict):
         return tool_args
 
-    confirmation = response.get("value", response)
-    if not confirmation.get("approved", True):
+    confirmation = UiPathConversationToolCallConfirmationEvent.model_validate(response)
+    if not confirmation.approved:
         return None
 
-    return (
-        confirmation.get("input")
-        if confirmation.get("input") is not None
-        else tool_args
-    )
+    return confirmation.input if confirmation.input is not None else tool_args
 
 
 # for conversational low code agents
@@ -200,8 +198,15 @@ def requires_approval(
             if approved_args is None:
                 return json.dumps({"meta": CANCELLED_MESSAGE})
 
+            args_modified = approved_args != tool_args
+
             _patch_span_input(approved_args)
-            return fn(**approved_args)
+            result = fn(**approved_args)
+
+            if args_modified:
+                return _wrap_with_args_modified_meta(result, approved_args)
+
+            return result
 
         # rewrite the signature: e.g. (query: str) -> (query: str, *, tool_call_id: str)
         original_sig = inspect.signature(fn)
@@ -233,6 +238,10 @@ def requires_approval(
                 args_schema=args_schema,
                 return_direct=return_direct,
             )
+
+        if result.metadata is None:
+            result.metadata = {}
+        result.metadata[REQUIRE_CONVERSATIONAL_CONFIRMATION] = True
 
         _created_tool.append(result)
         return result
