@@ -29,7 +29,7 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
-from uipath_langchain.chat.hitl import REQUIRE_CONVERSATIONAL_CONFIRMATION
+from uipath_langchain.chat.hitl import get_confirmation_schema
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
@@ -65,9 +65,7 @@ class UiPathLangGraphRuntime:
         self.entrypoint: str | None = entrypoint
         self.callbacks: list[BaseCallbackHandler] = callbacks or []
         self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
-        self.chat.tool_names_requiring_confirmation = (
-            self._get_tool_names_requiring_confirmation()
-        )
+        self.chat.tool_confirmation_schemas = self._get_tool_confirmation_info()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
     async def execute(
@@ -490,17 +488,36 @@ class UiPathLangGraphRuntime:
 
         return middleware_nodes
 
-    def _get_tool_names_requiring_confirmation(self) -> set[str]:
-        names: set[str] = set()
+    def _get_tool_confirmation_info(self) -> dict[str, Any]:
+        """Build {tool_name: input_schema} for tools requiring confirmation.
+
+        Walks compiled graph nodes once at runtime init. This is needed because coded agents
+        (create_agent) export a compiled graph as the only artifact — there's no side channel
+        to pass confirmation metadata from the build step to the runtime.
+        """
+        schemas: dict[str, Any] = {}
         for node_name, node_spec in self.graph.nodes.items():
-            # langgraph's processing node.bound -> runnable.tool -> baseTool (if tool node)
-            tool = getattr(getattr(node_spec, "bound", None), "tool", None)
-            if tool is None:
+            bound = getattr(node_spec, "bound", None)
+            if bound is None:
                 continue
-            metadata = getattr(tool, "metadata", None) or {}
-            if metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION):
-                names.add(getattr(tool, "name", node_name))
-        return names
+
+            # Coded agents: one tool per node
+            tool = getattr(bound, "tool", None)
+            if tool is not None:
+                schema = get_confirmation_schema(tool)
+                if schema is not None:
+                    schemas[getattr(tool, "name", node_name)] = schema
+                continue
+
+            # Low-code agents: multiple tools in one node
+            tools_by_name = getattr(bound, "tools_by_name", None)
+            if isinstance(tools_by_name, dict):
+                for name, tool in tools_by_name.items():
+                    schema = get_confirmation_schema(tool)
+                    if schema is not None:
+                        schemas[str(getattr(tool, "name", name))] = schema
+
+        return schemas
 
     def _is_middleware_node(self, node_name: str) -> bool:
         """Check if a node name represents a middleware node."""

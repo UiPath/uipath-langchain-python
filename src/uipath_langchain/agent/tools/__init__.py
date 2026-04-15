@@ -12,6 +12,7 @@ from .tool_factory import (
     create_tools_from_resources,
 )
 from .tool_node import (
+    ConversationalToolRunnableCallable,
     ToolWrapperMixin,
     UiPathToolNode,
     create_tool_node,
@@ -32,6 +33,7 @@ __all__ = [
     "create_ixp_extraction_tool",
     "create_ixp_escalation_tool",
     "UiPathToolNode",
+    "ConversationalToolRunnableCallable",
     "ToolWrapperMixin",
     "wrap_tools_with_error_handling",
 ]
