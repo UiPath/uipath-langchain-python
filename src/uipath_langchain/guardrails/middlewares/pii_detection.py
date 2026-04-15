@@ -19,7 +19,6 @@ from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 from uipath.core.guardrails import GuardrailSelector
-from uipath.platform import UiPath
 from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
     EnumListParameterValue,
@@ -158,7 +157,6 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         )
 
         self._guardrail = self._create_guardrail()
-        self._uipath: UiPath | None = None
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
@@ -292,12 +290,6 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
             validator_type="pii_detection",
             validator_parameters=validator_parameters,
         )
-
-    def _get_uipath(self) -> UiPath:
-        """Get or create UiPath instance."""
-        if self._uipath is None:
-            self._uipath = UiPath()
-        return self._uipath
 
     def _extract_tool_input_data(
         self, request: ToolCallRequest

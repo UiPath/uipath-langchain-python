@@ -27,17 +27,18 @@ class BuiltInGuardrailMiddlewareMixin:
         _guardrail (BuiltInValidatorGuardrail): The guardrail configuration.
         _name (str): The guardrail name used in log messages.
         action (GuardrailAction): The action to take on violation.
-
-    Subclasses must implement:
-        _get_uipath() -> UiPath: Returns the UiPath client instance.
     """
 
     _guardrail: BuiltInValidatorGuardrail
     _name: str
     action: GuardrailAction
+    _uipath: UiPath | None = None
 
     def _get_uipath(self) -> UiPath:
-        raise NotImplementedError
+        """Get or create UiPath instance."""
+        if self._uipath is None:
+            self._uipath = UiPath()
+        return self._uipath
 
     def _evaluate_guardrail(
         self, input_data: str | dict[str, Any]

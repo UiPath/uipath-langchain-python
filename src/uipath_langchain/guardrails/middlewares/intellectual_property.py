@@ -13,7 +13,6 @@ from langchain.agents.middleware import (
 from langchain_core.messages import AIMessage
 from langgraph.runtime import Runtime
 from uipath.core.guardrails import GuardrailSelector
-from uipath.platform import UiPath
 from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
     EnumListParameterValue,
@@ -78,7 +77,6 @@ class UiPathIntellectualPropertyMiddleware(BuiltInGuardrailMiddlewareMixin):
         )
 
         self._guardrail = self._create_guardrail()
-        self._uipath: UiPath | None = None
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
@@ -139,9 +137,3 @@ class UiPathIntellectualPropertyMiddleware(BuiltInGuardrailMiddlewareMixin):
             validator_type="intellectual_property",
             validator_parameters=validator_parameters,
         )
-
-    def _get_uipath(self) -> UiPath:
-        """Get or create UiPath instance."""
-        if self._uipath is None:
-            self._uipath = UiPath()
-        return self._uipath

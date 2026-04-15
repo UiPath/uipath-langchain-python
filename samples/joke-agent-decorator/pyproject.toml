@@ -13,3 +13,6 @@ dependencies = [
 dev = [
     "uipath-dev>=0.0.14",
 ]
+
+[tool.uv.sources]
+uipath-langchain = { path = "../..", editable = true }

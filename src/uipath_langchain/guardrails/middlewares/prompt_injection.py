@@ -7,7 +7,6 @@ from uuid import uuid4
 from langchain.agents.middleware import AgentMiddleware, AgentState, before_model
 from langgraph.runtime import Runtime
 from uipath.core.guardrails import GuardrailSelector
-from uipath.platform import UiPath
 from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailScope
 from uipath.platform.guardrails.guardrails import NumberParameterValue
 
@@ -83,7 +82,6 @@ class UiPathPromptInjectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         )
 
         self._guardrail = self._create_guardrail()
-        self._uipath: UiPath | None = None
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
@@ -126,9 +124,3 @@ class UiPathPromptInjectionMiddleware(BuiltInGuardrailMiddlewareMixin):
             validator_type="prompt_injection",
             validator_parameters=validator_parameters,
         )
-
-    def _get_uipath(self) -> UiPath:
-        """Get or create UiPath instance."""
-        if self._uipath is None:
-            self._uipath = UiPath()
-        return self._uipath

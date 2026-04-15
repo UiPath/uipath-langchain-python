@@ -7,7 +7,6 @@ from uuid import uuid4
 from langchain.agents.middleware import AgentMiddleware, AgentState, before_model
 from langgraph.runtime import Runtime
 from uipath.core.guardrails import GuardrailSelector
-from uipath.platform import UiPath
 from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailScope
 
 from ..models import GuardrailAction
@@ -60,7 +59,6 @@ class UiPathUserPromptAttacksMiddleware(BuiltInGuardrailMiddlewareMixin):
         self._description = description or "Detects user prompt attacks"
 
         self._guardrail = self._create_guardrail()
-        self._uipath: UiPath | None = None
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
@@ -95,9 +93,3 @@ class UiPathUserPromptAttacksMiddleware(BuiltInGuardrailMiddlewareMixin):
             validator_type="user_prompt_attacks",
             validator_parameters=[],
         )
-
-    def _get_uipath(self) -> UiPath:
-        """Get or create UiPath instance."""
-        if self._uipath is None:
-            self._uipath = UiPath()
-        return self._uipath
