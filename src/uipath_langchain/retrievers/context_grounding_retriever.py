@@ -5,7 +5,7 @@ from langchain_core.callbacks import (
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from uipath.platform import UiPath
-from uipath.platform.context_grounding import UnifiedSearchScope
+from uipath.platform.context_grounding import SearchMode, UnifiedSearchScope
 
 
 class ContextGroundingRetriever(BaseRetriever):
@@ -35,6 +35,7 @@ class ContextGroundingRetriever(BaseRetriever):
         result = sdk.context_grounding.unified_search(
             self.index_name,
             query,
+            search_mode=SearchMode.SEMANTIC,
             number_of_results=self.number_of_results
             if self.number_of_results is not None
             else 10,
@@ -45,15 +46,18 @@ class ContextGroundingRetriever(BaseRetriever):
         )
 
         values = result.semantic_results.values if result.semantic_results else []
+        search_id = (
+            result.semantic_results.metadata.operation_id
+            if result.semantic_results and result.semantic_results.metadata
+            else None
+        )
 
         return [
             Document(
                 page_content=x.content,
                 metadata={
                     "source": x.source,
-                    "search_id": result.metadata.operation_id
-                    if result.metadata
-                    else None,
+                    "search_id": search_id,
                     "reference": x.reference,
                     "page_number": x.page_number,
                     "score": x.score,
@@ -71,6 +75,7 @@ class ContextGroundingRetriever(BaseRetriever):
         result = await sdk.context_grounding.unified_search_async(
             self.index_name,
             query,
+            search_mode=SearchMode.SEMANTIC,
             number_of_results=self.number_of_results
             if self.number_of_results is not None
             else 10,
@@ -81,12 +86,18 @@ class ContextGroundingRetriever(BaseRetriever):
         )
 
         values = result.semantic_results.values if result.semantic_results else []
+        search_id = (
+            result.semantic_results.metadata.operation_id
+            if result.semantic_results and result.semantic_results.metadata
+            else None
+        )
 
         return [
             Document(
                 page_content=x.content,
                 metadata={
                     "source": x.source,
+                    "search_id": search_id,
                     "reference": x.reference,
                     "page_number": x.page_number,
                     "score": x.score,
