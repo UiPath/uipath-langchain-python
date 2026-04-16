@@ -20,14 +20,17 @@ _API_FLAVOR_TO_PROVIDER: dict[APIFlavor, LLMProvider] = {
 }
 
 
-def _fetch_discovery(agenthub_config: str) -> list[dict[str, Any]]:
+def _fetch_discovery(
+    agenthub_config: str, mode: str | None = None
+) -> list[dict[str, Any]]:
     """Fetch available models from LLM Gateway discovery endpoint."""
     from uipath.platform import UiPath
 
     sdk = UiPath()
-    models = sdk.agenthub.get_available_llm_models(
-        headers={"X-UiPath-AgentHub-Config": agenthub_config}
-    )
+    headers: dict[str, str] = {"X-UiPath-AgentHub-Config": agenthub_config}
+    if mode:
+        headers["X-UiPath-Mode"] = mode
+    models = sdk.agenthub.get_available_llm_models(headers=headers)
     return [model.model_dump(by_alias=True) for model in models]
 
 
@@ -38,6 +41,7 @@ def _create_openai_llm(
     max_tokens: int,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    mode: str | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create UiPathChatOpenAI for OpenAI models via LLMGateway."""
@@ -55,6 +59,7 @@ def _create_openai_llm(
                 api_version=azure_open_ai_latest_api_version,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
+                mode=mode,
                 output_version="v1",
                 **kwargs,
             )
@@ -67,6 +72,7 @@ def _create_openai_llm(
                 api_version=azure_open_ai_latest_api_version,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
+                mode=mode,
                 output_version="v1",
                 **kwargs,
             )
@@ -81,6 +87,7 @@ def _create_bedrock_llm(
     max_tokens: int,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    mode: str | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create UiPathChatBedrockConverse for Claude models via LLMGateway."""
@@ -97,6 +104,7 @@ def _create_bedrock_llm(
                 max_tokens=max_tokens,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
+                mode=mode,
                 output_version="v1",
                 **kwargs,
             )
@@ -107,6 +115,7 @@ def _create_bedrock_llm(
                 max_tokens=max_tokens,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
+                mode=mode,
                 output_version="v1",
                 **kwargs,
             )
@@ -121,6 +130,7 @@ def _create_vertex_llm(
     max_tokens: int | None,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    mode: str | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create UiPathChatVertex for Gemini models via LLMGateway."""
@@ -134,6 +144,7 @@ def _create_vertex_llm(
                 max_tokens=max_tokens,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
+                mode=mode,
                 output_version="v1",
                 **kwargs,
             )
@@ -199,8 +210,9 @@ def _get_model_info(
     model: str,
     agenthub_config: str,
     byo_connection_id: str | None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
-    discovery_models = _fetch_discovery(agenthub_config)
+    discovery_models = _fetch_discovery(agenthub_config, mode=mode)
 
     matching_models = [m for m in discovery_models if m.get("modelName") == model]
 
@@ -231,14 +243,21 @@ def get_chat_model(
     max_tokens: int,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    mode: str | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create and configure LLM instance using LLMGateway API.
 
     Fetches available models from the discovery API and selects the appropriate
     LLM class based on the apiFlavor field from the matching model configuration.
+
+    Args:
+        mode: Optional agent mode identifier (e.g. "standard" or
+            "advanced") forwarded to AgentHub via the
+            X-UiPath-Mode header on both the discovery call and
+            every completion request produced by the returned chat model.
     """
-    model_info = _get_model_info(model, agenthub_config, byo_connection_id)
+    model_info = _get_model_info(model, agenthub_config, byo_connection_id, mode)
 
     vendor, api_flavor = _compute_vendor_and_api_flavor(model_info)
     model_name: str = model_info.get("modelName", model)
@@ -252,6 +271,7 @@ def get_chat_model(
                 max_tokens,
                 agenthub_config,
                 byo_connection_id,
+                mode=mode,
                 **kwargs,
             )
         case LLMProvider.BEDROCK:
@@ -262,6 +282,7 @@ def get_chat_model(
                 max_tokens,
                 agenthub_config,
                 byo_connection_id,
+                mode=mode,
                 **kwargs,
             )
         case LLMProvider.VERTEX:
@@ -272,5 +293,6 @@ def get_chat_model(
                 max_tokens,
                 agenthub_config,
                 byo_connection_id,
+                mode=mode,
                 **kwargs,
             )

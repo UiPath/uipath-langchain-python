@@ -18,6 +18,7 @@ from uipath.platform.common.constants import (
     HEADER_JOB_KEY,
     HEADER_LICENSING_CONTEXT,
     HEADER_LLMGATEWAY_BYO_CONNECTION_ID,
+    HEADER_MODE,
     HEADER_PROCESS_KEY,
     HEADER_TRACE_ID,
 )
@@ -27,6 +28,7 @@ def build_uipath_headers(
     *,
     agenthub_config: str | None = None,
     byo_connection_id: str | None = None,
+    mode: str | None = None,
     inject_routing: bool = False,
 ) -> dict[str, str]:
     """Build common UiPath headers for LLM Gateway requests.
@@ -37,6 +39,10 @@ def build_uipath_headers(
     Args:
         agenthub_config: Optional AgentHub configuration identifier.
         byo_connection_id: Optional BYO connection identifier.
+        mode: Optional agent mode identifier forwarded to AgentHub via
+            the X-UiPath-Mode header. Expected values such as
+            "standard" or "advanced" are surfaced to Licensing as a raw data
+            parameter so advanced-mode runs can be billed differently.
         inject_routing: When True, adds tenant and account routing
             headers that are normally injected by the platform routing
             layer.  Set this when using a service URL override that
@@ -47,6 +53,8 @@ def build_uipath_headers(
         headers[HEADER_AGENTHUB_CONFIG] = agenthub_config
     if byo_connection_id:
         headers[HEADER_LLMGATEWAY_BYO_CONNECTION_ID] = byo_connection_id
+    if mode:
+        headers[HEADER_MODE] = mode
     if process_key := os.getenv(ENV_PROCESS_KEY):
         headers[HEADER_PROCESS_KEY] = quote(process_key, safe="")
     if job_key := os.getenv(ENV_JOB_KEY):

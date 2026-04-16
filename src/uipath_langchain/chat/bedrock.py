@@ -67,6 +67,7 @@ class AwsBedrockCompletionsPassthroughClient:
         api_flavor: str,
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
+        mode: Optional[str] = None,
         header_capture: HeaderCapture | None = None,
     ):
         self.model = model
@@ -74,6 +75,7 @@ class AwsBedrockCompletionsPassthroughClient:
         self.api_flavor = api_flavor
         self.agenthub_config = agenthub_config
         self.byo_connection_id = byo_connection_id
+        self.mode = mode
         self._vendor = "awsbedrock"
         self._url: Optional[str] = None
         self._is_override: bool = False
@@ -154,6 +156,7 @@ class AwsBedrockCompletionsPassthroughClient:
             build_uipath_headers(
                 agenthub_config=self.agenthub_config,
                 byo_connection_id=self.byo_connection_id,
+                mode=self.mode,
                 inject_routing=is_override,
             )
         )
@@ -178,6 +181,7 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
         model_name: str = BedrockModels.anthropic_claude_haiku_4_5,
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
+        mode: Optional[str] = None,
         retryer: Optional[Retrying] = None,
         aretryer: Optional[AsyncRetrying] = None,
         **kwargs,
@@ -205,6 +209,7 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
             api_flavor="converse",
             agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
+            mode=mode,
         )
 
         kwargs["client"] = passthrough_client.get_client()
@@ -240,6 +245,7 @@ class UiPathChatBedrock(ChatBedrock):
         model_name: str = BedrockModels.anthropic_claude_haiku_4_5,
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
+        mode: Optional[str] = None,
         retryer: Optional[Retrying] = None,
         aretryer: Optional[AsyncRetrying] = None,
         **kwargs,
@@ -269,6 +275,7 @@ class UiPathChatBedrock(ChatBedrock):
             api_flavor="invoke",
             agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
+            mode=mode,
             header_capture=header_capture,
         )
 

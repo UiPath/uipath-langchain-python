@@ -50,6 +50,26 @@ class TestBuildUiPathHeaders:
         assert headers["x-uipath-agenthub-config"] == "config-abc"
         assert headers["x-uipath-llmgateway-byoisconnectionid"] == "conn-xyz"
 
+    def test_mode_header_present(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            headers = build_uipath_headers(mode="advanced")
+        assert headers["x-uipath-mode"] == "advanced"
+
+    def test_mode_header_standard_value(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            headers = build_uipath_headers(mode="standard")
+        assert headers["x-uipath-mode"] == "standard"
+
+    def test_mode_header_absent_when_none(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            headers = build_uipath_headers()
+        assert "x-uipath-mode" not in headers
+
+    def test_mode_header_absent_when_empty_string(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            headers = build_uipath_headers(mode="")
+        assert "x-uipath-mode" not in headers
+
     def test_licensing_context_header_present(self) -> None:
         with (
             patch.dict(os.environ, {}, clear=True),

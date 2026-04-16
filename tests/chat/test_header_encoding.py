@@ -26,6 +26,7 @@ class TestOpenAIHeaderEncoding:
             obj = object.__new__(UiPathChatOpenAI)
             obj._agenthub_config = None
             obj._byo_connection_id = None
+            obj._mode = None
             obj._extra_headers = {}
             return obj._build_headers("fake-token")
 
@@ -52,6 +53,7 @@ class TestOpenAIHeaderEncoding:
             obj = object.__new__(UiPathChatOpenAI)
             obj._agenthub_config = None
             obj._byo_connection_id = None
+            obj._mode = None
             obj._extra_headers = {}
             headers = obj._build_headers("fake-token")
         assert "x-uipath-processkey" not in headers
@@ -67,6 +69,7 @@ class TestOpenAIHeaderEncoding:
             obj = object.__new__(UiPathChatOpenAI)
             obj._agenthub_config = None
             obj._byo_connection_id = None
+            obj._mode = None
             obj._extra_headers = {}
             headers = obj._build_headers("fake-token")
         assert headers["x-uipath-jobkey"] == "job-123"
@@ -80,6 +83,7 @@ class TestOpenAIHeaderEncoding:
             obj = object.__new__(UiPathChatOpenAI)
             obj._agenthub_config = None
             obj._byo_connection_id = None
+            obj._mode = None
             obj._extra_headers = {"x-uipath-jobkey": "override"}
             headers = obj._build_headers("fake-token")
         assert headers["x-uipath-jobkey"] == "override"
@@ -222,6 +226,7 @@ class TestRequestMixinHeaderEncoding:
             obj.default_request_timeout = 30
             obj.agenthub_config = None
             obj.byo_connection_id = None
+            obj.mode = None
             obj.include_account_id = False
             headers = obj.auth_headers
 

@@ -146,6 +146,7 @@ class UiPathRequestMixin(BaseModel):
     presence_penalty: float | None = None
     agenthub_config: str | None = None
     byo_connection_id: str | None = None
+    mode: str | None = None
 
     logger: logging.Logger | None = None
     max_retries: int | None = 5
@@ -771,6 +772,7 @@ class UiPathRequestMixin(BaseModel):
                 build_uipath_headers(
                     agenthub_config=self.agenthub_config,
                     byo_connection_id=self.byo_connection_id,
+                    mode=self.mode,
                     inject_routing=self._is_override,
                 )
             )

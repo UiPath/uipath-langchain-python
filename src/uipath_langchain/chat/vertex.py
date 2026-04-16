@@ -148,6 +148,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
     _uipath_llmgw_url: Optional[str] = PrivateAttr(default=None)
     _agenthub_config: Optional[str] = PrivateAttr(default=None)
     _byo_connection_id: Optional[str] = PrivateAttr(default=None)
+    _mode: Optional[str] = PrivateAttr(default=None)
     _retryer: Optional[Retrying] = PrivateAttr(default=None)
     _aretryer: Optional[AsyncRetrying] = PrivateAttr(default=None)
 
@@ -163,6 +164,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         temperature: Optional[float] = None,
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
+        mode: Optional[str] = None,
         retryer: Optional[Retrying] = None,
         aretryer: Optional[AsyncRetrying] = None,
         **kwargs: Any,
@@ -188,7 +190,10 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         headers: dict[str, str] = {"Authorization": f"Bearer {token}"}
         headers.update(
             self._build_headers(
-                agenthub_config, byo_connection_id, inject_routing=is_override
+                agenthub_config,
+                byo_connection_id,
+                mode,
+                inject_routing=is_override,
             )
         )
 
@@ -240,6 +245,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         self._uipath_llmgw_url = uipath_url
         self._agenthub_config = agenthub_config
         self._byo_connection_id = byo_connection_id
+        self._mode = mode
         self._retryer = retryer
         self._aretryer = aretryer
         self._header_capture = header_capture
@@ -260,6 +266,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
     def _build_headers(
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
+        mode: Optional[str] = None,
         *,
         inject_routing: bool = False,
     ) -> dict[str, str]:
@@ -267,6 +274,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         return build_uipath_headers(
             agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
+            mode=mode,
             inject_routing=inject_routing,
         )
 

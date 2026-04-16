@@ -119,6 +119,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         agenthub_config: Optional[str] = None,
         extra_headers: Optional[dict[str, str]] = None,
         byo_connection_id: Optional[str] = None,
+        mode: Optional[str] = None,
         **kwargs,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -143,6 +144,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         self._model_name = model_name
         self._agenthub_config = agenthub_config
         self._byo_connection_id = byo_connection_id
+        self._mode = mode
         self._extra_headers = extra_headers or {}
 
         url, is_override = self._resolve_url()
@@ -187,6 +189,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
             build_uipath_headers(
                 agenthub_config=self._agenthub_config,
                 byo_connection_id=self._byo_connection_id,
+                mode=self._mode,
                 inject_routing=inject_routing,
             )
         )
