@@ -147,6 +147,7 @@ class TestProcessToolInvocation:
             attachments=[],
             parent_span_id=None,
             parent_operation_id=None,
+            run_as_me=None,
         )
 
     @pytest.mark.asyncio
@@ -358,3 +359,97 @@ class TestProcessToolSpanContext:
 
         call_kwargs = mock_client.processes.invoke_async.call_args[1]
         assert call_kwargs["parent_span_id"] is None
+
+
+class TestProcessToolRunAsMe:
+    """Test RunAsMe propagation passed top-down from tool factory."""
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_run_as_me_true_passed_to_invoke(
+        self,
+        mock_uipath_class,
+        mock_interrupt,
+        process_resource,
+    ):
+        """Test RunAsMe=True is forwarded to invoke_async when set."""
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
+        mock_job.folder_key = "folder-key"
+
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(process_resource, run_as_me=True)
+        await tool.ainvoke({})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["run_as_me"] is True
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_run_as_me_false_sends_none(
+        self,
+        mock_uipath_class,
+        mock_interrupt,
+        process_resource,
+    ):
+        """Test RunAsMe=None when run_as_me=False (default)."""
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
+        mock_job.folder_key = "folder-key"
+
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(process_resource, run_as_me=False)
+        await tool.ainvoke({})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["run_as_me"] is None
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_run_as_me_default_sends_none(
+        self,
+        mock_uipath_class,
+        mock_interrupt,
+        process_resource,
+    ):
+        """Test RunAsMe=None when run_as_me not specified (default)."""
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
+        mock_job.folder_key = "folder-key"
+
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(process_resource)
+        await tool.ainvoke({})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["run_as_me"] is None
