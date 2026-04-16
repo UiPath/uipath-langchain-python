@@ -29,11 +29,32 @@ from .process_tool import create_process_tool
 logger = getLogger(__name__)
 
 
+def _is_user_token() -> bool:
+    """Check if the current token is a user token (sub_type == 'user')."""
+    try:
+        from uipath._cli._utils._common import get_claim_from_token
+
+        sub_type = get_claim_from_token("sub_type")
+        logger.info("Token sub_type=%r", sub_type)
+        return sub_type == "user"
+    except Exception as e:
+        logger.info("Token sub_type check failed: %s", e)
+        return False
+
+
 async def create_tools_from_resources(
     agent: LowCodeAgentDefinition, llm: BaseChatModel
 ) -> list[BaseTool]:
 
     tools: list[BaseTool] = []
+    is_user = _is_user_token()
+    run_as_me = agent.is_conversational and is_user
+    logger.info(
+        "RunAsMe decision: is_conversational=%s, is_user_token=%s, run_as_me=%s",
+        agent.is_conversational,
+        is_user,
+        run_as_me,
+    )
 
     logger.info("Creating tools for agent '%s' from resources", agent.name)
 
@@ -51,7 +72,9 @@ async def create_tools_from_resources(
             resource.name,
             type(resource).__name__,
         )
-        tool = await _build_tool_for_resource(resource, llm, agent=agent)
+        tool = await _build_tool_for_resource(
+            resource, llm, agent=agent, run_as_me=run_as_me
+        )
         if tool is not None:
             if isinstance(tool, list):
                 tools.extend(tool)
@@ -74,9 +97,10 @@ async def _build_tool_for_resource(
     resource: BaseAgentResourceConfig,
     llm: BaseChatModel,
     agent: LowCodeAgentDefinition | None = None,
+    run_as_me: bool = False,
 ) -> BaseTool | list[BaseTool] | None:
     if isinstance(resource, AgentProcessToolResourceConfig):
-        return create_process_tool(resource)
+        return create_process_tool(resource, run_as_me=run_as_me)
 
     elif isinstance(resource, AgentContextResourceConfig):
         return create_context_tool(resource, llm=llm, agent=agent)

@@ -9,7 +9,7 @@ resolution-markers = [
 
 [[package]]
 name = "a2a-sdk"
-version = "0.3.25"
+version = "0.3.26"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", version = "2.25.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14'" },
@@ -19,9 +19,9 @@ dependencies = [
     { name = "protobuf" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/55/83/3c99b276d09656cce039464509f05bf385e5600d6dc046a131bbcf686930/a2a_sdk-0.3.25.tar.gz", hash = "sha256:afda85bab8d6af0c5d15e82f326c94190f6be8a901ce562d045a338b7127242f", size = 270638, upload-time = "2026-03-10T13:08:46.417Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/97/a6840e01795b182ce751ca165430d46459927cde9bfab838087cbb24aef7/a2a_sdk-0.3.26.tar.gz", hash = "sha256:44068e2d037afbb07ab899267439e9bc7eaa7ac2af94f1e8b239933c993ad52d", size = 274598, upload-time = "2026-04-09T15:21:13.902Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bd/f9/6a62520b7ecb945188a6e1192275f4732ff9341cd4629bc975a6c146aeab/a2a_sdk-0.3.25-py3-none-any.whl", hash = "sha256:2fce38faea82eb0b6f9f9c2bcf761b0d78612c80ef0e599b50d566db1b2654b5", size = 149609, upload-time = "2026-03-10T13:08:44.7Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/d5/51f4ee1bf3b736add42a542d3c8a3fd3fa85f3d36c17972127defc46c26f/a2a_sdk-0.3.26-py3-none-any.whl", hash = "sha256:754e0573f6d33b225c1d8d51f640efa69cbbed7bdfb06ce9c3540ea9f58d4a91", size = 151016, upload-time = "2026-04-09T15:21:12.35Z" },
 ]
 
 [[package]]
@@ -3510,7 +3510,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "uipath", specifier = ">=2.10.49,<2.11.0" },
     { name = "uipath-core", specifier = ">=0.5.2,<0.6.0" },
-    { name = "uipath-platform", specifier = ">=0.1.25,<0.2.0" },
+    { name = "uipath-platform", specifier = ">=0.1.29,<0.2.0" },
     { name = "uipath-runtime", specifier = ">=0.10.0,<0.11.0" },
 ]
 provides-extras = ["vertex", "bedrock"]
@@ -3533,7 +3533,7 @@ dev = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.1.25"
+version = "0.1.29"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -3543,9 +3543,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/67/68/9bc2c0c2cbaea0beaeb84f406887717491fefd10b6f1de64db96d69ac188/uipath_platform-0.1.25.tar.gz", hash = "sha256:e390df460441b860c1c4d1f544e44e84bbdc392c4b95bbd4e672028be78cf34e", size = 313914, upload-time = "2026-04-10T07:19:21.495Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/94/4d38e16920a03cddbf448859e6db95c6b0c0dfd150b10917ae81989339e4/uipath_platform-0.1.29.tar.gz", hash = "sha256:854b696469c1d9f53b1267d10dd9e733f3634663589ef0246926c3e758d02e87", size = 315488, upload-time = "2026-04-16T16:25:53.613Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/04/e8/013e096e23cc1fc3bffbec6eceee3f0c1a1fef2c0ec6796caf36099140df/uipath_platform-0.1.25-py3-none-any.whl", hash = "sha256:5e45759f8ecd45be7d467d93cff7666785bb598f8de09d11841ca0a86af974da", size = 205317, upload-time = "2026-04-10T07:19:20.108Z" },
+    { url = "https://files.pythonhosted.org/packages/26/06/373ef799ff1889e38306ac658fa030d3c0821dd85fbbbbe8066072fe0103/uipath_platform-0.1.29-py3-none-any.whl", hash = "sha256:36e7396c8a16e07b27588d1ab7d51b66cb7e17367d8e2351698c0394fb0de9bb", size = 206073, upload-time = "2026-04-16T16:25:52.036Z" },
 ]
 
 [[package]]

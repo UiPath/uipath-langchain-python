@@ -39,7 +39,10 @@ _START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]
 }
 
 
-def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredTool:
+def create_process_tool(
+    resource: AgentProcessToolResourceConfig,
+    run_as_me: bool = False,
+) -> StructuredTool:
     """Uses interrupt() to suspend graph execution until process completes (handled by runtime)."""
     # Import here to avoid circular dependency
     from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
@@ -80,6 +83,7 @@ def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredT
                         attachments=attachments,
                         parent_span_id=parent_span_id,
                         parent_operation_id=parent_operation_id,
+                        run_as_me=True if run_as_me else None,
                     )
                 except EnrichedException as e:
                     raise_for_enriched(
