@@ -1,5 +1,6 @@
 """Tests for batch_transform_tool.py module."""
 
+import os
 import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -546,6 +547,57 @@ class TestCreateBatchTransformTool:
             source_path="/custom/path/result.csv",
             job_key="test-job-key",
         )
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch("uipath_langchain.agent.tools.internal_tools.batch_transform_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
+        lambda **kwargs: lambda f: f,
+    )
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
+    async def test_create_ephemeral_index_passes_folder_path(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_get_wrapper,
+        resource_config_static,
+        mock_llm,
+    ):
+        """Test that create_ephemeral_index_async receives folder_path from the execution environment."""
+        mock_uipath = AsyncMock()
+        mock_uipath_class.return_value = mock_uipath
+        mock_uipath_config = Mock()
+        mock_uipath_config.job_key = "test-job-key"
+
+        mock_index = ContextGroundingIndex(
+            id=str(uuid.uuid4()),
+            name="ephemeral-batch-folder",
+            last_ingestion_status="Successful",
+        )
+        mock_uipath.context_grounding.create_ephemeral_index_async = AsyncMock(
+            return_value=mock_index
+        )
+        mock_interrupt.side_effect = [{"file_path": "output.csv"}]
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value=uuid.uuid4())
+
+        mock_wrapper = Mock()
+        mock_get_wrapper.return_value = mock_wrapper
+
+        tool = create_batch_transform_tool(resource_config_static, mock_llm)
+        mock_attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName="data.csv", MimeType="text/csv"
+        )
+
+        assert tool.coroutine is not None
+        await tool.coroutine(attachment=mock_attachment)
+
+        call_kwargs = (
+            mock_uipath.context_grounding.create_ephemeral_index_async.call_args.kwargs
+        )
+        assert call_kwargs["folder_path"] == "/Shared/TestFolder"
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
