@@ -62,6 +62,7 @@ MODELS_TO_TEST: list[ModelTestConfig] = [
     ModelTestConfig(
         label="OpenAI (Azure, default/responses) - UiPathAzureChatOpenAI",
         model_name="gpt-5.2-2025-12-11",
+        api_flavor=ApiFlavor.RESPONSES,
     ),
     # VendorType.OPENAI (UiPath-owned) + CHAT_COMPLETIONS -> UiPathAzureChatOpenAI (chat-completions API)
     ModelTestConfig(
@@ -83,6 +84,7 @@ MODELS_TO_TEST: list[ModelTestConfig] = [
     ModelTestConfig(
         label="Bedrock (default/converse) - UiPathChatBedrockConverse",
         model_name="anthropic.claude-sonnet-4-5-20250929-v1:0",
+        api_flavor=ApiFlavor.CONVERSE,
     ),
     # VendorType.AWSBEDROCK + INVOKE -> UiPathChatBedrock
     ModelTestConfig(
