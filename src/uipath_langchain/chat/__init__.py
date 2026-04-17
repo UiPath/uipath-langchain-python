@@ -83,6 +83,18 @@ def __getattr__(name):
         )
 
         return UiPathChatFireworks
+    if name == "UiPathChatVertex":
+        from uipath_langchain.chat._legacy.vertex import UiPathChatVertex
+
+        return UiPathChatVertex
+    if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
+        from uipath_langchain.chat._legacy import supported_models
+
+        return getattr(supported_models, name)
+    if name in ("LLMProvider", "APIFlavor"):
+        from uipath_langchain.chat._legacy import types
+
+        return getattr(types, name)
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -99,6 +111,12 @@ __all__ = [
     "UiPathChatAnthropic",
     "UiPathChatAnthropicVertex",
     "UiPathChatFireworks",
+    "UiPathChatVertex",
+    "OpenAIModels",
+    "BedrockModels",
+    "GeminiModels",
+    "LLMProvider",
+    "APIFlavor",
     "request_approval",
     "request_conversational_tool_confirmation",
     "requires_approval",

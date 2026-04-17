@@ -12,6 +12,7 @@ dependencies = [
     "langgraph>=1.0.0, <2.0.0",
     "langchain-core>=1.2.11, <2.0.0",
     "langgraph-checkpoint-sqlite>=3.0.3, <4.0.0",
+    "langchain-openai>=1.0.0, <2.0.0",
     "langchain>=1.0.0, <2.0.0",
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.0.1",
@@ -43,16 +44,24 @@ anthropic = [
     "uipath-langchain-client[anthropic]>=1.9.2",
 ]
 vertex = [
+    "langchain-google-genai>=2.0.0",
+    "google-generativeai>=0.8.0",
     "uipath-langchain-client[google]>=1.9.2",
     "uipath-langchain-client[vertexai]>=1.9.2",
 ]
 bedrock = [
+    "langchain-aws>=0.2.35",
+    "boto3-stubs>=1.41.4",
     "uipath-langchain-client[bedrock]>=1.9.2",
 ]
 fireworks = [
     "uipath-langchain-client[fireworks]>=1.9.2",
 ]
 all = [
+    "langchain-google-genai>=2.0.0",
+    "google-generativeai>=0.8.0",
+    "langchain-aws>=0.2.35",
+    "boto3-stubs>=1.41.4",
     "uipath-langchain-client[all]>=1.9.2",
 ]
 
@@ -136,3 +145,4 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
