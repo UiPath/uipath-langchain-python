@@ -27,6 +27,7 @@ from uipath.runtime.errors import (
     UiPathRuntimeError,
 )
 
+from uipath_langchain._utils._environment import get_default_timeout
 from uipath_langchain._utils._settings import (
     UiPathClientFactorySettings,
     UiPathClientSettings,
@@ -129,8 +130,7 @@ class UiPathRequestMixin(BaseModel):
     )
     default_request_timeout: Any = Field(
         default_factory=lambda data: float(
-            getattr(data["settings"], "timeout_seconds", None)
-            or os.getenv("UIPATH_TIMEOUT_SECONDS", "120")
+            getattr(data["settings"], "timeout_seconds", None) or get_default_timeout()
         ),
         alias="timeout",
     )

@@ -42,7 +42,7 @@ class UiPathClientSettings(BaseSettings):
     requesting_feature: str = Field(
         default="langgraph-agent", alias="UIPATH_REQUESTING_FEATURE"
     )
-    timeout_seconds: str = Field(default="120", alias="UIPATH_TIMEOUT_SECONDS")
+    timeout_seconds: str = Field(default="300", alias="UIPATH_TIMEOUT_SECONDS")
     action_name: str = Field(default="DefaultActionName", alias="UIPATH_ACTION_NAME")
     action_id: str = Field(default="DefaultActionId", alias="UIPATH_ACTION_ID")
 

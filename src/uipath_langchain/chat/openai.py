@@ -11,6 +11,8 @@ from uipath.platform.common import (
     resource_override,
 )
 
+from uipath_langchain._utils._environment import get_default_timeout
+
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .supported_models import OpenAIModels
 from .types import APIFlavor, LLMProvider
@@ -119,6 +121,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         agenthub_config: Optional[str] = None,
         extra_headers: Optional[dict[str, str]] = None,
         byo_connection_id: Optional[str] = None,
+        timeout: float | None = None,
         **kwargs,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -148,7 +151,9 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         url, is_override = self._resolve_url()
 
         client_kwargs = get_httpx_client_kwargs()
-        client_kwargs["timeout"] = 300.0
+        client_kwargs["timeout"] = (
+            timeout if timeout is not None else get_default_timeout()
+        )
         verify = client_kwargs.get("verify", True)
 
         api_flavor = (
@@ -160,6 +165,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         super().__init__(
             azure_endpoint=url,
             model_name=model_name,
+            timeout=client_kwargs["timeout"],
             default_headers=self._build_headers(token, inject_routing=is_override),
             http_async_client=httpx.AsyncClient(
                 transport=UiPathURLRewriteTransport(verify=verify),
