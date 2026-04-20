@@ -253,7 +253,7 @@ async def joke_node(state: Input) -> Output:
             content=f"Generate a family-friendly joke based on the topic: {state.topic}"
         )
     ]
-    result = await agent.ainvoke({"messages": messages})  # type: ignore[arg-type]
+    result = await agent.ainvoke({"messages": messages})  # type: ignore[call-overload]
     joke = result["messages"][-1].content
     return Output(joke=joke)
 
