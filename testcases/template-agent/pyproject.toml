@@ -6,7 +6,7 @@ authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 dependencies = [
     "uipath-langchain[bedrock,vertex]",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 
 [tool.uv.sources]
 uipath-langchain = { path = "../../", editable = true }
