@@ -11,7 +11,7 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateDeepRag, WaitEphemeralIndex
+from uipath.platform.common import CreateDeepRag, UiPathConfig, WaitEphemeralIndex
 from uipath.platform.context_grounding import (
     CitationMode,
     EphemeralIndexUsage,
@@ -21,7 +21,6 @@ from uipath.platform.context_grounding.context_grounding_index import (
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain._utils.durable_interrupt import (
     SkipInterruptValue,
     durable_interrupt,
@@ -119,7 +118,7 @@ def create_deeprag_tool(
                     await uipath.context_grounding.create_ephemeral_index_async(
                         usage=EphemeralIndexUsage.DEEP_RAG,
                         attachments=[attachment_id],
-                        folder_path=get_execution_folder_path(),
+                        folder_key=UiPathConfig.folder_key,
                     )
                 )
                 if ephemeral_index.in_progress_ingestion():
