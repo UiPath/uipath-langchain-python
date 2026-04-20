@@ -557,8 +557,8 @@ class TestCreateBatchTransformTool:
         "uipath_langchain.agent.tools.internal_tools.batch_transform_tool.mockable",
         lambda **kwargs: lambda f: f,
     )
-    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
-    async def test_create_ephemeral_index_passes_folder_path(
+    @patch.dict(os.environ, {"UIPATH_FOLDER_KEY": "test-folder-key"})
+    async def test_create_ephemeral_index_passes_folder_key(
         self,
         mock_interrupt,
         mock_uipath_class,
@@ -566,7 +566,7 @@ class TestCreateBatchTransformTool:
         resource_config_static,
         mock_llm,
     ):
-        """Test that create_ephemeral_index_async receives folder_path from the execution environment."""
+        """Test that create_ephemeral_index_async receives folder_key from the execution environment."""
         mock_uipath = AsyncMock()
         mock_uipath_class.return_value = mock_uipath
         mock_uipath_config = Mock()
@@ -597,7 +597,7 @@ class TestCreateBatchTransformTool:
         call_kwargs = (
             mock_uipath.context_grounding.create_ephemeral_index_async.call_args.kwargs
         )
-        assert call_kwargs["folder_path"] == "/Shared/TestFolder"
+        assert call_kwargs["folder_key"] == "test-folder-key"
 
     @patch(
         "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
