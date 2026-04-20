@@ -16,7 +16,7 @@ Verified assumptions:
 import dataclasses
 import itertools
 import operator
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -314,8 +314,8 @@ class TestParallelNodesSeparateScratchpads:
 
         app = graph.compile(checkpointer=MemorySaver())
         result = app.invoke(
-            {"results": []},  # type: ignore[arg-type]
-            config={"configurable": {"thread_id": "test-parallel"}},
+            cast(Any, {"results": []}),
+            config=RunnableConfig(configurable={"thread_id": "test-parallel"}),
         )
 
         assert len(captured_scratchpad_ids) == 2
@@ -352,8 +352,8 @@ class TestParallelNodesSeparateScratchpads:
 
         app = graph.compile(checkpointer=MemorySaver())
         app.invoke(
-            {"results": []},  # type: ignore[arg-type]
-            config={"configurable": {"thread_id": "test-counters"}},
+            cast(Any, {"results": []}),
+            config=RunnableConfig(configurable={"thread_id": "test-counters"}),
         )
 
         assert len(captured_counters) == 2
