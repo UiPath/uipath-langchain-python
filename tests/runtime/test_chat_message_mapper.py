@@ -1136,11 +1136,15 @@ class TestMapEvent:
         result = await mapper.map_event(last_chunk)
 
         assert result is not None
-        # Should have the end event
+        # Should have content part end event followed by message end event
+        content_part_end_event = result[-2]
+        assert content_part_end_event.content_part is not None
+        assert content_part_end_event.content_part.end is not None
+        assert content_part_end_event.end is None
+
         end_event = result[-1]
         assert end_event.end is not None
-        assert end_event.content_part is not None
-        assert end_event.content_part.end is not None
+        assert end_event.content_part is None
 
     @pytest.mark.asyncio
     async def test_map_event_emits_tool_call_start_events_on_last_chunk(self):
@@ -1771,10 +1775,14 @@ class TestMapAiMessageToEvents:
         assert start_event.content_part is not None
         assert start_event.content_part.start is not None
 
+        content_part_end_event = result[-2]
+        assert content_part_end_event.content_part is not None
+        assert content_part_end_event.content_part.end is not None
+        assert content_part_end_event.end is None
+
         end_event = result[-1]
         assert end_event.end is not None
-        assert end_event.content_part is not None
-        assert end_event.content_part.end is not None
+        assert end_event.content_part is None
 
     @pytest.mark.asyncio
     async def test_emits_content_chunk_for_string_content(self):
