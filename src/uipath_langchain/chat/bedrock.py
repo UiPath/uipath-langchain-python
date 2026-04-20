@@ -13,6 +13,8 @@ from uipath.platform.common import (
     resource_override,
 )
 
+from uipath_langchain._utils._environment import get_default_timeout
+
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .http_client.header_capture import HeaderCapture
 from .http_client.retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
@@ -68,6 +70,7 @@ class AwsBedrockCompletionsPassthroughClient:
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
         header_capture: HeaderCapture | None = None,
+        timeout: float | None = None,
     ):
         self.model = model
         self.token = token
@@ -78,6 +81,7 @@ class AwsBedrockCompletionsPassthroughClient:
         self._url: Optional[str] = None
         self._is_override: bool = False
         self.header_capture = header_capture
+        self.timeout = timeout if timeout is not None else get_default_timeout()
 
     @property
     def endpoint(self) -> str:
@@ -120,7 +124,7 @@ class AwsBedrockCompletionsPassthroughClient:
             verify=ca_bundle if ca_bundle is not None else False,
             config=self._unsigned_config(
                 retries={"total_max_attempts": 1},
-                read_timeout=300,
+                read_timeout=self.timeout,
             ),
         )
         client.meta.events.register(
@@ -180,6 +184,7 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
         byo_connection_id: Optional[str] = None,
         retryer: Optional[Retrying] = None,
         aretryer: Optional[AsyncRetrying] = None,
+        timeout: float | None = None,
         **kwargs,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -205,6 +210,7 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
             api_flavor="converse",
             agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
+            timeout=timeout,
         )
 
         kwargs["client"] = passthrough_client.get_client()
@@ -242,6 +248,7 @@ class UiPathChatBedrock(ChatBedrock):
         byo_connection_id: Optional[str] = None,
         retryer: Optional[Retrying] = None,
         aretryer: Optional[AsyncRetrying] = None,
+        timeout: float | None = None,
         **kwargs,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -270,6 +277,7 @@ class UiPathChatBedrock(ChatBedrock):
             agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
             header_capture=header_capture,
+            timeout=timeout,
         )
 
         kwargs["client"] = passthrough_client.get_client()

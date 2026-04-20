@@ -15,6 +15,8 @@ from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.platform.common import EndpointManager
 
+from uipath_langchain._utils._environment import get_default_timeout
+
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .http_client.header_capture import HeaderCapture
 from .http_client.retryers.vertex import AsyncVertexRetryer, VertexRetryer
@@ -165,6 +167,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         byo_connection_id: Optional[str] = None,
         retryer: Optional[Retrying] = None,
         aretryer: Optional[AsyncRetrying] = None,
+        timeout: float | None = None,
         **kwargs: Any,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -194,11 +197,13 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
 
         header_capture = HeaderCapture(name=f"vertex_headers_{id(self)}")
         client_kwargs = get_httpx_client_kwargs(headers=headers)
-        client_kwargs["timeout"] = 300.0
+        resolved_timeout = timeout if timeout is not None else get_default_timeout()
+        client_kwargs["timeout"] = resolved_timeout
         verify = client_kwargs.get("verify", True)
         merged_headers = client_kwargs.pop("headers", {})
 
         http_options = genai_types.HttpOptions(
+            timeout=int(resolved_timeout * 1000),
             httpx_client=httpx.Client(
                 transport=_UrlRewriteTransport(
                     uipath_url, verify=verify, header_capture=header_capture
