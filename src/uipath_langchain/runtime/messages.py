@@ -585,7 +585,6 @@ class UiPathChatMessagesMapper:
     def map_to_content_part_end_event(
         self, message_id: str
     ) -> UiPathConversationMessageEvent:
-        """Emit ContentPartEndEvent without MessageEnd."""
         return UiPathConversationMessageEvent(
             message_id=message_id,
             content_part=UiPathConversationContentPartEvent(
