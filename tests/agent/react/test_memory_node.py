@@ -142,7 +142,10 @@ class TestCreateAgentWithMemory:
         return MemoryConfig(memory_space_id="test-space-id")
 
     def test_graph_has_memory_recall_node(
-        self, mock_model: MagicMock, messages: list, memory_config: MemoryConfig
+        self,
+        mock_model: MagicMock,
+        messages: list[SystemMessage],
+        memory_config: MemoryConfig,
     ) -> None:
         result: StateGraph[Any] = create_agent(
             mock_model, [], messages, memory=memory_config
@@ -151,7 +154,10 @@ class TestCreateAgentWithMemory:
         assert AgentGraphNode.MEMORY_RECALL in graph.nodes
 
     def test_graph_edges_with_memory(
-        self, mock_model: MagicMock, messages: list, memory_config: MemoryConfig
+        self,
+        mock_model: MagicMock,
+        messages: list[SystemMessage],
+        memory_config: MemoryConfig,
     ) -> None:
         result: StateGraph[Any] = create_agent(
             mock_model, [], messages, memory=memory_config
@@ -163,7 +169,7 @@ class TestCreateAgentWithMemory:
         assert Edge("__start__", AgentGraphNode.INIT) not in graph.edges
 
     def test_graph_without_memory_has_no_recall_node(
-        self, mock_model: MagicMock, messages: list
+        self, mock_model: MagicMock, messages: list[SystemMessage]
     ) -> None:
         result: StateGraph[Any] = create_agent(mock_model, [], messages)
         graph = result.compile().get_graph()
