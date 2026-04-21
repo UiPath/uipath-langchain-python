@@ -3437,7 +3437,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.9.33"
+version = "0.9.34"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -3489,7 +3489,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "a2a-sdk", specifier = ">=0.2.0" },
+    { name = "a2a-sdk", specifier = ">=0.2.0,<1.0.0" },
     { name = "boto3-stubs", marker = "extra == 'bedrock'", specifier = ">=1.41.4" },
     { name = "google-generativeai", marker = "extra == 'vertex'", specifier = ">=0.8.0" },
     { name = "httpx", specifier = ">=0.27.0" },
