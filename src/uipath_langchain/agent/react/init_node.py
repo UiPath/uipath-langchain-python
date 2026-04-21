@@ -24,6 +24,19 @@ def create_init_node(
             resolved_messages = list(messages(state))
         else:
             resolved_messages = list(messages)
+
+        # Append memory injection from the MEMORY_RECALL node (if present)
+        memory_injection = ""
+        if hasattr(state, "inner_state") and hasattr(
+            state.inner_state, "memory_injection"
+        ):
+            memory_injection = state.inner_state.memory_injection or ""
+        if memory_injection and resolved_messages:
+            first = resolved_messages[0]
+            if isinstance(first, SystemMessage):
+                resolved_messages[0] = SystemMessage(
+                    content=str(first.content) + memory_injection
+                )
         if is_conversational:
             # For conversational agents we need to reorder the messages so that the system message is first, followed by
             # the initial user message. When resuming the conversation, the state will have the entire message history,

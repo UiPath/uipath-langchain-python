@@ -19,6 +19,7 @@ class InnerAgentGraphState(BaseModel):
     job_attachments: Annotated[dict[str, Attachment], merge_dicts] = {}
     initial_message_count: int | None = None
     tools_storage: Annotated[dict[Hashable, Any], merge_dicts] = {}
+    memory_injection: str = ""
 
 
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
@@ -55,6 +56,23 @@ class AgentGraphNode(StrEnum):
     TOOLS = "tools"
     TERMINATE = "terminate"
     GUARDED_TERMINATE = "guarded-terminate"
+    MEMORY_RECALL = "memory_recall"
+
+
+class MemoryConfig(BaseModel):
+    """Configuration for Agent Episodic Memory.
+
+    When passed to ``create_agent()``, a MEMORY_RECALL node is added before
+    INIT that queries the memory service and stores the server-generated
+    systemPromptInjection in ``inner_state.memory_injection``.
+    """
+
+    memory_space_id: str = Field(description="GUID of the memory space to query.")
+    folder_key: str | None = Field(
+        default=None, description="Folder key for the memory resource."
+    )
+    result_count: int = Field(default=5, ge=1, le=10)
+    threshold: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class AgentGraphConfig(BaseModel):

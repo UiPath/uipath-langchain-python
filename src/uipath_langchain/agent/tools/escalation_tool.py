@@ -1,5 +1,7 @@
 """Escalation tool creation for Action Center integration."""
 
+import json
+import logging
 from enum import Enum
 from typing import Any, Literal
 
@@ -38,6 +40,8 @@ from .utils import (
     sanitize_dict_for_serialization,
     sanitize_tool_name,
 )
+
+_escalation_logger = logging.getLogger(__name__)
 
 
 class EscalationAction(str, Enum):
@@ -161,6 +165,17 @@ def _parse_task_data(
     return filtered_fields
 
 
+def _get_escalation_memory_space_id(
+    resource: AgentEscalationResourceConfig,
+) -> str | None:
+    """Resolve memory space ID from escalation resource extra fields."""
+    if not resource.is_agent_memory_enabled:
+        return None
+    return getattr(resource, "memorySpaceId", None) or getattr(
+        resource, "memory_space_id", None
+    )
+
+
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
 ) -> StructuredTool:
@@ -178,6 +193,7 @@ def create_escalation_tool(
         is_deleted: bool = False
 
     _bts_context: dict[str, Any] = {}
+    _memory_space_id: str | None = _get_escalation_memory_space_id(resource)
 
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
         agent_input: dict[str, Any] = (
@@ -197,6 +213,13 @@ def create_escalation_tool(
             task_title = tool.metadata.get("task_title") or task_title
 
         serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
+
+        # --- Escalation memory: check cache before creating HITL task ---
+        cached_result = await _check_escalation_memory_cache(
+            _memory_space_id, serialized_data
+        )
+        if cached_result is not None:
+            return cached_result
 
         @mockable(
             name=tool_name.lower(),
@@ -260,6 +283,13 @@ def create_escalation_tool(
         )
         escalation_action = (
             EscalationAction(outcome_str) if outcome_str else EscalationAction.CONTINUE
+        )
+
+        # --- Escalation memory: persist outcome for future recall ---
+        await _ingest_escalation_memory(
+            _memory_space_id,
+            answer=json.dumps(escalation_output),
+            attributes=json.dumps(serialized_data),
         )
 
         return {
@@ -333,3 +363,98 @@ def create_escalation_tool(
     tool.set_tool_wrappers(awrapper=escalation_wrapper)
 
     return tool
+
+
+# --- Escalation memory helpers ---
+
+
+async def _check_escalation_memory_cache(
+    memory_space_id: str | None,
+    serialized_input: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Check escalation memory for a cached answer.
+
+    Returns the cached result dict if found, None otherwise.
+    """
+    if not memory_space_id:
+        return None
+
+    try:
+        from uipath.platform.memory import (
+            MemorySearchRequest,
+            SearchField,
+            SearchMode,
+            SearchSettings,
+        )
+
+        fields = [
+            SearchField(key_path=[k], value=str(v))
+            for k, v in serialized_input.items()
+            if v is not None
+        ]
+        if not fields:
+            return None
+
+        request = MemorySearchRequest(
+            fields=fields,
+            settings=SearchSettings(
+                threshold=0.0, result_count=1, search_mode=SearchMode.Hybrid
+            ),
+        )
+        sdk = UiPath()
+        response = await sdk.memory.escalation_search_async(
+            memory_space_id=memory_space_id, request=request
+        )
+        if response.results and response.results[0].answer:
+            cached = response.results[0].answer
+            _escalation_logger.info(
+                "Escalation memory cache hit for space '%s'", memory_space_id
+            )
+            return {
+                "action": EscalationAction.CONTINUE,
+                "output": cached.output,
+                "outcome": cached.outcome or "cached",
+            }
+    except Exception:
+        _escalation_logger.warning(
+            "Escalation memory search failed for space '%s'",
+            memory_space_id,
+            exc_info=True,
+        )
+
+    return None
+
+
+async def _ingest_escalation_memory(
+    memory_space_id: str | None,
+    answer: str,
+    attributes: str,
+    span_id: str = "",
+    trace_id: str = "",
+) -> None:
+    """Persist a resolved escalation outcome into memory."""
+    if not memory_space_id:
+        return
+
+    try:
+        from uipath.platform.memory import EscalationMemoryIngestRequest
+
+        request = EscalationMemoryIngestRequest(
+            span_id=span_id or "unknown",
+            trace_id=trace_id or "unknown",
+            answer=answer,
+            attributes=attributes,
+        )
+        sdk = UiPath()
+        await sdk.memory.escalation_ingest_async(
+            memory_space_id=memory_space_id, request=request
+        )
+        _escalation_logger.info(
+            "Ingested escalation outcome into memory space '%s'", memory_space_id
+        )
+    except Exception:
+        _escalation_logger.warning(
+            "Failed to ingest escalation outcome into memory space '%s'",
+            memory_space_id,
+            exc_info=True,
+        )
