@@ -355,6 +355,7 @@ class UiPathChatMessagesMapper:
                 events.append(self._chunk_to_message_event(message.id, chunk))
             self._citation_stream_processor = CitationStreamProcessor()
 
+            events.append(self.map_to_content_part_end_event(message.id))
             if (
                 self.current_message.tool_calls is not None
                 and len(self.current_message.tool_calls) > 0
@@ -389,6 +390,7 @@ class UiPathChatMessagesMapper:
                 events.append(self._chunk_to_message_event(message.id, chunk))
             self._citation_stream_processor = CitationStreamProcessor()
 
+        events.append(self.map_to_content_part_end_event(message.id))
         if message.tool_calls:
             events.extend(await self.map_current_message_to_start_tool_call_events())
         else:
@@ -578,6 +580,13 @@ class UiPathChatMessagesMapper:
         return UiPathConversationMessageEvent(
             message_id=message_id,
             end=UiPathConversationMessageEndEvent(),
+        )
+
+    def map_to_content_part_end_event(
+        self, message_id: str
+    ) -> UiPathConversationMessageEvent:
+        return UiPathConversationMessageEvent(
+            message_id=message_id,
             content_part=UiPathConversationContentPartEvent(
                 content_part_id=self.get_content_part_id(message_id),
                 end=UiPathConversationContentPartEndEvent(),
