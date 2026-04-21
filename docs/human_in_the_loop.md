@@ -28,7 +28,9 @@ from uipath.platform.common import CreateTask
 task_output = interrupt(CreateTask(app_name="AppName", app_folder_path="MyFolderPath", title="Escalate Issue", data={"key": "value"}, assignee="user@example.com"))
 ```
 /// info
-The return value of the interrupt is the task output. If the task did not produce any output, the return value will be the task status, e.g., `{"status": "completed"}`.
+The return value of the interrupt is the task output — only the data fields written back by the app, not the full task object. If the task did not produce any output, the return value will be the task status, e.g., `{"status": "completed"}`.
+
+The human's decision (which Approve/Reject button was clicked, stored in `task.action`) is **not** included in the return value. To branch on the outcome, either add an explicit output field to the app schema (e.g. a boolean `IsApproved` wired to the buttons), or use [`CreateEscalation`](#3-createescalation) instead, which returns the full task object.
 ///
 
 For a practical implementation of the `CreateTask` model, refer to the [ticket-classification sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/ticket-classification). This sample demonstrates how to create an action with dynamic input.
@@ -51,15 +53,65 @@ from uipath.platform.common import WaitTask
 task_output = interrupt(WaitTask(task=my_task_instance, app_folder_path="MyFolderPath"))
 ```
 /// info
-The return value of the interrupt is the task output. If the task did not produce any output, the return value will be the task status, e.g., `{"status": "completed"}`.
+Like `CreateTask`, the return value is the task output only. Use [`WaitEscalation`](#4-waitescalation) if you need the full task object back, including the selected action.
 ///
+
+---
+
+### 3. CreateEscalation
+
+The `CreateEscalation` model creates an Action Center action the same way `CreateTask` does, but when the agent resumes it receives the **full `Task` object** instead of just `task.data`. Use this when the agent needs to branch on the human's decision (the button the reviewer clicked, stored in `task.action`) rather than only on the data fields written back by the app.
+
+Accepts the same attributes as [`CreateTask`](#1-createtask).
+
+#### Example:
+
+```python
+from uipath.platform.common import CreateEscalation
+
+task = interrupt(
+    CreateEscalation(
+        app_name="ApprovalApp",
+        app_folder_path="MyFolderPath",
+        title="Approve expense",
+        data={"amount": 1200},
+        assignee="reviewer@example.com",
+    )
+)
+
+if task.action == "Approve":
+    ...
+else:
+    ...
+```
+/// info
+The return value is the full `Task` object (including `task.action`, `task.data`, `task.status`, etc.). If the task is deleted while the agent is suspended, the task object is still returned rather than raising, so the agent can handle the deletion gracefully.
+///
+
+---
+
+### 4. WaitEscalation
+
+`WaitEscalation` is the escalation counterpart of [`WaitTask`](#2-waittask): wait on an already-created task and receive the full `Task` object on resume.
+
+#### Attributes:
+
+-   **action** (Task): The instance of the task to wait for.
+-   **app_folder_path** (Optional[str]): The folder path of the app.
+
+#### Example:
+
+```python
+from uipath.platform.common import WaitEscalation
+task = interrupt(WaitEscalation(action=my_task_instance, app_folder_path="MyFolderPath"))
+```
 
 ---
 
 > 💡The UiPath-LangChain SDK also supports **Robot/Agent-in-the-loop** scenarios. In this context, the execution of one agent
 > can be suspended until another robot or agent finishes its execution.
 
-### 3. InvokeProcess
+### 5. InvokeProcess
 
 The `InvokeProcess` model is utilized to invoke a process within the UiPath cloud platform.
 This process can be of various types, including API workflows, Agents or RPA automation.
@@ -90,7 +142,7 @@ For a practical implementation of the `InvokeProcess` model, refer to the [multi
 
 ---
 
-### 4. WaitJob
+### 6. WaitJob
 
 The `WaitJob` model is used to wait for a job completion. Unlike `InvokeProcess`, which automatically creates a job, this model is intended for scenarios where
 the job has already been created.
