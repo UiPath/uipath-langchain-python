@@ -20,6 +20,11 @@ _API_FLAVOR_TO_PROVIDER: dict[APIFlavor, LLMProvider] = {
 }
 
 
+def _should_skip_temperature(model_info: dict[str, Any]) -> bool:
+    details = model_info.get("modelDetails") or {}
+    return bool(details.get("shouldSkipTemperature", False))
+
+
 def _fetch_discovery(agenthub_config: str) -> list[dict[str, Any]]:
     """Fetch available models from LLM Gateway discovery endpoint."""
     from uipath.platform import UiPath
@@ -34,7 +39,7 @@ def _fetch_discovery(agenthub_config: str) -> list[dict[str, Any]]:
 def _create_openai_llm(
     model: str,
     api_flavor: APIFlavor,
-    temperature: float,
+    temperature: float | None,
     max_tokens: int,
     agenthub_config: str,
     byo_connection_id: str | None = None,
@@ -45,29 +50,33 @@ def _create_openai_llm(
 
     azure_open_ai_latest_api_version = "2025-04-01-preview"
 
+    sampling_kwargs: dict[str, Any] = {}
+    if temperature is not None:
+        sampling_kwargs["temperature"] = temperature
+
     match api_flavor:
         case APIFlavor.OPENAI_RESPONSES:
             return UiPathChatOpenAI(
                 use_responses_api=True,
                 model_name=model,
-                temperature=temperature,
                 max_tokens=max_tokens,
                 api_version=azure_open_ai_latest_api_version,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
                 output_version="v1",
+                **sampling_kwargs,
                 **kwargs,
             )
         case APIFlavor.OPENAI_COMPLETIONS:
             return UiPathChatOpenAI(
                 use_responses_api=False,
                 model_name=model,
-                temperature=temperature,
                 max_tokens=max_tokens,
                 api_version=azure_open_ai_latest_api_version,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
                 output_version="v1",
+                **sampling_kwargs,
                 **kwargs,
             )
         case _:
@@ -77,7 +86,7 @@ def _create_openai_llm(
 def _create_bedrock_llm(
     model: str,
     api_flavor: APIFlavor,
-    temperature: float,
+    temperature: float | None,
     max_tokens: int,
     agenthub_config: str,
     byo_connection_id: str | None = None,
@@ -89,25 +98,29 @@ def _create_bedrock_llm(
         UiPathChatBedrockConverse,
     )
 
+    sampling_kwargs: dict[str, Any] = {}
+    if temperature is not None:
+        sampling_kwargs["temperature"] = temperature
+
     match api_flavor:
         case APIFlavor.AWS_BEDROCK_CONVERSE:
             return UiPathChatBedrockConverse(
                 model_name=model,
-                temperature=temperature,
                 max_tokens=max_tokens,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
                 output_version="v1",
+                **sampling_kwargs,
                 **kwargs,
             )
         case APIFlavor.AWS_BEDROCK_INVOKE:
             return UiPathChatBedrock(
                 model_name=model,
-                temperature=temperature,
                 max_tokens=max_tokens,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
                 output_version="v1",
+                **sampling_kwargs,
                 **kwargs,
             )
         case _:
@@ -117,7 +130,7 @@ def _create_bedrock_llm(
 def _create_vertex_llm(
     model: str,
     api_flavor: APIFlavor,
-    temperature: float,
+    temperature: float | None,
     max_tokens: int | None,
     agenthub_config: str,
     byo_connection_id: str | None = None,
@@ -126,15 +139,19 @@ def _create_vertex_llm(
     """Create UiPathChatVertex for Gemini models via LLMGateway."""
     from uipath_langchain.chat._legacy.vertex import UiPathChatVertex
 
+    sampling_kwargs: dict[str, Any] = {}
+    if temperature is not None:
+        sampling_kwargs["temperature"] = temperature
+
     match api_flavor:
         case APIFlavor.VERTEX_GEMINI_GENERATE_CONTENT:
             return UiPathChatVertex(
                 model_name=model,
-                temperature=temperature,
                 max_tokens=max_tokens,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
                 output_version="v1",
+                **sampling_kwargs,
                 **kwargs,
             )
         case APIFlavor.VERTEX_ANTHROPIC_CLAUDE:
@@ -243,12 +260,16 @@ def get_chat_model(
     vendor, api_flavor = _compute_vendor_and_api_flavor(model_info)
     model_name: str = model_info.get("modelName", model)
 
+    effective_temperature: float | None = (
+        None if _should_skip_temperature(model_info) else temperature
+    )
+
     match LLMProvider(vendor):
         case LLMProvider.OPENAI:
             return _create_openai_llm(
                 model_name,
                 api_flavor,
-                temperature,
+                effective_temperature,
                 max_tokens,
                 agenthub_config,
                 byo_connection_id,
@@ -258,7 +279,7 @@ def get_chat_model(
             return _create_bedrock_llm(
                 model_name,
                 api_flavor,
-                temperature,
+                effective_temperature,
                 max_tokens,
                 agenthub_config,
                 byo_connection_id,
@@ -268,7 +289,7 @@ def get_chat_model(
             return _create_vertex_llm(
                 model_name,
                 api_flavor,
-                temperature,
+                effective_temperature,
                 max_tokens,
                 agenthub_config,
                 byo_connection_id,

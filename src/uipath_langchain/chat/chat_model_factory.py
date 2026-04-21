@@ -21,10 +21,16 @@ from uipath_langchain_client.settings import (
     RoutingMode,
     UiPathBaseSettings,
     VendorType,
+    get_default_client_settings,
 )
 
 _UNSET: Final[Any] = object()
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 300.0
+
+
+def _should_skip_temperature(model_info: dict[str, Any]) -> bool:
+    details = model_info.get("modelDetails") or {}
+    return bool(details.get("shouldSkipTemperature", False))
 
 
 def get_chat_model(
@@ -88,6 +94,17 @@ def get_chat_model(
             **kwargs,
         )
 
+    resolved_client_settings = client_settings or get_default_client_settings()
+
+    if temperature is not _UNSET:
+        model_info = resolved_client_settings.get_model_info(
+            model,
+            byo_connection_id=byo_connection_id,
+            vendor_type=vendor_type,
+        )
+        if _should_skip_temperature(model_info):
+            temperature = _UNSET
+
     optional_kwargs = {
         k: v
         for k, v in {
@@ -103,7 +120,7 @@ def get_chat_model(
     return get_chat_model_factory(
         model,
         byo_connection_id=byo_connection_id,
-        client_settings=client_settings,
+        client_settings=resolved_client_settings,
         routing_mode=routing_mode,
         vendor_type=vendor_type,
         api_flavor=api_flavor,
