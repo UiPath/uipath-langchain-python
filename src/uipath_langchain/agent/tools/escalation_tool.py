@@ -526,7 +526,7 @@ async def _check_escalation_memory_cache(
             return {
                 "action": EscalationAction.CONTINUE,
                 "output": cached.output,
-                "outcome": cached.outcome or "cached",
+                "outcome": cached.outcome,
             }
     except Exception:
         _escalation_logger.warning(
