@@ -176,6 +176,24 @@ def _get_escalation_memory_space_id(
     )
 
 
+def _get_escalation_memory_settings(
+    resource: AgentEscalationResourceConfig,
+) -> dict[str, Any] | None:
+    """Extract memory settings from escalation resource properties.
+
+    Maps to EscalationResourceDefinition.Properties.Memory in the Temporal
+    backend (backend/Common.Models/AgentExecution/ResourceDefinition.cs:96).
+    """
+    if not resource.is_agent_memory_enabled:
+        return None
+    props = getattr(resource, "properties", None)
+    if isinstance(props, dict):
+        return props.get("memory")
+    if props is not None:
+        return getattr(props, "memory", None)
+    return None
+
+
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
 ) -> StructuredTool:
@@ -194,6 +212,7 @@ def create_escalation_tool(
 
     _bts_context: dict[str, Any] = {}
     _memory_space_id: str | None = _get_escalation_memory_space_id(resource)
+    _memory_settings: dict[str, Any] | None = _get_escalation_memory_settings(resource)
 
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
         agent_input: dict[str, Any] = (
@@ -216,7 +235,10 @@ def create_escalation_tool(
 
         # --- Escalation memory: check cache before creating HITL task ---
         cached_result = await _check_escalation_memory_cache(
-            _memory_space_id, serialized_data, folder_path=folder_path
+            _memory_space_id,
+            serialized_data,
+            folder_path=folder_path,
+            memory_settings=_memory_settings,
         )
         if cached_result is not None:
             return cached_result
@@ -376,8 +398,14 @@ async def _check_escalation_memory_cache(
     memory_space_id: str | None,
     serialized_input: dict[str, Any],
     folder_path: str | None = None,
+    memory_settings: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Check escalation memory for a cached answer.
+
+    SearchSettings (threshold, searchMode) are read from the user's memory
+    settings on the escalation resource, matching the Temporal backend's
+    BuildMemorySearchRequest (EscalationToolExecutor.cs:714-747).
+    result_count is always 1 for escalation memory.
 
     Returns the cached result dict if found, None otherwise.
     """
@@ -386,24 +414,51 @@ async def _check_escalation_memory_cache(
 
     try:
         from uipath.platform.memory import (
+            FieldSettings,
             MemorySearchRequest,
             SearchField,
             SearchMode,
             SearchSettings,
         )
 
-        fields = [
-            SearchField(key_path=[k], value=str(v))
-            for k, v in serialized_input.items()
-            if v is not None
-        ]
+        # Read search settings from user's memory config (threshold, searchMode),
+        # falling back to defaults. result_count is always 1 for escalation memory.
+        # Ref: EscalationToolExecutor.cs BuildMemorySearchRequest (lines 740-743)
+        threshold = 0.0
+        search_mode = SearchMode.Hybrid
+        field_settings_lookup: dict[str, dict[str, Any]] = {}
+        if memory_settings:
+            threshold = memory_settings.get("threshold", 0.0)
+            mode_str = memory_settings.get("searchMode", "Hybrid")
+            search_mode = (
+                SearchMode(mode_str) if mode_str in SearchMode.__members__ else SearchMode.Hybrid
+            )
+            for fs in memory_settings.get("fieldSettings", []):
+                if isinstance(fs, dict) and "name" in fs:
+                    field_settings_lookup[fs["name"]] = fs
+
+        fields: list[SearchField] = []
+        for k, v in serialized_input.items():
+            if v is None:
+                continue
+            # When field settings are configured, only include fields with
+            # configured weights (matching Temporal backend behavior)
+            if field_settings_lookup and k not in field_settings_lookup:
+                continue
+            settings = FieldSettings()
+            if k in field_settings_lookup:
+                fs = field_settings_lookup[k]
+                settings = FieldSettings(weight=fs.get("weight", 1.0))
+            fields.append(SearchField(key_path=[k], value=str(v), settings=settings))
         if not fields:
             return None
 
         request = MemorySearchRequest(
             fields=fields,
             settings=SearchSettings(
-                threshold=0.0, result_count=1, search_mode=SearchMode.Hybrid
+                threshold=threshold,
+                result_count=1,
+                search_mode=search_mode,
             ),
         )
         sdk = UiPath()
