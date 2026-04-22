@@ -235,14 +235,15 @@ def create_escalation_tool(
         serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
 
         # --- Escalation memory: check cache before creating HITL task ---
-        cached_result = await _check_escalation_memory_cache(
-            _memory_space_id,
-            serialized_data,
-            folder_path=folder_path,
-            memory_settings=_memory_settings,
-        )
-        if cached_result is not None:
-            return cached_result
+        if _memory_space_id:
+            cached_result = await _check_escalation_memory_cache(
+                _memory_space_id,
+                serialized_data,
+                folder_path=folder_path,
+                memory_settings=_memory_settings,
+            )
+            if cached_result is not None:
+                return cached_result
 
         @mockable(
             name=tool_name.lower(),
@@ -313,15 +314,16 @@ def create_escalation_tool(
         #   answer:     new { taskResult.Output, taskResult.Outcome }         (line 485)
         #   attributes: new JsonObject { ["arguments"] = payload.Input.Arguments } (line 503)
         #   spanId/traceId/userId: lines 522-526
-        span_id, trace_id = _get_current_span_and_trace_ids()
-        await _ingest_escalation_memory(
-            _memory_space_id,
-            answer=json.dumps({"output": escalation_output, "outcome": outcome}),
-            attributes=json.dumps({"arguments": serialized_data}),
-            span_id=span_id,
-            trace_id=trace_id,
-            folder_path=folder_path,
-        )
+        if _memory_space_id:
+            span_id, trace_id = _get_current_span_and_trace_ids()
+            await _ingest_escalation_memory(
+                _memory_space_id,
+                answer=json.dumps({"output": escalation_output, "outcome": outcome}),
+                attributes=json.dumps({"arguments": serialized_data}),
+                span_id=span_id,
+                trace_id=trace_id,
+                folder_path=folder_path,
+            )
 
         return {
             "action": escalation_action,
@@ -441,7 +443,7 @@ def _set_memory_span_attribute(name: str, value: bool) -> None:
 
 
 async def _check_escalation_memory_cache(
-    memory_space_id: str | None,
+    memory_space_id: str,
     serialized_input: dict[str, Any],
     folder_path: str | None = None,
     memory_settings: dict[str, Any] | None = None,
@@ -455,8 +457,6 @@ async def _check_escalation_memory_cache(
 
     Returns the cached result dict if found, None otherwise.
     """
-    if not memory_space_id:
-        return None
 
     try:
         from uipath.platform.memory import (
@@ -539,7 +539,7 @@ async def _check_escalation_memory_cache(
 
 
 async def _ingest_escalation_memory(
-    memory_space_id: str | None,
+    memory_space_id: str,
     answer: str,
     attributes: str,
     span_id: str = "",
@@ -551,8 +551,6 @@ async def _ingest_escalation_memory(
     Sets span attributes to track memory state (EscalationToolWorkflow.cs:131-133):
       fromMemory=false (result was not from cache), savedToMemory=true/false.
     """
-    if not memory_space_id:
-        return
 
     # Ref: EscalationToolWorkflow.cs:132 — span.Attributes.FromMemory = false
     _set_memory_span_attribute("fromMemory", False)
