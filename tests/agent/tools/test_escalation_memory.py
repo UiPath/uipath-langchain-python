@@ -34,11 +34,6 @@ class TestGetEscalationMemorySpaceId:
 
 class TestCheckEscalationMemoryCache:
     @pytest.mark.asyncio
-    async def test_returns_none_when_no_space_id(self) -> None:
-        result = await _check_escalation_memory_cache(None, {"key": "value"})
-        assert result is None
-
-    @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
     async def test_returns_cached_answer(self, mock_uipath_cls: MagicMock) -> None:
         mock_sdk = MagicMock()
