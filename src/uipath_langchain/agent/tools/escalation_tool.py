@@ -216,7 +216,7 @@ def create_escalation_tool(
 
         # --- Escalation memory: check cache before creating HITL task ---
         cached_result = await _check_escalation_memory_cache(
-            _memory_space_id, serialized_data
+            _memory_space_id, serialized_data, folder_path=folder_path
         )
         if cached_result is not None:
             return cached_result
@@ -290,6 +290,7 @@ def create_escalation_tool(
             _memory_space_id,
             answer=json.dumps(escalation_output),
             attributes=json.dumps(serialized_data),
+            folder_path=folder_path,
         )
 
         return {
@@ -371,6 +372,7 @@ def create_escalation_tool(
 async def _check_escalation_memory_cache(
     memory_space_id: str | None,
     serialized_input: dict[str, Any],
+    folder_path: str | None = None,
 ) -> dict[str, Any] | None:
     """Check escalation memory for a cached answer.
 
@@ -402,8 +404,13 @@ async def _check_escalation_memory_cache(
             ),
         )
         sdk = UiPath()
+        folder_key = (
+            sdk.folders.retrieve_folder_key(folder_path) if folder_path else None
+        )
         response = await sdk.memory.escalation_search_async(
-            memory_space_id=memory_space_id, request=request
+            memory_space_id=memory_space_id,
+            request=request,
+            folder_key=folder_key,
         )
         if response.results and response.results[0].answer:
             cached = response.results[0].answer
@@ -431,6 +438,7 @@ async def _ingest_escalation_memory(
     attributes: str,
     span_id: str = "",
     trace_id: str = "",
+    folder_path: str | None = None,
 ) -> None:
     """Persist a resolved escalation outcome into memory."""
     if not memory_space_id:
@@ -446,8 +454,13 @@ async def _ingest_escalation_memory(
             attributes=attributes,
         )
         sdk = UiPath()
+        folder_key = (
+            sdk.folders.retrieve_folder_key(folder_path) if folder_path else None
+        )
         await sdk.memory.escalation_ingest_async(
-            memory_space_id=memory_space_id, request=request
+            memory_space_id=memory_space_id,
+            request=request,
+            folder_key=folder_key,
         )
         _escalation_logger.info(
             "Ingested escalation outcome into memory space '%s'", memory_space_id
