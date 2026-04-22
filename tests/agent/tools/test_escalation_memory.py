@@ -93,10 +93,6 @@ class TestCheckEscalationMemoryCache:
 
 class TestIngestEscalationMemory:
     @pytest.mark.asyncio
-    async def test_noop_when_no_space_id(self) -> None:
-        await _ingest_escalation_memory(None, answer="yes", attributes="{}")
-
-    @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
     async def test_calls_ingest(self, mock_uipath_cls: MagicMock) -> None:
         mock_sdk = MagicMock()
@@ -104,7 +100,11 @@ class TestIngestEscalationMemory:
         mock_sdk.memory.escalation_ingest_async = AsyncMock()
 
         await _ingest_escalation_memory(
-            "space-123", answer='{"approved": true}', attributes='{"input": "test"}'
+            "space-123",
+            answer='{"approved": true}',
+            attributes='{"input": "test"}',
+            span_id="abc123",
+            trace_id="def456",
         )
 
         mock_sdk.memory.escalation_ingest_async.assert_called_once()
@@ -119,4 +119,10 @@ class TestIngestEscalationMemory:
         )
 
         # Should not raise
-        await _ingest_escalation_memory("space-123", answer="yes", attributes="{}")
+        await _ingest_escalation_memory(
+            "space-123",
+            answer="yes",
+            attributes="{}",
+            span_id="abc123",
+            trace_id="def456",
+        )

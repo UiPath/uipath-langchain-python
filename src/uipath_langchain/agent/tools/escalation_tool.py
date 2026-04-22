@@ -542,8 +542,8 @@ async def _ingest_escalation_memory(
     memory_space_id: str,
     answer: str,
     attributes: str,
-    span_id: str = "",
-    trace_id: str = "",
+    span_id: str,
+    trace_id: str,
     folder_path: str | None = None,
 ) -> None:
     """Persist a resolved escalation outcome into memory.
@@ -559,8 +559,8 @@ async def _ingest_escalation_memory(
         from uipath.platform.memory import EscalationMemoryIngestRequest
 
         request = EscalationMemoryIngestRequest(
-            span_id=span_id or "unknown",
-            trace_id=trace_id or "unknown",
+            span_id=span_id,
+            trace_id=trace_id,
             answer=answer,
             attributes=attributes,
         )
