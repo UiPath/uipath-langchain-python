@@ -43,7 +43,9 @@ def create_memory_recall_node(
         if not input_arguments:
             return {}
 
-        fields = _build_search_fields(input_arguments)
+        fields = _build_search_fields(
+            input_arguments, field_weights=memory_config.field_weights or None
+        )
         if not fields:
             return {}
 
@@ -105,6 +107,9 @@ def _build_search_fields(
     fields: list[SearchField] = []
     for name, value in input_arguments.items():
         if value is None or name.startswith("uipath__"):
+            continue
+        # When field_weights is specified, only include fields with configured weights
+        if field_weights and name not in field_weights:
             continue
         settings = FieldSettings()
         if field_weights and name in field_weights:

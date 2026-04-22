@@ -73,6 +73,14 @@ class MemoryConfig(BaseModel):
     )
     result_count: int = Field(default=5, ge=1, le=10)
     threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    field_weights: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Per-field search weights. Keys are input field names, values are "
+            "weights between 0.0 and 1.0. Only fields listed here are used for "
+            "memory search. If empty, all input fields are used with default weight."
+        ),
+    )
 
 
 class AgentGraphConfig(BaseModel):
