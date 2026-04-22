@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from enum import Enum
 from typing import Any, Literal
 
@@ -311,10 +312,14 @@ def create_escalation_tool(
         # Shape must match Temporal backend (EscalationToolExecutor.cs):
         #   answer:     new { taskResult.Output, taskResult.Outcome }         (line 485)
         #   attributes: new JsonObject { ["arguments"] = payload.Input.Arguments } (line 503)
+        #   spanId/traceId/userId: lines 522-526
+        span_id, trace_id = _get_current_span_and_trace_ids()
         await _ingest_escalation_memory(
             _memory_space_id,
             answer=json.dumps({"output": escalation_output, "outcome": outcome}),
             attributes=json.dumps({"arguments": serialized_data}),
+            span_id=span_id,
+            trace_id=trace_id,
             folder_path=folder_path,
         )
 
@@ -392,6 +397,31 @@ def create_escalation_tool(
 
 
 # --- Escalation memory helpers ---
+
+
+def _get_current_span_and_trace_ids() -> tuple[str, str]:
+    """Get current OpenTelemetry span ID and trace ID.
+
+    Returns hex-encoded IDs, or empty strings if no active span.
+    Mirrors Temporal backend: payload.SpanId and toolCall.Metadata.Traces.TraceId
+    (EscalationToolExecutor.cs lines 522-523).
+    """
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        ctx = span.get_span_context()
+        if ctx.is_valid:
+            return (
+                format(ctx.span_id, "016x"),
+                format(ctx.trace_id, "032x"),
+            )
+    except ImportError:
+        pass
+
+    # Fall back to env var for trace_id
+    trace_id = os.environ.get("UIPATH_TRACE_ID", "")
+    return ("", trace_id)
 
 
 async def _check_escalation_memory_cache(
