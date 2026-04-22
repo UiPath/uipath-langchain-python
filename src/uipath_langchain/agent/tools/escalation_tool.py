@@ -286,6 +286,9 @@ def create_escalation_tool(
         )
 
         # --- Escalation memory: persist outcome for future recall ---
+        # Shape must match Temporal backend (EscalationToolExecutor.cs):
+        #   answer:     new { taskResult.Output, taskResult.Outcome }         (line 485)
+        #   attributes: new JsonObject { ["arguments"] = payload.Input.Arguments } (line 503)
         await _ingest_escalation_memory(
             _memory_space_id,
             answer=json.dumps({"output": escalation_output, "outcome": outcome}),
