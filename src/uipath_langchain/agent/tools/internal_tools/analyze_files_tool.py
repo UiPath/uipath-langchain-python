@@ -205,15 +205,16 @@ def create_analyze_file_tool(
         if not files:
             return {"analysisResult": "No attachments provided to analyze."}
 
-        client = UiPath()
+        client: UiPath | None = None
         policy: dict[str, Any] | None = None
         try:
+            client = UiPath()
             policy = await client.automation_ops.get_deployed_policy_async()
         except Exception:
             logger.exception("Failed to fetch deployed policy")
 
         pii_result: PiiDetectionResponse | None = None
-        if is_pii_policy_enabled(policy):
+        if client is not None and is_pii_policy_enabled(policy):
             try:
                 analysis_task, files, pii_result = await _apply_pii_masking(
                     client, policy, analysis_task, files
