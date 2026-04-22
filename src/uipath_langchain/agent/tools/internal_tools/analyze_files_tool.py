@@ -17,17 +17,8 @@ from langchain_core.tools import StructuredTool
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
 )
-from uipath.core.feature_flags import FeatureFlags
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.semantic_proxy import (
-    PiiDetectionRequest,
-    PiiDetectionResponse,
-    PiiDocument,
-    PiiEntityThreshold,
-    PiiFile,
-    rehydrate_from_pii_response,
-)
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
@@ -39,6 +30,7 @@ from uipath_langchain.agent.multimodal import (
     build_file_content_blocks_for,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.tools.internal_tools.pii_masker import PiiMasker
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -55,118 +47,6 @@ ANALYZE_FILES_SYSTEM_MESSAGE = (
     "Analyze the files contents thoroughly to deliver an accurate response "
     "based on the extracted information."
 )
-
-_PII_MASKING_FEATURE_FLAG = "File-Pii-Masking-Enabled"
-
-
-def is_pii_policy_enabled(policy: dict[str, Any] | None) -> bool:
-    """Determine whether PII detection should run.
-
-    Two gates (both must allow):
-
-    1. Local kill-switch — the ``File-Pii-Masking-Enabled`` feature flag
-       (defaults to ``True``; override via ``FeatureFlags.configure_flags``
-       or ``UIPATH_FEATURE_File-Pii-Masking-Enabled`` env var).
-    2. Platform policy — ``data.container.pii-in-flight-agents`` from the
-       AutomationOps deployed-policy response.
-    """
-    if not FeatureFlags.is_flag_enabled(_PII_MASKING_FEATURE_FLAG, default=True):
-        return False
-    if not policy:
-        return False
-    container = policy.get("data", {}).get("container", {})
-    return bool(container.get("pii-in-flight-agents", False))
-
-
-def _build_entity_thresholds_from_policy(
-    policy: dict[str, Any] | None,
-) -> list[PiiEntityThreshold]:
-    """Extract enabled entity thresholds from the deployed policy.
-
-    Filters ``data.pii-entity-table`` to entries where ``pii-entity-is-enabled``
-    is true and maps them to ``PiiEntityThreshold`` objects.
-    """
-    if not policy:
-        return []
-    table = policy.get("data", {}).get("pii-entity-table", [])
-    thresholds: list[PiiEntityThreshold] = []
-    for entry in table:
-        if not entry.get("pii-entity-is-enabled", False):
-            continue
-        category = entry.get("pii-entity-category")
-        confidence = entry.get("pii-entity-confidence-threshold")
-        if category is None or confidence is None:
-            continue
-        thresholds.append(
-            PiiEntityThreshold(
-                category=category,
-                confidence_threshold=confidence,
-            )
-        )
-    return thresholds
-
-
-def _rename_for_masking(file: FileInfo, redacted_url: str) -> FileInfo:
-    """Return a new ``FileInfo`` pointing at the redacted URL with a ``pii_masked_`` name prefix."""
-    if "." in file.name:
-        base, ext = file.name.rsplit(".", 1)
-        new_name = f"pii_masked_{base}.{ext}"
-    else:
-        new_name = f"pii_masked_{file.name}"
-    return FileInfo(url=redacted_url, name=new_name, mime_type=file.mime_type)
-
-
-async def _apply_pii_masking(
-    client: UiPath,
-    policy: dict[str, Any] | None,
-    analysis_task: str,
-    files: list[FileInfo],
-) -> tuple[str, list[FileInfo], PiiDetectionResponse]:
-    """Run PII detection and return a masked prompt, redacted files, and the raw response.
-
-    The returned response is retained so the LLM output can be rehydrated via
-    :func:`rehydrate_from_pii_response` after inference.
-    """
-    pii_request = PiiDetectionRequest(
-        documents=[PiiDocument(id="user-prompt", role="user", document=analysis_task)],
-        files=[
-            PiiFile(
-                file_name=f.name,
-                file_url=f.url,
-                file_type=f.name.rsplit(".", 1)[-1].lower() if "." in f.name else "",
-            )
-            for f in files
-        ],
-        entity_thresholds=_build_entity_thresholds_from_policy(policy) or None,
-    )
-    pii_result = await client.semantic_proxy.detect_pii_async(pii_request)
-    logger.info(
-        "PII detection completed: %d document entities, %d file entities",
-        sum(len(d.pii_entities) for d in pii_result.response),
-        sum(len(f.pii_entities) for f in pii_result.files),
-    )
-
-    masked_prompt = analysis_task
-    for doc in pii_result.response:
-        if doc.id == "user-prompt":
-            if doc.masked_document != analysis_task:
-                logger.info(
-                    "User prompt masked (%d entities replaced)",
-                    len(doc.pii_entities),
-                )
-            masked_prompt = doc.masked_document
-            break
-
-    redacted_by_name = {f.file_name: f.file_url for f in pii_result.files}
-    if redacted_by_name:
-        masked_files = [
-            _rename_for_masking(f, redacted_by_name.get(f.name, f.url)) for f in files
-        ]
-        logger.info("Renamed %d file(s) with pii_masked_ prefix", len(masked_files))
-    else:
-        masked_files = files
-
-    return masked_prompt, masked_files, pii_result
 
 
 def create_analyze_file_tool(
@@ -213,14 +93,18 @@ def create_analyze_file_tool(
         except Exception:
             logger.exception("Failed to fetch deployed policy")
 
-        pii_result: PiiDetectionResponse | None = None
-        if client is not None and is_pii_policy_enabled(policy):
+        masker: PiiMasker | None = None
+        if client is not None and PiiMasker.is_policy_enabled(policy):
+            masker = PiiMasker(client, policy)
             try:
-                analysis_task, files, pii_result = await _apply_pii_masking(
-                    client, policy, analysis_task, files
-                )
-            except Exception as e:
-                logger.error("PII detection raised: %r", e, exc_info=True)
+                analysis_task, files = await masker.apply(analysis_task, files)
+            except Exception as exc:
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.UNEXPECTED_ERROR,
+                    title="PII masking failed",
+                    detail=f"PII detection raised: {exc!r}",
+                    category=UiPathErrorCategory.SYSTEM,
+                ) from exc
 
         try:
             human_message = HumanMessage(content=analysis_task)
@@ -244,14 +128,16 @@ def create_analyze_file_tool(
 
         analysis_result = extract_text_content(result)
 
-        if pii_result is not None:
+        if masker is not None:
             try:
-                rehydrated = rehydrate_from_pii_response(analysis_result, pii_result)
-                if rehydrated != analysis_result:
-                    logger.info("Rehydrated LLM response with PII entities")
-                analysis_result = rehydrated
-            except Exception:
-                logger.exception("Failed to rehydrate LLM response")
+                analysis_result = masker.rehydrate(analysis_result)
+            except Exception as exc:
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.UNEXPECTED_ERROR,
+                    title="PII rehydration failed",
+                    detail=f"Failed to rehydrate LLM response: {exc!r}",
+                    category=UiPathErrorCategory.SYSTEM,
+                ) from exc
 
         return {"analysisResult": analysis_result}
 

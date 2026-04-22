@@ -12,6 +12,10 @@ from uipath.agent.models.agent import (
     AgentInternalToolType,
 )
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.multimodal import FileInfo
 from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
@@ -581,3 +585,227 @@ class TestResolveJobAttachmentArguments:
         assert len(result) == 1
         assert result[0].url == "https://blob.storage.com/files/doc1.pdf"
         mock_uipath_client.attachments.get_blob_file_access_uri_async.assert_called_once()
+
+
+class TestCreateAnalyzeFileToolWithPiiMasking:
+    """Integration tests verifying PiiMasker is wired into the tool correctly.
+
+    Unit tests for PiiMasker itself live in test_pii_masker.py; here we assert
+    that create_analyze_file_tool invokes it under the expected conditions.
+    """
+
+    @pytest.fixture
+    def mock_llm(self):
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(return_value=AIMessage(content="Analyzed result"))
+        llm.model_copy = Mock(return_value=llm)
+        return llm
+
+    @pytest.fixture
+    def resource_config(self):
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "analysisTask": {"type": "string"},
+                "attachments": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["analysisTask", "attachments"],
+        }
+        output_schema = {"type": "object", "properties": {"result": {"type": "string"}}}
+        properties = AgentInternalAnalyzeFilesToolProperties(
+            tool_type=AgentInternalToolType.ANALYZE_FILES
+        )
+        return AgentInternalToolResourceConfig(
+            name="analyze_files",
+            description="Analyze files with AI",
+            input_schema=input_schema,
+            output_schema=output_schema,
+            properties=properties,
+        )
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.PiiMasker")
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath")
+    async def test_invokes_masker_when_policy_enabled(
+        self,
+        mock_uipath_cls,
+        mock_masker_cls,
+        mock_resolve_attachments,
+        mock_add_files,
+        mock_get_wrapper,
+        resource_config,
+        mock_llm,
+    ):
+        mock_client = Mock()
+        mock_client.automation_ops.get_deployed_policy_async = AsyncMock(
+            return_value={"data": {"container": {"pii-in-flight-agents": True}}}
+        )
+        mock_uipath_cls.return_value = mock_client
+
+        mock_masker_cls.is_policy_enabled = Mock(return_value=True)
+        masker_instance = Mock()
+        masker_instance.apply = AsyncMock(
+            return_value=(
+                "contact [EMAIL]",
+                [
+                    FileInfo(
+                        url="https://redacted/doc.pdf",
+                        name="pii_masked_doc.pdf",
+                        mime_type="application/pdf",
+                    )
+                ],
+            )
+        )
+        masker_instance.rehydrate = Mock(return_value="Sent to john@example.com")
+        mock_masker_cls.return_value = masker_instance
+
+        mock_resolve_attachments.return_value = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+            )
+        ]
+        mock_add_files.return_value = HumanMessage(content="contact [EMAIL]")
+        mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Sent to [EMAIL]"))
+        mock_get_wrapper.return_value = Mock()
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName="doc.pdf", MimeType="application/pdf"
+        )
+
+        assert tool.coroutine is not None
+        result = await tool.coroutine(
+            analysisTask="contact john@example.com", attachments=[attachment]
+        )
+
+        mock_masker_cls.is_policy_enabled.assert_called_once_with(
+            {"data": {"container": {"pii-in-flight-agents": True}}}
+        )
+        mock_masker_cls.assert_called_once_with(
+            mock_client, {"data": {"container": {"pii-in-flight-agents": True}}}
+        )
+        masker_instance.apply.assert_awaited_once()
+        masker_instance.rehydrate.assert_called_once_with("Sent to [EMAIL]")
+
+        message_arg, files_arg = mock_add_files.call_args[0]
+        assert message_arg.content == "contact [EMAIL]"
+        assert files_arg[0].name == "pii_masked_doc.pdf"
+
+        assert result == {"analysisResult": "Sent to john@example.com"}
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.PiiMasker")
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath")
+    async def test_skips_masker_when_policy_disabled(
+        self,
+        mock_uipath_cls,
+        mock_masker_cls,
+        mock_resolve_attachments,
+        mock_add_files,
+        mock_get_wrapper,
+        resource_config,
+        mock_llm,
+    ):
+        mock_client = Mock()
+        mock_client.automation_ops.get_deployed_policy_async = AsyncMock(
+            return_value={"data": {"container": {"pii-in-flight-agents": False}}}
+        )
+        mock_uipath_cls.return_value = mock_client
+        mock_masker_cls.is_policy_enabled = Mock(return_value=False)
+
+        mock_resolve_attachments.return_value = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+            )
+        ]
+        mock_add_files.return_value = HumanMessage(content="task")
+        mock_get_wrapper.return_value = Mock()
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName="doc.pdf", MimeType="application/pdf"
+        )
+
+        assert tool.coroutine is not None
+        await tool.coroutine(analysisTask="task", attachments=[attachment])
+
+        # is_policy_enabled checked, but the class was never instantiated.
+        mock_masker_cls.assert_not_called()
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.PiiMasker")
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath")
+    async def test_raises_agent_runtime_error_when_masker_apply_fails(
+        self,
+        mock_uipath_cls,
+        mock_masker_cls,
+        mock_resolve_attachments,
+        mock_add_files,
+        mock_get_wrapper,
+        resource_config,
+        mock_llm,
+    ):
+        mock_client = Mock()
+        mock_client.automation_ops.get_deployed_policy_async = AsyncMock(
+            return_value={"data": {"container": {"pii-in-flight-agents": True}}}
+        )
+        mock_uipath_cls.return_value = mock_client
+
+        mock_masker_cls.is_policy_enabled = Mock(return_value=True)
+        underlying = RuntimeError("proxy unavailable")
+        masker_instance = Mock()
+        masker_instance.apply = AsyncMock(side_effect=underlying)
+        mock_masker_cls.return_value = masker_instance
+
+        mock_resolve_attachments.return_value = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+            )
+        ]
+        mock_get_wrapper.return_value = Mock()
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName="doc.pdf", MimeType="application/pdf"
+        )
+
+        assert tool.coroutine is not None
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.coroutine(analysisTask="task", attachments=[attachment])
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.UNEXPECTED_ERROR
+        )
+        assert exc_info.value.__cause__ is underlying
+        mock_llm.ainvoke.assert_not_called()
+        mock_add_files.assert_not_called()
