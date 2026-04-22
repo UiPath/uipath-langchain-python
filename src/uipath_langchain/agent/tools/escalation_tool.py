@@ -288,8 +288,8 @@ def create_escalation_tool(
         # --- Escalation memory: persist outcome for future recall ---
         await _ingest_escalation_memory(
             _memory_space_id,
-            answer=json.dumps(escalation_output),
-            attributes=json.dumps(serialized_data),
+            answer=json.dumps({"output": escalation_output, "outcome": outcome}),
+            attributes=json.dumps({"arguments": serialized_data}),
             folder_path=folder_path,
         )
 
