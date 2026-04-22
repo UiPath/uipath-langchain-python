@@ -424,6 +424,22 @@ def _get_current_span_and_trace_ids() -> tuple[str, str]:
     return ("", trace_id)
 
 
+def _set_memory_span_attribute(name: str, value: bool) -> None:
+    """Set a memory-related attribute on the current OTel span.
+
+    Mirrors EscalationToolSpanAttributes in the Temporal backend
+    (EscalationToolSpanAttributes.cs:19-25, EscalationToolWorkflow.cs:131-133).
+    """
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span.is_recording():
+            span.set_attribute(name, value)
+    except ImportError:
+        pass
+
+
 async def _check_escalation_memory_cache(
     memory_space_id: str | None,
     serialized_input: dict[str, Any],
@@ -505,6 +521,8 @@ async def _check_escalation_memory_cache(
             _escalation_logger.info(
                 "Escalation memory cache hit for space '%s'", memory_space_id
             )
+            # Ref: EscalationToolWorkflow.cs:103 — span.Attributes.FromMemory = true
+            _set_memory_span_attribute("fromMemory", True)
             return {
                 "action": EscalationAction.CONTINUE,
                 "output": cached.output,
@@ -528,9 +546,16 @@ async def _ingest_escalation_memory(
     trace_id: str = "",
     folder_path: str | None = None,
 ) -> None:
-    """Persist a resolved escalation outcome into memory."""
+    """Persist a resolved escalation outcome into memory.
+
+    Sets span attributes to track memory state (EscalationToolWorkflow.cs:131-133):
+      fromMemory=false (result was not from cache), savedToMemory=true/false.
+    """
     if not memory_space_id:
         return
+
+    # Ref: EscalationToolWorkflow.cs:132 — span.Attributes.FromMemory = false
+    _set_memory_span_attribute("fromMemory", False)
 
     try:
         from uipath.platform.memory import EscalationMemoryIngestRequest
@@ -550,10 +575,13 @@ async def _ingest_escalation_memory(
             request=request,
             folder_key=folder_key,
         )
+        # Ref: EscalationToolExecutor.cs:543 — savedToMemory = true on success
+        _set_memory_span_attribute("savedToMemory", True)
         _escalation_logger.info(
             "Ingested escalation outcome into memory space '%s'", memory_space_id
         )
     except Exception:
+        _set_memory_span_attribute("savedToMemory", False)
         _escalation_logger.warning(
             "Failed to ingest escalation outcome into memory space '%s'",
             memory_space_id,
