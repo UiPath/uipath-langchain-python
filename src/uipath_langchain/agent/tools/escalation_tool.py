@@ -281,6 +281,13 @@ def create_escalation_tool(
             return await create_escalation_task()
 
         result = await escalate(**kwargs)
+        # Extract completed_by_user before validation drops extra fields
+        # Ref: EscalationToolExecutor.cs:514-516 — resolves ReviewedBy email
+        _completed_by_user = (
+            result.get("completed_by_user")
+            if isinstance(result, dict)
+            else getattr(result, "completed_by_user", None)
+        )
         if isinstance(result, dict):
             result = TypeAdapter(EscalationToolOutput).validate_python(result)
 
@@ -322,6 +329,7 @@ def create_escalation_tool(
                 attributes=json.dumps({"arguments": serialized_data}),
                 span_id=span_id,
                 trace_id=trace_id,
+                user_id=_get_user_email(_completed_by_user),
                 folder_path=folder_path,
             )
 
@@ -546,6 +554,7 @@ async def _ingest_escalation_memory(
     attributes: str,
     span_id: str,
     trace_id: str,
+    user_id: str | None = None,
     folder_path: str | None = None,
 ) -> None:
     """Persist a resolved escalation outcome into memory.
@@ -565,6 +574,7 @@ async def _ingest_escalation_memory(
             trace_id=trace_id,
             answer=answer,
             attributes=attributes,
+            user_id=user_id,
         )
         sdk = UiPath()
         folder_key = (
