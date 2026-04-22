@@ -477,7 +477,9 @@ async def _check_escalation_memory_cache(
             threshold = memory_settings.get("threshold", 0.0)
             mode_str = memory_settings.get("searchMode", "Hybrid")
             search_mode = (
-                SearchMode(mode_str) if mode_str in SearchMode.__members__ else SearchMode.Hybrid
+                SearchMode(mode_str)
+                if mode_str in SearchMode.__members__
+                else SearchMode.Hybrid
             )
             for fs in memory_settings.get("fieldSettings", []):
                 if isinstance(fs, dict) and "name" in fs:
