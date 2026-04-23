@@ -81,7 +81,7 @@ class TestMemoryRecallNode:
         mock_response.system_prompt_injection = "\n\nBased on past runs..."
         mock_sdk.memory.search_async = AsyncMock(return_value=mock_response)
 
-        config = MemoryConfig(memory_space_id="space-123")
+        config = MemoryConfig(memory_space_id="space-123", field_weights={"topic": 1.0})
         node = create_memory_recall_node(config)
 
         state = MagicMock(spec=AgentGraphState)
@@ -101,7 +101,7 @@ class TestMemoryRecallNode:
         mock_uipath_cls.return_value = mock_sdk
         mock_sdk.memory.search_async = AsyncMock(side_effect=Exception("fail"))
 
-        config = MemoryConfig(memory_space_id="space-123")
+        config = MemoryConfig(memory_space_id="space-123", field_weights={"topic": 1.0})
         node = create_memory_recall_node(config)
 
         state = MagicMock(spec=AgentGraphState)
@@ -116,7 +116,7 @@ class TestMemoryRecallNode:
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_user_inputs(self) -> None:
-        config = MemoryConfig(memory_space_id="space-123")
+        config = MemoryConfig(memory_space_id="space-123", field_weights={"topic": 1.0})
         node = create_memory_recall_node(config)
 
         state = MagicMock(spec=AgentGraphState)
@@ -139,7 +139,7 @@ class TestCreateAgentWithMemory:
 
     @pytest.fixture
     def memory_config(self):
-        return MemoryConfig(memory_space_id="test-space-id")
+        return MemoryConfig(memory_space_id="test-space-id", field_weights={"topic": 1.0})
 
     def test_graph_has_memory_recall_node(
         self,

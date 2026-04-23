@@ -3,7 +3,7 @@ from typing import Annotated, Any, Hashable, Literal, Optional
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.platform.attachments import Attachment
 
@@ -75,13 +75,17 @@ class MemoryConfig(BaseModel):
     result_count: int = Field(default=3, ge=1, le=10)
     threshold: float = Field(default=0.0, ge=0.0, le=1.0)
     field_weights: dict[str, float] = Field(
-        default_factory=dict,
         description=(
             "Per-field search weights. Keys are input field names, values are "
-            "weights between 0.0 and 1.0. Only fields listed here are used for "
-            "memory search. If empty, all input fields are used with default weight."
+            "weights between 0.0 and 1.0. At least one field must be specified."
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_field_weights(self) -> "MemoryConfig":
+        if not self.field_weights:
+            raise ValueError("field_weights must contain at least one field")
+        return self
 
 
 class AgentGraphConfig(BaseModel):
