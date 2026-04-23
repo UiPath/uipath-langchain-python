@@ -39,14 +39,25 @@ def create_memory_recall_node(
     """
 
     async def memory_recall_node(state: AgentGraphState) -> dict[str, Any]:
-        # Extract user inputs from state. First try full state extraction,
-        # then fall back to reading field_weights keys directly from state
-        # attributes (needed when LangGraph deserializes as base class).
+        # Debug: comprehensive state inspection
+        logger.warning(
+            "Memory recall debug: type=%s, is_dict=%s, __dict__keys=%s, "
+            "hasattr_a=%s, model_extra=%s, pydantic_extra=%s",
+            type(state).__name__,
+            isinstance(state, dict),
+            list(state.__dict__.keys()) if hasattr(state, "__dict__") else "N/A",
+            hasattr(state, "a"),
+            getattr(state, "model_extra", "N/A"),
+            getattr(state, "__pydantic_extra__", "N/A"),
+        )
+        # Try dict-style access
+        try:
+            logger.warning("Memory recall debug: state['a']=%s", state["a"])  # type: ignore[index]
+        except (KeyError, TypeError) as e:
+            logger.warning("Memory recall debug: state['a'] failed: %s", e)
+
         input_arguments = _extract_user_inputs(state)
         if not input_arguments and memory_config.field_weights:
-            # LangGraph may pass state as base AgentGraphState where
-            # model_dump() misses dynamic input fields. Read them
-            # directly from state attributes using configured field names.
             for field_name in memory_config.field_weights:
                 value = getattr(state, field_name, None)
                 if value is not None:
