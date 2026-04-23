@@ -77,11 +77,11 @@ def create_memory_recall_node(
                 len(response.results),
                 memory_config.memory_space_id,
             )
-        except Exception:
+        except Exception as e:
             logger.warning(
-                "Memory recall failed for space '%s', continuing without injection",
+                "Memory recall failed for space '%s': %s",
                 memory_config.memory_space_id,
-                exc_info=True,
+                str(e),
             )
             injection = ""
 
