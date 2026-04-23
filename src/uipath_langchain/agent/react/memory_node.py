@@ -142,8 +142,10 @@ def create_memory_recall_node(
                         results_count,
                         memory_config.memory_space_id,
                     )
-                    # Set request/response on fewshot span as JSON strings
-                    # (exporter parses JSON strings back to objects)
+                    # Set request/response on fewshot span as JSON strings.
+                    # The exporter parses JSON strings back to objects.
+                    # The UI reads "response" to display matched memory items.
+                    # Ref: DynamicFewShotWorkflow.cs:50,71
                     if fewshot_span and hasattr(fewshot_span, "set_attribute"):
                         import json
 
@@ -151,6 +153,12 @@ def create_memory_recall_node(
                             "request",
                             json.dumps(
                                 request.model_dump(by_alias=True, exclude_none=True)
+                            ),
+                        )
+                        fewshot_span.set_attribute(
+                            "response",
+                            json.dumps(
+                                response.model_dump(by_alias=True, exclude_none=True)
                             ),
                         )
                 except Exception as e:
