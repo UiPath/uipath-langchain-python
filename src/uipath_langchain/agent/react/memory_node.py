@@ -93,18 +93,16 @@ def create_memory_recall_node(
                 memory_config.memory_space_id,
             )
         except Exception as e:
-            # Try to extract HTTP response body from the exception
-            error_detail = str(e)
-            if hasattr(e, "response"):
-                try:
-                    error_detail = f"{e} | body={e.response.text}"  # type: ignore[union-attr]
-                except Exception:
-                    pass
-            elif hasattr(e, "__cause__") and hasattr(e.__cause__, "response"):
-                try:
-                    error_detail = f"{e} | body={e.__cause__.response.text}"  # type: ignore[union-attr]
-                except Exception:
-                    pass
+            # Try to extract HTTP response body from the exception chain
+            error_detail = repr(e)
+            for exc in [e, getattr(e, "__cause__", None), getattr(e, "__context__", None)]:
+                if exc and hasattr(exc, "response"):
+                    try:
+                        resp = exc.response  # type: ignore[union-attr]
+                        error_detail = f"{exc} | status={resp.status_code} body={resp.text}"
+                    except Exception:
+                        pass
+                    break
             logger.warning(
                 "Memory recall failed for space '%s': %s",
                 memory_config.memory_space_id,
