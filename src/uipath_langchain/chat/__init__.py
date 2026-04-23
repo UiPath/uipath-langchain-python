@@ -84,9 +84,11 @@ def __getattr__(name):
 
         return UiPathChatFireworks
     if name == "UiPathChatVertex":
-        from uipath_langchain.chat._legacy.vertex import UiPathChatVertex
+        from uipath_langchain_client.clients.google.chat_models import (
+            UiPathChatGoogleGenerativeAI,
+        )
 
-        return UiPathChatVertex
+        return UiPathChatGoogleGenerativeAI
     if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
         from uipath_langchain.chat._legacy import supported_models
 
