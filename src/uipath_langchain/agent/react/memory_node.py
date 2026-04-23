@@ -17,9 +17,6 @@ from uipath.platform.memory import (
     SearchSettings,
 )
 
-from uipath_langchain._utils import get_current_span_and_trace_ids
-
-from ._memory_tracing import _now_iso, emit_memory_recall_spans
 from .types import AgentGraphState, MemoryConfig
 
 logger = logging.getLogger(__name__)
@@ -68,20 +65,15 @@ def create_memory_recall_node(
             definition_system_prompt="",
         )
 
-        span_id, trace_id = get_current_span_and_trace_ids()
-        start_time = _now_iso()
         results_count = 0
         error_msg: str | None = None
-        response_payload: dict[str, Any] | None = None
 
         try:
             sdk = UiPath()
             # Resolve folder_key: explicit > resolve from folder_path > SDK default
             folder_key = memory_config.folder_key
             if not folder_key and memory_config.folder_path:
-                folder_key = sdk.folders.retrieve_folder_key(
-                    memory_config.folder_path
-                )
+                folder_key = sdk.folders.retrieve_folder_key(memory_config.folder_path)
             logger.info(
                 "Memory recall: searching space='%s', folder_key='%s', "
                 "fields=%s, threshold=%s, result_count=%s",
@@ -105,11 +97,17 @@ def create_memory_recall_node(
             )
         except Exception as e:
             error_detail = repr(e)
-            for exc in [e, getattr(e, "__cause__", None), getattr(e, "__context__", None)]:
+            for exc in [
+                e,
+                getattr(e, "__cause__", None),
+                getattr(e, "__context__", None),
+            ]:
                 if exc and hasattr(exc, "response"):
                     try:
                         resp = exc.response  # type: ignore[union-attr]
-                        error_detail = f"{exc} | status={resp.status_code} body={resp.text}"
+                        error_detail = (
+                            f"{exc} | status={resp.status_code} body={resp.text}"
+                        )
                     except Exception:
                         pass
                     break
@@ -121,25 +119,41 @@ def create_memory_recall_node(
             injection = ""
             error_msg = error_detail
 
-        end_time = _now_iso()
+        # Emit trace spans via OpenTelemetry so they get picked up by
+        # the existing LlmOpsHttpExporter with the correct trace ID.
+        try:
+            from opentelemetry import trace as otel_trace
 
-        # Emit trace spans: "Find previous memories" + "Apply dynamic few shot"
-        # Ref: DynamicFewShotWorkflow.cs:29-52
-        if trace_id:
-            await emit_memory_recall_spans(
-                sdk=None,
-                trace_id=trace_id,
-                parent_span_id=span_id or None,
-                memory_space_id=memory_config.memory_space_id,
-                memory_space_name=getattr(memory_config, "memory_space_name", ""),
-                request_payload=request.model_dump(by_alias=True, exclude_none=True),
-                response_payload=response_payload,
-                results_count=results_count,
-                injection=injection or "",
-                start_time=start_time,
-                end_time=end_time,
-                error=error_msg,
-            )
+            tracer = otel_trace.get_tracer("uipath_langchain.memory")
+            with tracer.start_as_current_span(
+                "Find previous memories",
+                attributes={
+                    "type": "agentMemoryLookup",
+                    "span_type": "agentMemoryLookup",
+                    "uipath.custom_instrumentation": True,
+                    "memorySpaceName": memory_config.memory_space_name or "",
+                    "memorySpaceId": memory_config.memory_space_id,
+                    "strategy": "DynamicFewShotPrompt",
+                    "memoryItemsMatched": results_count,
+                },
+            ) as lookup_span:
+                with tracer.start_as_current_span(
+                    "Apply dynamic few shot",
+                    attributes={
+                        "type": "applyDynamicFewShot",
+                        "span_type": "applyDynamicFewShot",
+                        "uipath.custom_instrumentation": True,
+                        "memorySpaceName": memory_config.memory_space_name or "",
+                        "memorySpaceId": memory_config.memory_space_id,
+                    },
+                ):
+                    pass  # Child span just marks the time range
+                if error_msg:
+                    lookup_span.set_status(otel_trace.StatusCode.ERROR, error_msg)
+        except ImportError:
+            pass
+        except Exception:
+            logger.debug("Failed to emit memory recall OTel spans", exc_info=True)
 
         if not injection:
             return {}
