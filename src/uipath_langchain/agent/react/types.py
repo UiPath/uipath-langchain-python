@@ -71,6 +71,10 @@ class MemoryConfig(BaseModel):
     folder_key: str | None = Field(
         default=None, description="Folder key for the memory resource."
     )
+    folder_path: str | None = Field(
+        default=None,
+        description="Folder path for the memory resource. Resolved to folder_key at runtime if folder_key is not set.",
+    )
     # Defaults match FE episodic memory settings (agentEditor.ts:324-328)
     result_count: int = Field(default=3, ge=1, le=10)
     threshold: float = Field(default=0.0, ge=0.0, le=1.0)
