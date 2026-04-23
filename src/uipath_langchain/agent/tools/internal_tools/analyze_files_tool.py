@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 import uuid
 from typing import Any, cast
@@ -29,6 +30,7 @@ from uipath_langchain.agent.multimodal import (
     build_file_content_blocks_for,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.tools.internal_tools.pii_masker import PiiMasker
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -37,6 +39,8 @@ from uipath_langchain.chat.helpers import (
     append_content_blocks_to_message,
     extract_text_content,
 )
+
+logger = logging.getLogger("uipath")
 
 ANALYZE_FILES_SYSTEM_MESSAGE = (
     "Process the provided files to complete the given task. "
@@ -81,6 +85,27 @@ def create_analyze_file_tool(
         if not files:
             return {"analysisResult": "No attachments provided to analyze."}
 
+        client: UiPath | None = None
+        policy: dict[str, Any] | None = None
+        try:
+            client = UiPath()
+            policy = await client.automation_ops.get_deployed_policy_async()
+        except Exception:
+            logger.exception("Failed to fetch deployed policy")
+
+        masker: PiiMasker | None = None
+        if client is not None and PiiMasker.is_policy_enabled(policy):
+            masker = PiiMasker(client, policy)
+            try:
+                analysis_task, files = await masker.apply(analysis_task, files)
+            except Exception as exc:
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.UNEXPECTED_ERROR,
+                    title="PII masking failed",
+                    detail=f"PII detection raised: {exc!r}",
+                    category=UiPathErrorCategory.SYSTEM,
+                ) from exc
+
         try:
             human_message = HumanMessage(content=analysis_task)
             human_message_with_files = await add_files_to_message(human_message, files)
@@ -102,6 +127,18 @@ def create_analyze_file_tool(
         del messages, human_message_with_files, files
 
         analysis_result = extract_text_content(result)
+
+        if masker is not None:
+            try:
+                analysis_result = masker.rehydrate(analysis_result)
+            except Exception as exc:
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.UNEXPECTED_ERROR,
+                    title="PII rehydration failed",
+                    detail=f"Failed to rehydrate LLM response: {exc!r}",
+                    category=UiPathErrorCategory.SYSTEM,
+                ) from exc
+
         return {"analysisResult": analysis_result}
 
     job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)

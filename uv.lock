@@ -4375,7 +4375,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.10.1"
+version = "0.10.2"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4459,7 +4459,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.10.0,<1.11.0" },
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.10.0,<1.11.0" },
     { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.10.0,<1.11.0" },
-    { name = "uipath-platform", specifier = ">=0.1.30,<0.2.0" },
+    { name = "uipath-platform", specifier = ">=0.1.35,<0.2.0" },
     { name = "uipath-runtime", specifier = ">=0.10.0,<0.11.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "all"]
