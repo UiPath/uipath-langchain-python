@@ -11,7 +11,7 @@ from uipath.core.guardrails import (
 def mock_env_vars():
     return {
         "UIPATH_URL": "http://example.com",
-        "UIPATH_ACCESS_TOKEN": "***",
+        "UIPATH_ACCESS_TOKEN": "eyJhbGciOiAiSFMyNTYiLCAidHlwIjogIkpXVCJ9.eyJzdWIiOiAidGVzdCIsICJpc3MiOiAidGVzdCJ9.signature",
         "UIPATH_TENANT_ID": "test-tenant-id",
         "UIPATH_ORGANIZATION_ID": "test-org-id",
     }

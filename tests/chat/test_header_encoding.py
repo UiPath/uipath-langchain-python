@@ -4,7 +4,7 @@ from urllib.parse import quote
 
 import pytest
 
-from uipath_langchain.chat.openai import UiPathChatOpenAI
+from uipath_langchain.chat._legacy.openai import UiPathChatOpenAI
 
 NON_ASCII_PROCESS_KEY = "Solution.17.agent.GetCompanyIdAgent-請-test"
 ASCII_PROCESS_KEY = "Solution.17.agent.MyAgent-test"
@@ -93,7 +93,7 @@ class TestVertexHeaderEncoding:
         pytest.importorskip("google.genai", reason="google-genai not installed")
 
     def test_non_ascii_process_key_encoded(self) -> None:
-        from uipath_langchain.chat.vertex import UiPathChatVertex
+        from uipath_langchain.chat._legacy.vertex import UiPathChatVertex
 
         env = {**BASE_ENV, "UIPATH_PROCESS_KEY": NON_ASCII_PROCESS_KEY}
         with patch.dict(os.environ, env, clear=False):
@@ -104,7 +104,7 @@ class TestVertexHeaderEncoding:
         value.encode("ascii")
 
     def test_ascii_process_key_unchanged(self) -> None:
-        from uipath_langchain.chat.vertex import UiPathChatVertex
+        from uipath_langchain.chat._legacy.vertex import UiPathChatVertex
 
         env = {**BASE_ENV, "UIPATH_PROCESS_KEY": ASCII_PROCESS_KEY}
         with patch.dict(os.environ, env, clear=False):
@@ -112,7 +112,7 @@ class TestVertexHeaderEncoding:
         assert headers["x-uipath-processkey"] == quote(ASCII_PROCESS_KEY, safe="")
 
     def test_context_headers_included(self) -> None:
-        from uipath_langchain.chat.vertex import UiPathChatVertex
+        from uipath_langchain.chat._legacy.vertex import UiPathChatVertex
 
         env = {
             **BASE_ENV,
@@ -133,13 +133,16 @@ class TestBedrockHeaderEncoding:
 
     def test_non_ascii_process_key_encoded(self) -> None:
         pytest.importorskip("botocore", reason="botocore not installed")
-        from uipath_langchain.chat.bedrock import AwsBedrockCompletionsPassthroughClient
+        from uipath_langchain.chat._legacy.bedrock import (
+            AwsBedrockCompletionsPassthroughClient,
+        )
 
         env = {**BASE_ENV, "UIPATH_PROCESS_KEY": NON_ASCII_PROCESS_KEY}
         with (
             patch.dict(os.environ, env, clear=False),
             patch(
-                "uipath_langchain.chat.bedrock.boto3.client", return_value=MagicMock()
+                "uipath_langchain.chat._legacy.bedrock.boto3.client",
+                return_value=MagicMock(),
             ),
         ):
             client = AwsBedrockCompletionsPassthroughClient(
@@ -159,7 +162,9 @@ class TestBedrockHeaderEncoding:
 
     def test_context_headers_included(self) -> None:
         pytest.importorskip("botocore", reason="botocore not installed")
-        from uipath_langchain.chat.bedrock import AwsBedrockCompletionsPassthroughClient
+        from uipath_langchain.chat._legacy.bedrock import (
+            AwsBedrockCompletionsPassthroughClient,
+        )
 
         env = {
             **BASE_ENV,
@@ -170,7 +175,8 @@ class TestBedrockHeaderEncoding:
         with (
             patch.dict(os.environ, env, clear=False),
             patch(
-                "uipath_langchain.chat.bedrock.boto3.client", return_value=MagicMock()
+                "uipath_langchain.chat._legacy.bedrock.boto3.client",
+                return_value=MagicMock(),
             ),
         ):
             client = AwsBedrockCompletionsPassthroughClient(

@@ -1,6 +1,6 @@
 import httpx
 
-from uipath_langchain.chat.openai import _rewrite_openai_url
+from uipath_langchain.chat._legacy.openai import _rewrite_openai_url
 
 
 class TestRewriteOpenAIUrl:
