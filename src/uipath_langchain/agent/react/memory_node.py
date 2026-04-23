@@ -75,10 +75,13 @@ def create_memory_recall_node(
                 memory_config.threshold,
                 memory_config.result_count,
             )
+            # Don't pass folder_key explicitly — let the SDK resolve it
+            # from its execution context (UIPATH_FOLDER_KEY env var or
+            # FolderContext). Passing None explicitly is equivalent to
+            # omitting it.
             response = await sdk.memory.search_async(
                 memory_space_id=memory_config.memory_space_id,
                 request=request,
-                folder_key=memory_config.folder_key,
             )
             injection = response.system_prompt_injection
             logger.warning(
