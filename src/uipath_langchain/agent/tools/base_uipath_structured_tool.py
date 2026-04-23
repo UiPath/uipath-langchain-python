@@ -15,12 +15,17 @@ from pydantic import BaseModel
 class BaseUiPathStructuredTool(StructuredTool):
     """Base class for UiPath structured tools.
 
-    Extends LangChain's StructuredTool to override the _run and _arun methods.
-    The only difference is that the self reference variable is renamed, to avoid conflicts with payload keys.
+    Extends LangChain's StructuredTool with two categories of override:
 
-    DO NOT CHANGE ANYTHING IN THESE METHODS.
-    There are tests that verify the implementations against the upstream LangChain implementations.
+    1. Upstream-pinned: _run, _arun. These mirror StructuredTool's implementation
+       verbatim except the self parameter is renamed to avoid colliding with a
+       payload key literally named 'self'. DO NOT CHANGE — bytecode-pin tests
+       catch upstream drift and require re-syncing when LangChain changes.
 
+    2. Intentional divergence: _parse_input, tool_call_schema. These work around
+       LangChain's handling of field aliases whose names shadow inherited
+       BaseModel members (schema, copy, validate, dict, json). See PC-4332 and
+       the docstrings on those methods.
     """
 
     def _run(
@@ -138,6 +143,10 @@ class BaseUiPathStructuredTool(StructuredTool):
         'schema'), that causes the LLM to see and emit the Python-safe name
         (schema_) instead of the user-facing property ('schema').
         """
+        # Upstream builds a fresh subset class per property access (no caching
+        # in BaseTool.tool_call_schema), so mutating field info and config here
+        # is local to this call. If upstream ever adds caching this override
+        # must be revisited to avoid cross-instance state leakage.
         subset = super().tool_call_schema
         source = self.args_schema
         if not (

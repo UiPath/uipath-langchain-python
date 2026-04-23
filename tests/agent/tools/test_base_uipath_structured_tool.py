@@ -133,6 +133,10 @@ def test_function_with_self_parameter():
     assert result == "test:42"
 
 
+async def _noop_coroutine(**kwargs: object) -> dict[str, object]:
+    return kwargs
+
+
 def test_tool_call_schema_preserves_reserved_name_aliases():
     """The JSON schema exposed to the LLM must use the user-facing property names
     (e.g. 'schema'), not the Python-safe field names chosen by the converter
@@ -163,10 +167,6 @@ def test_tool_call_schema_preserves_reserved_name_aliases():
     )
     properties = tool_call_schema.model_json_schema()["properties"]
     assert set(properties) == {"schema", "json"}
-
-
-async def _noop_coroutine(**kwargs: object) -> dict[str, object]:
-    return kwargs
 
 
 @pytest.mark.asyncio
