@@ -62,6 +62,7 @@ def create_memory_recall_node(
                 result_count=memory_config.result_count,
                 search_mode=SearchMode.Hybrid,
             ),
+            definition_system_prompt="",
         )
 
         try:
