@@ -39,22 +39,19 @@ def create_memory_recall_node(
     """
 
     async def memory_recall_node(state: AgentGraphState) -> dict[str, Any]:
-        # Debug: log state type and keys to diagnose empty inputs
-        if isinstance(state, dict):
-            logger.warning("Memory recall: state is dict, keys=%s", list(state.keys()))
-        else:
-            logger.warning(
-                "Memory recall: state type=%s, fields=%s",
-                type(state).__name__,
-                list(state.model_fields.keys()) if hasattr(state, "model_fields") else "N/A",
-            )
-            logger.warning(
-                "Memory recall: state dump keys=%s",
-                list(state.model_dump().keys()) if hasattr(state, "model_dump") else "N/A",
-            )
-
+        # Extract user inputs from state. First try full state extraction,
+        # then fall back to reading field_weights keys directly from state
+        # attributes (needed when LangGraph deserializes as base class).
         input_arguments = _extract_user_inputs(state)
-        logger.warning("Memory recall: extracted inputs=%s", input_arguments)
+        if not input_arguments and memory_config.field_weights:
+            # LangGraph may pass state as base AgentGraphState where
+            # model_dump() misses dynamic input fields. Read them
+            # directly from state attributes using configured field names.
+            for field_name in memory_config.field_weights:
+                value = getattr(state, field_name, None)
+                if value is not None:
+                    input_arguments[field_name] = value
+
         if not input_arguments:
             logger.warning("Memory recall: no user inputs found in state")
             return {}
@@ -109,13 +106,29 @@ def create_memory_recall_node(
 
 
 def _extract_user_inputs(state: AgentGraphState) -> dict[str, Any]:
-    """Extract user-defined input fields from graph state, excluding internal fields."""
+    """Extract user-defined input fields from graph state, excluding internal fields.
+
+    LangGraph may pass state as a Pydantic model where base-class
+    model_dump() misses dynamically-added input schema fields. We use
+    the runtime type's model_dump() to capture all fields.
+    """
     internal_fields = set(AgentGraphState.model_fields.keys())
     if isinstance(state, dict):
-        return {k: v for k, v in state.items() if k not in internal_fields}
+        state_data = state
+    elif hasattr(state, "model_dump"):
+        # model_dump() returns declared fields. For dynamically-created
+        # subclasses (CompleteAgentGraphState), also check model_extra
+        # and __pydantic_extra__ for input schema fields
+        state_data = state.model_dump()
+        if hasattr(state, "model_extra") and state.model_extra:
+            state_data.update(state.model_extra)
+        elif hasattr(state, "__pydantic_extra__") and state.__pydantic_extra__:
+            state_data.update(state.__pydantic_extra__)
+    else:
+        state_data = {}
     return {
         k: v
-        for k, v in state.model_dump().items()
+        for k, v in state_data.items()
         if k not in internal_fields and v is not None
     }
 
