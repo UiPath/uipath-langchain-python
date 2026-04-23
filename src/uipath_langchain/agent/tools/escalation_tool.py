@@ -467,7 +467,14 @@ async def _check_escalation_memory_cache(
             if k in field_settings_lookup:
                 fs = field_settings_lookup[k]
                 settings = FieldSettings(weight=fs.get("weight", 1.0))
-            fields.append(SearchField(key_path=[k], value=str(v), settings=settings))
+            # key_path must be prefixed with field type (FieldBuilder.cs:15)
+            fields.append(
+                SearchField(
+                    key_path=["escalation-input", k],
+                    value=str(v),
+                    settings=settings,
+                )
+            )
         if not fields:
             return None
 

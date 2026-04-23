@@ -38,15 +38,15 @@ class TestBuildSearchFields:
         fields = _build_search_fields({"topic": "python", "level": "advanced"})
         assert len(fields) == 2
         key_paths = [f.key_path for f in fields]
-        assert ["topic"] in key_paths
-        assert ["level"] in key_paths
+        assert ["agent-input", "topic"] in key_paths
+        assert ["agent-input", "level"] in key_paths
 
     def test_filters_none_and_uipath_prefix(self) -> None:
         fields = _build_search_fields(
             {"topic": "py", "uipath__settings": {}, "empty": None}
         )
         assert len(fields) == 1
-        assert fields[0].key_path == ["topic"]
+        assert fields[0].key_path == ["agent-input", "topic"]
 
     def test_empty_input(self) -> None:
         assert _build_search_fields({}) == []

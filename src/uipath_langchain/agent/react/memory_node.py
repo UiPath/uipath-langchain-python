@@ -149,8 +149,15 @@ def _extract_user_inputs(state: Any) -> dict[str, Any]:
 def _build_search_fields(
     input_arguments: dict[str, Any],
     field_weights: dict[str, float] | None = None,
+    field_type: str = "agent-input",
 ) -> list[SearchField]:
-    """Convert agent input arguments to SearchField objects."""
+    """Convert agent input arguments to SearchField objects.
+
+    The key_path must be prefixed with the field type, matching the
+    Temporal backend's FieldBuilder (FieldBuilder.cs:15):
+      keyPath = [fieldType.StringValue(), fieldName]
+    e.g. ["agent-input", "a"] for episodic memory.
+    """
     fields: list[SearchField] = []
     for name, value in input_arguments.items():
         if value is None or name.startswith("uipath__"):
@@ -161,5 +168,9 @@ def _build_search_fields(
         settings = FieldSettings()
         if field_weights and name in field_weights:
             settings = FieldSettings(weight=field_weights[name])
-        fields.append(SearchField(key_path=[name], value=str(value), settings=settings))
+        fields.append(
+            SearchField(
+                key_path=[field_type, name], value=str(value), settings=settings
+            )
+        )
     return fields
