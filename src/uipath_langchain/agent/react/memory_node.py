@@ -6,6 +6,7 @@ the INIT node can append it to the system prompt.
 """
 
 import logging
+from contextlib import contextmanager
 from typing import Any
 
 from uipath.platform import UiPath
@@ -20,6 +21,12 @@ from uipath.platform.memory import (
 from .types import AgentGraphState, MemoryConfig
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _noop_context():
+    """No-op context manager when OTel is unavailable."""
+    yield None
 
 
 def create_memory_recall_node(
@@ -66,66 +73,20 @@ def create_memory_recall_node(
         )
 
         results_count = 0
-        error_msg: str | None = None
-
-        try:
-            sdk = UiPath()
-            # Resolve folder_key: explicit > resolve from folder_path > SDK default
-            folder_key = memory_config.folder_key
-            if not folder_key and memory_config.folder_path:
-                folder_key = sdk.folders.retrieve_folder_key(memory_config.folder_path)
-            logger.info(
-                "Memory recall: searching space='%s', folder_key='%s', "
-                "fields=%s, threshold=%s, result_count=%s",
-                memory_config.memory_space_id,
-                folder_key,
-                [(f.key_path, f.value) for f in fields],
-                memory_config.threshold,
-                memory_config.result_count,
-            )
-            response = await sdk.memory.search_async(
-                memory_space_id=memory_config.memory_space_id,
-                request=request,
-                folder_key=folder_key,
-            )
-            injection = response.system_prompt_injection
-            results_count = len(response.results)
-            logger.info(
-                "Memory recall returned %d results for space '%s'",
-                results_count,
-                memory_config.memory_space_id,
-            )
-        except Exception as e:
-            error_detail = repr(e)
-            for exc in [
-                e,
-                getattr(e, "__cause__", None),
-                getattr(e, "__context__", None),
-            ]:
-                if exc and hasattr(exc, "response"):
-                    try:
-                        resp = exc.response  # type: ignore[union-attr]
-                        error_detail = (
-                            f"{exc} | status={resp.status_code} body={resp.text}"
-                        )
-                    except Exception:
-                        pass
-                    break
-            logger.warning(
-                "Memory recall failed for space '%s': %s",
-                memory_config.memory_space_id,
-                error_detail,
-            )
-            injection = ""
-            error_msg = error_detail
-
-        # Emit trace spans via OpenTelemetry so they get picked up by
-        # the existing LlmOpsHttpExporter with the correct trace ID.
+        # Wrap the search in OTel spans so "Find previous memories" and
+        # "Apply dynamic few shot" appear in the Execution Trace with
+        # correct timing. The LlmOpsHttpExporter picks these up.
+        injection = ""
         try:
             from opentelemetry import trace as otel_trace
 
             tracer = otel_trace.get_tracer("uipath_langchain.memory")
-            with tracer.start_as_current_span(
+        except ImportError:
+            tracer = None  # type: ignore[assignment]
+            otel_trace = None  # type: ignore[assignment]
+
+        lookup_span_ctx = (
+            tracer.start_as_current_span(
                 "Find previous memories",
                 attributes={
                     "type": "agentMemoryLookup",
@@ -134,10 +95,15 @@ def create_memory_recall_node(
                     "memorySpaceName": memory_config.memory_space_name or "",
                     "memorySpaceId": memory_config.memory_space_id,
                     "strategy": "DynamicFewShotPrompt",
-                    "memoryItemsMatched": results_count,
                 },
-            ) as lookup_span:
-                with tracer.start_as_current_span(
+            )
+            if tracer
+            else _noop_context()
+        )
+
+        with lookup_span_ctx as lookup_span:
+            fewshot_span_ctx = (
+                tracer.start_as_current_span(
                     "Apply dynamic few shot",
                     attributes={
                         "type": "applyDynamicFewShot",
@@ -146,14 +112,60 @@ def create_memory_recall_node(
                         "memorySpaceName": memory_config.memory_space_name or "",
                         "memorySpaceId": memory_config.memory_space_id,
                     },
-                ):
-                    pass  # Child span just marks the time range
-                if error_msg:
-                    lookup_span.set_status(otel_trace.StatusCode.ERROR, error_msg)
-        except ImportError:
-            pass
-        except Exception:
-            logger.debug("Failed to emit memory recall OTel spans", exc_info=True)
+                )
+                if tracer
+                else _noop_context()
+            )
+
+            with fewshot_span_ctx:
+                try:
+                    sdk = UiPath()
+                    folder_key = memory_config.folder_key
+                    if not folder_key and memory_config.folder_path:
+                        folder_key = sdk.folders.retrieve_folder_key(
+                            memory_config.folder_path
+                        )
+                    response = await sdk.memory.search_async(
+                        memory_space_id=memory_config.memory_space_id,
+                        request=request,
+                        folder_key=folder_key,
+                    )
+                    injection = response.system_prompt_injection
+                    results_count = len(response.results)
+                    logger.info(
+                        "Memory recall returned %d results for space '%s'",
+                        results_count,
+                        memory_config.memory_space_id,
+                    )
+                except Exception as e:
+                    error_detail = repr(e)
+                    for exc in [
+                        e,
+                        getattr(e, "__cause__", None),
+                        getattr(e, "__context__", None),
+                    ]:
+                        if exc and hasattr(exc, "response"):
+                            try:
+                                resp = exc.response  # type: ignore[union-attr]
+                                error_detail = f"{exc} | status={resp.status_code} body={resp.text}"
+                            except Exception:
+                                pass
+                            break
+                    logger.warning(
+                        "Memory recall failed for space '%s': %s",
+                        memory_config.memory_space_id,
+                        error_detail,
+                    )
+                    if lookup_span and hasattr(lookup_span, "set_status"):
+                        lookup_span.set_status(
+                            otel_trace.StatusCode.ERROR, error_detail
+                        )
+
+            # Set result attributes after search completes
+            if lookup_span and hasattr(lookup_span, "set_attribute"):
+                lookup_span.set_attribute("memoryItemsMatched", results_count)
+                if injection:
+                    lookup_span.set_attribute("result", injection)
 
         if not injection:
             return {}
