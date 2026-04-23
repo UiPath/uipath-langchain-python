@@ -23,7 +23,7 @@ dependencies = [
     "langchain-mcp-adapters==0.2.1",
     "pillow>=12.1.1",
     "a2a-sdk>=0.2.0,<1.0.0",
-    "uipath-langchain-client[openai]>=1.9.8",
+    "uipath-langchain-client[openai]>=1.10.0,<1.11.0",
 ]
 
 classifiers = [
@@ -40,21 +40,21 @@ maintainers = [
 
 [project.optional-dependencies]
 anthropic = [
-    "uipath-langchain-client[anthropic]>=1.9.8",
+    "uipath-langchain-client[anthropic]>=1.10.0,<1.11.0",
 ]
 vertex = [
-    "uipath-langchain-client[google]>=1.9.8",
-    "uipath-langchain-client[vertexai]>=1.9.8",
+    "uipath-langchain-client[google]>=1.10.0,<1.11.0",
+    "uipath-langchain-client[vertexai]>=1.10.0,<1.11.0",
 ]
 bedrock = [
-    "uipath-langchain-client[bedrock]>=1.9.8",
+    "uipath-langchain-client[bedrock]>=1.10.0,<1.11.0",
     "boto3-stubs>=1.41.4",
 ]
 fireworks = [
-    "uipath-langchain-client[fireworks]>=1.9.8",
+    "uipath-langchain-client[fireworks]>=1.10.0,<1.11.0",
 ]
 all = [
-    "uipath-langchain-client[all]>=1.9.8",
+    "uipath-langchain-client[all]>=1.10.0,<1.11.0",
 ]
 
 [project.entry-points."uipath.middlewares"]
