@@ -6,6 +6,7 @@ from uipath_langchain.chat.chat_model_factory import (
     _API_FLAVOR_TO_PROVIDER,
     _DEFAULT_API_FLAVOR,
     _compute_vendor_and_api_flavor,
+    get_chat_model,
 )
 from uipath_langchain.chat.types import APIFlavor, LLMProvider
 
@@ -320,3 +321,147 @@ class TestMappingConsistency:
                 f"Default flavor {default_flavor} for {provider} "
                 f"maps to {mapped_provider} instead"
             )
+
+
+class TestGetChatModelTemperatureGating:
+    """End-to-end tests that call ``get_chat_model`` and assert how
+    ``temperature`` is forwarded to the underlying LangChain chat class.
+
+    The gate is driven by discovery's ``modelDetails.shouldSkipTemperature``:
+    when True, ``temperature`` must be omitted from the constructor kwargs;
+    when False/absent, it must be passed through as-is.
+    """
+
+    def test_opus_4_7_bedrock_converse_omits_temperature(self, mocker):
+        """flag=True + Bedrock Converse: UiPathChatBedrockConverse must be
+        instantiated without a ``temperature`` kwarg."""
+        pytest.importorskip("langchain_aws")
+        mocker.patch(
+            "uipath_langchain.chat.chat_model_factory._get_model_info",
+            return_value={
+                "modelName": "anthropic.claude-opus-4-7",
+                "vendor": "AwsBedrock",
+                "apiFlavor": "AwsBedrockConverse",
+                "modelDetails": {"shouldSkipTemperature": True},
+            },
+        )
+        mock_cls = mocker.patch(
+            "uipath_langchain.chat.bedrock.UiPathChatBedrockConverse"
+        )
+
+        get_chat_model(
+            model="anthropic.claude-opus-4-7",
+            temperature=0.0,
+            max_tokens=4096,
+            agenthub_config="cfg",
+        )
+
+        _, kwargs = mock_cls.call_args
+        assert "temperature" not in kwargs
+
+    def test_sonnet_4_5_bedrock_converse_forwards_temperature(self, mocker):
+        """flag=False: UiPathChatBedrockConverse receives the exact caller
+        temperature."""
+        pytest.importorskip("langchain_aws")
+        mocker.patch(
+            "uipath_langchain.chat.chat_model_factory._get_model_info",
+            return_value={
+                "modelName": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+                "vendor": "AwsBedrock",
+                "apiFlavor": "AwsBedrockConverse",
+                "modelDetails": {"shouldSkipTemperature": False},
+            },
+        )
+        mock_cls = mocker.patch(
+            "uipath_langchain.chat.bedrock.UiPathChatBedrockConverse"
+        )
+
+        get_chat_model(
+            model="anthropic.claude-sonnet-4-5-20250929-v1:0",
+            temperature=0.7,
+            max_tokens=4096,
+            agenthub_config="cfg",
+        )
+
+        _, kwargs = mock_cls.call_args
+        assert kwargs.get("temperature") == 0.7
+
+    def test_gpt_openai_responses_forwards_temperature_when_flag_absent(self, mocker):
+        """Older discovery payloads have ``modelDetails: null``; the gate
+        must default to not-skipping and UiPathChatOpenAI must receive the
+        caller temperature."""
+        pytest.importorskip("langchain_openai")
+        mocker.patch(
+            "uipath_langchain.chat.chat_model_factory._get_model_info",
+            return_value={
+                "modelName": "gpt-5-2025-08-07",
+                "vendor": "OpenAi",
+                "apiFlavor": "OpenAiResponses",
+                "modelDetails": None,
+            },
+        )
+        mock_cls = mocker.patch("uipath_langchain.chat.openai.UiPathChatOpenAI")
+
+        get_chat_model(
+            model="gpt-5-2025-08-07",
+            temperature=0.3,
+            max_tokens=2048,
+            agenthub_config="cfg",
+        )
+
+        _, kwargs = mock_cls.call_args
+        assert kwargs.get("temperature") == 0.3
+
+    def test_byom_custom_name_honors_discovery_flag(self, mocker):
+        """BYOM display names don't match any known alias, but the discovery
+        flag still identifies the underlying model — the gate must use it
+        and the leaf client must be built without a temperature kwarg."""
+        pytest.importorskip("langchain_aws")
+        mocker.patch(
+            "uipath_langchain.chat.chat_model_factory._get_model_info",
+            return_value={
+                "modelName": "Custom BYOM Opus 4.7",
+                "vendor": "AwsBedrock",
+                "apiFlavor": "AwsBedrockConverse",
+                "modelDetails": {"shouldSkipTemperature": True},
+            },
+        )
+        mock_cls = mocker.patch(
+            "uipath_langchain.chat.bedrock.UiPathChatBedrockConverse"
+        )
+
+        get_chat_model(
+            model="Custom BYOM Opus 4.7",
+            temperature=0.7,
+            max_tokens=4096,
+            agenthub_config="cfg",
+        )
+
+        _, kwargs = mock_cls.call_args
+        assert "temperature" not in kwargs
+
+    def test_gemini_vertex_forwards_temperature(self, mocker):
+        """Third vendor path: flag=False on a Vertex Gemini model must
+        forward the caller temperature to UiPathChatVertex."""
+        pytest.importorskip("langchain_google_genai")
+        pytest.importorskip("google.genai")
+        mocker.patch(
+            "uipath_langchain.chat.chat_model_factory._get_model_info",
+            return_value={
+                "modelName": "gemini-2.5-pro",
+                "vendor": "VertexAi",
+                "apiFlavor": "GeminiGenerateContent",
+                "modelDetails": {"shouldSkipTemperature": False},
+            },
+        )
+        mock_cls = mocker.patch("uipath_langchain.chat.vertex.UiPathChatVertex")
+
+        get_chat_model(
+            model="gemini-2.5-pro",
+            temperature=0.5,
+            max_tokens=2048,
+            agenthub_config="cfg",
+        )
+
+        _, kwargs = mock_cls.call_args
+        assert kwargs.get("temperature") == 0.5
