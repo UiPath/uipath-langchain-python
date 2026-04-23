@@ -7,7 +7,7 @@ from langchain_core.callbacks import (
 )
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
-from langchain_core.tools.base import _get_runnable_config_param
+from langchain_core.tools.base import ArgsSchema, _get_runnable_config_param
 from langchain_core.utils.pydantic import get_fields
 from pydantic import BaseModel
 
@@ -123,3 +123,46 @@ class BaseUiPathStructuredTool(StructuredTool):
             if alias in parsed:
                 parsed[alias] = getattr(result, python_name)
         return parsed
+
+    @property
+    def tool_call_schema(self) -> ArgsSchema:
+        """Return the LLM-facing schema with reserved-name aliases preserved.
+
+        Unlike _run/_arun, this property intentionally diverges from upstream.
+
+        Upstream BaseTool.tool_call_schema rebuilds a subset Pydantic model via
+        _create_subset_model_v2, which constructs a fresh FieldInfoV2 for each
+        field copying only description/default/metadata -- aliases and the source
+        model's ConfigDict (serialize_by_alias, populate_by_name) are dropped.
+        For fields produced by jsonschema-pydantic-converter (schema_ aliased to
+        'schema'), that causes the LLM to see and emit the Python-safe name
+        (schema_) instead of the user-facing property ('schema').
+        """
+        subset = super().tool_call_schema
+        source = self.args_schema
+        if not (
+            isinstance(subset, type)
+            and issubclass(subset, BaseModel)
+            and isinstance(source, type)
+            and issubclass(source, BaseModel)
+        ):
+            return subset
+
+        changed = False
+        for name, subset_field in subset.model_fields.items():
+            source_field = source.model_fields.get(name)
+            if source_field is None or not source_field.alias:
+                continue
+            if source_field.alias == name:
+                continue
+            subset_field.alias = source_field.alias
+            subset_field.validation_alias = source_field.validation_alias
+            subset_field.serialization_alias = source_field.serialization_alias
+            changed = True
+
+        if changed:
+            subset.model_config["serialize_by_alias"] = True
+            subset.model_config["populate_by_name"] = True
+            subset.model_rebuild(force=True)
+
+        return subset

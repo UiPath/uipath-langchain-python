@@ -133,6 +133,42 @@ def test_function_with_self_parameter():
     assert result == "test:42"
 
 
+def test_tool_call_schema_preserves_reserved_name_aliases():
+    """The JSON schema exposed to the LLM must use the user-facing property names
+    (e.g. 'schema'), not the Python-safe field names chosen by the converter
+    (e.g. 'schema_'). If the LLM sees 'schema_', it emits 'schema_' and the value
+    is silently dropped into the model's 'extra' bucket.
+    """
+    input_schema = create_model(
+        {
+            "type": "object",
+            "properties": {
+                "schema": {"type": "string"},
+                "json": {"type": "string"},
+            },
+            "required": ["schema", "json"],
+        }
+    )
+
+    tool = BaseUiPathStructuredTool(
+        coroutine=_noop_coroutine,
+        name="validator",
+        description="validator",
+        args_schema=input_schema,
+    )
+
+    tool_call_schema = tool.tool_call_schema
+    assert isinstance(tool_call_schema, type) and issubclass(
+        tool_call_schema, BaseModel
+    )
+    properties = tool_call_schema.model_json_schema()["properties"]
+    assert set(properties) == {"schema", "json"}
+
+
+async def _noop_coroutine(**kwargs: object) -> dict[str, object]:
+    return kwargs
+
+
 @pytest.mark.asyncio
 async def test_coroutine_receives_reserved_pydantic_name_as_value():
     """A tool argument aliased to a reserved Pydantic name (e.g. 'schema') must
