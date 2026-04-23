@@ -66,6 +66,15 @@ def create_memory_recall_node(
 
         try:
             sdk = UiPath()
+            logger.warning(
+                "Memory recall: searching space='%s', folder_key='%s', "
+                "fields=%s, threshold=%s, result_count=%s",
+                memory_config.memory_space_id,
+                memory_config.folder_key,
+                [(f.key_path, f.value) for f in fields],
+                memory_config.threshold,
+                memory_config.result_count,
+            )
             response = await sdk.memory.search_async(
                 memory_space_id=memory_config.memory_space_id,
                 request=request,
@@ -78,10 +87,22 @@ def create_memory_recall_node(
                 memory_config.memory_space_id,
             )
         except Exception as e:
+            # Try to extract HTTP response body from the exception
+            error_detail = str(e)
+            if hasattr(e, "response"):
+                try:
+                    error_detail = f"{e} | body={e.response.text}"  # type: ignore[union-attr]
+                except Exception:
+                    pass
+            elif hasattr(e, "__cause__") and hasattr(e.__cause__, "response"):
+                try:
+                    error_detail = f"{e} | body={e.__cause__.response.text}"  # type: ignore[union-attr]
+                except Exception:
+                    pass
             logger.warning(
                 "Memory recall failed for space '%s': %s",
                 memory_config.memory_space_id,
-                str(e),
+                error_detail,
             )
             injection = ""
 
