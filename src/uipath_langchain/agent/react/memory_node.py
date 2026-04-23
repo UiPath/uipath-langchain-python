@@ -38,31 +38,8 @@ def create_memory_recall_node(
         An async callable suitable for ``builder.add_node()``.
     """
 
-    async def memory_recall_node(state: AgentGraphState) -> dict[str, Any]:
-        # Debug: comprehensive state inspection
-        logger.warning(
-            "Memory recall debug: type=%s, is_dict=%s, __dict__keys=%s, "
-            "hasattr_a=%s, model_extra=%s, pydantic_extra=%s",
-            type(state).__name__,
-            isinstance(state, dict),
-            list(state.__dict__.keys()) if hasattr(state, "__dict__") else "N/A",
-            hasattr(state, "a"),
-            getattr(state, "model_extra", "N/A"),
-            getattr(state, "__pydantic_extra__", "N/A"),
-        )
-        # Try dict-style access
-        try:
-            logger.warning("Memory recall debug: state['a']=%s", state["a"])  # type: ignore[index]
-        except (KeyError, TypeError) as e:
-            logger.warning("Memory recall debug: state['a'] failed: %s", e)
-
+    async def memory_recall_node(state: Any) -> dict[str, Any]:
         input_arguments = _extract_user_inputs(state)
-        if not input_arguments and memory_config.field_weights:
-            for field_name in memory_config.field_weights:
-                value = getattr(state, field_name, None)
-                if value is not None:
-                    input_arguments[field_name] = value
-
         if not input_arguments:
             logger.warning("Memory recall: no user inputs found in state")
             return {}
@@ -116,25 +93,25 @@ def create_memory_recall_node(
     return memory_recall_node
 
 
-def _extract_user_inputs(state: AgentGraphState) -> dict[str, Any]:
+def _extract_user_inputs(state: Any) -> dict[str, Any]:
     """Extract user-defined input fields from graph state, excluding internal fields.
 
-    LangGraph may pass state as a Pydantic model where base-class
-    model_dump() misses dynamically-added input schema fields. We use
-    the runtime type's model_dump() to capture all fields.
+    Handles both dict states (LangGraph internal) and Pydantic model states.
+    For Pydantic models, uses the runtime type's model_dump() and also
+    checks __dict__ for fields that model_dump() may miss when the state
+    is deserialized as the base AgentGraphState class.
     """
     internal_fields = set(AgentGraphState.model_fields.keys())
     if isinstance(state, dict):
         state_data = state
     elif hasattr(state, "model_dump"):
-        # model_dump() returns declared fields. For dynamically-created
-        # subclasses (CompleteAgentGraphState), also check model_extra
-        # and __pydantic_extra__ for input schema fields
+        # Start with model_dump(), then merge any extra fields from __dict__
+        # that model_dump() missed (happens when LangGraph deserializes
+        # CompleteAgentGraphState as base AgentGraphState)
         state_data = state.model_dump()
-        if hasattr(state, "model_extra") and state.model_extra:
-            state_data.update(state.model_extra)
-        elif hasattr(state, "__pydantic_extra__") and state.__pydantic_extra__:
-            state_data.update(state.__pydantic_extra__)
+        for k, v in state.__dict__.items():
+            if k not in state_data and not k.startswith("_"):
+                state_data[k] = v
     else:
         state_data = {}
     return {
