@@ -85,10 +85,14 @@ def create_memory_recall_node(
             tracer = None  # type: ignore[assignment]
             otel_trace = None  # type: ignore[assignment]
 
+        # Span attribute keys matching what the LlmOpsHttpExporter and
+        # Studio UI expect. "openinference.span.kind" sets SpanType.
+        # Ref: AgentMemoryLookupSpanAttributes.cs, DynamicFewShotPromptSpanAttributes.cs
         lookup_span_ctx = (
             tracer.start_as_current_span(
                 "Find previous memories",
                 attributes={
+                    "openinference.span.kind": "agentMemoryLookup",
                     "type": "agentMemoryLookup",
                     "span_type": "agentMemoryLookup",
                     "uipath.custom_instrumentation": True,
@@ -106,6 +110,7 @@ def create_memory_recall_node(
                 tracer.start_as_current_span(
                     "Apply dynamic few shot",
                     attributes={
+                        "openinference.span.kind": "applyDynamicFewShot",
                         "type": "applyDynamicFewShot",
                         "span_type": "applyDynamicFewShot",
                         "uipath.custom_instrumentation": True,
@@ -117,7 +122,7 @@ def create_memory_recall_node(
                 else _noop_context()
             )
 
-            with fewshot_span_ctx:
+            with fewshot_span_ctx as fewshot_span:
                 try:
                     sdk = UiPath()
                     folder_key = memory_config.folder_key
@@ -137,6 +142,17 @@ def create_memory_recall_node(
                         results_count,
                         memory_config.memory_space_id,
                     )
+                    # Set request/response on fewshot span as JSON strings
+                    # (exporter parses JSON strings back to objects)
+                    if fewshot_span and hasattr(fewshot_span, "set_attribute"):
+                        import json
+
+                        fewshot_span.set_attribute(
+                            "request",
+                            json.dumps(
+                                request.model_dump(by_alias=True, exclude_none=True)
+                            ),
+                        )
                 except Exception as e:
                     error_detail = repr(e)
                     for exc in [
