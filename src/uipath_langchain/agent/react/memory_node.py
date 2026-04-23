@@ -17,6 +17,9 @@ from uipath.platform.memory import (
     SearchSettings,
 )
 
+from uipath_langchain._utils import get_current_span_and_trace_ids
+
+from ._memory_tracing import _now_iso, emit_memory_recall_spans
 from .types import AgentGraphState, MemoryConfig
 
 logger = logging.getLogger(__name__)
@@ -65,6 +68,12 @@ def create_memory_recall_node(
             definition_system_prompt="",
         )
 
+        span_id, trace_id = get_current_span_and_trace_ids()
+        start_time = _now_iso()
+        results_count = 0
+        error_msg: str | None = None
+        response_payload: dict[str, Any] | None = None
+
         try:
             sdk = UiPath()
             # Resolve folder_key: explicit > resolve from folder_path > SDK default
@@ -73,7 +82,7 @@ def create_memory_recall_node(
                 folder_key = sdk.folders.retrieve_folder_key(
                     memory_config.folder_path
                 )
-            logger.warning(
+            logger.info(
                 "Memory recall: searching space='%s', folder_key='%s', "
                 "fields=%s, threshold=%s, result_count=%s",
                 memory_config.memory_space_id,
@@ -88,13 +97,13 @@ def create_memory_recall_node(
                 folder_key=folder_key,
             )
             injection = response.system_prompt_injection
-            logger.warning(
+            results_count = len(response.results)
+            logger.info(
                 "Memory recall returned %d results for space '%s'",
-                len(response.results),
+                results_count,
                 memory_config.memory_space_id,
             )
         except Exception as e:
-            # Try to extract HTTP response body from the exception chain
             error_detail = repr(e)
             for exc in [e, getattr(e, "__cause__", None), getattr(e, "__context__", None)]:
                 if exc and hasattr(exc, "response"):
@@ -110,6 +119,27 @@ def create_memory_recall_node(
                 error_detail,
             )
             injection = ""
+            error_msg = error_detail
+
+        end_time = _now_iso()
+
+        # Emit trace spans: "Find previous memories" + "Apply dynamic few shot"
+        # Ref: DynamicFewShotWorkflow.cs:29-52
+        if trace_id:
+            await emit_memory_recall_spans(
+                sdk=None,
+                trace_id=trace_id,
+                parent_span_id=span_id or None,
+                memory_space_id=memory_config.memory_space_id,
+                memory_space_name=getattr(memory_config, "memory_space_name", ""),
+                request_payload=request.model_dump(by_alias=True, exclude_none=True),
+                response_payload=response_payload,
+                results_count=results_count,
+                injection=injection or "",
+                start_time=start_time,
+                end_time=end_time,
+                error=error_msg,
+            )
 
         if not injection:
             return {}

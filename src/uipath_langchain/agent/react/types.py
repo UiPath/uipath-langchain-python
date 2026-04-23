@@ -68,6 +68,9 @@ class MemoryConfig(BaseModel):
     """
 
     memory_space_id: str = Field(description="GUID of the memory space to query.")
+    memory_space_name: str = Field(
+        default="", description="Name of the memory space (for tracing)."
+    )
     folder_key: str | None = Field(
         default=None, description="Folder key for the memory resource."
     )
