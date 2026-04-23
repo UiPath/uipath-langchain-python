@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 from enum import Enum
 from typing import Any, Literal
 
@@ -26,7 +25,11 @@ from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
 from uipath.platform.common import WaitEscalation
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils import (
+    get_current_span_and_trace_ids,
+    get_execution_folder_path,
+    set_span_attribute,
+)
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
@@ -322,7 +325,7 @@ def create_escalation_tool(
         #   attributes: new JsonObject { ["arguments"] = payload.Input.Arguments } (line 503)
         #   spanId/traceId/userId: lines 522-526
         if _memory_space_id:
-            span_id, trace_id = _get_current_span_and_trace_ids()
+            span_id, trace_id = get_current_span_and_trace_ids()
             await _ingest_escalation_memory(
                 _memory_space_id,
                 answer=json.dumps({"output": escalation_output, "outcome": outcome}),
@@ -409,47 +412,6 @@ def create_escalation_tool(
 # --- Escalation memory helpers ---
 
 
-def _get_current_span_and_trace_ids() -> tuple[str, str]:
-    """Get current OpenTelemetry span ID and trace ID.
-
-    Returns hex-encoded IDs, or empty strings if no active span.
-    Mirrors Temporal backend: payload.SpanId and toolCall.Metadata.Traces.TraceId
-    (EscalationToolExecutor.cs lines 522-523).
-    """
-    try:
-        from opentelemetry import trace
-
-        span = trace.get_current_span()
-        ctx = span.get_span_context()
-        if ctx.is_valid:
-            return (
-                format(ctx.span_id, "016x"),
-                format(ctx.trace_id, "032x"),
-            )
-    except ImportError:
-        pass
-
-    # Fall back to env var for trace_id
-    trace_id = os.environ.get("UIPATH_TRACE_ID", "")
-    return ("", trace_id)
-
-
-def _set_memory_span_attribute(name: str, value: bool) -> None:
-    """Set a memory-related attribute on the current OTel span.
-
-    Mirrors EscalationToolSpanAttributes in the Temporal backend
-    (EscalationToolSpanAttributes.cs:19-25, EscalationToolWorkflow.cs:131-133).
-    """
-    try:
-        from opentelemetry import trace
-
-        span = trace.get_current_span()
-        if span.is_recording():
-            span.set_attribute(name, value)
-    except ImportError:
-        pass
-
-
 async def _check_escalation_memory_cache(
     memory_space_id: str,
     serialized_input: dict[str, Any],
@@ -532,7 +494,7 @@ async def _check_escalation_memory_cache(
                 "Escalation memory cache hit for space '%s'", memory_space_id
             )
             # Ref: EscalationToolWorkflow.cs:103 — span.Attributes.FromMemory = true
-            _set_memory_span_attribute("fromMemory", True)
+            set_span_attribute("fromMemory", True)
             return {
                 "action": EscalationAction.CONTINUE,
                 "output": cached.output,
@@ -564,7 +526,7 @@ async def _ingest_escalation_memory(
     """
 
     # Ref: EscalationToolWorkflow.cs:132 — span.Attributes.FromMemory = false
-    _set_memory_span_attribute("fromMemory", False)
+    set_span_attribute("fromMemory", False)
 
     try:
         from uipath.platform.memory import EscalationMemoryIngestRequest
@@ -586,12 +548,12 @@ async def _ingest_escalation_memory(
             folder_key=folder_key,
         )
         # Ref: EscalationToolExecutor.cs:543 — savedToMemory = true on success
-        _set_memory_span_attribute("savedToMemory", True)
+        set_span_attribute("savedToMemory", True)
         _escalation_logger.info(
             "Ingested escalation outcome into memory space '%s'", memory_space_id
         )
     except Exception:
-        _set_memory_span_attribute("savedToMemory", False)
+        set_span_attribute("savedToMemory", False)
         _escalation_logger.warning(
             "Failed to ingest escalation outcome into memory space '%s'",
             memory_space_id,
