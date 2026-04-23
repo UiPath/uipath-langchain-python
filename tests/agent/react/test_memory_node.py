@@ -139,7 +139,9 @@ class TestCreateAgentWithMemory:
 
     @pytest.fixture
     def memory_config(self):
-        return MemoryConfig(memory_space_id="test-space-id", field_weights={"topic": 1.0})
+        return MemoryConfig(
+            memory_space_id="test-space-id", field_weights={"topic": 1.0}
+        )
 
     def test_graph_has_memory_recall_node(
         self,
