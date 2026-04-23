@@ -1,6 +1,7 @@
 import ast
 import json
 import sys
+import types
 from typing import Any, ForwardRef, Union, get_args, get_origin
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
@@ -183,7 +184,7 @@ def _unwrap_optional(annotation: Any) -> Any:
         The unwrapped type, or the original if not Optional/Union
     """
     origin = get_origin(annotation)
-    if origin is Union:
+    if origin is Union or isinstance(annotation, types.UnionType):
         args = get_args(annotation)
         non_none_args = [arg for arg in args if arg is not type(None)]
         if non_none_args:
