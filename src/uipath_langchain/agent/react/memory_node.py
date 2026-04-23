@@ -39,7 +39,22 @@ def create_memory_recall_node(
     """
 
     async def memory_recall_node(state: AgentGraphState) -> dict[str, Any]:
+        # Debug: log state type and keys to diagnose empty inputs
+        if isinstance(state, dict):
+            logger.warning("Memory recall: state is dict, keys=%s", list(state.keys()))
+        else:
+            logger.warning(
+                "Memory recall: state type=%s, fields=%s",
+                type(state).__name__,
+                list(state.model_fields.keys()) if hasattr(state, "model_fields") else "N/A",
+            )
+            logger.warning(
+                "Memory recall: state dump keys=%s",
+                list(state.model_dump().keys()) if hasattr(state, "model_dump") else "N/A",
+            )
+
         input_arguments = _extract_user_inputs(state)
+        logger.warning("Memory recall: extracted inputs=%s", input_arguments)
         if not input_arguments:
             logger.warning("Memory recall: no user inputs found in state")
             return {}
