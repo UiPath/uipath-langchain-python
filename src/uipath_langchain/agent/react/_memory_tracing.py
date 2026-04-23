@@ -127,6 +127,12 @@ async def emit_memory_recall_spans(
     )
 
     # Send both spans to LLMOps
+    logger.warning(
+        "Emitting memory trace spans: trace_id=%s, parent=%s, lookup_id=%s",
+        trace_id,
+        parent_span_id,
+        lookup_span_id,
+    )
     try:
         base_url = os.environ.get("UIPATH_TRACE_BASE_URL") or (
             os.environ.get("UIPATH_URL", "").rstrip("/") + "/llmopstenant_"
@@ -152,5 +158,5 @@ async def emit_memory_recall_spans(
                         resp.status_code,
                         resp.text[:200],
                     )
-    except Exception:
-        logger.debug("Failed to emit memory recall trace spans", exc_info=True)
+    except Exception as e:
+        logger.warning("Failed to emit memory recall trace spans: %s", e)
