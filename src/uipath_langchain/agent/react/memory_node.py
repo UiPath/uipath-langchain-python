@@ -41,14 +41,14 @@ def create_memory_recall_node(
     async def memory_recall_node(state: AgentGraphState) -> dict[str, Any]:
         input_arguments = _extract_user_inputs(state)
         if not input_arguments:
-            logger.info("Memory recall: no user inputs found in state")
+            logger.warning("Memory recall: no user inputs found in state")
             return {}
 
         fields = _build_search_fields(
             input_arguments, field_weights=memory_config.field_weights or None
         )
         if not fields:
-            logger.info(
+            logger.warning(
                 "Memory recall: no search fields after filtering (inputs=%s, weights=%s)",
                 list(input_arguments.keys()),
                 memory_config.field_weights,
@@ -72,7 +72,7 @@ def create_memory_recall_node(
                 folder_key=memory_config.folder_key,
             )
             injection = response.system_prompt_injection
-            logger.info(
+            logger.warning(
                 "Memory recall returned %d results for space '%s'",
                 len(response.results),
                 memory_config.memory_space_id,
