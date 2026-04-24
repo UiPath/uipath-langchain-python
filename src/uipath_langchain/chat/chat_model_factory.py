@@ -25,7 +25,6 @@ from uipath_langchain_client.settings import (
 
 _UNSET: Final[Any] = object()
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 300.0
-DEFAULT_MAX_TOKENS: Final[int] = 1000
 DEFAULT_TEMPERATURE: Final[float] = 0.0
 DEFAULT_MAX_RETRIES: Final[int] = 3
 
@@ -40,7 +39,7 @@ def get_chat_model(
     api_flavor: ApiFlavor | str | None = None,
     custom_class: type[UiPathBaseChatModel] | None = None,
     temperature: float | None = DEFAULT_TEMPERATURE,
-    max_tokens: int | None = DEFAULT_MAX_TOKENS,
+    max_tokens: int | None = None,
     timeout: float | None = DEFAULT_TIMEOUT_SECONDS,
     max_retries: int | None = DEFAULT_MAX_RETRIES,
     callbacks: Callbacks = _UNSET,
@@ -63,9 +62,8 @@ def get_chat_model(
             instead of the auto-detected one.
         temperature: Sampling temperature. Defaults to 0.0. Pass ``None`` to
             omit the parameter when the underlying client supports it.
-        max_tokens: Maximum output tokens. Defaults to 1000 to match the
-            historical default from ``UiPathRequestMixin``. Pass ``None`` to
-            omit the limit when the underlying client supports it.
+        max_tokens: Maximum output tokens. Defaults to ``None`` (unset), which
+            lets the underlying client apply its own default.
         timeout: Request timeout in seconds. Defaults to 300 seconds.
         max_retries: Max retry count. Defaults to 3.
         callbacks: LangChain callbacks (handlers or a manager) attached to the
@@ -138,7 +136,7 @@ def _legacy_chat_model(
     return _legacy_get_chat_model(
         model,
         temperature if temperature is not _UNSET and temperature is not None else 0.0,
-        max_tokens if max_tokens is not _UNSET and max_tokens is not None else DEFAULT_MAX_TOKENS,
+        max_tokens if max_tokens is not _UNSET and max_tokens is not None else 0,
         agenthub_config,
         byo_connection_id,
         **kwargs,
