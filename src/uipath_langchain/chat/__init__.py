@@ -24,45 +24,35 @@ def __getattr__(name):
 
         return get_chat_model
     if name == "UiPathChat":
-        from uipath_langchain_client.clients.normalized.chat_models import (
-            UiPathChat,
-        )
+        from .models import UiPathChat
 
         return UiPathChat
     if name == "UiPathAzureChatOpenAI":
-        from uipath_langchain_client.clients.openai.chat_models import (
-            UiPathAzureChatOpenAI,
-        )
+        from .openai import UiPathAzureChatOpenAI
 
         return UiPathAzureChatOpenAI
     if name == "UiPathChatOpenAI":
-        from uipath_langchain_client.clients.openai.chat_models import (
-            UiPathChatOpenAI,
-        )
+        from .openai import UiPathChatOpenAI
 
         return UiPathChatOpenAI
     if name == "UiPathChatGoogleGenerativeAI":
-        from uipath_langchain_client.clients.google.chat_models import (
-            UiPathChatGoogleGenerativeAI,
-        )
+        from .vertex import UiPathChatGoogleGenerativeAI
 
         return UiPathChatGoogleGenerativeAI
+    if name == "UiPathChatVertex":
+        from .vertex import UiPathChatVertex
+
+        return UiPathChatVertex
     if name == "UiPathChatBedrock":
-        from uipath_langchain_client.clients.bedrock.chat_models import (
-            UiPathChatBedrock,
-        )
+        from .bedrock import UiPathChatBedrock
 
         return UiPathChatBedrock
     if name == "UiPathChatBedrockConverse":
-        from uipath_langchain_client.clients.bedrock.chat_models import (
-            UiPathChatBedrockConverse,
-        )
+        from .bedrock import UiPathChatBedrockConverse
 
         return UiPathChatBedrockConverse
     if name == "UiPathChatAnthropicBedrock":
-        from uipath_langchain_client.clients.bedrock.chat_models import (
-            UiPathChatAnthropicBedrock,
-        )
+        from .bedrock import UiPathChatAnthropicBedrock
 
         return UiPathChatAnthropicBedrock
     if name == "UiPathChatAnthropic":
@@ -83,12 +73,6 @@ def __getattr__(name):
         )
 
         return UiPathChatFireworks
-    if name == "UiPathChatVertex":
-        from uipath_langchain_client.clients.google.chat_models import (
-            UiPathChatGoogleGenerativeAI,
-        )
-
-        return UiPathChatGoogleGenerativeAI
     if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
         from uipath_langchain.chat._legacy import supported_models
 
