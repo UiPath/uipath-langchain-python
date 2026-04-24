@@ -9,6 +9,13 @@ Do NOT add eager imports like:
     from .models import UiPathChat  # BAD - loads langchain_openai immediately
 
 Instead, all exports are loaded on-demand when first accessed.
+
+Per-vendor classes are re-exported from ``uipath_langchain.chat.openai`` /
+``.bedrock`` / ``.vertex``. Those submodules are where the upstream
+``uipath_langchain_client`` classes are first imported — and where the
+legacy ``model_name`` defaults are attached to them — so each vendor-family
+default only fires (and loads its heavy deps) when a caller actually asks
+for that family.
 """
 
 from .hitl import (
@@ -24,71 +31,58 @@ def __getattr__(name):
 
         return get_chat_model
     if name == "UiPathChat":
-        from uipath_langchain_client.clients.normalized.chat_models import (
-            UiPathChat,
-        )
+        from .openai import UiPathChat
 
         return UiPathChat
     if name == "UiPathAzureChatOpenAI":
-        from uipath_langchain_client.clients.openai.chat_models import (
-            UiPathAzureChatOpenAI,
-        )
+        from .openai import UiPathAzureChatOpenAI
 
         return UiPathAzureChatOpenAI
     if name == "UiPathChatOpenAI":
-        from uipath_langchain_client.clients.openai.chat_models import (
-            UiPathChatOpenAI,
-        )
+        from .openai import UiPathChatOpenAI
 
         return UiPathChatOpenAI
     if name == "UiPathChatGoogleGenerativeAI":
-        from uipath_langchain_client.clients.google.chat_models import (
-            UiPathChatGoogleGenerativeAI,
-        )
+        from .vertex import UiPathChatGoogleGenerativeAI
 
         return UiPathChatGoogleGenerativeAI
+    if name == "UiPathChatVertex":
+        from .vertex import UiPathChatVertex
+
+        return UiPathChatVertex
     if name == "UiPathChatBedrock":
-        from uipath_langchain_client.clients.bedrock.chat_models import (
-            UiPathChatBedrock,
-        )
+        from .bedrock import UiPathChatBedrock
 
         return UiPathChatBedrock
     if name == "UiPathChatBedrockConverse":
-        from uipath_langchain_client.clients.bedrock.chat_models import (
-            UiPathChatBedrockConverse,
-        )
+        from .bedrock import UiPathChatBedrockConverse
 
         return UiPathChatBedrockConverse
     if name == "UiPathChatAnthropicBedrock":
-        from uipath_langchain_client.clients.bedrock.chat_models import (
-            UiPathChatAnthropicBedrock,
-        )
+        from .bedrock import UiPathChatAnthropicBedrock
 
         return UiPathChatAnthropicBedrock
     if name == "UiPathChatAnthropic":
+        # No legacy equivalent — model= stays required.
         from uipath_langchain_client.clients.anthropic.chat_models import (
             UiPathChatAnthropic,
         )
 
         return UiPathChatAnthropic
     if name == "UiPathChatAnthropicVertex":
+        # No legacy equivalent — model= stays required.
         from uipath_langchain_client.clients.vertexai.chat_models import (
             UiPathChatAnthropicVertex,
         )
 
         return UiPathChatAnthropicVertex
     if name == "UiPathChatFireworks":
+        # No legacy equivalent — model= stays required.
         from uipath_langchain_client.clients.fireworks.chat_models import (
             UiPathChatFireworks,
         )
 
         return UiPathChatFireworks
-    if name == "UiPathChatVertex":
-        from uipath_langchain_client.clients.google.chat_models import (
-            UiPathChatGoogleGenerativeAI,
-        )
-
-        return UiPathChatGoogleGenerativeAI
     if name in ("OpenAIModels", "BedrockModels", "GeminiModels"):
         from uipath_langchain.chat._legacy import supported_models
 
