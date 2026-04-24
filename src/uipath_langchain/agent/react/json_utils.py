@@ -184,7 +184,7 @@ def _unwrap_optional(annotation: Any) -> Any:
         The unwrapped type, or the original if not Optional/Union
     """
     origin = get_origin(annotation)
-    if origin is Union or isinstance(annotation, types.UnionType):
+    if origin is Union or origin is types.UnionType:
         args = get_args(annotation)
         non_none_args = [arg for arg in args if arg is not type(None)]
         if non_none_args:

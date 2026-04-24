@@ -27,6 +27,10 @@ class WithOptional(BaseModel):
     target: Optional[Target] = None
 
 
+class WithPipeUnion(BaseModel):
+    target: Target | None = None
+
+
 class WithNestedList(BaseModel):
     matrix: list[list[Target]]
 
@@ -52,6 +56,10 @@ class TestGetJsonPathsByType:
 
     def test_optional_field(self):
         paths = get_json_paths_by_type(WithOptional, "Target")
+        assert paths == ["$.target"]
+
+    def test_pipe_union_field(self):
+        paths = get_json_paths_by_type(WithPipeUnion, "Target")
         assert paths == ["$.target"]
 
     def test_nested_list_of_lists(self):
