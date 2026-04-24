@@ -138,7 +138,7 @@ def _legacy_chat_model(
 
     return _legacy_get_chat_model(
         model,
-        temperature if temperature is not _UNSET and temperature is not None else 0.0,
+        temperature,
         max_tokens,
         agenthub_config,
         byo_connection_id,
