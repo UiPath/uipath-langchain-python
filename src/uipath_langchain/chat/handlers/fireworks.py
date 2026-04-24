@@ -18,8 +18,8 @@ class FireworksPayloadHandler(ModelPayloadHandler):
         strict_mode: bool | None = None,
     ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"tool_choice": tool_choice}
-        if strict_mode is not None:
-            kwargs["strict"] = strict_mode
+        if strict_mode is True:
+            kwargs["strict"] = True
         return kwargs
 
     def check_stop_reason(self, response: Any) -> None:
