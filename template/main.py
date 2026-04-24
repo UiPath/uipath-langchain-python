@@ -6,19 +6,17 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from uipath_langchain.chat import (
     UiPathAzureChatOpenAI,
-    UiPathChat,
     UiPathChatAnthropicBedrock,
     UiPathChatGoogleGenerativeAI,
 )
 
 # Choose your LLM provider by uncommenting one of the following:
-llm = UiPathChat(model="gpt-4.1-mini-2025-04-14")
+llm = UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
 # llm = UiPathAzureChatOpenAI(model="gpt-4.1-mini-2025-04-14")
-# llm = UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
 # llm = UiPathChatGoogleGenerativeAI(model="gemini-2.5-flash")
 
 SYSTEM_PROMPT = (
@@ -31,7 +29,9 @@ MAX_RESPONSE_LENGTH = 5000
 
 
 class InputModel(BaseModel):
-    query: str
+    question: str = Field(
+        description="Question for the assistant, e.g. 'What's the weather in Paris?'"
+    )
 
 
 class AgentResponse(TypedDict):
@@ -76,7 +76,7 @@ async def prepare(input: InputModel) -> dict[str, Any]:
     return {
         "messages": [
             SystemMessage(SYSTEM_PROMPT),
-            HumanMessage(input.query),
+            HumanMessage(input.question),
         ],
     }
 

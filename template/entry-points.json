@@ -4,18 +4,19 @@
     "entryPoints": [
         {
             "filePath": "agent",
-            "uniqueId": "ed2b77c0-1fab-478a-abe4-41b3a6f573c2",
+            "uniqueId": "dd6b5e6a-fa02-4220-b78e-e99c2f112e34",
             "type": "agent",
             "input": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "title": "Query",
+                    "question": {
+                        "description": "Question for the assistant, e.g. 'What's the weather in Paris?'",
+                        "title": "Question",
                         "type": "string"
                     }
                 },
                 "required": [
-                    "query"
+                    "question"
                 ]
             },
             "output": {
@@ -65,7 +66,8 @@
                                     "type": "model",
                                     "subgraph": null,
                                     "metadata": {
-                                        "model_name": "anthropic.claude-haiku-4-5-20251001-v1:0"
+                                        "model_name": "anthropic.claude-haiku-4-5-20251001-v1:0",
+                                        "max_tokens": 4096
                                     }
                                 },
                                 {
@@ -76,7 +78,7 @@
                                     "metadata": {
                                         "tool_names": [
                                             "get_current_time",
-                                            "web_search"
+                                            "get_weather"
                                         ],
                                         "tool_count": 2
                                     }

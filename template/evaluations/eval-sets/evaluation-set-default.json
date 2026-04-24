@@ -13,7 +13,7 @@
       "id": "ada5a2c1-976c-470b-964f-eb70a5e61eb4",
       "name": "Weather in Paris",
       "inputs": {
-        "query": "Is it good weather for a walk in Paris?"
+        "question": "Is it good weather for a walk in Paris?"
       },
       "evaluationCriterias": {
         "evaluator-llm-judge-output": {
