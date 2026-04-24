@@ -6,7 +6,7 @@ A quickstart UiPath LangGraph agent. It answers user queries using live tools an
 
 ## What it does
 
-1. **Prepares** the conversation — injects a system prompt and the user query into state
+1. **Prepares** the conversation — injects a system prompt and the user question into state
 2. **Runs a ReAct agent node** that autonomously decides which tools to call and in what order
 3. **Postprocesses** — validates and truncates the response if it exceeds the configured max length
 
@@ -19,13 +19,12 @@ A quickstart UiPath LangGraph agent. It answers user queries using live tools an
 
 ### LLM Providers
 
-The template defaults to **GPT-4.1 Mini** via `UiPathChat`. To switch providers, edit `main.py`:
+The template defaults to **Claude Haiku 4.5** via `UiPathChatAnthropicBedrock`. To switch providers, edit `main.py`:
 
 ```python
 # Choose your LLM provider by uncommenting one of the following:
-llm = UiPathChat(model="gpt-4.1-mini-2025-04-14")
+llm = UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
 # llm = UiPathAzureChatOpenAI(model="gpt-4.1-mini-2025-04-14")
-# llm = UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
 # llm = UiPathChatGoogleGenerativeAI(model="gemini-2.5-flash")
 ```
 
@@ -44,7 +43,7 @@ flowchart TD
 ```json
 // Input
 {
-  "query": "What's the weather like in London?"
+  "question": "What's the weather like in London?"
 }
 
 // Output
@@ -57,10 +56,10 @@ flowchart TD
 
 ```bash
 # Run
-uv run uipath run agent --file input.json
+uv run uipath run agent --input-file input.json --output-file output.json
 
 # Debug with dynamic node breakpoints
-uv run uipath debug agent --file input.json
+uv run uipath debug agent --input-file input.json --output-file output.json
 ```
 
 ## Evaluation
