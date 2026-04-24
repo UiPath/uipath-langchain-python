@@ -3,7 +3,7 @@ from typing import Annotated, Any, Hashable, Literal, Optional
 
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.platform.attachments import Attachment
 
@@ -19,6 +19,7 @@ class InnerAgentGraphState(BaseModel):
     job_attachments: Annotated[dict[str, Attachment], merge_dicts] = {}
     initial_message_count: int | None = None
     tools_storage: Annotated[dict[Hashable, Any], merge_dicts] = {}
+    memory_injection: str = ""
 
 
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
@@ -55,6 +56,43 @@ class AgentGraphNode(StrEnum):
     TOOLS = "tools"
     TERMINATE = "terminate"
     GUARDED_TERMINATE = "guarded-terminate"
+    MEMORY_RECALL = "memory_recall"
+
+
+class MemoryConfig(BaseModel):
+    """Configuration for Agent Episodic Memory.
+
+    When passed to ``create_agent()``, a MEMORY_RECALL node is added before
+    INIT that queries the memory service and stores the server-generated
+    systemPromptInjection in ``inner_state.memory_injection``.
+    """
+
+    memory_space_id: str = Field(description="GUID of the memory space to query.")
+    memory_space_name: str = Field(
+        default="", description="Name of the memory space (for tracing)."
+    )
+    folder_key: str | None = Field(
+        default=None, description="Folder key for the memory resource."
+    )
+    folder_path: str | None = Field(
+        default=None,
+        description="Folder path for the memory resource. Resolved to folder_key at runtime if folder_key is not set.",
+    )
+    # Defaults match FE episodic memory settings (agentEditor.ts:324-328)
+    result_count: int = Field(default=3, ge=1, le=10)
+    threshold: float = Field(default=0.0, ge=0.0, le=1.0)
+    field_weights: dict[str, float] = Field(
+        description=(
+            "Per-field search weights. Keys are input field names, values are "
+            "weights between 0.0 and 1.0. At least one field must be specified."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_field_weights(self) -> "MemoryConfig":
+        if not self.field_weights:
+            raise ValueError("field_weights must contain at least one field")
+        return self
 
 
 class AgentGraphConfig(BaseModel):

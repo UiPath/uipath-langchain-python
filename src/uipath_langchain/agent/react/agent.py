@@ -24,6 +24,7 @@ from .init_node import (
 from .llm_node import (
     create_llm_node,
 )
+from .memory_node import create_memory_recall_node
 from .router import (
     create_route_agent,
 )
@@ -36,6 +37,7 @@ from .types import (
     AgentGraphConfig,
     AgentGraphNode,
     AgentGraphState,
+    MemoryConfig,
 )
 from .utils import create_state_with_input
 
@@ -53,6 +55,7 @@ def create_agent(
     output_schema: Type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
     guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None = None,
+    memory: MemoryConfig | None = None,
 ) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
     """Build agent graph with INIT -> AGENT (subgraph) <-> TOOLS loop, terminated by control flow tools.
 
@@ -122,7 +125,13 @@ def create_agent(
     )
     builder.add_node(AgentGraphNode.TERMINATE, terminate_with_guardrails_subgraph)
 
-    builder.add_edge(START, AgentGraphNode.INIT)
+    if memory:
+        memory_recall = create_memory_recall_node(memory, input_schema=input_schema)
+        builder.add_node(AgentGraphNode.MEMORY_RECALL, memory_recall)
+        builder.add_edge(START, AgentGraphNode.MEMORY_RECALL)
+        builder.add_edge(AgentGraphNode.MEMORY_RECALL, AgentGraphNode.INIT)
+    else:
+        builder.add_edge(START, AgentGraphNode.INIT)
 
     llm_node = create_llm_node(
         model,
