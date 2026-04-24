@@ -48,8 +48,8 @@ class AnthropicPayloadHandler(ModelPayloadHandler):
         kwargs: dict[str, Any] = {"tool_choice": tool_choice}
         if parallel_tool_calls is not None:
             kwargs["parallel_tool_calls"] = parallel_tool_calls
-        if strict_mode is not None:
-            kwargs["strict"] = strict_mode
+        if strict_mode is True:
+            kwargs["strict"] = True
         return kwargs
 
     def check_stop_reason(self, response: AIMessage) -> None:

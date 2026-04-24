@@ -40,7 +40,7 @@ def _create_openai_llm(
     model: str,
     api_flavor: APIFlavor,
     temperature: float | None,
-    max_tokens: int,
+    max_tokens: int | None,
     agenthub_config: str,
     byo_connection_id: str | None = None,
     **kwargs: Any,
@@ -87,7 +87,7 @@ def _create_bedrock_llm(
     model: str,
     api_flavor: APIFlavor,
     temperature: float | None,
-    max_tokens: int,
+    max_tokens: int | None,
     agenthub_config: str,
     byo_connection_id: str | None = None,
     **kwargs: Any,
@@ -244,8 +244,8 @@ def _get_model_info(
 
 def get_chat_model(
     model: str,
-    temperature: float,
-    max_tokens: int,
+    temperature: float | None,
+    max_tokens: int | None,
     agenthub_config: str,
     byo_connection_id: str | None = None,
     **kwargs: Any,

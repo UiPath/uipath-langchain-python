@@ -25,6 +25,9 @@ from uipath_langchain_client.settings import (
 
 _UNSET: Final[Any] = object()
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 300.0
+DEFAULT_MAX_TOKENS: Final[int] = 1000
+DEFAULT_TEMPERATURE: Final[float] = 0.0
+DEFAULT_MAX_RETRIES: Final[int] = 3
 
 
 def get_chat_model(
@@ -36,10 +39,10 @@ def get_chat_model(
     vendor_type: VendorType | str | None = None,
     api_flavor: ApiFlavor | str | None = None,
     custom_class: type[UiPathBaseChatModel] | None = None,
-    temperature: float | None = _UNSET,
-    max_tokens: int | None = _UNSET,
+    temperature: float | None = DEFAULT_TEMPERATURE,
+    max_tokens: int | None = DEFAULT_MAX_TOKENS,
     timeout: float | None = DEFAULT_TIMEOUT_SECONDS,
-    max_retries: int | None = _UNSET,
+    max_retries: int | None = DEFAULT_MAX_RETRIES,
     callbacks: Callbacks = _UNSET,
     # Legacy-only arguments
     agenthub_config: str | None = None,
@@ -58,10 +61,14 @@ def get_chat_model(
             Converse). Auto-detected when omitted.
         custom_class: Custom ``UiPathBaseChatModel`` subclass to instantiate
             instead of the auto-detected one.
-        temperature: Sampling temperature. Forwarded only when explicitly set.
-        max_tokens: Maximum output tokens. Forwarded only when explicitly set.
+        temperature: Sampling temperature. Defaults to 0.0. Pass ``None`` to
+            omit the parameter when the underlying client supports it.
+        max_tokens: Maximum output tokens. Defaults to 1000 to match the
+            historical default from ``UiPathRequestMixin``. Pass ``None`` to
+            forward an explicit unset value (lets the underlying client apply
+            its own default or use no limit).
         timeout: Request timeout in seconds. Defaults to 300 seconds.
-        max_retries: Max retry count. Forwarded only when explicitly set.
+        max_retries: Max retry count. Defaults to 3.
         callbacks: LangChain callbacks (handlers or a manager) attached to the
             returned chat model. Accepts ``list[BaseCallbackHandler]`` or a
             ``BaseCallbackManager``. Forwarded only when explicitly set.
@@ -131,8 +138,8 @@ def _legacy_chat_model(
 
     return _legacy_get_chat_model(
         model,
-        temperature if temperature is not _UNSET and temperature is not None else 0.0,
-        max_tokens if max_tokens is not _UNSET and max_tokens is not None else 0,
+        temperature,
+        max_tokens,
         agenthub_config,
         byo_connection_id,
         **kwargs,

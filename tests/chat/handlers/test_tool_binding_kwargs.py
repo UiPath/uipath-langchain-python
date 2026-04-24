@@ -103,10 +103,11 @@ class TestOpenAIGetToolBindingKwargs:
         assert result["strict"] is True
 
     def test_strict_mode_false(self):
+        """strict_mode=False must be omitted from the request payload."""
         result = self.handler.get_tool_binding_kwargs(
             tools=self.tools, tool_choice="auto", strict_mode=False
         )
-        assert result["strict"] is False
+        assert "strict" not in result
 
     def test_all_keys_present(self):
         result = self.handler.get_tool_binding_kwargs(
@@ -161,17 +162,18 @@ class TestAnthropicGetToolBindingKwargs:
         assert result["strict"] is True
 
     def test_strict_mode_false(self):
+        """strict_mode=False must be omitted from the request payload."""
         result = self.handler.get_tool_binding_kwargs(
             tools=self.tools, tool_choice="auto", strict_mode=False
         )
-        assert result["strict"] is False
+        assert "strict" not in result
 
     def test_all_keys_present(self):
         result = self.handler.get_tool_binding_kwargs(
             tools=self.tools,
             tool_choice="any",
             parallel_tool_calls=True,
-            strict_mode=False,
+            strict_mode=True,
         )
         assert set(result.keys()) == {"tool_choice", "parallel_tool_calls", "strict"}
 
