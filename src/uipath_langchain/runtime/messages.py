@@ -339,10 +339,8 @@ class UiPathChatMessagesMapper:
                                 self._chunk_to_message_event(message.id, chunk)
                             )
                     case "tool_call_chunk":
-                        # Accumulate the message chunk. Note that we assume no interweaving of AIMessage and AIMessageChunks for a given message.
-                        # Skip the first chunk — it's already assigned as current_message above,
-                        # so accumulating it with itself would duplicate fields via string concat
-                        # (e.g. tool name "search_web" becomes "search_websearch_web").
+                        # Skip self-merge: OpenAI's chunk #1 carries the tool name, and adding
+                        # a chunk to itself doubles string fields ("search_web" -> "search_websearch_web").
                         if (
                             isinstance(self.current_message, AIMessageChunk)
                             and self.current_message is not message

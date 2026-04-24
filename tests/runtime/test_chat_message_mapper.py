@@ -1996,26 +1996,12 @@ class TestMapAiMessageToEvents:
         assert result[-1].end is not None
 
 
-def _require_confirmation_field_available() -> bool:
-    """Return True if the installed uipath-core exposes the require_confirmation field."""
-    try:
-        from uipath.core.chat.tool import (
-            UiPathConversationToolCallStartEvent,
-        )
-
-        return hasattr(UiPathConversationToolCallStartEvent, "require_confirmation")
-    except Exception:
-        return False
-
-
 class TestToolCallConfirmation:
     """Tests for requireConfirmation flag on startToolCall events."""
 
     @pytest.mark.asyncio
     async def test_confirmation_tool_has_requires_confirmation_metadata(self):
         """startToolCall for confirmation tools includes requiresConfirmation in metadata."""
-        if not _require_confirmation_field_available():
-            pytest.skip("requires uipath-core>=0.5.12 with require_confirmation field")
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
@@ -2048,8 +2034,6 @@ class TestToolCallConfirmation:
     @pytest.mark.asyncio
     async def test_normal_tool_has_no_confirmation_metadata(self):
         """startToolCall for normal tools has no metadata."""
-        if not _require_confirmation_field_available():
-            pytest.skip("requires uipath-core>=0.5.12 with require_confirmation field")
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
@@ -2081,8 +2065,6 @@ class TestToolCallConfirmation:
     @pytest.mark.asyncio
     async def test_mixed_tools_only_confirmation_has_metadata(self):
         """In mixed tool calls, only confirmation tools get the metadata flag."""
-        if not _require_confirmation_field_available():
-            pytest.skip("requires uipath-core>=0.5.12 with require_confirmation field")
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
