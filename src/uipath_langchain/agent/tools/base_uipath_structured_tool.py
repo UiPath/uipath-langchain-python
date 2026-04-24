@@ -7,18 +7,25 @@ from langchain_core.callbacks import (
 )
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
-from langchain_core.tools.base import _get_runnable_config_param
+from langchain_core.tools.base import ArgsSchema, _get_runnable_config_param
+from langchain_core.utils.pydantic import get_fields
+from pydantic import BaseModel
 
 
 class BaseUiPathStructuredTool(StructuredTool):
     """Base class for UiPath structured tools.
 
-    Extends LangChain's StructuredTool to override the _run and _arun methods.
-    The only difference is that the self reference variable is renamed, to avoid conflicts with payload keys.
+    Extends LangChain's StructuredTool with two categories of override:
 
-    DO NOT CHANGE ANYTHING IN THESE METHODS.
-    There are tests that verify the implementations against the upstream LangChain implementations.
+    1. Upstream-pinned: _run, _arun. These mirror StructuredTool's implementation
+       verbatim except the self parameter is renamed to avoid colliding with a
+       payload key literally named 'self'. DO NOT CHANGE — bytecode-pin tests
+       catch upstream drift and require re-syncing when LangChain changes.
 
+    2. Intentional divergence: _parse_input, tool_call_schema. These work around
+       LangChain's handling of field aliases whose names shadow inherited
+       BaseModel members (schema, copy, validate, dict, json). See PC-4332 and
+       the docstrings on those methods.
     """
 
     def _run(
@@ -84,3 +91,87 @@ class BaseUiPathStructuredTool(StructuredTool):
         return await super()._arun(
             *args, config=config, run_manager=run_manager, **kwargs
         )
+
+    def _parse_input(
+        self, tool_input: str | dict[str, Any], tool_call_id: str | None
+    ) -> str | dict[str, Any]:
+        """Parse and validate tool input, resolving aliased fields by Python name.
+
+        Unlike _run/_arun, this method intentionally diverges from upstream.
+
+        Upstream StructuredTool._parse_input builds the kwargs dict via
+        getattr(validated_instance, alias). For aliases that shadow inherited
+        BaseModel members (e.g. 'schema', 'copy', 'validate', 'dict', 'json'),
+        this returns the inherited method instead of the aliased field value.
+        Fields produced by jsonschema-pydantic-converter for reserved JSON property
+        names use exactly such aliases (schema -> schema_ with alias='schema').
+        """
+        parsed = super()._parse_input(tool_input, tool_call_id)
+        if not isinstance(parsed, dict) or not isinstance(tool_input, dict):
+            return parsed
+
+        input_args = self.args_schema
+        if not (isinstance(input_args, type) and issubclass(input_args, BaseModel)):
+            return parsed
+
+        fields = get_fields(input_args)
+        alias_to_name = {
+            field.alias: name
+            for name, field in fields.items()
+            if field.alias and field.alias != name
+        }
+        if not alias_to_name:
+            return parsed
+
+        result = input_args.model_validate(tool_input)
+        for alias, python_name in alias_to_name.items():
+            if alias in parsed:
+                parsed[alias] = getattr(result, python_name)
+        return parsed
+
+    @property
+    def tool_call_schema(self) -> ArgsSchema:
+        """Return the LLM-facing schema with reserved-name aliases preserved.
+
+        Unlike _run/_arun, this property intentionally diverges from upstream.
+
+        Upstream BaseTool.tool_call_schema rebuilds a subset Pydantic model via
+        _create_subset_model_v2, which constructs a fresh FieldInfoV2 for each
+        field copying only description/default/metadata -- aliases and the source
+        model's ConfigDict (serialize_by_alias, populate_by_name) are dropped.
+        For fields produced by jsonschema-pydantic-converter (schema_ aliased to
+        'schema'), that causes the LLM to see and emit the Python-safe name
+        (schema_) instead of the user-facing property ('schema').
+        """
+        # Upstream builds a fresh subset class per property access (no caching
+        # in BaseTool.tool_call_schema), so mutating field info and config here
+        # is local to this call. If upstream ever adds caching this override
+        # must be revisited to avoid cross-instance state leakage.
+        subset = super().tool_call_schema
+        source = self.args_schema
+        if not (
+            isinstance(subset, type)
+            and issubclass(subset, BaseModel)
+            and isinstance(source, type)
+            and issubclass(source, BaseModel)
+        ):
+            return subset
+
+        changed = False
+        for name, subset_field in subset.model_fields.items():
+            source_field = source.model_fields.get(name)
+            if source_field is None or not source_field.alias:
+                continue
+            if source_field.alias == name:
+                continue
+            subset_field.alias = source_field.alias
+            subset_field.validation_alias = source_field.validation_alias
+            subset_field.serialization_alias = source_field.serialization_alias
+            changed = True
+
+        if changed:
+            subset.model_config["serialize_by_alias"] = True
+            subset.model_config["populate_by_name"] = True
+            subset.model_rebuild(force=True)
+
+        return subset

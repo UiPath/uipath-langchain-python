@@ -6,6 +6,7 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
 )
@@ -130,6 +131,77 @@ def test_function_with_self_parameter():
 
     result = tool.invoke({"self": "test", "value": 42})
     assert result == "test:42"
+
+
+async def _noop_coroutine(**kwargs: object) -> dict[str, object]:
+    return kwargs
+
+
+def test_tool_call_schema_preserves_reserved_name_aliases():
+    """The JSON schema exposed to the LLM must use the user-facing property names
+    (e.g. 'schema'), not the Python-safe field names chosen by the converter
+    (e.g. 'schema_'). If the LLM sees 'schema_', it emits 'schema_' and the value
+    is silently dropped into the model's 'extra' bucket.
+    """
+    input_schema = create_model(
+        {
+            "type": "object",
+            "properties": {
+                "schema": {"type": "string"},
+                "json": {"type": "string"},
+            },
+            "required": ["schema", "json"],
+        }
+    )
+
+    tool = BaseUiPathStructuredTool(
+        coroutine=_noop_coroutine,
+        name="validator",
+        description="validator",
+        args_schema=input_schema,
+    )
+
+    tool_call_schema = tool.tool_call_schema
+    assert isinstance(tool_call_schema, type) and issubclass(
+        tool_call_schema, BaseModel
+    )
+    properties = tool_call_schema.model_json_schema()["properties"]
+    assert set(properties) == {"schema", "json"}
+
+
+@pytest.mark.asyncio
+async def test_coroutine_receives_reserved_pydantic_name_as_value():
+    """A tool argument aliased to a reserved Pydantic name (e.g. 'schema') must
+    reach the coroutine as the user-supplied value, not as a bound BaseModel method.
+    """
+    input_schema = create_model(
+        {
+            "title": "Input",
+            "type": "object",
+            "properties": {
+                "schema": {"type": "string"},
+                "name": {"type": "string"},
+            },
+        }
+    )
+
+    received: dict[str, object] = {}
+
+    async def my_coroutine(**kwargs: object) -> dict[str, object]:
+        received.update(kwargs)
+        return input_schema.model_validate(kwargs).model_dump()
+
+    tool = BaseUiPathStructuredTool(
+        coroutine=my_coroutine,
+        name="reserved_name_tool",
+        description="Tool with a reserved-name argument",
+        args_schema=input_schema,
+    )
+
+    result = await tool.ainvoke({"schema": "my_schema", "name": "alice"})
+
+    assert received == {"schema": "my_schema", "name": "alice"}
+    assert result == {"schema": "my_schema", "name": "alice"}
 
 
 @pytest.mark.asyncio
