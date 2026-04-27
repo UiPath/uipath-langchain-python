@@ -22,7 +22,10 @@ from uipath_langchain.agent.react.utils import (
     extract_current_tool_call_index,
     find_latest_ai_message,
 )
-from uipath_langchain.chat.hitl import request_conversational_tool_confirmation
+from uipath_langchain.chat.hitl import (
+    REQUIRE_CONVERSATIONAL_CONFIRMATION,
+    request_conversational_tool_confirmation,
+)
 
 # the type safety can be improved with generics
 ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
@@ -274,7 +277,32 @@ def _wrap_tool_error_handling(
                 raise
             return result
 
+    tool = getattr(tool_node, "tool", None)
+
+    # Preserve tool ref so the runtime can discover which tools need confirmation
+    # (see runtime.py _get_tool_confirmation_info)
+    metadata = getattr(tool, "metadata", None) or {}
+    if isinstance(tool, BaseTool) and metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION):
+        return RunnableCallableWithTool(
+            func=_func, afunc=_afunc, name=tool_name, tool=tool
+        )
+
     return RunnableCallable(func=_func, afunc=_afunc, name=tool_name)
+
+
+class RunnableCallableWithTool(RunnableCallable):
+    """A RunnableCallable that preserves a reference to its underlying BaseTool."""
+
+    def __init__(
+        self,
+        *,
+        func: Callable[..., Any] | None,
+        afunc: Callable[..., Awaitable[Any]] | None,
+        name: str,
+        tool: BaseTool,
+    ):
+        super().__init__(func=func, afunc=afunc, name=name)
+        self.tool = tool
 
 
 class ToolWrapperMixin:
