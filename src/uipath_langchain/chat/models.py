@@ -2,6 +2,8 @@ import os
 
 from uipath_langchain_client.clients.normalized.chat_models import UiPathChat
 
+from .openai import UiPathAzureChatOpenAI, UiPathChatOpenAI
+
 DEFAULT_MODEL_NAME = "gpt-4.1-mini-2025-04-14"
 
 
@@ -15,4 +17,6 @@ UiPathChat.model_rebuild(force=True)
 
 __all__ = [
     "UiPathChat",
+    "UiPathAzureChatOpenAI",
+    "UiPathChatOpenAI",
 ]
