@@ -1,10 +1,12 @@
 """Tests for analyze_files_tool.py module."""
 
+import json
 import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, ConfigDict, Field
 from uipath.agent.models.agent import (
     AgentInternalAnalyzeFilesToolProperties,
@@ -19,6 +21,8 @@ from uipath_langchain.agent.exceptions import (
 from uipath_langchain.agent.multimodal import FileInfo
 from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
+    LLM_CALL_ATTACHMENTS_METADATA_KEY,
+    _config_with_llm_call_attachments,
     _resolve_job_attachment_arguments,
     create_analyze_file_tool,
 )
@@ -809,3 +813,143 @@ class TestCreateAnalyzeFileToolWithPiiMasking:
         assert exc_info.value.__cause__ is underlying
         mock_llm.ainvoke.assert_not_called()
         mock_add_files.assert_not_called()
+
+
+class TestConfigWithLlmCallAttachments:
+    """The attachments payload travels to the llmCall span via langchain config metadata."""
+
+    def test_returns_config_unchanged_when_no_files(self) -> None:
+        config: RunnableConfig = {"tags": ["existing"]}
+        assert _config_with_llm_call_attachments(config, []) is config
+
+    def test_returns_none_when_input_is_none_and_no_files(self) -> None:
+        assert _config_with_llm_call_attachments(None, []) is None
+
+    def test_injects_payload_into_metadata(self) -> None:
+        att_id = str(uuid.uuid4())
+        files = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+                attachment_id=att_id,
+            )
+        ]
+
+        new_config = _config_with_llm_call_attachments(None, files)
+        assert new_config is not None
+        payload = new_config["metadata"][LLM_CALL_ATTACHMENTS_METADATA_KEY]
+        attachments = json.loads(payload)
+        assert len(attachments) == 1
+        assert attachments[0]["id"] == att_id
+        assert attachments[0]["fileName"] == "doc.pdf"
+
+    def test_preserves_existing_metadata_keys(self) -> None:
+        files = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+                attachment_id=str(uuid.uuid4()),
+            )
+        ]
+        config: RunnableConfig = {"metadata": {"unrelated": "value"}, "tags": ["t"]}
+
+        new_config = _config_with_llm_call_attachments(config, files)
+        assert new_config is not None
+        assert new_config["metadata"]["unrelated"] == "value"
+        assert LLM_CALL_ATTACHMENTS_METADATA_KEY in new_config["metadata"]
+        assert new_config["tags"] == ["t"]
+
+    def test_uses_masked_attachment_when_present(self) -> None:
+        masked_id = str(uuid.uuid4())
+        files = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+                attachment_id=str(uuid.uuid4()),
+                masked_attachment_url="https://redacted/doc.pdf",
+                masked_attachment_id=masked_id,
+            )
+        ]
+
+        new_config = _config_with_llm_call_attachments({}, files)
+        assert new_config is not None
+        payload = new_config["metadata"][LLM_CALL_ATTACHMENTS_METADATA_KEY]
+        attachments = json.loads(payload)
+        assert attachments[0]["id"] == masked_id
+        assert attachments[0]["fileName"] == "pii_masked_doc.pdf"
+
+
+class TestAnalyzeFileToolPassesAttachmentsViaConfig:
+    """End-to-end: tool injects attachments metadata into the config given to ainvoke."""
+
+    @pytest.fixture
+    def resource_config(self):
+        input_schema = {
+            "type": "object",
+            "properties": {
+                "analysisTask": {"type": "string"},
+                "attachments": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["analysisTask", "attachments"],
+        }
+        output_schema = {"type": "object", "properties": {"result": {"type": "string"}}}
+        properties = AgentInternalAnalyzeFilesToolProperties(
+            tool_type=AgentInternalToolType.ANALYZE_FILES
+        )
+        return AgentInternalToolResourceConfig(
+            name="analyze_files",
+            description="Analyze files with AI",
+            input_schema=input_schema,
+            output_schema=output_schema,
+            properties=properties,
+        )
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    async def test_ainvoke_called_with_attachments_metadata(
+        self,
+        mock_resolve_attachments,
+        mock_add_files,
+        mock_get_wrapper,
+        resource_config,
+    ) -> None:
+        att_id = str(uuid.uuid4())
+        mock_resolve_attachments.return_value = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+                attachment_id=att_id,
+            )
+        ]
+        mock_add_files.return_value = HumanMessage(content="task")
+        mock_get_wrapper.return_value = Mock()
+
+        llm = AsyncMock()
+        llm.ainvoke = AsyncMock(return_value=AIMessage(content="result"))
+        llm.model_copy = Mock(return_value=llm)
+
+        tool = create_analyze_file_tool(resource_config, llm)
+        attachment = MockAttachment(
+            ID=att_id, FullName="doc.pdf", MimeType="application/pdf"
+        )
+
+        assert tool.coroutine is not None
+        await tool.coroutine(analysisTask="task", attachments=[attachment])
+
+        config_arg = llm.ainvoke.call_args.kwargs["config"]
+        assert config_arg is not None
+        payload = config_arg["metadata"][LLM_CALL_ATTACHMENTS_METADATA_KEY]
+        attachments = json.loads(payload)
+        assert attachments[0]["id"] == att_id
+        assert attachments[0]["fileName"] == "doc.pdf"
