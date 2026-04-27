@@ -2004,18 +2004,17 @@ class TestMapAiMessageToEvents:
         assert result[-1].end is not None
 
 
-class TestConfirmationToolDeferral:
-    """Tests for deferring startToolCall events for confirmation tools."""
+class TestToolCallConfirmation:
+    """Tests for requireConfirmation flag on startToolCall events."""
 
     @pytest.mark.asyncio
-    async def test_start_tool_call_skipped_for_confirmation_tool(self):
-        """AIMessageChunk with confirmation tool should NOT emit startToolCall."""
+    async def test_confirmation_tool_has_requires_confirmation_metadata(self):
+        """startToolCall for confirmation tools includes requiresConfirmation in metadata."""
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
-        mapper.tool_names_requiring_confirmation = {"confirm_tool"}
+        mapper.tools_requiring_confirmation = {"confirm_tool": {}}
 
-        # First chunk starts the message with a confirmation tool call
         first_chunk = AIMessageChunk(
             content="",
             id="msg-1",
@@ -2023,7 +2022,6 @@ class TestConfirmationToolDeferral:
         )
         await mapper.map_event(first_chunk)
 
-        # Last chunk triggers tool call start events
         last_chunk = AIMessageChunk(content="", id="msg-1")
         object.__setattr__(last_chunk, "chunk_position", "last")
         result = await mapper.map_event(last_chunk)
@@ -2034,15 +2032,20 @@ class TestConfirmationToolDeferral:
             for e in result
             if e.tool_call is not None and e.tool_call.start is not None
         ]
-        assert len(tool_start_events) == 0
+        assert len(tool_start_events) >= 1
+        event = tool_start_events[0]
+        assert event.tool_call is not None
+        assert event.tool_call.start is not None
+        assert event.tool_call.start.tool_name == "confirm_tool"
+        assert event.tool_call.start.require_confirmation is True
 
     @pytest.mark.asyncio
-    async def test_start_tool_call_emitted_for_non_confirmation_tool(self):
-        """Normal tools still emit startToolCall even when confirmation set is populated."""
+    async def test_normal_tool_has_no_confirmation_metadata(self):
+        """startToolCall for normal tools has no metadata."""
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
-        mapper.tool_names_requiring_confirmation = {"other_tool"}
+        mapper.tools_requiring_confirmation = {"other_tool": {}}
 
         first_chunk = AIMessageChunk(
             content="",
@@ -2062,48 +2065,18 @@ class TestConfirmationToolDeferral:
             if e.tool_call is not None and e.tool_call.start is not None
         ]
         assert len(tool_start_events) >= 1
-        assert tool_start_events[0].tool_call is not None
-        assert tool_start_events[0].tool_call.start is not None
-        assert tool_start_events[0].tool_call.start.tool_name == "normal_tool"
+        event = tool_start_events[0]
+        assert event.tool_call is not None
+        assert event.tool_call.start is not None
+        assert event.tool_call.start.require_confirmation is None
 
     @pytest.mark.asyncio
-    async def test_confirmation_tool_message_emits_only_end(self):
-        """ToolMessage for a confirmation tool should only emit endToolCall + messageEnd.
-
-        startToolCall is now emitted by the bridge on HITL approval, not here.
-        """
-        storage = create_mock_storage()
-        storage.get_value.return_value = {"tc-3": "msg-3"}
-        mapper = UiPathChatMessagesMapper("test-runtime", storage)
-        mapper.tool_names_requiring_confirmation = {"confirm_tool"}
-
-        tool_msg = ToolMessage(
-            content='{"result": "ok"}',
-            tool_call_id="tc-3",
-            name="confirm_tool",
-        )
-
-        result = await mapper.map_event(tool_msg)
-
-        assert result is not None
-        # Should have: endToolCall, messageEnd (no startToolCall)
-        assert len(result) == 2
-
-        # First event: endToolCall
-        end_event = result[0]
-        assert end_event.tool_call is not None
-        assert end_event.tool_call.end is not None
-
-        # Second event: messageEnd
-        assert result[1].end is not None
-
-    @pytest.mark.asyncio
-    async def test_mixed_tools_only_confirmation_deferred(self):
-        """Mixed tools in one AIMessage: only confirmation tool's startToolCall is deferred."""
+    async def test_mixed_tools_only_confirmation_has_metadata(self):
+        """In mixed tool calls, only confirmation tools get the metadata flag."""
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
-        mapper.tool_names_requiring_confirmation = {"confirm_tool"}
+        mapper.tools_requiring_confirmation = {"confirm_tool": {}}
 
         first_chunk = AIMessageChunk(
             content="",
@@ -2120,11 +2093,12 @@ class TestConfirmationToolDeferral:
         result = await mapper.map_event(last_chunk)
 
         assert result is not None
-        tool_start_names = [
-            e.tool_call.start.tool_name
-            for e in result
-            if e.tool_call is not None and e.tool_call.start is not None
-        ]
-        # normal_tool should have startToolCall, confirm_tool should NOT
-        assert "normal_tool" in tool_start_names
-        assert "confirm_tool" not in tool_start_names
+        tool_starts = {}
+        for e in result:
+            tc = e.tool_call
+            if tc is not None and tc.start is not None:
+                tool_starts[tc.start.tool_name] = tc.start
+        assert "normal_tool" in tool_starts
+        assert "confirm_tool" in tool_starts
+        assert tool_starts["normal_tool"].require_confirmation is None
+        assert tool_starts["confirm_tool"].require_confirmation is True
