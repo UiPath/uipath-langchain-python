@@ -24,3 +24,6 @@ class FileInfo:
     url: str
     name: str
     mime_type: str
+    masked_attachment_url: str | None = None
+    attachment_id: str | None = None
+    masked_attachment_id: str | None = None

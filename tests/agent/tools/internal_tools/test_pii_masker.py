@@ -1,5 +1,6 @@
 """Tests for pii_masker.py module."""
 
+import uuid
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -47,10 +48,17 @@ def _make_pii_response(
     )
 
 
-def _make_client(response: PiiDetectionResponse) -> Mock:
+def _make_client(
+    response: PiiDetectionResponse,
+    upload_result: uuid.UUID | None = None,
+) -> Mock:
     client = Mock()
     client.semantic_proxy = Mock()
     client.semantic_proxy.detect_pii_async = AsyncMock(return_value=response)
+    client.attachments = Mock()
+    client.attachments.upload_async = AsyncMock(
+        return_value=upload_result or uuid.uuid4()
+    )
     return client
 
 
@@ -153,51 +161,42 @@ class TestEntityThresholdsFromPolicy:
         ]
 
 
-class TestRenameForMasking:
-    """Test cases for PiiMasker._rename_for_masking."""
+class TestWithMaskedUrl:
+    """Test cases for PiiMasker._with_masked_url."""
 
-    def test_file_with_extension_preserves_extension(self):
+    def test_preserves_url_and_name_and_carries_masked_url(self):
         original = FileInfo(
             url="https://orig/report.pdf",
             name="report.pdf",
             mime_type="application/pdf",
+            attachment_id="att-uuid",
         )
 
-        renamed = PiiMasker._rename_for_masking(original, "https://redacted/report.pdf")
+        annotated = PiiMasker._with_masked_url(original, "https://redacted/report.pdf")
 
-        assert renamed.url == "https://redacted/report.pdf"
-        assert renamed.name == "pii_masked_report.pdf"
-        assert renamed.mime_type == "application/pdf"
+        assert annotated.url == "https://orig/report.pdf"
+        assert annotated.name == "report.pdf"
+        assert annotated.mime_type == "application/pdf"
+        assert annotated.masked_attachment_url == "https://redacted/report.pdf"
+        assert annotated.attachment_id == "att-uuid"
 
-    def test_file_without_extension_uses_whole_name(self):
+    def test_preserves_fields_when_attachment_id_missing(self):
         original = FileInfo(
             url="https://orig/readme", name="readme", mime_type="text/plain"
         )
 
-        renamed = PiiMasker._rename_for_masking(original, "https://redacted/readme")
+        annotated = PiiMasker._with_masked_url(original, "https://redacted/readme")
 
-        assert renamed.name == "pii_masked_readme"
-        assert renamed.url == "https://redacted/readme"
-        assert renamed.mime_type == "text/plain"
-
-    def test_file_with_multiple_dots_splits_at_last(self):
-        original = FileInfo(
-            url="https://orig/data.backup.json",
-            name="data.backup.json",
-            mime_type="application/json",
-        )
-
-        renamed = PiiMasker._rename_for_masking(
-            original, "https://redacted/data.backup.json"
-        )
-
-        assert renamed.name == "pii_masked_data.backup.json"
+        assert annotated.url == "https://orig/readme"
+        assert annotated.name == "readme"
+        assert annotated.masked_attachment_url == "https://redacted/readme"
+        assert annotated.attachment_id is None
 
 
 class TestApply:
     """Test cases for PiiMasker.apply."""
 
-    async def test_masks_prompt_and_renames_files(self):
+    async def test_masks_prompt_and_annotates_files(self, httpx_mock):
         entity = PiiEntity(
             pii_text="john@example.com",
             replacement_text="[EMAIL]",
@@ -215,14 +214,19 @@ class TestApply:
             entities=[entity],
             redacted_files=[redacted_file],
         )
-        client = _make_client(response)
+        uploaded_uuid = uuid.uuid4()
+        client = _make_client(response, upload_result=uploaded_uuid)
         files = [
             FileInfo(
                 url="https://orig/doc.pdf",
                 name="doc.pdf",
                 mime_type="application/pdf",
+                attachment_id="orig-uuid",
             )
         ]
+        httpx_mock.add_response(
+            url="https://redacted/doc.pdf", content=b"redacted-bytes"
+        )
 
         masker = PiiMasker(client, policy=None)
         masked_prompt, masked_files = await masker.apply(
@@ -231,12 +235,19 @@ class TestApply:
 
         assert masked_prompt == "Please contact [EMAIL] for info"
         assert len(masked_files) == 1
-        assert masked_files[0].url == "https://redacted/doc.pdf"
-        assert masked_files[0].name == "pii_masked_doc.pdf"
+        assert masked_files[0].url == "https://orig/doc.pdf"
+        assert masked_files[0].name == "doc.pdf"
+        assert masked_files[0].masked_attachment_url == "https://redacted/doc.pdf"
+        assert masked_files[0].masked_attachment_id == str(uploaded_uuid)
+        assert masked_files[0].attachment_id == "orig-uuid"
 
         request = client.semantic_proxy.detect_pii_async.call_args[0][0]
         assert request.files[0].file_name == "doc.pdf"
         assert request.files[0].file_type == "pdf"
+
+        upload_call = client.attachments.upload_async.call_args
+        assert upload_call.kwargs["name"] == "pii_masked_doc.pdf"
+        assert upload_call.kwargs["content"] == b"redacted-bytes"
 
     async def test_returns_original_files_when_no_redactions(self):
         response = _make_pii_response(masked_prompt="clean prompt")
@@ -254,7 +265,9 @@ class TestApply:
         # Same list instance returned when no redactions happened.
         assert masked_files is files
 
-    async def test_unmatched_redacted_filename_keeps_original_url(self):
+    async def test_unmatched_redacted_filename_falls_back_to_original_url(
+        self, httpx_mock
+    ):
         response = _make_pii_response(
             redacted_files=[
                 PiiFileResult(
@@ -272,12 +285,17 @@ class TestApply:
                 mime_type="application/pdf",
             )
         ]
+        # When name doesn't match, masked_attachment_url falls back to the
+        # original URL, so the upload pulls from there.
+        httpx_mock.add_response(url="https://orig/doc.pdf", content=b"original-bytes")
 
         _, masked_files = await PiiMasker(client, None).apply("original", files)
 
-        # Rename still applies; URL falls back to the original when unmatched.
+        # url and name stay as the originals; masked_attachment_url is the
+        # fallback (original URL).
         assert masked_files[0].url == "https://orig/doc.pdf"
-        assert masked_files[0].name == "pii_masked_doc.pdf"
+        assert masked_files[0].name == "doc.pdf"
+        assert masked_files[0].masked_attachment_url == "https://orig/doc.pdf"
 
     async def test_passes_entity_thresholds_from_policy(self):
         response = _make_pii_response()

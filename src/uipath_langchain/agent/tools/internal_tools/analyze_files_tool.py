@@ -1,3 +1,4 @@
+import json
 import logging
 import mimetypes
 import uuid
@@ -12,14 +13,21 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
-from langchain_core.runnables.config import var_child_runnable_config
+from langchain_core.runnables.config import RunnableConfig, var_child_runnable_config
 from langchain_core.tools import StructuredTool
+from opentelemetry import trace as otel_trace
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
 )
+from uipath.core.tracing.span_utils import UiPathSpanUtils
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.runtime.errors import UiPathErrorCategory
+from uipath.tracing import (
+    AttachmentDirection,
+    AttachmentProvider,
+    SpanAttachment,
+)
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
@@ -30,7 +38,10 @@ from uipath_langchain.agent.multimodal import (
     build_file_content_blocks_for,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
-from uipath_langchain.agent.tools.internal_tools.pii_masker import PiiMasker
+from uipath_langchain.agent.tools.internal_tools.pii_masker import (
+    PiiMasker,
+    _masked_name_for,
+)
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -47,6 +58,168 @@ ANALYZE_FILES_SYSTEM_MESSAGE = (
     "Analyze the files contents thoroughly to deliver an accurate response "
     "based on the extracted information."
 )
+
+# Langchain config metadata key carrying the JSON-serialized SpanAttachment list
+# that should render on the llmCall span. The LLMOps callback in uipath-agents
+# reads this and stamps it on the llmCall span as the ``attachments`` attribute.
+LLM_CALL_ATTACHMENTS_METADATA_KEY = "uipath_llm_call_attachments"
+
+
+def _original_attachment_id(file: FileInfo) -> str:
+    """Return the id to use for the original file in trace attachments.
+
+    Prefers the orchestrator attachment UUID when present; falls back to a
+    UUID derived from the file URL for files that did not come from
+    orchestrator (defensive, should not happen in production paths).
+    """
+    if file.attachment_id:
+        return file.attachment_id
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, file.url))
+
+
+def _masked_attachment_id(masked_url: str) -> str:
+    """Derive a stable GUID from the masked URL for trace attachments.
+
+    The LLMOps traces endpoint validates ``Attachment.Id`` as ``System.Guid``.
+    Masked files aren't orchestrator-tracked, so we synthesize a deterministic
+    UUID from the redacted blob URL to satisfy the schema while keeping the id
+    stable across re-runs.
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, masked_url))
+
+
+def _set_span_attachments(
+    span: otel_trace.Span, attachments: list[SpanAttachment]
+) -> None:
+    """Write a :class:`SpanAttachment` list as a JSON string on the given OTel span."""
+    if not attachments or span is None or not span.is_recording():
+        return
+    try:
+        span.set_attribute(
+            "attachments",
+            json.dumps([att.model_dump(by_alias=True) for att in attachments]),
+        )
+    except Exception:
+        logger.exception("Failed to emit trace attachments")
+
+
+def _llm_call_attachments_payload(files: list[FileInfo]) -> str | None:
+    """Build the JSON attachments payload for the llmCall span.
+
+    Each entry represents the file version actually sent to the model: the
+    masked copy when PII masking ran (keyed by the orchestrator UUID from the
+    re-upload when available, uuid5 fallback otherwise), else the original
+    orchestrator attachment. Direction is ``IN`` because the file is an input
+    to the LLM.
+    """
+    if not files:
+        return None
+    attachments: list[SpanAttachment] = []
+    for file in files:
+        if file.masked_attachment_url:
+            att_id = file.masked_attachment_id or _masked_attachment_id(
+                file.masked_attachment_url
+            )
+            name = _masked_name_for(file.name)
+        else:
+            att_id = _original_attachment_id(file)
+            name = file.name
+        attachments.append(
+            SpanAttachment(
+                id=att_id,
+                file_name=name,
+                mime_type=file.mime_type,
+                provider=AttachmentProvider.ORCHESTRATOR,
+                direction=AttachmentDirection.IN,
+            )
+        )
+    return json.dumps([att.model_dump(by_alias=True) for att in attachments])
+
+
+def _config_with_llm_call_attachments(
+    config: RunnableConfig | None, files: list[FileInfo]
+) -> RunnableConfig | None:
+    """Return a runnable config carrying the llmCall attachments payload.
+
+    The LLMOps callback in ``uipath-agents`` reads the payload from
+    ``metadata[LLM_CALL_ATTACHMENTS_METADATA_KEY]`` and stamps it as the
+    ``attachments`` attribute on the llmCall span — so the file actually sent
+    to the model (masked copy when PII masking ran, original otherwise)
+    renders as a downloadable attachment on the LLM-call boundary in the
+    trace UI, mirroring how the PII Masking span renders its files.
+    """
+    payload = _llm_call_attachments_payload(files)
+    if not payload:
+        return config
+    new_config = cast(RunnableConfig, dict(config) if config else {})
+    metadata = dict(new_config.get("metadata") or {})
+    metadata[LLM_CALL_ATTACHMENTS_METADATA_KEY] = payload
+    new_config["metadata"] = metadata
+    return new_config
+
+
+def _emit_pii_masking_attachments(span: otel_trace.Span, files: list[FileInfo]) -> None:
+    """Emit originals (IN) and masked copies (OUT) on the given PII Masking span.
+
+    Originals are keyed by the orchestrator attachment UUID; masked copies are
+    keyed by the real orchestrator UUID from the re-upload when available, or
+    a uuid5 derived from the redacted URL as a fallback.
+    """
+    if not files:
+        return
+    attachments: list[SpanAttachment] = []
+    input_files: list[dict[str, Any]] = []
+    output_files: list[dict[str, Any]] = []
+
+    for file in files:
+        original_id = _original_attachment_id(file)
+        attachments.append(
+            SpanAttachment(
+                id=original_id,
+                file_name=file.name,
+                mime_type=file.mime_type,
+                provider=AttachmentProvider.ORCHESTRATOR,
+                direction=AttachmentDirection.IN,
+            )
+        )
+        input_files.append(
+            {"id": original_id, "fileName": file.name, "mimeType": file.mime_type}
+        )
+
+        if file.masked_attachment_url:
+            # Prefer the real orchestrator UUID from the re-upload so the UI
+            # can download the file; fall back to the synthesized uuid5.
+            masked_id = file.masked_attachment_id or _masked_attachment_id(
+                file.masked_attachment_url
+            )
+            masked_name = _masked_name_for(file.name)
+            attachments.append(
+                SpanAttachment(
+                    id=masked_id,
+                    file_name=masked_name,
+                    mime_type=file.mime_type,
+                    provider=AttachmentProvider.ORCHESTRATOR,
+                    direction=AttachmentDirection.OUT,
+                )
+            )
+            output_files.append(
+                {"id": masked_id, "fileName": masked_name, "mimeType": file.mime_type}
+            )
+
+    _set_span_attachments(span, attachments)
+
+    if span is not None and span.is_recording():
+        try:
+            input_payload = json.dumps({"files": input_files})
+            output_payload = json.dumps({"files": output_files})
+            span.set_attribute("input", input_payload)
+            span.set_attribute("input.value", input_payload)
+            span.set_attribute("input.mime_type", "application/json")
+            span.set_attribute("output", output_payload)
+            span.set_attribute("output.value", output_payload)
+            span.set_attribute("output.mime_type", "application/json")
+        except Exception:
+            logger.exception("Failed to set PII Masking input/output attributes")
 
 
 def create_analyze_file_tool(
@@ -95,16 +268,30 @@ def create_analyze_file_tool(
 
         masker: PiiMasker | None = None
         if client is not None and PiiMasker.is_policy_enabled(policy):
-            masker = PiiMasker(client, policy)
-            try:
-                analysis_task, files = await masker.apply(analysis_task, files)
-            except Exception as exc:
-                raise AgentRuntimeError(
-                    code=AgentRuntimeErrorCode.UNEXPECTED_ERROR,
-                    title="PII masking failed",
-                    detail=f"PII detection raised: {exc!r}",
-                    category=UiPathErrorCategory.SYSTEM,
-                ) from exc
+            # Reconcile OTel current span with the LangChain/LangGraph external
+            # span provider so the new span is parented under the active tool
+            # call span and shares its trace id.
+            parent_ctx = UiPathSpanUtils.get_parent_context()
+            tracer = otel_trace.get_tracer(__name__)
+            with tracer.start_as_current_span(
+                "PII Masking", context=parent_ctx
+            ) as pii_span:
+                # Required for the LLMOps exporter's span filter to keep this span.
+                pii_span.set_attribute("uipath.custom_instrumentation", True)
+                pii_span.set_attribute("span_type", "piiMasking")
+                pii_span.set_attribute("type", "piiMasking")
+                masker = PiiMasker(client, policy)
+                try:
+                    analysis_task, files = await masker.apply(analysis_task, files)
+                    _emit_pii_masking_attachments(pii_span, files)
+                except Exception as exc:
+                    pii_span.record_exception(exc)
+                    raise AgentRuntimeError(
+                        code=AgentRuntimeErrorCode.UNEXPECTED_ERROR,
+                        title="PII masking failed",
+                        detail=f"PII detection raised: {exc!r}",
+                        category=UiPathErrorCategory.SYSTEM,
+                    ) from exc
 
         try:
             human_message = HumanMessage(content=analysis_task)
@@ -122,6 +309,7 @@ def create_analyze_file_tool(
             cast(AnyMessage, human_message_with_files),
         ]
         config = var_child_runnable_config.get(None)
+        config = _config_with_llm_call_attachments(config, files)
         result = await non_streaming_llm.ainvoke(messages, config=config)
 
         del messages, human_message_with_files, files
@@ -198,6 +386,7 @@ async def _resolve_job_attachment_arguments(
             url=blob_info.uri,
             name=blob_info.name,
             mime_type=mime_type,
+            attachment_id=str(attachment_id),
         )
         file_infos.append(file_info)
 
@@ -222,7 +411,17 @@ async def add_files_to_message(
 
     file_content_blocks: list[DataContentBlock] = []
     for file in files:
-        blocks = await build_file_content_blocks_for(file)
+        # Prefer the redacted URL + pii_masked_ name for LLM content when PII masking ran.
+        llm_file = (
+            FileInfo(
+                url=file.masked_attachment_url,
+                name=_masked_name_for(file.name),
+                mime_type=file.mime_type,
+            )
+            if file.masked_attachment_url
+            else file
+        )
+        blocks = await build_file_content_blocks_for(llm_file)
         file_content_blocks.extend(blocks)
     return append_content_blocks_to_message(
         message, cast(list[ContentBlock], file_content_blocks)

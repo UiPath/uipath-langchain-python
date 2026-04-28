@@ -4,6 +4,7 @@ Encapsulates the policy evaluation, PII detection request, and rehydration of
 masked LLM output behind a single :class:`PiiMasker` class.
 """
 
+import base64
 import logging
 from typing import Any
 
@@ -18,11 +19,19 @@ from uipath.platform.semantic_proxy import (
     rehydrate_from_pii_response,
 )
 
-from uipath_langchain.agent.multimodal import FileInfo
+from uipath_langchain.agent.multimodal import FileInfo, download_file_base64
 
 logger = logging.getLogger("uipath")
 
 _FEATURE_FLAG = "FilePiiMaskingEnabled"
+
+
+def _masked_name_for(name: str) -> str:
+    """Apply the ``pii_masked_`` filename prefix for re-uploaded masked files."""
+    if "." in name:
+        base, ext = name.rsplit(".", 1)
+        return f"pii_masked_{base}.{ext}"
+    return f"pii_masked_{name}"
 
 
 class PiiMasker:
@@ -57,7 +66,14 @@ class PiiMasker:
     async def apply(
         self, analysis_task: str, files: list[FileInfo]
     ) -> tuple[str, list[FileInfo]]:
-        """Run PII detection and return the masked prompt and redacted files.
+        """Run PII detection and return the masked prompt and annotated files.
+
+        Files returned keep their original ``url``/``name``/``attachment_id`` and
+        additionally carry ``masked_attachment_url`` (redacted blob URL from the
+        PII service) and ``masked_attachment_id`` (orchestrator UUID from the
+        re-upload, when the upload succeeds). This lets observability callers
+        reference both versions while the LLM path substitutes the masked URL at
+        the message boundary.
 
         The underlying detection response is retained so the LLM output can be
         rehydrated later via :meth:`rehydrate`.
@@ -99,10 +115,26 @@ class PiiMasker:
         redacted_by_name = {f.file_name: f.file_url for f in self._result.files}
         if redacted_by_name:
             masked_files = [
-                self._rename_for_masking(f, redacted_by_name.get(f.name, f.url))
+                self._with_masked_url(f, redacted_by_name.get(f.name, f.url))
                 for f in files
             ]
-            logger.info("Renamed %d file(s) with pii_masked_ prefix", len(masked_files))
+            logger.info(
+                "Populated masked_attachment_url on %d file(s)", len(masked_files)
+            )
+
+            # Re-upload redacted bytes to orchestrator so LLMOps traces can
+            # resolve a download URL for the masked attachment.
+            for idx, masked_file in enumerate(masked_files):
+                uploaded_id = await self._upload_masked_to_orchestrator(masked_file)
+                if uploaded_id:
+                    masked_files[idx] = FileInfo(
+                        url=masked_file.url,
+                        name=masked_file.name,
+                        mime_type=masked_file.mime_type,
+                        masked_attachment_url=masked_file.masked_attachment_url,
+                        attachment_id=masked_file.attachment_id,
+                        masked_attachment_id=uploaded_id,
+                    )
         else:
             masked_files = files
 
@@ -142,11 +174,43 @@ class PiiMasker:
         return thresholds
 
     @staticmethod
-    def _rename_for_masking(file: FileInfo, redacted_url: str) -> FileInfo:
-        """Return a FileInfo pointing at ``redacted_url`` with a ``pii_masked_`` prefix."""
-        if "." in file.name:
-            base, ext = file.name.rsplit(".", 1)
-            new_name = f"pii_masked_{base}.{ext}"
-        else:
-            new_name = f"pii_masked_{file.name}"
-        return FileInfo(url=redacted_url, name=new_name, mime_type=file.mime_type)
+    def _with_masked_url(file: FileInfo, redacted_url: str) -> FileInfo:
+        """Return a new ``FileInfo`` carrying the redacted URL on ``masked_attachment_url``.
+
+        The original ``url``, ``name``, and ``attachment_id`` are preserved so
+        observability callers (LLMOps traces) can reference both versions.
+        """
+        return FileInfo(
+            url=file.url,
+            name=file.name,
+            mime_type=file.mime_type,
+            masked_attachment_url=redacted_url,
+            attachment_id=file.attachment_id,
+        )
+
+    async def _upload_masked_to_orchestrator(self, file: FileInfo) -> str | None:
+        """Re-upload the redacted blob to orchestrator so LLMOps can download it.
+
+        The PII service returns a blob URL that LLMOps has no way to resolve, so
+        clicking the masked attachment in the trace viewer fails. Fetching the
+        bytes and uploading them via ``client.attachments.upload_async`` gives
+        us a real orchestrator UUID that the UI knows how to download.
+
+        Returns the uploaded attachment id, or ``None`` on failure (callers fall
+        back to a synthesized uuid5 — the trace still shows the file, just not
+        downloadable).
+        """
+        if not file.masked_attachment_url:
+            return None
+        try:
+            content = base64.b64decode(
+                await download_file_base64(file.masked_attachment_url)
+            )
+            attachment_key = await self._client.attachments.upload_async(
+                name=_masked_name_for(file.name),
+                content=content,
+            )
+            return str(attachment_key)
+        except Exception:
+            logger.exception("Failed to upload masked file to orchestrator")
+            return None
