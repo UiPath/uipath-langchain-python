@@ -4,6 +4,7 @@ import re
 from typing import Any, Callable
 
 from langgraph.types import Command
+from pydantic import BaseModel
 from uipath.core.guardrails import (
     DeterministicGuardrail,
     DeterministicGuardrailsService,
@@ -26,10 +27,26 @@ from uipath_langchain.agent.guardrails.utils import (
     get_message_content,
 )
 from uipath_langchain.agent.react.types import AgentGuardrailsGraphState
+from uipath_langchain.agent.react.utils import extract_input_data_from_state
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_agent_input(
+    state: AgentGuardrailsGraphState,
+    input_schema: type[BaseModel] | None,
+) -> dict[str, Any] | None:
+    if input_schema is None:
+        return None
+    try:
+        return extract_input_data_from_state(state, input_schema)
+    except Exception:
+        # The state may not yet carry agent-input fields (e.g., very early
+        # subgraphs, or schemas whose required fields aren't seeded yet); fall
+        # back to "no agent_input available" rather than crashing the run.
+        return None
 
 
 def _evaluate_deterministic_guardrail(
@@ -38,6 +55,7 @@ def _evaluate_deterministic_guardrail(
     execution_stage: ExecutionStage,
     input_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]],
     output_data_extractor: Callable[[AgentGuardrailsGraphState], dict[str, Any]] | None,
+    input_schema: type[BaseModel] | None = None,
 ):
     """Evaluate deterministic guardrail.
 
@@ -47,6 +65,10 @@ def _evaluate_deterministic_guardrail(
         execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
         input_data_extractor: Function to extract input data from state.
         output_data_extractor: Function to extract output data from state (optional).
+        input_schema: Optional input schema; when provided, the agent's
+            validated input parameters are extracted from state and passed to
+            pre-execution evaluation so rules can reference
+            ``FieldSource.AGENT_INPUT``.
 
     Returns:
         The guardrail evaluation result.
@@ -56,7 +78,9 @@ def _evaluate_deterministic_guardrail(
 
     if execution_stage == ExecutionStage.PRE_EXECUTION:
         return service.evaluate_pre_deterministic_guardrail(
-            input_data=input_data, guardrail=guardrail
+            input_data=input_data,
+            guardrail=guardrail,
+            agent_input=_resolve_agent_input(state, input_schema),
         )
     else:  # POST_EXECUTION
         output_data = output_data_extractor(state) if output_data_extractor else {}
@@ -150,6 +174,7 @@ def _create_guardrail_node(
     | None = None,
     tool_name: str | None = None,
     tool_type: str | None = None,
+    input_schema: type[BaseModel] | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Private factory for guardrail evaluation nodes.
 
@@ -195,6 +220,7 @@ def _create_guardrail_node(
                     execution_stage,
                     input_data_extractor,
                     output_data_extractor,
+                    input_schema,
                 )
             elif isinstance(guardrail, BuiltInValidatorGuardrail):
                 # Generate and store payload for observability
@@ -314,6 +340,7 @@ def create_tool_guardrail_node(
     failure_node: str,
     tool_name: str,
     tool_type: str | None = None,
+    input_schema: type[BaseModel] | None = None,
 ) -> tuple[str, Callable[[AgentGuardrailsGraphState], Any]]:
     """Create a guardrail node for TOOL scope guardrails.
 
@@ -324,6 +351,8 @@ def create_tool_guardrail_node(
         failure_node: Node to route to on validation fail.
         tool_name: Name of the tool to extract arguments from.
         tool_type: Optional type of the tool (e.g., "process", "escalation", "mcp").
+        input_schema: Optional agent input schema; enables rules to reference
+            ``FieldSource.AGENT_INPUT`` during pre-execution evaluation.
 
     Returns:
         A tuple of (node_name, node_function) for the guardrail evaluation node.
@@ -375,4 +404,5 @@ def create_tool_guardrail_node(
         _output_data_extractor,
         tool_name,
         tool_type,
+        input_schema,
     )

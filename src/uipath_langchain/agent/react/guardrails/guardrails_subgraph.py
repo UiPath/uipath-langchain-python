@@ -452,7 +452,10 @@ def create_tool_guardrails_subgraph(
         scope=GuardrailScope.TOOL,
         execution_stages=[ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION],
         node_factory=partial(
-            create_tool_guardrail_node, tool_name=tool_name, tool_type=tool_type
+            create_tool_guardrail_node,
+            tool_name=tool_name,
+            tool_type=tool_type,
+            input_schema=input_schema,
         ),
         input_schema=input_schema,
     )
