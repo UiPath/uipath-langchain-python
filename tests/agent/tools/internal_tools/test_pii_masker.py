@@ -55,8 +55,8 @@ def _make_client(
     client = Mock()
     client.semantic_proxy = Mock()
     client.semantic_proxy.detect_pii_async = AsyncMock(return_value=response)
-    client.attachments = Mock()
-    client.attachments.upload_async = AsyncMock(
+    client.jobs = Mock()
+    client.jobs.create_attachment_async = AsyncMock(
         return_value=upload_result or uuid.uuid4()
     )
     return client
@@ -245,9 +245,10 @@ class TestApply:
         assert request.files[0].file_name == "doc.pdf"
         assert request.files[0].file_type == "pdf"
 
-        upload_call = client.attachments.upload_async.call_args
+        upload_call = client.jobs.create_attachment_async.call_args
         assert upload_call.kwargs["name"] == "pii_masked_doc.pdf"
         assert upload_call.kwargs["content"] == b"redacted-bytes"
+        assert upload_call.kwargs["category"] == "pii masked"
 
     async def test_returns_original_files_when_no_redactions(self):
         response = _make_pii_response(masked_prompt="clean prompt")
