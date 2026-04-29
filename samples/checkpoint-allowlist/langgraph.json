@@ -1,0 +1,14 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "./main.py:graph"
+  },
+  "env": ".env",
+  "checkpointer": {
+    "serde": {
+      "allowed_msgpack_modules": [
+        ["main", "Score"]
+      ]
+    }
+  }
+}

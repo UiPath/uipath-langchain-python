@@ -1,0 +1,9 @@
+[project]
+name = "checkpoint-allowlist-sample"
+version = "0.0.1"
+description = "Sample showing how to allowlist custom types in langgraph.json's serde block"
+authors = [{ name = "UiPath" }]
+requires-python = ">=3.11"
+dependencies = [
+    "uipath-langchain>=0.10.11,<0.11.0",
+]

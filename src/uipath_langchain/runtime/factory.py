@@ -1,7 +1,9 @@
 import asyncio
+import inspect
 import os
 from typing import Any, AsyncContextManager
 
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from openinference.instrumentation.langchain import (
@@ -28,6 +30,17 @@ from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntime
 from uipath_langchain.runtime.graph import LangGraphLoader
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
 from uipath_langchain.runtime.storage import SqliteResumableStorage
+
+
+def _collect_sdk_interrupt_modules() -> list[tuple[str, str]]:
+    """Return `(module, class_name)` pairs for every SDK interrupt model."""
+    from uipath.platform.common import interrupt_models
+
+    return [
+        (cls.__module__, cls.__name__)
+        for _, cls in inspect.getmembers(interrupt_models, inspect.isclass)
+        if cls.__module__ == interrupt_models.__name__
+    ]
 
 
 class UiPathLangGraphRuntimeFactory:
@@ -95,7 +108,18 @@ class UiPathLangGraphRuntimeFactory:
                 self._memory_cm = AsyncSqliteSaver.from_conn_string(connection_string)
                 self._memory = await self._memory_cm.__aenter__()
                 await self._memory.setup()
+                self._apply_msgpack_allowlist(self._memory)
         return self._memory
+
+    def _apply_msgpack_allowlist(self, memory: AsyncSqliteSaver) -> None:
+        """Apply the user's msgpack allowlist (unioned with SDK interrupt models)."""
+        user_modules = self._load_config().allowed_msgpack_modules
+        if user_modules is None:
+            return
+        sdk_modules = _collect_sdk_interrupt_modules()
+        memory.serde = JsonPlusSerializer(
+            allowed_msgpack_modules=[*sdk_modules, *user_modules],
+        )
 
     def _load_config(self) -> LangGraphConfig:
         """Load langgraph.json configuration."""
