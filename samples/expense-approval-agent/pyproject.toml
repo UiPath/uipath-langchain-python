@@ -1,0 +1,14 @@
+[project]
+name = "expense-approval-agent"
+version = "0.0.1"
+description = "Automated expense approval workflow with manager review via API trigger"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+dependencies = [
+    "langgraph>=0.2.70",
+    "python-dotenv>=1.0.1",
+    "uipath-langchain==0.0.124",
+    "pydantic>=2.10.6",
+    "typing-extensions>=4.12.2",
+    "ipython>=8.32.0"
+]
+requires-python = ">=3.10"
