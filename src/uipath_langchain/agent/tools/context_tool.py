@@ -248,6 +248,8 @@ def handle_semantic_search(
             static_folder_path_prefix or _resolved_arg_folder_prefix
         )
 
+        debug_run = UiPathConfig.is_studio_project
+
         retriever = ContextGroundingRetriever(
             index_name=resource.index_name,
             folder_path=get_execution_folder_path(),
@@ -255,6 +257,7 @@ def handle_semantic_search(
             threshold=threshold,
             scope_folder=resolved_folder_path_prefix,
             scope_extension=file_extension,
+            include_system_indexes=debug_run,
         )
 
         actual_query = prompt or query

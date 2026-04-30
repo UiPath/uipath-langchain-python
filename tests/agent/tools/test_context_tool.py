@@ -525,6 +525,48 @@ class TestHandleSemanticSearch:
             call_kwargs = mock_retriever_class.call_args[1]
             assert call_kwargs["folder_path"] == "/Shared/TestFolder"
 
+    @pytest.mark.asyncio
+    async def test_semantic_search_enables_system_index_fallback_when_not_studio_project(
+        self,
+        semantic_config,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv("UIPATH_PROJECT_ID", raising=False)
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.return_value = []
+            mock_retriever_class.return_value = mock_retriever
+
+            tool = handle_semantic_search("semantic_tool", semantic_config)
+            assert tool.coroutine is not None
+            await tool.coroutine(query="test query")
+
+            call_kwargs = mock_retriever_class.call_args.kwargs
+            assert call_kwargs["include_system_indexes"] is True
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_disables_system_index_fallback_when_studio_project(
+        self,
+        semantic_config,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("UIPATH_PROJECT_ID", "some-project-id")
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.return_value = []
+            mock_retriever_class.return_value = mock_retriever
+
+            tool = handle_semantic_search("semantic_tool", semantic_config)
+            assert tool.coroutine is not None
+            await tool.coroutine(query="test query")
+
+            call_kwargs = mock_retriever_class.call_args.kwargs
+            assert call_kwargs["include_system_indexes"] is False
+
 
 class TestHandleBatchTransform:
     """Test cases for handle_batch_transform function."""
@@ -1095,3 +1137,87 @@ class TestSemanticSearchErrorHandling:
 
             with pytest.raises(EnrichedException):
                 await tool.coroutine(query="test query")
+
+
+class TestSemanticSearchSystemIndexFallbackIntegration:
+    """End-to-end mocked test that exercises the full SDK chain.
+
+    Verifies that when not running as a Studio project, the agent's
+    semantic-search tool resolves the index via the system-indexes
+    endpoint after the across-folders listing returns empty, and
+    successfully runs the unified search against the resolved id.
+    """
+
+    @pytest.mark.asyncio
+    async def test_resolves_system_index_and_runs_unified_search(
+        self,
+        httpx_mock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("UIPATH_URL", "https://cloud.uipath.com/org/tenant")
+        monkeypatch.setenv("UIPATH_ACCESS_TOKEN", "test-token")
+        monkeypatch.setenv("UIPATH_ORGANIZATION_ID", "org-id")
+        monkeypatch.setenv("UIPATH_TENANT_ID", "tenant-id")
+        monkeypatch.setenv("UIPATH_TRACING_ENABLED", "False")
+        monkeypatch.delenv("UIPATH_PROJECT_ID", raising=False)
+        monkeypatch.delenv("UIPATH_FOLDER_PATH", raising=False)
+        monkeypatch.delenv("UIPATH_FOLDER_KEY", raising=False)
+
+        base = "https://cloud.uipath.com/org/tenant"
+        httpx_mock.add_response(
+            url=f"{base}/ecs_/v2/indexes/allacrossfolders?$expand=dataSource&$filter=Name eq 'system-template-index'",
+            status_code=200,
+            json={"value": []},
+        )
+        httpx_mock.add_response(
+            url=f"{base}/ecs_/v2/indexes/allsystemindexes?$expand=dataSource&$filter=Name eq 'system-template-index'",
+            status_code=200,
+            json={
+                "value": [
+                    {
+                        "id": "sys-1",
+                        "name": "system-template-index",
+                        "lastIngestionStatus": "Completed",
+                    }
+                ]
+            },
+        )
+        httpx_mock.add_response(
+            url=f"{base}/ecs_/v1.2/search/sys-1",
+            status_code=200,
+            json={
+                "semanticResults": {
+                    "metadata": {"operation_id": "op-1", "strategy": "semantic"},
+                    "values": [
+                        {
+                            "id": "doc-1",
+                            "source": "src",
+                            "page_number": 1,
+                            "content": "hello world",
+                            "score": 0.9,
+                        }
+                    ],
+                }
+            },
+        )
+
+        resource = _make_context_resource(
+            name="semantic_tool",
+            description="Semantic search tool",
+            index_name="system-template-index",
+            retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
+            query_variant="dynamic",
+        )
+
+        tool = handle_semantic_search("semantic_tool", resource)
+        assert tool.coroutine is not None
+        result = await tool.coroutine(query="hi")
+
+        assert "documents" in result
+        assert len(result["documents"]) == 1
+        assert result["documents"][0]["page_content"] == "hello world"
+
+        urls = [str(r.url) for r in httpx_mock.get_requests()]
+        assert any("/v2/indexes/allacrossfolders" in u for u in urls)
+        assert any("/v2/indexes/allsystemindexes" in u for u in urls)
+        assert any("/v1.2/search/sys-1" in u for u in urls)
