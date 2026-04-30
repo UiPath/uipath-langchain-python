@@ -498,7 +498,7 @@ class TestGuardrailHelperFunctions:
 
         assert result.result == GuardrailValidationResultType.PASSED
         mock_service.evaluate_pre_deterministic_guardrail.assert_called_once_with(
-            input_data={"test": "data"}, guardrail=guardrail
+            input_data={"test": "data"}, guardrail=guardrail, agent_input=None
         )
 
     @pytest.mark.asyncio
@@ -543,6 +543,110 @@ class TestGuardrailHelperFunctions:
             output_data={"output": "data"},
             guardrail=guardrail,
         )
+
+    @pytest.mark.asyncio
+    async def test_evaluate_deterministic_guardrail_pre_passes_agent_input_when_schema_supplied(
+        self, monkeypatch
+    ):
+        """When input_schema is supplied, the agent input dict is extracted from
+        state and forwarded to evaluate_pre_deterministic_guardrail."""
+        from pydantic import BaseModel
+        from uipath.core.guardrails import DeterministicGuardrail
+
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _evaluate_deterministic_guardrail,
+        )
+        from uipath_langchain.agent.react.utils import (
+            create_guardrails_state_with_input,
+        )
+
+        class AgentInputSchema(BaseModel):
+            user_identity: str
+            role: str
+
+        mock_result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.PASSED, reason=""
+        )
+        mock_service = MagicMock()
+        mock_service.evaluate_pre_deterministic_guardrail.return_value = mock_result
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.DeterministicGuardrailsService",
+            lambda: mock_service,
+        )
+
+        guardrail = MagicMock(spec=DeterministicGuardrail)
+        state_cls = create_guardrails_state_with_input(AgentInputSchema)
+        state = state_cls(messages=[], user_identity="U157877", role="admin")
+        input_extractor = MagicMock(return_value={"target_user_id": "U157878"})
+        output_extractor = MagicMock()
+
+        result = _evaluate_deterministic_guardrail(
+            state,
+            guardrail,
+            ExecutionStage.PRE_EXECUTION,
+            input_extractor,
+            output_extractor,
+            AgentInputSchema,
+        )
+
+        assert result.result == GuardrailValidationResultType.PASSED
+        mock_service.evaluate_pre_deterministic_guardrail.assert_called_once_with(
+            input_data={"target_user_id": "U157878"},
+            guardrail=guardrail,
+            agent_input={"user_identity": "U157877", "role": "admin"},
+        )
+
+    @pytest.mark.asyncio
+    async def test_evaluate_deterministic_guardrail_post_does_not_pass_agent_input(
+        self, monkeypatch
+    ):
+        """Even with input_schema supplied, post-execution does NOT receive
+        agent_input — agent-input rules are pre-execution only by design."""
+        from pydantic import BaseModel
+        from uipath.core.guardrails import DeterministicGuardrail
+
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _evaluate_deterministic_guardrail,
+        )
+        from uipath_langchain.agent.react.utils import (
+            create_guardrails_state_with_input,
+        )
+
+        class AgentInputSchema(BaseModel):
+            user_identity: str
+
+        mock_service = MagicMock()
+        mock_service.evaluate_post_deterministic_guardrail.return_value = (
+            GuardrailValidationResult(
+                result=GuardrailValidationResultType.PASSED, reason=""
+            )
+        )
+        monkeypatch.setattr(
+            "uipath_langchain.agent.guardrails.guardrail_nodes.DeterministicGuardrailsService",
+            lambda: mock_service,
+        )
+
+        guardrail = MagicMock(spec=DeterministicGuardrail)
+        state_cls = create_guardrails_state_with_input(AgentInputSchema)
+        state = state_cls(messages=[], user_identity="U157877")
+
+        _evaluate_deterministic_guardrail(
+            state,
+            guardrail,
+            ExecutionStage.POST_EXECUTION,
+            MagicMock(return_value={"input": "data"}),
+            MagicMock(return_value={"output": "data"}),
+            AgentInputSchema,
+        )
+
+        mock_service.evaluate_post_deterministic_guardrail.assert_called_once_with(
+            input_data={"input": "data"},
+            output_data={"output": "data"},
+            guardrail=guardrail,
+        )
+        # agent_input must NOT be present in the post call
+        kwargs = mock_service.evaluate_post_deterministic_guardrail.call_args.kwargs
+        assert "agent_input" not in kwargs
 
     @pytest.mark.asyncio
     async def test_evaluate_builtin_guardrail(self, monkeypatch):
