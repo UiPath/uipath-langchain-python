@@ -1,3 +1,5 @@
+import logging
+
 from langchain_core.callbacks import (
     AsyncCallbackManagerForRetrieverRun,
     CallbackManagerForRetrieverRun,
@@ -6,6 +8,8 @@ from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from uipath.platform import UiPath
 from uipath.platform.context_grounding import SearchMode, UnifiedSearchScope
+
+logger = logging.getLogger(__name__)
 
 
 class ContextGroundingRetriever(BaseRetriever):
@@ -17,6 +21,7 @@ class ContextGroundingRetriever(BaseRetriever):
     threshold: float = 0.0
     scope_folder: str | None = None
     scope_extension: str | None = None
+    include_system_indexes: bool = False
 
     def _build_scope(self) -> UnifiedSearchScope | None:
         if self.scope_folder or self.scope_extension:
@@ -32,6 +37,11 @@ class ContextGroundingRetriever(BaseRetriever):
         """Sync implementation calls context_grounding unified_search API."""
 
         sdk = self.uipath_sdk if self.uipath_sdk is not None else UiPath()
+        if self.include_system_indexes:
+            logger.debug(
+                "Searching index '%s' with system-index fallback enabled",
+                self.index_name,
+            )
         result = sdk.context_grounding.unified_search(
             self.index_name,
             query,
@@ -43,6 +53,7 @@ class ContextGroundingRetriever(BaseRetriever):
             scope=self._build_scope(),
             folder_path=self.folder_path,
             folder_key=self.folder_key,
+            include_system_indexes=self.include_system_indexes,
         )
 
         values = result.semantic_results.values if result.semantic_results else []
@@ -72,6 +83,11 @@ class ContextGroundingRetriever(BaseRetriever):
         """Async implementation calls context_grounding unified_search_async API."""
 
         sdk = self.uipath_sdk if self.uipath_sdk is not None else UiPath()
+        if self.include_system_indexes:
+            logger.debug(
+                "Searching index '%s' with system-index fallback enabled",
+                self.index_name,
+            )
         result = await sdk.context_grounding.unified_search_async(
             self.index_name,
             query,
@@ -83,6 +99,7 @@ class ContextGroundingRetriever(BaseRetriever):
             scope=self._build_scope(),
             folder_path=self.folder_path,
             folder_key=self.folder_key,
+            include_system_indexes=self.include_system_indexes,
         )
 
         values = result.semantic_results.values if result.semantic_results else []

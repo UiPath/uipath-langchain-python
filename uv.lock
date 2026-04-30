@@ -4459,7 +4459,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.10.0,<1.11.0" },
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.10.0,<1.11.0" },
     { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.10.0,<1.11.0" },
-    { name = "uipath-platform", specifier = ">=0.1.36,<0.2.0" },
+    { name = "uipath-platform", specifier = ">=0.1.42,<0.2.0" },
     { name = "uipath-runtime", specifier = ">=0.10.0,<0.11.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "all"]
@@ -4543,7 +4543,7 @@ wheels = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.1.36"
+version = "0.1.42"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -4553,9 +4553,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4d/40/84eef1bb66548cb436472503a0dc6608bd0bc5a44d5bc335489462352082/uipath_platform-0.1.36.tar.gz", hash = "sha256:e6d290450bcc36c4f8dd4ac3766e5b5a02ef0d34f258c8dce8099071cd956217", size = 329335, upload-time = "2026-04-23T22:13:21.299Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/48/d0/b815b95164294138f679da5a4f703f5f0ba27bbda4cc07c0b6486a325dce/uipath_platform-0.1.42.tar.gz", hash = "sha256:44f3230fb61e63bce73c6151afc6d5f1156a96646eed220b89a8409866e0b315", size = 334236, upload-time = "2026-04-30T16:36:39.946Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/b6/16910fc66506cf18c1b4fa0e0ab51e1a044eeafc00497eb9b4299c0c062d/uipath_platform-0.1.36-py3-none-any.whl", hash = "sha256:c8b552569193deca687c8dada483ce322befba5735739fa5f10c4c096c82241e", size = 216940, upload-time = "2026-04-23T22:13:19.547Z" },
+    { url = "https://files.pythonhosted.org/packages/7f/a5/db4ecf46424cedddc57fdd2f8edf17b8dab51458a125e53b7f13a25b20db/uipath_platform-0.1.42-py3-none-any.whl", hash = "sha256:9f908c523ab2c9c2dca0542a1afd499e5d049c76deb58a4f4e1df30ba9ad2bb1", size = 219840, upload-time = "2026-04-30T16:36:38.48Z" },
 ]
 
 [[package]]
