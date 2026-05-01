@@ -126,12 +126,18 @@ def request_approval(
     """
     tool_call_id: str = tool_args.pop("tool_call_id")
 
+    # If this is a server-side tool (not client-side), execution follows immediately
+    # after confirmation — mark this as the execution trigger so the bridge emits
+    # executingToolCall. For client-side tools, the execution interrupt sets this instead.
+    is_execution_trigger = not (tool.metadata or {}).get("uipath_client_tool", False)
+
     @durable_interrupt
     def ask_confirmation():
         return {
             "tool_call_id": tool_call_id,
             "tool_name": tool.name,
             "input": tool_args,
+            "is_execution_phase": is_execution_trigger,
         }
 
     response = ask_confirmation()

@@ -30,6 +30,7 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
+from uipath_langchain.agent.tools.client_side_tool import CLIENT_SIDE_TOOL_MARKER
 from uipath_langchain.agent.tools.tool_node import RunnableCallableWithTool
 from uipath_langchain.chat.hitl import get_confirmation_schema
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
@@ -68,6 +69,7 @@ class UiPathLangGraphRuntime:
         self.callbacks: list[BaseCallbackHandler] = callbacks or []
         self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
         self.chat.tools_requiring_confirmation = self._get_tool_confirmation_info()
+        self.chat.client_side_tools = self._get_client_side_tools()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
     async def execute(
@@ -521,6 +523,34 @@ class UiPathLangGraphRuntime:
                         schemas[tool.name] = schema
 
         return schemas
+
+    def _get_client_side_tools(self) -> dict[str, Any]:
+        """Build {tool_name: output_schema} for client-side tools from compiled graph nodes."""
+
+        tools: dict[str, Any] = {}
+        for node_name, node_spec in self.graph.nodes.items():
+            bound = getattr(node_spec, "bound", None)
+            if bound is None:
+                continue
+
+            tool = getattr(bound, "tool", None)
+            if tool is not None:
+                metadata = getattr(tool, "metadata", None) or {}
+                if metadata.get(CLIENT_SIDE_TOOL_MARKER):
+                    name = getattr(tool, "name", node_name)
+                    tools[name] = metadata.get("output_schema")
+                continue
+
+            tools_by_name = getattr(bound, "tools_by_name", None)
+            if isinstance(tools_by_name, dict):
+                for name, tool in tools_by_name.items():
+                    metadata = getattr(tool, "metadata", None) or {}
+                    if metadata.get(CLIENT_SIDE_TOOL_MARKER):
+                        tools[str(getattr(tool, "name", name))] = metadata.get(
+                            "output_schema"
+                        )
+
+        return tools
 
     def _is_middleware_node(self, node_name: str) -> bool:
         """Check if a node name represents a middleware node."""
