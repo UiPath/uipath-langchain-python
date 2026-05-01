@@ -24,6 +24,7 @@ from uipath.core.chat import (
     UiPathConversationContentPartEndEvent,
     UiPathConversationContentPartEvent,
     UiPathConversationContentPartStartEvent,
+    UiPathConversationExecutingToolCallEvent,
     UiPathConversationMessage,
     UiPathConversationMessageData,
     UiPathConversationMessageEndEvent,
@@ -60,6 +61,7 @@ class UiPathChatMessagesMapper:
         self.storage = storage
         self.current_message: AIMessageChunk | AIMessage
         self.tools_requiring_confirmation: dict[str, Any] = {}
+        self.client_side_tools: dict[str, Any] = {}  # {tool_name: output_schema}
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
         self._citation_stream_processor = CitationStreamProcessor()
@@ -436,14 +438,38 @@ class UiPathChatMessagesMapper:
                             tool_name in self.tools_requiring_confirmation
                         )
                         input_schema = self.tools_requiring_confirmation.get(tool_name)
+                        is_client_side = tool_name in self.client_side_tools
+                        output_schema = (
+                            self.client_side_tools.get(tool_name)
+                            if is_client_side
+                            else None
+                        )
                         events.append(
                             self.map_tool_call_to_tool_call_start_event(
                                 self.current_message.id,
                                 tool_call,
                                 require_confirmation=require_confirmation or None,
                                 input_schema=input_schema,
+                                is_client_side_tool=is_client_side or None,
+                                output_schema=output_schema,
                             )
                         )
+
+                        # Emit executingToolCall from MessageMapper since there's no durable interrupt
+                        # to trigger it from the runtime loop.
+                        if not require_confirmation and not is_client_side:
+                            events.append(
+                                UiPathConversationMessageEvent(
+                                    message_id=self.current_message.id,
+                                    tool_call=UiPathConversationToolCallEvent(
+                                        tool_call_id=tool_call["id"],
+                                        executing=UiPathConversationExecutingToolCallEvent(
+                                            tool_name=tool_call["name"],
+                                            input=tool_call["args"],
+                                        ),
+                                    ),
+                                )
+                            )
 
                 if self.storage is not None:
                     await self.storage.set_value(
@@ -476,19 +502,24 @@ class UiPathChatMessagesMapper:
                 # Keep as string if not valid JSON
                 pass
 
-        events = [
-            UiPathConversationMessageEvent(
-                message_id=message_id,
-                tool_call=UiPathConversationToolCallEvent(
-                    tool_call_id=message.tool_call_id,
-                    end=UiPathConversationToolCallEndEvent(
-                        timestamp=self.get_timestamp(),
-                        output=content_value,
-                        is_error=message.status == "error",
+        # Suppress endToolCall for client-side tools — the client already has the result (it produced it).
+        is_client_side = message.response_metadata.get("uipath_client_tool", False)
+        events: list[UiPathConversationMessageEvent] = []
+
+        if not is_client_side:
+            events.append(
+                UiPathConversationMessageEvent(
+                    message_id=message_id,
+                    tool_call=UiPathConversationToolCallEvent(
+                        tool_call_id=message.tool_call_id,
+                        end=UiPathConversationToolCallEndEvent(
+                            timestamp=self.get_timestamp(),
+                            output=content_value,
+                            is_error=message.status == "error",
+                        ),
                     ),
-                ),
+                )
             )
-        ]
 
         if is_last_tool_call:
             events.append(self.map_to_message_end_event(message_id))
@@ -546,6 +577,8 @@ class UiPathChatMessagesMapper:
         *,
         require_confirmation: bool | None = None,
         input_schema: Any | None = None,
+        is_client_side_tool: bool | None = None,
+        output_schema: Any | None = None,
     ) -> UiPathConversationMessageEvent:
         return UiPathConversationMessageEvent(
             message_id=message_id,
@@ -557,6 +590,8 @@ class UiPathChatMessagesMapper:
                     input=tool_call["args"],
                     require_confirmation=require_confirmation,
                     input_schema=input_schema,
+                    is_client_side_tool=is_client_side_tool,
+                    output_schema=output_schema,
                 ),
             ),
         )
