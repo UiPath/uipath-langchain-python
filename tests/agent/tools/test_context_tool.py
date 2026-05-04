@@ -526,12 +526,12 @@ class TestHandleSemanticSearch:
             assert call_kwargs["folder_path"] == "/Shared/TestFolder"
 
     @pytest.mark.asyncio
-    async def test_semantic_search_enables_system_index_fallback_when_not_studio_project(
+    async def test_semantic_search_enables_system_index_fallback_in_studio_project(
         self,
         semantic_config,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.delenv("UIPATH_PROJECT_ID", raising=False)
+        monkeypatch.setenv("UIPATH_PROJECT_ID", "some-project-id")
         with patch(
             "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
         ) as mock_retriever_class:
@@ -547,12 +547,12 @@ class TestHandleSemanticSearch:
             assert call_kwargs["include_system_indexes"] is True
 
     @pytest.mark.asyncio
-    async def test_semantic_search_disables_system_index_fallback_when_studio_project(
+    async def test_semantic_search_disables_system_index_fallback_outside_studio_project(
         self,
         semantic_config,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setenv("UIPATH_PROJECT_ID", "some-project-id")
+        monkeypatch.delenv("UIPATH_PROJECT_ID", raising=False)
         with patch(
             "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
         ) as mock_retriever_class:
@@ -1142,7 +1142,7 @@ class TestSemanticSearchErrorHandling:
 class TestSemanticSearchSystemIndexFallbackIntegration:
     """End-to-end mocked test that exercises the full SDK chain.
 
-    Verifies that when not running as a Studio project, the agent's
+    Verifies that when running as a Studio project (debug run), the agent's
     semantic-search tool resolves the index via the system-indexes
     endpoint after the across-folders listing returns empty, and
     successfully runs the unified search against the resolved id.
@@ -1159,7 +1159,7 @@ class TestSemanticSearchSystemIndexFallbackIntegration:
         monkeypatch.setenv("UIPATH_ORGANIZATION_ID", "org-id")
         monkeypatch.setenv("UIPATH_TENANT_ID", "tenant-id")
         monkeypatch.setenv("UIPATH_TRACING_ENABLED", "False")
-        monkeypatch.delenv("UIPATH_PROJECT_ID", raising=False)
+        monkeypatch.setenv("UIPATH_PROJECT_ID", "studio-project-id")
         monkeypatch.delenv("UIPATH_FOLDER_PATH", raising=False)
         monkeypatch.delenv("UIPATH_FOLDER_KEY", raising=False)
 
