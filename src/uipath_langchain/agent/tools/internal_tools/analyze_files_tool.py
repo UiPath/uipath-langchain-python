@@ -40,7 +40,7 @@ from uipath_langchain.agent.multimodal import (
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.internal_tools.pii_masker import (
     PiiMasker,
-    _masked_name_for,
+    masked_name_for,
 )
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
@@ -120,7 +120,7 @@ def _llm_call_attachments_payload(files: list[FileInfo]) -> str | None:
             att_id = file.masked_attachment_id or _masked_attachment_id(
                 file.masked_attachment_url
             )
-            name = _masked_name_for(file.name)
+            name = masked_name_for(file.name)
         else:
             att_id = _original_attachment_id(file)
             name = file.name
@@ -192,7 +192,7 @@ def _emit_pii_masking_attachments(span: otel_trace.Span, files: list[FileInfo]) 
             masked_id = file.masked_attachment_id or _masked_attachment_id(
                 file.masked_attachment_url
             )
-            masked_name = _masked_name_for(file.name)
+            masked_name = masked_name_for(file.name)
             attachments.append(
                 SpanAttachment(
                     id=masked_id,
@@ -415,7 +415,7 @@ async def add_files_to_message(
         llm_file = (
             FileInfo(
                 url=file.masked_attachment_url,
-                name=_masked_name_for(file.name),
+                name=masked_name_for(file.name),
                 mime_type=file.mime_type,
             )
             if file.masked_attachment_url

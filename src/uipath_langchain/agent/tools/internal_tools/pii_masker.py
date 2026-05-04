@@ -26,7 +26,7 @@ logger = logging.getLogger("uipath")
 _FEATURE_FLAG = "FilePiiMaskingEnabled"
 
 
-def _masked_name_for(name: str) -> str:
+def masked_name_for(name: str) -> str:
     """Apply the ``pii_masked_`` filename prefix for re-uploaded masked files."""
     if "." in name:
         base, ext = name.rsplit(".", 1)
@@ -193,8 +193,10 @@ class PiiMasker:
 
         The PII service returns a blob URL that LLMOps has no way to resolve, so
         clicking the masked attachment in the trace viewer fails. Fetching the
-        bytes and uploading them via ``client.attachments.upload_async`` gives
-        us a real orchestrator UUID that the UI knows how to download.
+        bytes and uploading them via ``client.jobs.create_attachment_async``
+        gives us a real orchestrator UUID that the UI knows how to download,
+        and links the attachment to the current job so it shows up under the
+        job's attachments (job_key falls back to the running job's instance_key).
 
         Returns the uploaded attachment id, or ``None`` on failure (callers fall
         back to a synthesized uuid5 — the trace still shows the file, just not
@@ -206,9 +208,16 @@ class PiiMasker:
             content = base64.b64decode(
                 await download_file_base64(file.masked_attachment_url)
             )
-            attachment_key = await self._client.attachments.upload_async(
-                name=_masked_name_for(file.name),
+            masked_name = masked_name_for(file.name)
+            attachment_key = await self._client.jobs.create_attachment_async(
+                name=masked_name,
                 content=content,
+                category="pii masked",
+            )
+            logger.info(
+                "Uploaded masked attachment '%s' as id=%s",
+                masked_name,
+                attachment_key,
             )
             return str(attachment_key)
         except Exception:
