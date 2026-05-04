@@ -1,14 +1,15 @@
 """Ixp extraction tool."""
 
-from typing import Any
+import uuid
+from typing import Any, Optional
 
 from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall, ToolMessage
 from langchain_core.tools import StructuredTool
 from langgraph.types import Command, interrupt
+from pydantic import BaseModel, Field
 from uipath.agent.models.agent import AgentIxpExtractionResourceConfig
 from uipath.eval.mocks import mockable
-from uipath.platform.attachments import Attachment
 from uipath.platform.common import DocumentExtraction
 from uipath.platform.documents import ExtractionResponseIXP
 
@@ -26,6 +27,34 @@ class StructuredToolWithWrapper(StructuredToolWithOutputType, ToolWrapperMixin):
     pass
 
 
+class ExtractionToolInputSchema(BaseModel):
+    """Alias-free mirror of `Attachment` used as the tool's args_schema.
+
+    We don't use `Attachment` directly because its fields carry aliases
+    (`id` -> `ID`, `full_name` -> `FullName`, ...) and LangChain mishandles
+    aliased fields in two places (see PR #796):
+
+    1. `BaseTool._parse_input()` extracts each field with `getattr(model, key)`,
+       where `key` is the alias. For aliases that collide with built-in model
+       attributes (e.g. `schema`), this returns the built-in instead of the
+       field value, so downstream `kwargs.get("id") / kwargs.get("full_name")`
+       came back as `None`.
+    2. `tool_call_schema` rebuilds a subset of the model by copying each field
+       but drops alias and serialization options, so the rebuilt schema no
+       longer matches what the LLM emits.
+
+    Until LangChain fixes both, exposing an alias-free schema with field
+    names matching `Attachment`'s python names sidesteps the issue. Keep the
+    fields here in sync with `Attachment` — the test
+    `test_extraction_tool_has_attachment_input_schema` enforces this.
+    """
+
+    id: uuid.UUID
+    full_name: str
+    mime_type: str
+    metadata: Optional[dict[str, Any]] = Field(None)
+
+
 def create_ixp_extraction_tool(
     resource: AgentIxpExtractionResourceConfig,
 ) -> StructuredTool:
@@ -38,27 +67,21 @@ def create_ixp_extraction_tool(
     @mockable(
         name=resource.name,
         description=resource.description,
-        input_schema=Attachment.model_json_schema(),
+        input_schema=ExtractionToolInputSchema.model_json_schema(),
         output_schema=ExtractionResponseIXP.model_json_schema(),
         example_calls=resource.properties.example_calls,
     )
     async def extraction_tool_fn(**kwargs: Any) -> ExtractionResponseIXP:
         from uipath.platform import UiPath
 
+        attachment = ExtractionToolInputSchema.model_validate(kwargs)
         uipath = UiPath()
-
-        attachment_id = kwargs.get("id")
-        attachment_full_name = kwargs.get("full_name")
-
-        # TODO: attachment_mime_type is currently not used anywhere (attachment_full_name will also be obsolete once attachments api is onboarded)
-        # should we use them somewhere else? otherwise input_schema should only contain the file id
-        # attachment_mime_type = kwargs.get("mime_type")
 
         # TODO: current workaround. DocumentExtraction model should support attachment_id and use the
         # start_ixp_extraction_from_attachment sdk method once support is added
 
         attachment_local_file_path = await uipath.attachments.download_async(
-            key=attachment_id, destination_path=attachment_full_name
+            key=attachment.id, destination_path=attachment.full_name
         )
         document_extraction_response = interrupt(
             DocumentExtraction(
@@ -95,7 +118,7 @@ def create_ixp_extraction_tool(
     tool = StructuredToolWithWrapper(
         name=tool_name,
         description=resource.description,
-        args_schema=Attachment,
+        args_schema=ExtractionToolInputSchema,
         coroutine=extraction_tool_fn,
         output_type=ExtractionResponseIXP,
         metadata={
