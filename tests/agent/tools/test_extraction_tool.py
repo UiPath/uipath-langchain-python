@@ -82,7 +82,8 @@ class TestExtractionToolMetadata:
         """Test that extraction tool's input schema mirrors Attachment fields."""
         tool = create_ixp_extraction_tool(extraction_resource)
 
-        schema_fields = tool.args_schema.model_fields
+        assert tool.args_schema is ExtractionToolInputSchema
+        schema_fields = ExtractionToolInputSchema.model_fields
         attachment_fields = Attachment.model_fields
 
         assert schema_fields.keys() == attachment_fields.keys()
