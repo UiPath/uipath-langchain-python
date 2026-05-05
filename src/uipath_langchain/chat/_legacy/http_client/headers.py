@@ -3,6 +3,7 @@
 import os
 from urllib.parse import quote
 
+from uipath.platform.chat.llm_trace_context import build_trace_context_headers
 from uipath.platform.common._config import UiPathConfig
 from uipath.platform.common.constants import (
     ENV_FOLDER_KEY,
@@ -63,5 +64,7 @@ def build_uipath_headers(
             headers[HEADER_INTERNAL_TENANT_ID] = tenant_id
         if organization_id := os.getenv(ENV_ORGANIZATION_ID):
             headers[HEADER_INTERNAL_ACCOUNT_ID] = organization_id
+
+    headers.update(build_trace_context_headers(extra_baggage=["source=agents"]))
 
     return headers
