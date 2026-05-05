@@ -11,7 +11,10 @@ from uipath.agent.models.agent import (
 from uipath.platform.attachments import Attachment
 from uipath.platform.documents import ExtractionResponseIXP
 
-from uipath_langchain.agent.tools.extraction_tool import create_ixp_extraction_tool
+from uipath_langchain.agent.tools.extraction_tool import (
+    ExtractionToolInputSchema,
+    create_ixp_extraction_tool,
+)
 
 
 class TestExtractionToolMetadata:
@@ -76,10 +79,16 @@ class TestExtractionToolMetadata:
         assert tool.description == "Extract data from files"
 
     def test_extraction_tool_has_attachment_input_schema(self, extraction_resource):
-        """Test that extraction tool uses Attachment as input schema."""
+        """Test that extraction tool's input schema mirrors Attachment fields."""
         tool = create_ixp_extraction_tool(extraction_resource)
 
-        assert tool.args_schema == Attachment
+        assert tool.args_schema is ExtractionToolInputSchema
+        schema_fields = ExtractionToolInputSchema.model_fields
+        attachment_fields = Attachment.model_fields
+
+        assert schema_fields.keys() == attachment_fields.keys()
+        for name, attachment_field in attachment_fields.items():
+            assert schema_fields[name].annotation == attachment_field.annotation
 
     def test_extraction_tool_has_extraction_response_output_type(
         self, extraction_resource
@@ -234,6 +243,39 @@ class TestExtractionToolFunctionality:
             )
 
         assert "Download failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    @patch("uipath.platform.UiPath")
+    @patch("uipath_langchain.agent.tools.extraction_tool.interrupt")
+    async def test_extraction_tool_handles_alias_keyed_input(
+        self, mock_interrupt, mock_uipath_class, extraction_resource
+    ):
+        """The LLM emits Attachment fields by alias (ID/FullName/MimeType) — the
+        same shape Attachment.model_dump(by_alias=True) produces. download_async
+        must still be called with the populated UUID, not key=None.
+        """
+        mock_client = MagicMock()
+        mock_uipath_class.return_value = mock_client
+        mock_client.attachments.download_async = AsyncMock(
+            return_value="/path/to/document.pdf"
+        )
+        mock_interrupt.return_value = {"extracted_data": {"field1": "value1"}}
+
+        tool = create_ixp_extraction_tool(extraction_resource)
+
+        attachment = ExtractionToolInputSchema(
+            id=UUID("fa93f4ca-bd3f-473a-93e5-e6e5b5a8f27f"),
+            full_name="document.pdf",
+            mime_type="application/pdf",
+        )
+        aliased_input = attachment.model_dump()
+
+        await tool.ainvoke(aliased_input)
+
+        mock_client.attachments.download_async.assert_called_once_with(
+            key=UUID("fa93f4ca-bd3f-473a-93e5-e6e5b5a8f27f"),
+            destination_path="document.pdf",
+        )
 
 
 class TestExtractionToolNameSanitization:
