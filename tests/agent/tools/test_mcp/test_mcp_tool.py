@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -20,6 +20,9 @@ from uipath_langchain.agent.tools.mcp.mcp_tool import (
     create_mcp_tools,
     create_mcp_tools_and_clients,
     open_mcp_tools,
+)
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
 )
 
 logger = logging.getLogger(__name__)
@@ -1005,3 +1008,116 @@ class TestCreateMcpToolsFromConfig:
                     raise RuntimeError("boom")
 
             mock_client.dispose.assert_awaited_once()
+
+
+class TestMcpToolArgumentProperties:
+    """Test that argument_properties from config are applied to MCP tools."""
+
+    @pytest.fixture
+    def mock_mcp_client(self):
+        return MagicMock(spec=McpClient)
+
+    @pytest.mark.asyncio
+    async def test_none_mode_passes_argument_properties_to_tool(self, mock_mcp_client):
+        """In none mode, argument_properties from config must reach the built tool."""
+        resource = AgentMcpResourceConfig(
+            name="test_server",
+            description="Test",
+            folder_path="/Shared",
+            slug="test",
+            available_tools=[
+                AgentMcpTool(
+                    name="divide",
+                    description="Divide two numbers",
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "number"},
+                            "b": {"type": "number"},
+                        },
+                        "required": ["a", "b"],
+                    },
+                    argument_properties={
+                        "$['a']": {
+                            "variant": "static",
+                            "value": 76,
+                            "isSensitive": False,
+                        }
+                    },
+                ),
+            ],
+        )
+
+        tools = await create_mcp_tools(resource, mock_mcp_client)
+
+        assert len(tools) == 1
+        tool = tools[0]
+        assert hasattr(tool, "argument_properties")
+        assert "$['a']" in tool.argument_properties
+
+    @pytest.mark.asyncio
+    async def test_all_mode_carries_over_argument_properties_for_matching_tools(
+        self, mock_mcp_client
+    ):
+        """In all mode, argument_properties from config must attach to matching server tools."""
+        mock_mcp_client.list_tools = AsyncMock(
+            return_value=ListToolsResult(
+                tools=[
+                    Tool(
+                        name="divide",
+                        description="Divide from server",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                "a": {"type": "number"},
+                                "b": {"type": "number"},
+                            },
+                        },
+                    ),
+                    Tool(
+                        name="new_tool",
+                        description="New tool not in config",
+                        inputSchema={"type": "object", "properties": {}},
+                    ),
+                ]
+            )
+        )
+
+        resource = AgentMcpResourceConfig(
+            name="test_server",
+            description="Test",
+            folder_path="/Shared",
+            slug="test",
+            dynamic_tools=DynamicToolsMode.ALL,
+            available_tools=[
+                AgentMcpTool(
+                    name="divide",
+                    description="Divide (stale)",
+                    input_schema={"type": "object", "properties": {}},
+                    argument_properties={
+                        "$['a']": {
+                            "variant": "static",
+                            "value": 76,
+                            "isSensitive": False,
+                        }
+                    },
+                ),
+            ],
+        )
+
+        tools = await create_mcp_tools(resource, mock_mcp_client)
+
+        assert len(tools) == 2
+        divide_tool = next(
+            cast(StructuredToolWithArgumentProperties, t)
+            for t in tools
+            if t.name == "divide"
+        )
+        new_tool = next(
+            cast(StructuredToolWithArgumentProperties, t)
+            for t in tools
+            if t.name == "new_tool"
+        )
+
+        assert "$['a']" in divide_tool.argument_properties
+        assert not new_tool.argument_properties
