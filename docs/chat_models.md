@@ -1,14 +1,22 @@
 # Chat Models
 
-UiPath provides two chat models `UiPathAzureChatOpenAI` and `UiPathChat`. These are compatible with LangGraph as drop in replacements. You do not need to add tokens from OpenAI or Anthropic, usage of these chat models will consume `Agent Units` on your account.
+UiPath provides chat model classes compatible with LangChain and LangGraph as drop-in replacements. You do not need provider API keys — usage consumes Agent Units on your account.
 
-## UiPathAzureChatOpenAI
+To see the models available for your account, run:
 
-`UiPathAzureChatOpenAI` can be used as a drop in replacement for `ChatOpenAI` or `AzureChatOpenAI`.
+```bash
+uipath list-models
+```
 
-### Example usage
+/// note
+`UiPathChat` and `UiPathAzureChatOpenAI` are legacy classes and will be phased out in a future release. `UiPathAzureChatOpenAI` has been renamed to `UiPathChatOpenAI` (same class, new name). When you can, migrate existing code to one of the provider-specific classes below.
+///
 
-Here is a code that is using `ChatOpenAI`
+## UiPathChatOpenAI
+
+Drop-in replacement for `ChatOpenAI` or `AzureChatOpenAI`. This is the new name for `UiPathAzureChatOpenAI`.
+
+Original code using `ChatOpenAI`:
 
 ```python
 from langchain_openai import ChatOpenAI
@@ -26,13 +34,13 @@ llm = ChatOpenAI(
 )
 ```
 
-You can simply change `ChatOpenAi` with `UiPathAzureChatOpenAI`, you don't have to provide an OpenAI token.
+Swap `ChatOpenAI` for `UiPathChatOpenAI` — no OpenAI token needed:
 
 ```python
-from uipath_langchain.chat.models import UiPathAzureChatOpenAI
+from uipath_langchain.chat import UiPathChatOpenAI
 
-llm = UiPathAzureChatOpenAI(
-    model="gpt-4.1-mini-2025-04-14",
+llm = UiPathChatOpenAI(
+    model="<model>",
     temperature=0,
     max_tokens=4000,
     timeout=30,
@@ -41,17 +49,11 @@ llm = UiPathAzureChatOpenAI(
 )
 ```
 
-Currently, the following models can be used with `UiPathAzureChatOpenAI` (this list can be updated in the future):
+## UiPathChatAnthropicBedrock
 
--   `gpt-4`, `gpt-4-1106-Preview`, `gpt-4-32k`, `gpt-4-turbo-2024-04-09`, `gpt-4-vision-preview`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-mini-2024-07-18`, `gpt-4.1-mini-2025-04-14`, `o3-mini-2025-01-31`
+Drop-in replacement for `ChatAnthropic` (or `ChatBedrock` when using Anthropic models).
 
-## UiPathChat
-
-`UiPathChat` is a more versatile class that can suport models from diferent vendors including OpenAI.
-
-### Example usage
-
-Given the following code:
+Original code using `ChatAnthropic`:
 
 ```python
 from langchain_anthropic import ChatAnthropic
@@ -66,13 +68,13 @@ llm = ChatAnthropic(
 )
 ```
 
-You can replace it with `UiPathChat` like so:
+Swap for `UiPathChatAnthropicBedrock`:
 
 ```python
-from uipath_langchain.chat.models import UiPathChat
+from uipath_langchain.chat import UiPathChatAnthropicBedrock
 
-llm = UiPathChat(
-    model="anthropic.claude-3-opus-20240229-v1:0",
+llm = UiPathChatAnthropicBedrock(
+    model_id="<model>",
     temperature=0,
     max_tokens=1024,
     timeout=None,
@@ -81,13 +83,66 @@ llm = UiPathChat(
 )
 ```
 
-Currently the following models can be used with `UiPathChat` (this list can be updated in the future):
+## UiPathChatBedrockConverse
 
--   `anthropic.claude-3-5-sonnet-20240620-v1:0`, `anthropic.claude-3-5-sonnet-20241022-v2:0`, `anthropic.claude-3-7-sonnet-20250219-v1:0`, `anthropic.claude-3-haiku-20240307-v1:0`, `gemini-1.5-pro-001`, `gemini-2.0-flash-001`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini-2024-07-18`, `o3-mini-2025-01-31`
+Drop-in replacement for `ChatBedrockConverse` from `langchain_aws`. Supports models from multiple providers via the AWS Bedrock Converse API.
+
+Original code using `ChatBedrockConverse`:
+
+```python
+from langchain_aws import ChatBedrockConverse
+
+llm = ChatBedrockConverse(
+    model="anthropic.claude-3-5-sonnet-20240620-v1:0",
+    temperature=0,
+    max_tokens=1024,
+    # other params...
+)
+```
+
+Swap for `UiPathChatBedrockConverse`:
+
+```python
+from uipath_langchain.chat import UiPathChatBedrockConverse
+
+llm = UiPathChatBedrockConverse(
+    model="<model>",
+    temperature=0,
+    max_tokens=1024,
+    # other params...
+)
+```
+
+## UiPathChatVertex
+
+Drop-in replacement for `ChatGoogleGenerativeAI` or `ChatVertexAI`.
+
+Original code using `ChatGoogleGenerativeAI`:
+
+```python
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.0-flash-001",
+    temperature=0,
+    max_tokens=1024,
+    # other params...
+)
+```
+
+Swap for `UiPathChatVertex`:
+
+```python
+from uipath_langchain.chat import UiPathChatVertex
+
+llm = UiPathChatVertex(
+    model="<model>",
+    temperature=0,
+    max_tokens=1024,
+    # other params...
+)
+```
 
 /// warning
-Please note that you may get errors related to data residency, as some models are not available on all regions.
-
-Example: `[Enforced Region] No model configuration found for product uipath-python-sdk in EU using model anthropic.claude-3-opus-20240229-v1:0`.
-
+Some models may not be available in all regions due to data residency restrictions. Use `uipath list-models` to see which models are available in your region.
 ///
