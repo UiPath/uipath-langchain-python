@@ -121,8 +121,8 @@ class TestExportsWithoutDefaults:
 
 
 class TestReExportedClassIdentity:
-    def test_uipath_chat_is_upstream_class(self):
-        assert UiPathChat is _UpstreamUiPathChat
+    def test_uipath_chat_is_subclass_of_upstream(self):
+        assert issubclass(UiPathChat, _UpstreamUiPathChat)
 
     def test_uipath_chat_vertex_alias_matches_google(self):
         assert UiPathChatVertex is UiPathChatGoogleGenerativeAI
