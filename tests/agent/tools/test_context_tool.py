@@ -396,6 +396,19 @@ class TestCreateContextTool:
         result = create_context_tool(deep_rag_config)
         assert isinstance(result, StructuredToolWithArgumentProperties)
 
+    def test_legacy_none_context_type_semantic_search(self, semantic_search_config):
+        # Agents packaged with storage-schema < v48 have no contextType field.
+        semantic_search_config.context_type = None
+        result = create_context_tool(semantic_search_config)
+        assert isinstance(result, StructuredToolWithOutputType)
+        assert result.name == "test_semantic_search"
+
+    def test_legacy_none_context_type_deep_rag(self, deep_rag_config):
+        deep_rag_config.context_type = None
+        result = create_context_tool(deep_rag_config)
+        assert isinstance(result, StructuredToolWithArgumentProperties)
+        assert result.name == "test_deep_rag"
+
 
 class TestHandleSemanticSearch:
     """Test cases for handle_semantic_search function."""

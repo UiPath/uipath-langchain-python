@@ -150,7 +150,6 @@ def create_context_tool(
     llm: BaseChatModel | None = None,
     agent: LowCodeAgentDefinition | None = None,
 ) -> StructuredTool | BaseTool | None:
-    assert resource.context_type is not None
     tool_name = sanitize_tool_name(resource.name)
 
     if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
