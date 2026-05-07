@@ -1,15 +1,16 @@
 import os
 
-from pydantic import model_validator
+from pydantic import field_validator
 
 
 class _AgentHubConfigDefaultMixin:
-    @model_validator(mode="after")
-    def _clear_agenthub_config_default(self):
-        if os.getenv("UIPATH_AGENTHUB_CONFIG") is None:
-            client_settings = getattr(self, "client_settings", None)
-            if client_settings is not None and hasattr(
-                client_settings, "agenthub_config"
-            ):
-                client_settings.agenthub_config = None
-        return self
+    @field_validator("client_settings", mode="after")
+    @classmethod
+    def _clear_agenthub_config_default(cls, client_settings):
+        if (
+            client_settings is not None
+            and os.getenv("UIPATH_AGENTHUB_CONFIG") is None
+            and hasattr(client_settings, "agenthub_config")
+        ):
+            client_settings.agenthub_config = None
+        return client_settings
