@@ -63,6 +63,22 @@ class TestDirectConstructorAgentHubConfig:
         llm = cls()
         assert llm.client_settings.agenthub_config == "agentsplayground"
 
+    def test_no_agenthub_header_on_inner_http_client(self, cls):
+        llm = cls()
+        client = getattr(llm, "uipath_sync_client", None)
+        if client is None:
+            pytest.skip(f"{cls.__name__} has no uipath_sync_client to inspect")
+        assert "x-uipath-agenthub-config" not in {key.lower() for key in client.headers}
+
+    def test_env_var_is_honored_on_inner_http_client(self, cls, monkeypatch):
+        monkeypatch.setenv("UIPATH_AGENTHUB_CONFIG", "agentsplayground")
+        llm = cls()
+        client = getattr(llm, "uipath_sync_client", None)
+        if client is None:
+            pytest.skip(f"{cls.__name__} has no uipath_sync_client to inspect")
+        normalized = {key.lower(): value for key, value in client.headers.items()}
+        assert normalized.get("x-uipath-agenthub-config") == "agentsplayground"
+
 
 _UPSTREAM_CASES = [
     "uipath_langchain_client.clients.normalized.chat_models:UiPathChat",
