@@ -4375,7 +4375,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.10.18"
+version = "0.10.19"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4452,13 +4452,13 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "uipath", specifier = ">=2.10.61,<2.11.0" },
     { name = "uipath-core", specifier = ">=0.5.15,<0.6.0" },
-    { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.10.0,<1.11.0" },
-    { name = "uipath-langchain-client", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.10.0,<1.11.0" },
-    { name = "uipath-langchain-client", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=1.10.0,<1.11.0" },
-    { name = "uipath-langchain-client", extras = ["fireworks"], marker = "extra == 'fireworks'", specifier = ">=1.10.0,<1.11.0" },
-    { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.10.0,<1.11.0" },
-    { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.10.0,<1.11.0" },
-    { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.10.0,<1.11.0" },
+    { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.10.1,<1.11.0" },
+    { name = "uipath-langchain-client", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.10.1,<1.11.0" },
+    { name = "uipath-langchain-client", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=1.10.1,<1.11.0" },
+    { name = "uipath-langchain-client", extras = ["fireworks"], marker = "extra == 'fireworks'", specifier = ">=1.10.1,<1.11.0" },
+    { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.10.1,<1.11.0" },
+    { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.10.1,<1.11.0" },
+    { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.10.1,<1.11.0" },
     { name = "uipath-platform", specifier = ">=0.1.45,<0.2.0" },
     { name = "uipath-runtime", specifier = ">=0.10.0,<0.11.0" },
 ]
@@ -4482,15 +4482,15 @@ dev = [
 
 [[package]]
 name = "uipath-langchain-client"
-version = "1.10.0"
+version = "1.10.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
     { name = "uipath-llm-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b9/2d/6a683f7635fd2daab21ad3c451f168ac9893011fb05e3c976634ce6e5642/uipath_langchain_client-1.10.0.tar.gz", hash = "sha256:a50feb02d612dd18ee97d036f61125dbc875888da248995963dffa1428e2b3f3", size = 35833, upload-time = "2026-04-23T18:18:15.109Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/b8/5034d1a12a24e34138b2f3e0bba389d9ff870daf3511dbe71bee121e5e03/uipath_langchain_client-1.10.1.tar.gz", hash = "sha256:151ab00cd10c173df575ba64e3a81a9ba2ced268eaec9e4b822a8109e4863c8b", size = 36113, upload-time = "2026-05-08T11:39:49.538Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/05/e1/4e17ef24c644962b7a2120d4ad6a9903cc5a3154cf3f17b6012a31b5867c/uipath_langchain_client-1.10.0-py3-none-any.whl", hash = "sha256:4afb08843f65ec96a9ef0dbc8fde5e087a5357dd761b3f84da2389a06a11a084", size = 46015, upload-time = "2026-04-23T18:18:14.119Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/03/73aed19e0271f5cb2c62d15b7bba3274e110c9a738815ad975fb8348d8dc/uipath_langchain_client-1.10.1-py3-none-any.whl", hash = "sha256:73a72ffb3c0b992d295650d331f5b4c58f4d18709bfffe1e2f699525d951da10", size = 46184, upload-time = "2026-05-08T11:39:50.607Z" },
 ]
 
 [package.optional-dependencies]
