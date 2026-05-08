@@ -16,7 +16,7 @@ import logging
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from uipath.agent.models.agent import AgentContextResourceConfig
@@ -92,11 +92,51 @@ class DataFabricTextQueryHandler:
         result_state = await compiled_graph.ainvoke(
             {"messages": [HumanMessage(content=user_query)]}
         )
-        for msg in reversed(result_state["messages"]):
+        messages = result_state["messages"]
+        last_message = messages[-1] if messages else None
+
+        # On the happy path the sub-graph short-circuits at END after a
+        # successful execute_sql call, so the terminal state contains one or
+        # more ToolMessages. Collapse the trailing batch into one synthetic
+        # message so the outer agent can reason over the full result set.
+        if isinstance(last_message, ToolMessage):
+            trailing_tool_messages: list[ToolMessage] = []
+            for msg in reversed(messages):
+                if not isinstance(msg, ToolMessage):
+                    break
+                trailing_tool_messages.append(msg)
+            return self._format_terminal_tool_messages(
+                list(reversed(trailing_tool_messages))
+            )
+
+        # On errors / max-iterations the terminal message is an AIMessage
+        # carrying the natural-language explanation.
+        for msg in reversed(messages):
             if isinstance(msg, AIMessage) and msg.content:
                 return str(msg.content)
 
         return "Unable to generate an answer from the available data."
+
+    @staticmethod
+    def _format_terminal_tool_messages(tool_messages: list[ToolMessage]) -> str:
+        """Build one returned message from the terminal ToolMessage batch."""
+        non_empty_contents = [
+            str(msg.content) for msg in tool_messages if getattr(msg, "content", None)
+        ]
+        if not non_empty_contents:
+            return "Unable to generate an answer from the available data."
+        if len(non_empty_contents) == 1:
+            return non_empty_contents[0]
+
+        rendered_results = [
+            f"Result {index}:\n{content}"
+            for index, content in enumerate(non_empty_contents, start=1)
+        ]
+        return (
+            "Multiple SQL queries executed successfully. "
+            "Use all of the following results to answer the user's question.\n\n"
+            + "\n\n".join(rendered_results)
+        )
 
 
 def create_datafabric_query_tool(
@@ -125,10 +165,19 @@ def create_datafabric_query_tool(
         resource_description=resource.description or "",
         base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
     )
+    entity_lines = []
+    for e in entity_set:
+        line = f"- {e.name}"
+        if e.description:
+            line += f": {e.description}"
+        entity_lines.append(line)
+    entity_summary = "\n".join(entity_lines)
+
     return BaseUiPathStructuredTool(
         name=tool_name,
         description=(
-            "Query Data Fabric entities using natural language. "
+            "Query the following Data Fabric entities using natural language:\n"
+            f"{entity_summary}\n"
             "Describe what data you need and the tool will translate it to SQL, "
             "execute the query, and return a natural language answer."
         ),

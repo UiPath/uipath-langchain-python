@@ -3,6 +3,12 @@
 Implements a self-contained ReAct loop where an inner LLM translates
 natural-language questions into SQL, executes them via ``execute_sql``,
 and retries on errors — all within a single outer tool call.
+
+On a successful SQL execution the graph short-circuits straight to END
+rather than invoking the LLM again to reformat the records into prose;
+the outer agent receives the raw tool result and produces the final
+natural-language answer. Errors still loop back to the inner LLM so the
+retry path remains intact.
 """
 
 import asyncio
@@ -37,6 +43,7 @@ class DataFabricSubgraphState(BaseModel):
 
     messages: Annotated[list[AnyMessage], add_messages] = []
     iteration_count: int = 0
+    last_tool_success: bool = False
 
 
 class QueryExecutor:
@@ -104,7 +111,7 @@ class DataFabricGraph:
         graph.add_conditional_edges(
             "inner_llm", self.router, ["inner_tool", "termination", END]
         )
-        graph.add_edge("inner_tool", "inner_llm")
+        graph.add_conditional_edges("inner_tool", self.tool_router, ["inner_llm", END])
         graph.add_edge("termination", END)
         self.compiled_graph: CompiledStateGraph[Any] = graph.compile()
 
@@ -120,16 +127,19 @@ class DataFabricGraph:
         if not isinstance(last, AIMessage) or not last.tool_calls:
             return {"iteration_count": state.iteration_count}
 
-        tool_messages = await asyncio.gather(
+        results = await asyncio.gather(
             *[self._execute_tool_call(tc) for tc in last.tool_calls]
         )
+        tool_messages = [msg for msg, _ in results]
+        all_succeeded = bool(results) and all(success for _, success in results)
         return {
-            "messages": list(tool_messages),
+            "messages": tool_messages,
             "iteration_count": state.iteration_count + len(last.tool_calls),
+            "last_tool_success": all_succeeded,
         }
 
-    async def _execute_tool_call(self, tool_call: ToolCall) -> ToolMessage:
-        """Execute a single tool call and wrap the result."""
+    async def _execute_tool_call(self, tool_call: ToolCall) -> tuple[ToolMessage, bool]:
+        """Execute a single tool call and report whether it succeeded."""
         args = tool_call.get("args", {})
         try:
             result = await self._execute_sql_tool.ainvoke(args)
@@ -140,10 +150,18 @@ class DataFabricGraph:
                 "error": str(e),
                 "sql_query": args.get("sql_query", ""),
             }
-        return ToolMessage(
-            content=str(result),
-            tool_call_id=tool_call["id"],
-            name="execute_sql",
+        succeeded = (
+            isinstance(result, dict)
+            and not result.get("error")
+            and result.get("total_count", 0) > 0
+        )
+        return (
+            ToolMessage(
+                content=str(result),
+                tool_call_id=tool_call["id"],
+                name="execute_sql",
+            ),
+            succeeded,
         )
 
     async def termination_node(self, state: DataFabricSubgraphState) -> dict[str, Any]:
@@ -161,13 +179,25 @@ class DataFabricGraph:
         }
 
     def router(self, state: DataFabricSubgraphState) -> str:
-        """Route to tool, termination, or END based on state."""
+        """Route from ``inner_llm`` to tool, termination, or END."""
         last = state.messages[-1] if state.messages else None
         if isinstance(last, AIMessage) and last.tool_calls:
             if state.iteration_count < self._max_iterations:
                 return "inner_tool"
             return "termination"
         return END
+
+    def tool_router(self, state: DataFabricSubgraphState) -> str:
+        """Route from ``inner_tool``: short-circuit on success, retry on error.
+
+        Skips the redundant LLM call that would otherwise reformat a
+        successful SQL result into prose — the outer agent receives the
+        raw tool output and produces the final natural-language answer.
+        Errors loop back to ``inner_llm`` so the retry path is preserved.
+        """
+        if state.last_tool_success:
+            return END
+        return "inner_llm"
 
     def _create_execute_sql_tool(
         self,

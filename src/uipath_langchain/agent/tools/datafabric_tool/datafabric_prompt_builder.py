@@ -3,15 +3,17 @@
 Converts raw Entity SDK objects into structured Pydantic models (SQLContext),
 then formats them as text for system prompt injection.
 
-Note: This module will go through refinements as we better understand
-the tool's performance characteristics and scoring in production.
+The SQL strategy section (``sql_expert_system_prompt``) is rendered from a
+versioned prompt template via the ``prompts`` package. ``SQL_CONSTRAINTS`` is
+appended verbatim — the system prompt should describe strategy only, not
+backend deny-lists.
 """
 
 import logging
 
 from uipath.platform.entities import Entity
 
-from .datafabric_prompts import SQL_CONSTRAINTS, SQL_EXPERT_SYSTEM_PROMPT
+from .datafabric_prompts import SQL_CONSTRAINTS
 from .models import (
     EntitySchema,
     EntitySQLContext,
@@ -19,6 +21,7 @@ from .models import (
     QueryPattern,
     SQLContext,
 )
+from .prompts import build_prompt_context, get_prompt_version
 
 logger = logging.getLogger(__name__)
 
@@ -101,12 +104,30 @@ def build_sql_context(
     entities: list[Entity],
     resource_description: str = "",
     base_system_prompt: str = "",
+    prompt_version: str | None = None,
 ) -> SQLContext:
-    """Build the full SQL context from entities, prompts, and constraints."""
+    """Build the full SQL context from entities, prompts, and constraints.
+
+    Args:
+        entities: Resolved Data Fabric entities.
+        resource_description: Optional free-text description folded into the
+            rendered prompt as ``## Domain Guidance``.
+        base_system_prompt: Optional outer-agent system prompt prepended as
+            ``## Agent Instructions``.
+        prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
+            Defaults to the registry's default.
+    """
+    version = get_prompt_version(prompt_version)
+    ctx = build_prompt_context(
+        entities=entities,
+        resource_description=resource_description,
+    )
+    rendered_prompt = version.render(ctx)
+
     return SQLContext(
         base_system_prompt=base_system_prompt or None,
-        resource_description=resource_description or None,
-        sql_expert_system_prompt=SQL_EXPERT_SYSTEM_PROMPT,
+        resource_description=None,
+        sql_expert_system_prompt=rendered_prompt,
         constraints=SQL_CONSTRAINTS,
         entity_contexts=[build_entity_context(e) for e in entities],
     )
@@ -174,16 +195,20 @@ def build(
     entities: list[Entity],
     resource_description: str = "",
     base_system_prompt: str = "",
+    prompt_version: str | None = None,
 ) -> str:
     """Build the full SQL prompt text for the inner sub-graph LLM.
 
-    Combines agent system prompt, resource description, SQL guidelines,
-    constraints, entity schemas, and query patterns into a single prompt string.
+    Combines agent system prompt, the rendered SQL strategy prompt, the
+    Calcite constraint deny-list, and entity schemas + query patterns.
 
     Args:
         entities: List of Entity objects with schema information.
-        resource_description: Optional description of the resource/entity set.
+        resource_description: Optional description of the resource/entity set;
+            folded into the rendered prompt as domain guidance.
         base_system_prompt: Optional system prompt from the outer agent.
+        prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
+            Defaults to the registry's default.
 
     Returns:
         Formatted prompt string for the inner LLM system message.
@@ -191,5 +216,10 @@ def build(
     if not entities:
         return ""
 
-    ctx = build_sql_context(entities, resource_description, base_system_prompt)
+    ctx = build_sql_context(
+        entities,
+        resource_description,
+        base_system_prompt,
+        prompt_version=prompt_version,
+    )
     return format_sql_context(ctx)

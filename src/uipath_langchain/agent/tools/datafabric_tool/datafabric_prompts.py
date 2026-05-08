@@ -18,6 +18,7 @@ Rules:
 6. Use the exact table and column names from the provided schema
 7. For financial values (salary, price, etc.), use ROUND() function
 8. Handle NULL values appropriately with COALESCE() or IFNULL()
+9. Do NOT terminate the SQL query with a semicolon
 
 SUPPORTED SCENARIOS (Use these patterns):
 
@@ -28,8 +29,7 @@ SUPPORTED SCENARIOS (Use these patterns):
    - IS NULL/IS NOT NULL: WHERE deleted_at IS NULL
 
 2. Multi-Entity Joins (≤4 tables):
-   - LEFT JOIN chains (up to 4 tables): SELECT o.id, c.name FROM Order o LEFT JOIN Customer c ON o.customer_id = c.id
-   - Null-preserving semantics
+   - INNER JOIN chains (up to 4 tables): SELECT o.id, c.name FROM Order o INNER JOIN Customer c ON o.customer_id = c.id
 
 3. Predicate Distribution:
    - Table-scoped predicates: WHERE c.country='IN' AND o.total>1000
@@ -94,7 +94,7 @@ UNSUPPORTED SCENARIOS (Avoid these patterns):
    - Temporary objects or transactions
 
 5. UNSUPPORTED_CONSTRUCTS - Joins:
-   - RIGHT JOIN, FULL OUTER JOIN, CROSS JOIN
+   - LEFT JOIN, RIGHT JOIN, FULL OUTER JOIN, CROSS JOIN
    - Non-equi join conditions: ON a.created_at > b.created_at
    - Self-joins
    - LATERAL/APPLY
@@ -156,14 +156,12 @@ SQL_CONSTRAINTS = """\
 - SELECT id, name FROM Customer WHERE deleted_at IS NULL
 
 ### 2. Multi-Entity Joins (≤4 adapters)
-- LEFT JOIN chains via entity model (up to 4 tables)
-- Optional adapters pruned
+- INNER JOIN chains via entity model (up to 4 tables)
 - Shared intermediates
-- Null-preserving semantics
 
 **Examples:**
-- SELECT o.id, c.name FROM Order o LEFT JOIN Customer c ON o.customer_id = c.id
-- Fields spanning 3-4 adapters with proper LEFT JOIN chains
+- SELECT o.id, c.name FROM Order o INNER JOIN Customer c ON o.customer_id = c.id
+- Fields spanning 3-4 adapters with proper INNER JOIN chains
 
 ### 3. Predicate Distribution & Pushdown
 - Adapter-scoped predicates pushed down
@@ -255,7 +253,7 @@ SQL_CONSTRAINTS = """\
 - Common Table Expressions (WITH/CTE)
 - Window functions (ROW_NUMBER, RANK, PARTITION BY)
 - Self-joins
-- RIGHT JOIN or FULL OUTER JOIN (only LEFT JOIN supported)
+- LEFT JOIN, RIGHT JOIN, FULL OUTER JOIN (only INNER JOIN supported)
 - CROSS JOIN
 
 **Examples:**
@@ -277,6 +275,7 @@ SQL_CONSTRAINTS = """\
 
 ### 4. ADVANCED_JOINS
 - More than 4 tables in JOIN chain
+- LEFT JOIN
 - RIGHT JOIN
 - FULL OUTER JOIN
 - CROSS JOIN
@@ -337,7 +336,7 @@ SQL_CONSTRAINTS = """\
 
 1. **ALWAYS use explicit column names** - Never use SELECT *
 2. **Use COUNT(column_name)** - Never use COUNT(*)
-3. **Only LEFT JOIN** - No RIGHT JOIN, FULL OUTER JOIN, or CROSS JOIN
+3. **Only INNER JOIN** - No LEFT JOIN, RIGHT JOIN, FULL OUTER JOIN, or CROSS JOIN
 4. **Maximum 4 tables** - No more than 4 tables in a JOIN chain
 5. **No subqueries** - No subqueries in any clause
 6. **No CTEs** - No WITH clauses
