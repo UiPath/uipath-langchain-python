@@ -1,0 +1,22 @@
+[project]
+name = "email-triage-agent"
+version = "0.0.1"
+description = "Wait for new emails via UiPath Integration Services, triage them with an LLM, and optionally escalate to a human via Action Center."
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "langgraph>=1.0.4",
+    "uipath-langchain"
+]
+
+[dependency-groups]
+dev = [
+    "uipath-dev",
+]
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+publish-url = "https://test.pypi.org/legacy/"
+explicit = true
