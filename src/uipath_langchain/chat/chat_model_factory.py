@@ -73,8 +73,10 @@ def get_chat_model(
             returned chat model. Accepts ``list[BaseCallbackHandler]`` or a
             ``BaseCallbackManager``. Forwarded only when explicitly set.
             Ignored by the legacy factory.
-        agenthub_config: AgentHub config header value. Required by the legacy
-            factory; ignored by the new factory.
+        agenthub_config: AgentHub config header value. Threaded onto
+            ``client_settings.agenthub_config`` on the new path (PlatformSettings
+            otherwise defaults to ``"agentsruntime"``); required by the legacy
+            factory.
         use_new_llm_clients: Routes to the new ``uipath_langchain_client``
             factory when True (default). When False, routes to the legacy
             in-repo clients.
@@ -94,6 +96,14 @@ def get_chat_model(
             byo_connection_id=byo_connection_id,
             **kwargs,
         )
+
+    if agenthub_config is not None:
+        if client_settings is None:
+            from uipath_langchain_client.settings import get_default_client_settings
+
+            client_settings = get_default_client_settings()
+        if hasattr(client_settings, "agenthub_config"):
+            client_settings.agenthub_config = agenthub_config
 
     optional_kwargs = {
         k: v
