@@ -44,7 +44,6 @@ def get_chat_model(
     timeout: float | None = DEFAULT_TIMEOUT_SECONDS,
     max_retries: int | None = DEFAULT_MAX_RETRIES,
     callbacks: Callbacks = _UNSET,
-    # Legacy-only arguments
     agenthub_config: str | None = None,
     use_new_llm_clients: bool = True,
     **kwargs: Any,
@@ -74,7 +73,7 @@ def get_chat_model(
             ``BaseCallbackManager``. Forwarded only when explicitly set.
             Ignored by the legacy factory.
         agenthub_config: AgentHub config header value. Required by the legacy
-            factory; ignored by the new factory.
+            factory; forwarded to the new factory.
         use_new_llm_clients: Routes to the new ``uipath_langchain_client``
             factory when True (default). When False, routes to the legacy
             in-repo clients.
@@ -115,6 +114,7 @@ def get_chat_model(
         vendor_type=vendor_type,
         api_flavor=api_flavor,
         custom_class=custom_class,
+        agenthub_config=agenthub_config,
         **optional_kwargs,
         **kwargs,
     )
