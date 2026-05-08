@@ -12,8 +12,6 @@ from uipath_langchain_client.clients.bedrock.chat_models import (
     UiPathChatBedrockConverse as _UpstreamUiPathChatBedrockConverse,
 )
 
-from ._settings import _AgentHubConfigDefaultMixin
-
 DEFAULT_MODEL_NAME = "anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
@@ -21,13 +19,11 @@ def _default_factory() -> str:
     return os.getenv("UIPATH_MODEL_NAME", DEFAULT_MODEL_NAME)
 
 
-class UiPathChatBedrock(_AgentHubConfigDefaultMixin, _UpstreamUiPathChatBedrock):
+class UiPathChatBedrock(_UpstreamUiPathChatBedrock):
     pass
 
 
-class UiPathChatAnthropicBedrock(
-    _AgentHubConfigDefaultMixin, _UpstreamUiPathChatAnthropicBedrock
-):
+class UiPathChatAnthropicBedrock(_UpstreamUiPathChatAnthropicBedrock):
     pass
 
 
@@ -36,9 +32,7 @@ for _cls in (UiPathChatBedrock, UiPathChatAnthropicBedrock):
     _cls.model_rebuild(force=True)
 
 
-class UiPathChatBedrockConverse(
-    _AgentHubConfigDefaultMixin, _UpstreamUiPathChatBedrockConverse
-):
+class UiPathChatBedrockConverse(_UpstreamUiPathChatBedrockConverse):
     @model_validator(mode="before")
     @classmethod
     def _inject_default_model(cls, values: Any) -> Any:

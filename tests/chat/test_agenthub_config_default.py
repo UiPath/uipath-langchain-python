@@ -1,14 +1,9 @@
-"""Tests for the chat-client agenthub_config default behavior.
-
-Direct construction of UiPathChat / UiPathChatOpenAI / UiPathAzureChatOpenAI /
-UiPathChatBedrock / UiPathChatBedrockConverse / UiPathChatAnthropicBedrock /
-UiPathChatGoogleGenerativeAI / UiPathChatVertex must default
-client_settings.agenthub_config to None.
-
-The upstream classes (used by chat_model_factory for low-code runtime)
-must keep the upstream library default of "agentsruntime", proving the
-local override does not leak globally onto the upstream class.
-"""
+"""Tests that direct construction of UiPathChat / UiPathChatOpenAI /
+UiPathAzureChatOpenAI / UiPathChatBedrock / UiPathChatBedrockConverse /
+UiPathChatAnthropicBedrock / UiPathChatGoogleGenerativeAI / UiPathChatVertex
+defaults ``client_settings.agenthub_config`` to None and omits the
+``x-uipath-agenthub-config`` header on the outgoing httpx client unless
+``UIPATH_AGENTHUB_CONFIG`` is set."""
 
 import pytest
 
@@ -78,35 +73,3 @@ class TestDirectConstructorAgentHubConfig:
             pytest.skip(f"{cls.__name__} has no uipath_sync_client to inspect")
         normalized = {key.lower(): value for key, value in client.headers.items()}
         assert normalized.get("x-uipath-agenthub-config") == "agentsplayground"
-
-
-_UPSTREAM_CASES = [
-    "uipath_langchain_client.clients.normalized.chat_models:UiPathChat",
-    "uipath_langchain_client.clients.openai.chat_models:UiPathChatOpenAI",
-    "uipath_langchain_client.clients.openai.chat_models:UiPathAzureChatOpenAI",
-    "uipath_langchain_client.clients.bedrock.chat_models:UiPathChatBedrock",
-    "uipath_langchain_client.clients.bedrock.chat_models:UiPathChatBedrockConverse",
-    "uipath_langchain_client.clients.bedrock.chat_models:UiPathChatAnthropicBedrock",
-    "uipath_langchain_client.clients.google.chat_models:UiPathChatGoogleGenerativeAI",
-]
-
-
-@pytest.mark.parametrize("upstream_path", _UPSTREAM_CASES)
-class TestUpstreamAgentHubConfigUntouched:
-    """Deployed runtimes go through chat_model_factory, which instantiates the
-    upstream classes directly. Those must keep the upstream library default of
-    'agentsruntime'."""
-
-    def _resolve(self, upstream_path: str):
-        import importlib
-
-        module_name, attr = upstream_path.split(":")
-        return getattr(importlib.import_module(module_name), attr)
-
-    def test_upstream_keeps_agentsruntime_default(self, upstream_path):
-        # make sure model rebinds are not breaking the agenthub_config
-        import uipath_langchain.chat  # noqa: F401
-
-        upstream_cls = self._resolve(upstream_path)
-        llm = upstream_cls(model="gpt-4.1-mini-2025-04-14")
-        assert llm.client_settings.agenthub_config == "agentsruntime"

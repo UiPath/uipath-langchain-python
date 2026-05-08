@@ -4,8 +4,6 @@ from uipath_langchain_client.clients.google.chat_models import (
     UiPathChatGoogleGenerativeAI as _UpstreamUiPathChatGoogleGenerativeAI,
 )
 
-from ._settings import _AgentHubConfigDefaultMixin
-
 DEFAULT_MODEL_NAME = "gemini-2.5-flash"
 
 
@@ -13,9 +11,7 @@ def _default_factory() -> str:
     return os.getenv("UIPATH_MODEL_NAME", DEFAULT_MODEL_NAME)
 
 
-class UiPathChatGoogleGenerativeAI(
-    _AgentHubConfigDefaultMixin, _UpstreamUiPathChatGoogleGenerativeAI
-):
+class UiPathChatGoogleGenerativeAI(_UpstreamUiPathChatGoogleGenerativeAI):
     pass
 
 

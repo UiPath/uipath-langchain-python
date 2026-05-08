@@ -7,8 +7,6 @@ from uipath_langchain_client.clients.openai.chat_models import (
     UiPathChatOpenAI as _UpstreamUiPathChatOpenAI,
 )
 
-from ._settings import _AgentHubConfigDefaultMixin
-
 DEFAULT_MODEL_NAME = "gpt-4.1-mini-2025-04-14"
 
 
@@ -16,13 +14,11 @@ def _default_factory() -> str:
     return os.getenv("UIPATH_MODEL_NAME", DEFAULT_MODEL_NAME)
 
 
-class UiPathChatOpenAI(_AgentHubConfigDefaultMixin, _UpstreamUiPathChatOpenAI):
+class UiPathChatOpenAI(_UpstreamUiPathChatOpenAI):
     pass
 
 
-class UiPathAzureChatOpenAI(
-    _AgentHubConfigDefaultMixin, _UpstreamUiPathAzureChatOpenAI
-):
+class UiPathAzureChatOpenAI(_UpstreamUiPathAzureChatOpenAI):
     pass
 
 
