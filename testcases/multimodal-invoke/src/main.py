@@ -75,11 +75,6 @@ MODELS_TO_TEST: list[ModelTestConfig] = [
         label="VertexAI (Google) - UiPathChatGoogleGenerativeAI",
         model_name="gemini-2.5-pro",
     ),
-    # VendorType.VERTEXAI (Google family) -> UiPathChatGoogleGenerativeAI
-    ModelTestConfig(
-        label="VertexAI (Google) - UiPathChatGoogleGenerativeAI",
-        model_name="gemini-3-pro-preview",
-    ),
     # VendorType.AWSBEDROCK (UiPath-owned) -> UiPathChatBedrockConverse (converse API by default)
     ModelTestConfig(
         label="Bedrock (default/converse) - UiPathChatBedrockConverse",

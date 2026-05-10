@@ -24,7 +24,7 @@ from uipath_langchain_client.settings import (
 )
 
 _UNSET: Final[Any] = object()
-DEFAULT_TIMEOUT_SECONDS: Final[float] = 300.0
+DEFAULT_TIMEOUT_SECONDS: Final[float] = 895.0
 DEFAULT_MAX_TOKENS: Final[int] = 1000
 DEFAULT_TEMPERATURE: Final[float] = 0.0
 DEFAULT_MAX_RETRIES: Final[int] = 3
@@ -66,7 +66,7 @@ def get_chat_model(
             historical default from ``UiPathRequestMixin``. Pass ``None`` to
             forward an explicit unset value (lets the underlying client apply
             its own default or use no limit).
-        timeout: Request timeout in seconds. Defaults to 300 seconds.
+        timeout: Request timeout in seconds. Defaults to 895 seconds.
         max_retries: Max retry count. Defaults to 3.
         callbacks: LangChain callbacks (handlers or a manager) attached to the
             returned chat model. Accepts ``list[BaseCallbackHandler]`` or a
