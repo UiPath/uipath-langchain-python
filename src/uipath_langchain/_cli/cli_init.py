@@ -35,14 +35,11 @@ def generate_agent_md_file(
         target_directory: The directory where the file should be created.
         file_name: The name of the file should be created.
         resource_name: The name of the resource folder where should be the file.
-        no_agents_md_override: Whether to override existing files.
+        no_agents_md_override: When True, do not overwrite an existing file.
 
     Returns:
-        A tuple of (file_name, status) where status is a FileOperationStatus:
-        - CREATED: File was created
-        - UPDATED: File was overwritten
-        - SKIPPED: File exists and no_agents_md_override is True
-        Returns None if an error occurred.
+        A tuple of (file_name, status) where status is a FileOperationStatus,
+        or None if an error occurred.
     """
     target_path = os.path.join(target_directory, file_name)
     will_override = os.path.exists(target_path)
@@ -68,54 +65,70 @@ def generate_agent_md_file(
 
 
 def generate_specific_agents_md_files(
-    target_directory: str, no_agents_md_override: bool
+    target_directory: str,
+    no_agents_md_override: bool,
+    with_offline_docs: bool = False,
 ) -> Generator[tuple[str, FileOperationStatus], None, None]:
-    """Generate agent-specific files from the packaged resource.
+    """Generate AGENTS.md (and a CLAUDE.md shim), optionally bundling the offline docs.
 
     Args:
         target_directory: The directory where the files should be created.
-        no_agents_md_override: Whether to override existing files.
+        no_agents_md_override: When True, do not overwrite existing AGENTS.md/CLAUDE.md.
+        with_offline_docs: When True, copy llms-full.txt to .uipath/ as an offline fallback.
 
     Yields:
-        Tuple of (file_name, status) for each file operation, where status is a FileOperationStatus:
-        - CREATED: File was created
-        - UPDATED: File was overwritten
-        - SKIPPED: File exists and was not overwritten
+        Tuple of (file_name, status) for each file operation.
     """
-    agent_dir = os.path.join(target_directory, ".agent")
-    os.makedirs(agent_dir, exist_ok=True)
+    result = generate_agent_md_file(
+        target_directory,
+        "AGENTS.md",
+        "uipath_langchain._resources",
+        no_agents_md_override,
+    )
+    if result:
+        yield result
 
-    file_configs = [
-        (target_directory, "CLAUDE.md", "uipath._resources"),
-        (agent_dir, "CLI_REFERENCE.md", "uipath._resources"),
-        (agent_dir, "SDK_REFERENCE.md", "uipath._resources"),
-        (target_directory, "AGENTS.md", "uipath_langchain._resources"),
-        (agent_dir, "REQUIRED_STRUCTURE.md", "uipath_langchain._resources"),
-    ]
+    claude_result = generate_agent_md_file(
+        target_directory,
+        "CLAUDE.md",
+        "uipath_langchain._resources",
+        no_agents_md_override,
+    )
+    if claude_result:
+        yield claude_result
 
-    for directory, file_name, resource_name in file_configs:
-        result = generate_agent_md_file(
-            directory, file_name, resource_name, no_agents_md_override
-        )
-        if result:
-            yield result
+    if with_offline_docs:
+        uipath_dir = os.path.join(target_directory, ".uipath")
+        os.makedirs(uipath_dir, exist_ok=True)
+        try:
+            source = importlib.resources.files("uipath._resources").joinpath(
+                "llms-full.txt"
+            )
+            with importlib.resources.as_file(source) as s_path:
+                shutil.copy(s_path, os.path.join(uipath_dir, "llms-full.txt"))
+        except (FileNotFoundError, ModuleNotFoundError):
+            pass
+        else:
+            agents_path = os.path.join(target_directory, "AGENTS.md")
+            with open(agents_path, "a", encoding="utf-8") as f:
+                f.write(
+                    "\n3. If neither of the above is reachable, read "
+                    "`.uipath/llms-full.txt` (offline fallback bundled with this project).\n"
+                )
 
 
 def generate_agents_md_files(options: dict[str, Any]) -> None:
-    """Generate agent MD files and log categorized summary.
-
-    Args:
-        options: Options dictionary
-    """
+    """Generate AGENTS.md and log a summary."""
     current_directory = os.getcwd()
     no_agents_md_override = options.get("no_agents_md_override", False)
+    with_offline_docs = options.get("with_offline_docs", False)
 
     created_files = []
     updated_files = []
     skipped_files = []
 
     for file_name, status in generate_specific_agents_md_files(
-        current_directory, no_agents_md_override
+        current_directory, no_agents_md_override, with_offline_docs
     ):
         if status == FileOperationStatus.CREATED:
             created_files.append(file_name)
