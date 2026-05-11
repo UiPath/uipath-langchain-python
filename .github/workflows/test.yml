@@ -3,12 +3,14 @@ name: Test
 on:
   workflow_call:
     secrets:
-        UIPATH_URL:
-          required: true
-        UIPATH_CLIENT_ID:
-          required: true
-        UIPATH_CLIENT_SECRET:
-          required: true
+      UIPATH_URL:
+        required: true
+      UIPATH_CLIENT_ID:
+        required: true
+      UIPATH_CLIENT_SECRET:
+        required: true
+      SONAR_TOKEN:
+        required: false
 
 jobs:
   test:
@@ -41,19 +43,66 @@ jobs:
         if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
         uses: actions/setup-python@v5
         with:
-          python-version-file: ".python-version"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
-        run: uv sync --all-extras
+        run: uv sync --all-extras --python ${{ matrix.python-version }}
 
       - name: Run tests
-        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version')"
-        run: uv run pytest
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && !(matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13')"
+        run: uv run --python ${{ matrix.python-version }} pytest
         env:
           UIPATH_URL: ${{ secrets.UIPATH_URL }}
           UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
           UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
 
+      - name: Run tests with coverage
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'"
+        run: uv run --python ${{ matrix.python-version }} pytest --cov-report=xml --cov-report=html --tb=short
+        env:
+          UIPATH_URL: ${{ secrets.UIPATH_URL }}
+          UIPATH_CLIENT_ID: ${{ secrets.UIPATH_CLIENT_ID }}
+          UIPATH_CLIENT_SECRET: ${{ secrets.UIPATH_CLIENT_SECRET }}
+
+      - name: Upload coverage HTML report
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' && always()"
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html-report
+          path: htmlcov/
+          retention-days: 30
+
+      - name: Upload coverage XML report
+        if: "!contains(github.event.pull_request.labels.*.name, 'test-core-dev-version') && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' && always()"
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml-report
+          path: coverage.xml
+          retention-days: 30
+
     continue-on-error: true
 
+  sonarcloud:
+    name: SonarCloud
+    needs: test
+    runs-on: ubuntu-latest
+    if: always() && needs.test.result != 'failure'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download coverage
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: coverage-xml-report
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@2f77a1ec69fb1d595b06f35ab27e97605bdef703 # v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
