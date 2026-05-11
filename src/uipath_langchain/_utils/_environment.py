@@ -7,4 +7,4 @@ def get_execution_folder_path() -> str | None:
 
 
 def get_default_timeout() -> float:
-    return float(os.getenv("UIPATH_TIMEOUT_SECONDS", "300"))
+    return float(os.getenv("UIPATH_TIMEOUT_SECONDS", "895"))

@@ -13,6 +13,8 @@ from uipath.platform.common import (
     resource_override,
 )
 
+from uipath_langchain._utils._environment import get_default_timeout
+
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .http_client.header_capture import HeaderCapture
 from .http_client.retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
@@ -120,7 +122,7 @@ class AwsBedrockCompletionsPassthroughClient:
             verify=ca_bundle if ca_bundle is not None else False,
             config=self._unsigned_config(
                 retries={"total_max_attempts": 1},
-                read_timeout=300,
+                read_timeout=get_default_timeout(),
             ),
         )
         client.meta.events.register(
