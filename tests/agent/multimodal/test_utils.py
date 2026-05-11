@@ -218,13 +218,31 @@ class TestBuildFileContentBlocksFor:
         assert len(blocks) == 1
         assert blocks[0]["type"] == "image"
 
-    async def test_unsupported_mime_type_raises(self, httpx_mock: HTTPXMock) -> None:
-        content = b"some data"
+    async def test_arbitrary_mime_type_returns_file_block(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        content = b"col1,col2\n1,2\n"
         httpx_mock.add_response(url=FILE_URL, content=content)
         file_info = FileInfo(url=FILE_URL, name="data.csv", mime_type="text/csv")
 
-        with pytest.raises(ValueError, match="Unsupported"):
-            await build_file_content_blocks_for(file_info)
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "file"
+        assert blocks[0]["mime_type"] == "text/csv"
+
+    async def test_empty_mime_type_defaults_to_octet_stream(
+        self, httpx_mock: HTTPXMock
+    ) -> None:
+        content = b"raw bytes"
+        httpx_mock.add_response(url=FILE_URL, content=content)
+        file_info = FileInfo(url=FILE_URL, name="blob.bin", mime_type="")
+
+        blocks = await build_file_content_blocks_for(file_info)
+
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "file"
+        assert blocks[0]["mime_type"] == "application/octet-stream"
 
     async def test_error_includes_filename(self, httpx_mock: HTTPXMock) -> None:
         """ValueError from download includes the filename for debuggability."""

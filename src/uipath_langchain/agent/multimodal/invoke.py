@@ -16,7 +16,6 @@ from .types import MAX_FILE_SIZE_BYTES, FileInfo
 from .utils import (
     download_file_base64,
     is_image,
-    is_pdf,
     is_tiff,
     sanitize_filename,
     stream_tiff_to_content_blocks,
@@ -32,8 +31,10 @@ async def build_file_content_blocks_for(
 ) -> list[DataContentBlock]:
     """Build LangChain content blocks for a single file attachment.
 
-    Handles all supported MIME types in one place: images, PDFs, and
-    TIFFs (multi-page, converted to individual PNG blocks).
+    Images become image blocks, TIFFs are split into per-page PNG blocks,
+    and every other MIME type — PDF, text, office documents, and any
+    arbitrary binary — is wrapped in a generic file block. Provider
+    compatibility for non-image formats is delegated to the LLM.
 
     Args:
         file_info: File URL, name, and MIME type.
@@ -44,8 +45,7 @@ async def build_file_content_blocks_for(
         A list of DataContentBlock instances for the file.
 
     Raises:
-        ValueError: If the MIME type is not supported or the file exceeds
-            the size limit for LLM payloads.
+        ValueError: If the file exceeds the size limit for LLM payloads.
     """
     if is_tiff(file_info.mime_type):
         try:
@@ -60,16 +60,15 @@ async def build_file_content_blocks_for(
 
     if is_image(file_info.mime_type):
         return [create_image_block(base64=base64_file, mime_type=file_info.mime_type)]
-    if is_pdf(file_info.mime_type):
-        return [
-            create_file_block(
-                base64=base64_file,
-                mime_type=file_info.mime_type,
-                filename=sanitize_filename(file_info.name),
-            )
-        ]
 
-    raise ValueError(f"Unsupported mime_type={file_info.mime_type}")
+    mime_type = file_info.mime_type or "application/octet-stream"
+    return [
+        create_file_block(
+            base64=base64_file,
+            mime_type=mime_type,
+            filename=sanitize_filename(file_info.name),
+        )
+    ]
 
 
 async def build_file_content_blocks(files: list[FileInfo]) -> list[DataContentBlock]:
