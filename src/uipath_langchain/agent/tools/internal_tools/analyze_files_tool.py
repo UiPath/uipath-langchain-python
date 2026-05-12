@@ -158,6 +158,18 @@ def _config_with_llm_call_attachments(
     return new_config
 
 
+# Policy scope values that include files in PII detection. The analyze-files
+# tool is a files-only flow, so masking runs only when files are in scope.
+_PII_FILE_SCOPES = frozenset({"Both", "Files"})
+
+
+def _is_pii_scope_for_files(policy: dict[str, Any] | None) -> bool:
+    """Return True when the policy's ``pii-detection-scope`` covers files."""
+    if not policy:
+        return False
+    return policy.get("data", {}).get("pii-detection-scope") in _PII_FILE_SCOPES
+
+
 def _emit_pii_masking_attachments(span: otel_trace.Span, files: list[FileInfo]) -> None:
     """Emit originals (IN) and masked copies (OUT) on the given PII Masking span.
 
@@ -267,7 +279,11 @@ def create_analyze_file_tool(
             logger.exception("Failed to fetch deployed policy")
 
         masker: PiiMasker | None = None
-        if client is not None and PiiMasker.is_policy_enabled(policy):
+        if (
+            client is not None
+            and PiiMasker.is_policy_enabled(policy)
+            and _is_pii_scope_for_files(policy)
+        ):
             # Reconcile OTel current span with the LangChain/LangGraph external
             # span provider so the new span is parented under the active tool
             # call span and shares its trace id.
