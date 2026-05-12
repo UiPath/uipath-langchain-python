@@ -23,6 +23,7 @@ from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
     LLM_CALL_ATTACHMENTS_METADATA_KEY,
     _config_with_llm_call_attachments,
+    _is_pii_scope_for_files,
     _resolve_job_attachment_arguments,
     create_analyze_file_tool,
 )
@@ -648,9 +649,15 @@ class TestCreateAnalyzeFileToolWithPiiMasking:
         resource_config,
         mock_llm,
     ):
+        policy = {
+            "data": {
+                "container": {"pii-in-flight-agents": True},
+                "pii-detection-scope": "Both",
+            }
+        }
         mock_client = Mock()
         mock_client.automation_ops.get_deployed_policy_async = AsyncMock(
-            return_value={"data": {"container": {"pii-in-flight-agents": True}}}
+            return_value=policy
         )
         mock_uipath_cls.return_value = mock_client
 
@@ -692,12 +699,8 @@ class TestCreateAnalyzeFileToolWithPiiMasking:
             analysisTask="contact john@example.com", attachments=[attachment]
         )
 
-        mock_masker_cls.is_policy_enabled.assert_called_once_with(
-            {"data": {"container": {"pii-in-flight-agents": True}}}
-        )
-        mock_masker_cls.assert_called_once_with(
-            mock_client, {"data": {"container": {"pii-in-flight-agents": True}}}
-        )
+        mock_masker_cls.is_policy_enabled.assert_called_once_with(policy)
+        mock_masker_cls.assert_called_once_with(mock_client, policy)
         masker_instance.apply.assert_awaited_once()
         masker_instance.rehydrate.assert_called_once_with("Sent to [EMAIL]")
 
@@ -779,7 +782,12 @@ class TestCreateAnalyzeFileToolWithPiiMasking:
     ):
         mock_client = Mock()
         mock_client.automation_ops.get_deployed_policy_async = AsyncMock(
-            return_value={"data": {"container": {"pii-in-flight-agents": True}}}
+            return_value={
+                "data": {
+                    "container": {"pii-in-flight-agents": True},
+                    "pii-detection-scope": "Both",
+                }
+            }
         )
         mock_uipath_cls.return_value = mock_client
 
@@ -813,6 +821,164 @@ class TestCreateAnalyzeFileToolWithPiiMasking:
         assert exc_info.value.__cause__ is underlying
         mock_llm.ainvoke.assert_not_called()
         mock_add_files.assert_not_called()
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.PiiMasker")
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath")
+    async def test_skips_masker_when_scope_excludes_files(
+        self,
+        mock_uipath_cls,
+        mock_masker_cls,
+        mock_resolve_attachments,
+        mock_add_files,
+        mock_get_wrapper,
+        resource_config,
+        mock_llm,
+    ):
+        """is_policy_enabled returns True, but scope is Prompts only — masker must be skipped."""
+        mock_client = Mock()
+        mock_client.automation_ops.get_deployed_policy_async = AsyncMock(
+            return_value={
+                "data": {
+                    "container": {"pii-in-flight-agents": True},
+                    "pii-detection-scope": "Prompts",
+                }
+            }
+        )
+        mock_uipath_cls.return_value = mock_client
+        mock_masker_cls.is_policy_enabled = Mock(return_value=True)
+
+        mock_resolve_attachments.return_value = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+            )
+        ]
+        mock_add_files.return_value = HumanMessage(content="task")
+        mock_get_wrapper.return_value = Mock()
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName="doc.pdf", MimeType="application/pdf"
+        )
+
+        assert tool.coroutine is not None
+        await tool.coroutine(analysisTask="task", attachments=[attachment])
+
+        mock_masker_cls.assert_not_called()
+
+    @patch(
+        "uipath_langchain.agent.wrappers.job_attachment_wrapper.get_job_attachment_wrapper"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.add_files_to_message"
+    )
+    @patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool._resolve_job_attachment_arguments"
+    )
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.PiiMasker")
+    @patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath")
+    async def test_invokes_masker_when_scope_is_files_only(
+        self,
+        mock_uipath_cls,
+        mock_masker_cls,
+        mock_resolve_attachments,
+        mock_add_files,
+        mock_get_wrapper,
+        resource_config,
+        mock_llm,
+    ):
+        """Scope == 'Files' should be sufficient to enable masking in the files flow."""
+        policy = {
+            "data": {
+                "container": {"pii-in-flight-agents": True},
+                "pii-detection-scope": "Files",
+            }
+        }
+        mock_client = Mock()
+        mock_client.automation_ops.get_deployed_policy_async = AsyncMock(
+            return_value=policy
+        )
+        mock_uipath_cls.return_value = mock_client
+
+        mock_masker_cls.is_policy_enabled = Mock(return_value=True)
+        masker_instance = Mock()
+        masker_instance.apply = AsyncMock(
+            return_value=(
+                "task",
+                [
+                    FileInfo(
+                        url="https://redacted/doc.pdf",
+                        name="pii_masked_doc.pdf",
+                        mime_type="application/pdf",
+                    )
+                ],
+            )
+        )
+        masker_instance.rehydrate = Mock(return_value="result")
+        mock_masker_cls.return_value = masker_instance
+
+        mock_resolve_attachments.return_value = [
+            FileInfo(
+                url="https://orig/doc.pdf",
+                name="doc.pdf",
+                mime_type="application/pdf",
+            )
+        ]
+        mock_add_files.return_value = HumanMessage(content="task")
+        mock_llm.ainvoke = AsyncMock(return_value=AIMessage(content="result"))
+        mock_get_wrapper.return_value = Mock()
+
+        tool = create_analyze_file_tool(resource_config, mock_llm)
+        attachment = MockAttachment(
+            ID=str(uuid.uuid4()), FullName="doc.pdf", MimeType="application/pdf"
+        )
+
+        assert tool.coroutine is not None
+        await tool.coroutine(analysisTask="task", attachments=[attachment])
+
+        mock_masker_cls.assert_called_once_with(mock_client, policy)
+        masker_instance.apply.assert_awaited_once()
+
+
+class TestIsPiiScopeForFiles:
+    """Tests for the _is_pii_scope_for_files policy gate."""
+
+    def test_returns_true_when_scope_is_both(self) -> None:
+        policy = {"data": {"pii-detection-scope": "Both"}}
+        assert _is_pii_scope_for_files(policy) is True
+
+    def test_returns_true_when_scope_is_files(self) -> None:
+        policy = {"data": {"pii-detection-scope": "Files"}}
+        assert _is_pii_scope_for_files(policy) is True
+
+    def test_returns_false_when_scope_is_prompts(self) -> None:
+        policy = {"data": {"pii-detection-scope": "Prompts"}}
+        assert _is_pii_scope_for_files(policy) is False
+
+    def test_returns_false_when_scope_missing(self) -> None:
+        assert _is_pii_scope_for_files({"data": {}}) is False
+
+    def test_returns_false_when_policy_is_none(self) -> None:
+        assert _is_pii_scope_for_files(None) is False
+
+    def test_returns_false_when_policy_is_empty(self) -> None:
+        assert _is_pii_scope_for_files({}) is False
+
+    def test_is_case_sensitive(self) -> None:
+        """Policy serializes scope as 'Both' / 'Files' — lowercase shouldn't match."""
+        assert (
+            _is_pii_scope_for_files({"data": {"pii-detection-scope": "both"}}) is False
+        )
 
 
 class TestConfigWithLlmCallAttachments:
