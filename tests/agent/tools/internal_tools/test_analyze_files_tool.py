@@ -976,7 +976,9 @@ class TestIsPiiScopeForFiles:
 
     def test_is_case_sensitive(self) -> None:
         """Policy serializes scope as 'Both' / 'Files' — lowercase shouldn't match."""
-        assert _is_pii_scope_for_files({"data": {"pii-detection-scope": "both"}}) is False
+        assert (
+            _is_pii_scope_for_files({"data": {"pii-detection-scope": "both"}}) is False
+        )
 
 
 class TestConfigWithLlmCallAttachments:
