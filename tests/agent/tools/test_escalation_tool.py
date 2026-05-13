@@ -15,8 +15,11 @@ from uipath.agent.models.agent import (
 )
 from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
 
-from uipath_langchain.agent.tools.escalation_tool import (
+from uipath_langchain.agent.tools.escalation_memory import (
+    EscalationMemoryCachedResult,
     _get_user_email,
+)
+from uipath_langchain.agent.tools.escalation_tool import (
     _parse_task_data,
     create_escalation_tool,
     resolve_asset,
@@ -699,6 +702,50 @@ class TestEscalationToolOutputSchema:
             await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
         assert mock_interrupt.called
+
+    @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+    )
+    async def test_cached_escalation_uses_outcome_mapping(
+        self, mock_check_memory_cache: AsyncMock
+    ):
+        """Test cached outcomes follow the same outcome mapping as live results."""
+        from uipath_langchain.agent.exceptions import AgentRuntimeError
+
+        mock_check_memory_cache.return_value = EscalationMemoryCachedResult(
+            output={"approved": True},
+            outcome="approve",
+        )
+
+        channel_dict = {
+            "name": "action_center",
+            "type": "actionCenter",
+            "description": "Action Center channel",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {"type": "object", "properties": {}},
+            "properties": {
+                "appName": "ApprovalApp",
+                "appVersion": 1,
+                "resourceKey": "test-key",
+            },
+            "recipients": [],
+            "outcomeMapping": {"approve": "end", "reject": "continue"},
+        }
+
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[AgentEscalationChannel(**channel_dict)],
+            isAgentMemoryEnabled=True,
+            memorySpaceId="space-123",
+        )
+
+        tool = create_escalation_tool(resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        with pytest.raises(AgentRuntimeError):
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
 
 class TestGetUserEmail:
