@@ -24,6 +24,7 @@ MEMORY_CACHE_HIT_METRIC = "MemoryCacheHit"
 MEMORY_CACHE_MISS_METRIC = "MemoryCacheMiss"
 
 _metric_counters: dict[str, Any] = {}
+_MISSING_VALUE = object()
 
 
 class EscalationMemoryFieldSetting(BaseModel):
@@ -306,20 +307,27 @@ def _read_value(source: Any, *keys: str) -> Any:
     if source is None:
         return None
     if isinstance(source, dict):
-        for key in keys:
-            if key in source:
-                return source[key]
-        return None
+        value = _read_mapping_value(source, keys)
+        return None if value is _MISSING_VALUE else value
     if isinstance(source, BaseModel):
-        extra = source.model_extra or {}
-        for key in keys:
-            if key in extra:
-                return extra[key]
+        value = _read_mapping_value(source.model_extra or {}, keys)
+        if value is not _MISSING_VALUE:
+            return value
+    return _read_attribute_value(source, keys)
+
+
+def _read_mapping_value(source: dict[str, Any], keys: tuple[str, ...]) -> Any:
     for key in keys:
-        try:
-            return getattr(source, key)
-        except AttributeError:
-            continue
+        if key in source:
+            return source[key]
+    return _MISSING_VALUE
+
+
+def _read_attribute_value(source: Any, keys: tuple[str, ...]) -> Any:
+    for key in keys:
+        value = getattr(source, key, _MISSING_VALUE)
+        if value is not _MISSING_VALUE:
+            return value
     return None
 
 
