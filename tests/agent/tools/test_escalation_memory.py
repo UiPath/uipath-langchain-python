@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import BaseModel, ConfigDict
+from uipath.agent.models.agent import AgentEscalationResourceConfig
 
 from uipath_langchain.agent.tools.escalation_memory import (
     MEMORY_CACHE_HIT_METRIC,
@@ -22,6 +23,16 @@ from uipath_langchain.agent.tools.escalation_memory import (
     _record_custom_metric,
     _stringify_search_value,
 )
+
+
+def _memory_resource(**overrides: object) -> AgentEscalationResourceConfig:
+    values: dict[str, object] = {
+        "name": "approval",
+        "description": "Request approval",
+        "channels": [],
+    }
+    values.update(overrides)
+    return AgentEscalationResourceConfig(**values)
 
 
 class TestGetEscalationMemorySpaceId:
@@ -46,15 +57,15 @@ class TestGetEscalationMemorySpaceId:
 
 class TestGetEscalationMemorySettings:
     def test_returns_none_when_disabled(self) -> None:
-        resource = SimpleNamespace(is_agent_memory_enabled=False)
+        resource = _memory_resource(is_agent_memory_enabled=False)
         assert _get_escalation_memory_settings(resource) is None
 
     def test_returns_none_when_memory_properties_missing(self) -> None:
-        resource = SimpleNamespace(is_agent_memory_enabled=True, properties={})
+        resource = _memory_resource(is_agent_memory_enabled=True, properties={})
         assert _get_escalation_memory_settings(resource) is None
 
     def test_returns_typed_settings_from_properties(self) -> None:
-        resource = SimpleNamespace(
+        resource = _memory_resource(
             is_agent_memory_enabled=True,
             properties={
                 "memory": {
