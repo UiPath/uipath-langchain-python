@@ -106,7 +106,7 @@ async def _build_tool_for_resource(
         return create_context_tool(resource, llm=llm, agent=agent)
 
     elif isinstance(resource, AgentEscalationResourceConfig):
-        return create_escalation_tool(resource)
+        return create_escalation_tool(resource, agent=agent)
 
     elif isinstance(resource, AgentIntegrationToolResourceConfig):
         return create_integration_tool(resource)

@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from uipath.agent.models.agent import AgentEscalationResourceConfig
 from uipath.platform import UiPath
 from uipath.platform.memory import (
@@ -16,7 +16,11 @@ from uipath.platform.memory import (
     SearchSettings,
 )
 
-from uipath_langchain._utils import set_current_span_error, set_span_attribute
+from uipath_langchain._utils import (
+    get_execution_folder_path,
+    set_current_span_error,
+    set_span_attribute,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +51,17 @@ class EscalationMemorySettings(BaseModel):
         default=None,
         alias="fieldSettings",
     )
+
+    @field_validator("search_mode", mode="before")
+    @classmethod
+    def _normalize_search_mode(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            normalized = value.lower()
+            if normalized == "hybrid":
+                return SearchMode.Hybrid
+            if normalized == "semantic":
+                return SearchMode.Semantic
+        return value
 
 
 class EscalationMemoryCachedResult(BaseModel):
@@ -112,27 +127,121 @@ class EscalationMemoryRetriever:
 
 def _get_escalation_memory_space_id(
     resource: AgentEscalationResourceConfig,
+    agent: Any | None = None,
 ) -> str | None:
-    """Resolve memory space ID from escalation resource extra fields."""
-    if not resource.is_agent_memory_enabled:
+    """Resolve memory space ID from escalation resource or agent memory feature."""
+    if not _is_escalation_memory_enabled(resource):
         return None
 
-    memory_space_id = _read_value(resource, "memorySpaceId", "memory_space_id")
-    return str(memory_space_id) if memory_space_id else None
+    memory = _get_escalation_memory_properties(resource)
+    memory_space_id = _read_first_value(
+        (resource, memory),
+        "memorySpaceId",
+        "memory_space_id",
+    )
+    if memory_space_id:
+        return str(memory_space_id)
+
+    memory_space_name = _read_first_value(
+        (resource, memory),
+        "memorySpaceName",
+        "memory_space_name",
+    )
+    folder_path = _read_value(memory, "folderPath", "folder_path")
+    if not memory_space_name:
+        feature = _get_agent_memory_space_feature(agent)
+        memory_space_id = _read_value(feature, "memorySpaceId", "memory_space_id")
+        if memory_space_id:
+            return str(memory_space_id)
+        memory_space_name = _read_value(
+            feature,
+            "memorySpaceName",
+            "memory_space_name",
+        )
+        folder_path = _read_value(feature, "folderPath", "folder_path")
+
+    if not memory_space_name:
+        return None
+
+    return _resolve_memory_space_id_by_name(str(memory_space_name), folder_path)
 
 
 def _get_escalation_memory_settings(
     resource: AgentEscalationResourceConfig,
 ) -> EscalationMemorySettings | None:
     """Extract memory settings from escalation resource properties."""
-    if not resource.is_agent_memory_enabled:
+    if not _is_escalation_memory_enabled(resource):
         return None
 
-    properties = _read_value(resource, "properties")
-    memory = _read_value(properties, "memory") if properties is not None else None
+    memory = _get_escalation_memory_properties(resource)
     if memory is None:
         return None
     return _coerce_memory_settings(memory)
+
+
+def _is_escalation_memory_enabled(resource: AgentEscalationResourceConfig) -> bool:
+    memory = _get_escalation_memory_properties(resource)
+    memory_enabled = _read_value(memory, "isEnabled", "is_enabled")
+    if memory_enabled is not None:
+        return bool(memory_enabled)
+    return bool(_read_value(resource, "isAgentMemoryEnabled", "is_agent_memory_enabled"))
+
+
+def _get_escalation_memory_properties(resource: AgentEscalationResourceConfig) -> Any:
+    properties = _read_value(resource, "properties")
+    return _read_value(properties, "memory") if properties is not None else None
+
+
+def _get_agent_memory_space_feature(agent: Any | None) -> Any:
+    features = _read_value(agent, "features") or []
+    for feature in features:
+        feature_type = _read_value(feature, "$featureType", "featureType", "feature_type")
+        if feature_type != "memorySpace":
+            continue
+        is_enabled = _read_value(feature, "isEnabled", "is_enabled")
+        if is_enabled is False:
+            continue
+        if _read_value(feature, "memorySpaceId", "memory_space_id") or _read_value(
+            feature,
+            "memorySpaceName",
+            "memory_space_name",
+        ):
+            return feature
+    return None
+
+
+def _resolve_memory_space_id_by_name(
+    memory_space_name: str,
+    folder_path: Any,
+) -> str | None:
+    resolved_folder_path = _resolve_memory_folder_path(folder_path)
+    try:
+        escaped_name = memory_space_name.replace("'", "''")
+        spaces = UiPath().memory.list(
+            filter=f"name eq '{escaped_name}'",
+            folder_path=resolved_folder_path,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to resolve escalation memory space '%s'",
+            memory_space_name,
+            exc_info=True,
+        )
+        return None
+
+    if not spaces.value:
+        logger.warning(
+            "Escalation memory space '%s' was not found",
+            memory_space_name,
+        )
+        return None
+    return str(spaces.value[0].id)
+
+
+def _resolve_memory_folder_path(folder_path: Any) -> str | None:
+    if folder_path in (None, "", ".", "solution_folder"):
+        return get_execution_folder_path()
+    return str(folder_path)
 
 
 def _get_user_email(user: Any) -> str | None:
@@ -314,6 +423,14 @@ def _read_value(source: Any, *keys: str) -> Any:
         if value is not _MISSING_VALUE:
             return value
     return _read_attribute_value(source, keys)
+
+
+def _read_first_value(sources: tuple[Any, ...], *keys: str) -> Any:
+    for source in sources:
+        value = _read_value(source, *keys)
+        if value is not None:
+            return value
+    return None
 
 
 def _read_mapping_value(source: dict[str, Any], keys: tuple[str, ...]) -> Any:

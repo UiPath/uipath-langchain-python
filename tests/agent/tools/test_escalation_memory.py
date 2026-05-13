@@ -37,22 +37,72 @@ def _memory_resource(**overrides: object) -> AgentEscalationResourceConfig:
 
 class TestGetEscalationMemorySpaceId:
     def test_returns_none_when_disabled(self) -> None:
-        resource = MagicMock()
-        resource.is_agent_memory_enabled = False
+        resource = _memory_resource(is_agent_memory_enabled=False)
         assert _get_escalation_memory_space_id(resource) is None
 
     def test_returns_space_id_from_extra_field(self) -> None:
-        resource = MagicMock()
-        resource.is_agent_memory_enabled = True
-        resource.memorySpaceId = "space-abc"
+        resource = _memory_resource(
+            is_agent_memory_enabled=True,
+            memorySpaceId="space-abc",
+        )
         assert _get_escalation_memory_space_id(resource) == "space-abc"
 
     def test_returns_none_when_no_space_id(self) -> None:
-        resource = MagicMock()
-        resource.is_agent_memory_enabled = True
-        del resource.memorySpaceId
-        del resource.memory_space_id
+        resource = _memory_resource(is_agent_memory_enabled=True)
         assert _get_escalation_memory_space_id(resource) is None
+
+    def test_returns_space_id_when_escalation_memory_enabled_in_properties(self) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=False,
+            properties={
+                "memory": {
+                    "isEnabled": True,
+                    "memorySpaceId": "space-from-memory-properties",
+                }
+            },
+        )
+
+        assert (
+            _get_escalation_memory_space_id(resource)
+            == "space-from-memory-properties"
+        )
+
+    @patch("uipath_langchain.agent.tools.escalation_memory.get_execution_folder_path")
+    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    def test_resolves_space_id_from_agent_memory_feature(
+        self,
+        mock_uipath_cls: MagicMock,
+        mock_get_execution_folder_path: MagicMock,
+    ) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=False,
+            properties={"memory": {"isEnabled": True}},
+        )
+        agent = SimpleNamespace(
+            features=[
+                {
+                    "$featureType": "memorySpace",
+                    "isEnabled": True,
+                    "memorySpaceName": "MemorySpace",
+                    "folderPath": "solution_folder",
+                    "dynamicFewShotSettings": {"isEnabled": False},
+                }
+            ]
+        )
+        mock_get_execution_folder_path.return_value = "/My Workspace"
+        mock_sdk = MagicMock()
+        mock_sdk.memory.list.return_value = SimpleNamespace(
+            value=[SimpleNamespace(id="resolved-space-id")]
+        )
+        mock_uipath_cls.return_value = mock_sdk
+
+        result = _get_escalation_memory_space_id(resource, agent)
+
+        assert result == "resolved-space-id"
+        mock_sdk.memory.list.assert_called_once_with(
+            filter="name eq 'MemorySpace'",
+            folder_path="/My Workspace",
+        )
 
 
 class TestGetEscalationMemorySettings:
@@ -83,6 +133,28 @@ class TestGetEscalationMemorySettings:
         assert settings.search_mode.value == "Semantic"
         assert settings.field_settings == [
             EscalationMemoryFieldSetting(name="question", weight=0.4)
+        ]
+
+    def test_returns_settings_when_escalation_memory_enabled_in_properties(self) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=False,
+            properties={
+                "memory": {
+                    "isEnabled": True,
+                    "threshold": 0.8,
+                    "searchMode": "hybrid",
+                    "fieldSettings": [{"name": "request_details", "weight": 1}],
+                }
+            },
+        )
+
+        settings = _get_escalation_memory_settings(resource)
+
+        assert settings is not None
+        assert settings.threshold == 0.8
+        assert settings.search_mode.value == "Hybrid"
+        assert settings.field_settings == [
+            EscalationMemoryFieldSetting(name="request_details", weight=1)
         ]
 
 

@@ -16,6 +16,7 @@ from uipath.agent.models.agent import (
     ArgumentEmailRecipient,
     ArgumentGroupNameRecipient,
     AssetRecipient,
+    LowCodeAgentDefinition,
     StandardRecipient,
 )
 from uipath.agent.utils.text_tokens import safe_get_nested
@@ -184,6 +185,7 @@ def _resolve_escalation_action(
 
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
+    agent: LowCodeAgentDefinition | None = None,
 ) -> StructuredTool:
     """Uses interrupt() for Action Center human-in-the-loop."""
 
@@ -199,7 +201,7 @@ def create_escalation_tool(
         is_deleted: bool = False
 
     _bts_context: dict[str, Any] = {}
-    _memory_space_id: str | None = _get_escalation_memory_space_id(resource)
+    _memory_space_id: str | None = _get_escalation_memory_space_id(resource, agent)
     _memory_settings: EscalationMemorySettings | None = _get_escalation_memory_settings(
         resource
     )
