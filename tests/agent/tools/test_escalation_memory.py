@@ -1,16 +1,26 @@
 """Tests for escalation memory cache check and ingest."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import BaseModel, ConfigDict
 
 from uipath_langchain.agent.tools.escalation_memory import (
     MEMORY_CACHE_HIT_METRIC,
     MEMORY_CACHE_MISS_METRIC,
+    EscalationMemoryFieldSetting,
     EscalationMemorySettings,
+    _build_search_fields,
     _check_escalation_memory_cache,
+    _coerce_memory_settings,
+    _get_escalation_memory_settings,
     _get_escalation_memory_space_id,
+    _get_user_email,
     _ingest_escalation_memory,
+    _read_value,
+    _record_custom_metric,
+    _stringify_search_value,
 )
 
 
@@ -32,6 +42,50 @@ class TestGetEscalationMemorySpaceId:
         del resource.memorySpaceId
         del resource.memory_space_id
         assert _get_escalation_memory_space_id(resource) is None
+
+
+class TestGetEscalationMemorySettings:
+    def test_returns_none_when_disabled(self) -> None:
+        resource = SimpleNamespace(is_agent_memory_enabled=False)
+        assert _get_escalation_memory_settings(resource) is None
+
+    def test_returns_none_when_memory_properties_missing(self) -> None:
+        resource = SimpleNamespace(is_agent_memory_enabled=True, properties={})
+        assert _get_escalation_memory_settings(resource) is None
+
+    def test_returns_typed_settings_from_properties(self) -> None:
+        resource = SimpleNamespace(
+            is_agent_memory_enabled=True,
+            properties={
+                "memory": {
+                    "threshold": 0.7,
+                    "searchMode": "Semantic",
+                    "fieldSettings": [{"name": "question", "weight": 0.4}],
+                }
+            },
+        )
+
+        settings = _get_escalation_memory_settings(resource)
+
+        assert settings is not None
+        assert settings.threshold == 0.7
+        assert settings.search_mode.value == "Semantic"
+        assert settings.field_settings == [
+            EscalationMemoryFieldSetting(name="question", weight=0.4)
+        ]
+
+
+class TestGetUserEmail:
+    def test_extracts_email_from_supported_shapes(self) -> None:
+        assert _get_user_email(None) is None
+        assert (
+            _get_user_email({"emailAddress": "dict@example.com"}) == "dict@example.com"
+        )
+        assert _get_user_email({"name": "Reviewer"}) is None
+        assert (
+            _get_user_email(SimpleNamespace(emailAddress="object@example.com"))
+            == "object@example.com"
+        )
 
 
 class TestCheckEscalationMemoryCache:
@@ -115,6 +169,30 @@ class TestCheckEscalationMemoryCache:
             )
 
 
+class TestBuildSearchFields:
+    def test_filters_empty_and_unconfigured_fields(self) -> None:
+        settings = EscalationMemorySettings(
+            fieldSettings=[
+                {"name": "keep", "weight": 0.25},
+                {"name": "empty", "weight": 1.0},
+            ]
+        )
+
+        fields = _build_search_fields(
+            {
+                "keep": {"answer": True},
+                "empty": None,
+                "ignored": "value",
+            },
+            settings,
+        )
+
+        assert len(fields) == 1
+        assert fields[0].key_path == ["escalation-input", "keep"]
+        assert fields[0].value == '{"answer": true}'
+        assert fields[0].settings.weight == 0.25
+
+
 class TestIngestEscalationMemory:
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
@@ -156,3 +234,122 @@ class TestIngestEscalationMemory:
             trace_id="def456",
             user_id="reviewer@example.com",
         )
+
+
+class TestEscalationMemoryUtilities:
+    def test_record_custom_metric_creates_and_reuses_counter(self, monkeypatch) -> None:
+        from opentelemetry import metrics, trace
+
+        counters: list[tuple[str, int, dict[str, str]]] = []
+        events: list[tuple[str, dict[str, object]]] = []
+
+        class Counter:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                counters.append((self.name, value, attributes))
+
+        class Meter:
+            def __init__(self) -> None:
+                self.created: list[str] = []
+
+            def create_counter(self, name: str) -> Counter:
+                self.created.append(name)
+                return Counter(name)
+
+        class Span:
+            def is_recording(self) -> bool:
+                return True
+
+            def add_event(self, name: str, attributes: dict[str, object]) -> None:
+                events.append((name, attributes))
+
+        meter = Meter()
+        monkeypatch.setattr(metrics, "get_meter", lambda _name: meter)
+        monkeypatch.setattr(trace, "get_current_span", lambda: Span())
+
+        from uipath_langchain.agent.tools import escalation_memory
+
+        escalation_memory._metric_counters.clear()
+        _record_custom_metric(MEMORY_CACHE_HIT_METRIC, "space-123")
+        _record_custom_metric(MEMORY_CACHE_HIT_METRIC, "space-123")
+
+        assert meter.created == [MEMORY_CACHE_HIT_METRIC]
+        assert counters == [
+            (MEMORY_CACHE_HIT_METRIC, 1, {"memorySpaceId": "space-123"}),
+            (MEMORY_CACHE_HIT_METRIC, 1, {"memorySpaceId": "space-123"}),
+        ]
+        assert events == [
+            (
+                "customMetric",
+                {
+                    "name": MEMORY_CACHE_HIT_METRIC,
+                    "value": 1,
+                    "memorySpaceId": "space-123",
+                },
+            ),
+            (
+                "customMetric",
+                {
+                    "name": MEMORY_CACHE_HIT_METRIC,
+                    "value": 1,
+                    "memorySpaceId": "space-123",
+                },
+            ),
+        ]
+
+    def test_record_custom_metric_is_best_effort(self, monkeypatch) -> None:
+        from opentelemetry import metrics
+
+        monkeypatch.setattr(
+            metrics,
+            "get_meter",
+            MagicMock(side_effect=RuntimeError("metrics unavailable")),
+        )
+
+        from uipath_langchain.agent.tools import escalation_memory
+
+        escalation_memory._metric_counters.clear()
+        _record_custom_metric(MEMORY_CACHE_MISS_METRIC, "space-123")
+
+    def test_coerce_memory_settings_from_supported_shapes(self) -> None:
+        class MemoryModel(BaseModel):
+            threshold: float = 0.6
+            searchMode: str = "Semantic"
+            fieldSettings: list[dict[str, object]] = [
+                {"name": "model-field", "weight": 0.5}
+            ]
+
+        class MemoryObject:
+            threshold = 0.8
+            searchMode = "Hybrid"
+            fieldSettings = [{"name": "object-field", "weight": 0.9}]
+
+        existing = EscalationMemorySettings(threshold=0.1)
+        assert _coerce_memory_settings(existing) is existing
+        assert _coerce_memory_settings(MemoryModel()).field_settings == [
+            EscalationMemoryFieldSetting(name="model-field", weight=0.5)
+        ]
+        object_settings = _coerce_memory_settings(MemoryObject())
+        assert object_settings.threshold == 0.8
+        assert object_settings.field_settings == [
+            EscalationMemoryFieldSetting(name="object-field", weight=0.9)
+        ]
+
+    def test_read_value_from_supported_shapes(self) -> None:
+        class ExtraModel(BaseModel):
+            model_config = ConfigDict(extra="allow")
+
+        assert _read_value(None, "missing") is None
+        assert _read_value({"present": "yes"}, "present") == "yes"
+        assert _read_value({"other": "yes"}, "missing") is None
+        assert _read_value(ExtraModel(extra_value="yes"), "extra_value") == "yes"
+        assert _read_value(SimpleNamespace(present="yes"), "present") == "yes"
+        assert _read_value(SimpleNamespace(), "missing") is None
+
+    def test_stringify_search_value(self) -> None:
+        assert _stringify_search_value(None) == ""
+        assert _stringify_search_value("text") == "text"
+        assert _stringify_search_value({"b": 2, "a": 1}) == '{"a": 1, "b": 2}'
+        assert _stringify_search_value(("tuple", 1)) == "('tuple', 1)"
