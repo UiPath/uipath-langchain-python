@@ -42,6 +42,7 @@ from ..react.types import AgentGraphState
 from .escalation_memory import (
     EscalationMemorySettings,
     _check_escalation_memory_cache,
+    _get_escalation_memory_folder_path,
     _get_escalation_memory_settings,
     _get_escalation_memory_space_id,
     _get_user_email,
@@ -202,6 +203,9 @@ def create_escalation_tool(
 
     _bts_context: dict[str, Any] = {}
     _memory_space_id: str | None = _get_escalation_memory_space_id(resource, agent)
+    _memory_folder_path: str | None = _get_escalation_memory_folder_path(
+        resource, agent
+    )
     _memory_settings: EscalationMemorySettings | None = _get_escalation_memory_settings(
         resource
     )
@@ -230,7 +234,7 @@ def create_escalation_tool(
             cached_result = await _check_escalation_memory_cache(
                 _memory_space_id,
                 serialized_data,
-                folder_path=folder_path,
+                folder_path=_memory_folder_path or folder_path,
                 memory_settings=_memory_settings,
             )
             if cached_result is not None:
@@ -317,7 +321,7 @@ def create_escalation_tool(
                     parent_span_id=parent_span_id,
                     trace_id=trace_id,
                     user_id=user_id,
-                    folder_path=folder_path,
+                    folder_path=_memory_folder_path or folder_path,
                 )
             else:
                 set_span_attribute("fromMemory", False)

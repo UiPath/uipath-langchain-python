@@ -7,6 +7,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from uipath.agent.models.agent import AgentEscalationResourceConfig
 from uipath.platform import UiPath
+from uipath.platform.common._bindings import _resource_overwrites
 from uipath.platform.memory import (
     EscalationMemoryIngestRequest,
     FieldSettings,
@@ -158,12 +159,41 @@ def _get_escalation_memory_space_id(
             "memorySpaceName",
             "memory_space_name",
         )
-        folder_path = _read_value(feature, "folderPath", "folder_path")
+        folder_path = _read_value(feature, "folderPath", "folder_path") or folder_path
 
     if not memory_space_name:
         return None
 
     return _resolve_memory_space_id_by_name(str(memory_space_name), folder_path)
+
+
+def _get_escalation_memory_folder_path(
+    resource: AgentEscalationResourceConfig,
+    agent: Any | None = None,
+) -> str | None:
+    """Resolve folder path to use for escalation memory API calls."""
+    if not _is_escalation_memory_enabled(resource):
+        return None
+
+    memory = _get_escalation_memory_properties(resource)
+    memory_space_name = _read_first_value(
+        (resource, memory),
+        "memorySpaceName",
+        "memory_space_name",
+    )
+    folder_path = _read_value(memory, "folderPath", "folder_path")
+    if not memory_space_name and not folder_path:
+        feature = _get_agent_memory_space_feature(agent)
+        memory_space_name = _read_value(
+            feature,
+            "memorySpaceName",
+            "memory_space_name",
+        )
+        folder_path = _read_value(feature, "folderPath", "folder_path") or folder_path
+
+    return _resolve_memory_folder_path(
+        folder_path, str(memory_space_name) if memory_space_name else None
+    )
 
 
 def _get_escalation_memory_settings(
@@ -184,7 +214,9 @@ def _is_escalation_memory_enabled(resource: AgentEscalationResourceConfig) -> bo
     memory_enabled = _read_value(memory, "isEnabled", "is_enabled")
     if memory_enabled is not None:
         return bool(memory_enabled)
-    return bool(_read_value(resource, "isAgentMemoryEnabled", "is_agent_memory_enabled"))
+    return bool(
+        _read_value(resource, "isAgentMemoryEnabled", "is_agent_memory_enabled")
+    )
 
 
 def _get_escalation_memory_properties(resource: AgentEscalationResourceConfig) -> Any:
@@ -195,7 +227,9 @@ def _get_escalation_memory_properties(resource: AgentEscalationResourceConfig) -
 def _get_agent_memory_space_feature(agent: Any | None) -> Any:
     features = _read_value(agent, "features") or []
     for feature in features:
-        feature_type = _read_value(feature, "$featureType", "featureType", "feature_type")
+        feature_type = _read_value(
+            feature, "$featureType", "featureType", "feature_type"
+        )
         if feature_type != "memorySpace":
             continue
         is_enabled = _read_value(feature, "isEnabled", "is_enabled")
@@ -214,7 +248,7 @@ def _resolve_memory_space_id_by_name(
     memory_space_name: str,
     folder_path: Any,
 ) -> str | None:
-    resolved_folder_path = _resolve_memory_folder_path(folder_path)
+    resolved_folder_path = _resolve_memory_folder_path(folder_path, memory_space_name)
     try:
         escaped_name = memory_space_name.replace("'", "''")
         spaces = UiPath().memory.list(
@@ -238,10 +272,38 @@ def _resolve_memory_space_id_by_name(
     return str(spaces.value[0].id)
 
 
-def _resolve_memory_folder_path(folder_path: Any) -> str | None:
+def _resolve_memory_folder_path(
+    folder_path: Any,
+    memory_space_name: str | None = None,
+) -> str | None:
+    if memory_space_name:
+        folder_path = (
+            _get_memory_space_folder_override(memory_space_name) or folder_path
+        )
     if folder_path in (None, "", ".", "solution_folder"):
         return get_execution_folder_path()
     return str(folder_path)
+
+
+def _get_memory_space_folder_override(memory_space_name: str) -> str | None:
+    overwrites = _resource_overwrites.get()
+    if not overwrites:
+        return None
+
+    overwrite = overwrites.get(f"memorySpace.{memory_space_name}")
+    if not overwrite:
+        return None
+
+    folder_identifier = getattr(overwrite, "folder_identifier", None)
+    if not folder_identifier:
+        return None
+
+    logger.info(
+        "Memory space '%s' folder_path overwritten: '%s'",
+        memory_space_name,
+        folder_identifier,
+    )
+    return str(folder_identifier)
 
 
 def _get_user_email(user: Any) -> str | None:

@@ -747,6 +747,66 @@ class TestEscalationToolOutputSchema:
         with pytest.raises(AgentRuntimeError):
             await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.get_execution_folder_path")
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+    )
+    async def test_cache_lookup_uses_memory_folder_path(
+        self,
+        mock_check_memory_cache: AsyncMock,
+        mock_get_execution_folder_path: MagicMock,
+    ):
+        """Test escalation memory calls use the memory folder, not task folder."""
+        mock_get_execution_folder_path.return_value = "/Execution/Folder"
+        mock_check_memory_cache.return_value = EscalationMemoryCachedResult(
+            output={"approved": True},
+            outcome="approve",
+        )
+
+        channel_dict = {
+            "name": "action_center",
+            "type": "actionCenter",
+            "description": "Action Center channel",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {"type": "object", "properties": {}},
+            "properties": {
+                "appName": "ApprovalApp",
+                "appVersion": 1,
+                "resourceKey": "test-key",
+            },
+            "recipients": [],
+        }
+
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[AgentEscalationChannel(**channel_dict)],
+            properties={
+                "memory": {
+                    "isEnabled": True,
+                    "memorySpaceId": "space-123",
+                    "folderPath": "/Memory/Folder",
+                }
+            },
+        )
+
+        tool = create_escalation_tool(resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        assert result == {
+            "output": {"approved": True},
+            "outcome": "approve",
+            "task_id": None,
+            "assigned_to": None,
+        }
+        mock_check_memory_cache.assert_awaited_once()
+        assert (
+            mock_check_memory_cache.await_args.kwargs["folder_path"] == "/Memory/Folder"
+        )
+
 
 class TestGetUserEmail:
     """Test the _get_user_email helper function."""

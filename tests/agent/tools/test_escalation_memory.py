@@ -6,6 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import BaseModel, ConfigDict
 from uipath.agent.models.agent import AgentEscalationResourceConfig
+from uipath.platform.common._bindings import (
+    GenericResourceOverwrite,
+    _resource_overwrites,
+)
 
 from uipath_langchain.agent.tools.escalation_memory import (
     MEMORY_CACHE_HIT_METRIC,
@@ -15,6 +19,7 @@ from uipath_langchain.agent.tools.escalation_memory import (
     _build_search_fields,
     _check_escalation_memory_cache,
     _coerce_memory_settings,
+    _get_escalation_memory_folder_path,
     _get_escalation_memory_settings,
     _get_escalation_memory_space_id,
     _get_user_email,
@@ -51,7 +56,9 @@ class TestGetEscalationMemorySpaceId:
         resource = _memory_resource(is_agent_memory_enabled=True)
         assert _get_escalation_memory_space_id(resource) is None
 
-    def test_returns_space_id_when_escalation_memory_enabled_in_properties(self) -> None:
+    def test_returns_space_id_when_escalation_memory_enabled_in_properties(
+        self,
+    ) -> None:
         resource = _memory_resource(
             is_agent_memory_enabled=False,
             properties={
@@ -63,8 +70,7 @@ class TestGetEscalationMemorySpaceId:
         )
 
         assert (
-            _get_escalation_memory_space_id(resource)
-            == "space-from-memory-properties"
+            _get_escalation_memory_space_id(resource) == "space-from-memory-properties"
         )
 
     @patch("uipath_langchain.agent.tools.escalation_memory.get_execution_folder_path")
@@ -104,6 +110,54 @@ class TestGetEscalationMemorySpaceId:
             folder_path="/My Workspace",
         )
 
+    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    def test_resolves_agent_memory_feature_with_resource_overwrite(
+        self,
+        mock_uipath_cls: MagicMock,
+    ) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=False,
+            properties={"memory": {"isEnabled": True}},
+        )
+        agent = SimpleNamespace(
+            features=[
+                {
+                    "$featureType": "memorySpace",
+                    "isEnabled": True,
+                    "memorySpaceName": "MemorySpace",
+                    "folderPath": "solution_folder",
+                    "dynamicFewShotSettings": {"isEnabled": False},
+                }
+            ]
+        )
+        mock_sdk = MagicMock()
+        mock_sdk.memory.list.return_value = SimpleNamespace(
+            value=[SimpleNamespace(id="resolved-space-id")]
+        )
+        mock_uipath_cls.return_value = mock_sdk
+        token = _resource_overwrites.set(
+            {
+                "memorySpace.MemorySpace": GenericResourceOverwrite(
+                    resource_type="memorySpace",
+                    name="MemorySpace",
+                    folder_path="/My Workspace/Debug_escs",
+                )
+            }
+        )
+
+        try:
+            result = _get_escalation_memory_space_id(resource, agent)
+            folder_path = _get_escalation_memory_folder_path(resource, agent)
+        finally:
+            _resource_overwrites.reset(token)
+
+        assert result == "resolved-space-id"
+        assert folder_path == "/My Workspace/Debug_escs"
+        mock_sdk.memory.list.assert_called_once_with(
+            filter="name eq 'MemorySpace'",
+            folder_path="/My Workspace/Debug_escs",
+        )
+
 
 class TestGetEscalationMemorySettings:
     def test_returns_none_when_disabled(self) -> None:
@@ -135,7 +189,9 @@ class TestGetEscalationMemorySettings:
             EscalationMemoryFieldSetting(name="question", weight=0.4)
         ]
 
-    def test_returns_settings_when_escalation_memory_enabled_in_properties(self) -> None:
+    def test_returns_settings_when_escalation_memory_enabled_in_properties(
+        self,
+    ) -> None:
         resource = _memory_resource(
             is_agent_memory_enabled=False,
             properties={
