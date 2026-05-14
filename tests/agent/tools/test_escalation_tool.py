@@ -1055,7 +1055,7 @@ class TestEscalationMemoryPayload:
     """Test escalation memory ingest payload shape."""
 
     def test_builds_trace_and_search_payloads(self):
-        """Test memory ingest includes UI input/output and searchable input."""
+        """Test memory ingest matches the escalation memory service contract."""
         serialized_input = {
             "request_details": "User requested escalation before answering."
         }
@@ -1071,9 +1071,5 @@ class TestEscalationMemoryPayload:
             "output": {"reviewer_comment": "approve"},
             "outcome": "Approve",
         }
-        assert attributes == {
-            "arguments": serialized_input,
-            "input": serialized_input,
-            "output": answer,
-        }
+        assert attributes == {"arguments": serialized_input}
         assert "escalation-input" not in attributes
