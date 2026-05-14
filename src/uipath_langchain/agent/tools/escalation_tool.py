@@ -190,9 +190,9 @@ def _build_escalation_memory_payload(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     answer = {"output": escalation_output, "outcome": outcome}
     attributes = {
+        "arguments": serialized_input,
         "input": serialized_input,
         "output": answer,
-        "escalation-input": serialized_input,
     }
     return answer, attributes
 

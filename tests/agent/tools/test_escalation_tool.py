@@ -1072,8 +1072,8 @@ class TestEscalationMemoryPayload:
             "outcome": "Approve",
         }
         assert attributes == {
+            "arguments": serialized_input,
             "input": serialized_input,
             "output": answer,
-            "escalation-input": serialized_input,
         }
-        assert "arguments" not in attributes
+        assert "escalation-input" not in attributes
