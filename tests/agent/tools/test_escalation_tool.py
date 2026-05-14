@@ -291,6 +291,14 @@ class TestEscalationToolMetadata:
         assert tool.metadata["channel_type"] == "actionCenter"
 
     @pytest.mark.asyncio
+    async def test_escalation_tool_metadata_has_span_context(self, escalation_resource):
+        """Test that metadata contains a span context carrier for memory ingest."""
+        tool = create_escalation_tool(escalation_resource)
+        assert tool.metadata is not None
+        assert "_span_context" in tool.metadata
+        assert isinstance(tool.metadata["_span_context"], dict)
+
+    @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_metadata_has_recipient(
@@ -1014,6 +1022,86 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
 
         with pytest.raises(Exception, match="API error"):
             await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool.get_current_span_and_trace_ids"
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool._ingest_escalation_memory")
+    @patch("uipath_langchain.agent.tools.escalation_tool._resolve_user_id")
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_memory_ingest_uses_traced_escalation_span_context(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_check_memory_cache,
+        mock_resolve_user_id,
+        mock_ingest_memory,
+        mock_get_current_span_and_trace_ids,
+    ):
+        """Escalation memory ingest should use the escalationTool child span."""
+        mock_check_memory_cache.return_value = None
+        mock_resolve_user_id.return_value = "cef1337c-3456-4ae9-81c9-30d033dc2bef"
+        mock_ingest_memory.return_value = None
+        mock_get_current_span_and_trace_ids.return_value = ("wrong-span", "wrong-trace")
+
+        task = _make_mock_task(id=555)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.completed_by_user = {"emailAddress": "reviewer@example.com"}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                    ),
+                    recipients=[],
+                )
+            ],
+            isAgentMemoryEnabled=True,
+            memorySpaceId="space-123",
+        )
+
+        tool = create_escalation_tool(resource)
+        assert tool.metadata is not None
+        tool.metadata["_span_context"]["parent_span_id"] = "3a064d559eca5d62"
+        tool.metadata["_span_context"]["trace_id"] = "5d3feebba60343dfb9364b89ee304a5b"
+
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        mock_get_current_span_and_trace_ids.assert_not_called()
+        mock_ingest_memory.assert_awaited_once()
+        assert mock_ingest_memory.await_args is not None
+        assert (
+            mock_ingest_memory.await_args.kwargs["parent_span_id"] == "3a064d559eca5d62"
+        )
+        assert (
+            mock_ingest_memory.await_args.kwargs["trace_id"]
+            == "5d3feebba60343dfb9364b89ee304a5b"
+        )
+        assert tool.metadata["_span_context"] == {}
 
 
 class TestParseTaskData:

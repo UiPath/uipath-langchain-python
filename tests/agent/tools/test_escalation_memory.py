@@ -425,24 +425,36 @@ class TestCheckEscalationMemoryCache:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_raises_validation_error_when_no_fields(self) -> None:
-        with pytest.raises(ValueError, match="at least one configured input field"):
-            await _check_escalation_memory_cache("space-123", {})
+    @patch("uipath_langchain.agent.tools.escalation_memory._record_custom_metric")
+    async def test_treats_empty_search_fields_as_cache_miss(
+        self, mock_record_metric: MagicMock
+    ) -> None:
+        result = await _check_escalation_memory_cache("space-123", {})
+
+        assert result is None
+        mock_record_metric.assert_called_once_with(
+            MEMORY_CACHE_MISS_METRIC, "space-123"
+        )
 
     @pytest.mark.asyncio
-    async def test_raises_validation_error_when_configured_fields_do_not_match(
-        self,
+    @patch("uipath_langchain.agent.tools.escalation_memory._record_custom_metric")
+    async def test_treats_unmatched_configured_fields_as_cache_miss(
+        self, mock_record_metric: MagicMock
     ) -> None:
         settings = EscalationMemorySettings(
             fieldSettings=[{"name": "other", "weight": 1.0}]
         )
 
-        with pytest.raises(ValueError, match="at least one configured input field"):
-            await _check_escalation_memory_cache(
-                "space-123",
-                {"key": "val"},
-                memory_settings=settings,
-            )
+        result = await _check_escalation_memory_cache(
+            "space-123",
+            {"key": "val"},
+            memory_settings=settings,
+        )
+
+        assert result is None
+        mock_record_metric.assert_called_once_with(
+            MEMORY_CACHE_MISS_METRIC, "space-123"
+        )
 
 
 class TestBuildSearchFields:

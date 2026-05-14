@@ -400,8 +400,14 @@ async def _check_escalation_memory_cache(
 
     try:
         cached_result = await retriever.aretrieve(serialized_input)
-    except ValueError:
-        raise
+    except ValueError as error:
+        logger.warning(
+            "Skipping escalation memory search for space '%s': %s",
+            memory_space_id,
+            error,
+        )
+        _record_custom_metric(MEMORY_CACHE_MISS_METRIC, memory_space_id)
+        return None
     except Exception as error:
         set_current_span_error(error)
         logger.warning(
