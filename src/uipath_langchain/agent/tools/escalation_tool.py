@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from enum import Enum
 from typing import Any, Literal
 
@@ -193,6 +194,61 @@ def _build_escalation_memory_payload(
     return answer, attributes
 
 
+def _pop_escalation_memory_span_context(
+    metadata: dict[str, Any] | None,
+) -> tuple[str | None, str | None]:
+    span_context = (metadata or {}).get("_span_context")
+    if not isinstance(span_context, dict):
+        _escalation_logger.debug(
+            "Escalation memory span context missing _span_context metadata"
+        )
+        return None, None
+
+    parent_span_id = _format_otel_id(span_context.pop("parent_span_id", None), 16)
+    trace_id = _format_otel_id(span_context.pop("trace_id", None), 32)
+    _escalation_logger.debug(
+        "Escalation memory span context: %s",
+        json.dumps(
+            {
+                "parentSpanId": parent_span_id,
+                "traceId": trace_id,
+                "remainingContext": span_context,
+            },
+            default=str,
+        ),
+    )
+    return parent_span_id, trace_id
+
+
+def _format_otel_id(value: Any, width: int) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, int):
+        return f"{value:0{width}x}"
+    return str(value)
+
+
+def _normalize_trace_id(value: str) -> str:
+    normalized = value.replace("-", "").lower()
+    if len(normalized) != 32:
+        raise ValueError(f"Invalid trace ID format: {value}")
+    return normalized
+
+
+def _get_exported_trace_id(trace_id: str | None) -> str | None:
+    trace_id_override = os.environ.get("UIPATH_TRACE_ID")
+    if trace_id_override:
+        try:
+            return _normalize_trace_id(trace_id_override)
+        except ValueError:
+            _escalation_logger.warning(
+                "Ignoring invalid UIPATH_TRACE_ID override: %s",
+                trace_id_override,
+            )
+
+    return trace_id
+
+
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
     agent: LowCodeAgentDefinition | None = None,
@@ -210,6 +266,7 @@ def create_escalation_tool(
         data: output_model
         is_deleted: bool = False
 
+    _span_context: dict[str, Any] = {}
     _bts_context: dict[str, Any] = {}
     _memory_space_id: str | None = _get_escalation_memory_space_id(resource, agent)
     _memory_folder_path: str | None = _get_escalation_memory_folder_path(
@@ -319,7 +376,34 @@ def create_escalation_tool(
         # --- Escalation memory: persist outcome for future recall ---
         if _memory_space_id:
             user_id = await _resolve_user_id(result.completed_by_user)
-            parent_span_id, trace_id = get_current_span_and_trace_ids()
+            parent_span_id, trace_id = _pop_escalation_memory_span_context(
+                tool.metadata
+            )
+            if not parent_span_id or not trace_id:
+                fallback_span_id, fallback_trace_id = get_current_span_and_trace_ids()
+                _escalation_logger.debug(
+                    "Escalation memory span context fallback: %s",
+                    json.dumps(
+                        {
+                            "fallbackSpanId": fallback_span_id,
+                            "fallbackTraceId": fallback_trace_id,
+                            "hadParentSpanId": bool(parent_span_id),
+                            "hadTraceId": bool(trace_id),
+                        },
+                        default=str,
+                    ),
+                )
+                parent_span_id = parent_span_id or fallback_span_id
+                trace_id = trace_id or _get_exported_trace_id(fallback_trace_id)
+            if not parent_span_id or not trace_id:
+                _escalation_logger.warning(
+                    "Skipping escalation memory ingest because span provenance is incomplete"
+                )
+                return {
+                    "action": escalation_action,
+                    "output": escalation_output,
+                    "outcome": outcome,
+                }
             answer_payload, attributes_payload = _build_escalation_memory_payload(
                 serialized_data,
                 escalation_output,
@@ -405,6 +489,7 @@ def create_escalation_tool(
             "recipient": None,
             "args_schema": input_model,
             "output_schema": output_model,
+            "_span_context": _span_context,
             "_bts_context": _bts_context,
         },
     )
