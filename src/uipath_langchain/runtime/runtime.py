@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Iterator
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
@@ -30,9 +31,8 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
-from uipath_langchain.agent.tools.client_side_tool import CLIENT_SIDE_TOOL_MARKER
 from uipath_langchain.agent.tools.tool_node import RunnableCallableWithTool
-from uipath_langchain.chat.hitl import get_confirmation_schema
+from uipath_langchain.chat.hitl import CLIENT_SIDE_TOOL_MARKER, get_confirmation_schema
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
@@ -492,64 +492,40 @@ class UiPathLangGraphRuntime:
 
         return middleware_nodes
 
-    def _get_tool_confirmation_info(self) -> dict[str, Any]:
-        """Build {tool_name: input_schema} for tools requiring confirmation.
-
-        Walks compiled graph nodes once at runtime init. This is needed because coded agents
-        (create_agent) export a compiled graph as the only artifact — there's no side channel
-        to pass confirmation metadata from the build step to the runtime.
-        """
-        schemas: dict[str, Any] = {}
+    def _iter_graph_tools(self) -> Iterator[BaseTool]:
+        """Yield all BaseTool instances from compiled graph nodes."""
         for node_spec in self.graph.nodes.values():
             bound = getattr(node_spec, "bound", None)
             if bound is None:
                 continue
 
-            # Coded agents: one tool per node
-            if isinstance(bound, RunnableCallableWithTool):
-                schema = get_confirmation_schema(bound.tool)
-                if schema is not None:
-                    schemas[bound.tool.name] = schema
+            tool = getattr(bound, "tool", None)
+            if isinstance(tool, BaseTool):
+                yield tool
                 continue
 
-            # Low-code agents: multiple tools in one node
             tools_by_name = getattr(bound, "tools_by_name", None)
             if isinstance(tools_by_name, dict):
-                for tool in tools_by_name.values():
-                    if not isinstance(tool, BaseTool):
-                        continue
-                    schema = get_confirmation_schema(tool)
-                    if schema is not None:
-                        schemas[tool.name] = schema
+                for t in tools_by_name.values():
+                    if isinstance(t, BaseTool):
+                        yield t
 
+    def _get_tool_confirmation_info(self) -> dict[str, Any]:
+        """Build {tool_name: input_schema} for tools requiring confirmation."""
+        schemas: dict[str, Any] = {}
+        for tool in self._iter_graph_tools():
+            schema = get_confirmation_schema(tool)
+            if schema is not None:
+                schemas[tool.name] = schema
         return schemas
 
     def _get_client_side_tools(self) -> dict[str, Any]:
-        """Build {tool_name: output_schema} for client-side tools from compiled graph nodes."""
-
+        """Build {tool_name: output_schema} for client-side tools."""
         tools: dict[str, Any] = {}
-        for node_name, node_spec in self.graph.nodes.items():
-            bound = getattr(node_spec, "bound", None)
-            if bound is None:
-                continue
-
-            tool = getattr(bound, "tool", None)
-            if tool is not None:
-                metadata = getattr(tool, "metadata", None) or {}
-                if metadata.get(CLIENT_SIDE_TOOL_MARKER):
-                    name = getattr(tool, "name", node_name)
-                    tools[name] = metadata.get("output_schema")
-                continue
-
-            tools_by_name = getattr(bound, "tools_by_name", None)
-            if isinstance(tools_by_name, dict):
-                for name, tool in tools_by_name.items():
-                    metadata = getattr(tool, "metadata", None) or {}
-                    if metadata.get(CLIENT_SIDE_TOOL_MARKER):
-                        tools[str(getattr(tool, "name", name))] = metadata.get(
-                            "output_schema"
-                        )
-
+        for tool in self._iter_graph_tools():
+            metadata = getattr(tool, "metadata", None) or {}
+            if metadata.get(CLIENT_SIDE_TOOL_MARKER):
+                tools[tool.name] = metadata.get("output_schema")
         return tools
 
     def _is_middleware_node(self, node_name: str) -> bool:

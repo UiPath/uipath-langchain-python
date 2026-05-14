@@ -1,8 +1,6 @@
 """Factory for creating client-side tools that execute on the client SDK."""
 
-import inspect
 import json
-from logging import getLogger
 from typing import Annotated, Any
 
 from langchain_core.messages import ToolMessage
@@ -14,12 +12,9 @@ from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model as create_model_from_schema,
 )
+from uipath_langchain.chat.hitl import CLIENT_SIDE_TOOL_MARKER
 
 from .utils import sanitize_tool_name
-
-logger = getLogger(__name__)
-
-CLIENT_SIDE_TOOL_MARKER = "uipath_client_tool"
 
 
 def create_client_side_tool(
@@ -43,43 +38,38 @@ def create_client_side_tool(
             description=resource.description,
             input_schema=input_model.model_json_schema(),
             output_schema=(resource.output_schema or {}),
-            example_calls=getattr(resource.properties, 'example_calls', None),
+            example_calls=getattr(resource.properties, "example_calls", None),
         )
-        @durable_interrupt
-        async def wait_for_client_execution() -> dict[str, Any]:
-            return {
-                "tool_call_id": tool_call_id,
-                "tool_name": tool_name,
-                "input": kwargs,
-                "is_execution_phase": True,
-            }
+        async def execute_tool() -> dict[str, Any]:
+            """Execute client-side tool, pausing for client response."""
 
-        # First run: raises GraphInterrupt with the tool call info.
-        # On resume: returns the client's result (output, isError, etc.)
-        # During evals: @mockable intercepts and returns simulated response.
-        result = await wait_for_client_execution()
+            @durable_interrupt
+            async def wait_for_client_execution() -> dict[str, Any]:
+                return {
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "input": kwargs,
+                    "is_execution_phase": True,
+                }
 
-        # The resume value from the bridge is the endToolCall payload
-        output = result.get("output")
-        is_error = result.get("is_error", False)
+            result = await wait_for_client_execution()
+            return result.get("output", result) if isinstance(result, dict) else result
 
-        content = str(output) if output is not None else ""
-        if isinstance(output, dict):
-            content = json.dumps(output)
+        result = await execute_tool()
+
+        if isinstance(result, dict):
+            try:
+                content = json.dumps(result)
+            except TypeError:
+                content = str(result)
+        else:
+            content = str(result) if result is not None else ""
 
         return ToolMessage(
             content=content,
             tool_call_id=tool_call_id,
-            status="error" if is_error else "success",
             response_metadata={CLIENT_SIDE_TOOL_MARKER: True},
         )
-
-    # Patch signature so LangChain injects tool_call_id at runtime
-    original_sig = inspect.signature(client_side_tool_fn)
-    params = [p for p in original_sig.parameters.values() if p.name != "kwargs"] + [
-        inspect.Parameter("kwargs", inspect.Parameter.VAR_KEYWORD, annotation=Any),
-    ]
-    client_side_tool_fn.__signature__ = original_sig.replace(parameters=params)
 
     tool = StructuredTool(
         name=tool_name,
