@@ -1,11 +1,14 @@
 """Escalation tool creation for Action Center integration."""
 
+import json
+import logging
+import os
 from enum import Enum
 from typing import Any, Literal
 
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationRecipient,
@@ -14,16 +17,20 @@ from uipath.agent.models.agent import (
     ArgumentEmailRecipient,
     ArgumentGroupNameRecipient,
     AssetRecipient,
+    LowCodeAgentDefinition,
     StandardRecipient,
 )
 from uipath.agent.utils.text_tokens import safe_get_nested
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
+from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
 from uipath.platform.common import WaitEscalation
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils import (
+    get_current_span_and_trace_ids,
+    get_execution_folder_path,
+)
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
@@ -32,12 +39,23 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..react.types import AgentGraphState
+from .escalation_memory import (
+    EscalationMemorySettings,
+    _check_escalation_memory_cache,
+    _get_escalation_memory_folder_path,
+    _get_escalation_memory_settings,
+    _get_escalation_memory_space_id,
+    _ingest_escalation_memory,
+    _resolve_user_id,
+)
 from .tool_node import ToolWrapperReturnType
 from .utils import (
     resolve_task_title,
     sanitize_dict_for_serialization,
     sanitize_tool_name,
 )
+
+_escalation_logger = logging.getLogger(__name__)
 
 
 class EscalationAction(str, Enum):
@@ -110,15 +128,6 @@ async def resolve_asset(asset_name: str, folder_path: str | None) -> str | None:
         ) from e
 
 
-def _get_user_email(user: Any) -> str | None:
-    """Extract email from user object/dict."""
-    if user is None:
-        return None
-    if isinstance(user, dict):
-        return user.get("emailAddress")
-    return getattr(user, "emailAddress", None)
-
-
 def _parse_task_data(
     data: dict[str, Any],
     input_schema: dict[str, Any],
@@ -161,8 +170,88 @@ def _parse_task_data(
     return filtered_fields
 
 
+def _resolve_escalation_action(
+    outcome: str | None,
+    outcome_mapping: dict[str, str] | None,
+) -> EscalationAction:
+    outcome_action = (
+        outcome_mapping.get(outcome) if outcome_mapping and outcome else None
+    )
+    return (
+        EscalationAction(outcome_action)
+        if outcome_action
+        else EscalationAction.CONTINUE
+    )
+
+
+def _build_escalation_memory_payload(
+    serialized_input: dict[str, Any],
+    escalation_output: dict[str, Any],
+    outcome: str | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    answer = {"output": escalation_output, "outcome": outcome}
+    attributes = {"arguments": serialized_input}
+    return answer, attributes
+
+
+def _pop_escalation_memory_span_context(
+    metadata: dict[str, Any] | None,
+) -> tuple[str | None, str | None]:
+    span_context = (metadata or {}).get("_span_context")
+    if not isinstance(span_context, dict):
+        _escalation_logger.debug(
+            "Escalation memory span context missing _span_context metadata"
+        )
+        return None, None
+
+    parent_span_id = _format_otel_id(span_context.pop("parent_span_id", None), 16)
+    trace_id = _format_otel_id(span_context.pop("trace_id", None), 32)
+    _escalation_logger.debug(
+        "Escalation memory span context: %s",
+        json.dumps(
+            {
+                "parentSpanId": parent_span_id,
+                "traceId": trace_id,
+                "remainingContext": span_context,
+            },
+            default=str,
+        ),
+    )
+    return parent_span_id, trace_id
+
+
+def _format_otel_id(value: Any, width: int) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, int):
+        return f"{value:0{width}x}"
+    return str(value)
+
+
+def _normalize_trace_id(value: str) -> str:
+    normalized = value.replace("-", "").lower()
+    if len(normalized) != 32:
+        raise ValueError(f"Invalid trace ID format: {value}")
+    return normalized
+
+
+def _get_exported_trace_id(trace_id: str | None) -> str | None:
+    trace_id_override = os.environ.get("UIPATH_TRACE_ID")
+    if trace_id_override:
+        try:
+            return _normalize_trace_id(trace_id_override)
+        except ValueError:
+            _escalation_logger.warning(
+                "Ignoring invalid UIPATH_TRACE_ID override: %s",
+                trace_id_override,
+            )
+
+    return trace_id
+
+
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
+    agent: LowCodeAgentDefinition | None = None,
 ) -> StructuredTool:
     """Uses interrupt() for Action Center human-in-the-loop."""
 
@@ -177,7 +266,15 @@ def create_escalation_tool(
         data: output_model
         is_deleted: bool = False
 
+    _span_context: dict[str, Any] = {}
     _bts_context: dict[str, Any] = {}
+    _memory_space_id: str | None = _get_escalation_memory_space_id(resource, agent)
+    _memory_folder_path: str | None = _get_escalation_memory_folder_path(
+        resource, agent
+    )
+    _memory_settings: EscalationMemorySettings | None = _get_escalation_memory_settings(
+        resource
+    )
 
     async def escalation_tool_fn(**kwargs: Any) -> dict[str, Any]:
         agent_input: dict[str, Any] = (
@@ -197,6 +294,24 @@ def create_escalation_tool(
             task_title = tool.metadata.get("task_title") or task_title
 
         serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
+
+        # --- Escalation memory: check cache before creating HITL task ---
+        if _memory_space_id:
+            cached_result = await _check_escalation_memory_cache(
+                _memory_space_id,
+                serialized_data,
+                folder_path=_memory_folder_path or folder_path,
+                memory_settings=_memory_settings,
+            )
+            if cached_result is not None:
+                return {
+                    "action": _resolve_escalation_action(
+                        cached_result.outcome,
+                        channel.outcome_mapping,
+                    ),
+                    "output": cached_result.output,
+                    "outcome": cached_result.outcome,
+                }
 
         @mockable(
             name=tool_name.lower(),
@@ -235,7 +350,7 @@ def create_escalation_tool(
 
         result = await escalate(**kwargs)
         if isinstance(result, dict):
-            result = TypeAdapter(EscalationToolOutput).validate_python(result)
+            result = Task.model_validate(result)
 
         if result.is_deleted:
             return {
@@ -253,14 +368,61 @@ def create_escalation_tool(
             output_schema=output_model.model_json_schema(),
         )
 
-        outcome_str = (
-            channel.outcome_mapping.get(outcome)
-            if channel.outcome_mapping and outcome
-            else None
+        escalation_action = _resolve_escalation_action(
+            outcome,
+            channel.outcome_mapping,
         )
-        escalation_action = (
-            EscalationAction(outcome_str) if outcome_str else EscalationAction.CONTINUE
-        )
+
+        # --- Escalation memory: persist outcome for future recall ---
+        if _memory_space_id:
+            user_id = await _resolve_user_id(result.completed_by_user)
+            parent_span_id, trace_id = _pop_escalation_memory_span_context(
+                tool.metadata
+            )
+            if not parent_span_id or not trace_id:
+                fallback_span_id, fallback_trace_id = get_current_span_and_trace_ids()
+                _escalation_logger.debug(
+                    "Escalation memory span context fallback: %s",
+                    json.dumps(
+                        {
+                            "fallbackSpanId": fallback_span_id,
+                            "fallbackTraceId": fallback_trace_id,
+                            "hadParentSpanId": bool(parent_span_id),
+                            "hadTraceId": bool(trace_id),
+                        },
+                        default=str,
+                    ),
+                )
+                parent_span_id = parent_span_id or fallback_span_id
+                trace_id = trace_id or _get_exported_trace_id(fallback_trace_id)
+            if not parent_span_id or not trace_id:
+                _escalation_logger.warning(
+                    "Skipping escalation memory ingest because span provenance is incomplete"
+                )
+                return {
+                    "action": escalation_action,
+                    "output": escalation_output,
+                    "outcome": outcome,
+                }
+            answer_payload, attributes_payload = _build_escalation_memory_payload(
+                serialized_data,
+                escalation_output,
+                outcome,
+            )
+            await _ingest_escalation_memory(
+                _memory_space_id,
+                answer=json.dumps(answer_payload),
+                attributes=json.dumps(attributes_payload),
+                parent_span_id=parent_span_id,
+                trace_id=trace_id,
+                user_id=user_id,
+                folder_path=_memory_folder_path or folder_path,
+            )
+            if user_id is None:
+                _escalation_logger.info(
+                    "Ingested escalation memory without reviewer user ID "
+                    "because the completed user could not be resolved"
+                )
 
         return {
             "action": escalation_action,
@@ -327,6 +489,7 @@ def create_escalation_tool(
             "recipient": None,
             "args_schema": input_model,
             "output_schema": output_model,
+            "_span_context": _span_context,
             "_bts_context": _bts_context,
         },
     )

@@ -15,8 +15,12 @@ from uipath.agent.models.agent import (
 )
 from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
 
-from uipath_langchain.agent.tools.escalation_tool import (
+from uipath_langchain.agent.tools.escalation_memory import (
+    EscalationMemoryCachedResult,
     _get_user_email,
+)
+from uipath_langchain.agent.tools.escalation_tool import (
+    _build_escalation_memory_payload,
     _parse_task_data,
     create_escalation_tool,
     resolve_asset,
@@ -285,6 +289,14 @@ class TestEscalationToolMetadata:
         tool = create_escalation_tool(escalation_resource)
         assert tool.metadata is not None
         assert tool.metadata["channel_type"] == "actionCenter"
+
+    @pytest.mark.asyncio
+    async def test_escalation_tool_metadata_has_span_context(self, escalation_resource):
+        """Test that metadata contains a span context carrier for memory ingest."""
+        tool = create_escalation_tool(escalation_resource)
+        assert tool.metadata is not None
+        assert "_span_context" in tool.metadata
+        assert isinstance(tool.metadata["_span_context"], dict)
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
@@ -700,6 +712,111 @@ class TestEscalationToolOutputSchema:
 
         assert mock_interrupt.called
 
+    @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+    )
+    async def test_cached_escalation_uses_outcome_mapping(
+        self, mock_check_memory_cache: AsyncMock
+    ):
+        """Test cached outcomes follow the same outcome mapping as live results."""
+        from uipath_langchain.agent.exceptions import AgentRuntimeError
+
+        mock_check_memory_cache.return_value = EscalationMemoryCachedResult(
+            output={"approved": True},
+            outcome="approve",
+        )
+
+        channel_dict = {
+            "name": "action_center",
+            "type": "actionCenter",
+            "description": "Action Center channel",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {"type": "object", "properties": {}},
+            "properties": {
+                "appName": "ApprovalApp",
+                "appVersion": 1,
+                "resourceKey": "test-key",
+            },
+            "recipients": [],
+            "outcomeMapping": {"approve": "end", "reject": "continue"},
+        }
+
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[AgentEscalationChannel(**channel_dict)],
+            isAgentMemoryEnabled=True,
+            memorySpaceId="space-123",
+        )
+
+        tool = create_escalation_tool(resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        with pytest.raises(AgentRuntimeError):
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.get_execution_folder_path")
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+    )
+    async def test_cache_lookup_uses_memory_folder_path(
+        self,
+        mock_check_memory_cache: AsyncMock,
+        mock_get_execution_folder_path: MagicMock,
+    ):
+        """Test escalation memory calls use the memory folder, not task folder."""
+        mock_get_execution_folder_path.return_value = "/Execution/Folder"
+        mock_check_memory_cache.return_value = EscalationMemoryCachedResult(
+            output={"approved": True},
+            outcome="approve",
+        )
+
+        channel_dict = {
+            "name": "action_center",
+            "type": "actionCenter",
+            "description": "Action Center channel",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {"type": "object", "properties": {}},
+            "properties": {
+                "appName": "ApprovalApp",
+                "appVersion": 1,
+                "resourceKey": "test-key",
+            },
+            "recipients": [],
+        }
+
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[AgentEscalationChannel(**channel_dict)],
+            properties={
+                "memory": {
+                    "isEnabled": True,
+                    "memorySpaceId": "space-123",
+                    "folderPath": "/Memory/Folder",
+                }
+            },
+        )
+
+        tool = create_escalation_tool(resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        assert result == {
+            "output": {"approved": True},
+            "outcome": "approve",
+            "task_id": None,
+            "assigned_to": None,
+        }
+        mock_check_memory_cache.assert_awaited_once()
+        assert mock_check_memory_cache.await_args is not None
+        assert (
+            mock_check_memory_cache.await_args.kwargs["folder_path"] == "/Memory/Folder"
+        )
+
 
 class TestGetUserEmail:
     """Test the _get_user_email helper function."""
@@ -906,6 +1023,240 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
         with pytest.raises(Exception, match="API error"):
             await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
+    @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool.get_current_span_and_trace_ids"
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool._ingest_escalation_memory")
+    @patch("uipath_langchain.agent.tools.escalation_tool._resolve_user_id")
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_memory_ingest_uses_traced_escalation_span_context(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_check_memory_cache,
+        mock_resolve_user_id,
+        mock_ingest_memory,
+        mock_get_current_span_and_trace_ids,
+    ):
+        """Escalation memory ingest should use the escalationTool child span."""
+        mock_check_memory_cache.return_value = None
+        mock_resolve_user_id.return_value = "cef1337c-3456-4ae9-81c9-30d033dc2bef"
+        mock_ingest_memory.return_value = None
+        mock_get_current_span_and_trace_ids.return_value = ("wrong-span", "wrong-trace")
+
+        task = _make_mock_task(id=555)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.completed_by_user = {"emailAddress": "reviewer@example.com"}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                    ),
+                    recipients=[],
+                )
+            ],
+            isAgentMemoryEnabled=True,
+            memorySpaceId="space-123",
+        )
+
+        tool = create_escalation_tool(resource)
+        assert tool.metadata is not None
+        tool.metadata["_span_context"]["parent_span_id"] = "3a064d559eca5d62"
+        tool.metadata["_span_context"]["trace_id"] = "5d3feebba60343dfb9364b89ee304a5b"
+
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        mock_get_current_span_and_trace_ids.assert_not_called()
+        mock_ingest_memory.assert_awaited_once()
+        assert mock_ingest_memory.await_args is not None
+        assert (
+            mock_ingest_memory.await_args.kwargs["parent_span_id"] == "3a064d559eca5d62"
+        )
+        assert (
+            mock_ingest_memory.await_args.kwargs["trace_id"]
+            == "5d3feebba60343dfb9364b89ee304a5b"
+        )
+        assert tool.metadata["_span_context"] == {}
+
+    @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool.get_current_span_and_trace_ids"
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool._ingest_escalation_memory")
+    @patch("uipath_langchain.agent.tools.escalation_tool._resolve_user_id")
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_memory_ingest_falls_back_to_current_span_context(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_check_memory_cache,
+        mock_resolve_user_id,
+        mock_ingest_memory,
+        mock_get_current_span_and_trace_ids,
+    ):
+        """Escalation memory ingest should fall back when metadata is incomplete."""
+        mock_check_memory_cache.return_value = None
+        mock_resolve_user_id.return_value = None
+        mock_ingest_memory.return_value = None
+        mock_get_current_span_and_trace_ids.return_value = (
+            "fallback-span",
+            "fallback-trace",
+        )
+
+        task = _make_mock_task(id=555)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.completed_by_user = {"displayName": "Reviewer"}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                    ),
+                    recipients=[],
+                )
+            ],
+            isAgentMemoryEnabled=True,
+            memorySpaceId="space-123",
+        )
+
+        tool = create_escalation_tool(resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        mock_get_current_span_and_trace_ids.assert_called_once()
+        mock_ingest_memory.assert_awaited_once()
+        assert mock_ingest_memory.await_args is not None
+        assert mock_ingest_memory.await_args.kwargs["parent_span_id"] == "fallback-span"
+        assert mock_ingest_memory.await_args.kwargs["trace_id"] == "fallback-trace"
+        assert mock_ingest_memory.await_args.kwargs["user_id"] is None
+
+    @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool.get_current_span_and_trace_ids"
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool._ingest_escalation_memory")
+    @patch("uipath_langchain.agent.tools.escalation_tool._resolve_user_id")
+    @patch(
+        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+    )
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_memory_ingest_skips_when_span_context_is_unavailable(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        mock_check_memory_cache,
+        mock_resolve_user_id,
+        mock_ingest_memory,
+        mock_get_current_span_and_trace_ids,
+    ):
+        """Escalation memory ingest should be skipped without trace provenance."""
+        mock_check_memory_cache.return_value = None
+        mock_resolve_user_id.return_value = None
+        mock_get_current_span_and_trace_ids.return_value = (None, None)
+
+        task = _make_mock_task(id=555)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.completed_by_user = {"displayName": "Reviewer"}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        resource = AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp",
+                        app_version=1,
+                        resource_key="test-key",
+                    ),
+                    recipients=[],
+                )
+            ],
+            isAgentMemoryEnabled=True,
+            memorySpaceId="space-123",
+        )
+
+        tool = create_escalation_tool(resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        result = await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        assert result["output"] == {}
+        assert result["outcome"] == "approve"
+        mock_get_current_span_and_trace_ids.assert_called_once()
+        mock_ingest_memory.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_wrapper_requires_metadata(self, escalation_resource):
+        tool = create_escalation_tool(escalation_resource)
+        tool.metadata = None
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        with pytest.raises(
+            RuntimeError,
+            match="Tool metadata is required for task_title resolution",
+        ):
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
 
 class TestParseTaskData:
     """Test output task data is filtered correctly."""
@@ -940,3 +1291,27 @@ class TestParseTaskData:
         # No properties key in schemas
         result = _parse_task_data(data, {}, None)
         assert result == {"field": "value"}
+
+
+class TestEscalationMemoryPayload:
+    """Test escalation memory ingest payload shape."""
+
+    def test_builds_trace_and_search_payloads(self):
+        """Test memory ingest matches the escalation memory service contract."""
+        serialized_input = {
+            "request_details": "User requested escalation before answering."
+        }
+        escalation_output = {"reviewer_comment": "approve"}
+
+        answer, attributes = _build_escalation_memory_payload(
+            serialized_input,
+            escalation_output,
+            "Approve",
+        )
+
+        assert answer == {
+            "output": {"reviewer_comment": "approve"},
+            "outcome": "Approve",
+        }
+        assert attributes == {"arguments": serialized_input}
+        assert "escalation-input" not in attributes
