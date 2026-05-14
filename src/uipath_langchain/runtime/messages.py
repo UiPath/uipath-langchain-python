@@ -40,6 +40,8 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
+from uipath_langchain.chat.hitl import CLIENT_SIDE_TOOL_MARKER
+
 from ._citations import (
     CitationStreamProcessor,
     extract_citations_from_text,
@@ -462,8 +464,9 @@ class UiPathChatMessagesMapper:
                             )
                         )
 
-                        # Emit executingToolCall from MessageMapper since there's no durable interrupt
-                        # to trigger it from the runtime loop.
+                        # Emit executingToolCall from MessageMapper for tools without
+                        # a durable interrupt. Tools with interrupts (client-side, HITL)
+                        # get executingToolCall from the bridge instead.
                         if not require_confirmation and not is_client_side:
                             events.append(
                                 UiPathConversationMessageEvent(
@@ -510,7 +513,7 @@ class UiPathChatMessagesMapper:
                 pass
 
         # Suppress endToolCall for client-side tools — the client already has the result (it produced it).
-        is_client_side = message.response_metadata.get("uipath_client_tool", False)
+        is_client_side = message.response_metadata.get(CLIENT_SIDE_TOOL_MARKER, False)
         events: list[UiPathConversationMessageEvent] = []
 
         if not is_client_side:
