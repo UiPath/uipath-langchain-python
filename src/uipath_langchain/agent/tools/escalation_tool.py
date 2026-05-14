@@ -29,7 +29,6 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain._utils import (
     get_current_span_and_trace_ids,
     get_execution_folder_path,
-    set_span_attribute,
 )
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
@@ -45,8 +44,8 @@ from .escalation_memory import (
     _get_escalation_memory_folder_path,
     _get_escalation_memory_settings,
     _get_escalation_memory_space_id,
-    _get_user_email,
     _ingest_escalation_memory,
+    _resolve_user_id,
 )
 from .tool_node import ToolWrapperReturnType
 from .utils import (
@@ -184,6 +183,20 @@ def _resolve_escalation_action(
     )
 
 
+def _build_escalation_memory_payload(
+    serialized_input: dict[str, Any],
+    escalation_output: dict[str, Any],
+    outcome: str | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    answer = {"output": escalation_output, "outcome": outcome}
+    attributes = {
+        "input": serialized_input,
+        "output": answer,
+        "escalation-input": serialized_input,
+    }
+    return answer, attributes
+
+
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
     agent: LowCodeAgentDefinition | None = None,
@@ -309,27 +322,26 @@ def create_escalation_tool(
 
         # --- Escalation memory: persist outcome for future recall ---
         if _memory_space_id:
-            user_id = _get_user_email(result.completed_by_user)
-            if user_id:
-                parent_span_id, trace_id = get_current_span_and_trace_ids()
-                await _ingest_escalation_memory(
-                    _memory_space_id,
-                    answer=json.dumps(
-                        {"output": escalation_output, "outcome": outcome}
-                    ),
-                    attributes=json.dumps({"arguments": serialized_data}),
-                    parent_span_id=parent_span_id,
-                    trace_id=trace_id,
-                    user_id=user_id,
-                    folder_path=_memory_folder_path or folder_path,
-                )
-            else:
-                set_span_attribute("fromMemory", False)
-                set_span_attribute("savedToMemory", False)
-                _escalation_logger.warning(
-                    "Skipped escalation memory ingest for space '%s' because "
-                    "the completed user email was unavailable",
-                    _memory_space_id,
+            user_id = await _resolve_user_id(result.completed_by_user)
+            parent_span_id, trace_id = get_current_span_and_trace_ids()
+            answer_payload, attributes_payload = _build_escalation_memory_payload(
+                serialized_data,
+                escalation_output,
+                outcome,
+            )
+            await _ingest_escalation_memory(
+                _memory_space_id,
+                answer=json.dumps(answer_payload),
+                attributes=json.dumps(attributes_payload),
+                parent_span_id=parent_span_id,
+                trace_id=trace_id,
+                user_id=user_id,
+                folder_path=_memory_folder_path or folder_path,
+            )
+            if user_id is None:
+                _escalation_logger.info(
+                    "Ingested escalation memory without reviewer user ID "
+                    "because the completed user could not be resolved"
                 )
 
         return {

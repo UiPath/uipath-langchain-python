@@ -20,6 +20,7 @@ from uipath_langchain.agent.tools.escalation_memory import (
     _get_user_email,
 )
 from uipath_langchain.agent.tools.escalation_tool import (
+    _build_escalation_memory_payload,
     _parse_task_data,
     create_escalation_tool,
     resolve_asset,
@@ -803,6 +804,7 @@ class TestEscalationToolOutputSchema:
             "assigned_to": None,
         }
         mock_check_memory_cache.assert_awaited_once()
+        assert mock_check_memory_cache.await_args is not None
         assert (
             mock_check_memory_cache.await_args.kwargs["folder_path"] == "/Memory/Folder"
         )
@@ -1047,3 +1049,31 @@ class TestParseTaskData:
         # No properties key in schemas
         result = _parse_task_data(data, {}, None)
         assert result == {"field": "value"}
+
+
+class TestEscalationMemoryPayload:
+    """Test escalation memory ingest payload shape."""
+
+    def test_builds_trace_and_search_payloads(self):
+        """Test memory ingest includes UI input/output and searchable input."""
+        serialized_input = {
+            "request_details": "User requested escalation before answering."
+        }
+        escalation_output = {"reviewer_comment": "approve"}
+
+        answer, attributes = _build_escalation_memory_payload(
+            serialized_input,
+            escalation_output,
+            "Approve",
+        )
+
+        assert answer == {
+            "output": {"reviewer_comment": "approve"},
+            "outcome": "Approve",
+        }
+        assert attributes == {
+            "input": serialized_input,
+            "output": answer,
+            "escalation-input": serialized_input,
+        }
+        assert "arguments" not in attributes

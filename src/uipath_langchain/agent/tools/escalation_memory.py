@@ -3,10 +3,12 @@
 import json
 import logging
 from typing import Any
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from uipath.agent.models.agent import AgentEscalationResourceConfig
 from uipath.platform import UiPath
+from uipath.platform.common import UiPathConfig
 from uipath.platform.common._bindings import _resource_overwrites
 from uipath.platform.memory import (
     EscalationMemoryIngestRequest,
@@ -95,21 +97,16 @@ class EscalationMemoryRetriever:
         """Search escalation memory and return the first cached answer."""
         request = self._build_search_request(serialized_input)
         sdk = self._uipath_sdk if self._uipath_sdk is not None else UiPath()
-        response = await sdk.memory.escalation_search_async(
-            memory_space_id=self.memory_space_id,
-            request=request,
-            folder_path=self.folder_path,
-        )
+        try:
+            response = await sdk.memory.escalation_search_async(
+                memory_space_id=self.memory_space_id,
+                request=request,
+                folder_path=self.folder_path,
+            )
+        except ValidationError:
+            response = await self._raw_escalation_search(sdk, request)
 
-        results = response.results or []
-        if not results or not results[0].answer:
-            return None
-
-        answer = results[0].answer
-        return EscalationMemoryCachedResult(
-            output=answer.output,
-            outcome=answer.outcome,
-        )
+        return _cached_result_from_search_response(response)
 
     def _build_search_request(
         self,
@@ -123,7 +120,25 @@ class EscalationMemoryRetriever:
                 result_count=1,
                 search_mode=self.memory_settings.search_mode,
             ),
+            definition_system_prompt="",
         )
+
+    async def _raw_escalation_search(
+        self,
+        sdk: UiPath,
+        request: MemorySearchRequest,
+    ) -> Any:
+        spec = sdk.memory._escalation_search_spec(
+            self.memory_space_id,
+            folder_path=self.folder_path,
+        )
+        response = await sdk.memory.request_async(
+            spec.method,
+            spec.endpoint,
+            json=request.model_dump(by_alias=True, exclude_none=True),
+            headers=spec.headers,
+        )
+        return response.json()
 
 
 def _get_escalation_memory_space_id(
@@ -310,9 +325,64 @@ def _get_user_email(user: Any) -> str | None:
     """Extract an email address from an Action Center user payload."""
     if user is None:
         return None
-    if isinstance(user, dict):
-        return user.get("emailAddress")
-    return getattr(user, "emailAddress", None)
+
+    for key in ("emailAddress", "email", "Email", "userName"):
+        value = _read_value(user, key)
+        if value:
+            return str(value)
+
+    return None
+
+
+def _get_user_id(user: Any) -> str | None:
+    """Extract a LLMOps-compatible reviewer ID from an Action Center user payload."""
+    if user is None:
+        return None
+
+    for key in ("identifier", "userId", "userGlobalId", "id"):
+        user_id = _normalize_user_id(_read_value(user, key))
+        if user_id is not None:
+            return user_id
+
+    return None
+
+
+async def _resolve_user_id(user: Any) -> str | None:
+    """Resolve the Action Center reviewer to the directory ID expected by LLMOps."""
+    user_id = _get_user_id(user)
+    if user_id:
+        return user_id
+
+    email = _get_user_email(user)
+    if not email:
+        return None
+
+    org_id = UiPathConfig.organization_id
+    if not org_id:
+        return None
+
+    try:
+        response = await UiPath().api_client.request_async(
+            "GET",
+            f"/identity_/api/Directory/Search/{org_id}",
+            scoped="org",
+            params={
+                "startsWith": email,
+                "sourceFilter": ["directoryUsers", "localUsers"],
+            },
+        )
+    except Exception:
+        logger.warning("Failed to resolve reviewer '%s'", email, exc_info=True)
+        return None
+
+    for entry in response.json() or []:
+        if _get_user_email(entry) != email:
+            continue
+        user_id = _get_user_id(entry)
+        if user_id is not None:
+            return user_id
+
+    return None
 
 
 async def _check_escalation_memory_cache(
@@ -357,11 +427,17 @@ async def _ingest_escalation_memory(
     attributes: str,
     parent_span_id: str,
     trace_id: str,
-    user_id: str,
+    user_id: str | None = None,
     folder_path: str | None = None,
 ) -> None:
     """Persist a resolved escalation outcome into memory."""
     set_span_attribute("fromMemory", False)
+    normalized_user_id = _normalize_user_id(user_id)
+    if user_id is not None and normalized_user_id is None:
+        logger.info(
+            "Skipping escalation memory reviewer user ID because it is not a GUID: %s",
+            user_id,
+        )
 
     try:
         request = EscalationMemoryIngestRequest(
@@ -369,7 +445,7 @@ async def _ingest_escalation_memory(
             trace_id=trace_id,
             answer=answer,
             attributes=attributes,
-            user_id=user_id,
+            user_id=normalized_user_id,
         )
         sdk = UiPath()
         await sdk.memory.escalation_ingest_async(
@@ -385,8 +461,9 @@ async def _ingest_escalation_memory(
         set_span_attribute("savedToMemory", False)
         set_current_span_error(error)
         logger.warning(
-            "Failed to ingest escalation outcome into memory space '%s'",
+            "Failed to ingest escalation outcome into memory space '%s': %s",
             memory_space_id,
+            error,
             exc_info=True,
         )
 
@@ -454,6 +531,37 @@ def _record_custom_metric(metric_name: str, memory_space_id: str) -> None:
         logger.debug("Failed to record metric '%s'", metric_name, exc_info=True)
 
 
+def _cached_result_from_search_response(
+    response: Any,
+) -> EscalationMemoryCachedResult | None:
+    results = _read_value(response, "results") or []
+    if not results:
+        return None
+
+    answer = _read_value(results[0], "answer")
+    if not answer:
+        return None
+
+    if isinstance(answer, str):
+        try:
+            answer = json.loads(answer)
+        except json.JSONDecodeError:
+            logger.warning("Escalation memory cache entry answer is not valid JSON")
+            return None
+
+    output = _read_value(answer, "output", "Output")
+    if output is None:
+        logger.warning(
+            "Escalation memory cache entry has no 'output' property; treating as cache miss."
+        )
+        return None
+
+    return EscalationMemoryCachedResult(
+        output=output,
+        outcome=_read_value(answer, "outcome", "Outcome"),
+    )
+
+
 def _coerce_memory_settings(memory: Any) -> EscalationMemorySettings:
     if isinstance(memory, EscalationMemorySettings):
         return memory
@@ -508,6 +616,15 @@ def _read_attribute_value(source: Any, keys: tuple[str, ...]) -> Any:
         if value is not _MISSING_VALUE:
             return value
     return None
+
+
+def _normalize_user_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return str(UUID(str(value)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _stringify_search_value(value: Any) -> str:
