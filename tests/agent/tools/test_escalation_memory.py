@@ -19,16 +19,20 @@ from uipath_langchain.agent.tools.escalation_memory import (
     EscalationMemoryRetriever,
     EscalationMemorySettings,
     _build_search_fields,
+    _cached_result_from_search_response,
     _check_escalation_memory_cache,
     _coerce_memory_settings,
+    _get_agent_memory_space_feature,
     _get_escalation_memory_folder_path,
     _get_escalation_memory_settings,
     _get_escalation_memory_space_id,
+    _get_memory_space_folder_override,
     _get_user_email,
     _get_user_id,
     _ingest_escalation_memory,
     _read_value,
     _record_custom_metric,
+    _resolve_memory_space_id_by_name,
     _resolve_user_id,
     _stringify_search_value,
 )
@@ -164,6 +168,80 @@ class TestGetEscalationMemorySpaceId:
             folder_path="/My Workspace/Debug_escs",
         )
 
+    def test_skips_non_memory_and_disabled_agent_features(self) -> None:
+        agent = SimpleNamespace(
+            features=[
+                {"$featureType": "context", "memorySpaceId": "ignored-context"},
+                {
+                    "$featureType": "memorySpace",
+                    "isEnabled": False,
+                    "memorySpaceId": "ignored-disabled",
+                },
+                {
+                    "$featureType": "memorySpace",
+                    "isEnabled": True,
+                    "memorySpaceId": "selected-space",
+                },
+            ]
+        )
+
+        feature = _get_agent_memory_space_feature(agent)
+
+        assert feature is not None
+        assert _read_value(feature, "memorySpaceId") == "selected-space"
+
+    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    def test_space_name_resolution_returns_none_when_lookup_fails(
+        self,
+        mock_uipath_cls: MagicMock,
+    ) -> None:
+        mock_sdk = MagicMock()
+        mock_sdk.memory.list.side_effect = RuntimeError("lookup failed")
+        mock_uipath_cls.return_value = mock_sdk
+
+        result = _resolve_memory_space_id_by_name("MemorySpace", "/Memory")
+
+        assert result is None
+
+    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    def test_space_name_resolution_returns_none_when_lookup_is_empty(
+        self,
+        mock_uipath_cls: MagicMock,
+    ) -> None:
+        mock_sdk = MagicMock()
+        mock_sdk.memory.list.return_value = SimpleNamespace(value=[])
+        mock_uipath_cls.return_value = mock_sdk
+
+        result = _resolve_memory_space_id_by_name("MemorySpace", "/Memory")
+
+        assert result is None
+
+
+class TestGetMemorySpaceFolderOverride:
+    def test_returns_none_without_matching_override(self) -> None:
+        token = _resource_overwrites.set(
+            {"memorySpace.OtherSpace": SimpleNamespace(folder_identifier="/Other")}
+        )
+
+        try:
+            result = _get_memory_space_folder_override("MemorySpace")
+        finally:
+            _resource_overwrites.reset(token)
+
+        assert result is None
+
+    def test_returns_none_when_matching_override_has_no_folder(self) -> None:
+        token = _resource_overwrites.set(
+            {"memorySpace.MemorySpace": SimpleNamespace(folder_identifier=None)}
+        )
+
+        try:
+            result = _get_memory_space_folder_override("MemorySpace")
+        finally:
+            _resource_overwrites.reset(token)
+
+        assert result is None
+
 
 class TestGetEscalationMemorySettings:
     def test_returns_none_when_disabled(self) -> None:
@@ -218,6 +296,11 @@ class TestGetEscalationMemorySettings:
         assert settings.field_settings == [
             EscalationMemoryFieldSetting(name="request_details", weight=1)
         ]
+
+    def test_normalizes_semantic_search_mode(self) -> None:
+        settings = EscalationMemorySettings(searchMode="semantic")
+
+        assert settings.search_mode.value == "Semantic"
 
 
 class TestGetUserEmail:
@@ -307,6 +390,41 @@ class TestResolveUserId:
         ]
         mock_sdk = MagicMock()
         mock_sdk.api_client.request_async = AsyncMock(return_value=mock_response)
+        mock_uipath_cls.return_value = mock_sdk
+
+        result = await _resolve_user_id({"emailAddress": "reviewer@example.com"})
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_user_has_no_email(self) -> None:
+        assert await _resolve_user_id({"displayName": "Reviewer"}) is None
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_memory.UiPathConfig")
+    async def test_returns_none_when_organization_id_is_missing(
+        self,
+        mock_config: MagicMock,
+    ) -> None:
+        mock_config.organization_id = None
+
+        result = await _resolve_user_id({"emailAddress": "reviewer@example.com"})
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_memory.UiPathConfig")
+    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    async def test_returns_none_when_directory_lookup_fails(
+        self,
+        mock_uipath_cls: MagicMock,
+        mock_config: MagicMock,
+    ) -> None:
+        mock_config.organization_id = "org-123"
+        mock_sdk = MagicMock()
+        mock_sdk.api_client.request_async = AsyncMock(
+            side_effect=RuntimeError("directory unavailable")
+        )
         mock_uipath_cls.return_value = mock_sdk
 
         result = await _resolve_user_id({"emailAddress": "reviewer@example.com"})
@@ -455,6 +573,25 @@ class TestCheckEscalationMemoryCache:
         mock_record_metric.assert_called_once_with(
             MEMORY_CACHE_MISS_METRIC, "space-123"
         )
+
+    def test_search_response_without_answer_is_cache_miss(self) -> None:
+        result = _cached_result_from_search_response({"results": [{}]})
+
+        assert result is None
+
+    def test_search_response_with_invalid_json_answer_is_cache_miss(self) -> None:
+        result = _cached_result_from_search_response(
+            {"results": [{"answer": "not-json"}]}
+        )
+
+        assert result is None
+
+    def test_search_response_without_output_is_cache_miss(self) -> None:
+        result = _cached_result_from_search_response(
+            {"results": [{"answer": {"outcome": "approved"}}]}
+        )
+
+        assert result is None
 
 
 class TestBuildSearchFields:
