@@ -2224,7 +2224,8 @@ class TestExecutingToolCallEmission:
 
         assert result is not None
         executing_events = [
-            e for e in result
+            e
+            for e in result
             if e.tool_call is not None and e.tool_call.executing is not None
         ]
         assert len(executing_events) == 1
@@ -2251,7 +2252,8 @@ class TestExecutingToolCallEmission:
 
         assert result is not None
         executing_events = [
-            e for e in result
+            e
+            for e in result
             if e.tool_call is not None and e.tool_call.executing is not None
         ]
         assert len(executing_events) == 0
@@ -2262,12 +2264,16 @@ class TestExecutingToolCallEmission:
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
-        mapper.client_side_tools = {"client_tool": {"type": "object"}}
+        mapper.client_side_tools = {
+            "client_tool": {"input_schema": None, "output_schema": {"type": "object"}}
+        }
 
         first_chunk = AIMessageChunk(
             content="",
             id="msg-1",
-            tool_calls=[{"id": "tc-1", "name": "client_tool", "args": {"title": "Avatar"}}],
+            tool_calls=[
+                {"id": "tc-1", "name": "client_tool", "args": {"title": "Avatar"}}
+            ],
         )
         await mapper.map_event(first_chunk)
 
@@ -2277,7 +2283,8 @@ class TestExecutingToolCallEmission:
 
         assert result is not None
         executing_events = [
-            e for e in result
+            e
+            for e in result
             if e.tool_call is not None and e.tool_call.executing is not None
         ]
         assert len(executing_events) == 0
@@ -2288,7 +2295,7 @@ class TestClientSideToolEndSuppression:
 
     @pytest.mark.asyncio
     async def test_client_side_tool_suppresses_end_event(self):
-        """ToolMessage with CLIENT_SIDE_TOOL_MARKER should NOT emit endToolCall."""
+        """ToolMessage with IS_CONVERSATIONAL_CLIENT_SIDE_TOOL should NOT emit endToolCall."""
         storage = create_mock_storage()
         storage.get_value.return_value = {"tool-1": "msg-123"}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
@@ -2303,14 +2310,13 @@ class TestClientSideToolEndSuppression:
 
         assert result is not None
         tool_end_events = [
-            e for e in result
-            if e.tool_call is not None and e.tool_call.end is not None
+            e for e in result if e.tool_call is not None and e.tool_call.end is not None
         ]
         assert len(tool_end_events) == 0
 
     @pytest.mark.asyncio
     async def test_client_side_tool_still_emits_message_end(self):
-        """ToolMessage with CLIENT_SIDE_TOOL_MARKER should still emit message end when it's the last tool."""
+        """ToolMessage with IS_CONVERSATIONAL_CLIENT_SIDE_TOOL should still emit message end when it's the last tool."""
         storage = create_mock_storage()
         storage.get_value.return_value = {"tool-1": "msg-123"}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
@@ -2329,7 +2335,7 @@ class TestClientSideToolEndSuppression:
 
     @pytest.mark.asyncio
     async def test_normal_tool_emits_end_event(self):
-        """ToolMessage without CLIENT_SIDE_TOOL_MARKER should emit endToolCall normally."""
+        """ToolMessage without IS_CONVERSATIONAL_CLIENT_SIDE_TOOL should emit endToolCall normally."""
         storage = create_mock_storage()
         storage.get_value.return_value = {"tool-1": "msg-123"}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
@@ -2343,7 +2349,6 @@ class TestClientSideToolEndSuppression:
 
         assert result is not None
         tool_end_events = [
-            e for e in result
-            if e.tool_call is not None and e.tool_call.end is not None
+            e for e in result if e.tool_call is not None and e.tool_call.end is not None
         ]
         assert len(tool_end_events) == 1

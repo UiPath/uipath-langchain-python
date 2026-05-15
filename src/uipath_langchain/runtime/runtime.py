@@ -31,8 +31,12 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
+from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
 from uipath_langchain.agent.tools.tool_node import RunnableCallableWithTool
-from uipath_langchain.chat.hitl import CLIENT_SIDE_TOOL_MARKER, get_confirmation_schema
+from uipath_langchain.chat.hitl import (
+    IS_CONVERSATIONAL_CLIENT_SIDE_TOOL,
+    get_confirmation_schema,
+)
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
@@ -519,13 +523,19 @@ class UiPathLangGraphRuntime:
                 schemas[tool.name] = schema
         return schemas
 
-    def _get_client_side_tools(self) -> dict[str, Any]:
-        """Build {tool_name: output_schema} for client-side tools."""
-        tools: dict[str, Any] = {}
+    def _get_client_side_tools(self) -> dict[str, ClientSideToolInfo]:
+        """Build {tool_name: ClientSideToolInfo} for client-side tools."""
+        tools: dict[str, ClientSideToolInfo] = {}
         for tool in self._iter_graph_tools():
             metadata = getattr(tool, "metadata", None) or {}
-            if metadata.get(CLIENT_SIDE_TOOL_MARKER):
-                tools[tool.name] = metadata.get("output_schema")
+            if metadata.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL):
+                input_schema = None
+                if hasattr(tool, "args_schema") and tool.args_schema:
+                    input_schema = tool.args_schema.model_json_schema()
+                tools[tool.name] = {
+                    "input_schema": input_schema,
+                    "output_schema": metadata.get("output_schema"),
+                }
         return tools
 
     def _is_middleware_node(self, node_name: str) -> bool:

@@ -40,7 +40,7 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
-from uipath_langchain.chat.hitl import CLIENT_SIDE_TOOL_MARKER
+from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 
 from ._citations import (
     CitationStreamProcessor,
@@ -67,7 +67,7 @@ class UiPathChatMessagesMapper:
         self.storage = storage
         self.current_message: AIMessageChunk | AIMessage
         self.tools_requiring_confirmation: dict[str, Any] = {}
-        self.client_side_tools: dict[str, Any] = {}  # {tool_name: output_schema}
+        self.client_side_tools: dict[str, Any] = {}
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
         self._citation_stream_processor = CitationStreamProcessor()
@@ -448,8 +448,13 @@ class UiPathChatMessagesMapper:
                         )
                         input_schema = self.tools_requiring_confirmation.get(tool_name)
                         is_client_side = tool_name in self.client_side_tools
+                        client_tool_info = self.client_side_tools.get(tool_name)
                         output_schema = (
-                            self.client_side_tools.get(tool_name)
+                            (
+                                client_tool_info.get("output_schema")
+                                if isinstance(client_tool_info, dict)
+                                else client_tool_info
+                            )
                             if is_client_side
                             else None
                         )
@@ -513,7 +518,9 @@ class UiPathChatMessagesMapper:
                 pass
 
         # Suppress endToolCall for client-side tools — the client already has the result (it produced it).
-        is_client_side = message.response_metadata.get(CLIENT_SIDE_TOOL_MARKER, False)
+        is_client_side = message.response_metadata.get(
+            IS_CONVERSATIONAL_CLIENT_SIDE_TOOL, False
+        )
         events: list[UiPathConversationMessageEvent] = []
 
         if not is_client_side:

@@ -14,7 +14,7 @@ from uipath_langchain._utils.durable_interrupt import durable_interrupt
 CANCELLED_MESSAGE = "Cancelled by user"
 ARGS_MODIFIED_MESSAGE = "User has modified the tool arguments"
 
-CLIENT_SIDE_TOOL_MARKER = "uipath_client_tool"
+IS_CONVERSATIONAL_CLIENT_SIDE_TOOL = "uipath_client_tool"
 CONVERSATIONAL_APPROVED_TOOL_ARGS = "conversational_approved_tool_args"
 REQUIRE_CONVERSATIONAL_CONFIRMATION = "require_conversational_confirmation"
 
@@ -130,7 +130,9 @@ def request_approval(
     # If this is a server-side tool (not client-side), execution follows immediately
     # after confirmation — mark this as the execution trigger so the bridge emits
     # executingToolCall. For client-side tools, the execution interrupt sets this instead.
-    is_execution_trigger = not (tool.metadata or {}).get(CLIENT_SIDE_TOOL_MARKER, False)
+    is_execution_trigger = not (tool.metadata or {}).get(
+        IS_CONVERSATIONAL_CLIENT_SIDE_TOOL, False
+    )
 
     @durable_interrupt
     def ask_confirmation():

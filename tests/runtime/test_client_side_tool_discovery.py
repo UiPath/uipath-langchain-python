@@ -15,7 +15,7 @@ from uipath_langchain.agent.tools.tool_node import (
     UiPathToolNode,
     wrap_tools_with_error_handling,
 )
-from uipath_langchain.chat.hitl import CLIENT_SIDE_TOOL_MARKER
+from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
 
 
@@ -28,8 +28,11 @@ class _ClientSideTool(BaseTool):
     description: str = "A client-side tool"
     args_schema: type[BaseModel] = _ClientSideInput
     metadata: dict[str, Any] = {
-        CLIENT_SIDE_TOOL_MARKER: True,
-        "output_schema": {"type": "object", "properties": {"rating": {"type": "number"}}},
+        IS_CONVERSATIONAL_CLIENT_SIDE_TOOL: True,
+        "output_schema": {
+            "type": "object",
+            "properties": {"rating": {"type": "number"}},
+        },
     }
 
     def _run(self, title: str) -> str:
@@ -75,14 +78,16 @@ class TestClientSideToolDiscovery:
         assert "client_tool" in client_tools
         assert "normal_tool" not in client_tools
 
-    def test_output_schema_is_preserved(self):
+    def test_schemas_are_preserved(self):
         graph = _compile_graph_with_wrapped_tools([_ClientSideTool()])
         runtime = UiPathLangGraphRuntime(graph)
 
-        schema = runtime.chat.client_side_tools["client_tool"]
-        assert schema is not None
-        assert "properties" in schema
-        assert "rating" in schema["properties"]
+        tool_info = runtime.chat.client_side_tools["client_tool"]
+        assert tool_info is not None
+        assert "output_schema" in tool_info
+        assert "input_schema" in tool_info
+        assert "rating" in tool_info["output_schema"]["properties"]
+        assert "title" in tool_info["input_schema"]["properties"]
 
     def test_empty_when_no_client_side_tools(self):
         graph = _compile_graph_with_wrapped_tools([_NormalTool()])
