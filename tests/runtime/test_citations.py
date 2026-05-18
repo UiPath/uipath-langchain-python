@@ -17,6 +17,7 @@ from uipath_langchain.runtime._citations import (
     cas_deep_rag_citation_wrapper,
     convert_citations_to_inline_tags,
     extract_citations_from_text,
+    reconstruct_text_with_citations,
 )
 
 
@@ -755,6 +756,59 @@ class TestExtractCitationsFromText:
         cleaned, citations = extract_citations_from_text(text)
         assert citations[0].sources[0].number == 1
         assert citations[1].sources[0].number == 2
+
+
+class TestReconstructTextWithCitations:
+    """Test cases for reconstruct_text_with_citations - the inverse of extract_citations_from_text."""
+
+    def test_no_citations_returns_text_unchanged(self):
+        assert reconstruct_text_with_citations("hello world", []) == "hello world"
+        assert reconstruct_text_with_citations("hello world", None) == "hello world"
+
+    def test_url_citation_roundtrip(self):
+        original = 'Some fact<uip:cite title="Doc" url="https://doc.com" />'
+        cleaned, citations = extract_citations_from_text(original)
+        assert reconstruct_text_with_citations(cleaned, citations) == original
+
+    def test_media_citation_roundtrip(self):
+        original = (
+            'A finding<uip:cite title="Report.pdf" reference="https://r.com" '
+            'page_number="5" />'
+        )
+        cleaned, citations = extract_citations_from_text(original)
+        assert reconstruct_text_with_citations(cleaned, citations) == original
+
+    def test_multiple_citations_roundtrip(self):
+        original = (
+            'First<uip:cite title="A" url="https://a.com" />'
+            ' and second<uip:cite title="B" url="https://b.com" />.'
+        )
+        cleaned, citations = extract_citations_from_text(original)
+        assert reconstruct_text_with_citations(cleaned, citations) == original
+
+    def test_back_to_back_citations_roundtrip(self):
+        original = (
+            'Text<uip:cite title="A" url="https://a.com" />'
+            '<uip:cite title="B" url="https://b.com" />'
+        )
+        cleaned, citations = extract_citations_from_text(original)
+        # Both sources merged into a single citation; reconstruction should
+        # re-emit them back-to-back after the shared text span.
+        assert reconstruct_text_with_citations(cleaned, citations) == original
+
+    def test_citation_with_trailing_text_roundtrip(self):
+        original = 'A fact<uip:cite title="S" url="https://s.com" /> and more text.'
+        cleaned, citations = extract_citations_from_text(original)
+        assert reconstruct_text_with_citations(cleaned, citations) == original
+
+    def test_quotes_in_title_are_escaped(self):
+        cleaned, citations = extract_citations_from_text(
+            r'A fact<uip:cite title="The \"Real\" Story" url="https://example.com" />'
+        )
+        reconstructed = reconstruct_text_with_citations(cleaned, citations)
+        assert 'title="The "Real" Story"' not in reconstructed
+        assert "&quot;Real&quot;" in reconstructed
+        assert 'url="https://example.com"' in reconstructed
 
 
 class TestConvertCitationsToInlineTags:

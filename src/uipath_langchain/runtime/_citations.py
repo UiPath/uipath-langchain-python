@@ -5,7 +5,7 @@ import logging
 import mimetypes
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 from uuid import uuid4
 
 from langchain_core.messages.tool import ToolCall
@@ -265,6 +265,48 @@ def extract_citations_from_text(
         offset += length
 
     return ("".join(cleaned_parts), citations)
+
+
+def reconstruct_text_with_citations(
+    cleaned_text: str,
+    citations: Sequence[UiPathConversationCitationData] | None,
+) -> str:
+    """Inverse of extract_citations_from_text: reinsert <uip:cite/> tags into cleaned text.
+
+    Used when replaying assistant messages so the LLM sees its own prior citation markup
+    and doesn't over- or under-cite on the next turn.
+    """
+    if not citations:
+        return cleaned_text
+
+    parts: list[str] = []
+    cursor = 0
+    for citation in citations:
+        insert_pos = citation.offset + citation.length
+        parts.append(cleaned_text[cursor:insert_pos])
+        for source in citation.sources:
+            parts.append(_source_to_cite_tag(source))
+        cursor = insert_pos
+
+    parts.append(cleaned_text[cursor:])
+    return "".join(parts)
+
+
+def _source_to_cite_tag(
+    source: UiPathConversationCitationSourceUrl | UiPathConversationCitationSourceMedia,
+) -> str:
+    if isinstance(source, UiPathConversationCitationSourceUrl):
+        return (
+            f'<uip:cite title="{_escape_attr(source.title)}" '
+            f'url="{_escape_attr(source.url)}" />'
+        )
+    if isinstance(source, UiPathConversationCitationSourceMedia):
+        return (
+            f'<uip:cite title="{_escape_attr(source.title)}" '
+            f'reference="{_escape_attr(source.download_url or "")}" '
+            f'page_number="{_escape_attr(source.page_number or "")}" />'
+        )
+    return ""
 
 
 def _escape_attr(value: str) -> str:

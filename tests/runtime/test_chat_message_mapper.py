@@ -12,6 +12,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from uipath.core.chat import (
+    UiPathConversationCitation,
     UiPathConversationCitationSourceMedia,
     UiPathConversationCitationSourceUrl,
     UiPathConversationContentPart,
@@ -798,6 +799,70 @@ class TestMapMessages:
         assert isinstance(msg, AIMessage)
         assert msg.content == "I can help with that"
         assert msg.additional_kwargs["message_id"] == "msg-1"
+
+    def test_map_messages_reinserts_uip_cite_tags_for_assistant(self):
+        """Assistant messages with stored citations have <uip:cite/> tags reinserted on replay."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-1",
+                    mime_type="text/markdown",
+                    data=UiPathInlineValue(inline="First and second."),
+                    citations=[
+                        UiPathConversationCitation(
+                            citation_id="cit-1",
+                            created_at=TEST_TIMESTAMP,
+                            updated_at=TEST_TIMESTAMP,
+                            offset=0,
+                            length=5,
+                            sources=[
+                                UiPathConversationCitationSourceUrl(
+                                    title="A",
+                                    number=1,
+                                    url="https://a.com",
+                                )
+                            ],
+                        ),
+                        UiPathConversationCitation(
+                            citation_id="cit-2",
+                            created_at=TEST_TIMESTAMP,
+                            updated_at=TEST_TIMESTAMP,
+                            offset=5,
+                            length=11,
+                            sources=[
+                                UiPathConversationCitationSourceMedia(
+                                    title="Report.pdf",
+                                    number=2,
+                                    mime_type="application/pdf",
+                                    download_url="https://r.com",
+                                    page_number="5",
+                                )
+                            ],
+                        ),
+                    ],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, AIMessage)
+        assert msg.content == (
+            'First<uip:cite title="A" url="https://a.com" />'
+            ' and second<uip:cite title="Report.pdf" reference="https://r.com" '
+            'page_number="5" />.'
+        )
 
     def test_map_messages_external_value_produces_attachment_content(self):
         """Should include attachment metadata in content for external value content parts."""
