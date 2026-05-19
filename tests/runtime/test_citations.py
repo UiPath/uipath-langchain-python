@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 from langchain_core.messages.tool import ToolCall, ToolMessage
 from uipath.core.chat import (
+    UiPathConversationCitationData,
     UiPathConversationCitationSourceMedia,
     UiPathConversationCitationSourceUrl,
 )
@@ -17,6 +18,7 @@ from uipath_langchain.runtime._citations import (
     cas_deep_rag_citation_wrapper,
     convert_citations_to_inline_tags,
     extract_citations_from_text,
+    reconstruct_text_with_citations,
 )
 
 
@@ -76,11 +78,15 @@ class TestCitationStreamProcessor:
         proc = CitationStreamProcessor()
         text = 'A fact<uip:cite title="Doc" url="https://doc.com" />'
         events = proc.add_chunk(text)
-        assert len(events) == 1
+        # Preceding text and citation are emitted as two separate chunks so CAS
+        # resolves the citation to a point (offset=N, length=0).
+        assert len(events) == 2
         assert events[0].data == "A fact"
-        assert events[0].citation is not None
-        assert events[0].citation.end is not None
-        source = events[0].citation.end.sources[0]
+        assert events[0].citation is None
+        assert events[1].data is None
+        assert events[1].citation is not None
+        assert events[1].citation.end is not None
+        source = events[1].citation.end.sources[0]
         assert isinstance(source, UiPathConversationCitationSourceUrl)
         assert source.url == "https://doc.com"
 
@@ -88,10 +94,13 @@ class TestCitationStreamProcessor:
         proc = CitationStreamProcessor()
         text = 'A fact<uip:cite title="Report.pdf" reference="https://doc.com" page_number="3" />'
         events = proc.add_chunk(text)
-        assert len(events) == 1
-        assert events[0].citation is not None
-        assert events[0].citation.end is not None
-        source = events[0].citation.end.sources[0]
+        assert len(events) == 2
+        assert events[0].data == "A fact"
+        assert events[0].citation is None
+        assert events[1].data is None
+        assert events[1].citation is not None
+        assert events[1].citation.end is not None
+        source = events[1].citation.end.sources[0]
         assert isinstance(source, UiPathConversationCitationSourceMedia)
         assert source.download_url == "https://doc.com"
         assert source.page_number == "3"
@@ -153,12 +162,14 @@ class TestCitationStreamProcessor:
         events = proc.add_chunk(text)
         events.extend(proc.finalize())
 
+        # One plain text event for "First", followed by two citation-only events.
+        plain = [e for e in events if e.data]
+        assert len(plain) == 1
+        assert plain[0].data == "First"
         cited_events = [e for e in events if e.citation is not None]
         assert len(cited_events) == 2
-        assert cited_events[0].data == "First"
+        assert all(e.data is None for e in cited_events)
         assert cited_events[0].citation.end.sources[0].url == "https://doc1.com"
-        # Second citation has empty text (back-to-back)
-        assert cited_events[1].data == ""
         assert cited_events[1].citation.end.sources[0].url == "https://doc2.com"
 
     def test_citation_at_beginning_of_text(self):
@@ -167,8 +178,10 @@ class TestCitationStreamProcessor:
         text = '<uip:cite title="Doc" url="https://doc.com" />Some text after.'
         events = proc.add_chunk(text)
         events.extend(proc.finalize())
+        # No leading text event (empty preceding text is skipped), then citation,
+        # then plain text event for trailing content.
         assert len(events) == 2
-        assert events[0].data == ""
+        assert events[0].data is None
         assert events[0].citation is not None
         assert events[0].citation.end.sources[0].url == "https://doc.com"
         assert events[1].data == "Some text after."
@@ -218,9 +231,9 @@ class TestCitationStreamProcessor:
         assert combined == "Fact more"
         cited = [e for e in all_events if e.citation is not None]
         assert len(cited) == 1
-        # "Fact" was emitted as plain text before the '<' started buffering,
-        # so the citation event has empty data (back-to-back with preceding text)
-        assert cited[0].data == ""
+        # Citation events carry no data; the cited span text was emitted in
+        # preceding plain-text events.
+        assert cited[0].data is None
         assert cited[0].citation.end.sources[0].url == "https://s.com"
 
     def test_multiple_citations_streamed_across_chunks(self):
@@ -425,7 +438,7 @@ class TestCitationStreamProcessor:
         events.extend(proc.finalize())
         cited = [e for e in events if e.citation is not None]
         assert len(cited) == 3
-        assert all(e.data == "" for e in cited)
+        assert all(e.data is None for e in cited)
         assert cited[0].citation.end.sources[0].url == "https://a.com"
         assert cited[1].citation.end.sources[0].url == "https://b.com"
         assert cited[2].citation.end.sources[0].url == "https://c.com"
@@ -466,10 +479,13 @@ class TestCitationStreamProcessor:
         events.extend(proc.finalize())
         cited = [e for e in events if e.citation is not None]
         assert len(cited) == 2
-        assert cited[0].data == ""
+        assert all(e.data is None for e in cited)
         assert cited[0].citation.end.sources[0].url == "https://a.com"
-        assert cited[1].data == "   "
         assert cited[1].citation.end.sources[0].url == "https://b.com"
+        # The whitespace between citations is emitted in its own plain text event.
+        plain = [e for e in events if e.data]
+        assert len(plain) == 1
+        assert plain[0].data == "   "
 
     def test_unclosed_tag_with_valid_content_before(self):
         """Valid citation followed by an unclosed partial tag at end of stream."""
@@ -545,15 +561,18 @@ class TestCitationStreamProcessor:
         assert all(e.citation is None for e in events)
 
     def test_uip_prefix_followed_by_citation_single_chunk(self):
-        """'<uip ' followed by valid citation in a single chunk emits '<uip ' with the citation."""
+        """'<uip ' followed by valid citation in a single chunk emits '<uip ' then the citation."""
         proc = CitationStreamProcessor()
         events = proc.add_chunk(
             '<uip <uip:cite title="Source" url="https://example.com" />'
         )
         events.extend(proc.finalize())
+        plain = [e for e in events if e.data]
+        assert len(plain) == 1
+        assert plain[0].data == "<uip "
         cited = [e for e in events if e.citation is not None]
         assert len(cited) == 1
-        assert cited[0].data == "<uip "
+        assert cited[0].data is None
         assert cited[0].citation.end.sources[0].url == "https://example.com"
 
     def test_escaped_quotes_in_title(self):
@@ -562,9 +581,12 @@ class TestCitationStreamProcessor:
         text = r'Some text.<uip:cite title="The Peculiar Journey of \"Orange\"" url="https://example.com" />'
         events = proc.add_chunk(text)
         events.extend(proc.finalize())
+        plain = [e for e in events if e.data]
+        assert len(plain) == 1
+        assert plain[0].data == "Some text."
         cited = [e for e in events if e.citation is not None]
         assert len(cited) == 1
-        assert cited[0].data == "Some text."
+        assert cited[0].data is None
         source = cited[0].citation.end.sources[0]
         assert isinstance(source, UiPathConversationCitationSourceUrl)
         assert source.url == "https://example.com"
@@ -596,13 +618,14 @@ class TestExtractCitationsFromText:
         assert citations == []
 
     def test_url_citation(self):
-        """Text with a URL citation returns cleaned text and CitationData with URL source."""
+        """Text with a URL citation returns cleaned text and a point CitationData with URL source."""
         text = 'Some fact<uip:cite title="Doc" url="https://doc.com" />'
         cleaned, citations = extract_citations_from_text(text)
         assert cleaned == "Some fact"
         assert len(citations) == 1
-        assert citations[0].offset == 0
-        assert citations[0].length == 9  # len("Some fact")
+        # Point citation anchored right after the cited span.
+        assert citations[0].offset == 9  # len("Some fact")
+        assert citations[0].length == 0
         source = citations[0].sources[0]
         assert isinstance(source, UiPathConversationCitationSourceUrl)
         assert source.url == "https://doc.com"
@@ -622,7 +645,7 @@ class TestExtractCitationsFromText:
         assert source.title == "Report.pdf"
 
     def test_multiple_citations_correct_offsets(self):
-        """Multiple citations on different spans get correct offsets and lengths."""
+        """Multiple point citations are anchored right after their cited spans."""
         text = (
             'First<uip:cite title="A" url="https://a.com" />'
             ' and second<uip:cite title="B" url="https://b.com" />'
@@ -630,13 +653,13 @@ class TestExtractCitationsFromText:
         cleaned, citations = extract_citations_from_text(text)
         assert cleaned == "First and second"
         assert len(citations) == 2
-        # First citation: "First" at offset 0, length 5
-        assert citations[0].offset == 0
-        assert citations[0].length == 5
+        # First citation anchored after "First" (offset 5, length 0).
+        assert citations[0].offset == 5
+        assert citations[0].length == 0
         assert citations[0].sources[0].url == "https://a.com"
-        # Second citation: " and second" at offset 5, length 11
-        assert citations[1].offset == 5
-        assert citations[1].length == 11
+        # Second citation anchored after " and second" (offset 16, length 0).
+        assert citations[1].offset == 16
+        assert citations[1].length == 0
         assert citations[1].sources[0].url == "https://b.com"
 
     def test_duplicate_sources_same_number(self):
@@ -650,21 +673,21 @@ class TestExtractCitationsFromText:
         assert len(citations) == 2
         assert citations[0].sources[0].number == citations[1].sources[0].number
 
-    def test_back_to_back_citations_merged_into_previous(self):
-        """Back-to-back citations merge the second source into the previous citation."""
+    def test_back_to_back_citations_become_separate_point_citations(self):
+        """Back-to-back citations emit as separate point citations at the same offset."""
         text = (
             'Text<uip:cite title="A" url="https://a.com" />'
             '<uip:cite title="B" url="https://b.com" />'
         )
         cleaned, citations = extract_citations_from_text(text)
         assert cleaned == "Text"
-        assert len(citations) == 1
-        assert len(citations[0].sources) == 2
+        assert len(citations) == 2
+        assert all(c.offset == 4 and c.length == 0 for c in citations)
         assert citations[0].sources[0].url == "https://a.com"
-        assert citations[0].sources[1].url == "https://b.com"
+        assert citations[1].sources[0].url == "https://b.com"
 
     def test_three_back_to_back_citations(self):
-        """Three back-to-back citations all merge into one citation with three sources."""
+        """Three back-to-back citations emit as three separate point citations."""
         text = (
             'Answer<uip:cite title="A" reference="https://a.com" page_number="1" />'
             '<uip:cite title="B" reference="https://b.com" page_number="2" />'
@@ -672,24 +695,24 @@ class TestExtractCitationsFromText:
         )
         cleaned, citations = extract_citations_from_text(text)
         assert cleaned == "Answer"
-        assert len(citations) == 1
-        assert len(citations[0].sources) == 3
+        assert len(citations) == 3
+        assert all(c.offset == 6 and c.length == 0 for c in citations)
         assert citations[0].sources[0].title == "A"
-        assert citations[0].sources[1].title == "B"
-        assert citations[0].sources[2].title == "C"
+        assert citations[1].sources[0].title == "B"
+        assert citations[2].sources[0].title == "C"
 
     def test_back_to_back_citations_at_start_with_no_preceding_text(self):
-        """Back-to-back citations at the very start (no preceding text) are all dropped."""
+        """Back-to-back citations at the very start emit as point citations at offset 0."""
         text = (
             '<uip:cite title="A" url="https://a.com" />'
             '<uip:cite title="B" url="https://b.com" />'
         )
         cleaned, citations = extract_citations_from_text(text)
         assert cleaned == ""
-        # First citation has no preceding text and no previous citation to merge into
-        # Second citation also has no preceding text but merges into the first
-        # Both end up dropped since neither has a text span
-        assert len(citations) == 0
+        assert len(citations) == 2
+        assert all(c.offset == 0 and c.length == 0 for c in citations)
+        assert citations[0].sources[0].url == "https://a.com"
+        assert citations[1].sources[0].url == "https://b.com"
 
     def test_empty_text(self):
         """Empty string returns empty text and no citations."""
@@ -703,8 +726,8 @@ class TestExtractCitationsFromText:
         cleaned, citations = extract_citations_from_text(text)
         assert cleaned == "A fact and more text."
         assert len(citations) == 1
-        assert citations[0].offset == 0
-        assert citations[0].length == 6  # len("A fact")
+        assert citations[0].offset == 6  # right after "A fact"
+        assert citations[0].length == 0
 
     def test_reference_without_page_number_skipped(self):
         """Web URL misclassified as reference (no page_number) must not emit a citation."""
@@ -755,6 +778,100 @@ class TestExtractCitationsFromText:
         cleaned, citations = extract_citations_from_text(text)
         assert citations[0].sources[0].number == 1
         assert citations[1].sources[0].number == 2
+
+
+class TestReconstructTextWithCitations:
+    """Test cases for reconstruct_text_with_citations - the inverse of extract_citations_from_text."""
+
+    def test_no_citations_returns_text_unchanged(self):
+        assert reconstruct_text_with_citations("hello world", []) == "hello world"
+        assert reconstruct_text_with_citations("hello world", None) == "hello world"
+
+    def test_url_citation_roundtrip(self):
+        original = 'Some fact<uip:cite title="Doc" url="https://doc.com" />'
+        cleaned, citations = extract_citations_from_text(original)
+        assert reconstruct_text_with_citations(cleaned, citations) == original
+
+    def test_media_citation_roundtrip(self):
+        original = (
+            'A finding<uip:cite title="Report.pdf" reference="https://r.com" '
+            'page_number="5" />'
+        )
+        cleaned, citations = extract_citations_from_text(original)
+        assert reconstruct_text_with_citations(cleaned, citations) == original
+
+    def test_multiple_citations_roundtrip(self):
+        original = (
+            'First<uip:cite title="A" url="https://a.com" />'
+            ' and second<uip:cite title="B" url="https://b.com" />.'
+        )
+        cleaned, citations = extract_citations_from_text(original)
+        assert reconstruct_text_with_citations(cleaned, citations) == original
+
+    def test_back_to_back_citations_roundtrip(self):
+        original = (
+            'Text<uip:cite title="A" url="https://a.com" />'
+            '<uip:cite title="B" url="https://b.com" />'
+        )
+        cleaned, citations = extract_citations_from_text(original)
+        # Two separate point citations at the same offset; reconstruction
+        # re-emits them back-to-back at that anchor.
+        assert reconstruct_text_with_citations(cleaned, citations) == original
+
+    def test_citation_with_trailing_text_roundtrip(self):
+        original = 'A fact<uip:cite title="S" url="https://s.com" /> and more text.'
+        cleaned, citations = extract_citations_from_text(original)
+        assert reconstruct_text_with_citations(cleaned, citations) == original
+
+    def test_out_of_order_citations_sorted_by_offset(self):
+        """Reconstruct must not duplicate text when citations arrive out of offset order."""
+        cleaned = "First and second and third."
+        # Same sources, but presented in reverse offset order to reconstruct.
+        out_of_order = [
+            UiPathConversationCitationData(
+                offset=26,
+                length=0,
+                sources=[
+                    UiPathConversationCitationSourceUrl(
+                        title="C", number=3, url="https://c.com"
+                    )
+                ],
+            ),
+            UiPathConversationCitationData(
+                offset=16,
+                length=0,
+                sources=[
+                    UiPathConversationCitationSourceUrl(
+                        title="B", number=2, url="https://b.com"
+                    )
+                ],
+            ),
+            UiPathConversationCitationData(
+                offset=5,
+                length=0,
+                sources=[
+                    UiPathConversationCitationSourceUrl(
+                        title="A", number=1, url="https://a.com"
+                    )
+                ],
+            ),
+        ]
+        result = reconstruct_text_with_citations(cleaned, out_of_order)
+        expected = (
+            'First<uip:cite title="A" url="https://a.com" />'
+            ' and second<uip:cite title="B" url="https://b.com" />'
+            ' and third<uip:cite title="C" url="https://c.com" />.'
+        )
+        assert result == expected
+
+    def test_quotes_in_title_are_escaped(self):
+        cleaned, citations = extract_citations_from_text(
+            r'A fact<uip:cite title="The \"Real\" Story" url="https://example.com" />'
+        )
+        reconstructed = reconstruct_text_with_citations(cleaned, citations)
+        assert 'title="The "Real" Story"' not in reconstructed
+        assert "&quot;Real&quot;" in reconstructed
+        assert 'url="https://example.com"' in reconstructed
 
 
 class TestConvertCitationsToInlineTags:
@@ -926,7 +1043,7 @@ class TestConvertCitationsToInlineTags:
         assert '<uip:cite title="B.pdf"' in result
 
     def test_back_to_back_ordinals_roundtrip_with_extract(self):
-        """End-to-end: [1][2] converted to inline tags then extracted as merged sources."""
+        """End-to-end: [1][2] converted to inline tags then extracted as separate point citations."""
         content = {
             "text": "Answer [1][2]",
             "citations": [
@@ -949,10 +1066,10 @@ class TestConvertCitationsToInlineTags:
         cleaned, citations = extract_citations_from_text(inline_text)
 
         assert cleaned == "Answer "
-        assert len(citations) == 1
-        assert len(citations[0].sources) == 2
+        assert len(citations) == 2
+        assert all(c.offset == 7 and c.length == 0 for c in citations)
         assert citations[0].sources[0].title == "A.pdf"
-        assert citations[0].sources[1].title == "B.pdf"
+        assert citations[1].sources[0].title == "B.pdf"
 
 
 class TestDeepRagCitationWrapper:

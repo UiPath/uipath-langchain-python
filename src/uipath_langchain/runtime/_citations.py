@@ -5,7 +5,7 @@ import logging
 import mimetypes
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 from uuid import uuid4
 
 from langchain_core.messages.tool import ToolCall
@@ -155,30 +155,6 @@ class CitationStreamProcessor:
         self._source_numbers: dict[_ParsedCitation, int] = {}
         self._next_number: int = 1
 
-    def _build_content_part_citation(
-        self,
-        text: str,
-        citation: _ParsedCitation | None = None,
-    ) -> UiPathConversationContentPartChunkEvent:
-        if citation is None:
-            return UiPathConversationContentPartChunkEvent(data=text)
-
-        source, self._next_number = _make_source(
-            citation, self._source_numbers, self._next_number
-        )
-
-        if not source:
-            return UiPathConversationContentPartChunkEvent(data=text)
-
-        return UiPathConversationContentPartChunkEvent(
-            data=text,
-            citation=UiPathConversationCitationEvent(
-                citation_id=str(uuid4()),
-                start=UiPathConversationCitationStartEvent(),
-                end=UiPathConversationCitationEndEvent(sources=[source]),
-            ),
-        )
-
     def _process_segments(
         self, text: str
     ) -> list[UiPathConversationContentPartChunkEvent]:
@@ -186,16 +162,32 @@ class CitationStreamProcessor:
         if not segments:
             return []
 
+        # Emit each segment as up to two chunk events: a plain text chunk for the
+        # preceding text (if any), then a citation-only chunk with no data. CAS's
+        # content-part-event-helper records offset on start and length on end; with
+        # no data between them, length resolves to 0 (a point citation).
         content_parts: list[UiPathConversationContentPartChunkEvent] = []
         for segment_text, citation in segments:
-            if citation is not None:
-                content_part_with_citation = self._build_content_part_citation(
-                    segment_text, citation
+            if segment_text:
+                content_parts.append(
+                    UiPathConversationContentPartChunkEvent(data=segment_text)
                 )
-                content_parts.append(content_part_with_citation)
-            elif segment_text:
-                content_part_plain = self._build_content_part_citation(segment_text)
-                content_parts.append(content_part_plain)
+            if citation is None:
+                continue
+            source, self._next_number = _make_source(
+                citation, self._source_numbers, self._next_number
+            )
+            if source is None:
+                continue
+            content_parts.append(
+                UiPathConversationContentPartChunkEvent(
+                    citation=UiPathConversationCitationEvent(
+                        citation_id=str(uuid4()),
+                        start=UiPathConversationCitationStartEvent(),
+                        end=UiPathConversationCitationEndEvent(sources=[source]),
+                    ),
+                )
+            )
 
         return content_parts
 
@@ -229,7 +221,12 @@ class CitationStreamProcessor:
 def extract_citations_from_text(
     text: str,
 ) -> tuple[str, list[UiPathConversationCitationData]]:
-    """Parse inline <uip:cite .../> tags from text and return cleaned text with structured citations."""
+    """Parse inline <uip:cite .../> tags from text and return cleaned text with structured point citations.
+
+    Each tag becomes a length=0 citation anchored at the offset where the tag appeared
+    (i.e., immediately after its preceding text). This mirrors what the streaming emitter
+    produces on the wire, where start/end fire around an empty data slice.
+    """
     segments = _parse_citations(text)
     if not segments:
         return (text, [])
@@ -242,29 +239,68 @@ def extract_citations_from_text(
 
     for segment_text, citation in segments:
         cleaned_parts.append(segment_text)
-        length = len(segment_text)
+        offset += len(segment_text)
 
-        if citation is not None:
-            source, next_number = _make_source(citation, source_numbers, next_number)
-            if not source:
-                offset += length
-                continue
-            if length > 0:
-                citations.append(
-                    UiPathConversationCitationData(
-                        offset=offset,
-                        length=length,
-                        sources=[source],
-                    )
-                )
-            elif citations:
-                # Back-to-back citation with no preceding text:
-                # merge into the previous citation's sources (one citation data with two sources)
-                citations[-1].sources.append(source)
-
-        offset += length
+        if citation is None:
+            continue
+        source, next_number = _make_source(citation, source_numbers, next_number)
+        if source is None:
+            continue
+        citations.append(
+            UiPathConversationCitationData(
+                offset=offset,
+                length=0,
+                sources=[source],
+            )
+        )
 
     return ("".join(cleaned_parts), citations)
+
+
+def reconstruct_text_with_citations(
+    cleaned_text: str,
+    citations: Sequence[UiPathConversationCitationData] | None,
+) -> str:
+    """Inverse of extract_citations_from_text: reinsert <uip:cite/> tags into cleaned text.
+
+    Used when replaying assistant messages so the LLM sees its own prior citation markup
+    and doesn't over- or under-cite on the next turn. Citations are point anchors
+    (length=0), so tags are inserted at the offset directly.
+    """
+    if not citations:
+        return cleaned_text
+
+    # Sort by offset so we never walk the cursor backwards — out-of-order
+    # citations would otherwise re-emit text already added to `parts`.
+    ordered = sorted(citations, key=lambda c: c.offset)
+
+    parts: list[str] = []
+    cursor = 0
+    for citation in ordered:
+        parts.append(cleaned_text[cursor : citation.offset])
+        for source in citation.sources:
+            parts.append(_source_to_cite_tag(source))
+        cursor = citation.offset
+
+    parts.append(cleaned_text[cursor:])
+    return "".join(parts)
+
+
+def _source_to_cite_tag(
+    source: UiPathConversationCitationSourceUrl | UiPathConversationCitationSourceMedia,
+) -> str:
+    if isinstance(source, UiPathConversationCitationSourceUrl):
+        return (
+            f'<uip:cite title="{_escape_attr(source.title)}" '
+            f'url="{_escape_attr(source.url)}" />'
+        )
+    if isinstance(source, UiPathConversationCitationSourceMedia):
+        return (
+            f'<uip:cite title="{_escape_attr(source.title)}" '
+            f'reference="{_escape_attr(source.download_url or "")}" '
+            f'page_number="{_escape_attr(source.page_number or "")}" />'
+        )
+    return ""
 
 
 def _escape_attr(value: str) -> str:

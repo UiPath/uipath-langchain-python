@@ -12,6 +12,7 @@ from langchain_core.messages import (
     ToolMessage,
 )
 from uipath.core.chat import (
+    UiPathConversationCitation,
     UiPathConversationCitationSourceMedia,
     UiPathConversationCitationSourceUrl,
     UiPathConversationContentPart,
@@ -798,6 +799,70 @@ class TestMapMessages:
         assert isinstance(msg, AIMessage)
         assert msg.content == "I can help with that"
         assert msg.additional_kwargs["message_id"] == "msg-1"
+
+    def test_map_messages_reinserts_uip_cite_tags_for_assistant(self):
+        """Assistant messages with stored citations have <uip:cite/> tags reinserted on replay."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="assistant",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-1",
+                    mime_type="text/markdown",
+                    data=UiPathInlineValue(inline="First and second."),
+                    citations=[
+                        UiPathConversationCitation(
+                            citation_id="cit-1",
+                            created_at=TEST_TIMESTAMP,
+                            updated_at=TEST_TIMESTAMP,
+                            offset=5,
+                            length=0,
+                            sources=[
+                                UiPathConversationCitationSourceUrl(
+                                    title="A",
+                                    number=1,
+                                    url="https://a.com",
+                                )
+                            ],
+                        ),
+                        UiPathConversationCitation(
+                            citation_id="cit-2",
+                            created_at=TEST_TIMESTAMP,
+                            updated_at=TEST_TIMESTAMP,
+                            offset=16,
+                            length=0,
+                            sources=[
+                                UiPathConversationCitationSourceMedia(
+                                    title="Report.pdf",
+                                    number=2,
+                                    mime_type="application/pdf",
+                                    download_url="https://r.com",
+                                    page_number="5",
+                                )
+                            ],
+                        ),
+                    ],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, AIMessage)
+        assert msg.content == (
+            'First<uip:cite title="A" url="https://a.com" />'
+            ' and second<uip:cite title="Report.pdf" reference="https://r.com" '
+            'page_number="5" />.'
+        )
 
     def test_map_messages_external_value_produces_attachment_content(self):
         """Should include attachment metadata in content for external value content parts."""
@@ -1676,8 +1741,9 @@ class TestMapLangChainAIMessageCitations:
         assert isinstance(part.data, UiPathInlineValue)
         assert part.data.inline == "Some fact and more."
         assert len(part.citations) == 1
-        assert part.citations[0].offset == 0
-        assert part.citations[0].length == 9  # "Some fact"
+        # Point citation anchored right after "Some fact".
+        assert part.citations[0].offset == 9
+        assert part.citations[0].length == 0
         source = part.citations[0].sources[0]
         assert isinstance(source, UiPathConversationCitationSourceUrl)
         assert source.url == "https://doc.com"
@@ -1923,7 +1989,7 @@ class TestMapAiMessageToEvents:
 
     @pytest.mark.asyncio
     async def test_processes_citations_in_content(self):
-        """Should strip citation tags, emit cleaned text, and attach citation to chunk."""
+        """Should strip citation tags, emit cleaned text, and emit a citation-only chunk."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         msg = AIMessage(
             content='Some fact<uip:cite title="Doc" url="https://doc.com" /> and more.',
@@ -1942,13 +2008,13 @@ class TestMapAiMessageToEvents:
         for e in chunk_events:
             assert e.content_part is not None
             assert e.content_part.chunk is not None
-            assert e.content_part.chunk.data is not None
-            texts.append(e.content_part.chunk.data)
+            if e.content_part.chunk.data is not None:
+                texts.append(e.content_part.chunk.data)
         full_text = "".join(texts)
         assert "uip:cite" not in full_text
         assert "Some fact" in full_text
 
-        # The "Some fact" chunk should carry an attached citation
+        # The citation is emitted as its own chunk with no data (point citation).
         citation_chunk = next(
             e
             for e in chunk_events
@@ -1958,6 +2024,7 @@ class TestMapAiMessageToEvents:
         )
         assert citation_chunk.content_part is not None
         assert citation_chunk.content_part.chunk is not None
+        assert citation_chunk.content_part.chunk.data is None
         citation_event = citation_chunk.content_part.chunk.citation
         assert citation_event is not None
         assert citation_event.end is not None

@@ -39,7 +39,11 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
-from ._citations import CitationStreamProcessor, extract_citations_from_text
+from ._citations import (
+    CitationStreamProcessor,
+    extract_citations_from_text,
+    reconstruct_text_with_citations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +144,9 @@ class UiPathChatMessagesMapper:
                     ):
                         text = str(data.inline)
                         if text:
+                            text = reconstruct_text_with_citations(
+                                text, uipath_content_part.citations
+                            )
                             content_blocks.append(
                                 create_text_block(
                                     text, id=uipath_content_part.content_part_id
