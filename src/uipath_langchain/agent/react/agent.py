@@ -1,4 +1,4 @@
-from typing import Any, Callable, Sequence, Type, TypeVar
+from typing import Callable, Sequence, Type, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage

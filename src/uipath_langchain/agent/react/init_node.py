@@ -74,10 +74,15 @@ def create_init_node(
         # Validate client-side tool declarations from the exchange input
         if client_side_tools:
             client_tools_input = getattr(state, UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY, None)
-            if client_tools_input is not None and isinstance(client_tools_input, list):
-                validate_and_apply_tool_filter(client_tools_input, client_side_tools)
-            else:
+            if client_tools_input is None:
                 available_client_side_tools.set(None)
+            elif not isinstance(client_tools_input, list):
+                raise ValueError(
+                    f"'{UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY}' must be a list of tool declarations, "
+                    f"got {type(client_tools_input).__name__}."
+                )
+            else:
+                validate_and_apply_tool_filter(client_tools_input, client_side_tools)
 
         # Calculate initial message count for tracking new messages
         initial_message_count = (

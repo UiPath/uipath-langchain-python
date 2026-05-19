@@ -40,6 +40,7 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
+from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
 from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 
 from ._citations import (
@@ -67,7 +68,7 @@ class UiPathChatMessagesMapper:
         self.storage = storage
         self.current_message: AIMessageChunk | AIMessage
         self.tools_requiring_confirmation: dict[str, Any] = {}
-        self.client_side_tools: dict[str, Any] = {}
+        self.client_side_tools: dict[str, ClientSideToolInfo] = {}
         self.seen_message_ids: set[str] = set()
         self._storage_lock = asyncio.Lock()
         self._citation_stream_processor = CitationStreamProcessor()
@@ -448,13 +449,8 @@ class UiPathChatMessagesMapper:
                         )
                         input_schema = self.tools_requiring_confirmation.get(tool_name)
                         is_client_side = tool_name in self.client_side_tools
-                        client_tool_info = self.client_side_tools.get(tool_name)
                         output_schema = (
-                            (
-                                client_tool_info.get("output_schema")
-                                if isinstance(client_tool_info, dict)
-                                else client_tool_info
-                            )
+                            self.client_side_tools[tool_name].get("output_schema")
                             if is_client_side
                             else None
                         )
