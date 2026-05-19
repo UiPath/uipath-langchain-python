@@ -8,6 +8,19 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
+[options]
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer-span = "P2D"
+
+[options.exclude-newer-package]
+uipath = false
+uipath-platform = false
+uipath-runtime = false
+uipath-llm-client = false
+jsonschema-pydantic-converter = false
+uipath-langchain-client = false
+uipath-core = false
+
 [[package]]
 name = "a2a-sdk"
 version = "0.3.26"
@@ -4375,7 +4388,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.10.25"
+version = "0.11.1"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
