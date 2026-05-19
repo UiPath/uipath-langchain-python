@@ -152,6 +152,18 @@ exclude_lines = [
   "@(abc\\.)?abstractmethod",
 ]
 
+[tool.uv]
+exclude-newer = "2 days"
+
+[tool.uv.exclude-newer-package]
+uipath = false
+uipath-core = false
+uipath-platform = false
+uipath-runtime = false
+uipath-langchain-client = false
+uipath-llm-client = false
+jsonschema-pydantic-converter = false
+
 [[tool.uv.index]]
 name = "testpypi"
 url = "https://test.pypi.org/simple/"
