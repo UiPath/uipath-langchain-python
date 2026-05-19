@@ -57,11 +57,11 @@ async def create_mcp_tools(
         Returns empty list if config.is_enabled is False.
 
     Behavior depends on config.dynamic_tools:
-        - none: Uses tool schemas from config.available_tools (default).
-        - schema: Lists tools from the MCP server via mcpClient, but only
-          includes tools whose names appear in config.available_tools.
-        - all: Lists all tools from the MCP server via mcpClient, ignoring
-          config.available_tools entirely.
+        - off: Uses tool schemas from config.available_tools (default).
+        - live schemas: Lists tools from the MCP server via mcpClient, but
+          only includes tools whose names appear in config.available_tools.
+        - auto discover: Lists all tools from the MCP server via mcpClient,
+          ignoring config.available_tools entirely.
     """
 
     if config.is_enabled is False:
