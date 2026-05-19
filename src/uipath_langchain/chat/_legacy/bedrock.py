@@ -129,6 +129,9 @@ class AwsBedrockCompletionsPassthroughClient:
             "before-send.bedrock-runtime.*", self._modify_request
         )
         client.meta.events.register(
+            "before-send.bedrock-runtime.*", self._inject_license_ref_id
+        )
+        client.meta.events.register(
             "after-call.bedrock-runtime.*", self._capture_response_headers
         )
         return client
@@ -141,6 +144,24 @@ class AwsBedrockCompletionsPassthroughClient:
             verify=ca_bundle if ca_bundle is not None else False,
             config=self._unsigned_config(),
         )
+
+    def _inject_license_ref_id(self, request, **kwargs):
+        """boto3 before-send handler that injects X-UiPath-License-RefId.
+
+        Boto3 analog of UiPathURLRewriteTransport._inject_license_ref_id.
+        Reads the legacy module global populated by
+        uipath_agents._observability.license_ref_id.apply_legacy_license_ref_id
+        when a model_run span starts.
+        """
+        from uipath_langchain.chat._legacy.openai import _get_license_ref_id
+
+        license_ref_id = _get_license_ref_id()
+        if license_ref_id:
+            request.headers["X-UiPath-License-RefId"] = license_ref_id
+        else:
+            logger.warning(
+                "Expected license_ref_id to be set, but it was %s", license_ref_id
+            )
 
     def _modify_request(self, request, **kwargs):
         """Intercept boto3 request and redirect to LLM Gateway."""

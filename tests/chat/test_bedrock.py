@@ -1,5 +1,6 @@
 import logging
 import os
+from typing import Any
 from unittest.mock import patch
 
 import botocore
@@ -95,6 +96,58 @@ class TestGetClientSkipsImds:
         assert not credential_log_records, (
             f"Unexpected credential resolution: {[r.getMessage() for r in credential_log_records]}"
         )
+
+
+class TestInjectLicenseRefId:
+    """Boto3 before-send chain stamps X-UiPath-License-RefId on the request."""
+
+    def _make_passthrough(self) -> AwsBedrockCompletionsPassthroughClient:
+        return AwsBedrockCompletionsPassthroughClient(
+            model="anthropic.claude-haiku-4-5-20251001",
+            token="test-token",
+            api_flavor="converse",
+        )
+
+    def _emit_before_send(
+        self, passthrough: AwsBedrockCompletionsPassthroughClient
+    ) -> Any:
+        client = passthrough.get_client()
+
+        class _Req:
+            url = "https://bedrock.example/foo/converse"
+            headers: dict[str, str] = {}
+
+        request = _Req()
+        with patch.object(
+            passthrough, "_resolve_url", return_value=("https://gateway/x", False)
+        ):
+            client.meta.events.emit(
+                "before-send.bedrock-runtime.Converse", request=request
+            )
+        return request
+
+    def test_emits_header_when_global_is_set(self):
+        from uipath_langchain.chat._legacy.openai import set_license_ref_id
+
+        passthrough = self._make_passthrough()
+        set_license_ref_id("registered-order-uuid")
+        try:
+            request = self._emit_before_send(passthrough)
+        finally:
+            set_license_ref_id(None)
+
+        assert request.headers.get("Authorization") == "Bearer test-token"
+        assert request.headers.get("X-UiPath-License-RefId") == "registered-order-uuid"
+
+    def test_omits_header_when_global_is_unset(self):
+        from uipath_langchain.chat._legacy.openai import set_license_ref_id
+
+        passthrough = self._make_passthrough()
+        set_license_ref_id(None)
+        request = self._emit_before_send(passthrough)
+
+        assert request.headers.get("Authorization") == "Bearer test-token"
+        assert "X-UiPath-License-RefId" not in request.headers
 
 
 class TestConvertFileBlocksToAnthropicDocuments:
