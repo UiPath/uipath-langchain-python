@@ -47,12 +47,26 @@ def validate_and_apply_tool_filter(
         agent_tools: The agent's client-side tools.
             Dict of {tool_name: ClientSideToolInfo}.
     """
-    declared = {
-        (t["name"] if isinstance(t, dict) else t): t
-        if isinstance(t, dict)
-        else {"name": t}
-        for t in declared_tools
-    }
+    declared: dict[str, dict[str, Any]] = {}
+    for i, t in enumerate(declared_tools):
+        if isinstance(t, dict):
+            if "name" not in t:
+                raise ValueError(
+                    f"Client-side tool declaration at index {i} is missing required 'name' field."
+                )
+            name = t["name"]
+        elif isinstance(t, str):
+            name = t
+            t = {"name": t}
+        else:
+            raise ValueError(
+                f"Client-side tool declaration at index {i} must be a dict or string, got {type(t).__name__}."
+            )
+        if name in declared:
+            raise ValueError(
+                f"Duplicate client-side tool declaration: '{name}'."
+            )
+        declared[name] = t
 
     required = set(agent_tools.keys())
     missing = required - set(declared.keys())
