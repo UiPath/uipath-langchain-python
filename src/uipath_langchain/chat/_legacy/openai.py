@@ -12,29 +12,11 @@ from uipath.platform.common import (
 )
 
 from .http_client import build_uipath_headers, resolve_gateway_url
+from .license_ref_id import get_license_ref_id
 from .supported_models import OpenAIModels
 from .types import APIFlavor, LLMProvider
 
 logger = logging.getLogger(__name__)
-
-# Module-level storage for the current license ref ID.
-# Set by uipath-agents when a model_run span starts, read by the
-# transport to inject X-UiPath-License-RefId on LLM calls.
-# A plain global is used because the LangChain callback (which sets the
-# value) and the httpx transport (which reads it) run on different
-# threads, so neither ContextVar nor threading.local work.
-_current_license_ref_id: str | None = None
-
-
-def set_license_ref_id(value: str | None) -> None:
-    """Set the license ref ID for injection on LLM requests."""
-    global _current_license_ref_id
-    _current_license_ref_id = value
-
-
-def _get_license_ref_id() -> str | None:
-    """Read the current license ref ID."""
-    return _current_license_ref_id
 
 
 def _rewrite_openai_url(
@@ -66,7 +48,7 @@ def _rewrite_openai_url(
 
 def _inject_license_ref_id(request: httpx.Request) -> None:
     """Inject X-UiPath-License-RefId header if a model_run span is active."""
-    license_ref_id = _get_license_ref_id()
+    license_ref_id = get_license_ref_id()
     if license_ref_id:
         request.headers["X-UiPath-License-RefId"] = license_ref_id
 

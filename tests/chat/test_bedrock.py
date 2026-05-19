@@ -127,7 +127,7 @@ class TestInjectLicenseRefId:
         return request
 
     def test_emits_header_when_global_is_set(self):
-        from uipath_langchain.chat._legacy.openai import set_license_ref_id
+        from uipath_langchain.chat._legacy.license_ref_id import set_license_ref_id
 
         passthrough = self._make_passthrough()
         set_license_ref_id("registered-order-uuid")
@@ -140,7 +140,7 @@ class TestInjectLicenseRefId:
         assert request.headers.get("X-UiPath-License-RefId") == "registered-order-uuid"
 
     def test_omits_header_when_global_is_unset(self):
-        from uipath_langchain.chat._legacy.openai import set_license_ref_id
+        from uipath_langchain.chat._legacy.license_ref_id import set_license_ref_id
 
         passthrough = self._make_passthrough()
         set_license_ref_id(None)

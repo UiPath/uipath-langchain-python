@@ -18,6 +18,7 @@ from uipath_langchain._utils._environment import get_default_timeout
 from .http_client import build_uipath_headers, resolve_gateway_url
 from .http_client.header_capture import HeaderCapture
 from .http_client.retryers.bedrock import AsyncBedrockRetryer, BedrockRetryer
+from .license_ref_id import get_license_ref_id
 from .supported_models import BedrockModels
 from .types import APIFlavor, LLMProvider
 
@@ -149,13 +150,11 @@ class AwsBedrockCompletionsPassthroughClient:
         """boto3 before-send handler that injects X-UiPath-License-RefId.
 
         Boto3 analog of UiPathURLRewriteTransport._inject_license_ref_id.
-        Reads the legacy module global populated by
+        Reads the vendor-independent module global populated by
         uipath_agents._observability.license_ref_id.apply_legacy_license_ref_id
         when a model_run span starts.
         """
-        from uipath_langchain.chat._legacy.openai import _get_license_ref_id
-
-        license_ref_id = _get_license_ref_id()
+        license_ref_id = get_license_ref_id()
         if license_ref_id:
             request.headers["X-UiPath-License-RefId"] = license_ref_id
         else:
