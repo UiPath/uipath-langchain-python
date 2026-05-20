@@ -105,6 +105,7 @@ agent = create_agent(
         *UiPathPIIDetectionMiddleware(
             name="Tool PII detector",
             scopes=[GuardrailScope.TOOL],
+            stage=GuardrailExecutionStage.PRE_AND_POST,
             action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
             entities=[
                 PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5),
@@ -113,6 +114,17 @@ agent = create_agent(
             ],
             tools=[analyze_joke_syntax],
             enabled_for_evals=False,
+        ),
+        *UiPathHarmfulContentMiddleware(
+            name="Tool Harmful Content Detection",
+            scopes=[GuardrailScope.TOOL],
+            stage=GuardrailExecutionStage.PRE_AND_POST,
+            action=BlockAction(),
+            entities=[
+                HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2),
+                HarmfulContentEntity(HarmfulContentEntityType.HATE, threshold=2),
+            ],
+            tools=[analyze_joke_syntax],
         ),
         *UiPathUserPromptAttacksMiddleware(
             name="User Prompt Attacks Detection",

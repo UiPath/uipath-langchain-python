@@ -1,9 +1,12 @@
 """Base class for built-in UiPath guardrail middlewares."""
 
+import ast
+import json
 import logging
 from typing import Any
 
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langgraph.types import Command
 from uipath.core.guardrails import (
     GuardrailValidationResult,
     GuardrailValidationResultType,
@@ -54,6 +57,39 @@ class BuiltInGuardrailMiddlewareMixin:
         if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
             return self.action.handle_validation_result(result, input_data, self._name)
         return None
+
+    def _extract_tool_output_data(
+        self, result: ToolMessage | Command[Any]
+    ) -> dict[str, Any]:
+        """Extract tool output data from handler result for POST-stage evaluation."""
+        if isinstance(result, Command):
+            update = result.update if hasattr(result, "update") else {}
+            messages = update.get("messages", []) if isinstance(update, dict) else []
+            content = (
+                messages[0].content
+                if messages and isinstance(messages[0], ToolMessage)
+                else None
+            )
+        elif isinstance(result, ToolMessage):
+            content = result.content
+        else:
+            return {}
+
+        if content is None:
+            return {}
+        if isinstance(content, dict):
+            return content
+        elif isinstance(content, str):
+            try:
+                parsed = json.loads(content)
+                return parsed if isinstance(parsed, dict) else {"output": parsed}
+            except json.JSONDecodeError:
+                try:
+                    parsed = ast.literal_eval(content)
+                    return parsed if isinstance(parsed, dict) else {"output": parsed}
+                except (ValueError, SyntaxError):
+                    return {"output": content}
+        return {"output": content}
 
     def _check_messages(self, messages: list[BaseMessage]) -> None:
         """Evaluate guardrail against message text; apply action on violation."""

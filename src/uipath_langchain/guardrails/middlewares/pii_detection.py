@@ -29,11 +29,13 @@ from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockExce
 
 from uipath_langchain.agent.exceptions import AgentRuntimeError
 
+from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction, PIIDetectionEntity
 from ._base import BuiltInGuardrailMiddlewareMixin
 from ._utils import (
     convert_block_exception,
     create_modified_tool_request,
+    create_modified_tool_result,
     sanitize_tool_name,
 )
 
@@ -109,6 +111,7 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         entities: Sequence[PIIDetectionEntity],
         *,
         tools: Sequence[str | BaseTool] | None = None,
+        stage: GuardrailExecutionStage = GuardrailExecutionStage.PRE_AND_POST,
         name: str = "PII Detection",
         description: str | None = None,
         enabled_for_evals: bool = True,
@@ -149,6 +152,7 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         self.scopes = scopes_list
         self.action = action
         self.entities = list(entities)
+        self._tool_stage = stage
         self._name = name
         self.enabled_for_evals = enabled_for_evals
         self._description = (
@@ -229,24 +233,65 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
 
                 input_data = middleware_instance._extract_tool_input_data(request)
 
-                try:
-                    result = middleware_instance._evaluate_guardrail(input_data)
-                    modified_input = middleware_instance._handle_validation_result(
-                        result, input_data
-                    )
-                    if modified_input is not None and isinstance(modified_input, dict):
-                        request = create_modified_tool_request(request, modified_input)
-                except GuardrailBlockException as exc:
-                    raise convert_block_exception(exc) from exc
-                except AgentRuntimeError:
-                    raise
-                except Exception as e:
-                    logger.error(
-                        f"Error evaluating PII guardrail for tool '{tool_name}': {e}",
-                        exc_info=True,
-                    )
+                if middleware_instance._tool_stage in (
+                    GuardrailExecutionStage.PRE,
+                    GuardrailExecutionStage.PRE_AND_POST,
+                ):
+                    try:
+                        result = middleware_instance._evaluate_guardrail(input_data)
+                        modified_input = middleware_instance._handle_validation_result(
+                            result, input_data
+                        )
+                        if modified_input is not None and isinstance(
+                            modified_input, dict
+                        ):
+                            request = create_modified_tool_request(
+                                request, modified_input
+                            )
+                    except GuardrailBlockException as exc:
+                        raise convert_block_exception(exc) from exc
+                    except AgentRuntimeError:
+                        raise
+                    except Exception as e:
+                        logger.error(
+                            f"Error evaluating PII guardrail (PRE) for tool '{tool_name}': {e}",
+                            exc_info=True,
+                        )
 
-                return await handler(request)
+                tool_result = await handler(request)
+
+                if middleware_instance._tool_stage in (
+                    GuardrailExecutionStage.POST,
+                    GuardrailExecutionStage.PRE_AND_POST,
+                ):
+                    output_data = middleware_instance._extract_tool_output_data(
+                        tool_result
+                    )
+                    if output_data:
+                        try:
+                            result = middleware_instance._evaluate_guardrail(
+                                output_data
+                            )
+                            modified_output = (
+                                middleware_instance._handle_validation_result(
+                                    result, output_data
+                                )
+                            )
+                            if modified_output is not None:
+                                tool_result = create_modified_tool_result(
+                                    tool_result, modified_output
+                                )
+                        except GuardrailBlockException as exc:
+                            raise convert_block_exception(exc) from exc
+                        except AgentRuntimeError:
+                            raise
+                        except Exception as e:
+                            logger.error(
+                                f"Error evaluating PII guardrail (POST) for tool '{tool_name}': {e}",
+                                exc_info=True,
+                            )
+
+                return tool_result
 
             _wrap_tool_call_func.__name__ = f"{guardrail_name}_wrap_tool_call"
             _wrap_tool_call = wrap_tool_call(_wrap_tool_call_func)  # type: ignore[call-overload]
