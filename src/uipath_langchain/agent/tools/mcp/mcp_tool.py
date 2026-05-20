@@ -6,7 +6,8 @@ from langchain_core.tools import BaseTool
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
-    DynamicToolsMode,
+    CachedToolsConfig,
+    DynamicToolsConfig,
 )
 from uipath.eval.mocks import mockable
 
@@ -56,26 +57,34 @@ async def create_mcp_tools(
         List of BaseTool instances, one for each tool in the config.
         Returns empty list if config.is_enabled is False.
 
-    Behavior depends on config.dynamic_tools:
-        - none: Uses tool schemas from config.available_tools (default).
-        - schema: Lists tools from the MCP server via mcpClient, but only
-          includes tools whose names appear in config.available_tools.
-        - all: Lists all tools from the MCP server via mcpClient, ignoring
-          config.available_tools entirely.
+    Behavior depends on config.tools_configuration.discovery_mode:
+        - Cached (default when unset): Uses the tools and schemas saved in
+          config.available_tools.
+        - Dynamic with allow_all=True: Lists all tools from the MCP
+          server via mcpClient, ignoring config.available_tools as a source
+          of truth.
+        - Dynamic with allow_all=False: Lists tools from the MCP server,
+          then filters by names present in config.available_tools (live
+          schemas, curated tool set).
+        Argument properties from the snapshot are carried over by matching tool name.
     """
 
     if config.is_enabled is False:
         return []
 
-    dynamic_tools = config.dynamic_tools
+    discovery_mode = (
+        config.tools_configuration.discovery_mode
+        if config.tools_configuration is not None
+        else CachedToolsConfig()
+    )
     logger.info(
         f"Loading MCP tools for server '{config.slug}' "
-        f"(dynamic_tools={dynamic_tools.value})"
+        f"(discovery_mode={discovery_mode.type})"
     )
 
     config_tools_by_name = {t.name: t for t in config.available_tools}
 
-    if dynamic_tools in (DynamicToolsMode.SCHEMA, DynamicToolsMode.ALL):
+    if isinstance(discovery_mode, DynamicToolsConfig):
         logger.info(f"Fetching tools from MCP server '{config.slug}' via list_tools")
         result = await mcpClient.list_tools()
         server_tools = result.tools
@@ -84,7 +93,7 @@ async def create_mcp_tools(
             f"{[t.name for t in server_tools]}"
         )
 
-        if dynamic_tools == DynamicToolsMode.SCHEMA:
+        if not discovery_mode.allow_all:
             allowed_names = {t.name for t in config.available_tools}
             server_tool_names = {t.name for t in server_tools}
             missing = allowed_names - server_tool_names
