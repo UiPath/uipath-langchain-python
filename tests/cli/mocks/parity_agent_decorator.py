@@ -150,6 +150,22 @@ class Output(BaseModel):
     name="Tool PII Block Detection",
     stage=GuardrailExecutionStage.PRE,
 )
+@guardrail(
+    validator=PIIValidator(
+        entities=[PIIDetectionEntity(PIIDetectionEntityType.PERSON, 0.5)]
+    ),
+    action=BlockAction(),
+    name="Tool PII POST Block",
+    stage=GuardrailExecutionStage.POST,
+)
+@guardrail(
+    validator=HarmfulContentValidator(
+        entities=[HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2)]
+    ),
+    action=BlockAction(),
+    name="Tool Harmful Content POST Block",
+    stage=GuardrailExecutionStage.POST,
+)
 @tool
 def analyze_joke_syntax(joke: str) -> str:
     """Analyze the syntax of a joke by counting words and letters.

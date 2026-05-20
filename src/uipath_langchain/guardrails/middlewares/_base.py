@@ -112,77 +112,74 @@ class BuiltInGuardrailMiddlewareMixin:
             return args
         return str(args)
 
-    def _create_tool_wrap_hook(self, guardrail_name: str) -> AgentMiddleware:
-        """Create a wrap_tool_call hook that evaluates the guardrail at PRE and/or POST stage."""
-        middleware_instance = self
+    async def _run_tool_guardrail(
+        self, request: ToolCallRequest, handler: Any
+    ) -> ToolMessage | Command[Any]:
+        """Execute PRE guardrail check, run tool handler, then POST guardrail check."""
+        tool_call = request.tool_call
+        tool_name = tool_call.get("name", "")
+        sanitized_tool_name = sanitize_tool_name(tool_name)
 
-        async def _wrap_tool_call_func(
-            request: ToolCallRequest,
-            handler: Any,
-        ) -> ToolMessage | Command[Any]:
-            tool_call = request.tool_call
-            tool_name = tool_call.get("name", "")
-            sanitized_tool_name = sanitize_tool_name(tool_name)
+        if self._tool_names is None or sanitized_tool_name not in self._tool_names:
+            return await handler(request)
 
-            if (
-                middleware_instance._tool_names is None
-                or sanitized_tool_name not in middleware_instance._tool_names
-            ):
-                return await handler(request)
+        input_data = self._extract_tool_input_data(request)
 
-            input_data = middleware_instance._extract_tool_input_data(request)
+        if self._tool_stage in (
+            GuardrailExecutionStage.PRE,
+            GuardrailExecutionStage.PRE_AND_POST,
+        ):
+            try:
+                result = self._evaluate_guardrail(input_data)
+                modified_input = self._handle_validation_result(result, input_data)
+                if modified_input is not None and isinstance(modified_input, dict):
+                    request = create_modified_tool_request(request, modified_input)
+            except GuardrailBlockException as exc:
+                raise convert_block_exception(exc) from exc
+            except AgentRuntimeError:
+                raise
+            except Exception as e:
+                logger.error(
+                    f"Error evaluating '{self._name}' guardrail (PRE)"
+                    f" for tool '{tool_name}': {e}",
+                    exc_info=True,
+                )
 
-            if middleware_instance._tool_stage in (
-                GuardrailExecutionStage.PRE,
-                GuardrailExecutionStage.PRE_AND_POST,
-            ):
+        tool_result = await handler(request)
+
+        if self._tool_stage in (
+            GuardrailExecutionStage.POST,
+            GuardrailExecutionStage.PRE_AND_POST,
+        ):
+            output_data = self._extract_tool_output_data(tool_result)
+            if output_data:
                 try:
-                    result = middleware_instance._evaluate_guardrail(input_data)
-                    modified_input = middleware_instance._handle_validation_result(
-                        result, input_data
-                    )
-                    if modified_input is not None and isinstance(modified_input, dict):
-                        request = create_modified_tool_request(request, modified_input)
+                    result = self._evaluate_guardrail(output_data)
+                    modified_output = self._handle_validation_result(result, output_data)
+                    if modified_output is not None:
+                        tool_result = create_modified_tool_result(tool_result, modified_output)
                 except GuardrailBlockException as exc:
                     raise convert_block_exception(exc) from exc
                 except AgentRuntimeError:
                     raise
                 except Exception as e:
                     logger.error(
-                        f"Error evaluating '{middleware_instance._name}' guardrail (PRE)"
+                        f"Error evaluating '{self._name}' guardrail (POST)"
                         f" for tool '{tool_name}': {e}",
                         exc_info=True,
                     )
 
-            tool_result = await handler(request)
+        return tool_result
 
-            if middleware_instance._tool_stage in (
-                GuardrailExecutionStage.POST,
-                GuardrailExecutionStage.PRE_AND_POST,
-            ):
-                output_data = middleware_instance._extract_tool_output_data(tool_result)
-                if output_data:
-                    try:
-                        result = middleware_instance._evaluate_guardrail(output_data)
-                        modified_output = middleware_instance._handle_validation_result(
-                            result, output_data
-                        )
-                        if modified_output is not None:
-                            tool_result = create_modified_tool_result(
-                                tool_result, modified_output
-                            )
-                    except GuardrailBlockException as exc:
-                        raise convert_block_exception(exc) from exc
-                    except AgentRuntimeError:
-                        raise
-                    except Exception as e:
-                        logger.error(
-                            f"Error evaluating '{middleware_instance._name}' guardrail (POST)"
-                            f" for tool '{tool_name}': {e}",
-                            exc_info=True,
-                        )
+    def _create_tool_wrap_hook(self, guardrail_name: str) -> AgentMiddleware:
+        """Create a wrap_tool_call hook that delegates to _run_tool_guardrail."""
+        middleware_instance = self
 
-            return tool_result
+        async def _wrap_tool_call_func(
+            request: ToolCallRequest,
+            handler: Any,
+        ) -> ToolMessage | Command[Any]:
+            return await middleware_instance._run_tool_guardrail(request, handler)
 
         _wrap_tool_call_func.__name__ = f"{guardrail_name}_wrap_tool_call"
         return wrap_tool_call(_wrap_tool_call_func)  # type: ignore[call-overload]

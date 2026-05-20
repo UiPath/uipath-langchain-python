@@ -440,6 +440,77 @@ class TestGuardrailsParity:
             assert cause.error_info.category == UiPathErrorCategory.USER
 
     @pytest.mark.asyncio
+    async def test_tool_pii_post_block(self, agent_setup):
+        """TOOL-scope PII on tool OUTPUT (POST) → BlockAction raised after tool runs.
+
+        The mock distinguishes PRE from POST by checking the data shape:
+        - PRE receives the tool args dict {"joke": "..."} (no "output" key)
+        - POST receives the parsed ToolMessage dict {"output": "Input: ...\nWords..."} ("output" key present)
+        The joke has no person-name PII so the PRE check passes; POST mock always fails.
+        """
+        flavor, script, langgraph_json = agent_setup
+
+        mock_llm = _make_tool_calling_llm(
+            joke="Why did the chicken cross the road?",
+            final_content="Joke delivered.",
+            call_id="call_tool_pii_post_1",
+        )
+
+        def mock_evaluate(text, guardrail):
+            if guardrail.name == "Tool PII POST Block":
+                if isinstance(text, dict) and "output" in text:
+                    return _GUARDRAIL_FAILED
+            return _GUARDRAIL_PASSED
+
+        async with _patched_run(mock_llm, mock_evaluate) as temp_dir:
+            with pytest.raises(Exception) as exc_info:
+                await _run_agent(
+                    temp_dir, script, langgraph_json, flavor, {"topic": "chicken"}
+                )
+            cause = exc_info.value.__cause__
+            assert isinstance(cause, AgentRuntimeError)
+            assert cause.error_info.code == "AGENT_RUNTIME.TERMINATION_GUARDRAIL_VIOLATION"
+            assert cause.error_info.title == "Guardrail [Tool PII POST Block] blocked execution"
+            assert cause.error_info.detail == "Guardrail triggered"
+            assert cause.error_info.category == UiPathErrorCategory.USER
+
+    @pytest.mark.asyncio
+    async def test_tool_harmful_content_post_block(self, agent_setup):
+        """TOOL-scope HarmfulContent on tool OUTPUT (POST) → BlockAction raised after tool runs.
+
+        Same PRE/POST distinction: PRE data has no "output" key (args dict), POST does.
+        The joke itself is benign so PRE passes; POST mock always fails.
+        """
+        flavor, script, langgraph_json = agent_setup
+
+        mock_llm = _make_tool_calling_llm(
+            joke="Why did the banana go to the doctor?",
+            final_content="Joke delivered.",
+            call_id="call_tool_hc_post_1",
+        )
+
+        def mock_evaluate(text, guardrail):
+            if guardrail.name == "Tool Harmful Content POST Block":
+                if isinstance(text, dict) and "output" in text:
+                    return _GUARDRAIL_FAILED
+            return _GUARDRAIL_PASSED
+
+        async with _patched_run(mock_llm, mock_evaluate) as temp_dir:
+            with pytest.raises(Exception) as exc_info:
+                await _run_agent(
+                    temp_dir, script, langgraph_json, flavor, {"topic": "banana"}
+                )
+            cause = exc_info.value.__cause__
+            assert isinstance(cause, AgentRuntimeError)
+            assert cause.error_info.code == "AGENT_RUNTIME.TERMINATION_GUARDRAIL_VIOLATION"
+            assert (
+                cause.error_info.title
+                == "Guardrail [Tool Harmful Content POST Block] blocked execution"
+            )
+            assert cause.error_info.detail == "Guardrail triggered"
+            assert cause.error_info.category == UiPathErrorCategory.USER
+
+    @pytest.mark.asyncio
     async def test_intellectual_property_log(self, agent_setup):
         """LLM-scope IP detected (POST) → LogAction, agent completes normally."""
         flavor, script, langgraph_json = agent_setup
