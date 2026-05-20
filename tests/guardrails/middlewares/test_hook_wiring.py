@@ -23,6 +23,7 @@ from uipath.platform.guardrails.decorators import (
     LogAction,
 )
 
+from uipath_langchain.guardrails.enums import PIIDetectionEntityType
 from uipath_langchain.guardrails.middlewares import (
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
@@ -30,7 +31,6 @@ from uipath_langchain.guardrails.middlewares import (
     UiPathUserPromptAttacksMiddleware,
 )
 from uipath_langchain.guardrails.models import PIIDetectionEntity
-from uipath_langchain.guardrails.enums import PIIDetectionEntityType
 
 
 def _hook_names(middleware: Iterable[Any]) -> list[str]:
