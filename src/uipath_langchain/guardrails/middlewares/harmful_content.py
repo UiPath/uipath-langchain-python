@@ -11,13 +11,10 @@ from langchain.agents.middleware import (
     after_model,
     before_agent,
     before_model,
-    wrap_tool_call,
 )
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
-from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
-from langgraph.types import Command
 from uipath.core.guardrails import GuardrailSelector
 from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
@@ -25,19 +22,11 @@ from uipath.platform.guardrails import (
     GuardrailScope,
     MapEnumParameterValue,
 )
-from uipath.platform.guardrails.decorators._exceptions import GuardrailBlockException
-
-from uipath_langchain.agent.exceptions import AgentRuntimeError
 
 from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction, HarmfulContentEntity
 from ._base import BuiltInGuardrailMiddlewareMixin
-from ._utils import (
-    convert_block_exception,
-    create_modified_tool_request,
-    create_modified_tool_result,
-    sanitize_tool_name,
-)
+from ._utils import sanitize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -168,86 +157,7 @@ class UiPathHarmfulContentMiddleware(BuiltInGuardrailMiddlewareMixin):
             instances.append(_after_model)
 
         if GuardrailScope.TOOL in self.scopes:
-
-            async def _wrap_tool_call_func(
-                request: ToolCallRequest,
-                handler: Any,
-            ) -> ToolMessage | Command[Any]:
-                tool_call = request.tool_call
-                tool_name = tool_call.get("name", "")
-                sanitized_tool_name = sanitize_tool_name(tool_name)
-
-                if (
-                    middleware_instance._tool_names is None
-                    or sanitized_tool_name not in middleware_instance._tool_names
-                ):
-                    return await handler(request)
-
-                input_data = middleware_instance._extract_tool_input_data(request)
-
-                if middleware_instance._tool_stage in (
-                    GuardrailExecutionStage.PRE,
-                    GuardrailExecutionStage.PRE_AND_POST,
-                ):
-                    try:
-                        result = middleware_instance._evaluate_guardrail(input_data)
-                        modified_input = middleware_instance._handle_validation_result(
-                            result, input_data
-                        )
-                        if modified_input is not None and isinstance(
-                            modified_input, dict
-                        ):
-                            request = create_modified_tool_request(
-                                request, modified_input
-                            )
-                    except GuardrailBlockException as exc:
-                        raise convert_block_exception(exc) from exc
-                    except AgentRuntimeError:
-                        raise
-                    except Exception as e:
-                        logger.error(
-                            f"Error evaluating harmful content guardrail (PRE) for tool '{tool_name}': {e}",
-                            exc_info=True,
-                        )
-
-                tool_result = await handler(request)
-
-                if middleware_instance._tool_stage in (
-                    GuardrailExecutionStage.POST,
-                    GuardrailExecutionStage.PRE_AND_POST,
-                ):
-                    output_data = middleware_instance._extract_tool_output_data(
-                        tool_result
-                    )
-                    if output_data:
-                        try:
-                            result = middleware_instance._evaluate_guardrail(
-                                output_data
-                            )
-                            modified_output = (
-                                middleware_instance._handle_validation_result(
-                                    result, output_data
-                                )
-                            )
-                            if modified_output is not None:
-                                tool_result = create_modified_tool_result(
-                                    tool_result, modified_output
-                                )
-                        except GuardrailBlockException as exc:
-                            raise convert_block_exception(exc) from exc
-                        except AgentRuntimeError:
-                            raise
-                        except Exception as e:
-                            logger.error(
-                                f"Error evaluating harmful content guardrail (POST) for tool '{tool_name}': {e}",
-                                exc_info=True,
-                            )
-
-                return tool_result
-
-            _wrap_tool_call_func.__name__ = f"{guardrail_name}_wrap_tool_call"
-            _wrap_tool_call = wrap_tool_call(_wrap_tool_call_func)  # type: ignore[call-overload]
-            instances.append(_wrap_tool_call)
+            instances.append(self._create_tool_wrap_hook(guardrail_name))
 
         return instances
 
@@ -290,12 +200,3 @@ class UiPathHarmfulContentMiddleware(BuiltInGuardrailMiddlewareMixin):
             validator_parameters=validator_parameters,
         )
 
-    def _extract_tool_input_data(
-        self, request: ToolCallRequest
-    ) -> str | dict[str, Any]:
-        """Extract tool input data from ToolCallRequest."""
-        tool_call = request.tool_call
-        args = tool_call.get("args", {})
-        if isinstance(args, dict):
-            return args
-        return str(args)
