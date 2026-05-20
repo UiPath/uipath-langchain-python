@@ -1,6 +1,9 @@
 """Tests for escalation memory cache check and ingest."""
 
+import builtins
+import json
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -10,9 +13,10 @@ from uipath.platform.common._bindings import (
     GenericResourceOverwrite,
     _resource_overwrites,
 )
-from uipath.platform.memory import EscalationMemorySearchResponse
+from uipath.platform.memory import EscalationMemorySearchResponse, SearchMode
 
 from uipath_langchain.agent.tools.escalation_memory import (
+    ESCALATION_MEMORY_STRATEGY,
     MEMORY_CACHE_HIT_METRIC,
     MEMORY_CACHE_MISS_METRIC,
     EscalationMemoryFieldSetting,
@@ -26,6 +30,7 @@ from uipath_langchain.agent.tools.escalation_memory import (
     _get_escalation_memory_folder_path,
     _get_escalation_memory_settings,
     _get_escalation_memory_space_id,
+    _get_escalation_memory_space_name,
     _get_memory_space_folder_override,
     _get_user_email,
     _get_user_id,
@@ -34,10 +39,52 @@ from uipath_langchain.agent.tools.escalation_memory import (
     _record_custom_metric,
     _resolve_memory_space_id_by_name,
     _resolve_user_id,
+    _safe_len,
+    _serialize_search_response_for_trace,
     _stringify_search_value,
 )
 
 USER_GUID = "a543cbbd-f3f3-4868-bccf-f5142d2d3d7e"
+
+
+class _FakeSpan:
+    def __init__(self, name: str, attributes: dict[str, object]) -> None:
+        self.name = name
+        self.attributes = dict(attributes)
+        self.recorded_errors: list[BaseException] = []
+        self.statuses: list[tuple[object, ...]] = []
+
+    def set_attribute(self, name: str, value: object) -> None:
+        self.attributes[name] = value
+
+    def record_exception(self, error: BaseException) -> None:
+        self.recorded_errors.append(error)
+
+    def set_status(self, *status: object) -> None:
+        self.statuses.append(status)
+
+
+class _FakeSpanContext:
+    def __init__(self, span: _FakeSpan) -> None:
+        self.span = span
+
+    def __enter__(self) -> _FakeSpan:
+        return self.span
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+class _FakeTracer:
+    def __init__(self) -> None:
+        self.spans: list[_FakeSpan] = []
+
+    def start_as_current_span(
+        self, name: str, attributes: dict[str, object] | None = None
+    ) -> _FakeSpanContext:
+        span = _FakeSpan(name, attributes or {})
+        self.spans.append(span)
+        return _FakeSpanContext(span)
 
 
 def _memory_resource(**overrides: object) -> AgentEscalationResourceConfig:
@@ -189,6 +236,54 @@ class TestGetEscalationMemorySpaceId:
 
         assert feature is not None
         assert _read_value(feature, "memorySpaceId") == "selected-space"
+
+    def test_returns_space_id_from_agent_memory_feature(self) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=False,
+            properties={"memory": {"isEnabled": True}},
+        )
+        agent = SimpleNamespace(
+            features=[
+                {
+                    "$featureType": "memorySpace",
+                    "isEnabled": True,
+                    "memorySpaceId": "feature-space-id",
+                }
+            ]
+        )
+
+        assert _get_escalation_memory_space_id(resource, agent) == "feature-space-id"
+
+    def test_returns_memory_space_name_from_properties(self) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=False,
+            properties={
+                "memory": {
+                    "isEnabled": True,
+                    "memorySpaceName": "MemorySpace",
+                }
+            },
+        )
+
+        assert _get_escalation_memory_space_name(resource) == "MemorySpace"
+
+    def test_returns_memory_space_name_from_agent_memory_feature(self) -> None:
+        resource = _memory_resource(
+            is_agent_memory_enabled=False,
+            properties={"memory": {"isEnabled": True}},
+        )
+        agent = SimpleNamespace(
+            features=[
+                {
+                    "$featureType": "memorySpace",
+                    "isEnabled": True,
+                    "memorySpaceName": "MemorySpace",
+                    "dynamicFewShotSettings": {"isEnabled": False},
+                }
+            ]
+        )
+
+        assert _get_escalation_memory_space_name(resource, agent) == "MemorySpace"
 
     @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
     def test_space_name_resolution_returns_none_when_lookup_fails(
@@ -409,6 +504,27 @@ class TestResolveUserId:
         assert result is None
 
     @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_memory.UiPathConfig")
+    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    async def test_skips_directory_entries_for_different_email(
+        self,
+        mock_uipath_cls: MagicMock,
+        mock_config: MagicMock,
+    ) -> None:
+        mock_config.organization_id = "org-123"
+        mock_response = MagicMock()
+        mock_response.json.return_value = [
+            {"email": "other@example.com", "identifier": USER_GUID}
+        ]
+        mock_sdk = MagicMock()
+        mock_sdk.api_client.request_async = AsyncMock(return_value=mock_response)
+        mock_uipath_cls.return_value = mock_sdk
+
+        result = await _resolve_user_id({"emailAddress": "reviewer@example.com"})
+
+        assert result is None
+
+    @pytest.mark.asyncio
     async def test_returns_none_when_user_has_no_email(self) -> None:
         assert await _resolve_user_id({"displayName": "Reviewer"}) is None
 
@@ -473,6 +589,223 @@ class TestCheckEscalationMemoryCache:
         assert result.output == {"action": "approve", "reason": "meets criteria"}
         assert result.outcome == "approved"
         mock_record_metric.assert_called_once_with(MEMORY_CACHE_HIT_METRIC, "space-123")
+
+    @pytest.mark.asyncio
+    async def test_retriever_search_succeeds_without_opentelemetry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original_import = builtins.__import__
+
+        def import_without_otel(
+            name: str,
+            globals: dict[str, Any] | None = None,
+            locals: dict[str, Any] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> Any:
+            if name == "opentelemetry":
+                raise ImportError("opentelemetry unavailable")
+            return original_import(name, globals, locals, fromlist, level)
+
+        mock_sdk = MagicMock()
+        mock_sdk.memory.escalation_search_async = AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "answer": {
+                            "output": {"approved": True},
+                            "outcome": "approved",
+                        }
+                    }
+                ]
+            }
+        )
+        monkeypatch.setattr(builtins, "__import__", import_without_otel)
+
+        result = await EscalationMemoryRetriever(
+            "space-123",
+            uipath_sdk=mock_sdk,
+        ).aretrieve({"Content": "Is the sky blue?"})
+
+        assert result is not None
+        assert result.output == {"approved": True}
+        assert result.outcome == "approved"
+
+    @pytest.mark.asyncio
+    async def test_adds_memory_lookup_spans(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from opentelemetry import trace
+
+        from uipath_langchain.agent.tools import escalation_memory
+
+        fake_tracer = _FakeTracer()
+        tracer_names: list[str] = []
+
+        def get_tracer(name: str) -> _FakeTracer:
+            tracer_names.append(name)
+            return fake_tracer
+
+        mock_sdk = MagicMock()
+        mock_sdk.memory.escalation_search_async = AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "answer": {
+                            "output": {
+                                "action": "approve",
+                                "reason": "meets criteria",
+                            },
+                            "outcome": "approved",
+                        }
+                    }
+                ]
+            }
+        )
+        mock_record_metric = MagicMock()
+        monkeypatch.setattr(trace, "get_tracer", get_tracer)
+        monkeypatch.setattr(
+            escalation_memory, "UiPath", MagicMock(return_value=mock_sdk)
+        )
+        monkeypatch.setattr(
+            escalation_memory,
+            "_record_custom_metric",
+            mock_record_metric,
+        )
+
+        result = await _check_escalation_memory_cache(
+            "space-123",
+            {"Content": "Is the sky blue?"},
+            folder_path="/Memory/Folder",
+            memory_space_name="MemorySpace",
+        )
+
+        assert result is not None
+        assert [span.name for span in fake_tracer.spans] == [
+            "Find previous memories",
+            "Apply escalation memory",
+        ]
+        assert tracer_names == ["uipath_langchain.memory"]
+        lookup_span, apply_memory_span = fake_tracer.spans
+        assert lookup_span.attributes == {
+            "openinference.span.kind": "agentMemoryLookup",
+            "type": "agentMemoryLookup",
+            "span_type": "agentMemoryLookup",
+            "uipath.custom_instrumentation": True,
+            "memorySpaceName": "MemorySpace",
+            "memorySpaceId": "space-123",
+            "strategy": ESCALATION_MEMORY_STRATEGY,
+            "memoryItemsMatched": 1,
+            "result": json.dumps(
+                {
+                    "output": {
+                        "action": "approve",
+                        "reason": "meets criteria",
+                    },
+                    "outcome": "approved",
+                }
+            ),
+        }
+        assert (
+            apply_memory_span.attributes["openinference.span.kind"]
+            == "applyDynamicFewShot"
+        )
+        assert apply_memory_span.attributes["type"] == "applyDynamicFewShot"
+        assert apply_memory_span.attributes["span_type"] == "applyDynamicFewShot"
+        assert apply_memory_span.attributes["uipath.custom_instrumentation"] is True
+        assert apply_memory_span.attributes["memorySpaceName"] == "MemorySpace"
+        assert apply_memory_span.attributes["memorySpaceId"] == "space-123"
+        assert apply_memory_span.attributes["strategy"] == ESCALATION_MEMORY_STRATEGY
+        assert apply_memory_span.attributes["fromMemory"] is True
+        request_payload = json.loads(str(apply_memory_span.attributes["request"]))
+        assert request_payload["fields"][0]["keyPath"] == [
+            "escalation-input",
+            "Content",
+        ]
+        assert request_payload["fields"][0]["value"] == "Is the sky blue?"
+        assert request_payload["definitionSystemPrompt"] == ""
+        response_payload = json.loads(str(apply_memory_span.attributes["response"]))
+        assert response_payload["results"][0]["answer"]["outcome"] == "approved"
+        mock_record_metric.assert_called_once_with(MEMORY_CACHE_HIT_METRIC, "space-123")
+
+    @pytest.mark.asyncio
+    async def test_adds_memory_lookup_spans_on_cache_miss(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from opentelemetry import trace
+
+        from uipath_langchain.agent.tools import escalation_memory
+
+        fake_tracer = _FakeTracer()
+        tracer_names: list[str] = []
+
+        def get_tracer(name: str) -> _FakeTracer:
+            tracer_names.append(name)
+            return fake_tracer
+
+        mock_sdk = MagicMock()
+        mock_sdk.memory.escalation_search_async = AsyncMock(
+            return_value={"results": []}
+        )
+        mock_record_metric = MagicMock()
+        monkeypatch.setattr(trace, "get_tracer", get_tracer)
+        monkeypatch.setattr(
+            escalation_memory, "UiPath", MagicMock(return_value=mock_sdk)
+        )
+        monkeypatch.setattr(
+            escalation_memory,
+            "_record_custom_metric",
+            mock_record_metric,
+        )
+
+        result = await _check_escalation_memory_cache(
+            "space-123",
+            {"Content": "Is the sky blue?"},
+            folder_path="/Memory/Folder",
+            memory_space_name="MemorySpace",
+        )
+
+        assert result is None
+        assert tracer_names == ["uipath_langchain.memory"]
+        lookup_span, apply_memory_span = fake_tracer.spans
+        assert lookup_span.attributes["memoryItemsMatched"] == 0
+        assert lookup_span.attributes["memorySpaceName"] == "MemorySpace"
+        assert "result" not in lookup_span.attributes
+        assert apply_memory_span.attributes["memorySpaceName"] == "MemorySpace"
+        assert apply_memory_span.attributes["strategy"] == ESCALATION_MEMORY_STRATEGY
+        assert apply_memory_span.attributes["fromMemory"] is False
+        request_payload = json.loads(str(apply_memory_span.attributes["request"]))
+        assert request_payload["fields"][0]["value"] == "Is the sky blue?"
+        response_payload = json.loads(str(apply_memory_span.attributes["response"]))
+        assert response_payload == {"results": []}
+        mock_record_metric.assert_called_once_with(
+            MEMORY_CACHE_MISS_METRIC, "space-123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_sets_memory_lookup_spans_to_error_on_search_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from opentelemetry import trace
+
+        fake_tracer = _FakeTracer()
+        mock_sdk = MagicMock()
+        mock_sdk.memory.escalation_search_async = AsyncMock(
+            side_effect=RuntimeError("search down")
+        )
+        monkeypatch.setattr(trace, "get_tracer", lambda _name: fake_tracer)
+
+        with pytest.raises(RuntimeError, match="search down"):
+            await EscalationMemoryRetriever(
+                "space-123",
+                memory_space_name="MemorySpace",
+                uipath_sdk=mock_sdk,
+            ).aretrieve({"Content": "Is the sky blue?"})
+
+        lookup_span, apply_memory_span = fake_tracer.spans
+        expected_status = (trace.StatusCode.ERROR, "RuntimeError('search down')")
+        assert lookup_span.statuses == [expected_status]
+        assert apply_memory_span.statuses == [expected_status]
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_memory._record_custom_metric")
@@ -607,6 +940,14 @@ class TestCheckEscalationMemoryCache:
 
 
 class TestBuildSearchFields:
+    def test_search_settings_preserve_enum_search_mode(self) -> None:
+        settings = EscalationMemorySettings(searchMode=SearchMode.Semantic)
+
+        assert settings.search_mode is SearchMode.Semantic
+
+    def test_search_mode_validator_returns_unknown_values(self) -> None:
+        assert EscalationMemorySettings._normalize_search_mode("keyword") == "keyword"
+
     def test_search_request_includes_required_definition_prompt(self) -> None:
         request = EscalationMemoryRetriever("space-123")._build_search_request(
             {"keep": "value"}
@@ -728,6 +1069,25 @@ class TestIngestEscalationMemory:
 
 
 class TestEscalationMemoryUtilities:
+    def test_serialize_search_response_for_trace_uses_model_dump(self) -> None:
+        class SearchResponse(BaseModel):
+            model_config = ConfigDict(populate_by_name=True)
+
+            system_prompt_injection: str = ""
+
+        payload = _serialize_search_response_for_trace(
+            SearchResponse(system_prompt_injection="cached")
+        )
+
+        assert json.loads(payload) == {"system_prompt_injection": "cached"}
+
+    def test_safe_len_returns_zero_when_len_fails(self) -> None:
+        class BadLen:
+            def __len__(self) -> int:
+                raise RuntimeError("len unavailable")
+
+        assert _safe_len(BadLen()) == 0
+
     def test_record_custom_metric_creates_and_reuses_counter(self, monkeypatch) -> None:
         from opentelemetry import metrics, trace
 

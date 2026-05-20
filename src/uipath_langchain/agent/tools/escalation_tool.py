@@ -45,6 +45,7 @@ from .escalation_memory import (
     _get_escalation_memory_folder_path,
     _get_escalation_memory_settings,
     _get_escalation_memory_space_id,
+    _get_escalation_memory_space_name,
     _ingest_escalation_memory,
     _resolve_user_id,
 )
@@ -272,6 +273,7 @@ def create_escalation_tool(
     _memory_folder_path: str | None = _get_escalation_memory_folder_path(
         resource, agent
     )
+    _memory_space_name: str | None = _get_escalation_memory_space_name(resource, agent)
     _memory_settings: EscalationMemorySettings | None = _get_escalation_memory_settings(
         resource
     )
@@ -302,6 +304,7 @@ def create_escalation_tool(
                 serialized_data,
                 folder_path=_memory_folder_path or folder_path,
                 memory_settings=_memory_settings,
+                memory_space_name=_memory_space_name,
             )
             if cached_result is not None:
                 return {

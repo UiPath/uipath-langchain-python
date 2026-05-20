@@ -2,6 +2,7 @@
 
 import json
 import logging
+from contextlib import contextmanager
 from typing import Any
 from uuid import UUID
 
@@ -29,9 +30,16 @@ logger = logging.getLogger(__name__)
 
 MEMORY_CACHE_HIT_METRIC = "MemoryCacheHit"
 MEMORY_CACHE_MISS_METRIC = "MemoryCacheMiss"
+ESCALATION_MEMORY_STRATEGY = "EscalationMemoryCache"
 
 _metric_counters: dict[str, Any] = {}
 _MISSING_VALUE = object()
+
+
+@contextmanager
+def _noop_context():
+    """No-op context manager when OTel is unavailable."""
+    yield None
 
 
 class EscalationMemoryFieldSetting(BaseModel):
@@ -81,11 +89,13 @@ class EscalationMemoryRetriever:
         self,
         memory_space_id: str,
         *,
+        memory_space_name: str | None = None,
         folder_path: str | None = None,
         memory_settings: EscalationMemorySettings | None = None,
         uipath_sdk: UiPath | None = None,
     ) -> None:
         self.memory_space_id = memory_space_id
+        self.memory_space_name = memory_space_name or ""
         self.folder_path = folder_path
         self.memory_settings = memory_settings or EscalationMemorySettings()
         self._uipath_sdk = uipath_sdk
@@ -97,16 +107,116 @@ class EscalationMemoryRetriever:
         """Search escalation memory and return the first cached answer."""
         request = self._build_search_request(serialized_input)
         sdk = self._uipath_sdk if self._uipath_sdk is not None else UiPath()
-        try:
-            response = await sdk.memory.escalation_search_async(
-                memory_space_id=self.memory_space_id,
-                request=request,
-                folder_path=self.folder_path,
-            )
-        except ValidationError:
-            response = await self._raw_escalation_search(sdk, request)
 
-        return _cached_result_from_search_response(response)
+        results_count = 0
+        cached_result: EscalationMemoryCachedResult | None = None
+        try:
+            # Keep the OTel import local to match episodic memory and keep this
+            # module importable in runtimes where tracing is not installed.
+            from opentelemetry import trace as otel_trace
+
+            tracer = otel_trace.get_tracer("uipath_langchain.memory")
+        except ImportError:
+            tracer = None
+            otel_trace = None  # type: ignore[assignment]
+
+        # Span attribute keys matching what the LlmOpsHttpExporter and
+        # Studio UI expect. "openinference.span.kind" sets SpanType.
+        lookup_span_ctx = (
+            tracer.start_as_current_span(
+                "Find previous memories",
+                attributes={
+                    "openinference.span.kind": "agentMemoryLookup",
+                    "type": "agentMemoryLookup",
+                    "span_type": "agentMemoryLookup",
+                    "uipath.custom_instrumentation": True,
+                    "memorySpaceName": self.memory_space_name,
+                    "memorySpaceId": self.memory_space_id,
+                    "strategy": ESCALATION_MEMORY_STRATEGY,
+                },
+            )
+            if tracer
+            else _noop_context()
+        )
+
+        with lookup_span_ctx as lookup_span:
+            fewshot_span_ctx = (
+                tracer.start_as_current_span(
+                    "Apply escalation memory",
+                    attributes={
+                        # LlmOps/Studio still key memory rendering off this
+                        # exported span type; rename it when that contract changes.
+                        "openinference.span.kind": "applyDynamicFewShot",
+                        "type": "applyDynamicFewShot",
+                        "span_type": "applyDynamicFewShot",
+                        "uipath.custom_instrumentation": True,
+                        "memorySpaceName": self.memory_space_name,
+                        "memorySpaceId": self.memory_space_id,
+                        "strategy": ESCALATION_MEMORY_STRATEGY,
+                    },
+                )
+                if tracer
+                else _noop_context()
+            )
+
+            with fewshot_span_ctx as fewshot_span:
+                try:
+                    try:
+                        response = await sdk.memory.escalation_search_async(
+                            memory_space_id=self.memory_space_id,
+                            request=request,
+                            folder_path=self.folder_path,
+                        )
+                    except ValidationError:
+                        # Some existing escalation memories store `answer` as a
+                        # JSON string that the SDK response model rejects. The
+                        # raw API payload is still usable and parsed below.
+                        response = await self._raw_escalation_search(sdk, request)
+
+                    results = _read_value(response, "results") or []
+                    results_count = _safe_len(results)
+                    cached_result = _cached_result_from_search_response(response)
+                    # Set request/response on fewshot span as JSON strings.
+                    # The exporter parses JSON strings back to objects.
+                    # The UI reads "response" to display matched memory items.
+                    if fewshot_span and hasattr(fewshot_span, "set_attribute"):
+                        fewshot_span.set_attribute(
+                            "request",
+                            _json_dumps(
+                                request.model_dump(by_alias=True, exclude_none=True)
+                            ),
+                        )
+                        fewshot_span.set_attribute(
+                            "response",
+                            _serialize_search_response_for_trace(response),
+                        )
+                        fewshot_span.set_attribute(
+                            "fromMemory", cached_result is not None
+                        )
+                except Exception as error:
+                    error_detail = repr(error)
+                    if otel_trace:
+                        if fewshot_span and hasattr(fewshot_span, "set_status"):
+                            fewshot_span.set_status(
+                                otel_trace.StatusCode.ERROR, error_detail
+                            )
+                        if lookup_span and hasattr(lookup_span, "set_status"):
+                            lookup_span.set_status(
+                                otel_trace.StatusCode.ERROR, error_detail
+                            )
+                    raise
+
+            if lookup_span and hasattr(lookup_span, "set_attribute"):
+                lookup_span.set_attribute("memoryItemsMatched", results_count)
+                if cached_result is not None:
+                    lookup_span.set_attribute(
+                        "result",
+                        _json_dumps(
+                            cached_result.model_dump(by_alias=True, exclude_none=True)
+                        ),
+                    )
+
+        return cached_result
 
     def _build_search_request(
         self,
@@ -209,6 +319,32 @@ def _get_escalation_memory_folder_path(
     return _resolve_memory_folder_path(
         folder_path, str(memory_space_name) if memory_space_name else None
     )
+
+
+def _get_escalation_memory_space_name(
+    resource: AgentEscalationResourceConfig,
+    agent: Any | None = None,
+) -> str | None:
+    """Resolve memory space name from escalation resource or agent memory feature."""
+    if not _is_escalation_memory_enabled(resource):
+        return None
+
+    memory = _get_escalation_memory_properties(resource)
+    memory_space_name = _read_first_value(
+        (resource, memory),
+        "memorySpaceName",
+        "memory_space_name",
+    )
+    if memory_space_name:
+        return str(memory_space_name)
+
+    feature = _get_agent_memory_space_feature(agent)
+    memory_space_name = _read_value(
+        feature,
+        "memorySpaceName",
+        "memory_space_name",
+    )
+    return str(memory_space_name) if memory_space_name else None
 
 
 def _get_escalation_memory_settings(
@@ -390,10 +526,12 @@ async def _check_escalation_memory_cache(
     serialized_input: dict[str, Any],
     folder_path: str | None = None,
     memory_settings: EscalationMemorySettings | None = None,
+    memory_space_name: str | None = None,
 ) -> EscalationMemoryCachedResult | None:
     """Check escalation memory for a cached answer."""
     retriever = EscalationMemoryRetriever(
         memory_space_id,
+        memory_space_name=memory_space_name,
         folder_path=folder_path,
         memory_settings=memory_settings,
     )
@@ -535,6 +673,23 @@ def _record_custom_metric(metric_name: str, memory_space_id: str) -> None:
             )
     except Exception:
         logger.debug("Failed to record metric '%s'", metric_name, exc_info=True)
+
+
+def _serialize_search_response_for_trace(response: Any) -> str:
+    if isinstance(response, BaseModel):
+        response = response.model_dump(by_alias=True, exclude_none=True)
+    return _json_dumps(response)
+
+
+def _safe_len(value: Any) -> int:
+    try:
+        return len(value)
+    except Exception:
+        return 0
+
+
+def _json_dumps(payload: Any) -> str:
+    return json.dumps(payload, default=str)
 
 
 def _cached_result_from_search_response(

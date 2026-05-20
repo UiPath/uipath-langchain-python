@@ -795,6 +795,7 @@ class TestEscalationToolOutputSchema:
                 "memory": {
                     "isEnabled": True,
                     "memorySpaceId": "space-123",
+                    "memorySpaceName": "MemorySpace",
                     "folderPath": "/Memory/Folder",
                 }
             },
@@ -815,6 +816,10 @@ class TestEscalationToolOutputSchema:
         assert mock_check_memory_cache.await_args is not None
         assert (
             mock_check_memory_cache.await_args.kwargs["folder_path"] == "/Memory/Folder"
+        )
+        assert (
+            mock_check_memory_cache.await_args.kwargs["memory_space_name"]
+            == "MemorySpace"
         )
 
 
