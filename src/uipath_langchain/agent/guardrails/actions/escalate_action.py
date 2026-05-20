@@ -16,7 +16,10 @@ from uipath._utils import UiPathUrl
 from uipath.agent.models.agent import (
     AgentEscalationRecipient,
     AssetRecipient,
+    CustomAssigneesRecipient,
+    RoundRobinRecipient,
     StandardRecipient,
+    WorkloadRecipient,
 )
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import Task, TaskRecipient
@@ -139,6 +142,12 @@ class EscalateAction(GuardrailAction):
             elif isinstance(self.recipient, AssetRecipient):
                 metadata["escalation_data"]["assigned_to"] = (
                     task_recipient.value if task_recipient else None
+                )
+            elif isinstance(self.recipient, (WorkloadRecipient, RoundRobinRecipient)):
+                metadata["escalation_data"]["assigned_to"] = self.recipient.display_name
+            elif isinstance(self.recipient, CustomAssigneesRecipient):
+                metadata["escalation_data"]["assigned_to"] = (
+                    self.recipient.display_name or self.recipient.value
                 )
 
             # Validate message count based on execution stage
