@@ -32,6 +32,22 @@ def process_resource():
 
 
 @pytest.fixture
+def flow_resource():
+    """Create a process tool resource config of type Flow (Maestro Flow release)."""
+    return AgentProcessToolResourceConfig(
+        type=AgentToolType.FLOW,
+        name="test_flow",
+        description="Test flow description",
+        input_schema={"type": "object", "properties": {}},
+        output_schema={"type": "object", "properties": {}},
+        properties=AgentProcessToolProperties(
+            process_name="MyFlow",
+            folder_path="/Shared/Flows",
+        ),
+    )
+
+
+@pytest.fixture
 def process_resource_with_inputs():
     """Create a process tool resource config with input arguments."""
     return AgentProcessToolResourceConfig(
@@ -453,3 +469,84 @@ class TestProcessToolRunAsMe:
 
         call_kwargs = mock_client.processes.invoke_async.call_args[1]
         assert call_kwargs["run_as_me"] is None
+
+
+class TestProcessToolFlowType:
+    """Test that a Flow-type resource flows through create_process_tool correctly."""
+
+    def test_flow_tool_metadata_has_flow_tool_type(self, flow_resource):
+        """A Flow resource produces a tool with metadata.tool_type == 'flow'."""
+        tool = create_process_tool(flow_resource)
+        assert tool.metadata is not None
+        assert tool.metadata["tool_type"] == "flow"
+
+    def test_flow_tool_metadata_has_display_name(self, flow_resource):
+        """Flow tool metadata exposes the process_name as display_name."""
+        tool = create_process_tool(flow_resource)
+        assert tool.metadata is not None
+        assert tool.metadata["display_name"] == "MyFlow"
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/Flows"})
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_flow_tool_invokes_processes_invoke_async(
+        self, mock_uipath_class, mock_interrupt, flow_resource
+    ):
+        """Flow tool invokes client.processes.invoke_async (same path as Process)."""
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "flow-job-key"
+        mock_job.folder_key = "flow-folder-key"
+
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(flow_resource)
+        await tool.ainvoke({})
+
+        mock_client.processes.invoke_async.assert_called_once_with(
+            name="MyFlow",
+            input_arguments={},
+            folder_path="/Shared/Flows",
+            attachments=[],
+            parent_span_id=None,
+            parent_operation_id=None,
+            run_as_me=None,
+        )
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_flow_tool_uses_non_agent_bts_key(
+        self, mock_uipath_class, mock_interrupt, flow_resource
+    ):
+        """Flow tool stores the BTS tracking key under 'wait_for_job_key' (not agent variant)."""
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "flow-job-key"
+        mock_job.folder_key = "flow-folder-key"
+
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(flow_resource)
+        assert tool.metadata is not None
+
+        await tool.ainvoke({})
+
+        bts_context = tool.metadata["_bts_context"]
+        assert bts_context.get("wait_for_job_key") == "flow-job-key"
+        assert "wait_for_agent_job_key" not in bts_context

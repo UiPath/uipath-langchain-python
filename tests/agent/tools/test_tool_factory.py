@@ -69,6 +69,22 @@ def process_resource() -> AgentProcessToolResourceConfig:
 
 
 @pytest.fixture
+def flow_resource() -> AgentProcessToolResourceConfig:
+    """Create a process tool resource config of type Flow."""
+    return AgentProcessToolResourceConfig(
+        type=AgentToolType.FLOW,
+        name="test_flow",
+        description="Test flow description",
+        input_schema=EMPTY_SCHEMA,
+        output_schema=EMPTY_SCHEMA,
+        properties=AgentProcessToolProperties(
+            process_name="MyFlow",
+            folder_path="/Shared/Flows",
+        ),
+    )
+
+
+@pytest.fixture
 def context_resource() -> AgentContextResourceConfig:
     """Create a context tool resource config."""
     return AgentContextResourceConfig(
@@ -270,6 +286,7 @@ class TestCreateToolsFromResources:
         "resource_fixture",
         [
             "process_resource",
+            "flow_resource",
             "context_resource",
             "escalation_resource",
             "integration_resource",
@@ -288,3 +305,19 @@ class TestCreateToolsFromResources:
         mock_llm = AsyncMock(spec=BaseChatModel)
         tool = await _build_tool_for_resource(resource, mock_llm)
         assert_tool_is_base_uipath(tool)
+
+    async def test_flow_resource_routes_through_process_tool_path(
+        self, flow_resource, mock_uipath_sdk
+    ):
+        """A Flow-type resource is dispatched via the process_tool factory path."""
+        mock_llm = AsyncMock(spec=BaseChatModel)
+        with patch(
+            "uipath_langchain.agent.tools.tool_factory.create_process_tool"
+        ) as mock_create_process_tool:
+            mock_create_process_tool.return_value = MagicMock(
+                spec=BaseUiPathStructuredTool
+            )
+            tool = await _build_tool_for_resource(flow_resource, mock_llm)
+
+        mock_create_process_tool.assert_called_once_with(flow_resource, run_as_me=False)
+        assert tool is not None
