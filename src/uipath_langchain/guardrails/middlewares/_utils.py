@@ -39,7 +39,7 @@ def create_modified_tool_request(
     from dataclasses import replace
 
     modified_tool_call = deepcopy(request.tool_call)
-    modified_tool_call["args"] = modified_args
+    modified_tool_call["args"] = modified_args  # type: ignore[typeddict-item]
 
     try:
         return replace(request, tool_call=modified_tool_call)

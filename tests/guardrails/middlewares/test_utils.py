@@ -3,7 +3,7 @@
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
@@ -17,7 +17,7 @@ from uipath_langchain.guardrails.middlewares._utils import (
 def _make_request(args: dict[str, Any] | str | None = None) -> ToolCallRequest:
     resolved_args: dict[str, Any] | str = args if args is not None else {"x": 1}
     return ToolCallRequest(
-        tool_call={"id": "tc1", "name": "my_tool", "args": resolved_args},
+        tool_call={"id": "tc1", "name": "my_tool", "args": resolved_args},  # type: ignore[typeddict-item]
         tool=MagicMock(),
         state={},
         runtime=MagicMock(),
@@ -102,11 +102,11 @@ class TestCreateModifiedToolResult:
 
 class TestExtractTextFromMessages:
     def test_human_message_str_content(self) -> None:
-        msgs = [HumanMessage(content="hello")]
+        msgs: list[BaseMessage] = [HumanMessage(content="hello")]
         assert extract_text_from_messages(msgs) == "hello"
 
     def test_multimodal_list_extracts_text_part(self) -> None:
-        msgs = [
+        msgs: list[BaseMessage] = [
             HumanMessage(
                 content=[
                     {"type": "text", "text": "hi"},
@@ -117,7 +117,7 @@ class TestExtractTextFromMessages:
         assert extract_text_from_messages(msgs) == "hi"
 
     def test_non_text_parts_ignored(self) -> None:
-        msgs = [
+        msgs: list[BaseMessage] = [
             HumanMessage(
                 content=[{"type": "image_url", "url": "http://example.com/img.png"}]
             )
@@ -125,9 +125,9 @@ class TestExtractTextFromMessages:
         assert extract_text_from_messages(msgs) == ""
 
     def test_tool_messages_skipped(self) -> None:
-        msgs = [ToolMessage(content="tool output", tool_call_id="tc1")]
+        msgs: list[BaseMessage] = [ToolMessage(content="tool output", tool_call_id="tc1")]
         assert extract_text_from_messages(msgs) == ""
 
     def test_multiple_messages_joined_with_newline(self) -> None:
-        msgs = [HumanMessage(content="first"), AIMessage(content="second")]
+        msgs: list[BaseMessage] = [HumanMessage(content="first"), AIMessage(content="second")]
         assert extract_text_from_messages(msgs) == "first\nsecond"

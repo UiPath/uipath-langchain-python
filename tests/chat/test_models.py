@@ -128,7 +128,7 @@ class TestUiPathChatStream:
                 "UIPATH_ORGANIZATION_ID": "dummy-org",
             },
         ):
-            chat = UiPathChat.model_construct()
+            chat = UiPathChat.model_construct(model_name="gpt-4o")
         with patch.object(_UpstreamUiPathChat, "_uipath_stream", fake_stream):
             result = list(chat._uipath_stream(messages=[]))
 
@@ -169,7 +169,7 @@ class TestUiPathChatStream:
                 "UIPATH_ORGANIZATION_ID": "dummy-org",
             },
         ):
-            chat = UiPathChat.model_construct()
+            chat = UiPathChat.model_construct(model_name="gpt-4o")
         with patch.object(_UpstreamUiPathChat, "_uipath_astream", fake_astream):
             result = [c async for c in chat._uipath_astream(messages=[])]
 
