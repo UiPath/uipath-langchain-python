@@ -125,7 +125,9 @@ class TestPIIDetectionHookWiringToolScope:
         )
         names = _hook_names(middleware)
         assert len(names) == 1, f"Expected 1 hook, got: {names}"
-        assert "wrap_tool_call" in names[0], f"Expected wrap_tool_call hook, got: {names}"
+        assert "wrap_tool_call" in names[0], (
+            f"Expected wrap_tool_call hook, got: {names}"
+        )
 
     def test_tool_scope_no_before_or_after_hooks(self) -> None:
         middleware = UiPathPIIDetectionMiddleware(
@@ -152,7 +154,9 @@ class TestHarmfulContentHookWiringToolScope:
         )
         names = _hook_names(middleware)
         assert len(names) == 1, f"Expected 1 hook, got: {names}"
-        assert "wrap_tool_call" in names[0], f"Expected wrap_tool_call hook, got: {names}"
+        assert "wrap_tool_call" in names[0], (
+            f"Expected wrap_tool_call hook, got: {names}"
+        )
 
     def test_tool_scope_no_before_or_after_hooks(self) -> None:
         middleware = UiPathHarmfulContentMiddleware(

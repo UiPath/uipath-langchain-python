@@ -199,4 +199,3 @@ class UiPathHarmfulContentMiddleware(BuiltInGuardrailMiddlewareMixin):
             validator_type="harmful_content",
             validator_parameters=validator_parameters,
         )
-

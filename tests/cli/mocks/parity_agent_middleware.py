@@ -230,7 +230,9 @@ agent = create_agent(
             name="Tool Harmful Content POST Block",
             scopes=[GuardrailScope.TOOL],
             action=BlockAction(),
-            entities=[HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2)],
+            entities=[
+                HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2)
+            ],
             tools=[analyze_joke_syntax],
             stage=GuardrailExecutionStage.POST,
         ),

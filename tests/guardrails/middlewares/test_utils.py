@@ -125,9 +125,14 @@ class TestExtractTextFromMessages:
         assert extract_text_from_messages(msgs) == ""
 
     def test_tool_messages_skipped(self) -> None:
-        msgs: list[BaseMessage] = [ToolMessage(content="tool output", tool_call_id="tc1")]
+        msgs: list[BaseMessage] = [
+            ToolMessage(content="tool output", tool_call_id="tc1")
+        ]
         assert extract_text_from_messages(msgs) == ""
 
     def test_multiple_messages_joined_with_newline(self) -> None:
-        msgs: list[BaseMessage] = [HumanMessage(content="first"), AIMessage(content="second")]
+        msgs: list[BaseMessage] = [
+            HumanMessage(content="first"),
+            AIMessage(content="second"),
+        ]
         assert extract_text_from_messages(msgs) == "first\nsecond"

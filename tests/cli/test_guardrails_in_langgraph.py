@@ -469,8 +469,13 @@ class TestGuardrailsParity:
                 )
             cause = exc_info.value.__cause__
             assert isinstance(cause, AgentRuntimeError)
-            assert cause.error_info.code == "AGENT_RUNTIME.TERMINATION_GUARDRAIL_VIOLATION"
-            assert cause.error_info.title == "Guardrail [Tool PII POST Block] blocked execution"
+            assert (
+                cause.error_info.code == "AGENT_RUNTIME.TERMINATION_GUARDRAIL_VIOLATION"
+            )
+            assert (
+                cause.error_info.title
+                == "Guardrail [Tool PII POST Block] blocked execution"
+            )
             assert cause.error_info.detail == "Guardrail triggered"
             assert cause.error_info.category == UiPathErrorCategory.USER
 
@@ -502,7 +507,9 @@ class TestGuardrailsParity:
                 )
             cause = exc_info.value.__cause__
             assert isinstance(cause, AgentRuntimeError)
-            assert cause.error_info.code == "AGENT_RUNTIME.TERMINATION_GUARDRAIL_VIOLATION"
+            assert (
+                cause.error_info.code == "AGENT_RUNTIME.TERMINATION_GUARDRAIL_VIOLATION"
+            )
             assert (
                 cause.error_info.title
                 == "Guardrail [Tool Harmful Content POST Block] blocked execution"
