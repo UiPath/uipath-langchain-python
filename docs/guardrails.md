@@ -45,6 +45,7 @@ from uipath_langchain.guardrails import (
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
     UiPathPIIDetectionMiddleware,
+    UiPathPromptInjectionMiddleware,
     UiPathUserPromptAttacksMiddleware,
     PIIDetectionEntity,
     HarmfulContentEntity,
@@ -60,13 +61,16 @@ from uipath.core.guardrails import GuardrailScope
 
 ### Built-in middleware classes
 
-| Class | Default scopes | Stage support |
-|---|---|---|
-| `UiPathPIIDetectionMiddleware` | AGENT + LLM | PRE + POST |
-| `UiPathHarmfulContentMiddleware` | AGENT + LLM | PRE + POST |
-| `UiPathUserPromptAttacksMiddleware` | LLM | PRE only |
-| `UiPathIntellectualPropertyMiddleware` | LLM + AGENT | POST only |
-| `UiPathDeterministicGuardrailMiddleware` | TOOL | PRE / POST / PRE_AND_POST |
+| Class | Supported scopes | Stage support | Extra parameters |
+|---|---|---|---|
+| `UiPathPIIDetectionMiddleware` | AGENT, LLM, TOOL | PRE + POST | `entities`, `tools` |
+| `UiPathHarmfulContentMiddleware` | AGENT, LLM, TOOL | PRE + POST | `entities`, `tools` |
+| `UiPathPromptInjectionMiddleware` | LLM only | PRE only | `threshold` (float 0–1, default 0.5) |
+| `UiPathUserPromptAttacksMiddleware` | LLM only | PRE only | — |
+| `UiPathIntellectualPropertyMiddleware` | AGENT, LLM only | POST only | `entities` |
+| `UiPathDeterministicGuardrailMiddleware` | TOOL only | PRE / POST / PRE_AND_POST | `tools`, `rules`, `stage` |
+
+TOOL scope for `UiPathPIIDetectionMiddleware` and `UiPathHarmfulContentMiddleware` requires passing `tools=[...]` to restrict `wrap_tool_call` hooks to specific tools.
 
 All classes share these common parameters:
 
@@ -96,6 +100,7 @@ from uipath_langchain.guardrails import (
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
     UiPathPIIDetectionMiddleware,
+    UiPathPromptInjectionMiddleware,
     UiPathUserPromptAttacksMiddleware,
     PIIDetectionEntity,
     HarmfulContentEntity,
@@ -388,3 +393,84 @@ Use **middleware** when you want all guardrail policy in one place alongside a s
 
 - [`samples/joke-agent`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent) — middleware pattern
 - [`samples/joke-agent-decorator`](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/joke-agent-decorator) — decorator pattern
+
+---
+
+## Reference
+
+### GuardrailScope
+
+Imported from `uipath.core.guardrails`.
+
+| Value | Description |
+|---|---|
+| `AGENT` | Hooks run at agent input/output boundary (`before_agent` / `after_agent`) |
+| `LLM` | Hooks run around every LLM call (`before_model` / `after_model`) |
+| `TOOL` | Hooks run around every tool call (`wrap_tool_call`) |
+
+### GuardrailExecutionStage
+
+Imported from `uipath_langchain.guardrails`.
+
+| Value | When it fires |
+|---|---|
+| `PRE` | Before the call (inspect / block inputs) |
+| `POST` | After the call (inspect / transform outputs) |
+| `PRE_AND_POST` | Both — used only by `UiPathDeterministicGuardrailMiddleware` |
+
+### LoggingSeverityLevel
+
+Used in `LogAction(severity_level=...)`. Imported from `uipath_langchain.guardrails`.
+
+| Value |
+|---|
+| `DEBUG` |
+| `INFO` |
+| `WARNING` |
+| `ERROR` |
+
+### PIIDetectionEntityType
+
+Imported from `uipath_langchain.guardrails.enums`. Wrap each value in `PIIDetectionEntity(entity_type, threshold=0.5)` — `threshold` is a float from `0.0` to `1.0`.
+
+| Value |
+|---|
+| `PERSON` |
+| `ADDRESS` |
+| `DATE` |
+| `PHONE_NUMBER` |
+| `EUGPS_COORDINATES` |
+| `EMAIL` |
+| `CREDIT_CARD_NUMBER` |
+| `INTERNATIONAL_BANKING_ACCOUNT_NUMBER` |
+| `SWIFT_CODE` |
+| `ABA_ROUTING_NUMBER` |
+| `US_DRIVERS_LICENSE_NUMBER` |
+| `UK_DRIVERS_LICENSE_NUMBER` |
+| `US_INDIVIDUAL_TAXPAYER_IDENTIFICATION` |
+| `UK_UNIQUE_TAXPAYER_NUMBER` |
+| `US_BANK_ACCOUNT_NUMBER` |
+| `US_SOCIAL_SECURITY_NUMBER` |
+| `USUK_PASSPORT_NUMBER` |
+| `URL` |
+| `IP_ADDRESS` |
+
+### HarmfulContentEntityType
+
+Imported from `uipath_langchain.guardrails.enums`. Wrap each value in `HarmfulContentEntity(entity_type, threshold=2)` — `threshold` must be one of `0`, `2`, `4`, or `6` (higher = less sensitive).
+
+| Value |
+|---|
+| `HATE` |
+| `SELF_HARM` |
+| `SEXUAL` |
+| `VIOLENCE` |
+
+### IntellectualPropertyEntityType
+
+Imported from `uipath_langchain.guardrails.enums`. Pass values directly in `entities=[...]` — no wrapper model class.
+
+| Value |
+|---|
+| `TEXT` |
+| `CODE` |
