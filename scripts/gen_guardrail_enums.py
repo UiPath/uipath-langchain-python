@@ -14,7 +14,11 @@ from uipath_langchain.guardrails.enums import (
     PIIDetectionEntityType,
 )
 
-ENUMS = [PIIDetectionEntityType, HarmfulContentEntityType, IntellectualPropertyEntityType]
+ENUMS = [
+    PIIDetectionEntityType,
+    HarmfulContentEntityType,
+    IntellectualPropertyEntityType,
+]
 DOCS = pathlib.Path(__file__).parent.parent / "docs" / "guardrails.md"
 
 
