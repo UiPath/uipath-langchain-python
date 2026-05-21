@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-05-18T13:33:18.218624Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
@@ -4344,7 +4344,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.10.68"
+version = "2.10.69"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -4367,9 +4367,9 @@ dependencies = [
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a9/83/d15796221896fb73c38835a4669043a59fb1a5b32c8637ea4f18897a28e4/uipath-2.10.68.tar.gz", hash = "sha256:a9dab84960133ff9d8fa618e98b187e5ae5a8874d0afe4648b094e4879d08d44", size = 2942178, upload-time = "2026-05-20T13:27:56.146Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/1c/bfb47ee7ad8822ef9f86f270a02e98df048cce96247de2f8ff001c53b5da/uipath-2.10.69.tar.gz", hash = "sha256:8976b16bff085afedc922d5ba05734dc091e6db219ef1c09251a61335e243159", size = 2942472, upload-time = "2026-05-21T11:45:06.074Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/ae/9f8a77694dac09cc3dbe43b4e65ba33efcbbbf632ba860d57739b9a87eb3/uipath-2.10.68-py3-none-any.whl", hash = "sha256:5b9d9d727805791ad050945662b163d6da0cc760db0fc298eea2ce66653a5ab1", size = 390746, upload-time = "2026-05-20T13:27:54.291Z" },
+    { url = "https://files.pythonhosted.org/packages/9b/79/8548bc3bd1b2b2e4ceed9beb96dd08df5797a968276b6ef36a0741ed8e8e/uipath-2.10.69-py3-none-any.whl", hash = "sha256:c076aa7ca394c208cbf52d4e72e06c1da2fd150d343ee9c3358672e4bc9b7877", size = 390772, upload-time = "2026-05-21T11:45:03.813Z" },
 ]
 
 [[package]]
@@ -4388,7 +4388,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.11.3"
+version = "0.11.4"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4463,7 +4463,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=12.1.1" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.10.68,<2.11.0" },
+    { name = "uipath", specifier = ">=2.10.69,<2.11.0" },
     { name = "uipath-core", specifier = ">=0.5.15,<0.6.0" },
     { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.11.0,<1.12.0" },
     { name = "uipath-langchain-client", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.11.0,<1.12.0" },

@@ -1,8 +1,5 @@
 """Tests for process_tool.py."""
 
-import os
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 from uipath.agent.models.agent import (
     AgentProcessToolProperties,
@@ -10,7 +7,6 @@ from uipath.agent.models.agent import (
     AgentToolType,
 )
 from uipath.platform.common import WaitJob
-from uipath.platform.orchestrator import Job
 
 from uipath_langchain.agent.tools.process_tool import create_process_tool
 
@@ -27,6 +23,22 @@ def process_resource():
         properties=AgentProcessToolProperties(
             process_name="MyProcess",
             folder_path="/Shared/MyFolder",
+        ),
+    )
+
+
+@pytest.fixture
+def flow_resource():
+    """Create a process tool resource config of type Flow (Maestro Flow release)."""
+    return AgentProcessToolResourceConfig(
+        type=AgentToolType.FLOW,
+        name="test_flow",
+        description="Test flow description",
+        input_schema={"type": "object", "properties": {}},
+        output_schema={"type": "object", "properties": {}},
+        properties=AgentProcessToolProperties(
+            process_name="MyFlow",
+            folder_path="/Shared/Flows",
         ),
     )
 
@@ -64,25 +76,45 @@ class TestProcessToolMetadata:
     def test_process_tool_has_metadata(self, process_resource):
         """Test that process tool has metadata dict."""
         tool = create_process_tool(process_resource)
-
         assert tool.metadata is not None
         assert isinstance(tool.metadata, dict)
 
-    def test_process_tool_metadata_has_tool_type(self, process_resource):
-        """Test that metadata contains tool_type derived from resource type."""
-        tool = create_process_tool(process_resource)
+    @pytest.mark.parametrize(
+        "resource_fixture,expected_tool_type",
+        [
+            ("process_resource", "process"),
+            ("flow_resource", "flow"),
+        ],
+    )
+    def test_metadata_tool_type_derived_from_resource_type(
+        self, resource_fixture, expected_tool_type, request
+    ):
+        """tool_type metadata is derived from resource.type.lower()."""
+        resource = request.getfixturevalue(resource_fixture)
+        tool = create_process_tool(resource)
         assert tool.metadata is not None
-        assert tool.metadata["tool_type"] == "process"
+        assert tool.metadata["tool_type"] == expected_tool_type
+        assert tool.metadata["tool_type"] == resource.type.lower()
 
-    def test_process_tool_metadata_has_display_name(self, process_resource):
-        """Test that metadata contains display_name from process_name."""
-        tool = create_process_tool(process_resource)
+    @pytest.mark.parametrize(
+        "resource_fixture,expected_display_name",
+        [
+            ("process_resource", "MyProcess"),
+            ("flow_resource", "MyFlow"),
+        ],
+    )
+    def test_metadata_display_name_from_process_name(
+        self, resource_fixture, expected_display_name, request
+    ):
+        """display_name metadata is taken from properties.process_name."""
+        resource = request.getfixturevalue(resource_fixture)
+        tool = create_process_tool(resource)
         assert tool.metadata is not None
-        assert tool.metadata["display_name"] == "MyProcess"
+        assert tool.metadata["display_name"] == expected_display_name
 
-    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
-    def test_process_tool_metadata_has_folder_path(self, process_resource):
+    def test_process_tool_metadata_has_folder_path(self, process_resource, monkeypatch):
         """Test that metadata contains folder_path for span attributes."""
+        monkeypatch.setenv("UIPATH_FOLDER_PATH", "/Shared/TestFolder")
         tool = create_process_tool(process_resource)
         assert tool.metadata is not None
         assert tool.metadata["folder_path"] == "/Shared/TestFolder"
@@ -94,56 +126,39 @@ class TestProcessToolMetadata:
         assert "_span_context" in tool.metadata
         assert isinstance(tool.metadata["_span_context"], dict)
 
-    def test_process_tool_metadata_tool_type_uses_resource_type(self):
-        """Test that tool_type is derived from resource.type.lower()."""
-        resource = AgentProcessToolResourceConfig(
-            type=AgentToolType.PROCESS,
-            name="test_process",
-            description="Test",
-            input_schema={"type": "object", "properties": {}},
-            output_schema={"type": "object", "properties": {}},
-            properties=AgentProcessToolProperties(
-                process_name="MyProcess",
-                folder_path="/Shared",
-            ),
-        )
-        tool = create_process_tool(resource)
-        assert tool.metadata is not None
-        assert tool.metadata["tool_type"] == resource.type.lower()
-
 
 class TestProcessToolInvocation:
     """Test process tool invocation behavior: invoke then interrupt."""
 
     @pytest.mark.asyncio
-    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/MyFolder"})
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    @pytest.mark.parametrize(
+        "resource_fixture,expected_name,expected_folder",
+        [
+            ("process_resource", "MyProcess", "/Shared/MyFolder"),
+            ("flow_resource", "MyFlow", "/Shared/Flows"),
+        ],
+    )
     async def test_invoke_calls_processes_invoke_async(
-        self, mock_uipath_class, mock_interrupt, process_resource
+        self,
+        resource_fixture,
+        expected_name,
+        expected_folder,
+        mock_process_invocation,
+        monkeypatch,
+        request,
     ):
-        """Test that invoking the tool calls client.processes.invoke_async."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key-123"
-        mock_job.folder_key = "folder-key-123"
+        """Both Process and Flow tools invoke client.processes.invoke_async."""
+        monkeypatch.setenv("UIPATH_FOLDER_PATH", expected_folder)
+        mock_client, _, _, _ = mock_process_invocation
+        resource = request.getfixturevalue(resource_fixture)
 
-        mock_resumed_job = MagicMock(spec=Job)
-        mock_resumed_job.state = "successful"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
-
-        tool = create_process_tool(process_resource)
+        tool = create_process_tool(resource)
         await tool.ainvoke({})
 
         mock_client.processes.invoke_async.assert_called_once_with(
-            name="MyProcess",
+            name=expected_name,
             input_arguments={},
-            folder_path="/Shared/MyFolder",
+            folder_path=expected_folder,
             attachments=[],
             parent_span_id=None,
             parent_operation_id=None,
@@ -151,25 +166,11 @@ class TestProcessToolInvocation:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_interrupts_with_wait_job(
-        self, mock_uipath_class, mock_interrupt, process_resource
+        self, process_resource, mock_process_invocation
     ):
         """Test that after invoking, the tool interrupts with WaitJobRaw."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key-456"
-        mock_job.folder_key = "folder-key-456"
-
-        mock_resumed_job = MagicMock(spec=Job)
-        mock_resumed_job.state = "successful"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
+        _, mock_interrupt, mock_job, _ = mock_process_invocation
 
         tool = create_process_tool(process_resource)
         await tool.ainvoke({})
@@ -178,29 +179,18 @@ class TestProcessToolInvocation:
         wait_job_arg = mock_interrupt.call_args[0][0]
         assert isinstance(wait_job_arg, WaitJob)
         assert wait_job_arg.job == mock_job
-        assert wait_job_arg.process_folder_key == "folder-key-456"
+        assert wait_job_arg.process_folder_key == mock_job.folder_key
 
     @pytest.mark.asyncio
-    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/DataFolder"})
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_passes_input_arguments(
-        self, mock_uipath_class, mock_interrupt, process_resource_with_inputs
+        self,
+        process_resource_with_inputs,
+        mock_process_invocation,
+        monkeypatch,
     ):
         """Test that input arguments are correctly passed to invoke_async."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key"
-        mock_job.folder_key = "folder-key"
-
-        mock_resumed_job = MagicMock(spec=Job)
-        mock_resumed_job.state = "successful"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
+        monkeypatch.setenv("UIPATH_FOLDER_PATH", "/Shared/DataFolder")
+        mock_client, _, _, _ = mock_process_invocation
 
         tool = create_process_tool(process_resource_with_inputs)
         await tool.ainvoke({"name": "test-data", "count": 42})
@@ -211,27 +201,14 @@ class TestProcessToolInvocation:
         assert call_kwargs["folder_path"] == "/Shared/DataFolder"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_returns_output_from_extract(
-        self, mock_uipath_class, mock_interrupt, process_resource
+        self, process_resource, mock_process_invocation
     ):
         """Test that the tool returns the extracted job output on success."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key"
-        mock_job.folder_key = "folder-key"
-
-        mock_resumed_job = MagicMock(spec=Job)
-        mock_resumed_job.state = "successful"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_client.jobs.extract_output_async = AsyncMock(
-            return_value='{"output_arg": "value123"}'
+        mock_client, _, _, _ = mock_process_invocation
+        mock_client.jobs.extract_output_async.return_value = (
+            '{"output_arg": "value123"}'
         )
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(process_resource)
         result = await tool.ainvoke({})
@@ -239,26 +216,14 @@ class TestProcessToolInvocation:
         assert result == {"output_arg": "value123"}
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_invoke_returns_error_message_on_faulted_job(
-        self, mock_uipath_class, mock_interrupt, process_resource
+        self, process_resource, mock_process_invocation
     ):
         """Test that the tool returns an error message string when the job is faulted."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key"
-        mock_job.folder_key = "folder-key"
-
-        mock_resumed_job = MagicMock(spec=Job)
+        _, _, _, mock_resumed_job = mock_process_invocation
         mock_resumed_job.state = "faulted"
         mock_resumed_job.job_error = None
         mock_resumed_job.info = "Something went wrong in the workflow"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(process_resource)
         result = await tool.ainvoke({})
@@ -266,35 +231,40 @@ class TestProcessToolInvocation:
         assert isinstance(result, str)
         assert "Something went wrong in the workflow" in result
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "resource_fixture",
+        ["process_resource", "flow_resource"],
+    )
+    async def test_bts_key_is_non_agent_variant(
+        self, resource_fixture, mock_process_invocation, request
+    ):
+        """Non-agent process tools (Process, Flow) store the BTS key as 'wait_for_job_key'."""
+        _, _, mock_job, _ = mock_process_invocation
+        resource = request.getfixturevalue(resource_fixture)
+
+        tool = create_process_tool(resource)
+        assert tool.metadata is not None
+
+        await tool.ainvoke({})
+
+        bts_context = tool.metadata["_bts_context"]
+        assert bts_context.get("wait_for_job_key") == mock_job.key
+        assert "wait_for_agent_job_key" not in bts_context
+
 
 class TestProcessToolSpanContext:
     """Test that _span_context is properly wired for tracing."""
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_span_context_parent_span_id_passed_to_invoke(
-        self, mock_uipath_class, mock_interrupt, process_resource
+        self, process_resource, mock_process_invocation
     ):
         """Test that parent_span_id from _span_context is forwarded to invoke_async."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key"
-        mock_job.folder_key = "folder-key"
-
-        mock_resumed_job = MagicMock(spec=Job)
-        mock_resumed_job.state = "successful"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
+        mock_client, _, _, _ = mock_process_invocation
 
         tool = create_process_tool(process_resource)
         assert tool.metadata is not None
-
-        # Simulate tracing setting parent_span_id via the shared _span_context
         tool.metadata["_span_context"]["parent_span_id"] = "span-abc-123"
 
         await tool.ainvoke({})
@@ -303,58 +273,26 @@ class TestProcessToolSpanContext:
         assert call_kwargs["parent_span_id"] == "span-abc-123"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_span_context_consumed_after_invoke(
-        self, mock_uipath_class, mock_interrupt, process_resource
+        self, process_resource, mock_process_invocation
     ):
         """Test that parent_span_id is popped (consumed) from _span_context after use."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key"
-        mock_job.folder_key = "folder-key"
-
-        mock_resumed_job = MagicMock(spec=Job)
-        mock_resumed_job.state = "successful"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
-
         tool = create_process_tool(process_resource)
         assert tool.metadata is not None
         tool.metadata["_span_context"]["parent_span_id"] = "span-xyz"
 
         await tool.ainvoke({})
 
-        # parent_span_id should be consumed (popped) after invocation
         assert "parent_span_id" not in tool.metadata["_span_context"]
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_span_context_defaults_to_none_when_empty(
-        self, mock_uipath_class, mock_interrupt, process_resource
+        self, process_resource, mock_process_invocation
     ):
         """Test that parent_span_id defaults to None when _span_context is empty."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key"
-        mock_job.folder_key = "folder-key"
-
-        mock_resumed_job = MagicMock(spec=Job)
-        mock_resumed_job.state = "successful"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
+        mock_client, _, _, _ = mock_process_invocation
 
         tool = create_process_tool(process_resource)
-        # Don't set any parent_span_id
         await tool.ainvoke({})
 
         call_kwargs = mock_client.processes.invoke_async.call_args[1]
@@ -365,28 +303,11 @@ class TestProcessToolRunAsMe:
     """Test RunAsMe propagation passed top-down from tool factory."""
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_run_as_me_true_passed_to_invoke(
-        self,
-        mock_uipath_class,
-        mock_interrupt,
-        process_resource,
+        self, process_resource, mock_process_invocation
     ):
         """Test RunAsMe=True is forwarded to invoke_async when set."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key"
-        mock_job.folder_key = "folder-key"
-
-        mock_resumed_job = MagicMock(spec=Job)
-        mock_resumed_job.state = "successful"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
+        mock_client, _, _, _ = mock_process_invocation
 
         tool = create_process_tool(process_resource, run_as_me=True)
         await tool.ainvoke({})
@@ -395,28 +316,11 @@ class TestProcessToolRunAsMe:
         assert call_kwargs["run_as_me"] is True
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_run_as_me_false_sends_none(
-        self,
-        mock_uipath_class,
-        mock_interrupt,
-        process_resource,
+        self, process_resource, mock_process_invocation
     ):
         """Test RunAsMe=None when run_as_me=False (default)."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key"
-        mock_job.folder_key = "folder-key"
-
-        mock_resumed_job = MagicMock(spec=Job)
-        mock_resumed_job.state = "successful"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
+        mock_client, _, _, _ = mock_process_invocation
 
         tool = create_process_tool(process_resource, run_as_me=False)
         await tool.ainvoke({})
@@ -425,28 +329,11 @@ class TestProcessToolRunAsMe:
         assert call_kwargs["run_as_me"] is None
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
-    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
     async def test_run_as_me_default_sends_none(
-        self,
-        mock_uipath_class,
-        mock_interrupt,
-        process_resource,
+        self, process_resource, mock_process_invocation
     ):
         """Test RunAsMe=None when run_as_me not specified (default)."""
-        mock_job = MagicMock(spec=Job)
-        mock_job.key = "job-key"
-        mock_job.folder_key = "folder-key"
-
-        mock_resumed_job = MagicMock(spec=Job)
-        mock_resumed_job.state = "successful"
-
-        mock_client = MagicMock()
-        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
-        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
-        mock_uipath_class.return_value = mock_client
-
-        mock_interrupt.return_value = mock_resumed_job
+        mock_client, _, _, _ = mock_process_invocation
 
         tool = create_process_tool(process_resource)
         await tool.ainvoke({})
