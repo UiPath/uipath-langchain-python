@@ -2,6 +2,7 @@
 
 import copy
 import logging
+import re
 from typing import Any, Iterator, Mapping, Sequence, TypeVar
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
@@ -12,6 +13,7 @@ from typing_extensions import deprecated
 from uipath.agent.models.agent import (
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
+    AgentToolArrayBuilderArgumentProperties,
     AgentToolStaticArgumentProperties,
     AgentToolTextBuilderArgumentProperties,
 )
@@ -37,7 +39,13 @@ class ToolStaticArgument(BaseModel):
     """Tool static argument model."""
 
     value: Any
+    display_value: Any
     is_sensitive: bool
+
+
+_INDEX_AND_REST_REGEX = re.compile(r"^\[(\d+)\](.*)$")
+
+_SENSITIVE_ITEM_PLACEHOLDER = "<hidden>"
 
 
 def _resolve_argument_properties(
@@ -48,12 +56,15 @@ def _resolve_argument_properties(
 
     def resolve_to_static(
         props: AgentToolArgumentProperties,
+        json_path: str,
     ) -> ToolStaticArgument | None:
-        """Resolves argument and textBuilder variants to static."""
+        """Resolves argument, textBuilder, and arrayBuilder variants to static."""
         match props:
             case AgentToolStaticArgumentProperties():
                 return ToolStaticArgument(
-                    value=props.value, is_sensitive=props.is_sensitive
+                    value=props.value,
+                    display_value=props.value,
+                    is_sensitive=props.is_sensitive,
                 )
             case AgentToolArgumentArgumentProperties():
                 agent_argument = parse(props.argument_path).find(agent_input)
@@ -62,30 +73,86 @@ def _resolve_argument_properties(
                 else:
                     argument_value = agent_argument[0].value
                 return ToolStaticArgument(
-                    value=argument_value, is_sensitive=props.is_sensitive
+                    value=argument_value,
+                    display_value=argument_value,
+                    is_sensitive=props.is_sensitive,
                 )
             case AgentToolTextBuilderArgumentProperties():
                 text_value = build_string_from_tokens(props.tokens, agent_input)
                 return ToolStaticArgument(
-                    value=text_value, is_sensitive=props.is_sensitive
+                    value=text_value,
+                    display_value=text_value,
+                    is_sensitive=props.is_sensitive,
                 )
+            case AgentToolArrayBuilderArgumentProperties():
+                return resolve_arraybuilder(json_path, argument_properties)
             case _:
                 raise ValueError(f"Unsupported argument property type: {type(props)}")
+
+    def resolve_arraybuilder(
+        base_path: str,
+        argument_properties: Mapping[str, AgentToolArgumentProperties],
+    ) -> ToolStaticArgument:
+        """Build an array value from arrayBuilder indexed children.
+
+        Only direct indexed children ``base_path[N]`` are considered; entries
+        with other nested properties are out of scope and silently skipped."""
+
+        base_with_bracket = base_path + "["
+        direct_children: dict[int, AgentToolArgumentProperties] = {}
+        max_index = -1
+
+        for path, props in argument_properties.items():
+            if not path.startswith(base_with_bracket):
+                continue
+            match = _INDEX_AND_REST_REGEX.match(path[len(base_path) :])
+            if not match or match.group(2) != "":
+                continue
+            idx = int(match.group(1))
+            direct_children[idx] = props
+            if idx > max_index:
+                max_index = idx
+
+        runtime_items: list[Any] = []
+        display_items: list[Any] = []
+        for i in range(max_index + 1):
+            item_props = direct_children.get(i)
+            if item_props is None:
+                runtime_items.append(None)
+                display_items.append(None)
+                continue
+            resolved = resolve_to_static(item_props, f"{base_path}[{i}]")
+            if resolved is None:
+                runtime_items.append(None)
+                display_items.append(None)
+            else:
+                runtime_items.append(resolved.value)
+                display_value = (
+                    _SENSITIVE_ITEM_PLACEHOLDER
+                    if resolved.is_sensitive
+                    else resolved.display_value
+                )
+                display_items.append(display_value)
+
+        return ToolStaticArgument(
+            value=runtime_items, display_value=display_items, is_sensitive=False
+        )
 
     def deduplicate_argument_properties(
         properties: Mapping[str, AgentToolArgumentProperties],
     ) -> Iterator[tuple[str, AgentToolArgumentProperties]]:
         """Skips more specific argument properties. In effect, prioritizes parent paths over child paths."""
 
-        sorted_paths = sorted(properties.keys())
-        for i, json_path in enumerate(sorted_paths):
-            if i > 0 and json_path.startswith(sorted_paths[i - 1]):
+        last_yielded: str | None = None
+        for json_path in sorted(properties.keys()):
+            if last_yielded is not None and json_path.startswith(last_yielded):
                 continue
             yield json_path, properties[json_path]
+            last_yielded = json_path
 
     static_args: dict[str, ToolStaticArgument] = {}
     for json_path, props in deduplicate_argument_properties(argument_properties):
-        static_arg = resolve_to_static(props)
+        static_arg = resolve_to_static(props, json_path)
         if static_arg is not None:
             static_args[json_path] = static_arg
     return static_args
@@ -119,7 +186,7 @@ def _apply_static_arguments_to_schema(
             apply_static_value_to_schema(
                 modified_json_schema,
                 json_path,
-                static_arg.value,
+                static_arg.display_value,
                 static_arg.is_sensitive,
             )
         except SchemaModificationError as e:

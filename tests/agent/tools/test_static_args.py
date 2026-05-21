@@ -7,7 +7,11 @@ from pydantic import BaseModel, Field
 from uipath.agent.models.agent import (
     AgentToolArgumentArgumentProperties,
     AgentToolArgumentProperties,
+    AgentToolArrayBuilderArgumentProperties,
     AgentToolStaticArgumentProperties,
+    AgentToolTextBuilderArgumentProperties,
+    TextToken,
+    TextTokenType,
 )
 
 from uipath_langchain.agent.tools.static_args import (
@@ -579,3 +583,244 @@ class TestResolveStaticArgs:
 
         assert result == {"$['existing_param']": "exists"}
         assert "$['missing_param']" not in result
+
+
+class ListInput(BaseModel):
+    """Input model with an array field for arrayBuilder tests."""
+
+    items: list[str]
+    api_key: str = ""
+
+
+class TestArrayBuilder:
+    """Tests for AgentToolArrayBuilderArgumentProperties resolution."""
+
+    def test_array_builder_resolves_indexed_static_children_to_list(self):
+        """ArrayBuilder with indexed static children produces an ordered list."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['items']": AgentToolArrayBuilderArgumentProperties(),
+                "$['items'][0]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="alpha"
+                ),
+                "$['items'][1]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="beta"
+                ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {})
+
+        assert result == {"$['items']": ["alpha", "beta"]}
+
+    def test_array_builder_with_sparse_indices_fills_missing_with_none(self):
+        """ArrayBuilder leaves gaps as None for indices without props."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['items']": AgentToolArrayBuilderArgumentProperties(),
+                "$['items'][0]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="first"
+                ),
+                "$['items'][2]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="third"
+                ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {})
+
+        assert result == {"$['items']": ["first", None, "third"]}
+
+    def test_array_builder_with_no_indexed_children_produces_empty_list(self):
+        """ArrayBuilder with no children produces an empty list."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['items']": AgentToolArrayBuilderArgumentProperties(),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {})
+
+        assert result == {"$['items']": []}
+
+    def test_array_builder_ignores_nested_property_children(self):
+        """Children with nested paths like [0]['name'] are out of scope and skipped."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['items']": AgentToolArrayBuilderArgumentProperties(),
+                "$['items'][0]['name']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="ignored"
+                ),
+                "$['items'][1]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="kept"
+                ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {})
+
+        # Only index 1 is recognized as a direct child; index 0 is skipped.
+        assert result == {"$['items']": [None, "kept"]}
+
+    def test_array_builder_resolves_argument_variant_child_from_input(self):
+        """ArrayBuilder children of variant 'argument' resolve from agent input."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['items']": AgentToolArrayBuilderArgumentProperties(),
+                "$['items'][0]": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="userId"
+                ),
+                "$['items'][1]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="literal"
+                ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {"userId": "u-42"})
+
+        assert result == {"$['items']": ["u-42", "literal"]}
+
+    def test_array_builder_resolves_text_builder_child_from_tokens(self):
+        """ArrayBuilder children of variant 'textBuilder' resolve via tokens."""
+        tokens = [
+            TextToken(type=TextTokenType.SIMPLE_TEXT, raw_string="Hello, "),
+            TextToken(type=TextTokenType.VARIABLE, raw_string="input.name"),
+        ]
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['items']": AgentToolArrayBuilderArgumentProperties(),
+                "$['items'][0]": AgentToolTextBuilderArgumentProperties(
+                    is_sensitive=False, tokens=tokens
+                ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {"name": "world"})
+
+        assert result == {"$['items']": ["Hello, world"]}
+
+    def test_array_builder_argument_child_resolving_to_missing_becomes_none(self):
+        """A child argument that doesn't resolve in agent input becomes None in the list."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['items']": AgentToolArrayBuilderArgumentProperties(),
+                "$['items'][0]": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="present"
+                ),
+                "$['items'][1]": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="missing"
+                ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {"present": "yes"})
+
+        assert result == {"$['items']": ["yes", None]}
+
+    def test_array_builder_sensitive_child_runtime_value_preserved(self):
+        """Runtime value for the arrayBuilder keeps real values even when child is sensitive."""
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['items']": AgentToolArrayBuilderArgumentProperties(),
+                "$['items'][0]": AgentToolStaticArgumentProperties(
+                    is_sensitive=True, value="super-secret"
+                ),
+                "$['items'][1]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="public"
+                ),
+            },
+            args_schema=ListInput,
+        )
+        handler = StaticArgsHandler()
+        handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        call = _make_tool_call("test_tool")
+        handler.apply_to_response([call])
+
+        assert call["args"]["items"] == ["super-secret", "public"]
+
+    def test_array_builder_sensitive_child_schema_uses_hidden_placeholder(self):
+        """Schema modification uses display_value, so sensitive items appear as '<hidden>'."""
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['items']": AgentToolArrayBuilderArgumentProperties(),
+                "$['items'][0]": AgentToolStaticArgumentProperties(
+                    is_sensitive=True, value="super-secret"
+                ),
+                "$['items'][1]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="public"
+                ),
+            },
+            args_schema=ListInput,
+        )
+        handler = StaticArgsHandler()
+        processed_tools = handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        modified_tool = processed_tools[0]
+        assert isinstance(modified_tool.args_schema, type) and issubclass(
+            modified_tool.args_schema, BaseModel
+        )
+        schema = modified_tool.args_schema.model_json_schema()
+
+        ref = schema["properties"]["items"]["$ref"]
+        def_name = ref.rsplit("/", 1)[-1]
+        items_def = schema["$defs"][def_name]
+        assert items_def["type"] == "string"
+
+        assert items_def["enum"] == ['["<hidden>", "public"]']
+        assert "super-secret" not in items_def["enum"][0]
+
+
+class TestDeduplicationOfArgumentProperties:
+    """Tests for transitive parent tracking in deduplication."""
+
+    def test_dedup_skips_all_descendants_of_yielded_parent(self):
+        """All paths under a previously yielded parent are skipped, even across
+        non-contiguous siblings — i.e. last_yielded tracks the parent, not just
+        the immediately previous sorted path."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['users']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False,
+                    value={"age": 30, "name": "alice"},
+                ),
+                "$['users']['age']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value=99
+                ),
+                "$['users']['name']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="overwritten"
+                ),
+                "$['v']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="1.0"
+                ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {})
+
+        assert result == {
+            "$['users']": {"age": 30, "name": "alice"},
+            "$['v']": "1.0",
+        }
+
+    def test_dedup_array_builder_swallows_indexed_children_paths(self):
+        """Only the arrayBuilder variant is kept, with the built list."""
+
+        class ResourceWithProps(ArgumentPropertiesMixin):
+            argument_properties = {
+                "$['items']": AgentToolArrayBuilderArgumentProperties(),
+                "$['items'][0]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="a"
+                ),
+                "$['items'][1]": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="b"
+                ),
+            }
+
+        result = resolve_static_args(ResourceWithProps(), {})
+
+        assert result == {"$['items']": ["a", "b"]}
+        assert "$['items'][0]" not in result
+        assert "$['items'][1]" not in result
