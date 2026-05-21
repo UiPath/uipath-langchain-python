@@ -45,7 +45,6 @@ from uipath_langchain.guardrails import (
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
     UiPathPIIDetectionMiddleware,
-    UiPathPromptInjectionMiddleware,
     UiPathUserPromptAttacksMiddleware,
     PIIDetectionEntity,
     HarmfulContentEntity,
@@ -63,9 +62,8 @@ from uipath.core.guardrails import GuardrailScope
 
 | Class | Supported scopes | Stage support | Extra parameters |
 |---|---|---|---|
-| `UiPathPIIDetectionMiddleware` | AGENT, LLM, TOOL | PRE + POST | `entities`, `tools` |
-| `UiPathHarmfulContentMiddleware` | AGENT, LLM, TOOL | PRE + POST | `entities`, `tools` |
-| `UiPathPromptInjectionMiddleware` | LLM only | PRE only | `threshold` (float 0–1, default 0.5) |
+| `UiPathPIIDetectionMiddleware` | AGENT, LLM, TOOL | PRE / POST | `entities`, `tools` |
+| `UiPathHarmfulContentMiddleware` | AGENT, LLM, TOOL | PRE / POST | `entities`, `tools` |
 | `UiPathUserPromptAttacksMiddleware` | LLM only | PRE only | — |
 | `UiPathIntellectualPropertyMiddleware` | AGENT, LLM only | POST only | `entities` |
 | `UiPathDeterministicGuardrailMiddleware` | TOOL only | PRE / POST / PRE_AND_POST | `tools`, `rules`, `stage` |
@@ -100,7 +98,6 @@ from uipath_langchain.guardrails import (
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
     UiPathPIIDetectionMiddleware,
-    UiPathPromptInjectionMiddleware,
     UiPathUserPromptAttacksMiddleware,
     PIIDetectionEntity,
     HarmfulContentEntity,
