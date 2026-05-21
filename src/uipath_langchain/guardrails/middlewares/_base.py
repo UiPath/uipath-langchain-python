@@ -33,6 +33,32 @@ from ._utils import (
 logger = logging.getLogger(__name__)
 
 
+def _get_tool_message_content(result: ToolMessage | Command[Any]) -> Any:
+    """Return the raw content from a ToolMessage or the first ToolMessage in a Command."""
+    if isinstance(result, ToolMessage):
+        return result.content
+    if isinstance(result, Command):
+        update = result.update if hasattr(result, "update") else {}
+        messages = update.get("messages", []) if isinstance(update, dict) else []
+        tool_msg = next((m for m in messages if isinstance(m, ToolMessage)), None)
+        return tool_msg.content if tool_msg is not None else None
+    return None
+
+
+def _parse_str_content(content: str) -> dict[str, Any]:
+    """Parse a string into a dict, trying JSON then ast.literal_eval."""
+    try:
+        parsed = json.loads(content)
+        return parsed if isinstance(parsed, dict) else {"output": parsed}
+    except json.JSONDecodeError:
+        pass
+    try:
+        parsed = ast.literal_eval(content)
+        return parsed if isinstance(parsed, dict) else {"output": parsed}
+    except (ValueError, SyntaxError):
+        return {"output": content}
+
+
 class BuiltInGuardrailMiddlewareMixin:
     """Mixin providing shared evaluation logic for built-in guardrail middlewares.
 
@@ -76,30 +102,13 @@ class BuiltInGuardrailMiddlewareMixin:
         self, result: ToolMessage | Command[Any]
     ) -> dict[str, Any]:
         """Extract tool output data from handler result for POST-stage evaluation."""
-        if isinstance(result, Command):
-            update = result.update if hasattr(result, "update") else {}
-            messages = update.get("messages", []) if isinstance(update, dict) else []
-            tool_msg = next((m for m in messages if isinstance(m, ToolMessage)), None)
-            content = tool_msg.content if tool_msg is not None else None
-        elif isinstance(result, ToolMessage):
-            content = result.content
-        else:
-            return {}
-
+        content = _get_tool_message_content(result)
         if content is None:
             return {}
         if isinstance(content, dict):
             return content
-        elif isinstance(content, str):
-            try:
-                parsed = json.loads(content)
-                return parsed if isinstance(parsed, dict) else {"output": parsed}
-            except json.JSONDecodeError:
-                try:
-                    parsed = ast.literal_eval(content)
-                    return parsed if isinstance(parsed, dict) else {"output": parsed}
-                except (ValueError, SyntaxError):
-                    return {"output": content}
+        if isinstance(content, str):
+            return _parse_str_content(content)
         return {"output": content}
 
     def _extract_tool_input_data(
@@ -137,11 +146,10 @@ class BuiltInGuardrailMiddlewareMixin:
                 raise convert_block_exception(exc) from exc
             except AgentRuntimeError:
                 raise
-            except Exception as e:
-                logger.error(
+            except Exception:
+                logger.exception(
                     f"Error evaluating '{self._name}' guardrail (PRE)"
-                    f" for tool '{tool_name}': {e}",
-                    exc_info=True,
+                    f" for tool '{tool_name}'"
                 )
 
         tool_result = await handler(request)
@@ -167,11 +175,10 @@ class BuiltInGuardrailMiddlewareMixin:
                     raise convert_block_exception(exc) from exc
                 except AgentRuntimeError:
                     raise
-                except Exception as e:
-                    logger.error(
+                except Exception:
+                    logger.exception(
                         f"Error evaluating '{self._name}' guardrail (POST)"
-                        f" for tool '{tool_name}': {e}",
-                        exc_info=True,
+                        f" for tool '{tool_name}'"
                     )
 
         return tool_result
@@ -215,7 +222,5 @@ class BuiltInGuardrailMiddlewareMixin:
             raise convert_block_exception(exc) from exc
         except AgentRuntimeError:
             raise
-        except Exception as e:
-            logger.error(
-                f"Error evaluating guardrail '{self._name}': {e}", exc_info=True
-            )
+        except Exception:
+            logger.exception(f"Error evaluating guardrail '{self._name}'")
