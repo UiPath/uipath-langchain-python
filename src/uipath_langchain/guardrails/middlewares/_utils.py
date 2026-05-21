@@ -33,7 +33,7 @@ def sanitize_tool_name(name: str) -> str:
 
 def create_modified_tool_request(
     request: ToolCallRequest,
-    modified_args: dict[str, Any],
+    modified_args: str | dict[str, Any],
 ) -> ToolCallRequest:
     """Create a new ToolCallRequest with modified args."""
     from dataclasses import replace

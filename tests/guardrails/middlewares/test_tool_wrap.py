@@ -5,6 +5,7 @@ directly on UiPathPIIDetectionMiddleware (concrete subclass) with mocked guardra
 evaluation to avoid real UiPath API calls.
 """
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -54,11 +55,13 @@ def _make_middleware(
     )
 
 
-def _make_request(name: str = "my_tool", args: dict | str = None) -> ToolCallRequest:
-    if args is None:
-        args = {"text": "hello"}
+def _make_request(
+    name: str = "my_tool", args: dict[str, Any] | str | None = None
+) -> ToolCallRequest:
+    resolved_args: dict[str, Any] | str = args if args is not None else {"text": "hello"}
+    tool_call: Any = {"id": "tc1", "name": name, "args": resolved_args}
     return ToolCallRequest(
-        tool_call={"id": "tc1", "name": name, "args": args},
+        tool_call=tool_call,
         tool=MagicMock(),
         state={},
         runtime=MagicMock(),
@@ -102,7 +105,9 @@ class TestExtractToolOutputData:
 
     def test_tool_message_dict_content(self) -> None:
         mw = _make_middleware()
-        msg = ToolMessage(content={"key": "value"}, tool_call_id="tc1")
+        # Patch content after construction since ToolMessage only accepts str at init time
+        msg = _make_tool_message('{"key": "value"}')
+        msg.content = {"key": "value"}  # type: ignore[assignment]
         result = mw._extract_tool_output_data(msg)
         assert result == {"key": "value"}
 
@@ -130,20 +135,29 @@ class TestExtractToolOutputData:
         # Command with a non-ToolMessage — content resolves to None → {}
         from langchain_core.messages import AIMessage
 
-        cmd = Command(update={"messages": [AIMessage(content="hi")]})
+        cmd: Command[Any] = Command(update={"messages": [AIMessage(content="hi")]})
         result = mw._extract_tool_output_data(cmd)
         assert result == {}
 
     def test_command_with_tool_message(self) -> None:
         mw = _make_middleware()
         tool_msg = _make_tool_message('{"cmd_result": "done"}')
-        cmd = Command(update={"messages": [tool_msg]})
+        cmd: Command[Any] = Command(update={"messages": [tool_msg]})
         result = mw._extract_tool_output_data(cmd)
         assert result == {"cmd_result": "done"}
 
+    def test_command_tool_message_not_first(self) -> None:
+        from langchain_core.messages import AIMessage
+
+        mw = _make_middleware()
+        tool_msg = _make_tool_message('{"value": 42}')
+        cmd: Command[Any] = Command(update={"messages": [AIMessage(content="note"), tool_msg]})
+        result = mw._extract_tool_output_data(cmd)
+        assert result == {"value": 42}
+
     def test_command_without_messages(self) -> None:
         mw = _make_middleware()
-        cmd = Command(update={"messages": []})
+        cmd: Command[Any] = Command(update={"messages": []})
         result = mw._extract_tool_output_data(cmd)
         assert result == {}
 

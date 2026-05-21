@@ -106,7 +106,7 @@ agent = create_agent(
             name="Tool PII detector",
             scopes=[GuardrailScope.TOOL],
             stage=GuardrailExecutionStage.PRE_AND_POST,
-            action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
+            action=BlockAction(),
             entities=[
                 PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5),
                 PIIDetectionEntity(PIIDetectionEntityType.CREDIT_CARD_NUMBER, 0.5),
@@ -202,7 +202,7 @@ async def joke_node(state: Input) -> Output:
 
 
 # Build wrapper graph with custom input/output schemas
-builder = StateGraph(Input, input=Input, output=Output)
+builder = StateGraph(Input, input_schema=Input, output_schema=Output)
 builder.add_node("joke", joke_node)
 builder.add_edge(START, "joke")
 builder.add_edge("joke", END)

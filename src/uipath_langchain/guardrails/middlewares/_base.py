@@ -1,6 +1,7 @@
 """Base class for built-in UiPath guardrail middlewares."""
 
 import ast
+import asyncio
 import json
 import logging
 from typing import Any
@@ -39,13 +40,15 @@ class BuiltInGuardrailMiddlewareMixin:
         _guardrail (BuiltInValidatorGuardrail): The guardrail configuration.
         _name (str): The guardrail name used in log messages.
         action (GuardrailAction): The action to take on violation.
+        _tool_names (list[str] | None): Tool names to intercept; None skips all tools.
+        _tool_stage (GuardrailExecutionStage): PRE, POST, or PRE_AND_POST evaluation.
     """
 
     _guardrail: BuiltInValidatorGuardrail
     _name: str
     action: GuardrailAction
-    _tool_names: list[str] | None
-    _tool_stage: GuardrailExecutionStage
+    _tool_names: list[str] | None = None
+    _tool_stage: GuardrailExecutionStage = GuardrailExecutionStage.PRE_AND_POST
     _uipath: UiPath | None = None
 
     def _get_uipath(self) -> UiPath:
@@ -76,11 +79,8 @@ class BuiltInGuardrailMiddlewareMixin:
         if isinstance(result, Command):
             update = result.update if hasattr(result, "update") else {}
             messages = update.get("messages", []) if isinstance(update, dict) else []
-            content = (
-                messages[0].content
-                if messages and isinstance(messages[0], ToolMessage)
-                else None
-            )
+            tool_msg = next((m for m in messages if isinstance(m, ToolMessage)), None)
+            content = tool_msg.content if tool_msg is not None else None
         elif isinstance(result, ToolMessage):
             content = result.content
         else:
@@ -123,16 +123,15 @@ class BuiltInGuardrailMiddlewareMixin:
         if self._tool_names is None or sanitized_tool_name not in self._tool_names:
             return await handler(request)
 
-        input_data = self._extract_tool_input_data(request)
-
         if self._tool_stage in (
             GuardrailExecutionStage.PRE,
             GuardrailExecutionStage.PRE_AND_POST,
         ):
+            input_data = self._extract_tool_input_data(request)
             try:
-                result = self._evaluate_guardrail(input_data)
+                result = await asyncio.to_thread(self._evaluate_guardrail, input_data)
                 modified_input = self._handle_validation_result(result, input_data)
-                if modified_input is not None and isinstance(modified_input, dict):
+                if modified_input is not None:
                     request = create_modified_tool_request(request, modified_input)
             except GuardrailBlockException as exc:
                 raise convert_block_exception(exc) from exc
@@ -154,10 +153,16 @@ class BuiltInGuardrailMiddlewareMixin:
             output_data = self._extract_tool_output_data(tool_result)
             if output_data:
                 try:
-                    result = self._evaluate_guardrail(output_data)
-                    modified_output = self._handle_validation_result(result, output_data)
+                    result = await asyncio.to_thread(
+                        self._evaluate_guardrail, output_data
+                    )
+                    modified_output = self._handle_validation_result(
+                        result, output_data
+                    )
                     if modified_output is not None:
-                        tool_result = create_modified_tool_result(tool_result, modified_output)
+                        tool_result = create_modified_tool_result(
+                            tool_result, modified_output
+                        )
                 except GuardrailBlockException as exc:
                     raise convert_block_exception(exc) from exc
                 except AgentRuntimeError:
