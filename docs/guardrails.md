@@ -430,16 +430,28 @@ Used in `LogAction(severity_level=...)`. Imported from `uipath_langchain.guardra
 
 Imported from `uipath_langchain.guardrails.enums`. Wrap each value in `PIIDetectionEntity(entity_type, threshold=0.5)` — `threshold` is a float from `0.0` to `1.0`.
 
-<!-- ENUM uipath_langchain.guardrails.enums.PIIDetectionEntityType -->
+::: uipath.platform.guardrails.decorators._enums.PIIDetectionEntityType
+    options:
+      show_root_heading: false
+      show_source: false
+      members: false
 
 ### HarmfulContentEntityType
 
 Imported from `uipath_langchain.guardrails.enums`. Wrap each value in `HarmfulContentEntity(entity_type, threshold=2)` — `threshold` must be one of `0`, `2`, `4`, or `6` (higher = less sensitive).
 
-<!-- ENUM uipath_langchain.guardrails.enums.HarmfulContentEntityType -->
+::: uipath.platform.guardrails.decorators._enums.HarmfulContentEntityType
+    options:
+      show_root_heading: false
+      show_source: false
+      members: false
 
 ### IntellectualPropertyEntityType
 
 Imported from `uipath_langchain.guardrails.enums`. Pass values directly in `entities=[...]` — no wrapper model class.
 
-<!-- ENUM uipath_langchain.guardrails.enums.IntellectualPropertyEntityType -->
+::: uipath.platform.guardrails.decorators._enums.IntellectualPropertyEntityType
+    options:
+      show_root_heading: false
+      show_source: false
+      members: false
