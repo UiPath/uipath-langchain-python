@@ -5,11 +5,3 @@ repos:
     - id: ruff
       args: [ --fix ]
     - id: ruff-format
-- repo: local
-  hooks:
-    - id: gen-guardrail-enums
-      name: Regenerate guardrail enum tables from code
-      language: python
-      entry: python scripts/gen_guardrail_enums.py
-      files: ^(docs/guardrails\.md|src/uipath_langchain/guardrails/enums\.py)$
-      pass_filenames: false

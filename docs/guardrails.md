@@ -428,52 +428,30 @@ Used in `LogAction(severity_level=...)`. Imported from `uipath_langchain.guardra
 
 ### PIIDetectionEntityType
 
-Imported from `uipath_langchain.guardrails.enums`. Wrap each value in `PIIDetectionEntity(entity_type, threshold=0.5)` — `threshold` is a float from `0.0` to `1.0`.
+Wrap each value in `PIIDetectionEntity(entity_type, threshold=0.5)` — `threshold` is a float from `0.0` to `1.0`.
 
-<!-- BEGIN ENUM PIIDetectionEntityType -->
-| Value |
-|---|
-| `PERSON` |
-| `ADDRESS` |
-| `DATE` |
-| `PHONE_NUMBER` |
-| `EUGPS_COORDINATES` |
-| `EMAIL` |
-| `CREDIT_CARD_NUMBER` |
-| `INTERNATIONAL_BANKING_ACCOUNT_NUMBER` |
-| `SWIFT_CODE` |
-| `ABA_ROUTING_NUMBER` |
-| `US_DRIVERS_LICENSE_NUMBER` |
-| `UK_DRIVERS_LICENSE_NUMBER` |
-| `US_INDIVIDUAL_TAXPAYER_IDENTIFICATION` |
-| `UK_UNIQUE_TAXPAYER_NUMBER` |
-| `US_BANK_ACCOUNT_NUMBER` |
-| `US_SOCIAL_SECURITY_NUMBER` |
-| `USUK_PASSPORT_NUMBER` |
-| `URL` |
-| `IP_ADDRESS` |
-<!-- END ENUM PIIDetectionEntityType -->
+::: uipath_langchain.guardrails.enums.PIIDetectionEntityType
+    options:
+      show_root_heading: false
+      show_source: false
+      members_order: source
 
 ### HarmfulContentEntityType
 
-Imported from `uipath_langchain.guardrails.enums`. Wrap each value in `HarmfulContentEntity(entity_type, threshold=2)` — `threshold` must be one of `0`, `2`, `4`, or `6` (higher = less sensitive).
+Wrap each value in `HarmfulContentEntity(entity_type, threshold=2)` — `threshold` must be one of `0`, `2`, `4`, or `6` (higher = less sensitive).
 
-<!-- BEGIN ENUM HarmfulContentEntityType -->
-| Value |
-|---|
-| `HATE` |
-| `SELF_HARM` |
-| `SEXUAL` |
-| `VIOLENCE` |
-<!-- END ENUM HarmfulContentEntityType -->
+::: uipath_langchain.guardrails.enums.HarmfulContentEntityType
+    options:
+      show_root_heading: false
+      show_source: false
+      members_order: source
 
 ### IntellectualPropertyEntityType
 
-Imported from `uipath_langchain.guardrails.enums`. Pass values directly in `entities=[...]` — no wrapper model class.
+Pass values directly in `entities=[...]` — no wrapper model class.
 
-<!-- BEGIN ENUM IntellectualPropertyEntityType -->
-| Value |
-|---|
-| `TEXT` |
-| `CODE` |
-<!-- END ENUM IntellectualPropertyEntityType -->
+::: uipath_langchain.guardrails.enums.IntellectualPropertyEntityType
+    options:
+      show_root_heading: false
+      show_source: false
+      members_order: source
