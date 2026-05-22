@@ -62,8 +62,8 @@ from uipath.core.guardrails import GuardrailScope
 
 | Class | Supported scopes | Stage support | Extra parameters |
 |---|---|---|---|
-| `UiPathPIIDetectionMiddleware` | AGENT, LLM, TOOL | PRE / POST | `entities`, `tools` |
-| `UiPathHarmfulContentMiddleware` | AGENT, LLM, TOOL | PRE / POST | `entities`, `tools` |
+| `UiPathPIIDetectionMiddleware` | AGENT, LLM, TOOL | PRE / POST / PRE_AND_POST | `entities`, `tools`, `stage` |
+| `UiPathHarmfulContentMiddleware` | AGENT, LLM, TOOL | PRE / POST / PRE_AND_POST | `entities`, `tools`, `stage` |
 | `UiPathUserPromptAttacksMiddleware` | LLM only | PRE only | — |
 | `UiPathIntellectualPropertyMiddleware` | AGENT, LLM only | POST only | `entities` |
 | `UiPathDeterministicGuardrailMiddleware` | TOOL only | PRE / POST / PRE_AND_POST | `tools`, `rules`, `stage` |
@@ -79,7 +79,7 @@ All classes share these common parameters:
 
 Additional parameters per class:
 
-- **`UiPathPIIDetectionMiddleware`** / **`UiPathHarmfulContentMiddleware`**: `entities` (list of entity configs), `tools` (restrict TOOL-scope hooks to specific tools).
+- **`UiPathPIIDetectionMiddleware`** / **`UiPathHarmfulContentMiddleware`**: `entities` (list of entity configs), `tools` (restrict TOOL-scope hooks to specific tools), `stage`.
 - **`UiPathUserPromptAttacksMiddleware`**: no extra parameters.
 - **`UiPathIntellectualPropertyMiddleware`**: `entities` (list of `IntellectualPropertyEntityType` values).
 - **`UiPathDeterministicGuardrailMiddleware`**: `tools` (required — list of tools to guard), `rules` (list of lambda functions), `stage`.
