@@ -2,15 +2,17 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
+from langchain_core.callbacks import BaseCallbackHandler
 from uipath.core.feature_flags import FeatureFlags
+from uipath.llm_client.utils.headers import (
+    get_dynamic_request_headers,
+    set_dynamic_request_headers,
+)
 
 from uipath_langchain.chat.chat_model_factory import (
     _TraceContextHeadersCallback,
     _ensure_trace_context_callback,
 )
-
-_UNSET = object()
 
 
 class TestTraceContextHeadersCallback:
@@ -18,9 +20,11 @@ class TestTraceContextHeadersCallback:
 
     def setup_method(self) -> None:
         FeatureFlags.configure_flags({"EnableTraceContextHeaders": True})
+        set_dynamic_request_headers({})
 
     def teardown_method(self) -> None:
         FeatureFlags.reset_flags()
+        set_dynamic_request_headers({})
 
     def test_returns_headers_with_active_span(self) -> None:
         mock_span = MagicMock()
@@ -31,12 +35,15 @@ class TestTraceContextHeadersCallback:
 
         cb = _TraceContextHeadersCallback()
         with patch(
-            "uipath.platform.chat.llm_trace_context.UiPathSpanUtils"
+            "uipath.core.tracing.span_utils.UiPathSpanUtils"
             ".get_external_current_span",
             return_value=mock_span,
+        ), patch.dict(
+            "os.environ", {"UIPATH_TRACE_ID": "aabbccddeeff00112233445566778899"}
         ):
-            headers = cb.get_headers()
+            cb._merge_headers()
 
+        headers = get_dynamic_request_headers()
         assert "x-uipath-traceparent-id" in headers
         assert headers["x-uipath-traceparent-id"].startswith("00-")
         assert "x-uipath-tracebaggage" in headers
@@ -45,7 +52,8 @@ class TestTraceContextHeadersCallback:
     def test_returns_empty_when_flag_disabled(self) -> None:
         FeatureFlags.configure_flags({"EnableTraceContextHeaders": False})
         cb = _TraceContextHeadersCallback()
-        assert cb.get_headers() == {}
+        cb._merge_headers()
+        assert get_dynamic_request_headers() == {}
 
 
 class TestEnsureTraceContextCallback:
@@ -62,7 +70,7 @@ class TestEnsureTraceContextCallback:
         assert any(isinstance(cb, _TraceContextHeadersCallback) for cb in result)
 
     def test_does_not_duplicate(self) -> None:
-        existing = [_TraceContextHeadersCallback()]
+        existing: list[BaseCallbackHandler] = [_TraceContextHeadersCallback()]
         result = _ensure_trace_context_callback(existing)
         count = sum(1 for cb in result if isinstance(cb, _TraceContextHeadersCallback))
         assert count == 1
