@@ -182,9 +182,7 @@ class AwsBedrockCompletionsPassthroughClient:
         )
         headers["X-UiPath-LlmGateway-ApiFlavor"] = self.api_flavor
         headers["X-UiPath-Streaming-Enabled"] = streaming
-        headers.update(
-            build_trace_context_headers(extra_baggage=["source=agents"])
-        )
+        headers.update(build_trace_context_headers(extra_baggage=["source=agents"]))
 
         request.headers.update(headers)
 
