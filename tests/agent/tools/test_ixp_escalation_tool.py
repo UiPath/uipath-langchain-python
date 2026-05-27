@@ -20,7 +20,7 @@ from uipath.platform.documents import (
 
 from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphState
-from uipath_langchain.agent.tools.ixp_escalation_tool import create_ixp_escalation_tool
+from uipath_langchain.agent.tools.escalation.ixp_vs import create_ixp_escalation_tool
 
 
 def _passthrough_task(fn):
@@ -185,7 +185,7 @@ class TestIxpEscalationToolWrapper:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.ixp_vs.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_wrapper_retrieves_extraction_from_state(
         self,
@@ -285,7 +285,7 @@ class TestIxpEscalationToolWrapper:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.ixp_vs.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_wrapper_raises_on_document_rejection(
         self,
@@ -366,7 +366,7 @@ class TestIxpEscalationToolExecution:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.ixp_vs.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_tool_calls_interrupt_with_correct_params(
         self,
@@ -407,7 +407,7 @@ class TestIxpEscalationToolExecution:
         assert validation_arg.task_url == "https://example.com/actions_/tasks/123"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.ixp_vs.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_tool_uses_default_action_title_when_not_provided(
         self, mock_interrupt, mock_uipath_cls, mock_extraction_response
@@ -460,7 +460,7 @@ class TestIxpEscalationToolExecution:
         assert sdk_kwargs.kwargs["action_title"] == "VS Escalation Task"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.ixp_vs.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_tool_uses_default_priority_when_not_provided(
         self, mock_interrupt, mock_uipath_cls, mock_extraction_response
@@ -513,7 +513,7 @@ class TestIxpEscalationToolExecution:
         assert sdk_kwargs.kwargs["action_priority"] == ActionPriority.MEDIUM
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.ixp_vs.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_tool_returns_data_projection_as_dict(
         self,
@@ -541,7 +541,7 @@ class TestIxpEscalationToolExecution:
         assert "data" in result
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.ixp_escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.ixp_vs.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_tool_stores_validation_response_in_metadata(
         self,

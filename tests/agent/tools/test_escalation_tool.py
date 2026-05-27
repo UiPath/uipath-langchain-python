@@ -15,16 +15,18 @@ from uipath.agent.models.agent import (
 )
 from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
 
-from uipath_langchain.agent.tools.escalation_memory import (
-    EscalationMemoryCachedResult,
-    _get_user_email,
-)
-from uipath_langchain.agent.tools.escalation_tool import (
+from uipath_langchain.agent.tools.escalation.app_task import (
     _build_escalation_memory_payload,
-    _parse_task_data,
     create_escalation_tool,
+)
+from uipath_langchain.agent.tools.escalation.common import (
+    _parse_task_data,
     resolve_asset,
     resolve_recipient_value,
+)
+from uipath_langchain.agent.tools.escalation.memory import (
+    EscalationMemoryCachedResult,
+    _get_user_email,
 )
 
 
@@ -39,7 +41,7 @@ class TestResolveAsset:
     """Test the resolve_asset function."""
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.common.UiPath")
     async def test_resolve_asset_success(self, mock_uipath_class):
         """Test successful asset retrieval."""
         # Setup mock
@@ -59,7 +61,7 @@ class TestResolveAsset:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.common.UiPath")
     async def test_resolve_asset_no_value(self, mock_uipath_class):
         """Test asset with no value raises ValueError."""
         # Setup mock
@@ -76,7 +78,7 @@ class TestResolveAsset:
         assert "Asset 'empty_asset' has no value configured" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.common.UiPath")
     async def test_resolve_asset_not_found(self, mock_uipath_class):
         """Test asset not found raises ValueError."""
         # Setup mock
@@ -91,7 +93,7 @@ class TestResolveAsset:
         assert "Asset 'missing_asset' has no value configured" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.common.UiPath")
     async def test_resolve_asset_retrieval_exception(self, mock_uipath_class):
         """Test exception during asset retrieval raises ValueError with context."""
         # Setup mock
@@ -117,7 +119,7 @@ class TestResolveRecipientValue:
 
     @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
-    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_asset")
+    @patch("uipath_langchain.agent.tools.escalation.common.resolve_asset")
     async def test_resolve_recipient_asset_user_email(self, mock_resolve_asset):
         """Test ASSET_USER_EMAIL type calls resolve_asset."""
         mock_resolve_asset.return_value = "resolved@example.com"
@@ -139,7 +141,7 @@ class TestResolveRecipientValue:
 
     @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
-    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_asset")
+    @patch("uipath_langchain.agent.tools.escalation.common.resolve_asset")
     async def test_resolve_recipient_asset_group_name(self, mock_resolve_asset):
         """Test ASSET_GROUP_NAME type calls resolve_asset."""
         mock_resolve_asset.return_value = "ResolvedGroup"
@@ -176,7 +178,7 @@ class TestResolveRecipientValue:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_asset")
+    @patch("uipath_langchain.agent.tools.escalation.common.resolve_asset")
     async def test_resolve_recipient_propagates_error_when_asset_resolution_fails(
         self, mock_resolve_asset
     ):
@@ -299,7 +301,7 @@ class TestEscalationToolMetadata:
         assert isinstance(tool.metadata["_span_context"], dict)
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_metadata_has_recipient(
         self, mock_interrupt, mock_uipath_class, escalation_resource
@@ -328,7 +330,7 @@ class TestEscalationToolMetadata:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_metadata_recipient_none_when_no_recipients(
         self, mock_interrupt, mock_uipath_class, escalation_resource_no_recipient
@@ -353,7 +355,7 @@ class TestEscalationToolMetadata:
         assert tool.metadata["recipient"] is None
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_with_string_task_title(
         self, mock_interrupt, mock_uipath_class
@@ -403,7 +405,7 @@ class TestEscalationToolMetadata:
         assert create_call[1]["title"] == "Static Task Title"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_with_text_builder_task_title(
         self, mock_interrupt, mock_uipath_class
@@ -461,7 +463,7 @@ class TestEscalationToolMetadata:
         assert create_call[1]["title"] == "Approve request for John Doe"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_with_empty_task_title_defaults_to_escalation_task(
         self, mock_interrupt, mock_uipath_class
@@ -559,7 +561,7 @@ class TestEscalationToolOutputSchema:
         assert args_schema is not None
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_result_validation(
         self, mock_interrupt, mock_uipath_class, escalation_resource
@@ -587,7 +589,7 @@ class TestEscalationToolOutputSchema:
         assert result["outcome"] == "approve"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_extracts_action_from_result(
         self, mock_interrupt, mock_uipath_class, escalation_resource
@@ -611,7 +613,7 @@ class TestEscalationToolOutputSchema:
         assert mock_interrupt.called
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_raises_when_task_is_deleted(
         self, mock_interrupt, mock_uipath_class, escalation_resource
@@ -636,7 +638,7 @@ class TestEscalationToolOutputSchema:
             await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_dict_result_without_is_deleted_defaults_to_false(
         self, mock_interrupt, mock_uipath_class, escalation_resource
@@ -661,7 +663,7 @@ class TestEscalationToolOutputSchema:
         assert result["output"] == {"approved": True, "reason": "looks good"}
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_escalation_tool_with_outcome_mapping_end(
         self, mock_interrupt, mock_uipath_class
@@ -714,7 +716,7 @@ class TestEscalationToolOutputSchema:
 
     @pytest.mark.asyncio
     @patch(
-        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+        "uipath_langchain.agent.tools.escalation.app_task._check_escalation_memory_cache"
     )
     async def test_cached_escalation_uses_outcome_mapping(
         self, mock_check_memory_cache: AsyncMock
@@ -757,9 +759,9 @@ class TestEscalationToolOutputSchema:
             await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.get_execution_folder_path")
+    @patch("uipath_langchain.agent.tools.escalation.common.get_execution_folder_path")
     @patch(
-        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+        "uipath_langchain.agent.tools.escalation.app_task._check_escalation_memory_cache"
     )
     async def test_cache_lookup_uses_memory_folder_path(
         self,
@@ -951,7 +953,7 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_creates_task_then_interrupts_with_wait_escalation(
         self, mock_interrupt, mock_uipath_class, escalation_resource
@@ -986,7 +988,7 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
 
     @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_creates_task_with_execution_folder_path(
         self, mock_interrupt, mock_uipath_class, escalation_resource
@@ -1013,7 +1015,7 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
         assert create_call_kwargs["app_folder_path"] == "/Test/Folder"
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     async def test_task_creation_failure_propagates(
         self, mock_uipath_class, escalation_resource
     ):
@@ -1030,14 +1032,14 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
 
     @pytest.mark.asyncio
     @patch(
-        "uipath_langchain.agent.tools.escalation_tool.get_current_span_and_trace_ids"
+        "uipath_langchain.agent.tools.escalation.app_task.get_current_span_and_trace_ids"
     )
-    @patch("uipath_langchain.agent.tools.escalation_tool._ingest_escalation_memory")
-    @patch("uipath_langchain.agent.tools.escalation_tool._resolve_user_id")
+    @patch("uipath_langchain.agent.tools.escalation.app_task._ingest_escalation_memory")
+    @patch("uipath_langchain.agent.tools.escalation.app_task._resolve_user_id")
     @patch(
-        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+        "uipath_langchain.agent.tools.escalation.app_task._check_escalation_memory_cache"
     )
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_memory_ingest_uses_traced_escalation_span_context(
         self,
@@ -1110,14 +1112,14 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
 
     @pytest.mark.asyncio
     @patch(
-        "uipath_langchain.agent.tools.escalation_tool.get_current_span_and_trace_ids"
+        "uipath_langchain.agent.tools.escalation.app_task.get_current_span_and_trace_ids"
     )
-    @patch("uipath_langchain.agent.tools.escalation_tool._ingest_escalation_memory")
-    @patch("uipath_langchain.agent.tools.escalation_tool._resolve_user_id")
+    @patch("uipath_langchain.agent.tools.escalation.app_task._ingest_escalation_memory")
+    @patch("uipath_langchain.agent.tools.escalation.app_task._resolve_user_id")
     @patch(
-        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+        "uipath_langchain.agent.tools.escalation.app_task._check_escalation_memory_cache"
     )
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_memory_ingest_falls_back_to_current_span_context(
         self,
@@ -1184,14 +1186,14 @@ class TestEscalationToolCreatesTaskBeforeInterrupt:
 
     @pytest.mark.asyncio
     @patch(
-        "uipath_langchain.agent.tools.escalation_tool.get_current_span_and_trace_ids"
+        "uipath_langchain.agent.tools.escalation.app_task.get_current_span_and_trace_ids"
     )
-    @patch("uipath_langchain.agent.tools.escalation_tool._ingest_escalation_memory")
-    @patch("uipath_langchain.agent.tools.escalation_tool._resolve_user_id")
+    @patch("uipath_langchain.agent.tools.escalation.app_task._ingest_escalation_memory")
+    @patch("uipath_langchain.agent.tools.escalation.app_task._resolve_user_id")
     @patch(
-        "uipath_langchain.agent.tools.escalation_tool._check_escalation_memory_cache"
+        "uipath_langchain.agent.tools.escalation.app_task._check_escalation_memory_cache"
     )
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.app_task.UiPath")
     @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
     async def test_memory_ingest_skips_when_span_context_is_unavailable(
         self,

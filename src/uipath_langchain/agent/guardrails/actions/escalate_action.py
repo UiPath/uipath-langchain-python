@@ -114,9 +114,9 @@ class EscalateAction(GuardrailAction):
             if existing_task is not None:
                 return {}
 
-            # Lazy import to avoid circular dependency with escalation_tool
+            # Lazy import to avoid circular dependency with escalation tools
             from ...react.types import AgentGraphState
-            from ...tools.escalation_tool import resolve_recipient_value
+            from ...tools.escalation import resolve_recipient_value
             from ...tools.utils import sanitize_dict_for_serialization
 
             internal_fields = set(AgentGraphState.model_fields.keys())

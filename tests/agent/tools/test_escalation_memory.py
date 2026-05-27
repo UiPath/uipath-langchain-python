@@ -15,7 +15,7 @@ from uipath.platform.common._bindings import (
 )
 from uipath.platform.memory import EscalationMemorySearchResponse, SearchMode
 
-from uipath_langchain.agent.tools.escalation_memory import (
+from uipath_langchain.agent.tools.escalation.memory import (
     ESCALATION_MEMORY_STRATEGY,
     MEMORY_CACHE_HIT_METRIC,
     MEMORY_CACHE_MISS_METRIC,
@@ -130,8 +130,8 @@ class TestGetEscalationMemorySpaceId:
             _get_escalation_memory_space_id(resource) == "space-from-memory-properties"
         )
 
-    @patch("uipath_langchain.agent.tools.escalation_memory.get_execution_folder_path")
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.get_execution_folder_path")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     def test_resolves_space_id_from_agent_memory_feature(
         self,
         mock_uipath_cls: MagicMock,
@@ -167,7 +167,7 @@ class TestGetEscalationMemorySpaceId:
             folder_path="/My Workspace",
         )
 
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     def test_resolves_agent_memory_feature_with_resource_overwrite(
         self,
         mock_uipath_cls: MagicMock,
@@ -285,7 +285,7 @@ class TestGetEscalationMemorySpaceId:
 
         assert _get_escalation_memory_space_name(resource, agent) == "MemorySpace"
 
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     def test_space_name_resolution_returns_none_when_lookup_fails(
         self,
         mock_uipath_cls: MagicMock,
@@ -298,7 +298,7 @@ class TestGetEscalationMemorySpaceId:
 
         assert result is None
 
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     def test_space_name_resolution_returns_none_when_lookup_is_empty(
         self,
         mock_uipath_cls: MagicMock,
@@ -448,8 +448,8 @@ class TestResolveUserId:
         assert await _resolve_user_id({"identifier": USER_GUID}) == USER_GUID
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPathConfig")
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPathConfig")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_resolves_email_to_guid_identifier(
         self,
         mock_uipath_cls: MagicMock,
@@ -480,8 +480,8 @@ class TestResolveUserId:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPathConfig")
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPathConfig")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_ignores_directory_identifier_that_is_not_guid(
         self,
         mock_uipath_cls: MagicMock,
@@ -504,8 +504,8 @@ class TestResolveUserId:
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPathConfig")
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPathConfig")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_skips_directory_entries_for_different_email(
         self,
         mock_uipath_cls: MagicMock,
@@ -529,7 +529,7 @@ class TestResolveUserId:
         assert await _resolve_user_id({"displayName": "Reviewer"}) is None
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPathConfig")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPathConfig")
     async def test_returns_none_when_organization_id_is_missing(
         self,
         mock_config: MagicMock,
@@ -541,8 +541,8 @@ class TestResolveUserId:
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPathConfig")
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPathConfig")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_returns_none_when_directory_lookup_fails(
         self,
         mock_uipath_cls: MagicMock,
@@ -562,8 +562,8 @@ class TestResolveUserId:
 
 class TestCheckEscalationMemoryCache:
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory._record_custom_metric")
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory._record_custom_metric")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_returns_cached_answer(
         self, mock_uipath_cls: MagicMock, mock_record_metric: MagicMock
     ) -> None:
@@ -637,7 +637,7 @@ class TestCheckEscalationMemoryCache:
     ) -> None:
         from opentelemetry import trace
 
-        from uipath_langchain.agent.tools import escalation_memory
+        from uipath_langchain.agent.tools.escalation import memory as escalation_memory
 
         fake_tracer = _FakeTracer()
         tracer_names: list[str] = []
@@ -734,7 +734,7 @@ class TestCheckEscalationMemoryCache:
     ) -> None:
         from opentelemetry import trace
 
-        from uipath_langchain.agent.tools import escalation_memory
+        from uipath_langchain.agent.tools.escalation import memory as escalation_memory
 
         fake_tracer = _FakeTracer()
         tracer_names: list[str] = []
@@ -808,8 +808,8 @@ class TestCheckEscalationMemoryCache:
         assert apply_memory_span.statuses == [expected_status]
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory._record_custom_metric")
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory._record_custom_metric")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_returns_cached_answer_when_sdk_response_has_string_answer(
         self, mock_uipath_cls: MagicMock, mock_record_metric: MagicMock
     ) -> None:
@@ -858,8 +858,8 @@ class TestCheckEscalationMemoryCache:
         mock_record_metric.assert_called_once_with(MEMORY_CACHE_HIT_METRIC, "space-123")
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory._record_custom_metric")
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory._record_custom_metric")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_returns_none_on_empty_results(
         self, mock_uipath_cls: MagicMock, mock_record_metric: MagicMock
     ) -> None:
@@ -876,7 +876,7 @@ class TestCheckEscalationMemoryCache:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_returns_none_on_failure(self, mock_uipath_cls: MagicMock) -> None:
         mock_sdk = MagicMock()
         mock_uipath_cls.return_value = mock_sdk
@@ -888,7 +888,7 @@ class TestCheckEscalationMemoryCache:
         assert result is None
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory._record_custom_metric")
+    @patch("uipath_langchain.agent.tools.escalation.memory._record_custom_metric")
     async def test_treats_empty_search_fields_as_cache_miss(
         self, mock_record_metric: MagicMock
     ) -> None:
@@ -900,7 +900,7 @@ class TestCheckEscalationMemoryCache:
         )
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory._record_custom_metric")
+    @patch("uipath_langchain.agent.tools.escalation.memory._record_custom_metric")
     async def test_treats_unmatched_configured_fields_as_cache_miss(
         self, mock_record_metric: MagicMock
     ) -> None:
@@ -986,7 +986,7 @@ class TestBuildSearchFields:
 
 class TestIngestEscalationMemory:
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_calls_ingest(self, mock_uipath_cls: MagicMock) -> None:
         mock_sdk = MagicMock()
         mock_uipath_cls.return_value = mock_sdk
@@ -1008,7 +1008,7 @@ class TestIngestEscalationMemory:
         assert request.user_id == USER_GUID
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_calls_ingest_without_user_id(
         self, mock_uipath_cls: MagicMock
     ) -> None:
@@ -1028,7 +1028,7 @@ class TestIngestEscalationMemory:
         assert request.user_id is None
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_calls_ingest_without_invalid_user_id(
         self, mock_uipath_cls: MagicMock
     ) -> None:
@@ -1049,7 +1049,7 @@ class TestIngestEscalationMemory:
         assert request.user_id is None
 
     @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_memory.UiPath")
+    @patch("uipath_langchain.agent.tools.escalation.memory.UiPath")
     async def test_graceful_on_failure(self, mock_uipath_cls: MagicMock) -> None:
         mock_sdk = MagicMock()
         mock_uipath_cls.return_value = mock_sdk
@@ -1120,7 +1120,7 @@ class TestEscalationMemoryUtilities:
         monkeypatch.setattr(metrics, "get_meter", lambda _name: meter)
         monkeypatch.setattr(trace, "get_current_span", lambda: Span())
 
-        from uipath_langchain.agent.tools import escalation_memory
+        from uipath_langchain.agent.tools.escalation import memory as escalation_memory
 
         escalation_memory._metric_counters.clear()
         _record_custom_metric(MEMORY_CACHE_HIT_METRIC, "space-123")
@@ -1159,7 +1159,7 @@ class TestEscalationMemoryUtilities:
             MagicMock(side_effect=RuntimeError("metrics unavailable")),
         )
 
-        from uipath_langchain.agent.tools import escalation_memory
+        from uipath_langchain.agent.tools.escalation import memory as escalation_memory
 
         escalation_memory._metric_counters.clear()
         _record_custom_metric(MEMORY_CACHE_MISS_METRIC, "space-123")

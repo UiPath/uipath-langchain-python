@@ -1,4 +1,10 @@
-"""Ixp escalation tool."""
+"""IXP-VS escalation (``escalationType=1``).
+
+Unlike the app-task and quick-form variants, this one routes through
+the Document Understanding extraction validation endpoint. It reads
+an extraction result that was stored by a sibling IXP extraction tool
+and suspends until validation completes.
+"""
 
 from typing import Any
 
@@ -20,14 +26,11 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.types import AgentGraphState
-from uipath_langchain.agent.tools.tool_node import (
-    ToolWrapperMixin,
-    ToolWrapperReturnType,
-)
 
-from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
-from .structured_tool_with_output_type import StructuredToolWithOutputType
-from .utils import (
+from ...exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ..structured_tool_with_output_type import StructuredToolWithOutputType
+from ..tool_node import ToolWrapperMixin, ToolWrapperReturnType
+from ..utils import (
     resolve_task_title,
     sanitize_dict_for_serialization,
     sanitize_tool_name,

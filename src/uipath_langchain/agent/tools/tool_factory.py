@@ -20,13 +20,15 @@ from uipath.agent.models.agent import (
 from uipath_langchain.chat.hitl import REQUIRE_CONVERSATIONAL_CONFIRMATION
 
 from .context_tool import create_context_tool
-from .escalation_tool import create_escalation_tool
+from .escalation import (
+    create_escalation_tool,
+    create_ixp_escalation_tool,
+    create_quick_form_escalation_tool,
+)
 from .extraction_tool import create_ixp_extraction_tool
 from .integration_tool import create_integration_tool
 from .internal_tools import create_internal_tool
-from .ixp_escalation_tool import create_ixp_escalation_tool
 from .process_tool import create_process_tool
-from .quick_form_escalation_tool import create_quick_form_escalation_tool
 
 logger = getLogger(__name__)
 
