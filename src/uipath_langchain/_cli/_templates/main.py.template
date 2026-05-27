@@ -3,7 +3,7 @@ from langgraph.graph import START, StateGraph, END
 from uipath_langchain.chat import UiPathChat
 from pydantic import BaseModel
 
-llm = UiPathChat(model="gpt-4o-mini-2024-07-18")
+llm = UiPathChat(model="gpt-4.1-mini-2025-04-14")
 
 
 class GraphState(BaseModel):
