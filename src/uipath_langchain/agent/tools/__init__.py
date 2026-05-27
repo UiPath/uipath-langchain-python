@@ -8,6 +8,7 @@ from .integration_tool import create_integration_tool
 from .ixp_escalation_tool import create_ixp_escalation_tool
 from .mcp import open_mcp_tools
 from .process_tool import create_process_tool
+from .quick_form_escalation_tool import create_quick_form_escalation_tool
 from .tool_factory import (
     create_tools_from_resources,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "create_escalation_tool",
     "create_ixp_extraction_tool",
     "create_ixp_escalation_tool",
+    "create_quick_form_escalation_tool",
     "UiPathToolNode",
     "RunnableCallableWithTool",
     "ToolWrapperMixin",
