@@ -21,7 +21,12 @@ from uipath.agent.models.agent import (
 )
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.common import CreateBatchTransform, CreateDeepRag, UiPathConfig
+from uipath.platform.common import (
+    CreateBatchTransform,
+    CreateDeepRag,
+    UiPathConfig,
+    resource_override,
+)
 from uipath.platform.context_grounding import (
     BatchTransformOutputColumn,
     CitationMode,
@@ -132,6 +137,30 @@ def is_static_query(resource: AgentContextResourceConfig) -> bool:
     if resource.settings.query is None or resource.settings.query.variant is None:
         return False
     return resource.settings.query.variant.lower() == "static"
+
+
+@resource_override(resource_type="index")
+def _apply_index_binding(
+    name: str | None, folder_path: str | None
+) -> tuple[str | None, str | None]:
+    """Identity passthrough — the @resource_override decorator swaps `name`
+    and `folder_path` with the BYOC binding overwrite registered for
+    `index.<name>` (or `index.<name>.<folder_path>`) in the active
+    ResourceOverwritesContext. Returns the arguments unchanged when no
+    overwrite matches.
+    """
+    return name, folder_path
+
+
+def _resolve_index_binding(
+    resource: AgentContextResourceConfig,
+) -> tuple[str | None, str | None]:
+    """Resolve the effective index name and folder for a context resource,
+    honoring any active resource binding overwrite (BYOC)."""
+    return _apply_index_binding(
+        name=resource.index_name,
+        folder_path=resource.folder_path or get_execution_folder_path(),
+    )
 
 
 def _extract_system_prompt(agent: LowCodeAgentDefinition | None) -> str:
@@ -249,9 +278,11 @@ def handle_semantic_search(
 
         debug_run = UiPathConfig.is_studio_project
 
+        _index_name, _index_folder_path = _resolve_index_binding(resource)
+
         retriever = ContextGroundingRetriever(
-            index_name=resource.index_name,
-            folder_path=get_execution_folder_path(),
+            index_name=_index_name,
+            folder_path=_index_folder_path,
             number_of_results=result_count,
             threshold=threshold,
             scope_folder=resolved_folder_path_prefix,
@@ -331,7 +362,6 @@ def handle_deep_rag(
 
     assert resource.settings.query.variant is not None
 
-    index_name = resource.index_name
     if not resource.settings.citation_mode:
         raise AgentStartupError(
             code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
@@ -391,14 +421,16 @@ def handle_deep_rag(
             file_extension=file_extension,
         )
 
+        _index_name, _index_folder_path = _resolve_index_binding(resource)
+
         @durable_interrupt
         async def create_deep_rag():
             return CreateDeepRag(
                 name=f"task-{uuid.uuid4()}",
-                index_name=index_name,
+                index_name=_index_name,
                 prompt=actual_prompt,
                 citation_mode=citation_mode,
-                index_folder_path=get_execution_folder_path(),
+                index_folder_path=_index_folder_path,
                 glob_pattern=glob_pattern,
             )
 
@@ -442,8 +474,6 @@ def handle_batch_transform(
     assert resource.settings.query is not None
     assert resource.settings.query.variant is not None
 
-    index_name = resource.index_name
-    index_folder_path = get_execution_folder_path()
     if not resource.settings.web_search_grounding:
         raise AgentStartupError(
             code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
@@ -522,14 +552,16 @@ def handle_batch_transform(
             file_extension=None,
         )
 
+        _index_name, _index_folder_path = _resolve_index_binding(resource)
+
         @durable_interrupt
         async def create_batch_transform():
             return CreateBatchTransform(
                 name=f"task-{uuid.uuid4()}",
-                index_name=index_name,
+                index_name=_index_name,
                 prompt=actual_prompt,
                 destination_path=destination_path,
-                index_folder_path=index_folder_path,
+                index_folder_path=_index_folder_path,
                 enable_web_search_grounding=enable_web_search_grounding,
                 output_columns=batch_transform_output_columns,
                 storage_bucket_folder_path_prefix=glob_pattern,
