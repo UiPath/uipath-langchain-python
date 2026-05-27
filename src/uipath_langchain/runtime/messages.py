@@ -184,7 +184,7 @@ class UiPathChatMessagesMapper:
                 metadata["attachments"] = attachments
 
             role = uipath_message.role
-            if role == "user":
+            if role == "user" or role == "service":
                 converted_messages.append(
                     HumanMessage(
                         id=uipath_message.message_id,

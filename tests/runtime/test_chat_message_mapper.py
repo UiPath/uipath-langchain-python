@@ -274,6 +274,36 @@ class TestMapMessages:
         assert msg.content == []  # Empty content_blocks list
         assert msg.additional_kwargs["message_id"] == "msg-1"
 
+    def test_map_messages_converts_service_role_to_human_message(self):
+        """Should convert UiPath service-role messages (from UiPath Conversational Service) to HumanMessages."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="service",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-1",
+                    mime_type="text/plain",
+                    data=UiPathInlineValue(inline="service-provided context"),
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                )
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+
+        result = mapper.map_messages([uipath_msg])
+
+        assert len(result) == 1
+        msg = result[0]
+        assert isinstance(msg, HumanMessage)
+        assert msg.content_blocks[0]["text"] == "service-provided context"  # type: ignore[typeddict-item]
+        assert msg.additional_kwargs["message_id"] == "msg-1"
+
     def test_map_messages_handles_assistant_message_without_tool_calls(self):
         """Should convert assistant role to AIMessage."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
