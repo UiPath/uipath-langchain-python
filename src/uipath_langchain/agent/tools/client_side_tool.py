@@ -31,71 +31,29 @@ class ClientSideToolInfo(TypedDict):
     output_schema: dict[str, Any] | None
 
 
-def validate_and_apply_tool_filter(
-    declared_tools: list[dict[str, Any]],
+def apply_tool_filter(
+    declared_tools: list[str | dict[str, Any]],
     agent_tools: dict[str, ClientSideToolInfo],
 ) -> None:
-    """Validate client-side tool declarations and set the availability filter.
+    """Filter available client-side tools to the intersection of declared and agent tools.
 
-    Compares the client's declared tools against the agent's tool definitions.
-    Raises ValueError if required tools are missing or schemas don't match.
-    Sets the available_client_side_tools context variable for tool functions.
+    Extracts tool names from the client's declarations, intersects with the agent's
+    defined client-side tools, and sets the availability filter. Unknown names are
+    silently ignored.
 
     Args:
-        declared_tools: List of tool declarations from uipath__client_side_tools input.
-            Each item is a dict with 'name' and optional 'inputSchema'/'outputSchema'.
-        agent_tools: The agent's client-side tools.
-            Dict of {tool_name: ClientSideToolInfo}.
+        declared_tools: List of tool names (strings) or dicts with a 'name' field
+            from uipath__client_side_tools input.
+        agent_tools: The agent's client-side tools keyed by name.
     """
-    declared: dict[str, dict[str, Any]] = {}
-    for i, t in enumerate(declared_tools):
-        if isinstance(t, dict):
-            if "name" not in t:
-                raise ValueError(
-                    f"Client-side tool declaration at index {i} is missing required 'name' field."
-                )
-            name = t["name"]
-        elif isinstance(t, str):
-            name = t
-            t = {"name": t}
-        else:
-            raise ValueError(
-                f"Client-side tool declaration at index {i} must be a dict or string, got {type(t).__name__}."
-            )
-        if name in declared:
-            raise ValueError(
-                f"Duplicate client-side tool declaration: '{name}'."
-            )
-        declared[name] = t
+    declared_names: set[str] = set()
+    for t in declared_tools:
+        if isinstance(t, str):
+            declared_names.add(t)
+        elif isinstance(t, dict) and "name" in t:
+            declared_names.add(t["name"])
 
-    required = set(agent_tools.keys())
-    missing = required - set(declared.keys())
-    if missing:
-        raise ValueError(
-            f"Missing required client-side tools: {', '.join(sorted(missing))}. "
-            f"The client must register handlers for all client-side tools defined by the agent."
-        )
-
-    for name, decl in declared.items():
-        agent_tool = agent_tools.get(name)
-        if agent_tool is None:
-            continue  # Unknown tool, runtime will ignore it
-        if decl.get("inputSchema") and agent_tool.get("input_schema"):
-            if json.dumps(decl["inputSchema"], sort_keys=True) != json.dumps(
-                agent_tool["input_schema"], sort_keys=True
-            ):
-                raise ValueError(
-                    f"Client-side tool '{name}' inputSchema does not match agent definition."
-                )
-        if decl.get("outputSchema") and agent_tool.get("output_schema"):
-            if json.dumps(decl["outputSchema"], sort_keys=True) != json.dumps(
-                agent_tool["output_schema"], sort_keys=True
-            ):
-                raise ValueError(
-                    f"Client-side tool '{name}' outputSchema does not match agent definition."
-                )
-
-    available_client_side_tools.set(set(declared.keys()))
+    available_client_side_tools.set(declared_names & set(agent_tools.keys()))
 
 
 def create_client_side_tool(

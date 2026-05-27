@@ -475,7 +475,6 @@ class UiPathChatMessagesMapper:
                                     tool_call=UiPathConversationToolCallEvent(
                                         tool_call_id=tool_call["id"],
                                         executing=UiPathConversationExecutingToolCallEvent(
-                                            tool_name=tool_call["name"],
                                             input=tool_call["args"],
                                         ),
                                     ),

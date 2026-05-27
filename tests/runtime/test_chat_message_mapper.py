@@ -2229,7 +2229,7 @@ class TestExecutingToolCallEmission:
             if e.tool_call is not None and e.tool_call.executing is not None
         ]
         assert len(executing_events) == 1
-        assert executing_events[0].tool_call.executing.tool_name == "server_tool"
+        assert executing_events[0].tool_call.executing.input == {"x": 1}
 
     @pytest.mark.asyncio
     async def test_no_executing_for_confirmation_tool(self):

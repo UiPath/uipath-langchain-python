@@ -9,8 +9,8 @@ from pydantic import BaseModel
 from uipath_langchain.agent.tools.client_side_tool import (
     UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY,
     ClientSideToolInfo,
+    apply_tool_filter,
     available_client_side_tools,
-    validate_and_apply_tool_filter,
 )
 
 from .job_attachments import (
@@ -71,18 +71,20 @@ def create_init_node(
             )
             job_attachments_dict.update(message_attachments)
 
-        # Validate client-side tool declarations from the exchange input
-        if client_side_tools:
-            client_tools_input = getattr(state, UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY, None)
-            if client_tools_input is None:
-                available_client_side_tools.set(None)
-            elif not isinstance(client_tools_input, list):
-                raise ValueError(
-                    f"'{UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY}' must be a list of tool declarations, "
-                    f"got {type(client_tools_input).__name__}."
+            # Filter available client-side tools based on exchange input declarations
+            if client_side_tools:
+                client_tools_input = getattr(
+                    state, UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY, None
                 )
-            else:
-                validate_and_apply_tool_filter(client_tools_input, client_side_tools)
+                if client_tools_input is None:
+                    available_client_side_tools.set(None)
+                elif not isinstance(client_tools_input, list):
+                    raise ValueError(
+                        f"'{UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY}' must be a list of tool names, "
+                        f"got {type(client_tools_input).__name__}."
+                    )
+                else:
+                    apply_tool_filter(client_tools_input, client_side_tools)
 
         # Calculate initial message count for tracking new messages
         initial_message_count = (

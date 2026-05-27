@@ -1,11 +1,9 @@
-"""Tests for client-side tool validation and filtering logic."""
-
-import pytest
+"""Tests for client-side tool filtering logic."""
 
 from uipath_langchain.agent.tools.client_side_tool import (
     ClientSideToolInfo,
+    apply_tool_filter,
     available_client_side_tools,
-    validate_and_apply_tool_filter,
 )
 
 AGENT_TOOLS: dict[str, ClientSideToolInfo] = {
@@ -26,117 +24,56 @@ AGENT_TOOLS: dict[str, ClientSideToolInfo] = {
 }
 
 
-class TestValidateAndApplyToolFilter:
-    """Tests for validate_and_apply_tool_filter."""
+class TestApplyToolFilter:
+    """Tests for apply_tool_filter."""
 
-    def test_valid_declarations_set_filter(self):
-        declared = [
-            {"name": "get_weather"},
-            {"name": "show_map"},
-        ]
-        validate_and_apply_tool_filter(declared, AGENT_TOOLS)
+    def test_all_agent_tools_declared(self):
+        apply_tool_filter(["get_weather", "show_map"], AGENT_TOOLS)
+        assert available_client_side_tools.get() == {"get_weather", "show_map"}
 
-        allowed = available_client_side_tools.get()
-        assert allowed == {"get_weather", "show_map"}
+    def test_subset_of_agent_tools(self):
+        """Client passes [A] when agent has [A, B] — only A available."""
+        apply_tool_filter(["get_weather"], AGENT_TOOLS)
+        assert available_client_side_tools.get() == {"get_weather"}
 
-    def test_missing_required_tool_raises(self):
-        declared = [{"name": "get_weather"}]  # missing show_map
+    def test_empty_list_means_no_tools(self):
+        """Client passes [] — no tools available."""
+        apply_tool_filter([], AGENT_TOOLS)
+        assert available_client_side_tools.get() == set()
 
-        with pytest.raises(ValueError, match="Missing required client-side tools"):
-            validate_and_apply_tool_filter(declared, AGENT_TOOLS)
+    def test_unknown_names_ignored(self):
+        """Client passes [A, C, B] when agent has [A, B] — only [A, B]."""
+        apply_tool_filter(["get_weather", "unknown_tool", "show_map"], AGENT_TOOLS)
+        assert available_client_side_tools.get() == {"get_weather", "show_map"}
 
-    def test_input_schema_mismatch_raises(self):
-        declared = [
-            {
-                "name": "get_weather",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"location": {"type": "string"}},
-                },
-            },
-            {"name": "show_map"},
-        ]
+    def test_only_unknown_names(self):
+        """Client passes only unknown names — empty set."""
+        apply_tool_filter(["foo", "bar"], AGENT_TOOLS)
+        assert available_client_side_tools.get() == set()
 
-        with pytest.raises(ValueError, match="inputSchema does not match"):
-            validate_and_apply_tool_filter(declared, AGENT_TOOLS)
+    def test_dict_declarations_with_name(self):
+        """Dicts with 'name' field are accepted."""
+        apply_tool_filter([{"name": "get_weather"}, {"name": "show_map"}], AGENT_TOOLS)
+        assert available_client_side_tools.get() == {"get_weather", "show_map"}
 
-    def test_output_schema_mismatch_raises(self):
-        declared = [
-            {
-                "name": "get_weather",
-                "outputSchema": {
-                    "type": "object",
-                    "properties": {"temperature": {"type": "string"}},
-                },
-            },
-            {"name": "show_map"},
-        ]
+    def test_mixed_strings_and_dicts(self):
+        apply_tool_filter(["get_weather", {"name": "show_map"}], AGENT_TOOLS)
+        assert available_client_side_tools.get() == {"get_weather", "show_map"}
 
-        with pytest.raises(ValueError, match="outputSchema does not match"):
-            validate_and_apply_tool_filter(declared, AGENT_TOOLS)
+    def test_dicts_without_name_silently_skipped(self):
+        """Dicts missing 'name' are skipped, not errored."""
+        apply_tool_filter([{"inputSchema": {}}, "get_weather"], AGENT_TOOLS)
+        assert available_client_side_tools.get() == {"get_weather"}
 
-    def test_unknown_extra_tools_are_ignored(self):
-        declared = [
-            {"name": "get_weather"},
-            {"name": "show_map"},
-            {"name": "unknown_tool"},
-        ]
-        validate_and_apply_tool_filter(declared, AGENT_TOOLS)
+    def test_non_string_non_dict_silently_skipped(self):
+        """Invalid types are skipped, not errored."""
+        apply_tool_filter([123, "get_weather"], AGENT_TOOLS)
+        assert available_client_side_tools.get() == {"get_weather"}
 
-        allowed = available_client_side_tools.get()
-        assert allowed is not None
-        assert "unknown_tool" in allowed
-        assert "get_weather" in allowed
-
-    def test_string_declarations_accepted(self):
-        declared = ["get_weather", "show_map"]
-        validate_and_apply_tool_filter(declared, AGENT_TOOLS)
-
-        allowed = available_client_side_tools.get()
-        assert allowed == {"get_weather", "show_map"}
-
-    def test_missing_name_field_raises(self):
-        declared = [{"inputSchema": {}}]
-
-        with pytest.raises(ValueError, match="missing required 'name' field"):
-            validate_and_apply_tool_filter(declared, AGENT_TOOLS)
-
-    def test_invalid_type_raises(self):
-        declared = [123]
-
-        with pytest.raises(ValueError, match="must be a dict or string"):
-            validate_and_apply_tool_filter(declared, AGENT_TOOLS)
-
-    def test_duplicate_name_raises(self):
-        declared = [
-            {"name": "get_weather"},
-            {"name": "get_weather"},
-            {"name": "show_map"},
-        ]
-
-        with pytest.raises(ValueError, match="Duplicate client-side tool"):
-            validate_and_apply_tool_filter(declared, AGENT_TOOLS)
-
-    def test_matching_schemas_pass(self):
-        declared = [
-            {
-                "name": "get_weather",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"city": {"type": "string"}},
-                },
-                "outputSchema": {
-                    "type": "object",
-                    "properties": {"temp": {"type": "number"}},
-                },
-            },
-            {"name": "show_map"},
-        ]
-        validate_and_apply_tool_filter(declared, AGENT_TOOLS)
-
-        allowed = available_client_side_tools.get()
-        assert allowed is not None
-        assert "get_weather" in allowed
+    def test_duplicate_names_deduplicated(self):
+        """Duplicate names just collapse — no error."""
+        apply_tool_filter(["get_weather", "get_weather", "show_map"], AGENT_TOOLS)
+        assert available_client_side_tools.get() == {"get_weather", "show_map"}
 
 
 class TestToolNotAvailableEnforcement:
@@ -145,9 +82,11 @@ class TestToolNotAvailableEnforcement:
     def test_tool_not_in_allowed_set_returns_error(self):
         token = available_client_side_tools.set({"other_tool"})
         try:
-            from unittest.mock import AsyncMock, patch
-
             from uipath.agent.models.agent import AgentClientSideToolResourceConfig
+
+            from uipath_langchain.agent.tools.client_side_tool import (
+                create_client_side_tool,
+            )
 
             resource = AgentClientSideToolResourceConfig(
                 name="my_tool",
@@ -157,10 +96,6 @@ class TestToolNotAvailableEnforcement:
                     "properties": {"query": {"type": "string"}},
                 },
                 output_schema=None,
-            )
-
-            from uipath_langchain.agent.tools.client_side_tool import (
-                create_client_side_tool,
             )
 
             tool = create_client_side_tool(resource)
@@ -177,16 +112,16 @@ class TestToolNotAvailableEnforcement:
             available_client_side_tools.reset(token)
 
     def test_tool_in_allowed_set_proceeds(self):
-        """When tool IS in the allowed set, it should NOT return an error.
-
-        We can't fully test execution (it would hit durable_interrupt),
-        but we verify the availability check passes by patching the interrupt.
-        """
+        """When tool IS in the allowed set, it should NOT return an error."""
         token = available_client_side_tools.set({"my_tool"})
         try:
-            from unittest.mock import AsyncMock, patch
+            from unittest.mock import patch
 
             from uipath.agent.models.agent import AgentClientSideToolResourceConfig
+
+            from uipath_langchain.agent.tools.client_side_tool import (
+                create_client_side_tool,
+            )
 
             resource = AgentClientSideToolResourceConfig(
                 name="my_tool",
@@ -198,15 +133,6 @@ class TestToolNotAvailableEnforcement:
                 output_schema=None,
             )
 
-            from uipath_langchain.agent.tools.client_side_tool import (
-                create_client_side_tool,
-            )
-
-            tool = create_client_side_tool(resource)
-
-            import asyncio
-
-            # Patch durable_interrupt to avoid GraphInterrupt
             with (
                 patch(
                     "uipath_langchain.agent.tools.client_side_tool.durable_interrupt",
@@ -217,12 +143,12 @@ class TestToolNotAvailableEnforcement:
                     side_effect=lambda **kw: lambda fn: fn,
                 ),
             ):
-                # Re-create tool after patching
                 tool = create_client_side_tool(resource)
+                import asyncio
+
                 result = asyncio.get_event_loop().run_until_complete(
                     tool.coroutine(tool_call_id="tc-1", query="test")
                 )
-                # Should NOT be an error ToolMessage — it proceeded past the availability check
                 if hasattr(result, "status"):
                     assert result.status != "error"
         finally:
@@ -232,7 +158,13 @@ class TestToolNotAvailableEnforcement:
         """When available_client_side_tools is None (CAS default), all tools proceed."""
         token = available_client_side_tools.set(None)
         try:
+            from unittest.mock import patch
+
             from uipath.agent.models.agent import AgentClientSideToolResourceConfig
+
+            from uipath_langchain.agent.tools.client_side_tool import (
+                create_client_side_tool,
+            )
 
             resource = AgentClientSideToolResourceConfig(
                 name="any_tool",
@@ -242,12 +174,6 @@ class TestToolNotAvailableEnforcement:
                     "properties": {"q": {"type": "string"}},
                 },
                 output_schema=None,
-            )
-
-            from unittest.mock import patch
-
-            from uipath_langchain.agent.tools.client_side_tool import (
-                create_client_side_tool,
             )
 
             with (
