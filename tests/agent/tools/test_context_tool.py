@@ -13,6 +13,10 @@ from uipath.agent.models.agent import (
     AgentContextSettings,
     AgentContextValueSetting,
 )
+from uipath.platform.common._bindings import (
+    GenericResourceOverwrite,
+    _resource_overwrites,
+)
 from uipath.platform.context_grounding import (
     CitationMode,
     DeepRagContent,
@@ -321,11 +325,14 @@ class TestHandleDeepRag:
 
     @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
-    async def test_deep_rag_uses_execution_folder_path(self, base_resource_config):
-        """Test that CreateDeepRag receives index_folder_path from the execution environment."""
+    async def test_deep_rag_falls_back_to_execution_folder_when_resource_folder_missing(
+        self, base_resource_config
+    ):
+        """Test that CreateDeepRag falls back to the execution folder when the resource has no folder_path."""
         resource = base_resource_config(
             query_variant="static",
             query_value="test query",
+            folder_path=None,
             citation_mode_value=AgentContextValueSetting(value="Inline"),
         )
         tool = handle_deep_rag("test_tool", resource)
@@ -339,6 +346,62 @@ class TestHandleDeepRag:
 
             deep_rag_arg = mock_interrupt.call_args[0][0]
             assert deep_rag_arg.index_folder_path == "/Shared/TestFolder"
+
+    @pytest.mark.asyncio
+    async def test_deep_rag_uses_resource_folder_path(self, base_resource_config):
+        """Test that CreateDeepRag prefers the resource's configured folder_path."""
+        resource = base_resource_config(
+            query_variant="static",
+            query_value="test query",
+            folder_path="/Configured/Folder",
+            citation_mode_value=AgentContextValueSetting(value="Inline"),
+        )
+        tool = handle_deep_rag("test_tool", resource)
+
+        with patch(
+            "uipath_langchain._utils.durable_interrupt.decorator.interrupt"
+        ) as mock_interrupt:
+            mock_interrupt.return_value = {"mocked": "response"}
+            assert tool.coroutine is not None
+            await tool.coroutine()
+
+            deep_rag_arg = mock_interrupt.call_args[0][0]
+            assert deep_rag_arg.index_folder_path == "/Configured/Folder"
+
+    @pytest.mark.asyncio
+    async def test_deep_rag_applies_binding_overwrite(self, base_resource_config):
+        """Test that CreateDeepRag uses the BYOC binding overwrite's name and folder."""
+        resource = base_resource_config(
+            query_variant="static",
+            query_value="test query",
+            index_name="original-index",
+            folder_path="/Configured/Folder",
+            citation_mode_value=AgentContextValueSetting(value="Inline"),
+        )
+        tool = handle_deep_rag("test_tool", resource)
+
+        token = _resource_overwrites.set(
+            {
+                "index.original-index": GenericResourceOverwrite(
+                    resource_type="index",
+                    name="overridden-index",
+                    folder_path="/Overridden/Folder",
+                )
+            }
+        )
+        try:
+            with patch(
+                "uipath_langchain._utils.durable_interrupt.decorator.interrupt"
+            ) as mock_interrupt:
+                mock_interrupt.return_value = {"mocked": "response"}
+                assert tool.coroutine is not None
+                await tool.coroutine()
+
+                deep_rag_arg = mock_interrupt.call_args[0][0]
+                assert deep_rag_arg.index_name == "overridden-index"
+                assert deep_rag_arg.index_folder_path == "/Overridden/Folder"
+        finally:
+            _resource_overwrites.reset(token)
 
 
 class TestCreateContextTool:
@@ -522,8 +585,11 @@ class TestHandleSemanticSearch:
 
     @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
-    async def test_semantic_search_uses_execution_folder_path(self, semantic_config):
-        """Test that ContextGroundingRetriever receives folder_path from the execution environment."""
+    async def test_semantic_search_falls_back_to_execution_folder_when_resource_folder_missing(
+        self, semantic_config
+    ):
+        """Test that the retriever receives the execution folder when the resource has no folder_path."""
+        semantic_config.folder_path = None
         with patch(
             "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
         ) as mock_retriever_class:
@@ -537,6 +603,57 @@ class TestHandleSemanticSearch:
 
             call_kwargs = mock_retriever_class.call_args[1]
             assert call_kwargs["folder_path"] == "/Shared/TestFolder"
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_uses_resource_folder_path(self, semantic_config):
+        """Test that the retriever prefers the resource's configured folder_path."""
+        semantic_config.folder_path = "/Configured/Folder"
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.return_value = []
+            mock_retriever_class.return_value = mock_retriever
+
+            tool = handle_semantic_search("semantic_tool", semantic_config)
+            assert tool.coroutine is not None
+            await tool.coroutine(query="test query")
+
+            call_kwargs = mock_retriever_class.call_args[1]
+            assert call_kwargs["folder_path"] == "/Configured/Folder"
+            assert call_kwargs["index_name"] == semantic_config.index_name
+
+    @pytest.mark.asyncio
+    async def test_semantic_search_applies_binding_overwrite(self, semantic_config):
+        """Test that the retriever uses the BYOC binding overwrite's name and folder."""
+        semantic_config.index_name = "original-index"
+        semantic_config.folder_path = "/Configured/Folder"
+        token = _resource_overwrites.set(
+            {
+                "index.original-index": GenericResourceOverwrite(
+                    resource_type="index",
+                    name="overridden-index",
+                    folder_path="/Overridden/Folder",
+                )
+            }
+        )
+        try:
+            with patch(
+                "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+            ) as mock_retriever_class:
+                mock_retriever = AsyncMock()
+                mock_retriever.ainvoke.return_value = []
+                mock_retriever_class.return_value = mock_retriever
+
+                tool = handle_semantic_search("semantic_tool", semantic_config)
+                assert tool.coroutine is not None
+                await tool.coroutine(query="test query")
+
+                call_kwargs = mock_retriever_class.call_args[1]
+                assert call_kwargs["folder_path"] == "/Overridden/Folder"
+                assert call_kwargs["index_name"] == "overridden-index"
+        finally:
+            _resource_overwrites.reset(token)
 
     @pytest.mark.asyncio
     async def test_semantic_search_enables_system_index_fallback_in_studio_project(
@@ -900,10 +1017,11 @@ class TestHandleBatchTransform:
 
     @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})
-    async def test_batch_transform_uses_execution_folder_path(
+    async def test_batch_transform_falls_back_to_execution_folder_when_resource_folder_missing(
         self, batch_transform_config
     ):
-        """Test that CreateBatchTransform receives index_folder_path from the execution environment."""
+        """Test that CreateBatchTransform falls back to the execution folder when the resource has no folder_path."""
+        batch_transform_config.folder_path = None
         tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
 
         mock_uipath = MagicMock()
@@ -923,6 +1041,72 @@ class TestHandleBatchTransform:
 
             batch_transform_arg = mock_interrupt.call_args[0][0]
             assert batch_transform_arg.index_folder_path == "/Shared/TestFolder"
+
+    @pytest.mark.asyncio
+    async def test_batch_transform_uses_resource_folder_path(
+        self, batch_transform_config
+    ):
+        """Test that CreateBatchTransform prefers the resource's configured folder_path."""
+        batch_transform_config.folder_path = "/Configured/Folder"
+        tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
+
+        mock_uipath = MagicMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id")
+        with (
+            patch(
+                "uipath_langchain._utils.durable_interrupt.decorator.interrupt"
+            ) as mock_interrupt,
+            patch(
+                "uipath_langchain.agent.tools.context_tool.UiPath",
+                return_value=mock_uipath,
+            ),
+        ):
+            mock_interrupt.return_value = MagicMock()
+            assert tool.coroutine is not None
+            await tool.coroutine(destination_path="output.csv")
+
+            batch_transform_arg = mock_interrupt.call_args[0][0]
+            assert batch_transform_arg.index_folder_path == "/Configured/Folder"
+
+    @pytest.mark.asyncio
+    async def test_batch_transform_applies_binding_overwrite(
+        self, batch_transform_config
+    ):
+        """Test that CreateBatchTransform uses the BYOC binding overwrite's name and folder."""
+        batch_transform_config.index_name = "original-index"
+        batch_transform_config.folder_path = "/Configured/Folder"
+        tool = handle_batch_transform("batch_transform_tool", batch_transform_config)
+
+        token = _resource_overwrites.set(
+            {
+                "index.original-index": GenericResourceOverwrite(
+                    resource_type="index",
+                    name="overridden-index",
+                    folder_path="/Overridden/Folder",
+                )
+            }
+        )
+        mock_uipath = MagicMock()
+        mock_uipath.jobs.create_attachment_async = AsyncMock(return_value="att-id")
+        try:
+            with (
+                patch(
+                    "uipath_langchain._utils.durable_interrupt.decorator.interrupt"
+                ) as mock_interrupt,
+                patch(
+                    "uipath_langchain.agent.tools.context_tool.UiPath",
+                    return_value=mock_uipath,
+                ),
+            ):
+                mock_interrupt.return_value = MagicMock()
+                assert tool.coroutine is not None
+                await tool.coroutine(destination_path="output.csv")
+
+                batch_transform_arg = mock_interrupt.call_args[0][0]
+                assert batch_transform_arg.index_name == "overridden-index"
+                assert batch_transform_arg.index_folder_path == "/Overridden/Folder"
+        finally:
+            _resource_overwrites.reset(token)
 
 
 class TestBuildGlobPattern:
@@ -1218,6 +1402,7 @@ class TestSemanticSearchSystemIndexFallbackIntegration:
             name="semantic_tool",
             description="Semantic search tool",
             index_name="system-template-index",
+            folder_path=None,
             retrieval_mode=AgentContextRetrievalMode.SEMANTIC,
             query_variant="dynamic",
         )
