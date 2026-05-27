@@ -7,6 +7,7 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
+from uipath.platform.chat.llm_trace_context import build_trace_context_headers
 from uipath.platform.common import (
     EndpointManager,
     get_ca_bundle_path,
@@ -181,6 +182,7 @@ class AwsBedrockCompletionsPassthroughClient:
         )
         headers["X-UiPath-LlmGateway-ApiFlavor"] = self.api_flavor
         headers["X-UiPath-Streaming-Enabled"] = streaming
+        headers.update(build_trace_context_headers(extra_baggage=["source=agents"]))
 
         request.headers.update(headers)
 
