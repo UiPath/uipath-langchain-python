@@ -27,15 +27,22 @@ class Output(BaseModel):
 
 ### Required LLM Initialization
 
-Unless the user explicitly requests a different LLM provider, always use `UiPathChat`:
+Unless the user explicitly requests a different LLM provider, always use `UiPathChatOpenAI`:
 
 ```python
-from uipath_langchain.chat import UiPathChat
+from uipath_langchain.chat import UiPathChatOpenAI
 
-llm = UiPathChat(model="gpt-4.1-mini-2025-04-14", temperature=0.7)
+llm = UiPathChatOpenAI(model="gpt-4o-2024-11-20", temperature=0.7)
 ```
 
-**Alternative LLMs** (only use if explicitly requested):
+To list available models, run `uipath list-models`.
+
+**Alternative UiPath chat models** (require the matching extra: `uipath-langchain[bedrock]` or `uipath-langchain[vertex]`):
+- `UiPathChatAnthropicBedrock` for Anthropic models via AWS Bedrock
+- `UiPathChatBedrockConverse` for the AWS Bedrock Converse API (multi-provider)
+- `UiPathChatVertex` for Google Vertex AI models
+
+**Alternative LangChain LLMs** (only use if explicitly requested):
 - `ChatOpenAI` from `langchain_openai`
 - `ChatAnthropic` from `langchain_anthropic`
 - Other LangChain-compatible LLMs
@@ -47,7 +54,7 @@ Every agent should follow this basic structure:
 ```python
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import START, StateGraph, END
-from uipath_langchain.chat import UiPathChat
+from uipath_langchain.chat import UiPathChatOpenAI
 from pydantic import BaseModel
 
 # 1. Define Input, State, and Output models
@@ -61,8 +68,8 @@ class State(BaseModel):
 class Output(BaseModel):
     result: str
 
-# 2. Initialize UiPathChat LLM
-llm = UiPathChat(model="gpt-4.1-mini-2025-04-14", temperature=0.7)
+# 2. Initialize the LLM
+llm = UiPathChatOpenAI(model="gpt-4o-2024-11-20", temperature=0.7)
 
 # 3. Define agent nodes (async functions)
 async def process_node(state: State) -> State:
