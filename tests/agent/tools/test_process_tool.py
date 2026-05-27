@@ -550,3 +550,149 @@ class TestProcessToolFlowType:
         bts_context = tool.metadata["_bts_context"]
         assert bts_context.get("wait_for_job_key") == "flow-job-key"
         assert "wait_for_agent_job_key" not in bts_context
+
+
+@pytest.fixture
+def process_resource_with_conversation_id():
+    """Resource whose input schema declares the reserved conversation-id arg."""
+    return AgentProcessToolResourceConfig(
+        type=AgentToolType.PROCESS,
+        name="conv_process",
+        description="Process that consumes conversation id",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string"},
+                "UIPATH_RESERVED_CONVERSATIONID": {"type": "string"},
+            },
+        },
+        output_schema={"type": "object", "properties": {}},
+        properties=AgentProcessToolProperties(
+            process_name="ConvProcess",
+            folder_path="/Shared/Conv",
+        ),
+    )
+
+
+class TestProcessToolConversationIdInjection:
+    """Auto-inject conversation id when the tool's input schema declares it."""
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_CONVERSATION_ID": "conv-xyz"})
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_injects_conversation_id_when_schema_declares_it(
+        self,
+        mock_uipath_class,
+        mock_interrupt,
+        process_resource_with_conversation_id,
+    ):
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
+        mock_job.folder_key = "folder-key"
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(process_resource_with_conversation_id)
+        await tool.ainvoke({"topic": "hello"})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["input_arguments"] == {
+            "topic": "hello",
+            "UIPATH_RESERVED_CONVERSATIONID": "conv-xyz",
+        }
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_CONVERSATION_ID": "from-runtime"})
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_runtime_value_overrides_caller_supplied_value(
+        self,
+        mock_uipath_class,
+        mock_interrupt,
+        process_resource_with_conversation_id,
+    ):
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
+        mock_job.folder_key = "folder-key"
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(process_resource_with_conversation_id)
+        await tool.ainvoke(
+            {"topic": "hi", "UIPATH_RESERVED_CONVERSATIONID": "from-llm"}
+        )
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert (
+            call_kwargs["input_arguments"]["UIPATH_RESERVED_CONVERSATIONID"]
+            == "from-runtime"
+        )
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_omits_when_conversation_id_missing(
+        self,
+        mock_uipath_class,
+        mock_interrupt,
+        process_resource_with_conversation_id,
+    ):
+        os.environ.pop("UIPATH_CONVERSATION_ID", None)
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
+        mock_job.folder_key = "folder-key"
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(process_resource_with_conversation_id)
+        await tool.ainvoke({"topic": "hi"})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert call_kwargs["input_arguments"].get("UIPATH_RESERVED_CONVERSATIONID") is None
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_CONVERSATION_ID": "conv-xyz"})
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_skips_injection_when_schema_does_not_declare_it(
+        self,
+        mock_uipath_class,
+        mock_interrupt,
+        process_resource_with_inputs,
+    ):
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "job-key"
+        mock_job.folder_key = "folder-key"
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(process_resource_with_inputs)
+        await tool.ainvoke({"name": "x", "count": 1})
+
+        call_kwargs = mock_client.processes.invoke_async.call_args[1]
+        assert "UIPATH_RESERVED_CONVERSATIONID" not in call_kwargs["input_arguments"]

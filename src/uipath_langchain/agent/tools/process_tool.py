@@ -12,7 +12,7 @@ from uipath.platform.errors import EnrichedException
 from uipath.platform.orchestrator import JobState
 from uipath.runtime.errors import UiPathErrorCategory
 
-from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils import get_conversation_id, get_execution_folder_path
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.exceptions import raise_for_enriched
 from uipath_langchain.agent.react.job_attachments import get_job_attachments
@@ -38,6 +38,7 @@ _START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]
     ),
 }
 
+_RESERVED_CONVERSATION_ID_KEY = "UIPATH_RESERVED_CONVERSATIONID"
 
 def create_process_tool(
     resource: AgentProcessToolResourceConfig,
@@ -58,6 +59,10 @@ def create_process_tool(
     _bts_context: dict[str, Any] = {}
 
     async def process_tool_fn(**kwargs: Any):
+        if _RESERVED_CONVERSATION_ID_KEY in input_model.model_fields:
+            conversation_id = get_conversation_id()
+            if conversation_id is not None:
+                kwargs[_RESERVED_CONVERSATION_ID_KEY] = conversation_id
         attachments = get_job_attachments(input_model, kwargs)
         input_arguments = input_model.model_validate(kwargs).model_dump(mode="json")
 

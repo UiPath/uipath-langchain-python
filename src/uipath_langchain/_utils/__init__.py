@@ -1,4 +1,4 @@
-from ._environment import get_execution_folder_path
+from ._environment import get_conversation_id, get_execution_folder_path
 from ._otel import (
     get_current_span_and_trace_ids,
     set_current_span_error,
@@ -8,6 +8,7 @@ from ._request_mixin import UiPathRequestMixin
 
 __all__ = [
     "UiPathRequestMixin",
+    "get_conversation_id",
     "get_current_span_and_trace_ids",
     "get_execution_folder_path",
     "set_current_span_error",

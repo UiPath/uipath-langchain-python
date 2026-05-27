@@ -6,5 +6,10 @@ def get_execution_folder_path() -> str | None:
     return os.environ.get("UIPATH_FOLDER_PATH")
 
 
+def get_conversation_id() -> str | None:
+    """Reads the current conversation ID from the runtime environment."""
+    return os.environ.get("UIPATH_CONVERSATION_ID")
+
+
 def get_default_timeout() -> float:
     return float(os.getenv("UIPATH_TIMEOUT_SECONDS", "895"))
