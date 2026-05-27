@@ -29,6 +29,7 @@ from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErr
 from .analyze_files_tool import create_analyze_file_tool
 from .batch_transform_tool import create_batch_transform_tool
 from .deeprag_tool import create_deeprag_tool
+from .get_case_state_tool import create_get_case_state_tool
 
 _INTERNAL_TOOL_HANDLERS: dict[
     AgentInternalToolType,
@@ -37,6 +38,7 @@ _INTERNAL_TOOL_HANDLERS: dict[
     AgentInternalToolType.ANALYZE_FILES: create_analyze_file_tool,
     AgentInternalToolType.DEEP_RAG: create_deeprag_tool,
     AgentInternalToolType.BATCH_TRANSFORM: create_batch_transform_tool,
+    AgentInternalToolType.GET_CASE_STATE: create_get_case_state_tool,
 }
 
 
