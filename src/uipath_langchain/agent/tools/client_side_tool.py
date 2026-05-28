@@ -61,10 +61,9 @@ def create_client_side_tool(
 ) -> StructuredTool:
     """Create a client-side tool that pauses the graph and waits for the client to execute it.
 
-    The tool uses @durable_interrupt to suspend the graph. The client SDK receives
-    an executingToolCall event, runs its registered handler, and sends endToolCall
-    back through CAS. The bridge routes that endToolCall to wait_for_resume(),
-    which unblocks the graph with the client's result.
+    The tool uses @durable_interrupt to suspend the graph. The client receives
+    an executingToolCall event, executes its registered handler, and sends
+    endToolCall back through CAS.
     """
     tool_name = sanitize_tool_name(resource.name)
     input_model = create_model_from_schema(resource.input_schema)
@@ -96,7 +95,6 @@ def create_client_side_tool(
                     "tool_call_id": tool_call_id,
                     "tool_name": tool_name,
                     "input": kwargs,
-                    "is_execution_phase": True,
                 }
 
             result = await wait_for_client_execution()

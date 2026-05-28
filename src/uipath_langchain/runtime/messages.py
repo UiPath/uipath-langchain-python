@@ -465,10 +465,10 @@ class UiPathChatMessagesMapper:
                             )
                         )
 
-                        # Emit executingToolCall from MessageMapper for tools without
-                        # a durable interrupt. Tools with interrupts (client-side, HITL)
-                        # get executingToolCall from the bridge instead.
-                        if not require_confirmation and not is_client_side:
+                        # Emit executingToolCall for tools without confirmation.
+                        # Confirmed tools get executingToolCall from the runtime
+                        # loop after the confirmation resumes.
+                        if not require_confirmation:
                             events.append(
                                 UiPathConversationMessageEvent(
                                     message_id=self.current_message.id,

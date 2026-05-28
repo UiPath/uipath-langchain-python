@@ -2259,8 +2259,8 @@ class TestExecutingToolCallEmission:
         assert len(executing_events) == 0
 
     @pytest.mark.asyncio
-    async def test_no_executing_for_client_side_tool(self):
-        """Should NOT emit executingToolCall for a client-side tool (bridge handles it)."""
+    async def test_emits_executing_for_client_side_tool(self):
+        """Should emit executingToolCall for a client-side tool without confirmation."""
         storage = create_mock_storage()
         storage.get_value.return_value = {}
         mapper = UiPathChatMessagesMapper("test-runtime", storage)
@@ -2287,7 +2287,8 @@ class TestExecutingToolCallEmission:
             for e in result
             if e.tool_call is not None and e.tool_call.executing is not None
         ]
-        assert len(executing_events) == 0
+        assert len(executing_events) == 1
+        assert executing_events[0].tool_call.executing.input == {"title": "Avatar"}
 
 
 class TestClientSideToolEndSuppression:
