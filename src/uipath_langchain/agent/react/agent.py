@@ -81,22 +81,22 @@ def create_agent(
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
     # Derive client-side tool schemas from tools for input validation in the init node.
-    cs_tools: dict[str, ClientSideToolInfo] | None = None
+    conversational_client_side_tools: dict[str, ClientSideToolInfo] | None = None
     if config.is_conversational:
-        cs_tools = {}
+        conversational_client_side_tools = {}
         for t in agent_tools:
             meta = getattr(t, "metadata", None) or {}
             if meta.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL):
-                cs_tools[t.name] = {
+                conversational_client_side_tools[t.name] = {
                     "input_schema": t.args_schema.model_json_schema()
                     if hasattr(t, "args_schema") and t.args_schema
                     else None,
                     "output_schema": meta.get("output_schema"),
                 }
-        cs_tools = cs_tools or None
+        conversational_client_side_tools = conversational_client_side_tools or None
 
     init_node = create_init_node(
-        messages, input_schema, config.is_conversational, cs_tools
+        messages, input_schema, config.is_conversational, conversational_client_side_tools
     )
 
     tool_nodes = create_tool_node(agent_tools)

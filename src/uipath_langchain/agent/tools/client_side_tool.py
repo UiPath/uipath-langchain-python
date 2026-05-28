@@ -98,21 +98,25 @@ def create_client_side_tool(
                 }
 
             result = await wait_for_client_execution()
-            return result.get("output", result) if isinstance(result, dict) else result
+            return result if isinstance(result, dict) else {"output": result}
 
         result = await execute_tool()
 
-        if isinstance(result, dict):
+        is_error = result.get("isError", False)
+        output = result.get("output", result)
+
+        if isinstance(output, dict):
             try:
-                content = json.dumps(result)
+                content = json.dumps(output)
             except TypeError:
-                content = str(result)
+                content = str(output)
         else:
-            content = str(result) if result is not None else ""
+            content = str(output) if output is not None else ""
 
         return ToolMessage(
             content=content,
             tool_call_id=tool_call_id,
+            status="error" if is_error else "success",
             response_metadata={IS_CONVERSATIONAL_CLIENT_SIDE_TOOL: True},
         )
 
