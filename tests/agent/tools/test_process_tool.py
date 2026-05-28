@@ -48,6 +48,22 @@ def flow_resource():
 
 
 @pytest.fixture
+def function_resource():
+    """Create a process tool resource config of type Function (coded function release)."""
+    return AgentProcessToolResourceConfig(
+        type=AgentToolType.FUNCTION,
+        name="test_function",
+        description="Test function description",
+        input_schema={"type": "object", "properties": {}},
+        output_schema={"type": "object", "properties": {}},
+        properties=AgentProcessToolProperties(
+            process_name="MyFunction",
+            folder_path="/Shared/Functions",
+        ),
+    )
+
+
+@pytest.fixture
 def process_resource_with_inputs():
     """Create a process tool resource config with input arguments."""
     return AgentProcessToolResourceConfig(
@@ -549,4 +565,85 @@ class TestProcessToolFlowType:
 
         bts_context = tool.metadata["_bts_context"]
         assert bts_context.get("wait_for_job_key") == "flow-job-key"
+        assert "wait_for_agent_job_key" not in bts_context
+
+
+class TestProcessToolFunctionType:
+    """Test that a Function-type resource flows through create_process_tool correctly."""
+
+    def test_function_tool_metadata_has_function_tool_type(self, function_resource):
+        """A Function resource produces a tool with metadata.tool_type == 'function'."""
+        tool = create_process_tool(function_resource)
+        assert tool.metadata is not None
+        assert tool.metadata["tool_type"] == "function"
+
+    def test_function_tool_metadata_has_display_name(self, function_resource):
+        """Function tool metadata exposes the process_name as display_name."""
+        tool = create_process_tool(function_resource)
+        assert tool.metadata is not None
+        assert tool.metadata["display_name"] == "MyFunction"
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/Functions"})
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_function_tool_invokes_processes_invoke_async(
+        self, mock_uipath_class, mock_interrupt, function_resource
+    ):
+        """Function tool invokes client.processes.invoke_async (same path as Process)."""
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "function-job-key"
+        mock_job.folder_key = "function-folder-key"
+
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(function_resource)
+        await tool.ainvoke({})
+
+        mock_client.processes.invoke_async.assert_called_once_with(
+            name="MyFunction",
+            input_arguments={},
+            folder_path="/Shared/Functions",
+            attachments=[],
+            parent_span_id=None,
+            parent_operation_id=None,
+            run_as_me=None,
+        )
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    @patch("uipath_langchain.agent.tools.process_tool.UiPath")
+    async def test_function_tool_uses_non_agent_bts_key(
+        self, mock_uipath_class, mock_interrupt, function_resource
+    ):
+        """Function tool stores the BTS tracking key under 'wait_for_job_key' (not agent variant)."""
+        mock_job = MagicMock(spec=Job)
+        mock_job.key = "function-job-key"
+        mock_job.folder_key = "function-folder-key"
+
+        mock_resumed_job = MagicMock(spec=Job)
+        mock_resumed_job.state = "successful"
+
+        mock_client = MagicMock()
+        mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
+        mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
+        mock_uipath_class.return_value = mock_client
+
+        mock_interrupt.return_value = mock_resumed_job
+
+        tool = create_process_tool(function_resource)
+        assert tool.metadata is not None
+
+        await tool.ainvoke({})
+
+        bts_context = tool.metadata["_bts_context"]
+        assert bts_context.get("wait_for_job_key") == "function-job-key"
         assert "wait_for_agent_job_key" not in bts_context
