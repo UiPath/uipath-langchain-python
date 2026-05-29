@@ -151,6 +151,7 @@ class TestCreateAgent:
             messages,
             None,  # input schema
             False,  # is_conversational
+            None,  # client_side_tools
         )
         mock_create_terminate_node.assert_called_once_with(
             None,  # output schema
@@ -246,6 +247,7 @@ class TestCreateAgent:
             messages,
             None,  # input schema
             True,  # is_conversational
+            None,  # client_side_tools
         )
         mock_create_terminate_node.assert_called_once_with(
             None,  # output schema

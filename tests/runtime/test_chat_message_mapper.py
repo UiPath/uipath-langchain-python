@@ -2199,3 +2199,161 @@ class TestToolCallConfirmation:
         assert "confirm_tool" in tool_starts
         assert tool_starts["normal_tool"].require_confirmation is None
         assert tool_starts["confirm_tool"].require_confirmation is True
+
+
+class TestExecutingToolCallEmission:
+    """Tests for executingToolCall event emission from MessageMapper."""
+
+    @pytest.mark.asyncio
+    async def test_emits_executing_for_normal_tool(self):
+        """Should emit executingToolCall for a server tool without confirmation or client-side marker."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        first_chunk = AIMessageChunk(
+            content="",
+            id="msg-1",
+            tool_calls=[{"id": "tc-1", "name": "server_tool", "args": {"x": 1}}],
+        )
+        await mapper.map_event(first_chunk)
+
+        last_chunk = AIMessageChunk(content="", id="msg-1")
+        object.__setattr__(last_chunk, "chunk_position", "last")
+        result = await mapper.map_event(last_chunk)
+
+        assert result is not None
+        executing_events = [
+            e
+            for e in result
+            if e.tool_call is not None and e.tool_call.executing is not None
+        ]
+        assert len(executing_events) == 1
+        assert executing_events[0].tool_call is not None
+        assert executing_events[0].tool_call.executing is not None
+        assert executing_events[0].tool_call.executing.input == {"x": 1}
+
+    @pytest.mark.asyncio
+    async def test_no_executing_for_confirmation_tool(self):
+        """Should NOT emit executingToolCall for a tool that requires confirmation."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        mapper.tools_requiring_confirmation = {"confirm_tool": {}}
+
+        first_chunk = AIMessageChunk(
+            content="",
+            id="msg-1",
+            tool_calls=[{"id": "tc-1", "name": "confirm_tool", "args": {}}],
+        )
+        await mapper.map_event(first_chunk)
+
+        last_chunk = AIMessageChunk(content="", id="msg-1")
+        object.__setattr__(last_chunk, "chunk_position", "last")
+        result = await mapper.map_event(last_chunk)
+
+        assert result is not None
+        executing_events = [
+            e
+            for e in result
+            if e.tool_call is not None and e.tool_call.executing is not None
+        ]
+        assert len(executing_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_emits_executing_for_client_side_tool(self):
+        """Should emit executingToolCall for a client-side tool without confirmation."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+        mapper.client_side_tools = {
+            "client_tool": {"input_schema": None, "output_schema": {"type": "object"}}
+        }
+
+        first_chunk = AIMessageChunk(
+            content="",
+            id="msg-1",
+            tool_calls=[
+                {"id": "tc-1", "name": "client_tool", "args": {"title": "Avatar"}}
+            ],
+        )
+        await mapper.map_event(first_chunk)
+
+        last_chunk = AIMessageChunk(content="", id="msg-1")
+        object.__setattr__(last_chunk, "chunk_position", "last")
+        result = await mapper.map_event(last_chunk)
+
+        assert result is not None
+        executing_events = [
+            e
+            for e in result
+            if e.tool_call is not None and e.tool_call.executing is not None
+        ]
+        assert len(executing_events) == 1
+        assert executing_events[0].tool_call is not None
+        assert executing_events[0].tool_call.executing is not None
+        assert executing_events[0].tool_call.executing.input == {"title": "Avatar"}
+
+
+class TestClientSideToolEndSuppression:
+    """Tests for suppressing endToolCall for client-side tools."""
+
+    @pytest.mark.asyncio
+    async def test_client_side_tool_suppresses_end_event(self):
+        """ToolMessage with IS_CONVERSATIONAL_CLIENT_SIDE_TOOL should NOT emit endToolCall."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {"tool-1": "msg-123"}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        tool_msg = ToolMessage(
+            content='{"rating": 9}',
+            tool_call_id="tool-1",
+            response_metadata={"uipath_client_tool": True},
+        )
+
+        result = await mapper.map_event(tool_msg)
+
+        assert result is not None
+        tool_end_events = [
+            e for e in result if e.tool_call is not None and e.tool_call.end is not None
+        ]
+        assert len(tool_end_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_client_side_tool_still_emits_message_end(self):
+        """ToolMessage with IS_CONVERSATIONAL_CLIENT_SIDE_TOOL should still emit message end when it's the last tool."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {"tool-1": "msg-123"}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        tool_msg = ToolMessage(
+            content='{"rating": 9}',
+            tool_call_id="tool-1",
+            response_metadata={"uipath_client_tool": True},
+        )
+
+        result = await mapper.map_event(tool_msg)
+
+        assert result is not None
+        message_end_events = [e for e in result if e.end is not None]
+        assert len(message_end_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_normal_tool_emits_end_event(self):
+        """ToolMessage without IS_CONVERSATIONAL_CLIENT_SIDE_TOOL should emit endToolCall normally."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {"tool-1": "msg-123"}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        tool_msg = ToolMessage(
+            content='{"result": "success"}',
+            tool_call_id="tool-1",
+        )
+
+        result = await mapper.map_event(tool_msg)
+
+        assert result is not None
+        tool_end_events = [
+            e for e in result if e.tool_call is not None and e.tool_call.end is not None
+        ]
+        assert len(tool_end_events) == 1
