@@ -2229,6 +2229,8 @@ class TestExecutingToolCallEmission:
             if e.tool_call is not None and e.tool_call.executing is not None
         ]
         assert len(executing_events) == 1
+        assert executing_events[0].tool_call is not None
+        assert executing_events[0].tool_call.executing is not None
         assert executing_events[0].tool_call.executing.input == {"x": 1}
 
     @pytest.mark.asyncio
@@ -2288,6 +2290,8 @@ class TestExecutingToolCallEmission:
             if e.tool_call is not None and e.tool_call.executing is not None
         ]
         assert len(executing_events) == 1
+        assert executing_events[0].tool_call is not None
+        assert executing_events[0].tool_call.executing is not None
         assert executing_events[0].tool_call.executing.input == {"title": "Avatar"}
 
 

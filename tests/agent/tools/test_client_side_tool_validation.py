@@ -67,7 +67,7 @@ class TestApplyToolFilter:
 
     def test_non_string_non_dict_silently_skipped(self):
         """Invalid types are skipped, not errored."""
-        apply_tool_filter([123, "get_weather"], AGENT_TOOLS)
+        apply_tool_filter([123, "get_weather"], AGENT_TOOLS)  # type: ignore[list-item]
         assert available_client_side_tools.get() == {"get_weather"}
 
     def test_duplicate_names_deduplicated(self):
@@ -102,6 +102,7 @@ class TestToolNotAvailableEnforcement:
 
             import asyncio
 
+            assert tool.coroutine is not None
             result = asyncio.get_event_loop().run_until_complete(
                 tool.coroutine(tool_call_id="tc-1", query="test")
             )
@@ -146,6 +147,7 @@ class TestToolNotAvailableEnforcement:
                 tool = create_client_side_tool(resource)
                 import asyncio
 
+                assert tool.coroutine is not None
                 result = asyncio.get_event_loop().run_until_complete(
                     tool.coroutine(tool_call_id="tc-1", query="test")
                 )
@@ -190,6 +192,7 @@ class TestToolNotAvailableEnforcement:
 
                 import asyncio
 
+                assert tool.coroutine is not None
                 result = asyncio.get_event_loop().run_until_complete(
                     tool.coroutine(tool_call_id="tc-1", q="test")
                 )

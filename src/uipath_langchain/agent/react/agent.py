@@ -89,14 +89,19 @@ def create_agent(
             if meta.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL):
                 conversational_client_side_tools[t.name] = {
                     "input_schema": t.args_schema.model_json_schema()
-                    if hasattr(t, "args_schema") and t.args_schema
+                    if hasattr(t, "args_schema")
+                    and t.args_schema
+                    and hasattr(t.args_schema, "model_json_schema")
                     else None,
                     "output_schema": meta.get("output_schema"),
                 }
         conversational_client_side_tools = conversational_client_side_tools or None
 
     init_node = create_init_node(
-        messages, input_schema, config.is_conversational, conversational_client_side_tools
+        messages,
+        input_schema,
+        config.is_conversational,
+        conversational_client_side_tools,
     )
 
     tool_nodes = create_tool_node(agent_tools)

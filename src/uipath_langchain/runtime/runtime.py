@@ -32,7 +32,6 @@ from uipath.runtime.events import (
 from uipath.runtime.schema import UiPathRuntimeSchema
 
 from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
-from uipath_langchain.agent.tools.tool_node import RunnableCallableWithTool
 from uipath_langchain.chat.hitl import (
     IS_CONVERSATIONAL_CLIENT_SIDE_TOOL,
     get_confirmation_schema,
@@ -530,7 +529,11 @@ class UiPathLangGraphRuntime:
             metadata = getattr(tool, "metadata", None) or {}
             if metadata.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL):
                 input_schema = None
-                if hasattr(tool, "args_schema") and tool.args_schema:
+                if (
+                    hasattr(tool, "args_schema")
+                    and tool.args_schema
+                    and hasattr(tool.args_schema, "model_json_schema")
+                ):
                     input_schema = tool.args_schema.model_json_schema()
                 tools[tool.name] = {
                     "input_schema": input_schema,

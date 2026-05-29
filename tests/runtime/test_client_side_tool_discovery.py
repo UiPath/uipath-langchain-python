@@ -86,6 +86,8 @@ class TestClientSideToolDiscovery:
         assert tool_info is not None
         assert "output_schema" in tool_info
         assert "input_schema" in tool_info
+        assert tool_info["output_schema"] is not None
+        assert tool_info["input_schema"] is not None
         assert "rating" in tool_info["output_schema"]["properties"]
         assert "title" in tool_info["input_schema"]["properties"]
 
