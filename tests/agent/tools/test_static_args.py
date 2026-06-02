@@ -174,6 +174,31 @@ class TestStaticArgsHandler:
         assert call["args"]["existing_param"] == "exists"
         assert "missing_param" not in call["args"]
 
+    def test_initialize_with_all_argument_properties_unresolved(self):
+        """A tool whose argument properties all resolve to nothing is returned
+        unchanged and threads no static args into the call."""
+
+        class InputSchema(BaseModel):
+            present: str = ""
+
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['query']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="absentField"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        processed_tools = handler.initialize([tool], InputSchema(), InputSchema)
+
+        # No static args resolved, so the original tool passes through unmodified.
+        assert processed_tools[0] is tool
+
+        call = _make_tool_call("test_tool", {"host": "h"})
+        handler.apply_to_response([call])
+        assert call["args"] == {"host": "h"}
+
     def test_apply_to_response_merges_with_existing_args(self):
         """Test that apply_to_response merges static args with existing tool call args."""
         tool = _create_tool(

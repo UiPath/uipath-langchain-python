@@ -295,24 +295,25 @@ class StaticArgsHandler:
         self._processed_tools = []
         self._sanitized_static_values = {}
         for tool in tools:
-            if isinstance(tool, ArgumentPropertiesMixin) and tool.argument_properties:
+            if (
+                isinstance(tool, ArgumentPropertiesMixin)
+                and isinstance(tool, StructuredTool)
+                and tool.argument_properties
+            ):
                 static_args = _resolve_argument_properties(
                     tool.argument_properties, agent_input
                 )
-                if isinstance(tool, StructuredTool):
-                    modified_tool, applied_paths = _apply_static_arguments_to_schema(
-                        tool, static_args
-                    )
-                    # Only thread args that survived schema modification: paths the
-                    # schema rejected would fail the synthesized strict validator.
-                    static_args = {
-                        path: sa
-                        for path, sa in static_args.items()
-                        if path in applied_paths
-                    }
-                    self._processed_tools.append(modified_tool)
-                else:
-                    self._processed_tools.append(tool)
+                modified_tool, applied_paths = _apply_static_arguments_to_schema(
+                    tool, static_args
+                )
+                # Only thread args that survived schema modification: paths the
+                # schema rejected would fail the synthesized strict validator.
+                static_args = {
+                    path: sa
+                    for path, sa in static_args.items()
+                    if path in applied_paths
+                }
+                self._processed_tools.append(modified_tool)
                 self._sanitized_static_values[tool.name] = (
                     sanitize_dict_for_serialization(
                         {k: sa.value for k, sa in static_args.items()}
