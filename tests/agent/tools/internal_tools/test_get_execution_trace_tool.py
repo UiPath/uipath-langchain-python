@@ -61,11 +61,11 @@ class TestCreateGetExecutionTraceTool:
         return mock_uipath
 
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.get_execution_trace_tool.mockable",
+        "uipath_langchain.agent.tools.internal_tools._pims_read_tool_factory.mockable",
         lambda **kwargs: lambda f: f,
     )
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.get_execution_trace_tool.UiPath"
+        "uipath_langchain.agent.tools.internal_tools._pims_read_tool_factory.UiPath"
     )
     async def test_explicit_folder_key_sends_header(
         self, mock_uipath_class, resource_config, mock_llm
@@ -86,11 +86,11 @@ class TestCreateGetExecutionTraceTool:
         assert kwargs == {"headers": {"x-uipath-folderkey": "folder-xyz"}}
 
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.get_execution_trace_tool.mockable",
+        "uipath_langchain.agent.tools.internal_tools._pims_read_tool_factory.mockable",
         lambda **kwargs: lambda f: f,
     )
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.get_execution_trace_tool.UiPath"
+        "uipath_langchain.agent.tools.internal_tools._pims_read_tool_factory.UiPath"
     )
     async def test_falls_back_to_runtime_folder_context(
         self, mock_uipath_class, resource_config, mock_llm
@@ -113,11 +113,11 @@ class TestCreateGetExecutionTraceTool:
         assert kwargs == {"include_folder_headers": True}
 
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.get_execution_trace_tool.mockable",
+        "uipath_langchain.agent.tools.internal_tools._pims_read_tool_factory.mockable",
         lambda **kwargs: lambda f: f,
     )
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.get_execution_trace_tool.UiPath"
+        "uipath_langchain.agent.tools.internal_tools._pims_read_tool_factory.UiPath"
     )
     async def test_missing_instance_id_raises(
         self, mock_uipath_class, resource_config, mock_llm
@@ -130,11 +130,11 @@ class TestCreateGetExecutionTraceTool:
             await tool.coroutine(folderKey="folder-xyz")
 
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.get_execution_trace_tool.mockable",
+        "uipath_langchain.agent.tools.internal_tools._pims_read_tool_factory.mockable",
         lambda **kwargs: lambda f: f,
     )
     @patch(
-        "uipath_langchain.agent.tools.internal_tools.get_execution_trace_tool.UiPath"
+        "uipath_langchain.agent.tools.internal_tools._pims_read_tool_factory.UiPath"
     )
     async def test_404_maps_to_agent_runtime_error(
         self,
