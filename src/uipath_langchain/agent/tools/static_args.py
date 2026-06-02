@@ -164,23 +164,30 @@ ToolT = TypeVar("ToolT", bound=StructuredTool)
 def _apply_static_arguments_to_schema(
     tool: ToolT,
     static_args: dict[str, ToolStaticArgument],
-) -> ToolT:
+) -> tuple[ToolT, set[str]]:
     """Modify tool schema based on pre-resolved static arguments.
 
     Args:
         tool: The tool to modify
         static_args: The mapping from JSON paths to static arguments
+
+    Returns:
+        The schema-modified tool and the set of json paths that were applied to
+        the schema. Paths that cannot be applied are skipped, so callers must
+        not thread them into the tool call: the synthesized schema rejects them
+        as extra inputs.
     """
     if not static_args:
-        return tool
+        return tool, set()
 
     if isinstance(tool.args_schema, dict):
         modified_json_schema = copy.deepcopy(tool.args_schema)
     elif tool.args_schema and issubclass(tool.args_schema, BaseModel):
         modified_json_schema = tool.args_schema.model_json_schema()
     else:
-        return tool
+        return tool, set(static_args)
 
+    applied_paths: set[str] = set()
     for json_path, static_arg in static_args.items():
         try:
             apply_static_value_to_schema(
@@ -189,6 +196,7 @@ def _apply_static_arguments_to_schema(
                 static_arg.display_value,
                 static_arg.is_sensitive,
             )
+            applied_paths.add(json_path)
         except SchemaModificationError as e:
             logger.warning(
                 f"Skipping invalid static argument path '{json_path}' for tool '{tool.name}': {e}"
@@ -197,7 +205,7 @@ def _apply_static_arguments_to_schema(
     modified_tool = tool.model_copy(deep=True)
     modified_tool.args_schema = create_model(modified_json_schema)
 
-    return modified_tool
+    return modified_tool, applied_paths
 
 
 @deprecated(
@@ -291,15 +299,24 @@ class StaticArgsHandler:
                 static_args = _resolve_argument_properties(
                     tool.argument_properties, agent_input
                 )
+                if isinstance(tool, StructuredTool):
+                    modified_tool, applied_paths = _apply_static_arguments_to_schema(
+                        tool, static_args
+                    )
+                    # Only thread args that survived schema modification: paths the
+                    # schema rejected would fail the synthesized strict validator.
+                    static_args = {
+                        path: sa
+                        for path, sa in static_args.items()
+                        if path in applied_paths
+                    }
+                    self._processed_tools.append(modified_tool)
+                else:
+                    self._processed_tools.append(tool)
                 self._sanitized_static_values[tool.name] = (
                     sanitize_dict_for_serialization(
                         {k: sa.value for k, sa in static_args.items()}
                     )
-                )
-                self._processed_tools.append(
-                    _apply_static_arguments_to_schema(tool, static_args)
-                    if isinstance(tool, StructuredTool)
-                    else tool
                 )
             else:
                 self._processed_tools.append(tool)
