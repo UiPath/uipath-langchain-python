@@ -173,9 +173,7 @@ def _apply_static_arguments_to_schema(
 
     Returns:
         The schema-modified tool and the set of json paths that were applied to
-        the schema. Paths that cannot be applied are skipped, so callers must
-        not thread them into the tool call: the synthesized schema rejects them
-        as extra inputs.
+        the schema. Paths that cannot be applied are skipped.
     """
     if not static_args:
         return tool, set()
@@ -306,18 +304,16 @@ class StaticArgsHandler:
                 modified_tool, applied_paths = _apply_static_arguments_to_schema(
                     tool, static_args
                 )
+                self._processed_tools.append(modified_tool)
                 # Only thread args that survived schema modification: paths the
                 # schema rejected would fail the synthesized strict validator.
-                static_args = {
-                    path: sa
+                applied_static_values = {
+                    path: sa.value
                     for path, sa in static_args.items()
                     if path in applied_paths
                 }
-                self._processed_tools.append(modified_tool)
                 self._sanitized_static_values[tool.name] = (
-                    sanitize_dict_for_serialization(
-                        {k: sa.value for k, sa in static_args.items()}
-                    )
+                    sanitize_dict_for_serialization(applied_static_values)
                 )
             else:
                 self._processed_tools.append(tool)

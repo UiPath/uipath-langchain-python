@@ -290,6 +290,33 @@ class TestStaticArgsHandler:
         assert len(processed_tools) == 1
         assert processed_tools[0] is tool
 
+    def test_initialize_keeps_static_args_when_schema_is_not_a_model(self):
+        """A tool without a dict/BaseModel schema can't be schema-filtered, so its
+        static args pass through unchanged and the tool is returned as-is."""
+
+        async def tool_fn(**kwargs: Any) -> str:
+            return "ok"
+
+        tool = StructuredToolWithArgumentProperties(
+            name="test_tool",
+            description="A test tool",
+            args_schema=None,
+            coroutine=tool_fn,
+            output_type=None,
+            argument_properties={
+                "$['x']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="v"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        processed_tools = handler.initialize([tool], EmptyInput(), EmptyInput)
+        assert processed_tools[0] is tool
+
+        call = _make_tool_call("test_tool")
+        handler.apply_to_response([call])
+        assert call["args"] == {"x": "v"}
+
     def test_initialize_skips_nonexistent_schema_fields(self):
         """Test that static properties referencing nonexistent schema fields are skipped."""
         tool = _create_tool(
