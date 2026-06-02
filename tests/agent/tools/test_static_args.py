@@ -88,6 +88,10 @@ class TestStaticArgsHandler:
             userId: str
             searchQuery: str
 
+        class ToolArgs(BaseModel):
+            user_id: str
+            query: str
+
         tool = _create_tool(
             "test_tool",
             {
@@ -98,6 +102,7 @@ class TestStaticArgsHandler:
                     is_sensitive=False, argument_path="searchQuery"
                 ),
             },
+            args_schema=ToolArgs,
         )
         handler = StaticArgsHandler()
         state = InputSchema(userId="user123", searchQuery="test search")
@@ -114,6 +119,10 @@ class TestStaticArgsHandler:
         class InputSchema(BaseModel):
             userId: str
 
+        class ToolArgs(BaseModel):
+            api_key: str
+            user_id: str
+
         tool = _create_tool(
             "test_tool",
             {
@@ -124,6 +133,7 @@ class TestStaticArgsHandler:
                     is_sensitive=False, argument_path="userId"
                 ),
             },
+            args_schema=ToolArgs,
         )
         handler = StaticArgsHandler()
         handler.initialize([tool], InputSchema(userId="user456"), InputSchema)
@@ -140,6 +150,10 @@ class TestStaticArgsHandler:
             existingArg: str
             missingArg: str = ""
 
+        class ToolArgs(BaseModel):
+            existing_param: str
+            missing_param: str = ""
+
         tool = _create_tool(
             "test_tool",
             {
@@ -150,6 +164,7 @@ class TestStaticArgsHandler:
                     is_sensitive=False, argument_path="nonExistentField"
                 ),
             },
+            args_schema=ToolArgs,
         )
         handler = StaticArgsHandler()
         handler.initialize([tool], InputSchema(existingArg="exists"), InputSchema)
@@ -158,6 +173,31 @@ class TestStaticArgsHandler:
         handler.apply_to_response([call])
         assert call["args"]["existing_param"] == "exists"
         assert "missing_param" not in call["args"]
+
+    def test_initialize_with_all_argument_properties_unresolved(self):
+        """A tool whose argument properties all resolve to nothing is returned
+        unchanged and threads no static args into the call."""
+
+        class InputSchema(BaseModel):
+            present: str = ""
+
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['query']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path="absentField"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        processed_tools = handler.initialize([tool], InputSchema(), InputSchema)
+
+        # No static args resolved, so the original tool passes through unmodified.
+        assert processed_tools[0] is tool
+
+        call = _make_tool_call("test_tool", {"host": "h"})
+        handler.apply_to_response([call])
+        assert call["args"] == {"host": "h"}
 
     def test_apply_to_response_merges_with_existing_args(self):
         """Test that apply_to_response merges static args with existing tool call args."""
@@ -250,6 +290,33 @@ class TestStaticArgsHandler:
         assert len(processed_tools) == 1
         assert processed_tools[0] is tool
 
+    def test_initialize_keeps_static_args_when_schema_is_not_a_model(self):
+        """A tool without a dict/BaseModel schema can't be schema-filtered, so its
+        static args pass through unchanged and the tool is returned as-is."""
+
+        async def tool_fn(**kwargs: Any) -> str:
+            return "ok"
+
+        tool = StructuredToolWithArgumentProperties(
+            name="test_tool",
+            description="A test tool",
+            args_schema=None,
+            coroutine=tool_fn,
+            output_type=None,
+            argument_properties={
+                "$['x']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="v"
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        processed_tools = handler.initialize([tool], EmptyInput(), EmptyInput)
+        assert processed_tools[0] is tool
+
+        call = _make_tool_call("test_tool")
+        handler.apply_to_response([call])
+        assert call["args"] == {"x": "v"}
+
     def test_initialize_skips_nonexistent_schema_fields(self):
         """Test that static properties referencing nonexistent schema fields are skipped."""
         tool = _create_tool(
@@ -274,6 +341,53 @@ class TestStaticArgsHandler:
         host_def = schema["$defs"]["Host"]
         assert host_def["enum"] == ["api.example.com"]
         assert "nonexistent_field" not in schema["properties"]
+
+    def test_static_arg_skipped_from_schema_is_not_applied_to_tool_call(self):
+        """
+        A static argument whose path cannot be applied to the schema (e.g. the
+        Integration-Service ``generateSchema`` button element, which is not a real
+        schema property) is correctly skipped during schema modification but must
+        also be stripped from the values threaded into the tool call. Otherwise the
+        leaked key is rejected by the synthesized strict (``extra='forbid'``) model.
+        """
+        dict_schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        }
+
+        async def tool_fn(**kwargs: Any) -> str:
+            return "ok"
+
+        tool = StructuredToolWithArgumentProperties(
+            name="Search_using_String",
+            description="An Integration-Service tool",
+            args_schema=dict_schema,
+            coroutine=tool_fn,
+            output_type=None,
+            argument_properties={
+                "$['generateSchema']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value=None
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+        processed_tools = handler.initialize([tool], EmptyInput(), EmptyInput)
+        modified_tool = processed_tools[0]
+
+        call = _make_tool_call("Search_using_String", {"query": "hello"})
+        handler.apply_to_response([call])
+
+        # The un-inlineable path must not leak into the tool call args.
+        assert "generateSchema" not in call["args"]
+        assert call["args"] == {"query": "hello"}
+
+        # The applied args must validate against the synthesized strict model.
+        assert isinstance(modified_tool.args_schema, type) and issubclass(
+            modified_tool.args_schema, BaseModel
+        )
+        modified_tool.args_schema.model_validate(call["args"])
 
 
 class TestApplyStaticArgs:
