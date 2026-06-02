@@ -14,6 +14,7 @@ from uipath.agent.models.agent import (
     AgentEscalationRecipient,
     AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
+    AgentQuickFormEscalationResourceConfig,
     ArgumentEmailRecipient,
     ArgumentGroupNameRecipient,
     AssetRecipient,
@@ -251,10 +252,15 @@ def _get_exported_trace_id(trace_id: str | None) -> str | None:
 
 
 def create_escalation_tool(
-    resource: AgentEscalationResourceConfig,
+    resource: AgentEscalationResourceConfig | AgentQuickFormEscalationResourceConfig,
     agent: LowCodeAgentDefinition | None = None,
 ) -> StructuredTool:
-    """Uses interrupt() for Action Center human-in-the-loop."""
+    """Uses interrupt() for Action Center human-in-the-loop.
+
+    Handles both the legacy App Task path (channel-bound to an Action App, inline
+    schema in channel.input_schema) and the Quick Form path (channel.schema_id +
+    channel.schema set, rendered by FormLib via Orchestrator's TaskSchemas table).
+    """
 
     tool_name: str = f"escalate_{sanitize_tool_name(resource.name)}"
     channel: AgentEscalationChannel = resource.channels[0]
@@ -327,17 +333,35 @@ def create_escalation_tool(
             @durable_interrupt
             async def create_escalation_task():
                 client = UiPath()
-                created_task = await client.tasks.create_async(
-                    title=task_title,
-                    data=serialized_data,
-                    app_name=channel.properties.app_name,
-                    app_folder_path=folder_path,
-                    recipient=recipient,
-                    priority=channel.priority,
-                    labels=channel.labels,
-                    is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
-                    actionable_message_metadata=channel.properties.actionable_message_meta_data,
-                )
+                if channel.schema_id is not None and channel.schema is not None:
+                    # Quick Form path: schema-first HITL. Orchestrator upserts the
+                    # schema (keyed by task_schema_key) and creates the task in one
+                    # call; FormLib in Action Center renders it.
+                    created_task = await client.tasks.create_quickform_async(
+                        title=task_title,
+                        task_schema_key=channel.schema_id,
+                        schema=channel.schema,
+                        data=serialized_data,
+                        folder_path=folder_path,
+                        recipient=recipient,
+                        priority=channel.priority,
+                        labels=channel.labels,
+                        is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
+                        actionable_message_metadata=channel.properties.actionable_message_meta_data,
+                    )
+                else:
+                    # Legacy App Task path (Action App + inline input schema).
+                    created_task = await client.tasks.create_async(
+                        title=task_title,
+                        data=serialized_data,
+                        app_name=channel.properties.app_name,
+                        app_folder_path=folder_path,
+                        recipient=recipient,
+                        priority=channel.priority,
+                        labels=channel.labels,
+                        is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
+                        actionable_message_metadata=channel.properties.actionable_message_meta_data,
+                    )
 
                 if created_task.id is not None:
                     _bts_context["task_key"] = str(created_task.id)
@@ -363,13 +387,21 @@ def create_escalation_tool(
             }
 
         outcome = result.action
-        escalation_output = _parse_task_data(
+        raw_task_data = (
             result.data.model_dump()
             if isinstance(result.data, BaseModel)
-            else result.data,
-            input_schema=input_model.model_json_schema(),
-            output_schema=output_model.model_json_schema(),
+            else result.data
         )
+        if channel.schema_id is not None:
+            # Quick Form tasks return outputs only by design — no input/output
+            # filtering needed.
+            escalation_output = raw_task_data
+        else:
+            escalation_output = _parse_task_data(
+                raw_task_data,
+                input_schema=input_model.model_json_schema(),
+                output_schema=output_model.model_json_schema(),
+            )
 
         escalation_action = _resolve_escalation_action(
             outcome,
