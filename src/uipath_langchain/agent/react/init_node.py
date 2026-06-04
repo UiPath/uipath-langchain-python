@@ -6,6 +6,13 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.types import Overwrite
 from pydantic import BaseModel
 
+from uipath_langchain.agent.tools.client_side_tool import (
+    UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY,
+    ClientSideToolInfo,
+    apply_tool_filter,
+    available_client_side_tools,
+)
+
 from .job_attachments import (
     get_job_attachments,
     parse_attachments_from_conversation_messages,
@@ -17,6 +24,7 @@ def create_init_node(
     | Callable[[Any], Sequence[SystemMessage | HumanMessage]],
     input_schema: type[BaseModel] | None,
     is_conversational: bool = False,
+    client_side_tools: dict[str, ClientSideToolInfo] | None = None,
 ):
     def graph_state_init(state: Any) -> Any:
         resolved_messages: Sequence[SystemMessage | HumanMessage] | Overwrite
@@ -62,6 +70,21 @@ def create_init_node(
                 preserved_messages
             )
             job_attachments_dict.update(message_attachments)
+
+            # Filter available client-side tools based on exchange input declarations
+            if client_side_tools:
+                client_tools_input = getattr(
+                    state, UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY, None
+                )
+                if client_tools_input is None:
+                    available_client_side_tools.set(None)
+                elif not isinstance(client_tools_input, list):
+                    raise ValueError(
+                        f"'{UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY}' must be a list of tool names, "
+                        f"got {type(client_tools_input).__name__}."
+                    )
+                else:
+                    apply_tool_filter(client_tools_input, client_side_tools)
 
         # Calculate initial message count for tracking new messages
         initial_message_count = (

@@ -1,5 +1,6 @@
 import logging
 import os
+from collections.abc import Iterator
 from typing import Any, AsyncGenerator
 from uuid import uuid4
 
@@ -30,8 +31,11 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
-from uipath_langchain.agent.tools.tool_node import RunnableCallableWithTool
-from uipath_langchain.chat.hitl import get_confirmation_schema
+from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
+from uipath_langchain.chat.hitl import (
+    IS_CONVERSATIONAL_CLIENT_SIDE_TOOL,
+    get_confirmation_schema,
+)
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
@@ -68,6 +72,7 @@ class UiPathLangGraphRuntime:
         self.callbacks: list[BaseCallbackHandler] = callbacks or []
         self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
         self.chat.tools_requiring_confirmation = self._get_tool_confirmation_info()
+        self.chat.client_side_tools = self._get_client_side_tools()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
     async def execute(
@@ -490,37 +495,51 @@ class UiPathLangGraphRuntime:
 
         return middleware_nodes
 
-    def _get_tool_confirmation_info(self) -> dict[str, Any]:
-        """Build {tool_name: input_schema} for tools requiring confirmation.
-
-        Walks compiled graph nodes once at runtime init. This is needed because coded agents
-        (create_agent) export a compiled graph as the only artifact — there's no side channel
-        to pass confirmation metadata from the build step to the runtime.
-        """
-        schemas: dict[str, Any] = {}
+    def _iter_graph_tools(self) -> Iterator[BaseTool]:
+        """Yield all BaseTool instances from compiled graph nodes."""
         for node_spec in self.graph.nodes.values():
             bound = getattr(node_spec, "bound", None)
             if bound is None:
                 continue
 
-            # Coded agents: one tool per node
-            if isinstance(bound, RunnableCallableWithTool):
-                schema = get_confirmation_schema(bound.tool)
-                if schema is not None:
-                    schemas[bound.tool.name] = schema
+            tool = getattr(bound, "tool", None)
+            if isinstance(tool, BaseTool):
+                yield tool
                 continue
 
-            # Low-code agents: multiple tools in one node
             tools_by_name = getattr(bound, "tools_by_name", None)
             if isinstance(tools_by_name, dict):
-                for tool in tools_by_name.values():
-                    if not isinstance(tool, BaseTool):
-                        continue
-                    schema = get_confirmation_schema(tool)
-                    if schema is not None:
-                        schemas[tool.name] = schema
+                for t in tools_by_name.values():
+                    if isinstance(t, BaseTool):
+                        yield t
 
+    def _get_tool_confirmation_info(self) -> dict[str, Any]:
+        """Build {tool_name: input_schema} for tools requiring confirmation."""
+        schemas: dict[str, Any] = {}
+        for tool in self._iter_graph_tools():
+            schema = get_confirmation_schema(tool)
+            if schema is not None:
+                schemas[tool.name] = schema
         return schemas
+
+    def _get_client_side_tools(self) -> dict[str, ClientSideToolInfo]:
+        """Build {tool_name: ClientSideToolInfo} for client-side tools."""
+        tools: dict[str, ClientSideToolInfo] = {}
+        for tool in self._iter_graph_tools():
+            metadata = getattr(tool, "metadata", None) or {}
+            if metadata.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL):
+                input_schema = None
+                if (
+                    hasattr(tool, "args_schema")
+                    and tool.args_schema
+                    and hasattr(tool.args_schema, "model_json_schema")
+                ):
+                    input_schema = tool.args_schema.model_json_schema()
+                tools[tool.name] = {
+                    "input_schema": input_schema,
+                    "output_schema": metadata.get("output_schema"),
+                }
+        return tools
 
     def _is_middleware_node(self, node_name: str) -> bool:
         """Check if a node name represents a middleware node."""

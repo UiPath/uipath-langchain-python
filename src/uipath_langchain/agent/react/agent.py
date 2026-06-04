@@ -9,6 +9,9 @@ from pydantic import BaseModel
 from uipath.platform.context_grounding import DeepRagContent
 from uipath.platform.guardrails import BaseGuardrail
 
+from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
+from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
+
 from ...runtime._citations import cas_deep_rag_citation_wrapper
 from ..guardrails.actions import GuardrailAction
 from ..tools.structured_tool_with_output_type import StructuredToolWithOutputType
@@ -77,7 +80,29 @@ def create_agent(
     )
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
-    init_node = create_init_node(messages, input_schema, config.is_conversational)
+    # Derive client-side tool schemas from tools for input validation in the init node.
+    conversational_client_side_tools: dict[str, ClientSideToolInfo] | None = None
+    if config.is_conversational:
+        conversational_client_side_tools = {}
+        for t in agent_tools:
+            meta = getattr(t, "metadata", None) or {}
+            if meta.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL):
+                conversational_client_side_tools[t.name] = {
+                    "input_schema": t.args_schema.model_json_schema()
+                    if hasattr(t, "args_schema")
+                    and t.args_schema
+                    and hasattr(t.args_schema, "model_json_schema")
+                    else None,
+                    "output_schema": meta.get("output_schema"),
+                }
+        conversational_client_side_tools = conversational_client_side_tools or None
+
+    init_node = create_init_node(
+        messages,
+        input_schema,
+        config.is_conversational,
+        conversational_client_side_tools,
+    )
 
     tool_nodes = create_tool_node(agent_tools)
 
