@@ -1,6 +1,7 @@
 """Process tool creation for UiPath process execution."""
 
 import json
+import logging
 from typing import Any
 
 from langchain_core.tools import StructuredTool
@@ -38,6 +39,8 @@ _START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]
     ),
 }
 
+logger = logging.getLogger(__name__)
+
 _RESERVED_CONVERSATION_ID_KEY = "UIPATH_RESERVED_CONVERSATIONID"
 
 def create_process_tool(
@@ -62,6 +65,12 @@ def create_process_tool(
         if _RESERVED_CONVERSATION_ID_KEY in input_model.model_fields:
             conversation_id = get_conversation_id()
             if conversation_id is not None:
+                logger.info(
+                    "Overriding %s on tool '%s' to be '%s'",
+                    _RESERVED_CONVERSATION_ID_KEY,
+                    resource.name,
+                    conversation_id,
+                )
                 kwargs[_RESERVED_CONVERSATION_ID_KEY] = conversation_id
         attachments = get_job_attachments(input_model, kwargs)
         input_arguments = input_model.model_validate(kwargs).model_dump(mode="json")
