@@ -740,6 +740,7 @@ class TestProcessToolFunctionType:
         mock_job = MagicMock(spec=Job)
         mock_job.key = "function-job-key"
         mock_job.folder_key = "function-folder-key"
+
         mock_resumed_job = MagicMock(spec=Job)
         mock_resumed_job.state = "successful"
 
@@ -747,6 +748,7 @@ class TestProcessToolFunctionType:
         mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
         mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
         mock_uipath_class.return_value = mock_client
+
         mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(function_resource)
@@ -772,6 +774,7 @@ class TestProcessToolFunctionType:
         mock_job = MagicMock(spec=Job)
         mock_job.key = "function-job-key"
         mock_job.folder_key = "function-folder-key"
+
         mock_resumed_job = MagicMock(spec=Job)
         mock_resumed_job.state = "successful"
 
@@ -779,6 +782,7 @@ class TestProcessToolFunctionType:
         mock_client.processes.invoke_async = AsyncMock(return_value=mock_job)
         mock_client.jobs.extract_output_async = AsyncMock(return_value=None)
         mock_uipath_class.return_value = mock_client
+
         mock_interrupt.return_value = mock_resumed_job
 
         tool = create_process_tool(function_resource)
