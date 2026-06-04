@@ -13,6 +13,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from tenacity import AsyncRetrying, Retrying
 from uipath._utils import resource_override
 from uipath._utils._ssl_context import get_httpx_client_kwargs
+from uipath.platform.chat.llm_trace_context import build_trace_context_headers
 from uipath.platform.common import EndpointManager
 
 from .http_client import build_uipath_headers, resolve_gateway_url
@@ -96,6 +97,11 @@ class _UrlRewriteTransport(httpx.HTTPTransport):
             request.headers["host"] = new_url.host
             request.url = new_url
 
+        for key, value in build_trace_context_headers(
+            extra_baggage=["source=agents"]
+        ).items():
+            request.headers[key] = value
+
         response = super().handle_request(request)
         if self.header_capture:
             self.header_capture.set(dict(response.headers))
@@ -128,6 +134,11 @@ class _AsyncUrlRewriteTransport(httpx.AsyncHTTPTransport):
             # Update host header to match the new URL
             request.headers["host"] = new_url.host
             request.url = new_url
+
+        for key, value in build_trace_context_headers(
+            extra_baggage=["source=agents"]
+        ).items():
+            request.headers[key] = value
 
         response = await super().handle_async_request(request)
         if self.header_capture:

@@ -1,14 +1,14 @@
 [project]
 name = "uipath-langchain"
-version = "0.11.3"
+version = "0.11.12"
 description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
-    "uipath>=2.10.68, <2.11.0",
-    "uipath-core>=0.5.15, <0.6.0",
-    "uipath-platform>=0.1.45, <0.2.0",
-    "uipath-runtime>=0.10.0, <0.11.0",
+    "uipath>=2.10.74, <2.11.0",
+    "uipath-core>=0.5.17, <0.6.0",
+    "uipath-platform>=0.1.59, <0.2.0",
+    "uipath-runtime>=0.11.0, <0.12.0",
     "langgraph>=1.1.8, <2.0.0",
     "langchain-core>=1.2.11, <2.0.0",
     "langgraph-checkpoint-sqlite>=3.0.3, <4.0.0",
@@ -23,7 +23,7 @@ dependencies = [
     "langchain-mcp-adapters==0.2.1",
     "pillow>=12.1.1",
     "a2a-sdk>=0.2.0,<1.0.0",
-    "uipath-langchain-client[openai]>=1.11.0,<1.12.0",
+    "uipath-langchain-client[openai]>=1.13.0,<1.14.0",
 ]
 
 classifiers = [
@@ -40,21 +40,21 @@ maintainers = [
 
 [project.optional-dependencies]
 anthropic = [
-    "uipath-langchain-client[anthropic]>=1.11.0,<1.12.0",
+    "uipath-langchain-client[anthropic]>=1.13.0,<1.14.0",
 ]
 vertex = [
-    "uipath-langchain-client[google]>=1.11.0,<1.12.0",
-    "uipath-langchain-client[vertexai]>=1.11.0,<1.12.0",
+    "uipath-langchain-client[google]>=1.13.0,<1.14.0",
+    "uipath-langchain-client[vertexai]>=1.13.0,<1.14.0",
 ]
 bedrock = [
-    "uipath-langchain-client[bedrock]>=1.11.0,<1.12.0",
+    "uipath-langchain-client[bedrock]>=1.13.0,<1.14.0",
     "boto3-stubs>=1.41.4",
 ]
 fireworks = [
-    "uipath-langchain-client[fireworks]>=1.11.0,<1.12.0",
+    "uipath-langchain-client[fireworks]>=1.13.0,<1.14.0",
 ]
 all = [
-    "uipath-langchain-client[all]>=1.11.0,<1.12.0",
+    "uipath-langchain-client[all]>=1.13.0,<1.14.0",
 ]
 
 [project.entry-points."uipath.middlewares"]

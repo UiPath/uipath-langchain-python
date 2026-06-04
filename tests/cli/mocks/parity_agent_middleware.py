@@ -216,6 +216,26 @@ agent = create_agent(
             entities=[PIIDetectionEntity(PIIDetectionEntityType.PERSON, 0.5)],
             tools=[analyze_joke_syntax],
         ),
+        # Tool scope PII — BlockAction (POST only)
+        *UiPathPIIDetectionMiddleware(
+            name="Tool PII POST Block",
+            scopes=[GuardrailScope.TOOL],
+            action=BlockAction(),
+            entities=[PIIDetectionEntity(PIIDetectionEntityType.PERSON, 0.5)],
+            tools=[analyze_joke_syntax],
+            stage=GuardrailExecutionStage.POST,
+        ),
+        # Tool scope Harmful Content — BlockAction (POST only)
+        *UiPathHarmfulContentMiddleware(
+            name="Tool Harmful Content POST Block",
+            scopes=[GuardrailScope.TOOL],
+            action=BlockAction(),
+            entities=[
+                HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2)
+            ],
+            tools=[analyze_joke_syntax],
+            stage=GuardrailExecutionStage.POST,
+        ),
         # Tool deterministic — filter "donkey" PRE
         *UiPathDeterministicGuardrailMiddleware(
             tools=[analyze_joke_syntax],

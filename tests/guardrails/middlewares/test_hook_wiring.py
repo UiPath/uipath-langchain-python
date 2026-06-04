@@ -23,11 +23,14 @@ from uipath.platform.guardrails.decorators import (
     LogAction,
 )
 
+from uipath_langchain.guardrails.enums import PIIDetectionEntityType
 from uipath_langchain.guardrails.middlewares import (
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
+    UiPathPIIDetectionMiddleware,
     UiPathUserPromptAttacksMiddleware,
 )
+from uipath_langchain.guardrails.models import PIIDetectionEntity
 
 
 def _hook_names(middleware: Iterable[Any]) -> list[str]:
@@ -107,6 +110,64 @@ class TestUserPromptAttacksHookWiring:
         )
         assert not any("after" in n for n in names), (
             f"No after_* hooks expected, got: {names}"
+        )
+
+
+class TestPIIDetectionHookWiringToolScope:
+    """UiPathPIIDetectionMiddleware TOOL scope registers exactly one wrap_tool_call hook."""
+
+    def test_tool_scope_registers_one_wrap_tool_call_hook(self) -> None:
+        middleware = UiPathPIIDetectionMiddleware(
+            scopes=[GuardrailScope.TOOL],
+            action=_LOG,
+            entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL)],
+            tools=["my_tool"],
+        )
+        names = _hook_names(middleware)
+        assert len(names) == 1, f"Expected 1 hook, got: {names}"
+        assert "wrap_tool_call" in names[0], (
+            f"Expected wrap_tool_call hook, got: {names}"
+        )
+
+    def test_tool_scope_no_before_or_after_hooks(self) -> None:
+        middleware = UiPathPIIDetectionMiddleware(
+            scopes=[GuardrailScope.TOOL],
+            action=_BLOCK,
+            entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL)],
+            tools=["my_tool"],
+        )
+        names = _hook_names(middleware)
+        assert not any("before" in n or "after" in n for n in names), (
+            f"No before_*/after_* hooks expected for TOOL scope, got: {names}"
+        )
+
+
+class TestHarmfulContentHookWiringToolScope:
+    """UiPathHarmfulContentMiddleware TOOL scope registers exactly one wrap_tool_call hook."""
+
+    def test_tool_scope_registers_one_wrap_tool_call_hook(self) -> None:
+        middleware = UiPathHarmfulContentMiddleware(
+            scopes=[GuardrailScope.TOOL],
+            action=_LOG,
+            entities=[HarmfulContentEntity("Hate")],
+            tools=["my_tool"],
+        )
+        names = _hook_names(middleware)
+        assert len(names) == 1, f"Expected 1 hook, got: {names}"
+        assert "wrap_tool_call" in names[0], (
+            f"Expected wrap_tool_call hook, got: {names}"
+        )
+
+    def test_tool_scope_no_before_or_after_hooks(self) -> None:
+        middleware = UiPathHarmfulContentMiddleware(
+            scopes=[GuardrailScope.TOOL],
+            action=_BLOCK,
+            entities=[HarmfulContentEntity("Violence")],
+            tools=["my_tool"],
+        )
+        names = _hook_names(middleware)
+        assert not any("before" in n or "after" in n for n in names), (
+            f"No before_*/after_* hooks expected for TOOL scope, got: {names}"
         )
 
 

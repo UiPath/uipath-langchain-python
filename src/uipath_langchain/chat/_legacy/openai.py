@@ -5,6 +5,7 @@ from typing import Optional
 import httpx
 from langchain_openai import AzureChatOpenAI
 from pydantic import PrivateAttr
+from uipath.platform.chat.llm_trace_context import build_trace_context_headers
 from uipath.platform.common import (
     EndpointManager,
     get_httpx_client_kwargs,
@@ -53,6 +54,14 @@ def _inject_license_ref_id(request: httpx.Request) -> None:
         request.headers["X-UiPath-License-RefId"] = license_ref_id
 
 
+def _inject_trace_context_headers(request: httpx.Request) -> None:
+    """Inject trace context headers per-request from the active OTEL span."""
+    for key, value in build_trace_context_headers(
+        extra_baggage=["source=agents"]
+    ).items():
+        request.headers[key] = value
+
+
 class UiPathURLRewriteTransport(httpx.AsyncHTTPTransport):
     def __init__(self, verify: bool = True, **kwargs):
         super().__init__(verify=verify, **kwargs)
@@ -62,6 +71,7 @@ class UiPathURLRewriteTransport(httpx.AsyncHTTPTransport):
         if new_url:
             request.url = new_url
         _inject_license_ref_id(request)
+        _inject_trace_context_headers(request)
 
         return await super().handle_async_request(request)
 
@@ -75,6 +85,7 @@ class UiPathSyncURLRewriteTransport(httpx.HTTPTransport):
         if new_url:
             request.url = new_url
         _inject_license_ref_id(request)
+        _inject_trace_context_headers(request)
 
         return super().handle_request(request)
 
