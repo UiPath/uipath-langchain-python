@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from uipath.core.feature_flags import FeatureFlags
-from uipath.platform.semantic_proxy import (
+from uipath.platform.pii_detection import (
     PiiDetectionResponse,
     PiiDocumentResult,
     PiiEntity,
@@ -53,8 +53,8 @@ def _make_client(
     upload_result: uuid.UUID | None = None,
 ) -> Mock:
     client = Mock()
-    client.semantic_proxy = Mock()
-    client.semantic_proxy.detect_pii_async = AsyncMock(return_value=response)
+    client.pii_detection = Mock()
+    client.pii_detection.detect_pii_async = AsyncMock(return_value=response)
     client.jobs = Mock()
     client.jobs.create_attachment_async = AsyncMock(
         return_value=upload_result or uuid.uuid4()
@@ -241,7 +241,7 @@ class TestApply:
         assert masked_files[0].masked_attachment_id == str(uploaded_uuid)
         assert masked_files[0].attachment_id == "orig-uuid"
 
-        request = client.semantic_proxy.detect_pii_async.call_args[0][0]
+        request = client.pii_detection.detect_pii_async.call_args[0][0]
         assert request.files[0].file_name == "doc.pdf"
         assert request.files[0].file_type == "pdf"
 
@@ -315,7 +315,7 @@ class TestApply:
 
         await PiiMasker(client, policy).apply("original", [])
 
-        request = client.semantic_proxy.detect_pii_async.call_args[0][0]
+        request = client.pii_detection.detect_pii_async.call_args[0][0]
         assert request.entity_thresholds == [
             PiiEntityThreshold(category="Email", confidence_threshold=0.6)
         ]
