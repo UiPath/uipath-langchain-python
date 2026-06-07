@@ -43,7 +43,7 @@ The workflow follows a ReAct pattern:
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.11+
 - `uipath-langchain`
 - `langchain-mcp-adapters`
 - `langgraph`

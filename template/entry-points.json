@@ -1,0 +1,169 @@
+{
+    "$schema": "https://cloud.uipath.com/draft/2024-12/entry-point",
+    "$id": "entry-points.json",
+    "entryPoints": [
+        {
+            "filePath": "agent",
+            "uniqueId": "dd6b5e6a-fa02-4220-b78e-e99c2f112e34",
+            "type": "agent",
+            "input": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "description": "Question for the assistant, e.g. 'What's the weather in Paris?'",
+                        "title": "Question",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "question"
+                ]
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "response": {
+                        "title": "Response",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "response"
+                ]
+            },
+            "graph": {
+                "nodes": [
+                    {
+                        "id": "__start__",
+                        "name": "__start__",
+                        "type": "__start__",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "prepare",
+                        "name": "prepare",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "react_agent",
+                        "name": "react_agent",
+                        "type": "node",
+                        "subgraph": {
+                            "nodes": [
+                                {
+                                    "id": "__start__",
+                                    "name": "__start__",
+                                    "type": "__start__",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                },
+                                {
+                                    "id": "model",
+                                    "name": "model",
+                                    "type": "model",
+                                    "subgraph": null,
+                                    "metadata": {
+                                        "model_name": "anthropic.claude-haiku-4-5-20251001-v1:0",
+                                        "max_tokens": 4096
+                                    }
+                                },
+                                {
+                                    "id": "tools",
+                                    "name": "tools",
+                                    "type": "tool",
+                                    "subgraph": null,
+                                    "metadata": {
+                                        "tool_names": [
+                                            "get_current_time",
+                                            "get_weather"
+                                        ],
+                                        "tool_count": 2
+                                    }
+                                },
+                                {
+                                    "id": "__end__",
+                                    "name": "__end__",
+                                    "type": "__end__",
+                                    "subgraph": null,
+                                    "metadata": {}
+                                }
+                            ],
+                            "edges": [
+                                {
+                                    "source": "__start__",
+                                    "target": "model",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "__end__",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "model",
+                                    "label": null
+                                },
+                                {
+                                    "source": "model",
+                                    "target": "tools",
+                                    "label": null
+                                },
+                                {
+                                    "source": "tools",
+                                    "target": "__end__",
+                                    "label": null
+                                },
+                                {
+                                    "source": "tools",
+                                    "target": "model",
+                                    "label": null
+                                }
+                            ]
+                        },
+                        "metadata": {}
+                    },
+                    {
+                        "id": "postprocess",
+                        "name": "postprocess",
+                        "type": "node",
+                        "subgraph": null,
+                        "metadata": {}
+                    },
+                    {
+                        "id": "__end__",
+                        "name": "__end__",
+                        "type": "__end__",
+                        "subgraph": null,
+                        "metadata": {}
+                    }
+                ],
+                "edges": [
+                    {
+                        "source": "__start__",
+                        "target": "prepare",
+                        "label": null
+                    },
+                    {
+                        "source": "prepare",
+                        "target": "react_agent",
+                        "label": null
+                    },
+                    {
+                        "source": "react_agent",
+                        "target": "postprocess",
+                        "label": null
+                    },
+                    {
+                        "source": "postprocess",
+                        "target": "__end__",
+                        "label": null
+                    }
+                ]
+            }
+        }
+    ]
+}

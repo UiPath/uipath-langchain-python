@@ -1,0 +1,6 @@
+{
+  "ProjectType": "Agent",
+  "Name": "uipath-langchain-template-agent",
+  "Description": "uipath-langchain-template-agent",
+  "MainFile": null
+}

@@ -1,0 +1,24 @@
+{
+  "description": "Chat models agent trace assertions - check key spans exist for all test types",
+  "required_spans": [
+    {
+      "name": "run_all_tests",
+      "attributes": {
+        "openinference.span.kind": "CHAIN"
+      }
+    },
+    {
+      "name": [
+        "UiPathChatVertex",
+        "UiPathChatOpenAI",
+        "UiPathChatBedrockConverse",
+        "UiPathChatBedrock",
+        "UiPathChat",
+        "UiPathAzureChatOpenAI"
+      ],
+      "attributes": {
+        "openinference.span.kind": "LLM"
+      }
+    }
+  ]
+}

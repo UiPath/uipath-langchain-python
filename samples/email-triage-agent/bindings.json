@@ -1,0 +1,21 @@
+{
+    "version": "2.0",
+    "resources": [
+        {
+            "resource": "connection",
+            "key": "<your-outlook-connection>",
+            "value": {
+                "ConnectionId": {
+                    "defaultValue": "<your-outlook-connection>",
+                    "isExpression": false,
+                    "displayName": "Outlook Connection"
+                }
+            },
+            "metadata": {
+                "Connector": "uipath-microsoft-outlook365",
+                "useConnectionService": "true",
+                "BindingsVersion": "2.2"
+            }
+        }
+    ]
+}

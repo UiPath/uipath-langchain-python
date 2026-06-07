@@ -1,51 +1,145 @@
 """Process tool creation for UiPath process execution."""
 
-from __future__ import annotations
+import json
+from typing import Any
 
-from typing import Any, Type
-
-from jsonschema_pydantic import jsonschema_to_pydantic  # type: ignore[import-untyped]
 from langchain_core.tools import StructuredTool
-from langgraph.types import interrupt
-from pydantic import BaseModel
-from uipath.agent.models.agent import AgentProcessToolResourceConfig
-from uipath.models import InvokeProcess
+from uipath.agent.models.agent import AgentProcessToolResourceConfig, AgentToolType
+from uipath.eval.mocks import mockable
+from uipath.platform import UiPath
+from uipath.platform.common import WaitJobRaw
+from uipath.platform.errors import EnrichedException
+from uipath.platform.orchestrator import JobState
+from uipath.runtime.errors import UiPathErrorCategory
+
+from uipath_langchain._utils import get_execution_folder_path
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain.agent.exceptions import raise_for_enriched
+from uipath_langchain.agent.react.job_attachments import get_job_attachments
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
+    StructuredToolWithArgumentProperties,
+)
 
 from .utils import sanitize_tool_name
 
+_START_JOBS_ERRORS: dict[tuple[int, str | None], tuple[str, UiPathErrorCategory]] = {
+    (404, "1002"): (
+        "Could not find process for tool '{tool}'. Please check if the process is deployed in the configured folder.",
+        UiPathErrorCategory.DEPLOYMENT,
+    ),
+    (400, "1100"): (
+        "Could not find folder for tool '{tool}'. Please check if the folder exists and is accessible by the robot.",
+        UiPathErrorCategory.DEPLOYMENT,
+    ),
+    (409, None): (
+        "Cannot start process for tool '{tool}': {message}",
+        UiPathErrorCategory.DEPLOYMENT,
+    ),
+}
 
-def create_process_tool(resource: AgentProcessToolResourceConfig) -> StructuredTool:
+
+def create_process_tool(
+    resource: AgentProcessToolResourceConfig,
+    run_as_me: bool = False,
+) -> StructuredTool:
     """Uses interrupt() to suspend graph execution until process completes (handled by runtime)."""
+    # Import here to avoid circular dependency
+    from uipath_langchain.agent.wrappers import get_job_attachment_wrapper
+
     tool_name: str = sanitize_tool_name(resource.name)
     process_name = resource.properties.process_name
-    folder_path = resource.properties.folder_path
+    folder_path = get_execution_folder_path()
 
-    input_model: Type[BaseModel] = jsonschema_to_pydantic(resource.input_schema)
-    output_model: Type[BaseModel] = jsonschema_to_pydantic(resource.output_schema)
+    input_model: Any = create_model(resource.input_schema)
+    output_model: Any = create_model(resource.output_schema)
+
+    _span_context: dict[str, Any] = {}
+    _bts_context: dict[str, Any] = {}
 
     async def process_tool_fn(**kwargs: Any):
-        try:
-            result = interrupt(
-                InvokeProcess(
-                    name=process_name,
-                    input_arguments=kwargs,
-                    process_folder_path=folder_path,
-                    process_folder_key=None,
-                )
-            )
-        except Exception:
-            raise
+        attachments = get_job_attachments(input_model, kwargs)
+        input_arguments = input_model.model_validate(kwargs).model_dump(mode="json")
 
-        return result
+        @mockable(
+            name=resource.name,
+            description=resource.description,
+            input_schema=input_model.model_json_schema(),
+            output_schema=output_model.model_json_schema(),
+            example_calls=resource.properties.example_calls,
+        )
+        async def invoke_process(**_tool_kwargs: Any):
+            parent_span_id = _span_context.pop("parent_span_id", None)
+            parent_operation_id = _bts_context.pop("parent_operation_id", None)
 
-    class ProcessTool(StructuredTool):
-        """Process tool with OutputType for schema compatibility."""
+            @durable_interrupt
+            async def start_job():
+                client = UiPath()
+                try:
+                    job = await client.processes.invoke_async(
+                        name=process_name,
+                        input_arguments=input_arguments,
+                        folder_path=folder_path,
+                        attachments=attachments,
+                        parent_span_id=parent_span_id,
+                        parent_operation_id=parent_operation_id,
+                        run_as_me=True if run_as_me else None,
+                    )
+                except EnrichedException as e:
+                    raise_for_enriched(
+                        e,
+                        _START_JOBS_ERRORS,
+                        title=f"Failed to execute tool '{resource.name}'",
+                        tool=resource.name,
+                    )
+                    raise
 
-        OutputType: Type[BaseModel] = output_model
+                if job.key:
+                    bts_key = (
+                        "wait_for_agent_job_key"
+                        if resource.type == AgentToolType.AGENT
+                        else "wait_for_job_key"
+                    )
+                    _bts_context[bts_key] = str(job.key)
 
-    return ProcessTool(
+                return WaitJobRaw(job=job, process_folder_key=job.folder_key)
+
+            job = await start_job()
+
+            if (job.state or "").lower() == JobState.FAULTED:
+                error_info = str(job.info or "Unknown error")
+                return f"{error_info}"
+
+            client = UiPath()
+            output_str = await client.jobs.extract_output_async(job)
+            if output_str:
+                try:
+                    return json.loads(output_str)
+                except (json.JSONDecodeError, TypeError):
+                    return output_str
+            return output_str
+
+        return await invoke_process(**kwargs)
+
+    job_attachment_wrapper = get_job_attachment_wrapper(output_type=output_model)
+
+    tool = StructuredToolWithArgumentProperties(
         name=tool_name,
         description=resource.description,
         args_schema=input_model,
         coroutine=process_tool_fn,
+        output_type=output_model,
+        metadata={
+            "tool_type": resource.type.lower(),
+            "display_name": process_name,
+            "folder_path": folder_path,
+            "args_schema": input_model,
+            "output_schema": output_model,
+            "_span_context": _span_context,
+            "_bts_context": _bts_context,
+        },
+        argument_properties=resource.argument_properties,
     )
+    tool.set_tool_wrappers(awrapper=job_attachment_wrapper)
+
+    return tool

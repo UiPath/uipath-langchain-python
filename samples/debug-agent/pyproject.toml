@@ -1,0 +1,16 @@
+[project]
+name = "debug-agent"
+version = "0.0.1"
+description = "Debug Agent"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "uipath-langchain",
+    "uipath",
+]
+
+[dependency-groups]
+dev = [
+    "uipath-dev",
+]
+

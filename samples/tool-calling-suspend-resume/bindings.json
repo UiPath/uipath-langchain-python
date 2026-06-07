@@ -1,0 +1,26 @@
+{
+    "version": "2.0",
+    "resources": [
+        {
+            "resource": "process",
+            "key": "Add.Two.Number.API.Workflow.Tool.api.API.Workflow",
+            "value": {
+                "processKey": {
+                    "defaultValue": "Add.Two.Number.API.Workflow.Tool.api.API.Workflow",
+                    "isExpression": false,
+                    "displayName": "Process Key"
+                },
+                "releaseKey": {
+                    "defaultValue": "40A364E7-8B12-407E-BAB4-16F1E028AEA4",
+                    "isExpression": false,
+                    "displayName": "Release Key"
+                }
+            },
+            "metadata": {
+                "ActivityName": "InvokeProcess",
+                "BindingsVersion": "2.2",
+                "DisplayLabel": "Add.Two.Number.API.Workflow.Tool.api.API.Workflow"
+            }
+        }
+    ]
+}

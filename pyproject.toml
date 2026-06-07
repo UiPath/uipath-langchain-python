@@ -1,39 +1,67 @@
 [project]
 name = "uipath-langchain"
-version = "0.0.149"
-description = "UiPath Langchain"
+version = "0.11.13"
+description = "Python SDK that enables developers to build and deploy LangGraph agents to the UiPath Cloud Platform"
 readme = { file = "README.md", content-type = "text/markdown" }
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "uipath>=2.1.123, <2.2.0",
-    "langgraph>=0.5.0, <0.7.0",
-    "langchain-core>=0.3.34",
-    "langgraph-checkpoint-sqlite>=2.0.3",
-    "langchain-community>=0.3.21",
-    "langchain-openai>=0.3.3",
-    "langchain>=0.3.4",
+    "uipath>=2.10.74, <2.11.0",
+    "uipath-core>=0.5.17, <0.6.0",
+    "uipath-platform>=0.1.61, <0.2.0",
+    "uipath-runtime>=0.11.0, <0.12.0",
+    "langgraph>=1.1.8, <2.0.0",
+    "langchain-core>=1.2.11, <2.0.0",
+    "langgraph-checkpoint-sqlite>=3.0.3, <4.0.0",
+    "langchain>=1.0.0, <2.0.0",
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.0.1",
     "httpx>=0.27.0",
-    "openai>=1.65.5",
-    "openinference-instrumentation-langchain>=0.1.50",
-    "jsonschema-pydantic>=0.6",
+    "openinference-instrumentation-langchain>=0.1.56",
+    "jsonschema-pydantic-converter>=0.4.0",
+    "jsonpath-ng>=1.7.0",
+    "mcp==1.26.0",
+    "langchain-mcp-adapters==0.2.1",
+    "pillow>=12.1.1",
+    "a2a-sdk>=0.2.0,<1.0.0",
+    "uipath-langchain-client[openai]>=1.13.0,<1.14.0",
 ]
+
 classifiers = [
-    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Build Tools",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 maintainers = [
     { name = "Marius Cosareanu", email = "marius.cosareanu@uipath.com" },
-    { name = "Cristian Pufu", email = "cristian.pufu@uipath.com" }
+    { name = "Cristian Pufu", email = "cristian.pufu@uipath.com" },
+]
+
+[project.optional-dependencies]
+anthropic = [
+    "uipath-langchain-client[anthropic]>=1.13.0,<1.14.0",
+]
+vertex = [
+    "uipath-langchain-client[google]>=1.13.0,<1.14.0",
+    "uipath-langchain-client[vertexai]>=1.13.0,<1.14.0",
+]
+bedrock = [
+    "uipath-langchain-client[bedrock]>=1.13.0,<1.14.0",
+    "boto3-stubs>=1.41.4",
+]
+fireworks = [
+    "uipath-langchain-client[fireworks]>=1.13.0,<1.14.0",
+]
+all = [
+    "uipath-langchain-client[all]>=1.13.0,<1.14.0",
 ]
 
 [project.entry-points."uipath.middlewares"]
 register = "uipath_langchain.middlewares:register_middleware"
+
+[project.entry-points."uipath.runtime.factories"]
+langgraph = "uipath_langchain.runtime:register_runtime_factory"
 
 [project.urls]
 Homepage = "https://uipath.com"
@@ -52,14 +80,12 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.11.1",
     "pytest-asyncio>=1.0.0",
-    "pre-commit>=4.1.0",
+    "pre-commit>=4.5.1",
+    "filelock>=3.20.3",
+    "virtualenv>=20.36.1",
     "numpy>=1.24.0",
-    "pytest_httpx>=0.35.0"
-]
-
-[project.optional-dependencies]
-langchain = [
-  "uipath-langchain>=0.0.2"
+    "pytest_httpx>=0.35.0",
+    "rust-just>=1.39.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -68,13 +94,15 @@ packages = ["src/uipath_langchain"]
 [tool.ruff]
 line-length = 88
 indent-width = 4
-exclude = ["samples/**", "testcases/**"]
+exclude = ["samples/**", "testcases/**", "template/**"]
 
 [tool.ruff.lint]
 select = ["E", "F", "B", "I"]
 
 [tool.ruff.lint.per-file-ignores]
 "*" = ["E501"]
+"src/uipath_langchain/chat/_legacy/bedrock.py" = ["E402"]
+"src/uipath_langchain/chat/_legacy/vertex.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -83,14 +111,10 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.mypy]
-plugins = [
-  "pydantic.mypy"
-]
-exclude = [
-    "samples/.*",
-    "testcases/.*"
-]
+plugins = ["pydantic.mypy"]
+exclude = ["samples/.*", "testcases/.*", "template/.*"]
 
+namespace_packages = true
 follow_imports = "silent"
 warn_redundant_casts = true
 warn_unused_ignores = true
@@ -103,9 +127,42 @@ disallow_untyped_defs = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
-addopts = "-ra -q"
+addopts = "-ra -q --cov=src/uipath_langchain --cov-report=term-missing"
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["src/uipath_langchain"]
+relative_files = true
+omit = [
+  "*/tests/*",
+  "*/__pycache__/*",
+  "*/site-packages/*",
+  "*/conftest.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "@(abc\\.)?abstractmethod",
+]
+
+[tool.uv]
+exclude-newer = "2 days"
+
+[tool.uv.exclude-newer-package]
+uipath = false
+uipath-core = false
+uipath-platform = false
+uipath-runtime = false
+uipath-langchain-client = false
+uipath-llm-client = false
+jsonschema-pydantic-converter = false
 
 [[tool.uv.index]]
 name = "testpypi"

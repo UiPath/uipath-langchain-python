@@ -1,0 +1,22 @@
+flowchart TB
+  __start__(__start__)
+  prepare(prepare)
+  postprocess(postprocess)
+  __end__(__end__)
+  __start__ --> prepare
+  prepare --> react_agent
+  react_agent --> postprocess
+  postprocess --> __end__
+  subgraph react_agent [react_agent]
+    direction LR
+    __start__(__start__)
+    model(model)
+    tools(tools)
+    __end__(__end__)
+    __start__ --> model
+    model --> __end__
+    model --> model
+    model --> tools
+    tools --> __end__
+    tools --> model
+  end

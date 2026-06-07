@@ -1,44 +1,148 @@
-"""LLM node implementation for LangGraph."""
+"""LLM node for ReAct Agent graph."""
 
-from typing import Sequence
+from typing import Literal, Sequence, TypeVar
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, AnyMessage
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    ToolCall,
+)
 from langchain_core.tools import BaseTool
+from pydantic import BaseModel
+from uipath.agent.react import RAISE_ERROR_TOOL
+from uipath.runtime.errors import UiPathErrorCategory
 
-from .constants import MAX_SUCCESSIVE_COMPLETIONS
-from .types import AgentGraphState
-from .utils import count_successive_completions
+from uipath_langchain.chat.handlers import get_payload_handler
+
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ..exceptions.licensing import raise_for_provider_http_error
+from ..messages.message_utils import replace_tool_calls
+from ..tools.static_args import StaticArgsHandler
+from .constants import (
+    DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
+    DEFAULT_MAX_LLM_MESSAGES,
+)
+from .types import FLOW_CONTROL_TOOLS, AgentGraphState
+from .utils import count_consecutive_thinking_messages
+
+
+def _filter_control_flow_tool_calls(
+    tool_calls: list[ToolCall],
+) -> list[ToolCall]:
+    """Remove control flow tool calls only when regular tool calls exist alongside them.
+
+    When only control flow tool calls are present and raise_error is among them,
+    keep only the first raise_error (takes precedence over end_execution).
+    """
+    if len(tool_calls) <= 1:
+        return tool_calls
+
+    non_control_flow_tool_calls = [
+        tc for tc in tool_calls if tc.get("name") not in FLOW_CONTROL_TOOLS
+    ]
+    if not non_control_flow_tool_calls:
+        raise_error_calls = [
+            tc for tc in tool_calls if tc.get("name") == RAISE_ERROR_TOOL.name
+        ]
+        return raise_error_calls[:1] if raise_error_calls else tool_calls
+
+    return non_control_flow_tool_calls
+
+
+StateT = TypeVar("StateT", bound=AgentGraphState)
+InputT = TypeVar("InputT", bound=BaseModel)
 
 
 def create_llm_node(
     model: BaseChatModel,
-    tools: Sequence[BaseTool] | None = None,
+    tools: Sequence[BaseTool],
+    input_schema: type[InputT] | None = None,
+    is_conversational: bool = False,
+    llm_messages_limit: int = DEFAULT_MAX_LLM_MESSAGES,
+    thinking_messages_limit: int = DEFAULT_MAX_CONSECUTIVE_THINKING_MESSAGES,
+    tool_choice: Literal["auto", "any"] = "auto",
+    parallel_tool_calls: bool = True,
+    strict_mode: bool = False,
 ):
-    """Invoke LLM with tools and dynamically control tool_choice based on successive completions.
+    """Create LLM node with dynamic tool_choice enforcement.
 
-    When successive completions reach the limit, tool_choice is set to "required" to force
-    the LLM to use a tool and prevent infinite reasoning loops.
+    Controls when to force tool usage based on consecutive thinking steps
+    to prevent infinite loops and ensure progress.
+
+    Args:
+        model: The chat model to use
+        tools: Available tools to bind
+        is_conversational: Whether this is a conversational agent
+        llm_messages_limit: Maximum number of LLM calls allowed per execution
+        thinking_messages_limit: Max consecutive LLM responses without tool calls
+            before enforcing tool usage. 0 = force tools every time.
     """
     bindable_tools = list(tools) if tools else []
-    base_llm = model.bind_tools(bindable_tools) if bindable_tools else model
+    payload_handler = get_payload_handler(model)
+    static_args_handler = StaticArgsHandler()
 
-    async def llm_node(state: AgentGraphState):
-        messages: list[AnyMessage] = state["messages"]
-
-        successive_completions = count_successive_completions(messages)
-
-        if successive_completions >= MAX_SUCCESSIVE_COMPLETIONS and bindable_tools:
-            llm = base_llm.bind(tool_choice="required")
-        else:
-            llm = base_llm
-
-        response = await llm.ainvoke(messages)
-        if not isinstance(response, AIMessage):
-            raise TypeError(
-                f"LLM returned {type(response).__name__} instead of AIMessage"
+    async def llm_node(state: StateT):
+        messages: list[AnyMessage] = state.messages
+        initial_count = state.inner_state.initial_message_count or 0
+        current_turn_messages = messages[initial_count:]
+        agent_ai_messages = sum(
+            1 for msg in current_turn_messages if isinstance(msg, AIMessage)
+        )
+        if agent_ai_messages >= llm_messages_limit:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_MAX_ITERATIONS,
+                title=f"Maximum iterations of '{llm_messages_limit}' reached.",
+                detail="Verify the agent's trajectory or consider increasing the max iterations in the agent's settings.",
+                category=UiPathErrorCategory.USER,
             )
 
+        static_schema_tools = static_args_handler.initialize(
+            bindable_tools, state, input_schema or type(state)
+        )
+        current_tool_choice: Literal["auto", "any"] = tool_choice
+        if current_tool_choice == "auto" and (
+            not is_conversational
+            and bindable_tools
+            and count_consecutive_thinking_messages(messages) >= thinking_messages_limit
+        ):
+            current_tool_choice = "any"
+
+        binding_kwargs = payload_handler.get_tool_binding_kwargs(
+            tools=static_schema_tools,
+            tool_choice=current_tool_choice,
+            parallel_tool_calls=parallel_tool_calls,
+            strict_mode=strict_mode,
+        )
+
+        llm = model.bind_tools(static_schema_tools, **binding_kwargs)
+
+        try:
+            response = await llm.ainvoke(messages)
+        except Exception as e:
+            # LLM errors arrive as provider-specific exceptions (OpenAI, Bedrock,
+            # Vertex). Convert to a structured AgentRuntimeError with the HTTP
+            # status code so upstream handlers can categorise (e.g. 403 → licensing).
+            raise_for_provider_http_error(e)
+            raise
+        if not isinstance(response, AIMessage):
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
+                title=f"LLM returned {type(response).__name__} invalid response.",
+                detail="The language model returned an unexpected response type."
+                "If you are using a BYOM configuration, verify your model deployment.",
+                category=UiPathErrorCategory.SYSTEM,
+            )
+
+        payload_handler.check_stop_reason(response)
+
+        # filter out flow control tools when multiple tool calls exist
+        if response.tool_calls:
+            filtered_tool_calls = _filter_control_flow_tool_calls(response.tool_calls)
+            if len(filtered_tool_calls) != len(response.tool_calls):
+                response = replace_tool_calls(response, filtered_tool_calls)
+
+        static_args_handler.apply_to_response(response.tool_calls)
         return {"messages": [response]}
 
     return llm_node

@@ -30,8 +30,8 @@ print(retriever.invoke("What is the company policy on remote work?"))
 You can easily integrate the retriever with LangChain's tool system:
 
 ```python
-from langchain.agents import create_react_agent
-from langchain.tools.retriever import create_retriever_tool
+from langchain.agents import create_agent
+from langchain_core.tools.retriever import create_retriever_tool
 from uipath_langchain.retrievers import ContextGroundingRetriever
 
 retriever = ContextGroundingRetriever(index_name = "Company Policy Context")
@@ -47,7 +47,7 @@ retriever_tool = create_retriever_tool(
 # You can use the tool in your agents
 model = OpenAI()
 tools = [retriever_tool]
-agent = create_react_agent(model, tools, prompt="Answer user questions as best as you can using the search tool.")
+agent = create_agent(model, tools, system_prompt="Answer user questions as best as you can using the search tool.")
 ```
 
 
@@ -83,7 +83,7 @@ You can integrate the vector store into a retrieval chain with a language model:
 
 ```python
 # Run a retrieval chain
-model = UiPathAzureChatOpenAI(model="gpt-4o-2024-08-06", max_retries=3)
+model = UiPathAzureChatOpenAI(model="gpt-4.1-mini-2025-04-14", max_retries=3)
 retrieval_chain = create_retrieval_chain(vectorstore=vectorstore, model=model)
 
 query = "What is the ECCN for a laptop?"

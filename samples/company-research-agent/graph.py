@@ -1,7 +1,7 @@
 from langchain_anthropic import ChatAnthropic
 from langchain_tavily import TavilySearch
 from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, BaseMessage
 
@@ -31,9 +31,9 @@ Always maintain a professional and objective tone in your research and recommend
 DO NOT do any math as specified in your instructions.
 """
 
-llm = ChatAnthropic(model="claude-3-5-sonnet-latest")
+llm = ChatAnthropic(model="claude-3-7-sonnet-latest")
 
-research_agent = create_react_agent(llm, tools=[tavily_tool], prompt=system_prompt)
+research_agent = create_agent(llm, tools=[tavily_tool], system_prompt=system_prompt)
 
 def get_message_text(msg: BaseMessage) -> str:
     """LangChain-style safe message text extractor."""

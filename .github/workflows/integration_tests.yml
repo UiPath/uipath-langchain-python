@@ -21,6 +21,7 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Discover testcases
+      # Skip common directory - it's shared utilities, not a testcase
       id: discover
       run: |
         # Find all testcase folders (excluding common folders like README, etc.)
@@ -36,18 +37,19 @@ jobs:
   integration-tests:
     needs: [discover-testcases]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     container:
       image: ghcr.io/astral-sh/uv:python3.12-bookworm
       env:
         UIPATH_JOB_KEY: "3a03d5cb-fa21-4021-894d-a8e2eda0afe0"
+        UIPATH_TRACING_ENABLED: false
     strategy:
       fail-fast: false
       matrix:
         testcase: ${{ fromJson(needs.discover-testcases.outputs.testcases) }}
-        environment: [alpha, staging] # temporary disable [cloud]
-        use_azure_chat: [true, false]
+        environment: [alpha, cloud, staging]
 
-    name: "${{ matrix.testcase }} / ${{ matrix.environment }} / ${{ matrix.use_azure_chat && 'UiPathAzureChatOpenAI' || 'UiPathChat' }}"
+    name: "${{ matrix.testcase }} / ${{ matrix.environment }}"
 
     steps:
     - name: Checkout code
@@ -58,16 +60,14 @@ jobs:
 
     - name: Run testcase
       env:
-        CLIENT_ID:      ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_ID || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_ID || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_ID }}
-        CLIENT_SECRET:  ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_SECRET || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_SECRET || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_SECRET }}
-        BASE_URL:       ${{ matrix.environment == 'alpha' && secrets.ALPHA_BASE_URL || matrix.environment == 'staging' && secrets.STAGING_BASE_URL || matrix.environment == 'cloud' && secrets.CLOUD_BASE_URL }}
-        USE_AZURE_CHAT: ${{ matrix.use_azure_chat }}
+        ENVIRONMENT: ${{ matrix.environment }}
+        CLIENT_ID: ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_ID || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_ID || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_ID }}
+        CLIENT_SECRET: ${{ matrix.environment == 'alpha' && secrets.ALPHA_TEST_CLIENT_SECRET || matrix.environment == 'staging' && secrets.STAGING_TEST_CLIENT_SECRET || matrix.environment == 'cloud' && secrets.CLOUD_TEST_CLIENT_SECRET }}
+        BASE_URL: ${{ matrix.environment == 'alpha' && secrets.ALPHA_BASE_URL || matrix.environment == 'staging' && secrets.STAGING_BASE_URL || matrix.environment == 'cloud' && secrets.CLOUD_BASE_URL }}
       working-directory: testcases/${{ matrix.testcase }}
       run: |
         echo "Running testcase: ${{ matrix.testcase }}"
         echo "Environment: ${{ matrix.environment }}"
-        echo "LLM: ${{ matrix.use_azure_chat && 'UiPathAzureChatOpenAI' || 'UiPathChat' }}"
-        echo "USE_AZURE_CHAT: ${{ matrix.use_azure_chat }}"
 
         # Execute the testcase run script directly
         bash run.sh

@@ -1,0 +1,19 @@
+[project]
+name = "chat-hitl-agent"
+version = "0.0.1"
+description = "Chat agent with Tavily web search and Human-in-the-Loop"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=1.0.4",
+    "langchain-anthropic>=1.2.0",
+    "tavily-python>=0.7.13",
+    "langchain-tavily>=0.2.13",
+    "uipath",
+    "uipath-langchain"
+]
+
+[dependency-groups]
+dev = [
+     "uipath-dev",
+]

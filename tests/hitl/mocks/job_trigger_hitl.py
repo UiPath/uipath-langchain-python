@@ -1,13 +1,13 @@
 # type: ignore
 import dataclasses
 import time
-from typing import Optional
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel
-from uipath.models import InvokeProcess, Job, WaitJob
+from uipath.platform.common import InvokeProcess, WaitJob
+from uipath.platform.orchestrator import Job
 
 
 @dataclasses.dataclass
@@ -16,7 +16,7 @@ class Input:
 
 
 class GraphState(BaseModel):
-    process_output: Optional[str] = None
+    process_output: str | None = None
 
 
 @dataclasses.dataclass
@@ -42,12 +42,18 @@ def wait_job_node(state: GraphState) -> Output:
     print("Process output: {}".format(state.process_output))
 
     response = interrupt(
-        WaitJob(job=Job(key="487d9dc7-30fe-4926-b5f0-35a956914042", Id=123))
+        WaitJob(
+            job=Job(
+                key="487d9dc7-30fe-4926-b5f0-35a956914042",
+                id=123,
+                folder_key="test-folder-key",
+            )
+        )
     )
     return Output(message=response["output_arg_2"])
 
 
-builder = StateGraph(GraphState, input=Input, output=Output)
+builder = StateGraph(GraphState, input_schema=Input, output_schema=Output)
 
 builder.add_node("create_process_node", create_process_node)
 builder.add_node("wait_job_node", wait_job_node)

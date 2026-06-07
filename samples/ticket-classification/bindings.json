@@ -1,0 +1,26 @@
+{
+    "version": "2.0",
+    "resources": [
+          {
+      "resource": "app",
+      "key": "escalation_agent_app.app_folder_path",
+      "value": {
+        "name": {
+          "defaultValue": "escalation_agent_app",
+          "isExpression": false,
+          "displayName": "App Name"
+        },
+        "folderPath": {
+          "defaultValue": "app_folder_path",
+          "isExpression": false,
+          "displayName": "App Folder Path"
+        }
+      },
+      "metadata": {
+        "ActivityName": "create_async",
+        "BindingsVersion": "2.2",
+        "DisplayLabel": "app_name"
+      }
+    }
+    ]
+}

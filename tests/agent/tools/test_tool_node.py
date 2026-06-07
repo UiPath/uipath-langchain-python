@@ -1,0 +1,625 @@
+"""Tests for tool_node.py module."""
+
+import json
+from typing import Any, Dict
+from unittest.mock import patch
+
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages.tool import ToolCall, ToolMessage
+from langchain_core.tools import BaseTool
+from langgraph.types import Command
+from pydantic import BaseModel
+
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.tools.tool_node import (
+    ToolWrapperMixin,
+    UiPathToolNode,
+    create_tool_node,
+    wrap_tools_with_error_handling,
+)
+from uipath_langchain.chat.hitl import (
+    ARGS_MODIFIED_MESSAGE,
+    CANCELLED_MESSAGE,
+    CONVERSATIONAL_APPROVED_TOOL_ARGS,
+)
+
+
+class MockTool(BaseTool):
+    """Mock tool for testing."""
+
+    name: str = "mock_tool"
+    description: str = "A mock tool for testing"
+
+    def _run(self, input_text: str = "") -> str:
+        return f"Mock result: {input_text}"
+
+    async def _arun(self, input_text: str = "") -> str:
+        return f"Async mock result: {input_text}"
+
+
+class MockToolWithWrappers(BaseTool, ToolWrapperMixin):
+    """Mock tool with wrapper mixin for testing."""
+
+    name: str = "mock_tool_with_wrappers"
+    description: str = "A mock tool with wrappers for testing"
+
+    def _run(self, input_text: str = "") -> str:
+        return f"Wrapped mock result: {input_text}"
+
+    async def _arun(self, input_text: str = "") -> str:
+        return f"Async wrapped mock result: {input_text}"
+
+
+class MockFailingTool(BaseTool):
+    """Mock tool that always fails for testing error handling."""
+
+    name: str = "mock_failing_tool"
+    description: str = "A mock tool that fails for testing"
+
+    def _run(self, input_text: str = "") -> str:
+        raise ValueError(f"Tool execution failed: {input_text}")
+
+    async def _arun(self, input_text: str = "") -> str:
+        raise ValueError(f"Async tool execution failed: {input_text}")
+
+
+class FilteredState(BaseModel):
+    """Mock filtered state model for testing wrappers."""
+
+    user_id: str = "test_user"
+    session_id: str = "test_session"
+
+
+class MockState(AgentGraphState):
+    """Mock state for testing."""
+
+    user_id: str = "test_user"
+    session_id: str = "test_session"
+
+
+def mock_wrapper(
+    tool: BaseTool, call: ToolCall, state: FilteredState
+) -> Dict[str, Any]:
+    """Mock synchronous wrapper for testing."""
+    result = tool.invoke(call["args"])
+    # Access user_id if available, demonstrating flexibility with different BaseModel subclasses
+    user_id = getattr(state, "user_id", "unknown")
+    return {"wrapped_result": f"Wrapped: {result} (user: {user_id})"}
+
+
+async def mock_awrapper(
+    tool: BaseTool, call: ToolCall, state: FilteredState
+) -> Dict[str, Any]:
+    """Mock asynchronous wrapper for testing."""
+    result = await tool.ainvoke(call["args"])
+    # Access user_id if available, demonstrating flexibility with different BaseModel subclasses
+    user_id = getattr(state, "user_id", "unknown")
+    return {"wrapped_result": f"Async wrapped: {result} (user: {user_id})"}
+
+
+def mock_wrapper_with_command(
+    tool: BaseTool, call: ToolCall, state: FilteredState
+) -> Command[Any]:
+    """Mock wrapper that returns a Command for testing."""
+    return Command(goto="next_node")
+
+
+class TestUiPathToolNode:
+    """Test cases for UiPathToolNode class."""
+
+    @pytest.fixture
+    def mock_tool(self):
+        """Fixture for mock tool."""
+        return MockTool()
+
+    @pytest.fixture
+    def mock_state(self):
+        """Fixture for mock state with tool call."""
+        tool_call = {
+            "name": "mock_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        return MockState(messages=[ai_message])
+
+    @pytest.fixture
+    def empty_state(self):
+        """Fixture for state without tool calls."""
+        ai_message = AIMessage(content="No tools")
+        return MockState(messages=[ai_message])
+
+    @pytest.fixture
+    def non_ai_state(self):
+        """Fixture for state with non-AI message."""
+        human_message = HumanMessage(content="Hello")
+        return MockState(messages=[human_message])
+
+    @pytest.fixture
+    def sequential_execution_state(self):
+        """Fixture for state with multiple tool calls in sequential execution."""
+        tool_calls = [
+            {"name": "first_tool", "args": {"input": "first"}, "id": "call_1"},
+            {"name": "mock_tool", "args": {"input_text": "test input"}, "id": "call_2"},
+        ]
+        ai_message = AIMessage(content="Using tools", tool_calls=tool_calls)
+        # Add a ToolMessage for the first tool call (already executed)
+        first_tool_message = ToolMessage(
+            content="First tool result", name="first_tool", tool_call_id="call_1"
+        )
+        return MockState(messages=[ai_message, first_tool_message])
+
+    def test_basic_tool_execution(self, mock_tool, mock_state):
+        """Test basic tool execution without wrappers."""
+        node = UiPathToolNode(mock_tool)
+
+        result = node._func(mock_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+
+        tool_message = result["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        assert tool_message.name == "mock_tool"
+        assert tool_message.tool_call_id == "test_call_id"
+        assert "Mock result: test input" in tool_message.content
+
+    async def test_async_tool_execution(self, mock_tool, mock_state):
+        """Test asynchronous tool execution without wrappers."""
+        node = UiPathToolNode(mock_tool)
+
+        result = await node._afunc(mock_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+
+        tool_message = result["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        assert tool_message.name == "mock_tool"
+        assert tool_message.tool_call_id == "test_call_id"
+        assert "Async mock result: test input" in tool_message.content
+
+    def test_tool_execution_with_sync_wrapper(self, mock_tool, mock_state):
+        """Test tool execution with synchronous wrapper."""
+        node = UiPathToolNode(mock_tool, wrapper=mock_wrapper)
+
+        result = node._func(mock_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+
+        tool_message = result["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        assert "wrapped_result" in tool_message.content
+        assert "Wrapped:" in tool_message.content
+        assert "user: test_user" in tool_message.content
+
+    async def test_tool_execution_with_async_wrapper(self, mock_tool, mock_state):
+        """Test tool execution with asynchronous wrapper."""
+        node = UiPathToolNode(mock_tool, awrapper=mock_awrapper)
+
+        result = await node._afunc(mock_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+
+        tool_message = result["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        assert "wrapped_result" in tool_message.content
+        assert "Async wrapped:" in tool_message.content
+        assert "user: test_user" in tool_message.content
+
+    def test_wrapper_returning_command(self, mock_tool, mock_state):
+        """Test wrapper that returns a Command instead of a dict."""
+        node = UiPathToolNode(mock_tool, wrapper=mock_wrapper_with_command)
+
+        result = node._func(mock_state)
+
+        assert isinstance(result, Command)
+        assert result.goto == "next_node"
+
+    def test_no_tool_calls_returns_none(self, mock_tool, empty_state):
+        """Test that missing tool calls return None."""
+        node = UiPathToolNode(mock_tool)
+
+        result = node._func(empty_state)
+
+        assert result is None
+
+    def test_no_ai_message_returns_none(self, mock_tool, non_ai_state):
+        """Test that missing AI messages return None."""
+        node = UiPathToolNode(mock_tool)
+
+        result = node._func(non_ai_state)
+
+        assert result is None
+
+    def test_mismatched_tool_name_returns_none(self, mock_tool, mock_state):
+        """Test that mismatched tool names return None."""
+        # Change the tool call name to something different
+        mock_state.messages[-1].tool_calls[0]["name"] = "different_tool"
+
+        node = UiPathToolNode(mock_tool)
+
+        result = node._func(mock_state)
+
+        assert result is None
+
+    def test_sequential_execution_finds_correct_tool_call(
+        self, mock_tool, sequential_execution_state
+    ):
+        """Test that sequential execution finds the correct tool call to execute."""
+        node = UiPathToolNode(mock_tool)
+
+        result = node._func(sequential_execution_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+
+        tool_message = result["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        assert tool_message.name == "mock_tool"
+        assert tool_message.tool_call_id == "call_2"
+        assert "Mock result: test input" in tool_message.content
+
+    def test_state_filtering(self, mock_tool, mock_state):
+        """Test that state is properly filtered for wrapper functions."""
+        node = UiPathToolNode(mock_tool, wrapper=mock_wrapper)
+
+        filtered_state = node._filter_state(mock_state, mock_wrapper)
+
+        assert isinstance(filtered_state, FilteredState)
+        assert filtered_state.user_id == "test_user"
+        assert filtered_state.session_id == "test_session"
+
+    def test_invalid_wrapper_state_type_raises_error(self, mock_tool, mock_state):
+        """Test that invalid wrapper state parameter types raise AgentRuntimeError."""
+
+        def invalid_wrapper(
+            tool: BaseTool, call: ToolCall, state: str
+        ) -> Dict[str, Any]:
+            return {"result": "invalid"}
+
+        node = UiPathToolNode(mock_tool, wrapper=invalid_wrapper)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            node._func(mock_state)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.TOOL_INVALID_WRAPPER_STATE
+        )
+
+    def test_tool_error_propagates(self, mock_state):
+        """Test that tool errors propagate from UiPathToolNode."""
+        failing_tool = MockFailingTool()
+        tool_call = {
+            "name": "mock_failing_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        state = MockState(messages=[ai_message])
+
+        node = UiPathToolNode(failing_tool)
+
+        with pytest.raises(ValueError) as exc_info:
+            node._func(state)
+
+        assert "Tool execution failed: test input" in str(exc_info.value)
+
+    async def test_async_tool_error_propagates(self):
+        """Test that async tool errors propagate from UiPathToolNode."""
+        failing_tool = MockFailingTool()
+        tool_call = {
+            "name": "mock_failing_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        state = MockState(messages=[ai_message])
+
+        node = UiPathToolNode(failing_tool)
+
+        with pytest.raises(ValueError) as exc_info:
+            await node._afunc(state)
+
+        assert "Async tool execution failed: test input" in str(exc_info.value)
+
+
+class TestToolWrapperMixin:
+    """Test cases for ToolWrapperMixin class."""
+
+    def test_set_tool_wrappers(self):
+        """Test setting tool wrappers on a mixin instance."""
+        tool = MockToolWithWrappers()
+
+        tool.set_tool_wrappers(wrapper=mock_wrapper, awrapper=mock_awrapper)
+
+        assert tool.wrapper == mock_wrapper
+        assert tool.awrapper == mock_awrapper
+
+    def test_set_tool_wrappers_with_none(self):
+        """Test setting tool wrappers to None."""
+        tool = MockToolWithWrappers()
+
+        tool.set_tool_wrappers(wrapper=None, awrapper=None)
+
+        assert tool.wrapper is None
+        assert tool.awrapper is None
+
+
+class TestCreateToolNode:
+    """Test cases for create_tool_node function."""
+
+    def test_create_tool_node_basic_tools(self):
+        """Test creating tool nodes for basic tools."""
+        tools = [MockTool(name="mock_tool_1"), MockTool(name="mock_tool_2")]
+
+        result = create_tool_node(tools)
+
+        assert len(result) == 2
+        assert "mock_tool_1" in result
+        assert isinstance(result["mock_tool_1"], UiPathToolNode)
+        assert result["mock_tool_1"].tool.name == "mock_tool_1"
+
+        assert "mock_tool_2" in result
+        assert isinstance(result["mock_tool_2"], UiPathToolNode)
+        assert result["mock_tool_2"].tool.name == "mock_tool_2"
+
+    def test_create_tool_node_with_wrapper_mixin(self):
+        """Test creating tool nodes for tools with wrapper mixin."""
+        tool_with_wrappers = MockToolWithWrappers()
+        tool_with_wrappers.set_tool_wrappers(
+            wrapper=mock_wrapper, awrapper=mock_awrapper
+        )
+
+        tools = [MockTool(), tool_with_wrappers]
+
+        result = create_tool_node(tools)
+
+        assert len(result) == 2
+        assert "mock_tool" in result
+        assert "mock_tool_with_wrappers" in result
+
+        # Basic tool should have no wrappers
+        basic_node = result["mock_tool"]
+        assert basic_node.wrapper is None
+        assert basic_node.awrapper is None
+
+        # Tool with mixin should have wrappers
+        wrapper_node = result["mock_tool_with_wrappers"]
+        assert wrapper_node.wrapper == mock_wrapper
+        assert wrapper_node.awrapper == mock_awrapper
+
+    def test_create_tool_node_empty_tools(self):
+        """Test creating tool nodes with empty tool list."""
+        result = create_tool_node([])
+
+        assert result == {}
+
+    async def test_wrap_tools_with_error_handling_captures_error(self):
+        """Test that wrap_tools_with_error_handling captures tool errors as error ToolMessages."""
+        failing_tool = MockFailingTool()
+        tool_call = {
+            "name": "mock_failing_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        state = AgentGraphState(messages=[ai_message])
+
+        node = UiPathToolNode(failing_tool)
+        wrapped_nodes = wrap_tools_with_error_handling({"mock_failing_tool": node})
+        wrapped = wrapped_nodes["mock_failing_tool"]
+
+        result = await wrapped.ainvoke(state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert len(result["messages"]) == 1
+
+        tool_message = result["messages"][0]
+        assert isinstance(tool_message, ToolMessage)
+        assert tool_message.name == "mock_failing_tool"
+        assert tool_message.tool_call_id == "test_call_id"
+        assert tool_message.status == "error"
+        assert isinstance(tool_message.content, str)
+        assert "Async tool execution failed: test input" in tool_message.content
+
+
+class TestToolNodeConfirmation:
+    """Tests for confirmation flow in UiPathToolNode._func / _afunc."""
+
+    @pytest.fixture
+    def confirmation_tool(self):
+        """Tool with require_conversational_confirmation metadata."""
+        return MockTool(metadata={"require_conversational_confirmation": True})
+
+    @pytest.fixture
+    def confirmation_state(self):
+        tool_call = {
+            "name": "mock_tool",
+            "args": {"input_text": "test input"},
+            "id": "test_call_id",
+        }
+        ai_message = AIMessage(content="Using tool", tool_calls=[tool_call])
+        return MockState(messages=[ai_message])
+
+    def test_no_confirmation_without_metadata(self):
+        """Tool without metadata executes normally, no interrupt."""
+        tool = MockTool()  # no metadata
+        node = UiPathToolNode(tool)
+        tool_call = {
+            "name": "mock_tool",
+            "args": {"input_text": "hello"},
+            "id": "call_1",
+        }
+        state = MockState(messages=[AIMessage(content="go", tool_calls=[tool_call])])
+
+        result = node._func(state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        assert "Mock result: hello" in result["messages"][0].content
+
+    @patch("uipath_langchain.chat.hitl.request_approval", return_value=None)
+    def test_cancelled_returns_cancelled_message(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Rejected confirmation returns CANCELLED_MESSAGE."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert isinstance(msg, ToolMessage)
+        assert msg.content == json.dumps({"meta": CANCELLED_MESSAGE})
+
+    @patch(
+        "uipath_langchain.chat.hitl.request_approval",
+        return_value={"input_text": "test input"},
+    )
+    def test_approved_same_args_no_meta(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Approved with same args → normal execution, no meta injected."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert ARGS_MODIFIED_MESSAGE not in msg.content
+        assert "Mock result:" in msg.content
+
+    @patch(
+        "uipath_langchain.chat.hitl.request_approval",
+        return_value={"input_text": "edited"},
+    )
+    def test_approved_modified_args_injects_meta(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Approved with edited args → tool runs with new args, meta injected."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+
+        assert isinstance(msg.content, str)
+        wrapped = json.loads(msg.content)
+        assert wrapped["meta"]["message"] == ARGS_MODIFIED_MESSAGE
+        assert wrapped["meta"]["executed_args"] == {"input_text": "edited"}
+        assert "Mock result: edited" in wrapped["result"]
+
+    @patch("uipath_langchain.chat.hitl.request_approval", return_value=None)
+    async def test_async_cancelled(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Async path: rejected confirmation returns CANCELLED_MESSAGE."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = await node._afunc(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert msg.content == json.dumps({"meta": CANCELLED_MESSAGE})
+
+    @patch(
+        "uipath_langchain.chat.hitl.request_approval",
+        return_value={"input_text": "async edited"},
+    )
+    async def test_async_approved_modified_args(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Async path: approved with edited args → meta injected."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = await node._afunc(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+
+        assert isinstance(msg.content, str)
+        wrapped = json.loads(msg.content)
+        assert wrapped["meta"]["message"] == ARGS_MODIFIED_MESSAGE
+        assert wrapped["meta"]["executed_args"] == {"input_text": "async edited"}
+        assert "Async mock result: async edited" in wrapped["result"]
+
+    @patch(
+        "uipath_langchain.chat.hitl.request_approval",
+        return_value={"input_text": "approved"},
+    )
+    def test_approved_attaches_approved_args_metadata(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Approved path attaches approved args in response_metadata."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert CONVERSATIONAL_APPROVED_TOOL_ARGS in msg.response_metadata
+        assert msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] == {
+            "input_text": "approved"
+        }
+
+    @patch("uipath_langchain.chat.hitl.request_approval", return_value=None)
+    def test_cancelled_attaches_original_args_metadata(
+        self, mock_approval, confirmation_tool, confirmation_state
+    ):
+        """Cancelled path attaches original args in response_metadata."""
+        node = UiPathToolNode(confirmation_tool)
+
+        result = node._func(confirmation_state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert CONVERSATIONAL_APPROVED_TOOL_ARGS in msg.response_metadata
+        assert msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] == {
+            "input_text": "test input"
+        }
+
+    def test_no_confirmation_no_metadata(self):
+        """Non-confirmation tools don't get the approved args metadata."""
+        tool = MockTool()  # no confirmation metadata
+        node = UiPathToolNode(tool)
+        tool_call = {
+            "name": "mock_tool",
+            "args": {"input_text": "hello"},
+            "id": "call_1",
+        }
+        state = MockState(messages=[AIMessage(content="go", tool_calls=[tool_call])])
+
+        result = node._func(state)
+
+        assert result is not None
+        assert isinstance(result, dict)
+        msg = result["messages"][0]
+        assert CONVERSATIONAL_APPROVED_TOOL_ARGS not in msg.response_metadata

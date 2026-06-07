@@ -1,0 +1,139 @@
+{
+  "entryPoints": [
+    {
+      "filePath": "agent",
+      "uniqueId": "0afddb15-cecc-4a20-87ef-c1a65a690fcb",
+      "type": "agent",
+      "input": {
+        "type": "object",
+        "properties": {
+          "word": {
+            "type": "string",
+            "description": "The word to base the joke on"
+          }
+        },
+        "required": ["word"]
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "joke": {
+            "type": "string",
+            "description": "The generated family-friendly joke"
+          },
+          "randomName": {
+            "type": "string",
+            "description": "A randomly generated name"
+          },
+          "analysis": {
+            "type": "string",
+            "description": "The analysis result from the SentenceAnalyzer tool"
+          },
+          "explanation": {
+            "type": "string",
+            "description": "An explanation if a joke couldn't be generated"
+          }
+        },
+        "required": ["joke", "randomName", "analysis"]
+      }
+    }
+  ],
+  "bindings": {
+    "version": "2.0",
+    "resources": [],
+    "guardrails": [
+      {
+        "$guardrailType": "custom",
+        "id": "0dac2299-a8ae-43aa-8703-3eb93c657b2a",
+        "name": "Guardrail on input for donkey",
+        "description": "Filters out the word 'donkey' from tool inputs",
+        "enabledForEvals": true,
+        "selector": {
+          "scopes": ["Tool"],
+          "matchNames": ["Agent _ Sentence Analyzer"]
+        },
+        "rules": [
+          {
+            "$ruleType": "word",
+            "fieldSelector": {
+              "$selectorType": "specific",
+              "fields": [
+                {
+                  "path": "sentence",
+                  "source": "input"
+                }
+              ]
+            },
+            "operator": "contains",
+            "value": "donkey"
+          }
+        ],
+        "action": {
+          "$actionType": "filter",
+          "fields": [
+            {
+              "path": "sentence",
+              "source": "input"
+            }
+          ]
+        }
+      },
+      {
+        "$guardrailType": "builtInValidator",
+        "id": "3b4d5416-202a-47ab-bba6-89fa8940a5cf",
+        "name": "PII detection guardrail",
+        "description": "This validator is designed to detect personally identifiable information",
+        "validatorType": "pii_detection",
+        "validatorParameters": [
+          {
+            "$parameterType": "enum-list",
+            "id": "entities",
+            "value": ["Email", "Address", "Person"]
+          },
+          {
+            "$parameterType": "map-enum",
+            "id": "entityThresholds",
+            "value": {
+              "Email": 0.5,
+              "Address": 0.5,
+              "Person": 0.5
+            }
+          }
+        ],
+        "action": {
+          "$actionType": "block",
+          "reason": "PII detected"
+        },
+        "enabledForEvals": true,
+        "selector": {
+          "scopes": ["Agent", "Llm"],
+          "matchNames": []
+        }
+      },
+      {
+        "$guardrailType": "builtInValidator",
+        "id": "255b1220-97f8-4d79-be8e-052a664b2b90",
+        "name": "Prompt injection guardrail",
+        "description": "This validator is built to detect malicious attack attempts",
+        "validatorType": "prompt_injection",
+        "validatorParameters": [
+          {
+            "$parameterType": "number",
+            "id": "threshold",
+            "value": 0.5
+          }
+        ],
+        "action": {
+          "$actionType": "block",
+          "reason": "Prompt Injection detected"
+        },
+        "enabledForEvals": true,
+        "selector": {
+          "scopes": ["Llm"],
+          "matchNames": []
+        }
+      }
+    ]
+  }
+}
+

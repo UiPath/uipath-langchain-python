@@ -3,12 +3,15 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, AsyncIterator, Dict, Iterator, Mapping
 
 import httpx
 import openai
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import _cleanup_llm_representation
+from langchain_core.messages import AIMessageChunk
+from langchain_core.messages.ai import UsageMetadata
+from langchain_core.outputs import ChatGenerationChunk
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 from tenacity import (
     AsyncRetrying,
@@ -17,23 +20,28 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential_jitter,
 )
-from uipath._cli._runtime._contracts import (
+from uipath._utils._ssl_context import get_httpx_client_kwargs
+from uipath.runtime.errors import (
     UiPathErrorCategory,
     UiPathErrorCode,
     UiPathRuntimeError,
 )
-from uipath._utils._ssl_context import get_httpx_client_kwargs
 
-from uipath_langchain._cli._runtime._exception import (
-    LangGraphErrorCode,
-    LangGraphRuntimeError,
-)
+from uipath_langchain._utils._environment import get_default_timeout
 from uipath_langchain._utils._settings import (
     UiPathClientFactorySettings,
     UiPathClientSettings,
     get_uipath_token_header,
 )
 from uipath_langchain._utils._sleep_policy import before_sleep_log
+from uipath_langchain.chat._legacy.http_client import (
+    build_uipath_headers,
+    resolve_gateway_url,
+)
+from uipath_langchain.runtime.errors import (
+    LangGraphErrorCode,
+    LangGraphRuntimeError,
+)
 
 
 def get_from_uipath_url():
@@ -63,7 +71,7 @@ def _get_access_token(data):
         return get_uipath_token_header(settings)
     except ValidationError:
         raise UiPathRuntimeError(
-            UiPathErrorCode.AUTHENTICATION_REQUIRED,
+            UiPathErrorCode.EXECUTION_ERROR,
             title="Authorization required",
             detail="Authorization required. Please run uipath auth",
             category=UiPathErrorCategory.USER,
@@ -73,93 +81,99 @@ def _get_access_token(data):
 class UiPathRequestMixin(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    default_headers: Optional[Mapping[str, str]] = {
+    default_headers: Mapping[str, str] | None = {
         "X-UiPath-Streaming-Enabled": "false",
-        "X-UiPath-JobKey": os.getenv("UIPATH_JOB_KEY", ""),
-        "X-UiPath-ProcessKey": os.getenv("UIPATH_PROCESS_KEY", ""),
     }
-    model_name: Optional[str] = Field(
-        default_factory=lambda: os.getenv("UIPATH_MODEL_NAME", "gpt-4o-2024-08-06"),
+    model_name: str | None = Field(
+        default_factory=lambda: os.getenv(
+            "UIPATH_MODEL_NAME", "gpt-4.1-mini-2025-04-14"
+        ),
         alias="model",
     )
-    settings: Optional[UiPathClientSettings] = None
-    client_id: Optional[str] = Field(
-        default_factory=lambda: os.getenv("UIPATH_CLIENT_ID")
-    )
-    client_secret: Optional[str] = Field(
+    settings: UiPathClientSettings | None = None
+    client_id: str | None = Field(default_factory=lambda: os.getenv("UIPATH_CLIENT_ID"))
+    client_secret: str | None = Field(
         default_factory=lambda: os.getenv("UIPATH_CLIENT_SECRET")
     )
-    base_url: Optional[str] = Field(
-        default_factory=lambda data: getattr(data["settings"], "base_url", None)
-        or os.getenv("UIPATH_BASE_URL")
-        or get_from_uipath_url(),
+    base_url: str | None = Field(
+        default_factory=lambda data: (
+            getattr(data["settings"], "base_url", None)
+            or os.getenv("UIPATH_BASE_URL")
+            or get_from_uipath_url()
+        ),
         alias="azure_endpoint",
     )
-    access_token: Optional[str] = Field(
+    access_token: str | None = Field(
         default_factory=lambda data: _get_access_token(data)
     )
 
     org_id: Any = Field(
-        default_factory=lambda data: getattr(data["settings"], "org_id", None)
-        or os.getenv("UIPATH_ORGANIZATION_ID", "")
+        default_factory=lambda data: (
+            getattr(data["settings"], "org_id", None)
+            or os.getenv("UIPATH_ORGANIZATION_ID", "")
+        )
     )
     tenant_id: Any = Field(
-        default_factory=lambda data: getattr(data["settings"], "tenant_id", None)
-        or os.getenv("UIPATH_TENANT_ID", "")
+        default_factory=lambda data: (
+            getattr(data["settings"], "tenant_id", None)
+            or os.getenv("UIPATH_TENANT_ID", "")
+        )
     )
     requesting_product: Any = Field(
-        default_factory=lambda data: getattr(
-            data["settings"], "requesting_product", None
+        default_factory=lambda data: (
+            getattr(data["settings"], "requesting_product", None)
+            or os.getenv("UIPATH_REQUESTING_PRODUCT", "uipath-python-sdk")
         )
-        or os.getenv("UIPATH_REQUESTING_PRODUCT", "uipath-python-sdk")
     )
     requesting_feature: Any = Field(
-        default_factory=lambda data: getattr(
-            data["settings"], "requesting_feature", None
+        default_factory=lambda data: (
+            getattr(data["settings"], "requesting_feature", None)
+            or os.getenv("UIPATH_REQUESTING_FEATURE", "langgraph-agent")
         )
-        or os.getenv("UIPATH_REQUESTING_FEATURE", "langgraph-agent")
     )
     default_request_timeout: Any = Field(
         default_factory=lambda data: float(
-            getattr(data["settings"], "timeout_seconds", None)
-            or os.getenv("UIPATH_TIMEOUT_SECONDS", "120")
+            getattr(data["settings"], "timeout_seconds", None) or get_default_timeout()
         ),
         alias="timeout",
     )
 
-    openai_api_version: Optional[str] = Field(
+    openai_api_version: str | None = Field(
         default_factory=lambda: os.getenv("OPENAI_API_VERSION", "2024-08-01-preview"),
         alias="api_version",
     )
     include_account_id: bool = False
-    temperature: Optional[float] = 0.0
-    max_tokens: Optional[int] = 1000
-    frequency_penalty: Optional[float] = None
-    presence_penalty: Optional[float] = None
+    temperature: float | None = 0.0
+    max_tokens: int | None = 1000
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    agenthub_config: str | None = None
+    byo_connection_id: str | None = None
 
-    logger: Optional[logging.Logger] = None
-    max_retries: Optional[int] = 5
+    logger: logging.Logger | None = None
+    max_retries: int | None = 5
     base_delay: float = 5.0
     max_delay: float = 60.0
 
-    _url: Optional[str] = None
-    _auth_headers: Optional[Dict[str, str]] = None
+    _url: str | None = None
+    _is_override: bool = False
+    _auth_headers: dict[str, str] | None = None
 
     # required to instantiate AzureChatOpenAI subclasses
-    azure_endpoint: Optional[str] = Field(
+    azure_endpoint: str | None = Field(
         default="placeholder", description="Bypassed Azure endpoint"
     )
-    openai_api_key: Optional[SecretStr] = Field(
+    openai_api_key: SecretStr | None = Field(
         default=SecretStr("placeholder"), description="Bypassed API key"
     )
     # required to instatiate ChatAnthropic subclasses (will be needed when passthrough is implemented for Anthropic models)
-    stop_sequences: Optional[List[str]] = Field(
+    stop_sequences: list[str] | None = Field(
         default=None, description="Bypassed stop sequence"
     )
 
     def _request(
-        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
-    ) -> Dict[str, Any]:
+        self, url: str, request_body: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         """Run an asynchronous call to the LLM."""
         # if self.logger:
         #     self.logger.info(f"Completion request: {request_body['messages'][:2]}")
@@ -180,6 +194,8 @@ class UiPathRequestMixin(BaseModel):
 
             # Handle HTTP errors and map them to OpenAI exceptions
             try:
+                content = response.content  # Read content to avoid closed stream issues
+                print(f"Response content: {content.decode('utf-8')}")
                 response.raise_for_status()
             except httpx.HTTPStatusError as err:
                 if self.logger:
@@ -199,8 +215,8 @@ class UiPathRequestMixin(BaseModel):
             return response.json()
 
     def _call(
-        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
-    ) -> Dict[str, Any]:
+        self, url: str, request_body: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         """Run a synchronous call with retries to LLM"""
         if self.max_retries is None:
             return self._request(url, request_body, headers)
@@ -223,6 +239,7 @@ class UiPathRequestMixin(BaseModel):
 
         try:
             return retryer(self._request, url, request_body, headers)
+            # return self._request(url, request_body, headers)
         except openai.APIStatusError as err:
             if self.logger:
                 self.logger.error(
@@ -238,8 +255,8 @@ class UiPathRequestMixin(BaseModel):
             raise err
 
     async def _arequest(
-        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
-    ) -> Dict[str, Any]:
+        self, url: str, request_body: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         # if self.logger:
         #     self.logger.info(f"Completion request: {request_body['messages'][:2]}")
         client_kwargs = get_httpx_client_kwargs()
@@ -277,8 +294,8 @@ class UiPathRequestMixin(BaseModel):
             return response.json()
 
     async def _acall(
-        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
-    ) -> Dict[str, Any]:
+        self, url: str, request_body: dict[str, Any], headers: dict[str, str]
+    ) -> dict[str, Any]:
         """Run an asynchronous call with retries to the LLM."""
         if self.max_retries is None:
             return await self._arequest(url, request_body, headers)
@@ -333,6 +350,256 @@ class UiPathRequestMixin(BaseModel):
                     },
                 )
             raise err
+
+    def _convert_chunk(
+        self,
+        chunk: Dict[str, Any],
+        default_chunk_class: type,
+        include_tool_calls: bool = False,
+    ) -> ChatGenerationChunk | None:
+        """Convert a streaming chunk to a ChatGenerationChunk.
+
+        Args:
+            chunk: The raw SSE chunk dictionary
+            default_chunk_class: The default message chunk class to use
+            include_tool_calls: Whether to parse and include tool call chunks
+
+        Returns:
+            A ChatGenerationChunk or None if the chunk should be skipped
+        """
+
+        token_usage = chunk.get("usage")
+        choices = chunk.get("choices", [])
+
+        usage_metadata: UsageMetadata | None = None
+        if token_usage:
+            usage_metadata = UsageMetadata(
+                input_tokens=token_usage.get("prompt_tokens", 0),
+                output_tokens=token_usage.get("completion_tokens", 0),
+                total_tokens=token_usage.get("total_tokens", 0),
+            )
+
+        if len(choices) == 0:
+            return ChatGenerationChunk(
+                message=default_chunk_class(content="", usage_metadata=usage_metadata),
+                generation_info={},
+            )
+
+        choice = choices[0]
+        delta = choice.get("delta")
+        if delta is None:
+            return None
+
+        # Extract content from delta
+        content = delta.get("content", "")
+
+        # Build the message chunk
+        message_kwargs = {
+            "content": content or "",
+            "usage_metadata": usage_metadata,
+        }
+
+        # Handle tool calls if requested (for normalized API)
+        if include_tool_calls:
+            tool_calls = delta.get("tool_calls", [])
+            tool_call_chunks = []
+            if tool_calls:
+                for tc in tool_calls:
+                    # Tool call structure: {'function': {'name': '...', 'arguments': '...'}, 'id': '...', 'index': 0}
+                    function = tc.get("function", {})
+                    tool_call_chunks.append(
+                        {
+                            "id": tc.get("id"),
+                            "name": function.get("name"),
+                            "args": function.get("arguments", ""),
+                            "index": tc.get("index", 0),
+                        }
+                    )
+            if tool_call_chunks:
+                message_kwargs["tool_call_chunks"] = tool_call_chunks
+
+        message_chunk = AIMessageChunk(**message_kwargs)
+
+        generation_info = {}
+        if finish_reason := choice.get("finish_reason"):
+            generation_info["finish_reason"] = finish_reason
+            if model_name := chunk.get("model"):
+                generation_info["model_name"] = model_name
+
+        return ChatGenerationChunk(
+            message=message_chunk,
+            generation_info=generation_info or None,
+        )
+
+    def _stream_request(
+        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
+    ) -> Iterator[Dict[str, Any]]:
+        """Stream SSE responses from the LLM."""
+        client_kwargs = get_httpx_client_kwargs()
+        with httpx.Client(
+            **client_kwargs,
+            event_hooks={
+                "request": [self._log_request_duration],
+                "response": [self._log_response_duration],
+            },
+        ) as client:
+            with client.stream(
+                "POST",
+                url,
+                headers=headers,
+                json=request_body,
+                timeout=self.default_request_timeout,
+            ) as response:
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as err:
+                    if self.logger:
+                        self.logger.error(
+                            "Error querying UiPath: %s (%s)",
+                            err.response.reason_phrase,
+                            err.response.status_code,
+                            extra={
+                                "ActionName": self.settings.action_name,
+                                "ActionId": self.settings.action_id,
+                            }
+                            if self.settings
+                            else None,
+                        )
+                    # Read the response body for streaming responses
+                    err.response.read()
+                    raise self._make_status_error_from_response(err.response) from err
+
+                for line in response.iter_lines():
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    if self.logger:
+                        self.logger.debug(f"[SSE] Raw line: {line}")
+
+                    if line.startswith("data:"):
+                        data = line[
+                            5:
+                        ].strip()  # Remove "data:" prefix and strip whitespace
+                        if data == "[DONE]":
+                            break
+                        if not data:  # Skip empty data lines
+                            continue
+                        try:
+                            parsed = json.loads(data)
+                            # Skip empty chunks (some APIs send them as keepalive)
+                            # Check for truly empty: empty id AND (no choices or empty choices list)
+                            if (not parsed.get("id") or parsed.get("id") == "") and (
+                                not parsed.get("choices")
+                                or len(parsed.get("choices", [])) == 0
+                            ):
+                                if self.logger:
+                                    self.logger.debug(
+                                        "[SSE] Skipping empty keepalive chunk"
+                                    )
+                                continue
+                            yield parsed
+                        except json.JSONDecodeError as e:
+                            if self.logger:
+                                self.logger.warning(
+                                    f"Failed to parse SSE chunk: {data}, error: {e}"
+                                )
+                            continue
+                    else:
+                        # Handle lines without "data: " prefix (some APIs send raw JSON)
+                        try:
+                            parsed = json.loads(line)
+                            if self.logger:
+                                self.logger.debug(f"[SSE] Parsed raw JSON: {parsed}")
+                            yield parsed
+                        except json.JSONDecodeError:
+                            # Not JSON, skip
+                            pass
+
+    async def _astream_request(
+        self, url: str, request_body: Dict[str, Any], headers: Dict[str, str]
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Async stream SSE responses from the LLM."""
+        client_kwargs = get_httpx_client_kwargs()
+        async with httpx.AsyncClient(
+            **client_kwargs,
+            event_hooks={
+                "request": [self._alog_request_duration],
+                "response": [self._alog_response_duration],
+            },
+        ) as client:
+            async with client.stream(
+                "POST",
+                url,
+                headers=headers,
+                json=request_body,
+                timeout=self.default_request_timeout,
+            ) as response:
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as err:
+                    if self.logger:
+                        self.logger.error(
+                            "Error querying LLM: %s (%s)",
+                            err.response.reason_phrase,
+                            err.response.status_code,
+                            extra={
+                                "ActionName": self.settings.action_name,
+                                "ActionId": self.settings.action_id,
+                            }
+                            if self.settings
+                            else None,
+                        )
+                    # Read the response body for streaming responses
+                    await err.response.aread()
+                    raise self._make_status_error_from_response(err.response) from err
+
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    if self.logger:
+                        self.logger.debug(f"[SSE] Raw line: {line}")
+
+                    if line.startswith("data:"):
+                        data = line[
+                            5:
+                        ].strip()  # Remove "data:" prefix and strip whitespace
+                        if data == "[DONE]":
+                            break
+                        if not data:  # Skip empty data lines
+                            continue
+                        try:
+                            parsed = json.loads(data)
+                            # Skip empty chunks (some APIs send them as keepalive)
+                            # Check for truly empty: empty id AND (no choices or empty choices list)
+                            if (not parsed.get("id") or parsed.get("id") == "") and (
+                                not parsed.get("choices")
+                                or len(parsed.get("choices", [])) == 0
+                            ):
+                                if self.logger:
+                                    self.logger.debug(
+                                        "[SSE] Skipping empty keepalive chunk"
+                                    )
+                                continue
+                            yield parsed
+                        except json.JSONDecodeError as e:
+                            if self.logger:
+                                self.logger.warning(
+                                    f"Failed to parse SSE chunk: {data}, error: {e}"
+                                )
+                            continue
+                    else:
+                        # Handle lines without "data: " prefix (some APIs send raw JSON)
+                        try:
+                            parsed = json.loads(line)
+                            if self.logger:
+                                self.logger.debug(f"[SSE] Parsed raw JSON: {parsed}")
+                            yield parsed
+                        except json.JSONDecodeError:
+                            # Not JSON, skip
+                            pass
 
     def _make_status_error_from_response(
         self,
@@ -451,7 +718,7 @@ class UiPathRequestMixin(BaseModel):
         return "uipath"
 
     @property
-    def _identifying_params(self) -> Dict[str, Any]:
+    def _identifying_params(self) -> dict[str, Any]:
         return {
             "url": self.url,
             "model": self.model_name,
@@ -467,17 +734,26 @@ class UiPathRequestMixin(BaseModel):
     def _build_headers(self, options, retries_taken: int = 0) -> httpx.Headers:
         return httpx.Headers(self.auth_headers)
 
+    def _resolve_url_and_override(self) -> None:
+        """Resolve ``_url`` and ``_is_override`` idempotently."""
+        if self._url:
+            return
+        try:
+            self._url, self._is_override = resolve_gateway_url(self.endpoint)
+        except ValueError:
+            self._url = (
+                f"{self.base_url}/{self.org_id}/{self.tenant_id}/{self.endpoint}"
+            )
+        except NotImplementedError:
+            pass
+
     @property
     def url(self) -> str:
+        self._resolve_url_and_override()
         if not self._url:
-            env_uipath_url = os.getenv("UIPATH_URL")
-
-            if env_uipath_url:
-                self._url = f"{env_uipath_url.rstrip('/')}/{self.endpoint}"
-            else:
-                self._url = (
-                    f"{self.base_url}/{self.org_id}/{self.tenant_id}/{self.endpoint}"
-                )
+            raise NotImplementedError(
+                "The endpoint property is not implemented for this class."
+            )
         return self._url
 
     @property
@@ -487,15 +763,23 @@ class UiPathRequestMixin(BaseModel):
         )
 
     @property
-    def auth_headers(self) -> Dict[str, str]:
+    def auth_headers(self) -> dict[str, str]:
         if not self._auth_headers:
+            self._resolve_url_and_override()
             self._auth_headers = {
                 **self.default_headers,  # type: ignore
-                "Authorization": f"Bearer {self.access_token}",
-                "X-UiPath-LlmGateway-RequestingProduct": self.requesting_product,
-                "X-UiPath-LlmGateway-RequestingFeature": self.requesting_feature,
-                "X-UiPath-LlmGateway-TimeoutSeconds": str(self.default_request_timeout),
             }
+            self._auth_headers["Authorization"] = f"Bearer {self.access_token}"
+            self._auth_headers.update(
+                build_uipath_headers(
+                    agenthub_config=self.agenthub_config,
+                    byo_connection_id=self.byo_connection_id,
+                    inject_routing=self._is_override,
+                )
+            )
+            self._auth_headers["X-UiPath-LlmGateway-TimeoutSeconds"] = str(
+                self.default_request_timeout
+            )
             if self.is_normalized and self.model_name:
                 self._auth_headers["X-UiPath-LlmGateway-NormalizedApi-ModelName"] = (
                     self.model_name
@@ -505,7 +789,7 @@ class UiPathRequestMixin(BaseModel):
                 self._auth_headers["x-uipath-internal-tenantid"] = self.tenant_id
         return self._auth_headers
 
-    def _get_llm_string(self, stop: Optional[list[str]] = None, **kwargs: Any) -> str:
+    def _get_llm_string(self, stop: list[str] | None = None, **kwargs: Any) -> str:
         serialized_repr = getattr(self, "_serialized", self.model_dump())
         _cleanup_llm_representation(serialized_repr, 1)
         kwargs = serialized_repr.get("kwargs", serialized_repr)

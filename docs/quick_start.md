@@ -8,12 +8,17 @@ This guide provides step-by-step instructions for setting up, creating, publishi
 
 Before proceeding, ensure you have the following installed:
 
--   Python 3.10 or higher
+-   Python 3.11 or higher
 -   `pip` or `uv` package manager
 -   A UiPath Automation Cloud account with appropriate permissions
--   An Anthropic or OpenAI API key
 
-/// info
+
+By default, the quickstart agent uses UiPath LLM Gateway, which provides access to any LLM provider without requiring API keys. Alternatively, you can configure your agent to connect directly to the LLM provider of your choice (such as Anthropic or OpenAI) by providing the appropriate API key as an environment variable.
+
+For more details, see the [Chat Models documentation](https://uipath.github.io/uipath-python/langchain/chat_models/#chat-models).
+
+
+/// info | Optional: Using alternative LLM providers
 
 1. **Anthropic** - Generate an Anthropic API key [here](https://console.anthropic.com/settings/keys).
 
@@ -53,12 +58,12 @@ We recommend using `uv` for package management. To create a new project:
 
 ```shell
 # Initialize a new uv project in the current directory
-> uv init . --python 3.10
+> uv init . --python 3.11
 
 # Create a new virtual environment
 # By default, uv creates a virtual environment in a directory called .venv
 > uv venv
-Using CPython 3.10.16 interpreter at: [PATH]
+Using CPython 3.11.16 interpreter at: [PATH]
 Creating virtual environment at: .venv
 Activate with: source .venv/bin/activate
 
@@ -67,15 +72,12 @@ Activate with: source .venv/bin/activate
 # For Windows Bash: source .venv/Scripts/activate
 > source .venv/bin/activate
 
-# Install the langchain anthropic package
-> uv add langchain-anthropic
-
 # Install the uipath package
 > uv add uipath-langchain
 
 # Verify the uipath installation
 > uipath -lv
-uipath-langchain version 0.0.100
+uipath-langchain version 0.1.0
 ```
 
 ////
@@ -96,15 +98,12 @@ uipath-langchain version 0.0.100
 # Upgrade pip to the latest version
 > python -m pip install --upgrade pip
 
-# Install the langchain anthropic package
-> pip install langchain-anthropic
-
 # Install the uipath package
 > pip install uipath-langchain
 
 # Verify the uipath installation
 > uipath -lv
-uipath-langchain version 0.0.100
+uipath-langchain version 0.1.0
 ```
 
 ////
@@ -159,36 +158,18 @@ Selected tenant: Tenant1
 ⠋ Initializing UiPath project ...
 ✓   Created '.env' file.
 ✓   Created 'agent.mermaid' file.
-✓   Created 'uipath.json' file.
+✓   Created 'entry-points.json' file.
+✓   Created 'bindings.json' file.
 ```
 
 This command creates the following files:
 
 | File Name        | Description                                                                                                                       |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `.env`           | Environment variables and secrets (this file will not be packed & published).                                                     |
-| `uipath.json`    | Input/output JSON schemas and bindings.                                                                                           |
-| `agent.mermaid`  | Graph visual representation.                                                                                                      |
-
-## Set Up Environment Variables
-
-Before running the agent, configure either `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the `.env` file:
-
-//// tab | Open AI
-
-```
-OPENAI_API_KEY=sk-proj-......
-```
-
-////
-
-//// tab | ANTHROPIC_API_KEY
-
-```
-ANTHROPIC_API_KEY=sk-ant-a.....
-```
-
-////
+| `.env`              | Environment variables and secrets (this file will not be packed & published) |
+| `entry-points.json` | Contains the input/output and graph schemas of your graphs                   |
+| `bindings.json`     | Allows you to configure overridable resource bindings                        |
+| `agent.mermaid`     | Graph visual representation                                                  |
 
 ## Run The Agent Locally
 

@@ -1,22 +1,346 @@
 """Tool node factory wiring directly to LangGraph's ToolNode."""
 
 from collections.abc import Sequence
+from inspect import signature
+from typing import Any, Awaitable, Callable, Literal, Mapping
 
+from langchain_core.messages.tool import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
-from langgraph.prebuilt import ToolNode
+from langgraph._internal._runnable import RunnableCallable
+from langgraph.errors import GraphBubbleUp
+from langgraph.types import Command
+from pydantic import BaseModel
+from uipath.platform.resume_triggers import is_no_content_marker
+from uipath.runtime.errors import UiPathErrorCategory
+
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
+from uipath_langchain.agent.react.types import AgentGraphState
+from uipath_langchain.agent.react.utils import (
+    extract_current_tool_call_index,
+    find_latest_ai_message,
+)
+from uipath_langchain.chat.hitl import (
+    IS_CONVERSATIONAL_CLIENT_SIDE_TOOL,
+    REQUIRE_CONVERSATIONAL_CONFIRMATION,
+    request_conversational_tool_confirmation,
+)
+
+# the type safety can be improved with generics
+ToolWrapperReturnType = dict[str, Any] | Command[Any] | None
+
+ToolWrapperWithoutState = Callable[[BaseTool, ToolCall], ToolWrapperReturnType]
+ToolWrapperWithState = Callable[[BaseTool, ToolCall, Any], ToolWrapperReturnType]
+ToolWrapperType = ToolWrapperWithoutState | ToolWrapperWithState
+
+AsyncToolWrapperWithoutState = Callable[
+    [BaseTool, ToolCall], Awaitable[ToolWrapperReturnType]
+]
+AsyncToolWrapperWithState = Callable[
+    [BaseTool, ToolCall, Any], Awaitable[ToolWrapperReturnType]
+]
+AsyncToolWrapperType = AsyncToolWrapperWithoutState | AsyncToolWrapperWithState
+
+OutputType = dict[Literal["messages"], list[ToolMessage]] | Command[Any] | None
 
 
-def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, ToolNode]:
+def _wrapper_needs_state(wrapper: ToolWrapperType | AsyncToolWrapperType) -> bool:
+    """Check if wrapper function expects a state parameter."""
+    params = list(signature(wrapper).parameters.values())
+    return len(params) >= 3
+
+
+class UiPathToolNode(RunnableCallable):
+    """
+    A ToolNode that can be used in a React agent graph.
+    It extracts the tool call from the state messages and invokes the tool.
+    It supports optional synchronous and asynchronous wrappers for custom processing.
+    Generic over the state model.
+    Args:
+        tool: The tool to invoke.
+        wrapper: An optional synchronous wrapper for custom processing.
+        awrapper: An optional asynchronous wrapper for custom processing.
+
+    Returns:
+        A dict with ToolMessage or a Command.
+    """
+
+    def __init__(
+        self,
+        tool: BaseTool,
+        wrapper: ToolWrapperType | None = None,
+        awrapper: AsyncToolWrapperType | None = None,
+    ):
+        super().__init__(func=self._func, afunc=self._afunc, name=tool.name)
+        self.tool = tool
+        self.wrapper = wrapper
+        self.awrapper = awrapper
+
+    def _func(self, state: AgentGraphState) -> OutputType:
+        call = self._extract_tool_call(state)
+        if call is None:
+            return None
+
+        # prompt user for approval if tool requires confirmation
+        conversational_confirmation = request_conversational_tool_confirmation(
+            call, self.tool
+        )
+        if conversational_confirmation:
+            if conversational_confirmation.cancelled:
+                # tool confirmation rejected
+                return self._process_result(call, conversational_confirmation.cancelled)
+
+        if self.wrapper:
+            inputs = self._prepare_wrapper_inputs(self.wrapper, self.tool, call, state)
+            result = self.wrapper(*inputs)
+        else:
+            result = self.tool.invoke(call)
+        output = self._process_result(call, result)
+        if conversational_confirmation:
+            # HITL approved - apply confirmation metadata to tool result message
+            conversational_confirmation.annotate_result(output)
+        return output
+
+    async def _afunc(self, state: AgentGraphState) -> OutputType:
+        call = self._extract_tool_call(state)
+        if call is None:
+            return None
+
+        # prompt user for approval if tool requires confirmation
+        conversational_confirmation = request_conversational_tool_confirmation(
+            call, self.tool
+        )
+        if conversational_confirmation:
+            if conversational_confirmation.cancelled:
+                # tool confirmation rejected
+                return self._process_result(call, conversational_confirmation.cancelled)
+
+        if self.awrapper:
+            inputs = self._prepare_wrapper_inputs(self.awrapper, self.tool, call, state)
+            result = await self.awrapper(*inputs)
+        else:
+            result = await self.tool.ainvoke(call)
+        output = self._process_result(call, result)
+        if conversational_confirmation:
+            # HITL approved - apply confirmation metadata to tool result message
+            conversational_confirmation.annotate_result(output)
+        return output
+
+    def _extract_tool_call(self, state: AgentGraphState) -> ToolCall | None:
+        """Extract the tool call from the state messages."""
+
+        latest_ai_message = find_latest_ai_message(state.messages)
+        if latest_ai_message is None:
+            return None
+
+        try:
+            current_tool_call_index = extract_current_tool_call_index(
+                state.messages, self.tool.name
+            )
+        except AgentRuntimeError:
+            # Handle cases where AIMessage has no tool calls or other invalid states
+            return None
+
+        if current_tool_call_index is None:
+            return None
+
+        return latest_ai_message.tool_calls[current_tool_call_index]
+
+    def _process_result(
+        self, call: ToolCall, result: dict[str, Any] | Command[Any] | ToolMessage | None
+    ) -> OutputType:
+        """Process the tool result into a message format or return a Command.
+        Strip NO_CONTENT markers into ToolMessages embedded in a Command.
+        """
+        if isinstance(result, Command):
+            self._filter_result(result)
+            return result
+        elif isinstance(result, ToolMessage):
+            if is_no_content_marker(result.content):
+                result.content = ""
+            return {"messages": [result]}
+        else:
+            content = "" if is_no_content_marker(result) else str(result)
+            message = ToolMessage(
+                content=content, name=call["name"], tool_call_id=call["id"]
+            )
+            return {"messages": [message]}
+
+    @staticmethod
+    def _filter_result(command: Command[Any]) -> None:
+        """Strip NO_CONTENT markers from ToolMessages embedded in a Command."""
+        update = getattr(command, "update", None)
+        if not isinstance(update, dict):
+            return
+        messages = update.get("messages")
+        if not messages:
+            return
+        for msg in messages:
+            if isinstance(msg, ToolMessage) and is_no_content_marker(msg.content):
+                msg.content = ""
+
+    def _prepare_wrapper_inputs(
+        self,
+        wrapper: ToolWrapperType | AsyncToolWrapperType,
+        tool: BaseTool,
+        call: ToolCall,
+        state: AgentGraphState,
+    ) -> Sequence[Any]:
+        """Prepare inputs for wrapper invocation based on its signature."""
+        if _wrapper_needs_state(wrapper):
+            filtered_state = self._filter_state(state, wrapper)
+            return tool, call, filtered_state
+        return tool, call
+
+    def _filter_state(
+        self, state: Any, wrapper: ToolWrapperType | AsyncToolWrapperType
+    ) -> BaseModel:
+        """Filter the state to the expected model type."""
+        model_type = list(signature(wrapper).parameters.values())[2].annotation
+        if not issubclass(model_type, BaseModel):
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TOOL_INVALID_WRAPPER_STATE,
+                title="Wrapper state parameter must be a pydantic BaseModel subclass.",
+                detail=f"Got {model_type.__name__} instead of BaseModel for wrapper state parameter.",
+                category=UiPathErrorCategory.SYSTEM,
+            )
+        return model_type.model_validate(state, from_attributes=True)
+
+
+def _get_tool_error_result(
+    e: Exception, state: AgentGraphState, tool_name: str
+) -> OutputType | None:
+    """Build an error ToolMessage for the current tool call, or return None to re-raise."""
+    latest_ai_message = find_latest_ai_message(state.messages)
+    if latest_ai_message is None:
+        return None
+    try:
+        idx = extract_current_tool_call_index(state.messages, tool_name)
+    except Exception:
+        return None
+    if idx is None:
+        return None
+    call = latest_ai_message.tool_calls[idx]
+    return {
+        "messages": [
+            ToolMessage(
+                content=str(e),
+                name=call["name"],
+                tool_call_id=call["id"],
+                status="error",
+            )
+        ]
+    }
+
+
+def wrap_tools_with_error_handling(
+    tool_nodes: Mapping[str, RunnableCallable],
+) -> dict[str, RunnableCallable]:
+    """Wrap tool nodes to catch errors and return them as ToolMessages, rather than failing the entire graph execution."""
+    return {
+        tool_name: _wrap_tool_error_handling(tool_node, tool_name)
+        for tool_name, tool_node in tool_nodes.items()
+    }
+
+
+def _wrap_tool_error_handling(
+    tool_node: RunnableCallable,
+    tool_name: str,
+) -> RunnableCallable:
+    """Wrap a tool node to catch errors and return them as ToolMessages, rather than failing the entire graph execution.
+
+    Catch and re-raise GraphBubbleUp, since LangGraph uses exceptions for interrupt control flow.
+    This is so we don't swallow expected interrupts as tool errors.
+    (https://langchain-ai.github.io/langgraph/concepts/human_in_the_loop/)
+    """
+
+    def _func(state: AgentGraphState) -> OutputType:
+        try:
+            return tool_node.invoke(state)
+        except GraphBubbleUp:
+            raise
+        except Exception as e:
+            result = _get_tool_error_result(e, state, tool_name)
+            if result is None:
+                raise
+            return result
+
+    async def _afunc(state: AgentGraphState) -> OutputType:
+        try:
+            return await tool_node.ainvoke(state)
+        except GraphBubbleUp:
+            raise
+        except Exception as e:
+            result = _get_tool_error_result(e, state, tool_name)
+            if result is None:
+                raise
+            return result
+
+    tool = getattr(tool_node, "tool", None)
+
+    # Preserve tool ref so the runtime can discover tool metadata
+    # (confirmation requirements, client-side markers, etc.)
+    metadata = getattr(tool, "metadata", None) or {}
+    if isinstance(tool, BaseTool) and (
+        metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION)
+        or metadata.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL)
+    ):
+        return RunnableCallableWithTool(
+            func=_func, afunc=_afunc, name=tool_name, tool=tool
+        )
+
+    return RunnableCallable(func=_func, afunc=_afunc, name=tool_name)
+
+
+class RunnableCallableWithTool(RunnableCallable):
+    """A RunnableCallable that preserves a reference to its underlying BaseTool."""
+
+    def __init__(
+        self,
+        *,
+        func: Callable[..., Any] | None,
+        afunc: Callable[..., Awaitable[Any]] | None,
+        name: str,
+        tool: BaseTool,
+    ):
+        super().__init__(func=func, afunc=afunc, name=name)
+        self.tool = tool
+
+
+class ToolWrapperMixin:
+    wrapper: ToolWrapperType | None = None
+    awrapper: AsyncToolWrapperType | None = None
+
+    def set_tool_wrappers(
+        self,
+        wrapper: ToolWrapperType | None = None,
+        awrapper: AsyncToolWrapperType | None = None,
+    ) -> None:
+        """Define wrappers for the tool execution."""
+        self.wrapper = wrapper
+        self.awrapper = awrapper
+
+
+def create_tool_node(tools: Sequence[BaseTool]) -> dict[str, UiPathToolNode]:
     """Create individual ToolNode for each tool.
 
     Args:
         tools: Sequence of tools to create nodes for.
 
     Returns:
-        Dict mapping tool.name -> ToolNode([tool]).
+        Dict mapping tool.name -> UiPathToolNode.
         Each tool gets its own dedicated node for middleware composition.
-
-    Note:
-        handle_tool_errors=False delegates error handling to LangGraph's error boundary.
     """
-    return {tool.name: ToolNode([tool], handle_tool_errors=False) for tool in tools}
+    dict_mapping: dict[str, UiPathToolNode] = {}
+    for tool in tools:
+        if isinstance(tool, ToolWrapperMixin):
+            dict_mapping[tool.name] = UiPathToolNode(
+                tool,
+                wrapper=tool.wrapper,
+                awrapper=tool.awrapper,
+            )
+        else:
+            dict_mapping[tool.name] = UiPathToolNode(tool, wrapper=None, awrapper=None)
+    return dict_mapping

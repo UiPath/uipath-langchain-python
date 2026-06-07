@@ -3,9 +3,9 @@ Simple trace assertion - just check that expected spans exist with required attr
 Much simpler than the tree-based approach.
 """
 import json
-from typing import List, Dict, Any
+from typing import Any
 
-def load_traces(traces_file: str) -> List[Dict[str, Any]]:
+def load_traces(traces_file: str) -> list[dict[str, Any]]:
     """Load traces from a JSONL file."""
     traces = []
     with open(traces_file, 'r', encoding='utf-8') as f:
@@ -14,13 +14,13 @@ def load_traces(traces_file: str) -> List[Dict[str, Any]]:
                 traces.append(json.loads(line))
     return traces
 
-def load_expected_traces(expected_file: str) -> List[Dict[str, Any]]:
+def load_expected_traces(expected_file: str) -> list[dict[str, Any]]:
     """Load expected trace definitions from a JSON file."""
     with open(expected_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
     return data.get('required_spans', [])
 
-def get_attributes(span: Dict[str, Any]) -> Dict[str, Any]:
+def get_attributes(span: dict[str, Any]) -> dict[str, Any]:
     """
     Parse attributes from a span.
     Supports both formats:
@@ -54,7 +54,7 @@ def matches_value(expected_value: Any, actual_value: Any) -> bool:
     # Exact match
     return expected_value == actual_value
 
-def matches_expected(span: Dict[str, Any], expected: Dict[str, Any]) -> bool:
+def matches_expected(span: dict[str, Any], expected: dict[str, Any]) -> bool:
     """
     Check if a span matches the expected definition.
     Supports both formats:
@@ -108,15 +108,27 @@ def assert_traces(traces_file: str, expected_file: str) -> None:
     for expected in expected_spans:
         # Find a matching span
         found = False
+        name = expected['name']
+        # Handle both string and list of names
+        name_str = name if isinstance(name, str) else f"[{' | '.join(name)}]"
+
         for span in traces:
             if matches_expected(span, expected):
                 found = True
-                print(f"✓ Found span: {expected['name']}")
+                print(f"✓ Found span: {name_str}")
                 break
         if not found:
-            missing_spans.append(expected['name'])
-            print(f"✗ Missing span: {expected['name']}")
+            missing_spans.append(name_str)
+            print(f"✗ Missing span: {name_str}")
+
+    print("Traces file content:")
+    with open(traces_file, 'r', encoding='utf-8') as f:
+        print(f.read())
     if missing_spans:
+        print(f"\n=== Dumping raw traces from {traces_file} ===")
+        with open(traces_file, 'r', encoding='utf-8') as f:
+            print(f.read())
+        print(f"\n=== End of traces dump ===\n")
         raise AssertionError(
             f"Missing expected spans: {', '.join(missing_spans)}\n"
             f"Expected {len(expected_spans)} spans, found {len(expected_spans) - len(missing_spans)}"

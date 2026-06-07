@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Literal, Optional
+from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
@@ -11,16 +11,13 @@ from langgraph.graph import END, START, StateGraph, MessagesState
 from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field
 
-from uipath import UiPath
-from uipath.models import CreateAction
-from uipath_langchain.chat import UiPathAzureChatOpenAI, UiPathChat
-
+from uipath.platform import UiPath
+from uipath_langchain.chat import UiPathChat
 # Configuration
 logger = logging.getLogger(__name__)
 uipath = UiPath()
 
 # Constants
-DEFAULT_MODEL = "gpt-4o-2024-08-06"
 DEFAULT_CONFIDENCE = 0.0
 APP_FOLDER_PATH_PLACEHOLDER = "FOLDER_PATH_PLACEHOLDER"
 
@@ -33,7 +30,7 @@ class GraphInput(BaseModel):
     """Input model for the ticket classification graph."""
     message: str
     ticket_id: str
-    assignee: Optional[str] = None
+    assignee: str | None = None
 
 
 class GraphOutput(BaseModel):
@@ -46,11 +43,11 @@ class GraphState(MessagesState):
     """State model for the ticket classification workflow."""
     message: str
     ticket_id: str
-    assignee: Optional[str]
-    label: Optional[str] = None
-    confidence: Optional[float] = None
-    last_predicted_category: Optional[str] = None
-    human_approval: Optional[bool] = None
+    assignee: str | None
+    label: str | None = None
+    confidence: float | None = None
+    last_predicted_category: str | None = None
+    human_approval: bool | None = None
 
 
 class TicketClassification(BaseModel):
@@ -115,10 +112,7 @@ def decide_next_node(state: GraphState) -> NextNode:
 
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    if os.getenv("USE_AZURE_CHAT", "false").lower() == "true":
-        llm = UiPathAzureChatOpenAI(model=DEFAULT_MODEL)
-    else:
-        llm = UiPathChat(model=DEFAULT_MODEL)
+    llm = UiPathChat(model="gpt-4o-2024-11-20")
 
     # Add rejection message if there was a previous prediction
     if state.get("last_predicted_category"):
@@ -173,9 +167,9 @@ async def wait_for_human(state: GraphState) -> Command:
     label = state["label"]
     confidence = state["confidence"]
     is_resume = state.get("human_approval") is not None
-    
-    
-    
+
+
+
     if not is_resume:
         logger.info("Waiting for human approval via regular interrupt")
     interrupt_message = (
@@ -184,7 +178,7 @@ async def wait_for_human(state: GraphState) -> Command:
     )
     action_data = interrupt(interrupt_message)
     human_approved = bool(action_data)
-   
+
     return Command(
         update={
             "human_approval": human_approved,
@@ -200,20 +194,20 @@ async def notify_team(state: GraphState) -> GraphOutput:
 def build_graph() -> StateGraph:
     """Build and compile the ticket classification graph."""
     builder = StateGraph(GraphState, input=GraphInput, output=GraphOutput)
-    
+
     # Add nodes
     builder.add_node("prepare_input", prepare_input)
     builder.add_node("classify", classify)
     builder.add_node("human_approval_node", wait_for_human)
     builder.add_node("notify_team", notify_team)
-    
+
     # Add edges
     builder.add_edge(START, "prepare_input")
     builder.add_edge("prepare_input", "classify")
     builder.add_edge("classify", "human_approval_node")
     builder.add_conditional_edges("human_approval_node", decide_next_node)
     builder.add_edge("notify_team", END)
-    
+
     # Compile with memory checkpointer
     memory = MemorySaver()
     return builder.compile(checkpointer=memory)

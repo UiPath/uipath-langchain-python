@@ -1,0 +1,5 @@
+{
+  "graphs": {
+    "agent": "./src/deepagent_storage_buckets/graph.py:deep_agent"
+  }
+}

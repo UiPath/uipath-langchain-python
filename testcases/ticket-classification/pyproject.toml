@@ -15,7 +15,7 @@ dependencies = [
     "typing-extensions>=4.12.2",
     "ipython>=8.32.0",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 [tool.uv.sources]
 uipath-langchain = { path = "../../", editable = true }

@@ -31,10 +31,9 @@ version = "0.0.1"
 description = "{project_name}"
 authors = [{{ name = "John Doe", email = "john.doe@myemail.com" }}]
 dependencies = [
-    "uipath-langchain>=0.0.106",
-    "langchain-anthropic>=0.3.8",
+    "uipath-langchain>=0.10.0, <0.11.0",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 """
 
     with open(project_toml_path, "w") as f:
@@ -48,7 +47,6 @@ def langgraph_new_middleware(name: str) -> MiddlewareResult:
 
     try:
         with console.spinner(f"Creating new agent {name} in current directory ..."):
-            generate_pyproject(directory, name)
             generate_script(directory)
             console.success("Created 'main.py' file.")
             console.success("Created 'langgraph.json' file.")

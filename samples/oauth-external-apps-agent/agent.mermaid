@@ -1,0 +1,9 @@
+flowchart TB
+  __start__(__start__)
+  fetch_new_access_token(fetch_new_access_token)
+  connect_to_mcp(connect_to_mcp)
+  __end__(__end__)
+  __start__ --> connect_to_mcp
+  __start__ --> fetch_new_access_token
+  fetch_new_access_token --> connect_to_mcp
+  connect_to_mcp --> __end__

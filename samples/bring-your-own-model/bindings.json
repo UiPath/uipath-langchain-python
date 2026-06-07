@@ -1,0 +1,22 @@
+{
+  "version": "2.0",
+  "resources": [
+    {
+      "resource": "connection",
+      "key": "my-custom-model",
+      "value": {
+        "connectionId": {
+          "defaultValue": "my-custom-model",
+          "isExpression": false,
+          "displayName": "Model connection ID"
+        }
+      },
+      "metadata": {
+        "connector": "uipath-microsoft-azureopenai",
+        "useConnectionService": "true",
+        "bindingsVersion": "2.2",
+        "solutionsSupport": "true"
+      }
+    }
+  ]
+}

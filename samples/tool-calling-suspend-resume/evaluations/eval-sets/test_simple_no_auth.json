@@ -1,0 +1,21 @@
+{
+  "version": "1.0",
+  "id": "test-simple-no-auth",
+  "name": "Simple Suspend/Resume Test (No Auth Required)",
+  "description": "Tests suspend/resume pattern using simple dict payload. Note: This eval set demonstrates suspend behavior - evaluations will suspend on first run and complete after resume with --resume flag.",
+  "evaluatorRefs": ["uipath-contains"],
+  "evaluations": [
+    {
+      "id": "test_suspend_resume_basic",
+      "name": "Basic suspend/resume with query",
+      "inputs": {
+        "query": "Test suspend with simple payload"
+      },
+      "evaluationCriterias": {
+        "uipath-contains": {
+          "searchText": "Completed with resume data"
+        }
+      }
+    }
+  ]
+}

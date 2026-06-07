@@ -1,0 +1,28 @@
+{
+  "description": "Template agent trace assertions - check key spans exist",
+  "required_spans": [
+    {
+      "name": "prepare",
+      "attributes": {
+        "openinference.span.kind": "CHAIN"
+      }
+    },
+    {
+      "name": [
+        "UiPathChat",
+        "UiPathAzureChatOpenAI",
+        "UiPathChatAnthropicBedrock",
+        "UiPathChatGoogleGenerativeAI"
+      ],
+      "attributes": {
+        "openinference.span.kind": "LLM"
+      }
+    },
+    {
+      "name": "postprocess",
+      "attributes": {
+        "openinference.span.kind": "CHAIN"
+      }
+    }
+  ]
+}

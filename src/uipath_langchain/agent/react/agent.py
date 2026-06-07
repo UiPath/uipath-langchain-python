@@ -1,5 +1,4 @@
-import os
-from typing import Sequence, Type
+from typing import Callable, Sequence, Type, TypeVar
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -7,73 +6,202 @@ from langchain_core.tools import BaseTool
 from langgraph.constants import END, START
 from langgraph.graph import StateGraph
 from pydantic import BaseModel
+from uipath.platform.context_grounding import DeepRagContent
+from uipath.platform.guardrails import BaseGuardrail
 
-from ..tools import create_tool_node
+from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
+from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
+
+from ...runtime._citations import cas_deep_rag_citation_wrapper
+from ..guardrails.actions import GuardrailAction
+from ..tools.structured_tool_with_output_type import StructuredToolWithOutputType
+from .guardrails.guardrails_subgraph import (
+    create_agent_init_guardrails_subgraph,
+    create_agent_terminate_guardrails_subgraph,
+    create_llm_guardrails_subgraph,
+    create_tools_guardrails_subgraph,
+)
 from .init_node import (
     create_init_node,
 )
 from .llm_node import (
     create_llm_node,
 )
+from .memory_node import create_memory_recall_node
 from .router import (
-    route_agent,
+    create_route_agent,
 )
+from .router_conversational import create_route_agent_conversational
 from .terminate_node import (
     create_terminate_node,
 )
 from .tools import create_flow_control_tools
-from .types import AgentGraphConfig, AgentGraphNode, AgentGraphState
+from .types import (
+    AgentGraphConfig,
+    AgentGraphNode,
+    AgentGraphState,
+    MemoryConfig,
+)
+from .utils import create_state_with_input
+
+InputT = TypeVar("InputT", bound=BaseModel)
+OutputT = TypeVar("OutputT", bound=BaseModel)
 
 
 def create_agent(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
-    messages: Sequence[SystemMessage | HumanMessage],
+    messages: Sequence[SystemMessage | HumanMessage]
+    | Callable[[InputT], Sequence[SystemMessage | HumanMessage]],
     *,
-    state_schema: Type[AgentGraphState] = AgentGraphState,
-    response_format: type[BaseModel] | None = None,
+    input_schema: Type[InputT] | None = None,
+    output_schema: Type[OutputT] | None = None,
     config: AgentGraphConfig | None = None,
-) -> StateGraph[AgentGraphState]:
-    """Build agent graph with INIT -> AGENT <-> TOOLS loop, terminated by control flow tools.
+    guardrails: Sequence[tuple[BaseGuardrail, GuardrailAction]] | None = None,
+    memory: MemoryConfig | None = None,
+) -> StateGraph[AgentGraphState, None, InputT, OutputT]:
+    """Build agent graph with INIT -> AGENT (subgraph) <-> TOOLS loop, terminated by control flow tools.
+
+    The AGENT node is a subgraph that runs:
+    - before-agent guardrail middlewares
+    - the LLM tool-executing node
+    - after-agent guardrail middlewares
 
     Control flow tools (end_execution, raise_error) are auto-injected alongside regular tools.
     """
+    from ..tools import create_tool_node, wrap_tools_with_error_handling
+
     if config is None:
         config = AgentGraphConfig()
 
-    os.environ["LANGCHAIN_RECURSION_LIMIT"] = str(config.recursion_limit)
-
     agent_tools = list(tools)
-    flow_control_tools: list[BaseTool] = create_flow_control_tools(response_format)
+    flow_control_tools: list[BaseTool] = (
+        [] if config.is_conversational else create_flow_control_tools(output_schema)
+    )
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 
-    init_node = create_init_node(messages)
-    agent_node = create_llm_node(model, llm_tools)
+    # Derive client-side tool schemas from tools for input validation in the init node.
+    conversational_client_side_tools: dict[str, ClientSideToolInfo] | None = None
+    if config.is_conversational:
+        conversational_client_side_tools = {}
+        for t in agent_tools:
+            meta = getattr(t, "metadata", None) or {}
+            if meta.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL):
+                conversational_client_side_tools[t.name] = {
+                    "input_schema": t.args_schema.model_json_schema()
+                    if hasattr(t, "args_schema")
+                    and t.args_schema
+                    and hasattr(t.args_schema, "model_json_schema")
+                    else None,
+                    "output_schema": meta.get("output_schema"),
+                }
+        conversational_client_side_tools = conversational_client_side_tools or None
+
+    init_node = create_init_node(
+        messages,
+        input_schema,
+        config.is_conversational,
+        conversational_client_side_tools,
+    )
+
     tool_nodes = create_tool_node(agent_tools)
-    terminate_node = create_terminate_node(response_format)
 
-    builder: StateGraph[AgentGraphState] = StateGraph(state_schema)
-    builder.add_node(AgentGraphNode.INIT, init_node)
-    builder.add_node(AgentGraphNode.AGENT, agent_node)
+    # for conversational agents we transform deeprag's citation format into cas's
+    if config.is_conversational:
+        for node in tool_nodes.values():
+            if isinstance(node.tool, StructuredToolWithOutputType) and issubclass(
+                node.tool.output_type, DeepRagContent
+            ):
+                node.awrapper = cas_deep_rag_citation_wrapper
 
-    for tool_name, tool_node in tool_nodes.items():
+    tool_nodes_with_guardrails = create_tools_guardrails_subgraph(
+        tool_nodes, guardrails, input_schema=input_schema
+    )
+
+    processed_tool_nodes = tool_nodes_with_guardrails
+    if config.is_conversational:
+        processed_tool_nodes = wrap_tools_with_error_handling(
+            tool_nodes_with_guardrails
+        )
+
+    terminate_node = create_terminate_node(output_schema, config.is_conversational)
+
+    CompleteAgentGraphState = create_state_with_input(
+        input_schema if input_schema is not None else BaseModel
+    )
+
+    builder: StateGraph[AgentGraphState, None, InputT, OutputT] = StateGraph(
+        CompleteAgentGraphState, input_schema=input_schema, output_schema=output_schema
+    )
+    init_with_guardrails_subgraph = create_agent_init_guardrails_subgraph(
+        (AgentGraphNode.GUARDED_INIT, init_node),
+        guardrails,
+        input_schema=input_schema,
+    )
+    builder.add_node(AgentGraphNode.INIT, init_with_guardrails_subgraph)
+
+    for tool_name, tool_node in processed_tool_nodes.items():
         builder.add_node(tool_name, tool_node)
 
-    builder.add_node(AgentGraphNode.TERMINATE, terminate_node)
+    terminate_with_guardrails_subgraph = create_agent_terminate_guardrails_subgraph(
+        (AgentGraphNode.GUARDED_TERMINATE, terminate_node),
+        guardrails,
+        input_schema=input_schema,
+    )
+    builder.add_node(AgentGraphNode.TERMINATE, terminate_with_guardrails_subgraph)
 
-    builder.add_edge(START, AgentGraphNode.INIT)
+    if memory:
+        memory_recall = create_memory_recall_node(memory, input_schema=input_schema)
+        builder.add_node(AgentGraphNode.MEMORY_RECALL, memory_recall)
+        builder.add_edge(START, AgentGraphNode.MEMORY_RECALL)
+        builder.add_edge(AgentGraphNode.MEMORY_RECALL, AgentGraphNode.INIT)
+    else:
+        builder.add_edge(START, AgentGraphNode.INIT)
+
+    llm_node = create_llm_node(
+        model,
+        llm_tools,
+        input_schema=input_schema,
+        is_conversational=config.is_conversational,
+        llm_messages_limit=config.llm_messages_limit,
+        thinking_messages_limit=config.thinking_messages_limit,
+        tool_choice=config.tool_choice,
+        parallel_tool_calls=config.parallel_tool_calls,
+        strict_mode=config.strict_mode,
+    )
+    llm_with_guardrails_subgraph = create_llm_guardrails_subgraph(
+        (AgentGraphNode.LLM, llm_node), guardrails, input_schema=input_schema
+    )
+    builder.add_node(AgentGraphNode.AGENT, llm_with_guardrails_subgraph)
     builder.add_edge(AgentGraphNode.INIT, AgentGraphNode.AGENT)
 
-    tool_node_names = list(tool_nodes.keys())
+    tool_node_names = list(tool_nodes_with_guardrails.keys())
+
+    if config.is_conversational:
+        route_agent = create_route_agent_conversational()
+        target_node_names = [
+            *tool_node_names,
+            AgentGraphNode.TERMINATE,
+        ]
+    else:
+        route_agent = create_route_agent(config.thinking_messages_limit)
+        target_node_names = [
+            AgentGraphNode.AGENT,
+            *tool_node_names,
+            AgentGraphNode.TERMINATE,
+        ]
+
     builder.add_conditional_edges(
         AgentGraphNode.AGENT,
         route_agent,
-        [AgentGraphNode.AGENT, *tool_node_names, AgentGraphNode.TERMINATE],
+        target_node_names,
     )
 
-    for tool_name in tool_node_names:
-        builder.add_edge(tool_name, AgentGraphNode.AGENT)
+    if config.is_conversational:
+        target_node_names.append(AgentGraphNode.AGENT)
 
+    for tool_name in tool_node_names:
+        builder.add_conditional_edges(tool_name, route_agent, target_node_names)
     builder.add_edge(AgentGraphNode.TERMINATE, END)
 
     return builder

@@ -1,0 +1,252 @@
+import functools
+import inspect
+import json
+from inspect import Parameter
+from typing import Annotated, Any, Callable, NamedTuple
+
+from langchain_core.messages.tool import ToolCall, ToolMessage
+from langchain_core.tools import BaseTool, InjectedToolCallId
+from langchain_core.tools import tool as langchain_tool
+from uipath.core.chat import UiPathConversationToolCallConfirmationEvent
+
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
+
+CANCELLED_MESSAGE = "Cancelled by user"
+ARGS_MODIFIED_MESSAGE = "User has modified the tool arguments"
+
+IS_CONVERSATIONAL_CLIENT_SIDE_TOOL = "uipath_client_tool"
+CONVERSATIONAL_APPROVED_TOOL_ARGS = "conversational_approved_tool_args"
+REQUIRE_CONVERSATIONAL_CONFIRMATION = "require_conversational_confirmation"
+
+
+def _wrap_with_args_modified_meta(result: Any, approved_args: dict[str, Any]) -> str:
+    """Wrap a tool result with metadata indicating the user modified the args."""
+    try:
+        result_value = json.loads(result) if isinstance(result, str) else result
+    except (json.JSONDecodeError, TypeError):
+        result_value = result
+    return json.dumps(
+        {
+            "meta": {
+                "message": ARGS_MODIFIED_MESSAGE,
+                "executed_args": approved_args,
+            },
+            "result": result_value,
+        }
+    )
+
+
+def get_confirmation_schema(tool: Any) -> dict[str, Any] | None:
+    """Return the JSON input schema if this tool requires confirmation, else None."""
+    metadata = getattr(tool, "metadata", None) or {}
+    if not metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION):
+        return None
+    tool_call_schema = getattr(tool, "tool_call_schema", None)
+    return tool_call_schema.model_json_schema() if tool_call_schema is not None else {}
+
+
+class ConfirmationResult(NamedTuple):
+    """Result of a tool confirmation check."""
+
+    cancelled: ToolMessage | None  # ToolMessage if cancelled, None if approved
+    args_modified: bool
+    approved_args: dict[str, Any] | None = None
+
+    def annotate_result(self, output: dict[str, Any] | Any) -> None:
+        """Apply confirmation metadata to a tool result message."""
+        msg = None
+        if isinstance(output, dict):
+            messages = output.get("messages")
+            if messages:
+                msg = messages[0]
+        else:
+            # Tools with @durable_interrupt return a Command whose messages
+            # are nested under output.update["messages"].
+            update = getattr(output, "update", None)
+            if isinstance(update, dict):
+                messages = update.get("messages")
+                if messages:
+                    msg = messages[0]
+        if msg is None:
+            return
+        if self.approved_args is not None:
+            msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] = (
+                self.approved_args
+            )
+        if self.args_modified and self.approved_args is not None:
+            msg.content = _wrap_with_args_modified_meta(msg.content, self.approved_args)
+
+
+def _patch_span_input(approved_args: dict[str, Any]) -> None:
+    """Update the current tracer Run so the span records the approved tool args.
+
+    LangChain tracers (including OpenInference) read ``run.inputs`` when the
+    span ends, overwriting any earlier ``set_attribute`` call.  We patch the
+    Run object directly via the public ``BaseTracer.run_map`` API so that
+    every tracer picks up the correct value.
+    """
+    try:
+        from langchain_core.callbacks import BaseCallbackManager
+        from langchain_core.runnables.config import var_child_runnable_config
+        from langchain_core.tracers.base import BaseTracer
+
+        config = var_child_runnable_config.get()
+        if not isinstance(config, dict):
+            return
+
+        run_id = None
+        managers: list[BaseCallbackManager] = []
+        for v in config.values():
+            if isinstance(v, BaseCallbackManager):
+                managers.append(v)
+                if not run_id:
+                    run_id = v.parent_run_id
+
+        if not run_id:
+            return
+
+        serialized = str(approved_args)
+        key = str(run_id)
+        for mgr in managers:
+            for handler in mgr.handlers:
+                if isinstance(handler, BaseTracer):
+                    run = handler.run_map.get(key)
+                    if run is not None:
+                        run.inputs = {"input": serialized}
+    except Exception:
+        pass
+
+
+def request_approval(
+    tool_args: dict[str, Any],
+    tool: BaseTool,
+) -> dict[str, Any] | None:
+    """Interrupt the graph to request user approval for a tool call.
+
+    Returns the (possibly edited) tool arguments if approved, or None if rejected.
+    """
+    tool_call_id: str = tool_args.pop("tool_call_id")
+
+    @durable_interrupt
+    def ask_confirmation():
+        return {
+            "tool_call_id": tool_call_id,
+            "tool_name": tool.name,
+            "input": tool_args,
+        }
+
+    response = ask_confirmation()
+
+    if not isinstance(response, dict):
+        return tool_args
+
+    confirmation = UiPathConversationToolCallConfirmationEvent.model_validate(response)
+    if not confirmation.approved:
+        return None
+
+    return confirmation.input if confirmation.input is not None else tool_args
+
+
+# for conversational low code agents
+def request_conversational_tool_confirmation(
+    call: ToolCall, tool: BaseTool
+) -> ConfirmationResult | None:
+    """Check whether a tool requires user confirmation and request approval"""
+    if not (tool.metadata and tool.metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION)):
+        return None
+
+    original_args = call["args"]
+    approved_args = request_approval(
+        {**original_args, "tool_call_id": call["id"]}, tool
+    )
+    if approved_args is None:
+        cancelled_msg = ToolMessage(
+            content=json.dumps({"meta": CANCELLED_MESSAGE}),
+            name=call["name"],
+            tool_call_id=call["id"],
+        )
+        cancelled_msg.response_metadata[CONVERSATIONAL_APPROVED_TOOL_ARGS] = (
+            original_args
+        )
+        return ConfirmationResult(cancelled=cancelled_msg, args_modified=False)
+
+    # Mutate call args so the tool executes with the approved values
+    call["args"] = approved_args
+    return ConfirmationResult(
+        cancelled=None,
+        args_modified=approved_args != original_args,
+        approved_args=approved_args,
+    )
+
+
+# for conversational coded agents
+def requires_approval(
+    func: Callable[..., Any] | None = None,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    args_schema: type | None = None,
+    return_direct: bool = False,
+) -> BaseTool | Callable[..., BaseTool]:
+
+    def decorator(fn: Callable[..., Any]) -> BaseTool:
+        _created_tool: list[BaseTool] = []
+
+        # wrap the tool/function
+        @functools.wraps(fn)
+        def wrapper(**tool_args: Any) -> Any:
+            approved_args = request_approval(tool_args, _created_tool[0])
+            if approved_args is None:
+                return json.dumps({"meta": CANCELLED_MESSAGE})
+
+            args_modified = approved_args != tool_args
+
+            _patch_span_input(approved_args)
+            result = fn(**approved_args)
+
+            if args_modified:
+                return _wrap_with_args_modified_meta(result, approved_args)
+
+            return result
+
+        # rewrite the signature: e.g. (query: str) -> (query: str, *, tool_call_id: str)
+        original_sig = inspect.signature(fn)
+        params = list[Parameter](original_sig.parameters.values()) + [
+            inspect.Parameter(
+                "tool_call_id",
+                inspect.Parameter.KEYWORD_ONLY,
+                annotation=Annotated[str, InjectedToolCallId],
+            ),
+        ]
+        wrapper.__signature__ = original_sig.replace(parameters=params)  # type: ignore[attr-defined]
+        wrapper.__annotations__ = {
+            **fn.__annotations__,
+            "tool_call_id": Annotated[str, InjectedToolCallId],
+        }
+
+        # Create the LangChain tool
+        if name is not None:
+            result: BaseTool = langchain_tool(
+                name,
+                description=description,
+                args_schema=args_schema,
+                return_direct=return_direct,
+            )(wrapper)
+        else:
+            result = langchain_tool(
+                wrapper,
+                description=description,
+                args_schema=args_schema,
+                return_direct=return_direct,
+            )
+
+        if result.metadata is None:
+            result.metadata = {}
+        result.metadata[REQUIRE_CONVERSATIONAL_CONFIRMATION] = True
+
+        _created_tool.append(result)
+        return result
+
+    if func is not None:
+        return decorator(func)
+    return decorator

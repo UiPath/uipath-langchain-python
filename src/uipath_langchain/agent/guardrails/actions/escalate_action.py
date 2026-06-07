@@ -1,0 +1,908 @@
+from __future__ import annotations
+
+import ast
+import json
+import re
+from typing import Any, Dict, Literal, cast
+
+from langchain_core.messages import (
+    AIMessage,
+    AnyMessage,
+    BaseMessage,
+    ToolMessage,
+)
+from langgraph.types import Command, interrupt
+from uipath._utils import UiPathUrl
+from uipath.agent.models.agent import (
+    AgentEscalationRecipient,
+    AssetRecipient,
+    StandardRecipient,
+)
+from uipath.platform import UiPath
+from uipath.platform.action_center.tasks import Task, TaskRecipient
+from uipath.platform.common import UiPathConfig, WaitEscalation
+from uipath.platform.guardrails import (
+    BaseGuardrail,
+    GuardrailScope,
+)
+from uipath.runtime.errors import UiPathErrorCategory
+
+from ...exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ...messages.message_utils import replace_tool_calls
+from ...react.types import AgentGuardrailsGraphState
+from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
+from ..types import ExecutionStage
+from ..utils import _extract_tool_args_from_message, get_message_content
+from .base_action import GuardrailAction, GuardrailActionNodes
+
+
+class EscalateAction(GuardrailAction):
+    """Node-producing action that inserts a HITL interruption node into the graph.
+
+    The returned node creates a human-in-the-loop interruption that suspends execution
+    and waits for human review. When execution resumes, if the escalation was approved,
+    the flow continues with the reviewed content; otherwise, an error is raised.
+    """
+
+    def __init__(
+        self,
+        app_name: str,
+        app_folder_path: str,
+        version: int,
+        recipient: AgentEscalationRecipient,
+    ):
+        """Initialize EscalateAction with escalation app configuration.
+
+        Args:
+            app_name: Name of the escalation app.
+            app_folder_path: Folder path where the escalation app is located.
+            version: Version of the escalation app.
+            recipient: Recipient object (StandardRecipient or AssetRecipient).
+        """
+        self.app_name = app_name
+        self.app_folder_path = app_folder_path
+        self.version = version
+        self.recipient = recipient
+
+    @property
+    def action_type(self) -> str:
+        return "Escalate"
+
+    def action_node(
+        self,
+        *,
+        guardrail: BaseGuardrail,
+        scope: GuardrailScope,
+        execution_stage: ExecutionStage,
+        guarded_component_name: str,
+    ) -> GuardrailActionNodes:
+        """Create two HITL escalation nodes for the guardrail.
+
+        Returns an ordered pair of nodes that the subgraph builder will chain:
+
+        1. **create-task node** – creates the Action Center task and persists
+           the task id in ``inner_state.hitl_task_info`` so it survives across
+           graph super-steps.  Because this node completes normally its state
+           update *is* committed to the checkpoint.
+        2. **interrupt node** – calls ``interrupt(WaitEscalation(…))`` to pause
+           execution. On resume, it reads the stored task data from state
+           (skipping re-creation) and processes the escalation response.
+        """
+        base_name = _get_node_name(execution_stage, guardrail, scope)
+        create_task_node_name = f"{base_name}_create_task"
+        interrupt_node_name = base_name
+
+        metadata: Dict[str, Any] = {
+            "guardrail": guardrail,
+            "scope": scope,
+            "execution_stage": execution_stage,
+            "escalation_data": {
+                "recipient_type": self.recipient.type.value
+                if self.recipient and self.recipient.type
+                else None,
+            },
+        }
+
+        # Node 1: create the escalation task
+        async def _create_task_node(
+            state: AgentGuardrailsGraphState,
+        ) -> Dict[str, Any]:
+            # If the task was already created (e.g. subgraph replayed this
+            # node on resume), skip creation and return as-is.
+            hitl_info = state.inner_state.hitl_task_info
+            existing_task = hitl_info.get(create_task_node_name) if hitl_info else None
+            if existing_task is not None:
+                return {}
+
+            # Lazy import to avoid circular dependency with escalation_tool
+            from ...react.types import AgentGraphState
+            from ...tools.escalation_tool import resolve_recipient_value
+            from ...tools.utils import sanitize_dict_for_serialization
+
+            internal_fields = set(AgentGraphState.model_fields.keys())
+            state_dict = sanitize_dict_for_serialization(dict(state))
+            input_args = {
+                k: v for k, v in state_dict.items() if k not in internal_fields
+            }
+
+            # Resolve recipient value (handles StandardRecipient, AssetRecipient, and argument-based recipients)
+            task_recipient = await resolve_recipient_value(
+                self.recipient, input_args=input_args
+            )
+
+            if isinstance(self.recipient, StandardRecipient):
+                metadata["escalation_data"]["assigned_to"] = (
+                    self.recipient.display_name
+                    if self.recipient.display_name
+                    else self.recipient.value
+                )
+            elif isinstance(self.recipient, AssetRecipient):
+                metadata["escalation_data"]["assigned_to"] = (
+                    task_recipient.value if task_recipient else None
+                )
+
+            # Validate message count based on execution stage
+            _validate_message_count(state, execution_stage)
+
+            # Build base data dictionary with common fields
+            data: Dict[str, Any] = {
+                "GuardrailName": guardrail.name,
+                "GuardrailDescription": guardrail.description,
+                "Component": _build_component_name(scope, guarded_component_name),
+                # send Tool for backwards compatibility for agents that use old HITL app
+                "Tool": _build_component_name(scope, guarded_component_name),
+                "TenantName": UiPathConfig.tenant_name,
+                "ExecutionStage": _execution_stage_to_string(execution_stage),
+                "GuardrailResult": state.inner_state.guardrail_validation_details,
+            }
+
+            # Add tenant and trace URL if base_url is configured
+            cloud_base_url = UiPathConfig.base_url
+            if cloud_base_url is not None:
+                data["AgentTrace"] = _get_agent_execution_viewer_url(cloud_base_url)
+
+            # Add stage-specific fields
+            if execution_stage == ExecutionStage.PRE_EXECUTION:
+                # PRE_EXECUTION: Only Inputs field from last message
+                input_content = _extract_escalation_content(
+                    state.messages[-1],
+                    state,
+                    scope,
+                    execution_stage,
+                    guarded_component_name,
+                )
+                data["Inputs"] = input_content
+                # send ToolInputs for backwards compatibility for agents that use old HITL app
+                data["ToolInputs"] = input_content
+            else:  # POST_EXECUTION
+                if scope == GuardrailScope.AGENT:
+                    input_message = state.messages[1]
+                else:
+                    input_message = state.messages[-2]
+                input_content = _extract_escalation_content(
+                    input_message,
+                    state,
+                    scope,
+                    ExecutionStage.PRE_EXECUTION,
+                    guarded_component_name,
+                )
+
+                # Extract Outputs from last message using POST_EXECUTION logic
+                output_content = _extract_escalation_content(
+                    state.messages[-1],
+                    state,
+                    scope,
+                    execution_stage,
+                    guarded_component_name,
+                )
+
+                data["Inputs"] = input_content
+                data["Outputs"] = output_content
+                # send ToolInputs and ToolOutputs for backwards compatibility for agents that use old HITL app
+                data["ToolInputs"] = input_content
+                data["ToolOutputs"] = output_content
+
+            # Create the escalation task via API
+            client = UiPath()
+            created_task = await client.tasks.create_async(
+                title="Agents Guardrail Task",
+                data=data,
+                app_name=self.app_name,
+                app_folder_path=self.app_folder_path,
+                recipient=task_recipient,
+            )
+
+            # Store task URL in metadata for observability — before interrupt
+            task_id = created_task.id
+            task_url = f"{UiPathConfig.base_url}/actions_/tasks/{task_id}"
+            metadata["escalation_data"]["task_url"] = task_url
+            metadata["node_type"] = "create_hitl_task"
+
+            # Persist task info in state so the interrupt node can read it,
+            # and so that on resume this node can detect it already ran.
+            return {
+                "inner_state": {
+                    "hitl_task_info": {
+                        create_task_node_name: created_task.model_dump(mode="json")
+                    },
+                }
+            }
+
+        _create_task_node.__metadata__ = metadata  # type: ignore[attr-defined]
+
+        # ── Node 2: interrupt and wait for escalation result ─────────────
+        async def _interrupt_node(
+            state: AgentGuardrailsGraphState,
+        ) -> Dict[str, Any] | Command[Any]:
+            hitl_info = state.inner_state.hitl_task_info
+            task_info = hitl_info.get(create_task_node_name) if hitl_info else None
+            if task_info is None:
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_ERROR,
+                    title="Escalation task not found",
+                    detail="The escalation task was not found in state. "
+                    "The create-task node must run before the interrupt node.",
+                    category=UiPathErrorCategory.SYSTEM,
+                )
+
+            created_task = Task.model_validate(task_info)
+            task_recipient = (
+                TaskRecipient.model_validate(task_info["recipient"])
+                if task_info.get("recipient")
+                else None
+            )
+
+            escalation_result = interrupt(
+                WaitEscalation(
+                    action=created_task,
+                    app_name=self.app_name,
+                    app_folder_path=self.app_folder_path,
+                    recipient=task_recipient,
+                )
+            )
+
+            # Store reviewed inputs/outputs in metadata for observability
+            if escalation_result.data:
+                reviewed_inputs = escalation_result.data.get("ReviewedInputs")
+                reviewed_outputs = escalation_result.data.get("ReviewedOutputs")
+                reason = escalation_result.data.get("Reason")
+                if reviewed_inputs:
+                    metadata["escalation_data"]["reviewed_inputs"] = (
+                        _parse_reviewed_data(reviewed_inputs)
+                    )
+                if reviewed_outputs:
+                    metadata["escalation_data"]["reviewed_outputs"] = (
+                        _parse_reviewed_data(reviewed_outputs)
+                    )
+                if reason:
+                    metadata["escalation_data"]["reason"] = reason
+
+            # Store reviewed_by from completed_by_user
+            completed_by_user = getattr(escalation_result, "completed_by_user", None)
+            if completed_by_user:
+                reviewed_by = completed_by_user.get(
+                    "displayName"
+                ) or completed_by_user.get("emailAddress")
+                if reviewed_by:
+                    metadata["escalation_data"]["reviewed_by"] = reviewed_by
+
+            # Clear the stored task data
+            cleanup_update: Dict[str, Any] = {
+                "inner_state": {"hitl_task_info": {create_task_node_name: None}},
+            }
+
+            if escalation_result.action == "Approve":
+                result = _process_escalation_response(
+                    state,
+                    escalation_result.data,
+                    scope,
+                    execution_stage,
+                    guarded_component_name,
+                )
+                # Merge the cleanup into the response
+                if isinstance(result, Command) and result.update:
+                    _deep_merge(result.update, cleanup_update)
+                elif isinstance(result, dict):
+                    _deep_merge(result, cleanup_update)
+                else:
+                    result = cleanup_update
+                return result
+
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
+                title="Escalation rejected",
+                detail=f"Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data.get('Reason', None)}",
+                category=UiPathErrorCategory.USER,
+            )
+
+        _interrupt_node.__metadata__ = metadata  # type: ignore[attr-defined]
+
+        return [
+            (create_task_node_name, _create_task_node),
+            (interrupt_node_name, _interrupt_node),
+        ]
+
+
+def _deep_merge(target: Dict[str, Any], source: Dict[str, Any]) -> None:
+    """Recursively merge *source* into *target* in place (dict values are merged, others overwritten)."""
+    for key, value in source.items():
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+            _deep_merge(target[key], value)
+        else:
+            target[key] = value
+
+
+def _parse_reviewed_data(value: Any) -> Any:
+    if not value:
+        return value
+
+    if isinstance(value, str):
+        try:
+            # Try to parse as JSON first (handles JSON strings like "abcd")
+            parsed = json.loads(value)
+            return parsed
+        except json.JSONDecodeError:
+            # If not valid JSON, return as-is (plain string)
+            return value
+
+    # Already parsed (dict/list), return as-is
+    return value
+
+
+def _validate_message_count(
+    state: AgentGuardrailsGraphState,
+    execution_stage: ExecutionStage,
+) -> None:
+    """Validate that state has the required number of messages for the execution stage.
+
+    Args:
+        state: The current agent graph state.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Raises:
+        AgentRuntimeError: If the state doesn't have enough messages.
+    """
+    required_messages = 1 if execution_stage == ExecutionStage.PRE_EXECUTION else 2
+    actual_messages = len(state.messages)
+
+    if actual_messages < required_messages:
+        stage_name = (
+            "PRE_EXECUTION"
+            if execution_stage == ExecutionStage.PRE_EXECUTION
+            else "POST_EXECUTION"
+        )
+        detail = f"{stage_name} requires at least {required_messages} message{'s' if required_messages > 1 else ''} in state, but found {actual_messages}."
+        if execution_stage == ExecutionStage.POST_EXECUTION:
+            detail += " Cannot extract Inputs from previous message."
+
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_ERROR,
+            title=f"Invalid state for {stage_name}",
+            detail=detail,
+            category=UiPathErrorCategory.SYSTEM,
+        )
+
+
+def _get_node_name(
+    execution_stage: ExecutionStage, guardrail: BaseGuardrail, scope: GuardrailScope
+) -> str:
+    raw_node_name = f"{scope.name}_{execution_stage.name}_{guardrail.name}_hitl"
+    node_name = re.sub(r"\W+", "_", raw_node_name.lower()).strip("_")
+    return node_name
+
+
+def _process_escalation_response(
+    state: AgentGuardrailsGraphState,
+    escalation_result: Dict[str, Any],
+    scope: GuardrailScope,
+    execution_stage: ExecutionStage,
+    guarded_node_name: str,
+) -> Dict[str, Any] | Command[Any]:
+    """Process escalation response and route to appropriate handler based on scope.
+
+    Args:
+        state: The current agent graph state.
+        escalation_result: The result from the escalation interrupt containing reviewed inputs/outputs.
+        scope: The guardrail scope (LLM/AGENT/TOOL).
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Returns:
+        Command updates for the state (e.g., updating messages / tool calls / agent_result),
+        or an empty dict if no update is needed.
+    """
+    match scope:
+        case GuardrailScope.LLM:
+            return _process_llm_escalation_response(
+                state, escalation_result, execution_stage
+            )
+        case GuardrailScope.TOOL:
+            return _process_tool_escalation_response(
+                state, escalation_result, execution_stage, guarded_node_name
+            )
+        case GuardrailScope.AGENT:
+            return _process_agent_escalation_response(
+                state, escalation_result, execution_stage
+            )
+
+
+def _process_agent_escalation_response(
+    state: AgentGuardrailsGraphState,
+    escalation_result: Dict[str, Any],
+    execution_stage: ExecutionStage,
+) -> Dict[str, Any] | Command[Any]:
+    """Process escalation response for AGENT scope guardrails.
+
+    For AGENT scope:
+    - PRE_EXECUTION: updates the last message content using `ReviewedInputs`
+    - POST_EXECUTION: updates `agent_result` using `ReviewedOutputs`
+
+    Args:
+        state: The current agent graph state.
+        escalation_result: The result from the escalation interrupt containing reviewed inputs/outputs.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Returns:
+        Command to update state, or empty dict if no updates are needed.
+
+    Raises:
+        AgentRuntimeError: If escalation response processing fails.
+    """
+    try:
+        reviewed_field = get_reviewed_field_name(execution_stage)
+        if reviewed_field not in escalation_result:
+            return {}
+
+        reviewed_value = escalation_result.get(reviewed_field)
+        if not reviewed_value:
+            return {}
+
+        try:
+            parsed = json.loads(reviewed_value)
+        except json.JSONDecodeError:
+            parsed = reviewed_value
+
+        if execution_stage == ExecutionStage.PRE_EXECUTION:
+            msgs = state.messages.copy()
+            if not msgs:
+                return {}
+            msgs[-1].content = parsed
+            return Command(update={"messages": msgs})
+
+        # POST_EXECUTION: update agent_result
+        return Command(update={"inner_state": {"agent_result": parsed}})
+    except Exception as e:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
+            title="Escalation rejected",
+            detail=str(e),
+            category=UiPathErrorCategory.SYSTEM,
+        ) from e
+
+
+def get_reviewed_field_name(execution_stage):
+    return (
+        "ReviewedInputs"
+        if execution_stage == ExecutionStage.PRE_EXECUTION
+        else "ReviewedOutputs"
+    )
+
+
+def _process_llm_escalation_response(
+    state: AgentGuardrailsGraphState,
+    escalation_result: Dict[str, Any],
+    execution_stage: ExecutionStage,
+) -> Dict[str, Any] | Command[Any]:
+    """Process escalation response for LLM scope guardrails.
+
+    Updates message content or tool calls based on reviewed inputs/outputs from escalation.
+
+    Args:
+        state: The current agent graph state.
+        escalation_result: The result from the escalation interrupt containing reviewed inputs/outputs.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Returns:
+        Command to update messages with reviewed inputs/outputs, or empty dict if no updates needed.
+
+    Raises:
+        AgentRuntimeError: If escalation response processing fails.
+    """
+    try:
+        reviewed_field = get_reviewed_field_name(execution_stage)
+
+        msgs = state.messages.copy()
+        if not msgs or reviewed_field not in escalation_result:
+            return {}
+
+        last_message = msgs[-1]
+
+        if execution_stage == ExecutionStage.PRE_EXECUTION:
+            reviewed_content = escalation_result[reviewed_field]
+            if reviewed_content:
+                last_message.content = json.loads(reviewed_content)
+        else:
+            reviewed_outputs_json = escalation_result[reviewed_field]
+            if not reviewed_outputs_json:
+                return {}
+
+            reviewed_tool_calls_obj = json.loads(reviewed_outputs_json)
+            if not reviewed_tool_calls_obj:
+                return {}
+
+            reviewed_tool_calls_list = (
+                reviewed_tool_calls_obj.get("tool_calls")
+                if "tool_calls" in reviewed_tool_calls_obj
+                else None
+            )
+
+            # Track if tool calls were successfully processed
+            tool_calls_processed = False
+
+            # For AI messages, process tool calls if present
+            if isinstance(last_message, AIMessage):
+                ai_message: AIMessage = last_message
+
+                if ai_message.tool_calls and isinstance(reviewed_tool_calls_list, list):
+                    tool_calls = list(ai_message.tool_calls)
+
+                    # Create a name-to-args mapping from reviewed tool call data
+                    reviewed_tool_calls_map = {}
+                    for reviewed_data in reviewed_tool_calls_list:
+                        if (
+                            isinstance(reviewed_data, dict)
+                            and "name" in reviewed_data
+                            and "args" in reviewed_data
+                        ):
+                            reviewed_tool_calls_map[reviewed_data["name"]] = (
+                                reviewed_data["args"]
+                            )
+
+                    # Update tool calls with reviewed args by matching name
+                    if reviewed_tool_calls_map:
+                        for tool_call in tool_calls:
+                            tool_name = (
+                                tool_call.get("name")
+                                if isinstance(tool_call, dict)
+                                else getattr(tool_call, "name", None)
+                            )
+                            if tool_name and tool_name in reviewed_tool_calls_map:
+                                if isinstance(tool_call, dict):
+                                    tool_call["args"] = reviewed_tool_calls_map[
+                                        tool_name
+                                    ]
+                                else:
+                                    tool_call.args = reviewed_tool_calls_map[tool_name]
+
+                        ai_message = replace_tool_calls(ai_message, tool_calls)
+                        msgs[-1] = ai_message
+                        tool_calls_processed = True
+
+            # Fallback: update message content if tool_calls weren't processed
+            if not tool_calls_processed:
+                last_message.content = reviewed_outputs_json
+
+        return Command(update={"messages": msgs})
+    except Exception as e:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
+            title="Escalation rejected",
+            detail=str(e),
+            category=UiPathErrorCategory.SYSTEM,
+        ) from e
+
+
+def _process_tool_escalation_response(
+    state: AgentGuardrailsGraphState,
+    escalation_result: Dict[str, Any],
+    execution_stage: ExecutionStage,
+    tool_name: str,
+) -> Dict[str, Any] | Command[Any]:
+    """Process escalation response for TOOL scope guardrails.
+
+    Updates the tool call arguments (PreExecution) or tool message content (PostExecution)
+    for the specific tool matching the tool_name. For PreExecution, finds the tool call
+    with the matching name and updates only that tool call's args with the reviewed dict.
+    For PostExecution, updates the tool message content.
+
+    Args:
+        state: The current agent graph state.
+        escalation_result: The result from the escalation interrupt containing reviewed inputs/outputs.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+        tool_name: Name of the tool to update. Only the tool call matching this name will be updated.
+
+    Returns:
+        Command to update messages with reviewed tool call args or content, or empty dict if no updates needed.
+
+    Raises:
+        AgentRuntimeError: If escalation response processing fails.
+    """
+    try:
+        reviewed_field = get_reviewed_field_name(execution_stage)
+
+        msgs = state.messages.copy()
+        if not msgs or reviewed_field not in escalation_result:
+            return {}
+
+        if execution_stage == ExecutionStage.PRE_EXECUTION:
+            # Find the latest AI message instead of assuming last message is AI
+            ai_message = find_latest_ai_message(msgs)
+            if ai_message is None:
+                return {}
+
+            # Get reviewed tool calls args from escalation result
+            reviewed_inputs_json = escalation_result[reviewed_field]
+            if not reviewed_inputs_json:
+                return {}
+
+            reviewed_tool_calls_args = json.loads(reviewed_inputs_json)
+            if not isinstance(reviewed_tool_calls_args, dict):
+                return {}
+
+            # Find the current tool call index for the specific tool
+            if ai_message.tool_calls:
+                tool_calls = list(ai_message.tool_calls)
+                current_index = extract_current_tool_call_index(msgs, tool_name)
+
+                # If we found the current index and it's valid
+                if current_index is not None and current_index < len(tool_calls):
+                    tool_call = tool_calls[current_index]
+                    call_name = (
+                        tool_call.get("name")
+                        if isinstance(tool_call, dict)
+                        else getattr(tool_call, "name", None)
+                    )
+
+                    # Verify this is the correct tool by name
+                    if call_name == tool_name:
+                        # Update args for the specific tool call at current index
+                        if isinstance(reviewed_tool_calls_args, dict):
+                            if isinstance(tool_call, dict):
+                                tool_call["args"] = reviewed_tool_calls_args
+                            else:
+                                tool_call.args = reviewed_tool_calls_args
+
+                        ai_message = replace_tool_calls(ai_message, tool_calls)
+                        return Command(update={"messages": [ai_message]})
+                    else:
+                        raise AgentRuntimeError(
+                            code=AgentRuntimeErrorCode.STATE_ERROR,
+                            title=f"Tool call name [{call_name}] does not match expected tool name [{tool_name}].",
+                            detail=f"Expected tool call for '{tool_name}' but found '{call_name}' at the current index.",
+                            category=UiPathErrorCategory.SYSTEM,
+                        )
+                else:
+                    return {}
+
+        else:
+            # POST_EXECUTION: last message should be ToolMessage for tool escalation
+            last_message = msgs[-1]
+            if not isinstance(last_message, ToolMessage):
+                return {}
+
+            # PostExecution: update tool message content
+            reviewed_outputs_json = escalation_result[reviewed_field]
+            if reviewed_outputs_json:
+                last_message.content = reviewed_outputs_json
+
+        return Command(update={"messages": msgs})
+    except Exception as e:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
+            title="Escalation rejected",
+            detail=str(e),
+            category=UiPathErrorCategory.SYSTEM,
+        ) from e
+
+
+def _extract_escalation_content(
+    message: BaseMessage,
+    state: AgentGuardrailsGraphState,
+    scope: GuardrailScope,
+    execution_stage: ExecutionStage,
+    guarded_node_name: str,
+) -> str | list[str | Dict[str, Any]]:
+    """Extract escalation content from a message based on guardrail scope and execution stage.
+
+    Args:
+        message: The message to extract content from.
+        scope: The guardrail scope (LLM/AGENT/TOOL).
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+        guarded_node_name: Name of the guarded component.
+
+    Returns:
+        str or list[str | Dict[str, Any]]: For LLM scope, returns JSON string or list with message/tool call content.
+        For AGENT scope, returns empty string. For TOOL scope, returns JSON string or list with tool-specific content.
+    """
+    match scope:
+        case GuardrailScope.LLM:
+            return _extract_llm_escalation_content(message, execution_stage)
+        case GuardrailScope.AGENT:
+            return _extract_agent_escalation_content(message, state, execution_stage)
+        case GuardrailScope.TOOL:
+            return _extract_tool_escalation_content(
+                message, execution_stage, guarded_node_name
+            )
+
+
+def _extract_agent_escalation_content(
+    message: BaseMessage,
+    state: AgentGuardrailsGraphState,
+    execution_stage: ExecutionStage,
+) -> str | list[str | Dict[str, Any]]:
+    """Extract escalation content for AGENT scope guardrails.
+
+    Args:
+        message: The message used to extract the agent input content.
+        state: The current agent guardrails graph state. Used to read `agent_result` for POST_EXECUTION.
+        execution_stage: PRE_EXECUTION or POST_EXECUTION.
+
+    Returns:
+        - PRE_EXECUTION: the agent input string (from message content).
+        - POST_EXECUTION: a JSON-serialized representation of `state.agent_result`.
+    """
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        return json.dumps(get_message_content(cast(AnyMessage, message)))
+
+    output_content = state.inner_state.agent_result or ""
+    return json.dumps(output_content)
+
+
+def _extract_llm_escalation_content(
+    message: BaseMessage, execution_stage: ExecutionStage
+) -> str | list[str | Dict[str, Any]]:
+    """Extract escalation content for LLM scope guardrails.
+
+    Args:
+        message: The message to extract content from.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+
+    Returns:
+        str or list[str | Dict[str, Any]]: For PreExecution, returns JSON string with message content or empty string.
+        For PostExecution, returns JSON string (array) with tool call content and message content.
+        Returns empty string if no content found.
+    """
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        if isinstance(message, ToolMessage):
+            return message.content
+
+        return json.dumps(get_message_content(cast(AnyMessage, message)))
+
+    # For AI messages, process tool calls if present
+    if isinstance(message, AIMessage):
+        ai_message: AIMessage = message
+
+        if ai_message.tool_calls:
+            content_list: list[Dict[str, Any]] = []
+            for tool_call in ai_message.tool_calls:
+                tool_call_data = {
+                    "name": tool_call.get("name"),
+                    "args": tool_call.get("args"),
+                }
+                content_list.append(tool_call_data)
+            tool_calls_obj = {"tool_calls": content_list}
+            return json.dumps(tool_calls_obj)
+
+    # Fallback for other message types
+    return json.dumps(get_message_content(cast(AnyMessage, message)))
+
+
+def _extract_tool_escalation_content(
+    message: BaseMessage, execution_stage: ExecutionStage, tool_name: str
+) -> str | list[str | Dict[str, Any]]:
+    """Extract escalation content for TOOL scope guardrails.
+
+    Args:
+        message: The message to extract content from.
+        execution_stage: The execution stage (PRE_EXECUTION or POST_EXECUTION).
+        tool_name: Optional tool name to filter tool calls. If provided, only extracts args for matching tool.
+
+    Returns:
+        str or list[str | Dict[str, Any]]: For PreExecution, returns JSON string with tool call arguments
+        for the specified tool name, or empty string if not found. For PostExecution, returns string with
+        tool message content, or empty string if message type doesn't match.
+    """
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        args = _extract_tool_args_from_message(cast(AnyMessage, message), tool_name)
+        if args:
+            return json.dumps(args)
+        return ""
+    else:
+        if not isinstance(message, ToolMessage):
+            return ""
+        content = message.content
+
+        # If content is already dict/list, serialize to JSON
+        if isinstance(content, (dict, list)):
+            return json.dumps(content)
+
+        # If content is a string that looks like a Python literal, convert to JSON
+        if isinstance(content, str):
+            try:
+                # Try to parse as Python literal and convert to JSON
+                parsed_content = ast.literal_eval(content)
+                return json.dumps(parsed_content)
+            except (ValueError, SyntaxError):
+                # If parsing fails, return as-is
+                pass
+
+        return content
+
+
+def _execution_stage_to_escalation_field(
+    execution_stage: ExecutionStage,
+) -> str:
+    """Convert execution stage to escalation data field name.
+
+    Args:
+        execution_stage: The execution stage enum.
+
+    Returns:
+        "Inputs" for PRE_EXECUTION, "Outputs" for POST_EXECUTION.
+    """
+    return "Inputs" if execution_stage == ExecutionStage.PRE_EXECUTION else "Outputs"
+
+
+def _build_component_name(scope: GuardrailScope, guarded_component_name: str) -> str:
+    """Build component name based on guardrail scope and guarded component name.
+
+    Args:
+        scope: The guardrail scope (LLM/AGENT/TOOL).
+        guarded_component_name: Name of the guarded component.
+
+    Returns:
+        "Agent" for AGENT scope, "LLM call" for LLM scope, or guarded_component_name for TOOL scope.
+    """
+    match scope:
+        case GuardrailScope.AGENT:
+            return "Agent"
+        case GuardrailScope.LLM:
+            return "LLM call"
+        case GuardrailScope.TOOL:
+            return guarded_component_name
+
+
+def _execution_stage_to_string(
+    execution_stage: ExecutionStage,
+) -> Literal["PreExecution", "PostExecution"]:
+    """Convert ExecutionStage enum to string literal.
+
+    Args:
+        execution_stage: The execution stage enum.
+
+    Returns:
+        "PreExecution" for PRE_EXECUTION, "PostExecution" for POST_EXECUTION.
+    """
+    if execution_stage == ExecutionStage.PRE_EXECUTION:
+        return "PreExecution"
+    return "PostExecution"
+
+
+def _get_agent_execution_viewer_url(cloud_base_url: str) -> str:
+    """Generate the agent execution viewer URL based on execution context.
+
+    Constructs the appropriate URL for viewing agent execution traces. The URL format
+    depends on whether the agent is running in a studio project (development) or
+    deployed (production) context.
+
+    Args:
+        cloud_base_url: The UiPath cloud base URL to use for constructing the viewer URL.
+
+    Returns:
+        str: The constructed agent execution viewer URL.
+    """
+    uiPath_Url = UiPathUrl(cloud_base_url)
+    organization_id = UiPathConfig.organization_id
+    project_id = UiPathConfig.project_id
+
+    # Route to appropriate URL based on source
+    if UiPathConfig.is_studio_project:
+        solutionId = UiPathConfig.studio_solution_id
+        return f"{uiPath_Url.base_url}/{organization_id}/studio_/designer/{project_id}?solutionId={solutionId}"
+    else:
+        execution_folder_id = UiPathConfig.folder_key
+        process_uuid = UiPathConfig.process_uuid
+        trace_id = UiPathConfig.trace_id
+        package_version = UiPathConfig.process_version
+        project_key = UiPathConfig.project_key
+
+        return f"{uiPath_Url.base_url}/{organization_id}/agents_/deployed/{execution_folder_id}/{process_uuid}/{project_key}/{package_version}/traces/{trace_id}"

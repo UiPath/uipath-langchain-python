@@ -1,0 +1,26 @@
+[project]
+name = "debug-breakpoints-test"
+version = "0.0.1"
+description = "Test case for debug and breakpoint functionality"
+authors = [{ name = "UiPath", email = "test@uipath.com" }]
+dependencies = [
+    "langgraph>=0.2.70",
+    "langchain-core>=0.3.34",
+    "langgraph-checkpoint-sqlite>=2.0.3",
+    "python-dotenv>=1.0.1",
+    "uipath-langchain",
+    "pydantic>=2.10.6",
+    "typing-extensions>=4.12.2",
+    "pexpect>=4.9.0",
+    "pyte>=0.8.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+requires-python = ">=3.11"
+
+[tool.uv.sources]
+uipath-langchain = { path = "../../", editable = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

@@ -1,0 +1,11 @@
+{
+  "description": "Debug breakpoints test - verify LangGraph execution spans",
+  "required_spans": [
+    {
+      "name": "LangGraph",
+      "attributes": {
+        "openinference.span.kind": "CHAIN"
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "fileName": "tool-call-count.json",
+  "id": "evaluator-tool-call-count",
+  "description": "Verify tool call counts match expected values",
+  "evaluatorTypeId": "uipath-tool-call-count",
+  "evaluatorConfig": {
+    "strict": false,
+    "name": "Tool Call Count",
+    "defaultEvaluationCriteria": {
+      "toolCallsCount": {
+        "get_weather": [
+          "=",
+          1
+        ],
+        "get_current_time": [
+          "=",
+          1
+        ]
+      }
+    }
+  },
+  "createdAt": "2026-04-09T07:09:51.451Z",
+  "updatedAt": "2026-04-09T07:09:53.843Z"
+}

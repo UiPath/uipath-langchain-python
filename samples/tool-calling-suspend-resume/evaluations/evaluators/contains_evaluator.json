@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "uipath-contains",
+  "evaluatorTypeId": "uipath-contains",
+  "name": "Resume Output Contains Evaluator",
+  "description": "Checks if the agent output after resume contains the expected text",
+  "evaluatorConfig": {
+    "name": "ContainsEvaluator",
+    "case_sensitive": false
+  }
+}

@@ -11,8 +11,8 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.vectorstores import VectorStore
 from typing_extensions import override
-from uipath import UiPath
-from uipath.models.context_grounding import ContextGroundingQueryResponse
+from uipath.platform import UiPath
+from uipath.platform.context_grounding import ContextGroundingQueryResponse
 
 
 class ContextGroundingVectorStore(VectorStore):

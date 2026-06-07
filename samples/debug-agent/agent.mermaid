@@ -1,0 +1,25 @@
+flowchart TB
+  __start__(__start__)
+  analyze_sentiment(analyze_sentiment)
+  classify_category(classify_category)
+  check_urgency(check_urgency)
+  determine_priority(determine_priority)
+  check_escalation(check_escalation)
+  route_to_department(route_to_department)
+  escalate_to_manager(escalate_to_manager)
+  assign_standard_queue(assign_standard_queue)
+  generate_response(generate_response)
+  finalize_ticket(finalize_ticket)
+  __end__(__end__)
+  __start__ --> analyze_sentiment
+  analyze_sentiment --> classify_category
+  assign_standard_queue --> generate_response
+  check_escalation --> route_to_department
+  check_urgency --> determine_priority
+  classify_category --> check_urgency
+  determine_priority --> check_escalation
+  escalate_to_manager --> generate_response
+  generate_response --> finalize_ticket
+  route_to_department --> assign_standard_queue
+  route_to_department --> escalate_to_manager
+  finalize_ticket --> __end__
