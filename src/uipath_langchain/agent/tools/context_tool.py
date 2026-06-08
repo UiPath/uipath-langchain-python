@@ -30,6 +30,7 @@ from uipath.platform.context_grounding import (
 from uipath.platform.errors import (
     ContextGroundingIndexNotFoundError,
     EnrichedException,
+    IngestionInProgressException,
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -274,6 +275,13 @@ def handle_semantic_search(
                 title=f"Context grounding index '{resource.index_name}' was not found",
                 detail=e.message,
                 category=UiPathErrorCategory.DEPLOYMENT,
+            ) from e
+        except IngestionInProgressException as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.CONTEXT_GROUNDING_INGESTION_IN_PROGRESS,
+                title=f"Context grounding index '{resource.index_name}' is still ingesting",
+                detail=str(e),
+                category=UiPathErrorCategory.USER,
             ) from e
         except EnrichedException as e:
             raise_for_enriched(
