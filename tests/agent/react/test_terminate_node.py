@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.core.chat import UiPathConversationMessageData
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
@@ -333,6 +334,36 @@ class TestTerminateNodeWithResponseSchema:
         result = terminate_node(state)
 
         assert result == {"status": "completed", "count": 42}
+
+    def test_end_execution_invalid_output_raises_output_validation_error(self):
+        """Output that violates the response schema should raise a typed user error."""
+
+        class CustomOutput(BaseModel):
+            status: str
+            count: int
+
+        terminate_node = create_terminate_node(
+            response_schema=CustomOutput, is_conversational=False
+        )
+        ai_message = AIMessage(
+            content="Done",
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"status": "completed"},  # missing required 'count'
+                    "id": "call_1",
+                }
+            ],
+        )
+        state = MockAgentGraphState(messages=[ai_message])
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            terminate_node(state)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
 
 
 class TestTerminateNodeFactory:

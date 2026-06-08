@@ -48,6 +48,7 @@ class AgentRuntimeErrorCode(str, Enum):
 
     # Input / output validation
     INVALID_ATTACHMENT_ID = "INVALID_ATTACHMENT_ID"
+    OUTPUT_VALIDATION_ERROR = "OUTPUT_VALIDATION_ERROR"
 
     FILE_ERROR = "FILE_ERROR"
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, NoReturn
 
 from langchain_core.messages import AIMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
 from uipath.core.chat import UiPathConversationMessageData
 from uipath.runtime.errors import UiPathErrorCategory
@@ -20,7 +20,17 @@ def _handle_end_execution(
 ) -> dict[str, Any]:
     """Handle LLM-initiated termination via END_EXECUTION_TOOL."""
     output_schema = response_schema or END_EXECUTION_TOOL.args_schema
-    validated = output_schema.model_validate(args)
+    try:
+        validated = output_schema.model_validate(args)
+    except ValidationError as e:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR,
+            title="Agent output did not match the expected schema",
+            detail=(
+                f"The agent's final output does not satisfy the configured output schema:\n{e}"
+            ),
+            category=UiPathErrorCategory.USER,
+        ) from e
     return validated.model_dump()
 
 
