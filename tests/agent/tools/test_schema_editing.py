@@ -7,7 +7,8 @@ from jsonpath_ng import parse  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 
 from uipath_langchain.agent.tools.schema_editing import (
-    SchemaModificationError,
+    InvalidStaticArgError,
+    SchemaNavigationError,
     apply_static_value_to_schema,
 )
 
@@ -402,7 +403,7 @@ class TestInvalidSchemaPath:
     """Test cases for error handling with invalid schema paths."""
 
     def test_invalid_field_name_raises_error(self):
-        """Test that accessing a non-existent field raises SchemaModificationError."""
+        """Test that accessing a non-existent field raises SchemaNavigationError."""
 
         class SimpleModel(BaseModel):
             name: str
@@ -410,7 +411,7 @@ class TestInvalidSchemaPath:
 
         schema = SimpleModel.model_json_schema()
 
-        with pytest.raises(SchemaModificationError):
+        with pytest.raises(SchemaNavigationError):
             apply_static_value_to_schema(
                 schema,
                 json_path="$['nonexistent']",
@@ -426,7 +427,7 @@ class TestInvalidSchemaPath:
 
         schema = Model.model_json_schema()
 
-        with pytest.raises(SchemaModificationError, match="Empty JSON path"):
+        with pytest.raises(SchemaNavigationError, match="Empty JSON path"):
             apply_static_value_to_schema(
                 schema,
                 json_path="$",
@@ -443,13 +444,40 @@ class TestInvalidSchemaPath:
         schema = Model.model_json_schema()
 
         # Trying to access a field on array without using 'items' keyword
-        with pytest.raises(SchemaModificationError):
+        with pytest.raises(SchemaNavigationError):
             apply_static_value_to_schema(
                 schema,
                 json_path="$['tags']['name']",
                 value="test",
                 is_sensitive=False,
             )
+
+
+class TestObjectStaticValueValidation:
+    """Test cases for validating object-typed static argument values."""
+
+    def test_non_dict_object_static_value_raises_invalid_static_arg_error(self):
+        """A non-dict value for an object-typed field is a fatal, distinct error."""
+
+        class Config(BaseModel):
+            a: str
+
+        class Model(BaseModel):
+            cfg: Config
+
+        schema = Model.model_json_schema()
+
+        with pytest.raises(InvalidStaticArgError):
+            apply_static_value_to_schema(
+                schema,
+                json_path="$['cfg']",
+                value="not-a-dict",
+                is_sensitive=False,
+            )
+
+    def test_invalid_static_arg_error_is_not_a_schema_navigation_error(self):
+        """The fatal error must not be swallowed by the SchemaNavigationError skip path."""
+        assert not issubclass(InvalidStaticArgError, SchemaNavigationError)
 
 
 class TestApplyStaticValueToSchemaWithAnyOfUnion:

@@ -18,8 +18,14 @@ STATIC_ARGUMENT_DESCRIPTION = (
 )
 
 
-class SchemaModificationError(ValueError):
-    """Raised when a schema modification fails."""
+class SchemaNavigationError(ValueError):
+    """Raised when navigating a schema fails."""
+
+    pass
+
+
+class InvalidStaticArgError(ValueError):
+    """Raised when a static argument value is incompatible with its schema field."""
 
     pass
 
@@ -63,7 +69,7 @@ def apply_static_value_to_schema(
     """Apply the static argument value to a specific field in the schema."""
     path_parts = parse_jsonpath_segments(json_path)
     if not path_parts:
-        raise SchemaModificationError("Empty JSON path")
+        raise SchemaNavigationError("Empty JSON path")
 
     try:
         if is_sensitive:
@@ -73,7 +79,7 @@ def apply_static_value_to_schema(
 
         return schema
     except KeyError as e:
-        raise SchemaModificationError(
+        raise SchemaNavigationError(
             f"Invalid schema path {json_path} for schema {schema}"
         ) from e
 
@@ -99,7 +105,7 @@ def _navigate_schema_inlining_refs(
             _inline_ref_if_present(schema, current, "items")
             current = current["items"]
         else:
-            raise SchemaModificationError(
+            raise SchemaNavigationError(
                 f"Invalid schema type {schema_type} for key {key} in schema {schema}"
             )
 
@@ -122,7 +128,7 @@ def strip_enum(
     """
     try:
         field_schema = _navigate_schema_inlining_refs(schema, path_segments)
-    except SchemaModificationError:
+    except SchemaNavigationError:
         return
 
     field_schema.pop("enum", None)
@@ -185,9 +191,11 @@ def _apply_const_schema_modification(
                     "enum": [json.dumps(value)],
                 }
             case "object":
-                assert isinstance(value, dict), (
-                    "Object static value should be a dictionary"
-                )
+                if not isinstance(value, dict):
+                    raise InvalidStaticArgError(
+                        f"Static value for field '{field_name}' must be an "
+                        f"object, got {type(value).__name__}."
+                    )
                 for prop_name, prop_value in value.items():
                     _apply_recursive(field_schema["properties"], prop_name, prop_value)
 
@@ -202,7 +210,7 @@ def _apply_const_schema_modification(
     elif parent_type == "object":
         _apply_recursive(parent_object_schema["properties"], field_name, static_value)
     else:
-        raise SchemaModificationError(
+        raise SchemaNavigationError(
             f"{parent_object_schema} at path {path_parts} must be a container"
         )
 
@@ -246,7 +254,7 @@ def _inline_ref_if_present(
             resolved = _resolve_definition(schema, candidate["$ref"])
             container[key] = resolved
     except (KeyError, IndexError, TypeError) as e:
-        raise SchemaModificationError(
+        raise SchemaNavigationError(
             f"Unable to inline ref at '{key}' in container type {type(container).__name__}"
         ) from e
 
