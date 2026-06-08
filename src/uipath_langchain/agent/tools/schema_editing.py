@@ -80,7 +80,7 @@ def apply_static_value_to_schema(
         return schema
     except KeyError as e:
         raise SchemaNavigationError(
-            f"Invalid schema path {json_path} for schema {schema}"
+            f"Invalid schema path {json_path}: missing key {e}"
         ) from e
 
 

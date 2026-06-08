@@ -387,6 +387,7 @@ async def _resolve_job_attachment_arguments(
         attachment_id_value = getattr(attachment, "ID", None)
         if attachment_id_value is None:
             continue
+        attachment_name = getattr(attachment, "FullName", None) or "<unknown>"
 
         try:
             attachment_id = uuid.UUID(attachment_id_value)
@@ -394,7 +395,9 @@ async def _resolve_job_attachment_arguments(
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID,
                 title="Invalid attachment id",
-                detail=(f"Attachment id '{attachment_id_value!r}' is not a valid UUID"),
+                detail=(
+                    f"Attachment id {attachment_id_value!r} ('{attachment_name}') is not a valid UUID"
+                ),
                 category=UiPathErrorCategory.SYSTEM,
             ) from e
         try:
@@ -406,11 +409,12 @@ async def _resolve_job_attachment_arguments(
                 e,
                 {
                     (404, None): (
-                        "Attachment '{attachment}' was not found.",
+                        "Attachment '{attachment_name}' ({attachment_id}) was not found.",
                         UiPathErrorCategory.SYSTEM,
                     ),
                 },
                 title="Failed to resolve job attachment",
+                attachment_name=attachment_name,
                 attachment_id=str(attachment_id),
             )
             raise

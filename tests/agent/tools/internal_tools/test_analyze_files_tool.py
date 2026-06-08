@@ -587,6 +587,8 @@ class TestResolveJobAttachmentArguments:
         with pytest.raises(AgentRuntimeError) as exc_info:
             await _resolve_job_attachment_arguments([mock_attachment])
         assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+        detail = exc_info.value.error_info.detail
+        assert "document.pdf" in detail
 
     async def test_resolve_attachments_mixed_valid_and_invalid(
         self, mock_uipath_client
