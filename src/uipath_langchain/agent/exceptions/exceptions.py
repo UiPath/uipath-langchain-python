@@ -46,6 +46,9 @@ class AgentRuntimeErrorCode(str, Enum):
     # State
     STATE_ERROR = "STATE_ERROR"
 
+    # Input / output validation
+    INVALID_ATTACHMENT_ID = "INVALID_ATTACHMENT_ID"
+
     FILE_ERROR = "FILE_ERROR"
 
     LLM_INVALID_RESPONSE = "LLM_INVALID_RESPONSE"

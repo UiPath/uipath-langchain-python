@@ -13,6 +13,7 @@ from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
 )
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
@@ -27,6 +28,24 @@ from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     _resolve_job_attachment_arguments,
     create_analyze_file_tool,
 )
+
+
+class _Attachment:
+    """Minimal attachment stub exposing an ``ID`` attribute."""
+
+    def __init__(self, id_value: str):
+        self.ID = id_value
+
+
+@pytest.mark.asyncio
+async def test_invalid_attachment_id_raises_user_error():
+    with patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath"):
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await _resolve_job_attachment_arguments([_Attachment("not-a-uuid")])
+    assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+    assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+        AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID
+    )
 
 
 class MockAttachment(BaseModel):
@@ -540,7 +559,7 @@ class TestResolveJobAttachmentArguments:
     async def test_resolve_attachment_with_invalid_uuid_raises(
         self, mock_uipath_client
     ):
-        """Test that invalid UUID in ID field raises ValueError."""
+        """Test that invalid UUID in ID field raises AgentRuntimeError."""
 
         class AttachmentWithInvalidID(BaseModel):
             ID: str
@@ -553,8 +572,11 @@ class TestResolveJobAttachmentArguments:
             MimeType="application/pdf",
         )
 
-        with pytest.raises(ValueError):
+        with pytest.raises(AgentRuntimeError) as exc_info:
             await _resolve_job_attachment_arguments([mock_attachment])
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID
+        )
 
     async def test_resolve_attachments_mixed_valid_and_invalid(
         self, mock_uipath_client

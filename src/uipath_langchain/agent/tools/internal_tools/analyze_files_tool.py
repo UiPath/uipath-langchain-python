@@ -386,7 +386,15 @@ async def _resolve_job_attachment_arguments(
         if attachment_id_value is None:
             continue
 
-        attachment_id = uuid.UUID(attachment_id_value)
+        try:
+            attachment_id = uuid.UUID(attachment_id_value)
+        except (ValueError, TypeError) as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID,
+                title="Invalid attachment id",
+                detail=(f"Attachment id '{attachment_id_value!r}' is not a valid UUID"),
+                category=UiPathErrorCategory.SYSTEM,
+            ) from e
         blob_info = await client.attachments.get_blob_file_access_uri_async(
             key=attachment_id
         )
