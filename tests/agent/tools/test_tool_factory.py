@@ -132,7 +132,7 @@ def escalation_resource() -> AgentEscalationResourceConfig:
         channels=[
             AgentEscalationChannel(
                 name="test_channel",
-                type="action_center",
+                type="actionCenter",
                 description="Test channel description",
                 task_title="Test Task",
                 input_schema=EMPTY_SCHEMA,
