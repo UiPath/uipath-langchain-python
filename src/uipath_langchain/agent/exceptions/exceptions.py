@@ -51,6 +51,9 @@ class AgentRuntimeErrorCode(str, Enum):
     LLM_INVALID_RESPONSE = "LLM_INVALID_RESPONSE"
     TOOL_INVALID_WRAPPER_STATE = "TOOL_INVALID_WRAPPER_STATE"
 
+    # Resources
+    CONTEXT_GROUNDING_INDEX_NOT_FOUND = "CONTEXT_GROUNDING_INDEX_NOT_FOUND"
+
 
 class AgentStartupErrorCode(str, Enum):
     """Error codes for agent startup errors detected before graph execution."""
