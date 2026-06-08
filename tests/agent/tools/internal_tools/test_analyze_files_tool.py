@@ -32,25 +32,7 @@ from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
 )
 
 
-class _Attachment:
-    """Minimal attachment stub exposing an ``ID`` attribute."""
-
-    def __init__(self, id_value: str):
-        self.ID = id_value
-
-
-@pytest.mark.asyncio
-async def test_invalid_attachment_id_raises_user_error():
-    with patch("uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath"):
-        with pytest.raises(AgentRuntimeError) as exc_info:
-            await _resolve_job_attachment_arguments([_Attachment("not-a-uuid")])
-    assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
-    assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
-        AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID
-    )
-
-
-def _make_enriched_404():
+def _make_enriched_404() -> EnrichedException:
     req = httpx.Request(
         "GET", "https://cloud.uipath.com/orchestrator_/odata/Attachments(x)"
     )
@@ -64,21 +46,6 @@ def _make_enriched_404():
     enriched = EnrichedException(err)
     enriched.__cause__ = err
     return enriched
-
-
-@pytest.mark.asyncio
-async def test_missing_attachment_raises_user_error():
-    valid = "11111111-1111-1111-1111-111111111111"
-    with patch(
-        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath"
-    ) as MockUiPath:
-        client = MockUiPath.return_value
-        client.attachments.get_blob_file_access_uri_async = AsyncMock(
-            side_effect=_make_enriched_404()
-        )
-        with pytest.raises(AgentRuntimeError) as exc_info:
-            await _resolve_job_attachment_arguments([_Attachment(valid)])
-    assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
 
 
 class MockAttachment(BaseModel):
@@ -593,13 +560,7 @@ class TestResolveJobAttachmentArguments:
         self, mock_uipath_client
     ):
         """Test that invalid UUID in ID field raises AgentRuntimeError."""
-
-        class AttachmentWithInvalidID(BaseModel):
-            ID: str
-            FullName: str
-            MimeType: str
-
-        mock_attachment = AttachmentWithInvalidID(
+        mock_attachment = MockAttachment(
             ID="not-a-valid-uuid",
             FullName="document.pdf",
             MimeType="application/pdf",
@@ -610,6 +571,22 @@ class TestResolveJobAttachmentArguments:
         assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID
         )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+
+    async def test_resolve_missing_attachment_raises(self, mock_uipath_client):
+        """Test that a 404 from Orchestrator surfaces as a categorized error."""
+        mock_attachment = MockAttachment(
+            ID="11111111-1111-1111-1111-111111111111",
+            FullName="document.pdf",
+            MimeType="application/pdf",
+        )
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            side_effect=_make_enriched_404()
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await _resolve_job_attachment_arguments([mock_attachment])
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
 
     async def test_resolve_attachments_mixed_valid_and_invalid(
         self, mock_uipath_client
