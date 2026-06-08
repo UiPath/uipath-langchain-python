@@ -4,6 +4,7 @@ import json
 import uuid
 from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import RunnableConfig
@@ -13,6 +14,7 @@ from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
     AgentInternalToolType,
 )
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
@@ -46,6 +48,37 @@ async def test_invalid_attachment_id_raises_user_error():
     assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
         AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID
     )
+
+
+def _make_enriched_404():
+    req = httpx.Request(
+        "GET", "https://cloud.uipath.com/orchestrator_/odata/Attachments(x)"
+    )
+    resp = httpx.Response(
+        404,
+        request=req,
+        content=b'{"message":"Attachment not found"}',
+        headers={"content-type": "application/json"},
+    )
+    err = httpx.HTTPStatusError("404", request=req, response=resp)
+    enriched = EnrichedException(err)
+    enriched.__cause__ = err
+    return enriched
+
+
+@pytest.mark.asyncio
+async def test_missing_attachment_raises_user_error():
+    valid = "11111111-1111-1111-1111-111111111111"
+    with patch(
+        "uipath_langchain.agent.tools.internal_tools.analyze_files_tool.UiPath"
+    ) as MockUiPath:
+        client = MockUiPath.return_value
+        client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            side_effect=_make_enriched_404()
+        )
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await _resolve_job_attachment_arguments([_Attachment(valid)])
+    assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
 
 
 class MockAttachment(BaseModel):
