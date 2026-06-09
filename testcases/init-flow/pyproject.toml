@@ -5,7 +5,7 @@ description = "agent"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 dependencies = [
     "langchain-anthropic>=0.3.8",
-    "uipath-langchain",
+    "uipath-langchain[bedrock,vertex]",
 ]
 requires-python = ">=3.11"
 
