@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
@@ -13,7 +14,7 @@ from uipath_langchain.agent.exceptions import (
 from uipath_langchain.agent.react.router_conversational import (
     create_route_agent_conversational,
 )
-from uipath_langchain.agent.react.types import AgentGraphNode
+from uipath_langchain.agent.react.types import AgentGraphNode, AgentGraphState
 
 
 class MockInnerState(BaseModel):
@@ -30,13 +31,26 @@ class MockAgentGraphState(BaseModel):
     inner_state: MockInnerState = MockInnerState()
 
 
+# Routing targets used across the test states (tools + control nodes).
+_VALID_TARGETS: list[str] = [
+    AgentGraphNode.AGENT,
+    AgentGraphNode.TERMINATE,
+    "search_tool",
+    "calculator_tool",
+    "weather_tool",
+    "first_tool",
+    "second_tool",
+    "third_tool",
+]
+
+
 class TestCreateRouteAgentConversational:
     """Test cases for create_route_agent_conversational function."""
 
     @pytest.fixture
     def route_function(self):
         """Fixture for the conversational routing function."""
-        return create_route_agent_conversational()
+        return create_route_agent_conversational(valid_targets=_VALID_TARGETS)
 
     @pytest.fixture
     def state_with_single_tool_call(self):
@@ -220,13 +234,49 @@ class TestRouteAgentConversationalFactory:
 
     def test_returns_callable(self):
         """Should return a callable routing function."""
-        result = create_route_agent_conversational()
+        result = create_route_agent_conversational(valid_targets=_VALID_TARGETS)
 
         assert callable(result)
 
     def test_each_call_returns_new_function(self):
         """Should return a new function instance each time."""
-        func1 = create_route_agent_conversational()
-        func2 = create_route_agent_conversational()
+        func1 = create_route_agent_conversational(valid_targets=_VALID_TARGETS)
+        func2 = create_route_agent_conversational(valid_targets=_VALID_TARGETS)
 
         assert func1 is not func2
+
+
+class TestRouteAgentConversationalTargetValidation:
+    """Test guarding of router return values against valid graph targets."""
+
+    def test_unknown_target_raises_routing_error(self):
+        """Should raise ROUTING_ERROR (SYSTEM) when the routed tool is unwired."""
+        route_func = create_route_agent_conversational(
+            valid_targets=[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE, "real_tool"],
+        )
+        ai_message = AIMessage(
+            content="routing",
+            tool_calls=[{"name": "context", "args": {}, "id": "call_1"}],
+        )
+        state = AgentGraphState(messages=[HumanMessage(content="query"), ai_message])
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            route_func(state)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+
+    def test_known_target_returns_tool_name(self):
+        """Should return the tool name when it is in the valid target set."""
+        route_func = create_route_agent_conversational(
+            valid_targets=[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE, "real_tool"],
+        )
+        ai_message = AIMessage(
+            content="routing",
+            tool_calls=[{"name": "real_tool", "args": {}, "id": "call_1"}],
+        )
+        state = AgentGraphState(messages=[HumanMessage(content="query"), ai_message])
+
+        assert route_func(state) == "real_tool"

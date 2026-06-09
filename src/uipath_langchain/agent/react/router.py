@@ -1,5 +1,6 @@
 """Routing functions for conditional edges in the agent graph."""
 
+from collections.abc import Container
 from typing import Literal
 
 from uipath.runtime.errors import UiPathErrorCategory
@@ -13,10 +14,14 @@ from .utils import (
 )
 
 
-def create_route_agent(thinking_messages_limit: int = 0):
+def create_route_agent(
+    valid_targets: Container[str],
+    thinking_messages_limit: int = 0,
+):
     """Create a routing function configured with thinking_messages_limit.
 
     Args:
+        valid_targets: Allowed routing destinations
         thinking_messages_limit: Max consecutive thinking messages before error
 
     Returns:
@@ -89,6 +94,17 @@ def create_route_agent(thinking_messages_limit: int = 0):
 
         if current_tool_name in FLOW_CONTROL_TOOLS:
             return AgentGraphNode.TERMINATE
+
+        if current_tool_name not in valid_targets:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.ROUTING_ERROR,
+                title="Agent routed to an unknown destination",
+                detail=(
+                    f"The agent attempted to route to '{current_tool_name}', "
+                    "which is not a registered tool or control node."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            )
 
         return current_tool_name
 
