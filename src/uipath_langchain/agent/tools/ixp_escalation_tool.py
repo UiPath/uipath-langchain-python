@@ -6,7 +6,10 @@ from langchain.tools import BaseTool
 from langchain_core.messages import ToolCall
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
-from uipath.agent.models.agent import AgentIxpVsEscalationResourceConfig
+from uipath.agent.models.agent import (
+    AgentEscalationChannel,
+    AgentIxpVsEscalationResourceConfig,
+)
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.common import WaitDocumentExtractionValidation
@@ -25,7 +28,12 @@ from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperReturnType,
 )
 
-from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ..exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    AgentStartupError,
+    AgentStartupErrorCode,
+)
 from .structured_tool_with_output_type import StructuredToolWithOutputType
 from .utils import (
     resolve_task_title,
@@ -42,6 +50,24 @@ class EmptyInput(BaseModel):
     pass
 
 
+def _resolve_action_center_channel(
+    resource: AgentIxpVsEscalationResourceConfig,
+) -> AgentEscalationChannel:
+    """Return the VS escalation's Action Center channel, rejecting quick forms."""
+    channel = resource.channels[0]
+    if not isinstance(channel, AgentEscalationChannel):
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Unsupported VS escalation channel",
+            detail=(
+                f"VS escalation '{resource.name}' must use an Action Center channel "
+                f"but received channel type '{channel.type.value}'."
+            ),
+            category=UiPathErrorCategory.USER,
+        )
+    return channel
+
+
 def create_ixp_escalation_tool(
     resource: AgentIxpVsEscalationResourceConfig,
 ) -> StructuredTool:
@@ -51,7 +77,7 @@ def create_ixp_escalation_tool(
     storage_bucket_folder_path: str = (
         resource.vs_escalation_properties.storage_bucket_folder_path
     )
-    channel = resource.channels[0]
+    channel = _resolve_action_center_channel(resource)
     action_priority = ActionPriority.from_str(channel.priority)
     ixp_tool_name: str = resource.vs_escalation_properties.ixp_tool_id
 
