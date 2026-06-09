@@ -4,17 +4,8 @@ import logging
 from typing import Any, Sequence
 from uuid import uuid4
 
-from langchain.agents.middleware import (
-    AgentMiddleware,
-    AgentState,
-    after_agent,
-    after_model,
-    before_agent,
-    before_model,
-)
-from langchain_core.messages import AIMessage
+from langchain.agents.middleware import AgentMiddleware
 from langchain_core.tools import BaseTool
-from langgraph.runtime import Runtime
 from uipath.core.guardrails import GuardrailSelector
 from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
@@ -105,57 +96,28 @@ class UiPathHarmfulContentMiddleware(BuiltInGuardrailMiddlewareMixin):
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
-        """Create middleware instances from decorated functions."""
-        instances = []
-        middleware_instance = self
+        """Create middleware instances from decorated functions.
+
+        AGENT/LLM hooks are built by the shared, stage-gated
+        ``_build_message_hooks`` helper (``PRE`` → ``before_*`` only, ``POST`` →
+        ``after_*`` only, ``PRE_AND_POST`` → both), so a guardrail validates (and
+        acts, e.g. escalates) at a single checkpoint instead of twice per run.
+        """
+        instances: list[AgentMiddleware] = []
         guardrail_name = self._name.replace(" ", "_")
 
         if GuardrailScope.AGENT in self.scopes:
-
-            async def _before_agent_func(
-                state: AgentState[Any], runtime: Runtime
-            ) -> None:
-                messages = state.get("messages", [])
-                middleware_instance._check_messages(list(messages))
-
-            _before_agent_func.__name__ = f"{guardrail_name}_before_agent"
-            _before_agent = before_agent(_before_agent_func)
-            instances.append(_before_agent)
-
-            async def _after_agent_func(
-                state: AgentState[Any], runtime: Runtime
-            ) -> None:
-                messages = state.get("messages", [])
-                middleware_instance._check_messages(list(messages))
-
-            _after_agent_func.__name__ = f"{guardrail_name}_after_agent"
-            _after_agent = after_agent(_after_agent_func)
-            instances.append(_after_agent)
-
+            instances.extend(
+                self._build_message_hooks(
+                    GuardrailScope.AGENT, self._tool_stage, guardrail_name
+                )
+            )
         if GuardrailScope.LLM in self.scopes:
-
-            async def _before_model_func(
-                state: AgentState[Any], runtime: Runtime
-            ) -> None:
-                messages = state.get("messages", [])
-                middleware_instance._check_messages(list(messages))
-
-            _before_model_func.__name__ = f"{guardrail_name}_before_model"
-            _before_model = before_model(_before_model_func)
-            instances.append(_before_model)
-
-            async def _after_model_func(
-                state: AgentState[Any], runtime: Runtime
-            ) -> None:
-                messages = state.get("messages", [])
-                ai_messages = [msg for msg in messages if isinstance(msg, AIMessage)]
-                if ai_messages:
-                    middleware_instance._check_messages([ai_messages[-1]])
-
-            _after_model_func.__name__ = f"{guardrail_name}_after_model"
-            _after_model = after_model(_after_model_func)
-            instances.append(_after_model)
-
+            instances.extend(
+                self._build_message_hooks(
+                    GuardrailScope.LLM, self._tool_stage, guardrail_name
+                )
+            )
         if GuardrailScope.TOOL in self.scopes:
             instances.append(self._create_tool_wrap_hook(guardrail_name))
 

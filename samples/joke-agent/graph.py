@@ -1,5 +1,7 @@
 """Joke generating agent that creates family-friendly jokes based on a topic."""
 
+import os
+
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
@@ -12,6 +14,7 @@ from uipath.core.guardrails import GuardrailScope
 from uipath_langchain.chat import UiPathChat
 from uipath_langchain.guardrails import (
     BlockAction,
+    EscalateAction,
     GuardrailExecutionStage,
     HarmfulContentEntity,
     LogAction,
@@ -42,6 +45,15 @@ class Output(BaseModel):
 
     joke: str
 
+
+# Escalation Action App configuration (override via env vars to match your
+# tenant deployment). Defaults point at the "Guardrail Escalation Action App (2)"
+# published as the process "Guardrail.Escalation.Action.App.2" in the "Shared"
+# folder (its deployed name/folder in the tenant — verified via `uip or processes list`).
+ESCALATION_APP_NAME = os.getenv(
+    "GUARDRAIL_ESCALATION_APP_NAME", "Guardrail.Escalation.Action.App.2"
+)
+ESCALATION_APP_FOLDER = os.getenv("GUARDRAIL_ESCALATION_APP_FOLDER", "Shared")
 
 # Initialize UiPathChat LLM
 llm = UiPathChat(model="gpt-4o-2024-08-06", temperature=0.7)
@@ -93,13 +105,25 @@ agent = create_agent(
     system_prompt=SYSTEM_PROMPT,
     middleware=[
         *LoggingMiddleware,
+        # PII detection on the agent scope. On a violation it escalates to the
+        # Guardrail Escalation Action App for human review via the documented
+        # HITL interrupt(CreateEscalation(...)) — the run suspends until a human
+        # approves (optionally editing the content) or rejects.
         *UiPathPIIDetectionMiddleware(
-            name="My personal PII detector",
-            scopes=[GuardrailScope.AGENT, GuardrailScope.LLM],
-            action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
+            name="PII escalation guardrail",
+            scopes=[GuardrailScope.AGENT],
+            # PRE only → validate the input once, so the escalation triggers a
+            # single time per run (AGENT scope would otherwise check both
+            # before_agent and after_agent).
+            stage=GuardrailExecutionStage.PRE,
+            action=EscalateAction(
+                app_name=ESCALATION_APP_NAME,
+                app_folder_path=ESCALATION_APP_FOLDER,
+            ),
             entities=[
                 PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5),
                 PIIDetectionEntity(PIIDetectionEntityType.CREDIT_CARD_NUMBER, 0.5),
+                PIIDetectionEntity(PIIDetectionEntityType.PHONE_NUMBER, 0.5),
             ],
         ),
         *UiPathPIIDetectionMiddleware(
@@ -182,26 +206,23 @@ agent = create_agent(
 )
 
 
-# Wrapper node to convert topic input to messages and call the agent
+# Wrapper node to convert topic input to messages and call the agent. The
+# guardrail middleware runs inside the agent; when the PII escalation guardrail
+# fires, interrupt(CreateEscalation(...)) suspends the run for human review.
 async def joke_node(state: Input) -> Output:
     """Convert topic to messages, call agent, and extract joke."""
-    # Convert topic to messages format
     messages = [
         HumanMessage(
             content=f"Generate a family-friendly joke based on the topic: {state.topic}"
         )
     ]
-
-    # Call the agent with messages
     result = await agent.ainvoke({"messages": messages})
-
-    # Extract the joke from the agent's response
     joke = result["messages"][-1].content
-
     return Output(joke=joke)
 
 
-# Build wrapper graph with custom input/output schemas
+# Build wrapper graph with custom input/output schemas. The runtime recompiles
+# this with a durable checkpointer, so interrupt()/resume works under `uipath run`.
 builder = StateGraph(Input, input_schema=Input, output_schema=Output)
 builder.add_node("joke", joke_node)
 builder.add_edge(START, "joke")

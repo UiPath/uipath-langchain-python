@@ -1,6 +1,6 @@
 # Joke Agent
 
-A LangGraph agent that generates family-friendly jokes based on a given topic using UiPath's LLM. The agent includes comprehensive guardrails for PII detection, prompt injection prevention, and content validation.
+A LangGraph agent that generates family-friendly jokes based on a given topic using UiPath's LLM. The agent includes comprehensive guardrails for PII detection, prompt injection prevention, and content validation — plus a **human-in-the-loop (HITL) escalation** to the *Guardrail Escalation Action App* when PII is detected in the agent's input.
 
 ## Requirements
 
@@ -52,12 +52,79 @@ The `topic` field should be a string representing the subject for the joke. The 
 - Custom logging middleware that logs input and output
 - Simple, clean architecture following UiPath agent patterns
 
+## Guardrail Escalation (Human-in-the-Loop)
+
+The PII detection guardrail uses **`EscalateAction`** — a first-class guardrail
+middleware action, alongside `LogAction` and `BlockAction`. **When PII is detected, the run
+escalates to a human reviewer** through the **Guardrail Escalation Action App** and suspends
+until the task is completed, reusing the documented UiPath LangChain HITL primitive
+`interrupt(CreateEscalation(...))` — the same mechanism the
+[`ticket-classification`](../ticket-classification) sample uses.
+
+```python
+UiPathPIIDetectionMiddleware(
+    name="PII escalation guardrail",
+    scopes=[GuardrailScope.AGENT],
+    stage=GuardrailExecutionStage.PRE,  # validate input once → escalate once per run
+    action=EscalateAction(
+        app_name="Guardrail.Escalation.Action.App.2",
+        app_folder_path="Shared",
+    ),
+    entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5)],
+)
+```
+
+On a violation the run **suspends** with a review task in the action app. The reviewer can edit the
+flagged input (or, at a POST check, the output) and **Approve** to resume with the edited value, or
+**Reject** to terminate the run with a guardrail-violation error.
+
+### Configuration
+
+The target app is configured via environment variables (defaults shown):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GUARDRAIL_ESCALATION_APP_NAME` | `Guardrail.Escalation.Action.App.2` | Published action app (process) name |
+| `GUARDRAIL_ESCALATION_APP_FOLDER` | `Shared` | Folder where the app is deployed |
+
+The **Guardrail Escalation Action App (2)** must be published to the configured folder on
+your tenant for the escalation task to be created. The defaults match its deployed
+name/folder (find yours with `uip or processes list --all-folders --name Guardrail`).
+
+**Escalation target.** `assignee` is the simple username/email shortcut. For typed targets,
+pass `recipient=TaskRecipient(...)` instead — the HITL `CreateEscalation` primitive supports the
+four `TaskRecipientType` members: `USER_ID`, `GROUP_ID`, `EMAIL` (user email), and `GROUP_NAME`, e.g.:
+
+```python
+from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
+
+EscalateAction(
+    app_name="Guardrail.Escalation.Action.App.2",
+    app_folder_path="Shared",
+    recipient=TaskRecipient(type=TaskRecipientType.GROUP_NAME, value="Reviewers"),
+)
+```
+
+### Triggering an escalation
+
+A `"banana"` topic contains no PII, so it completes without escalating. To exercise the
+HITL path, use a topic that contains PII, e.g.:
+
+```bash
+uv run uipath run agent '{"topic": "a joke that mentions the email john.doe@example.com"}'
+```
+
+The run will suspend after creating the review task. Complete the task in Action Center
+(choosing **Approve** or **Reject**), then resume the run with `uv run uipath run agent --resume ...`.
+
 ## Agent Architecture
 
 The agent is built using LangGraph's `StateGraph` with custom input/output schemas:
 
 - **Input Schema**: `Input` with a `topic` field
 - **Output Schema**: `Output` with a `joke` field
+- **`joke` node**: runs the guarded `create_agent` and extracts the joke. The guardrail
+  middleware (including the PII `EscalateAction`) runs inside the agent.
 - **LLM**: UiPathChat with model `gpt-4o-2024-08-06` and temperature `0.7`
 
 ### Tools

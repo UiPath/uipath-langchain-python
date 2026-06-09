@@ -6,4 +6,6 @@ from uipath.platform.guardrails.decorators import (
     LoggingSeverityLevel,
 )
 
-__all__ = ["LoggingSeverityLevel", "LogAction", "BlockAction"]
+from .escalate_action import EscalateAction
+
+__all__ = ["LoggingSeverityLevel", "LogAction", "BlockAction", "EscalateAction"]
