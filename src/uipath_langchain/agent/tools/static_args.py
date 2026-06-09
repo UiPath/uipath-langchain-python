@@ -18,11 +18,17 @@ from uipath.agent.models.agent import (
     AgentToolTextBuilderArgumentProperties,
 )
 from uipath.agent.utils.text_tokens import build_string_from_tokens
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.utils import extract_input_data_from_state
 from uipath_langchain.agent.tools.schema_editing import (
-    SchemaModificationError,
+    InvalidStaticArgError,
+    SchemaNavigationError,
     apply_static_value_to_schema,
 )
 
@@ -195,7 +201,14 @@ def _apply_static_arguments_to_schema(
                 static_arg.is_sensitive,
             )
             applied_paths.add(json_path)
-        except SchemaModificationError as e:
+        except InvalidStaticArgError as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.INVALID_STATIC_ARGUMENT,
+                title="Invalid static argument value",
+                detail=f"At path '{json_path}' for tool '{tool.name}': {e}",
+                category=UiPathErrorCategory.USER,
+            ) from e
+        except SchemaNavigationError as e:
             logger.warning(
                 f"Skipping invalid static argument path '{json_path}' for tool '{tool.name}': {e}"
             )

@@ -22,6 +22,7 @@ from uipath.agent.models.agent import (
 from uipath.core.tracing.span_utils import UiPathSpanUtils
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 from uipath.tracing import (
     AttachmentDirection,
@@ -32,6 +33,7 @@ from uipath.tracing import (
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
+    raise_for_enriched,
 )
 from uipath_langchain.agent.multimodal import (
     FileInfo,
@@ -385,11 +387,37 @@ async def _resolve_job_attachment_arguments(
         attachment_id_value = getattr(attachment, "ID", None)
         if attachment_id_value is None:
             continue
+        attachment_name = getattr(attachment, "FullName", None) or "<unknown>"
 
-        attachment_id = uuid.UUID(attachment_id_value)
-        blob_info = await client.attachments.get_blob_file_access_uri_async(
-            key=attachment_id
-        )
+        try:
+            attachment_id = uuid.UUID(attachment_id_value)
+        except (ValueError, TypeError) as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID,
+                title="Invalid attachment id",
+                detail=(
+                    f"Attachment id {attachment_id_value!r} ('{attachment_name}') is not a valid UUID"
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            ) from e
+        try:
+            blob_info = await client.attachments.get_blob_file_access_uri_async(
+                key=attachment_id
+            )
+        except EnrichedException as e:
+            raise_for_enriched(
+                e,
+                {
+                    (404, None): (
+                        "Attachment '{attachment_name}' ({attachment_id}) was not found.",
+                        UiPathErrorCategory.SYSTEM,
+                    ),
+                },
+                title="Failed to resolve job attachment",
+                attachment_name=attachment_name,
+                attachment_id=str(attachment_id),
+            )
+            raise
 
         input_mime_type = getattr(attachment, "MimeType", None)
         mime_type = (

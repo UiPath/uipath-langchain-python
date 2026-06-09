@@ -2,6 +2,7 @@
 
 from typing import Any
 
+import pytest
 from langchain_core.messages import ToolCall
 from pydantic import BaseModel, Field
 from uipath.agent.models.agent import (
@@ -13,7 +14,12 @@ from uipath.agent.models.agent import (
     TextToken,
     TextTokenType,
 )
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.tools.static_args import (
     ArgumentPropertiesMixin,
     StaticArgsHandler,
@@ -388,6 +394,34 @@ class TestStaticArgsHandler:
             modified_tool.args_schema, BaseModel
         )
         modified_tool.args_schema.model_validate(call["args"])
+
+    def test_initialize_raises_for_non_dict_object_static_value(self):
+        """A non-dict static value for an object-typed field is fatal, not skipped."""
+
+        class NestedConfig(BaseModel):
+            a: str
+
+        class ToolArgs(BaseModel):
+            cfg: NestedConfig
+
+        tool = _create_tool(
+            "test_tool",
+            {
+                "$['cfg']": AgentToolStaticArgumentProperties(
+                    is_sensitive=False, value="not-a-dict"
+                ),
+            },
+            args_schema=ToolArgs,
+        )
+        handler = StaticArgsHandler()
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            handler.initialize([tool], EmptyInput(), EmptyInput)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.INVALID_STATIC_ARGUMENT
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
 
 
 class TestApplyStaticArgs:

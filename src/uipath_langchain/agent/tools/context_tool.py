@@ -27,12 +27,18 @@ from uipath.platform.context_grounding import (
     CitationMode,
     DeepRagContent,
 )
-from uipath.platform.errors import EnrichedException
+from uipath.platform.errors import (
+    ContextGroundingIndexNotFoundError,
+    EnrichedException,
+    IngestionInProgressException,
+)
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
     AgentStartupError,
     AgentStartupErrorCode,
     raise_for_enriched,
@@ -263,6 +269,20 @@ def handle_semantic_search(
         assert actual_query is not None
         try:
             docs = await retriever.ainvoke(actual_query)
+        except ContextGroundingIndexNotFoundError as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.CONTEXT_GROUNDING_INDEX_NOT_FOUND,
+                title=f"Context grounding index '{resource.index_name}' was not found",
+                detail=e.message,
+                category=UiPathErrorCategory.DEPLOYMENT,
+            ) from e
+        except IngestionInProgressException as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.CONTEXT_GROUNDING_INDEX_INGESTION_IN_PROGRESS,
+                title=f"Context grounding index '{resource.index_name}' is still ingesting",
+                detail=str(e),
+                category=UiPathErrorCategory.USER,
+            ) from e
         except EnrichedException as e:
             raise_for_enriched(
                 e,
