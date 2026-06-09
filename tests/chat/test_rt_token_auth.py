@@ -16,6 +16,7 @@ regress underneath us.
 import base64
 import json
 import time
+from typing import Any
 
 import httpx
 import pytest
@@ -28,10 +29,10 @@ _RT_TOKEN = "rt_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _BASE_URL = "https://alpha.uipath.com/TestOrg/TestTenant"
 
 
-def _make_jwt(payload: dict) -> str:
+def _make_jwt(payload: dict[str, Any]) -> str:
     """Build a JWT-shaped token (``header.payload.signature``) for ``payload``."""
 
-    def _segment(obj: dict) -> str:
+    def _segment(obj: dict[str, Any]) -> str:
         raw = json.dumps(obj).encode()
         return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
