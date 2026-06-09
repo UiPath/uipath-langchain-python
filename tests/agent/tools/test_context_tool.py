@@ -1195,7 +1195,7 @@ class TestSemanticSearchErrorHandling:
                 await tool.coroutine(query="test query")
             assert exc_info.value.error_info.category == UiPathErrorCategory.USER
             assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
-                AgentRuntimeErrorCode.CONTEXT_GROUNDING_INGESTION_IN_PROGRESS
+                AgentRuntimeErrorCode.CONTEXT_GROUNDING_INDEX_INGESTION_IN_PROGRESS
             )
 
 

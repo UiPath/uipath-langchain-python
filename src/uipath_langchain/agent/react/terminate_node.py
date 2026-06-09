@@ -27,7 +27,8 @@ def _handle_end_execution(
             code=AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR,
             title="Agent output did not match the expected schema",
             detail=(
-                f"The agent's final output does not satisfy the configured output schema:\n{e}"
+                "The agent's output does not satisfy the configured output schema."
+                f"Verify the output, and adjust the schema or the prompt. Details:\n{e}"
             ),
             category=UiPathErrorCategory.USER,
         ) from e

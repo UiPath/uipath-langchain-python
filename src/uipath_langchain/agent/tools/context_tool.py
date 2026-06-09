@@ -278,7 +278,7 @@ def handle_semantic_search(
             ) from e
         except IngestionInProgressException as e:
             raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.CONTEXT_GROUNDING_INGESTION_IN_PROGRESS,
+                code=AgentRuntimeErrorCode.CONTEXT_GROUNDING_INDEX_INGESTION_IN_PROGRESS,
                 title=f"Context grounding index '{resource.index_name}' is still ingesting",
                 detail=str(e),
                 category=UiPathErrorCategory.USER,
