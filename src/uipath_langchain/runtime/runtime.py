@@ -1,3 +1,4 @@
+import contextvars
 import logging
 import os
 from collections.abc import Iterator
@@ -18,6 +19,7 @@ from uipath.runtime import (
     UiPathRuntimeStorageProtocol,
     UiPathStreamOptions,
 )
+from uipath.tracing import ReferenceContext, ReferenceContextAccessor
 from uipath.runtime.errors import (
     UiPathBaseRuntimeError,
     UiPathErrorCategory,
@@ -75,12 +77,31 @@ class UiPathLangGraphRuntime:
         self.chat.client_side_tools = self._get_client_side_tools()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
+    def _push_reference_context(self) -> contextvars.Token:
+        """Append this runtime's own entry to the ambient ReferenceContext.
+
+        Reads any parent context already in the accessor (e.g. set by an
+        upstream middleware or the agents-python runtime), then appends a
+        ``langgraph`` entry for this runtime.  Returns the ContextVar token
+        so the caller can reset in a ``finally`` block.
+        """
+        agent_id = os.environ.get("UIPATH_AGENT_ID")
+        agent_version = os.environ.get("UIPATH_PROCESS_VERSION") or None
+        parent_ctx = ReferenceContextAccessor.get() or ReferenceContext.Empty
+        ref_ctx = (
+            parent_ctx.add("langgraph", agent_id, agent_version)
+            if agent_id
+            else parent_ctx
+        )
+        return ReferenceContextAccessor.set(ref_ctx)
+
     async def execute(
         self,
         input: dict[str, Any] | None = None,
         options: UiPathExecuteOptions | None = None,
     ) -> UiPathRuntimeResult:
         """Execute the graph with the provided input and configuration."""
+        ref_ctx_token = self._push_reference_context()
         try:
             graph_input = await self._get_graph_input(input, options)
             graph_config = self._get_graph_config()
@@ -99,6 +120,8 @@ class UiPathLangGraphRuntime:
 
         except Exception as e:
             raise self.create_runtime_error(e) from e
+        finally:
+            ReferenceContextAccessor.reset(ref_ctx_token)
 
     async def stream(
         self,
@@ -133,6 +156,7 @@ class UiPathLangGraphRuntime:
         Raises:
             LangGraphRuntimeError: If execution fails
         """
+        ref_ctx_token = self._push_reference_context()
         try:
             graph_input = await self._get_graph_input(input, options)
             graph_config = self._get_graph_config()
@@ -230,6 +254,8 @@ class UiPathLangGraphRuntime:
 
         except Exception as e:
             raise self.create_runtime_error(e) from e
+        finally:
+            ReferenceContextAccessor.reset(ref_ctx_token)
 
     async def get_schema(self) -> UiPathRuntimeSchema:
         """Get schema for this LangGraph runtime."""
