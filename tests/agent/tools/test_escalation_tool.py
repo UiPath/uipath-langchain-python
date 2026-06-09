@@ -10,6 +10,8 @@ from uipath.agent.models.agent import (
     AgentEscalationChannelProperties,
     AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
+    AgentQuickFormChannelProperties,
+    AgentQuickFormEscalationChannel,
     AssetRecipient,
     StandardRecipient,
 )
@@ -261,6 +263,32 @@ class TestEscalationToolMetadata:
             ],
         )
 
+    @pytest.fixture
+    def quick_form_escalation_resource(self):
+        """Create a quick-form escalation resource (channel has no app_name)."""
+        return AgentEscalationResourceConfig(
+            name="approval",
+            description="Request approval",
+            channels=[
+                AgentQuickFormEscalationChannel(
+                    name="Escalation",
+                    type="actionCenterQuickForm",
+                    description="Quick Form channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentQuickFormChannelProperties(
+                        form_schema={"schemaId": "schema-123", "fields": []},
+                    ),
+                    recipients=[
+                        StandardRecipient(
+                            type=AgentEscalationRecipientType.USER_EMAIL,
+                            value="user@example.com",
+                        )
+                    ],
+                )
+            ],
+        )
+
     @pytest.mark.asyncio
     async def test_escalation_tool_has_metadata(self, escalation_resource):
         """Test that escalation tool has metadata dict."""
@@ -282,6 +310,15 @@ class TestEscalationToolMetadata:
         tool = create_escalation_tool(escalation_resource)
         assert tool.metadata is not None
         assert tool.metadata["display_name"] == "ApprovalApp"
+
+    @pytest.mark.asyncio
+    async def test_escalation_tool_metadata_display_name_falls_back_to_channel_name(
+        self, quick_form_escalation_resource
+    ):
+        """Quick-form channels have no app_name; display_name uses the channel name."""
+        tool = create_escalation_tool(quick_form_escalation_resource)
+        assert tool.metadata is not None
+        assert tool.metadata["display_name"] == "Escalation"
 
     @pytest.mark.asyncio
     async def test_escalation_tool_metadata_has_channel_type(self, escalation_resource):
@@ -1320,3 +1357,216 @@ class TestEscalationMemoryPayload:
         }
         assert attributes == {"arguments": serialized_input}
         assert "escalation-input" not in attributes
+
+
+class TestQuickFormEscalation:
+    """QuickForm channel (actionCenterQuickForm) path through create_escalation_tool."""
+
+    @pytest.fixture
+    def quick_form_schema(self):
+        return {
+            "schemaId": "00000000-0000-0000-0000-000000000abc",
+            "fields": [{"name": "decision", "type": "string"}],
+            "outcomes": ["approve", "reject"],
+        }
+
+    @pytest.fixture
+    def quick_form_channel_dict(self, quick_form_schema):
+        return {
+            "name": "quick_form_channel",
+            "type": "actionCenterQuickForm",
+            "description": "Quick-form channel",
+            "inputSchema": {"type": "object", "properties": {}},
+            "outputSchema": {"type": "object", "properties": {}},
+            "properties": {
+                "schema": quick_form_schema,
+                "isActionableMessageEnabled": False,
+                "actionableMessageMetaData": None,
+            },
+            "recipients": [],
+        }
+
+    @pytest.fixture
+    def quick_form_resource(self, quick_form_channel_dict):
+        return AgentEscalationResourceConfig(
+            name="quick_form_approval",
+            description="Request quick-form approval",
+            channels=[AgentQuickFormEscalationChannel(**quick_form_channel_dict)],
+        )
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_dispatches_to_create_quickform_async(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        quick_form_resource,
+        quick_form_schema,
+    ):
+        task = _make_mock_task(id=777, key="task-key-777")
+        mock_client = MagicMock()
+        mock_client.tasks.create_quickform_async = AsyncMock(return_value=task)
+        mock_client.tasks.create_async = AsyncMock(return_value=task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(quick_form_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        mock_client.tasks.create_quickform_async.assert_called_once()
+        mock_client.tasks.create_async.assert_not_called()
+
+        kwargs = mock_client.tasks.create_quickform_async.call_args[1]
+        assert kwargs["task_schema_key"] == "00000000-0000-0000-0000-000000000abc"
+        assert kwargs["schema"] == quick_form_schema
+        assert kwargs["folder_path"] == "/Test/Folder"
+        assert "app_name" not in kwargs
+        assert "app_folder_path" not in kwargs
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_wait_escalation_app_name_is_none_for_quick_form(
+        self, mock_interrupt, mock_uipath_class, quick_form_resource
+    ):
+        from uipath.platform.common import WaitEscalation
+
+        task = _make_mock_task(id=778)
+        mock_client = MagicMock()
+        mock_client.tasks.create_quickform_async = AsyncMock(return_value=task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(quick_form_resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        mock_interrupt.assert_called_once()
+        interrupt_arg = mock_interrupt.call_args[0][0]
+        assert isinstance(interrupt_arg, WaitEscalation)
+        assert interrupt_arg.app_name is None
+        assert interrupt_arg.action == task
+
+    @pytest.mark.asyncio
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_outcome_mapping_end_terminates_agent(
+        self,
+        mock_interrupt,
+        mock_uipath_class,
+        quick_form_channel_dict,
+    ):
+        from uipath_langchain.agent.exceptions import AgentRuntimeError
+
+        channel = dict(quick_form_channel_dict)
+        channel["outcomeMapping"] = {"approve": "end", "reject": "continue"}
+        resource = AgentEscalationResourceConfig(
+            name="quick_form_approval",
+            description="Request quick-form approval",
+            channels=[AgentQuickFormEscalationChannel(**channel)],
+        )
+
+        task = _make_mock_task(id=779)
+        mock_client = MagicMock()
+        mock_client.tasks.create_quickform_async = AsyncMock(return_value=task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+
+        with pytest.raises(AgentRuntimeError):
+            await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_tool_metadata_for_quick_form_resource(self, quick_form_resource):
+        tool = create_escalation_tool(quick_form_resource)
+        assert tool.metadata is not None
+        assert tool.metadata["tool_type"] == "escalation"
+        assert tool.metadata["channel_type"] == "actionCenterQuickForm"
+        assert "_span_context" in tool.metadata
+        assert "_bts_context" in tool.metadata
+
+    async def test_missing_schema_id_raises_on_construction(
+        self, quick_form_channel_dict
+    ):
+        from uipath_langchain.agent.exceptions import AgentStartupError
+
+        channel = dict(quick_form_channel_dict)
+        channel["properties"] = {
+            "schema": {"fields": [], "outcomes": []},
+            "isActionableMessageEnabled": False,
+            "actionableMessageMetaData": None,
+        }
+        resource = AgentEscalationResourceConfig(
+            name="quick_form_approval",
+            description="Request quick-form approval",
+            channels=[AgentQuickFormEscalationChannel(**channel)],
+        )
+
+        with pytest.raises(AgentStartupError) as exc_info:
+            create_escalation_tool(resource)
+
+        assert "INVALID_TOOL_CONFIG" in exc_info.value.error_info.code
+
+    @pytest.mark.asyncio
+    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
+    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
+    @patch("uipath_langchain._utils.durable_interrupt.decorator.interrupt")
+    async def test_action_center_channel_does_not_dispatch_to_quickform(
+        self, mock_interrupt, mock_uipath_class
+    ):
+        resource = AgentEscalationResourceConfig(
+            name="action_center_approval",
+            description="Request approval",
+            channels=[
+                AgentEscalationChannel(
+                    name="action_center_channel",
+                    type="actionCenter",
+                    description="Action Center channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentEscalationChannelProperties(
+                        app_name="ApprovalApp", app_version=1
+                    ),
+                    recipients=[],
+                )
+            ],
+        )
+
+        task = _make_mock_task(id=780)
+        mock_client = MagicMock()
+        mock_client.tasks.create_async = AsyncMock(return_value=task)
+        mock_client.tasks.create_quickform_async = AsyncMock(return_value=task)
+        mock_uipath_class.return_value = mock_client
+
+        mock_result = MagicMock()
+        mock_result.action = "approve"
+        mock_result.data = {}
+        mock_result.is_deleted = False
+        mock_interrupt.return_value = mock_result
+
+        tool = create_escalation_tool(resource)
+        call = ToolCall(args={}, id="test-call", name=tool.name)
+        await tool.awrapper(tool, call, {})  # type: ignore[attr-defined]
+
+        mock_client.tasks.create_async.assert_called_once()
+        mock_client.tasks.create_quickform_async.assert_not_called()
