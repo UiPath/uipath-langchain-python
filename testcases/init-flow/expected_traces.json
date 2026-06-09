@@ -14,11 +14,16 @@
       }
     },
     {
-      "name": "UiPathChat",
+      "name": [
+        "UiPathChatAnthropicBedrock",
+        "UiPathChatBedrockConverse",
+        "UiPathChatBedrock",
+        "UiPathAzureChatOpenAI",
+        "UiPathChatGoogleGenerativeAI",
+        "UiPathChat"
+      ],
       "attributes": {
-        "openinference.span.kind": "LLM",
-        "llm.provider": "uipath",
-        "llm.model_name": "*"
+        "openinference.span.kind": "LLM"
       }
     }
   ]
