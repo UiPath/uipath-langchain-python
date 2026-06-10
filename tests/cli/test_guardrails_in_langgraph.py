@@ -582,6 +582,11 @@ async def _final_llm(messages, *args, **kwargs):
     return AIMessage(content="final answer")
 
 
+async def _final_llm_with_email(messages, *args, **kwargs):
+    """Mock LLM whose OUTPUT contains an email, so a POST guardrail fires on it."""
+    return AIMessage(content="here is your joke — reach me at a@b.com")
+
+
 def _interrupt_value(result: Any, agent: Any, config: dict[str, Any]) -> Any:
     """Extract the value passed to interrupt() from an invoke result/state."""
     interrupts = result.get("__interrupt__") if isinstance(result, dict) else None
@@ -596,9 +601,10 @@ def _interrupt_value(result: Any, agent: Any, config: dict[str, Any]) -> Any:
 class TestMiddlewareEscalation:
     """The middleware EscalateAction suspends via interrupt() and resumes correctly.
 
-    Middleware flavor only. The decorator/@guardrail flavor is a follow-up: it does
-    not yet publish the guardrail action context, so Component/ExecutionStage parity
-    needs decorator-side work before a 2-flavor escalation parity test is meaningful.
+    Covers AGENT scope at PRE (escalate on input; Approve substitutes ReviewedInputs)
+    and AGENT/LLM scope at POST (escalate on the output; Approve substitutes
+    ReviewedOutputs), asserting the context-derived Component/ExecutionStage and the
+    stage-aware Inputs/Outputs payload.
     """
 
     @pytest.fixture(autouse=True)
@@ -616,6 +622,28 @@ class TestMiddlewareEscalation:
                     name="PII escalation guardrail",
                     scopes=[GuardrailScope.AGENT],
                     stage=GuardrailExecutionStage.PRE,
+                    action=EscalateAction(app_name="EscApp", app_folder_path="Shared"),
+                    entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5)],
+                ),
+            ],
+            checkpointer=MemorySaver(),
+        )
+
+    def _build_post_agent(self, scope: GuardrailScope) -> Any:
+        """Agent with a single PII escalation guardrail at POST for the given scope.
+
+        POST validates the *output* (the agent's final message for AGENT scope,
+        the model response for LLM scope), so the escalation fires on the output.
+        """
+        llm = UiPathChatOpenAI(model="gpt-4o-2024-11-20")  # type: ignore[call-arg]
+        return create_agent(
+            model=llm,
+            tools=[],
+            middleware=[
+                *UiPathPIIDetectionMiddleware(
+                    name="PII escalation guardrail",
+                    scopes=[scope],
+                    stage=GuardrailExecutionStage.POST,
                     action=EscalateAction(app_name="EscApp", app_folder_path="Shared"),
                     entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5)],
                 ),
@@ -710,3 +738,128 @@ class TestMiddlewareEscalation:
                     config,
                 )
         assert "contains PII" in str(exc_info.value)
+
+    # -- POST stage: escalate on the OUTPUT (input is clean, only output flagged) --
+
+    @pytest.mark.asyncio
+    async def test_agent_post_escalation_suspends_with_output_payload(self) -> None:
+        agent = self._build_post_agent(GuardrailScope.AGENT)
+        config = {"configurable": {"thread_id": "esc-agent-post"}}
+        with (
+            patch(
+                "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
+                side_effect=_final_llm_with_email,
+            ),
+            patch(
+                "uipath.platform.guardrails.GuardrailsService.evaluate_guardrail",
+                side_effect=_fail_on_email,
+            ),
+        ):
+            result = await agent.ainvoke(
+                {"messages": [HumanMessage(content="tell a joke")]}, config
+            )
+
+        cre = _interrupt_value(result, agent, config)
+        assert isinstance(cre, CreateEscalation)
+        assert cre.data is not None
+        # AGENT scope at POST: the agent OUTPUT is flagged; the original input is
+        # carried alongside it so the reviewer sees both.
+        assert cre.data["Component"] == "Agent"
+        assert cre.data["ExecutionStage"] == "PostExecution"
+        assert cre.data["Outputs"] == json.dumps(
+            "here is your joke — reach me at a@b.com"
+        )
+        assert cre.data["Inputs"] == json.dumps("tell a joke")
+        assert cre.data["GuardrailName"] == "PII escalation guardrail"
+
+    @pytest.mark.asyncio
+    async def test_agent_post_approve_applies_reviewed_output(self) -> None:
+        agent = self._build_post_agent(GuardrailScope.AGENT)
+        config = {"configurable": {"thread_id": "esc-agent-post-approve"}}
+        with (
+            patch(
+                "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
+                side_effect=_final_llm_with_email,
+            ),
+            patch(
+                "uipath.platform.guardrails.GuardrailsService.evaluate_guardrail",
+                side_effect=_fail_on_email,
+            ),
+        ):
+            await agent.ainvoke(
+                {"messages": [HumanMessage(content="tell a joke")]}, config
+            )
+            final = await agent.ainvoke(
+                Command(
+                    resume={
+                        "action": "Approve",
+                        "data": {"ReviewedOutputs": "clean output"},
+                    }
+                ),
+                config,
+            )
+
+        # Run completed and the reviewer's edit was written back to the agent output.
+        assert "__interrupt__" not in final
+        assert final["messages"][-1].content == "clean output"
+
+    @pytest.mark.asyncio
+    async def test_llm_post_escalation_suspends_with_output_payload(self) -> None:
+        agent = self._build_post_agent(GuardrailScope.LLM)
+        config = {"configurable": {"thread_id": "esc-llm-post"}}
+        with (
+            patch(
+                "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
+                side_effect=_final_llm_with_email,
+            ),
+            patch(
+                "uipath.platform.guardrails.GuardrailsService.evaluate_guardrail",
+                side_effect=_fail_on_email,
+            ),
+        ):
+            result = await agent.ainvoke(
+                {"messages": [HumanMessage(content="tell a joke")]}, config
+            )
+
+        cre = _interrupt_value(result, agent, config)
+        assert isinstance(cre, CreateEscalation)
+        assert cre.data is not None
+        # LLM scope at POST fires through the after_model hook → Component "LLM call".
+        assert cre.data["Component"] == "LLM call"
+        assert cre.data["ExecutionStage"] == "PostExecution"
+        assert cre.data["Outputs"] == json.dumps(
+            "here is your joke — reach me at a@b.com"
+        )
+        assert cre.data["Inputs"] == json.dumps("tell a joke")
+        assert cre.data["GuardrailName"] == "PII escalation guardrail"
+
+    @pytest.mark.asyncio
+    async def test_llm_post_approve_applies_reviewed_output(self) -> None:
+        agent = self._build_post_agent(GuardrailScope.LLM)
+        config = {"configurable": {"thread_id": "esc-llm-post-approve"}}
+        with (
+            patch(
+                "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
+                side_effect=_final_llm_with_email,
+            ),
+            patch(
+                "uipath.platform.guardrails.GuardrailsService.evaluate_guardrail",
+                side_effect=_fail_on_email,
+            ),
+        ):
+            await agent.ainvoke(
+                {"messages": [HumanMessage(content="tell a joke")]}, config
+            )
+            final = await agent.ainvoke(
+                Command(
+                    resume={
+                        "action": "Approve",
+                        "data": {"ReviewedOutputs": "clean output"},
+                    }
+                ),
+                config,
+            )
+
+        # The reviewer's edit was written back to the LLM output via after_model.
+        assert "__interrupt__" not in final
+        assert final["messages"][-1].content == "clean output"

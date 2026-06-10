@@ -326,13 +326,20 @@ class BuiltInGuardrailMiddlewareMixin:
                 async def _after_agent_func(
                     state: AgentState[Any], runtime: Runtime
                 ) -> None:
+                    # POST validates the agent's OUTPUT — the final AI message —
+                    # not the whole conversation, so the flagged content maps back
+                    # to a single message (an escalation's ReviewedOutputs edit can
+                    # be applied) and the original input is carried separately as
+                    # input_text. Mirrors the LLM-scope after_model behavior.
                     messages = state.get("messages", [])
-                    mw._check_messages(
-                        list(messages),
-                        scope=GuardrailScope.AGENT,
-                        stage=GuardrailExecutionStage.POST,
-                        input_text=mw._last_input_text(list(messages)),
-                    )
+                    ai_messages = [m for m in messages if isinstance(m, AIMessage)]
+                    if ai_messages:
+                        mw._check_messages(
+                            [ai_messages[-1]],
+                            scope=GuardrailScope.AGENT,
+                            stage=GuardrailExecutionStage.POST,
+                            input_text=mw._last_input_text(messages),
+                        )
 
                 _after_agent_func.__name__ = f"{guardrail_name}_after_agent"
                 hooks.append(after_agent(_after_agent_func))
