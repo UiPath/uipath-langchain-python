@@ -1,7 +1,5 @@
 """Joke generating agent that creates family-friendly jokes based on a topic."""
 
-import os
-
 from langchain.agents import create_agent
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import tool
@@ -45,15 +43,6 @@ class Output(BaseModel):
 
     joke: str
 
-
-# Escalation Action App configuration (override via env vars to match your
-# tenant deployment). Defaults point at the "Guardrail Escalation Action App (2)"
-# published as the process "Guardrail.Escalation.Action.App.2" in the "Shared"
-# folder (its deployed name/folder in the tenant — verified via `uip or processes list`).
-ESCALATION_APP_NAME = os.getenv(
-    "GUARDRAIL_ESCALATION_APP_NAME", "Guardrail.Escalation.Action.App.2"
-)
-ESCALATION_APP_FOLDER = os.getenv("GUARDRAIL_ESCALATION_APP_FOLDER", "Shared")
 
 # Initialize UiPathChat LLM
 llm = UiPathChat(model="gpt-4o-2024-08-06", temperature=0.7)
@@ -117,8 +106,11 @@ agent = create_agent(
             # before_agent and after_agent).
             stage=GuardrailExecutionStage.PRE,
             action=EscalateAction(
-                app_name=ESCALATION_APP_NAME,
-                app_folder_path=ESCALATION_APP_FOLDER,
+                # Escalation Action App — declared as a binding in bindings.json
+                # (resource "app"). Studio/deploy resolves and can override it;
+                # locally these literal values are used.
+                app_name="Guardrail.Escalation.Action.App.2",
+                app_folder_path="Shared",
             ),
             entities=[
                 PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5),
