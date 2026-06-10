@@ -39,6 +39,7 @@ agent = create_agent(
 ```python
 from uipath_langchain.guardrails import (
     BlockAction,
+    EscalateAction,
     LogAction,
     LoggingSeverityLevel,
     UiPathDeterministicGuardrailMiddleware,
@@ -73,7 +74,7 @@ TOOL scope for `UiPathPIIDetectionMiddleware` and `UiPathHarmfulContentMiddlewar
 All classes share these common parameters:
 
 - **`name`** (`str`) — display name for this guardrail instance.
-- **`action`** — what to do on violation: `LogAction(...)` or `BlockAction(...)`.
+- **`action`** — what to do on violation: `LogAction(...)`, `BlockAction(...)`, or `EscalateAction(...)` (escalate to a human — see [Escalation action](#escalation-action-human-in-the-loop)).
 - **`scopes`** (`list[GuardrailScope]`) — restrict which hooks are registered. Defaults shown in the table above. Use `GuardrailScope.AGENT`, `GuardrailScope.LLM`, `GuardrailScope.TOOL`.
 - **`enabled_for_evals`** (`bool`, default `True`) — set `False` to skip this guardrail when the agent runs in evaluation mode.
 
@@ -237,6 +238,45 @@ agent = create_agent(
     ],
 )
 ```
+
+### Escalation action (human-in-the-loop)
+
+`EscalateAction` routes a violation to a **human reviewer** instead of logging or blocking it. On a violation it builds the review payload and calls the documented HITL primitive [`interrupt(CreateEscalation(...))`](https://uipath.github.io/uipath-python/langchain/human_in_the_loop/#3-createescalation) — creating a task in a UiPath **Action App** and **suspending the run** until the reviewer responds. On resume:
+
+- **Approve** — if the reviewer edited the content, the edited value is substituted back into the flagged message / tool args / output; otherwise the original is kept. The edit is read from `ReviewedInputs` for a PRE (input) escalation and `ReviewedOutputs` for a POST (output) one.
+- **Reject** — raises `GuardrailBlockException`, terminating the run.
+
+```python
+from uipath_langchain.guardrails import EscalateAction
+from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
+
+*UiPathPIIDetectionMiddleware(
+    name="PII escalation",
+    scopes=[GuardrailScope.AGENT],
+    stage=GuardrailExecutionStage.PRE,   # validate once → escalate once per run
+    action=EscalateAction(
+        app_name="Guardrail Escalation Action App",
+        app_folder_path="Shared",
+        # route the review task to a specific recipient (user / group / email)
+        recipient=TaskRecipient(
+            type=TaskRecipientType.EMAIL, value="reviewer@example.com"
+        ),
+    ),
+    entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL, threshold=0.5)],
+),
+```
+
+Parameters:
+
+- **`app_name`** (`str`, required) — the published Action App that renders the review task.
+- **`app_folder_path`** (`str`) — folder where the app is deployed.
+- **`assignee`** (`str`) — the simple username/email to assign the task to.
+- **`recipient`** (`TaskRecipient`) — a typed escalation target (shown above); takes precedence over `assignee`. Supports the four `TaskRecipientType` members — `USER_ID`, `GROUP_ID`, `EMAIL` (user email), and `GROUP_NAME`, e.g. `TaskRecipient(type=TaskRecipientType.GROUP_NAME, value="Reviewers")`.
+- **`title`** (`str`) — task title; defaults to a message derived from the guardrail name.
+
+> 💡 **Escalate once per run.** On AGENT/LLM scope a guardrail validates both *before* and *after* by default, which can escalate twice. Set `stage=GuardrailExecutionStage.PRE` (or `POST`) so only a single checkpoint is registered.
+
+> ⚠️ **Requires a published Action App.** The target app must exist in the configured folder for the task to be created. Resume is durable — the run suspends on `interrupt()` and resumes when the task is completed. See [Human In The Loop](https://uipath.github.io/uipath-python/langchain/human_in_the_loop/) for the underlying primitive.
 
 ### Custom actions
 
@@ -413,7 +453,7 @@ Imported from `uipath_langchain.guardrails`.
 |---|---|
 | `PRE` | Before the call (inspect / block inputs) |
 | `POST` | After the call (inspect / transform outputs) |
-| `PRE_AND_POST` | Both — used only by `UiPathDeterministicGuardrailMiddleware` |
+| `PRE_AND_POST` | Both checkpoints (the default) |
 
 ### LoggingSeverityLevel
 
