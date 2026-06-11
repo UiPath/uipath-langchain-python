@@ -20,6 +20,7 @@ from uipath_langchain.chat import UiPathChat
 from uipath_langchain.guardrails import (
     BlockAction,
     CustomValidator,
+    EscalateAction,
     GuardrailAction,
     GuardrailExclude,
     GuardrailExecutionStage,
@@ -258,6 +259,24 @@ Remember to always include the 'joke' property in your output to match the requi
 # ---------------------------------------------------------------------------
 
 
+# On an EMAIL PII violation in the agent input this escalates to the Guardrail
+# Escalation Action App for human review via the documented HITL
+# interrupt(CreateEscalation(...)) — the run suspends until a human approves
+# (optionally editing the input) or rejects. PRE only, so it triggers once per
+# run. This is the decorator-style counterpart of the middleware joke-agent's
+# AGENT-scope PII escalation.
+@guardrail(
+    validator=pii_email,
+    action=EscalateAction(
+        # Escalation Action App — declared as a binding in bindings.json (resource
+        # "app"). Studio/deploy resolves and can override it; locally these literal
+        # values are used.
+        app_name="Guardrail.Escalation.Action.App.2",
+        app_folder_path="Shared",
+    ),
+    name="Agent PII Escalation",
+    stage=GuardrailExecutionStage.PRE,
+)
 @guardrail(
     validator=HarmfulContentValidator(
         entities=[HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2)],

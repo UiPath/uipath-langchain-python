@@ -10,6 +10,7 @@ Registers a :class:`LangChainGuardrailAdapter` that teaches the platform
 The adapter is auto-registered when ``uipath_langchain.guardrails`` is imported.
 """
 
+import json
 import logging
 from functools import wraps
 from typing import Any
@@ -20,7 +21,7 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
-from uipath.core.guardrails import GuardrailValidationResultType
+from uipath.core.guardrails import GuardrailScope, GuardrailValidationResultType
 from uipath.platform.guardrails.decorators._core import (
     _EvaluatorFn,
     _extract_input,
@@ -33,6 +34,11 @@ from uipath.platform.guardrails.decorators._models import GuardrailAction
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from uipath_langchain.guardrails._action_context import (
+    GuardrailActionContext,
+    _action_context,
+    component_label,
+)
 from uipath_langchain.guardrails.middlewares._utils import create_modified_tool_result
 
 logger = logging.getLogger(__name__)
@@ -51,6 +57,51 @@ def _convert_block_exception(exc: GuardrailBlockException) -> AgentRuntimeError:
         detail=exc.detail,
         category=UiPathErrorCategory.USER,
     )
+
+
+# ---------------------------------------------------------------------------
+# Guardrail action invocation (with runtime context publishing)
+# ---------------------------------------------------------------------------
+
+
+def _run_action(
+    action: GuardrailAction,
+    result: Any,
+    data: Any,
+    name: str,
+    *,
+    scope: GuardrailScope | None,
+    stage: GuardrailExecutionStage | None,
+    component: str | None,
+    input_payload: str | None = None,
+) -> str | dict[str, Any] | None:
+    """Run a guardrail action with its runtime context published.
+
+    Publishes the guardrail context (scope / stage / component / input_payload)
+    on a ``ContextVar`` for the duration of the action call, so context-aware
+    actions (e.g. ``EscalateAction``) can read it at runtime instead of requiring
+    it to be hardcoded. ``input_payload`` carries the original input at POST so
+    the action can show both input and output. Mirrors the middleware path's
+    publishing in ``_base.py``.
+
+    A :class:`GuardrailBlockException` is converted to an ``AgentRuntimeError``.
+    Any other exception — notably LangGraph's ``GraphInterrupt`` raised by an
+    escalation action — propagates unchanged so the run can suspend.
+    """
+    token = _action_context.set(
+        GuardrailActionContext(
+            scope=scope,
+            execution_stage=stage,
+            component=component,
+            input_payload=input_payload,
+        )
+    )
+    try:
+        return action.handle_validation_result(result, data, name)
+    except GuardrailBlockException as exc:
+        raise _convert_block_exception(exc) from exc
+    finally:
+        _action_context.reset(token)
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +137,23 @@ def _extract_message_text(msg: BaseMessage) -> str:
         ]
         return "\n".join(filter(None, parts))
     return ""
+
+
+def _input_payload_from_messages(
+    messages: list[BaseMessage] | None,
+) -> str | None:
+    """JSON-encode the last HumanMessage's text as the original-input payload.
+
+    Used at POST so the escalation action can show the original input alongside
+    the flagged output. Returns ``None`` when there is no usable human input.
+    """
+    if not messages:
+        return None
+    msg = _get_last_human_message(messages)
+    if msg is None:
+        return None
+    text = _extract_message_text(msg)
+    return json.dumps(text) if text else None
 
 
 def _apply_message_text_modification(msg: BaseMessage, modified: str) -> None:
@@ -158,10 +226,15 @@ def _wrap_tool_with_guardrail(
             return tool_input
         modified = None
         if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
-            try:
-                modified = action.handle_validation_result(result, input_data, name)
-            except GuardrailBlockException as exc:
-                raise _convert_block_exception(exc) from exc
+            modified = _run_action(
+                action,
+                result,
+                input_data,
+                name,
+                scope=GuardrailScope.TOOL,
+                stage=GuardrailExecutionStage.PRE,
+                component=tool.name,
+            )
         if modified is not None and isinstance(modified, dict):
             return _rewrap_input(tool_input, modified)
         return tool_input
@@ -183,10 +256,16 @@ def _wrap_tool_with_guardrail(
             return raw_result
         modified = None
         if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
-            try:
-                modified = action.handle_validation_result(result, output_data, name)
-            except GuardrailBlockException as exc:
-                raise _convert_block_exception(exc) from exc
+            modified = _run_action(
+                action,
+                result,
+                output_data,
+                name,
+                scope=GuardrailScope.TOOL,
+                stage=GuardrailExecutionStage.POST,
+                component=tool.name,
+                input_payload=json.dumps(input_data),
+            )
         if modified is not None:
             if isinstance(raw_result, (ToolMessage, Command)):
                 return create_modified_tool_result(raw_result, modified)
@@ -245,10 +324,15 @@ def _apply_llm_pre(
         return
     modified = None
     if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
-        try:
-            modified = action.handle_validation_result(result, text, name)
-        except GuardrailBlockException as exc:
-            raise _convert_block_exception(exc) from exc
+        modified = _run_action(
+            action,
+            result,
+            text,
+            name,
+            scope=GuardrailScope.LLM,
+            stage=GuardrailExecutionStage.PRE,
+            component=component_label(GuardrailScope.LLM),
+        )
     if isinstance(modified, str) and modified != text:
         _apply_message_text_modification(msg, modified)
 
@@ -258,6 +342,7 @@ def _apply_llm_post(
     evaluator: _EvaluatorFn,
     action: GuardrailAction,
     name: str,
+    input_messages: list[BaseMessage] | None = None,
 ) -> None:
     """Evaluate the AIMessage content in-place (POST stage, LLM scope)."""
     if not isinstance(response.content, str) or not response.content:
@@ -268,10 +353,16 @@ def _apply_llm_post(
         return
     modified = None
     if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
-        try:
-            modified = action.handle_validation_result(result, response.content, name)
-        except GuardrailBlockException as exc:
-            raise _convert_block_exception(exc) from exc
+        modified = _run_action(
+            action,
+            result,
+            response.content,
+            name,
+            scope=GuardrailScope.LLM,
+            stage=GuardrailExecutionStage.POST,
+            component=component_label(GuardrailScope.LLM),
+            input_payload=_input_payload_from_messages(input_messages),
+        )
     if isinstance(modified, str) and modified != response.content:
         response.content = modified
 
@@ -299,7 +390,13 @@ def _wrap_llm_with_guardrail(
                 GuardrailExecutionStage.POST,
                 GuardrailExecutionStage.PRE_AND_POST,
             ):
-                _apply_llm_post(response, evaluator, action, name)
+                _apply_llm_post(
+                    response,
+                    evaluator,
+                    action,
+                    name,
+                    input_messages=messages if isinstance(messages, list) else None,
+                )
             return response
 
         async def ainvoke(
@@ -315,7 +412,13 @@ def _wrap_llm_with_guardrail(
                 GuardrailExecutionStage.POST,
                 GuardrailExecutionStage.PRE_AND_POST,
             ):
-                _apply_llm_post(response, evaluator, action, name)
+                _apply_llm_post(
+                    response,
+                    evaluator,
+                    action,
+                    name,
+                    input_messages=messages if isinstance(messages, list) else None,
+                )
             return response
 
     llm.__class__ = _GuardedLLM
@@ -351,10 +454,15 @@ def _apply_agent_input_guardrail(
         return
     modified = None
     if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
-        try:
-            modified = action.handle_validation_result(result, text, name)
-        except GuardrailBlockException as exc:
-            raise _convert_block_exception(exc) from exc
+        modified = _run_action(
+            action,
+            result,
+            text,
+            name,
+            scope=GuardrailScope.AGENT,
+            stage=GuardrailExecutionStage.PRE,
+            component=component_label(GuardrailScope.AGENT),
+        )
     if isinstance(modified, str) and modified != text:
         _apply_message_text_modification(msg, modified)
 
@@ -383,10 +491,16 @@ def _apply_agent_output_guardrail(
         return
     modified = None
     if result.result == GuardrailValidationResultType.VALIDATION_FAILED:
-        try:
-            modified = action.handle_validation_result(result, text, name)
-        except GuardrailBlockException as exc:
-            raise _convert_block_exception(exc) from exc
+        modified = _run_action(
+            action,
+            result,
+            text,
+            name,
+            scope=GuardrailScope.AGENT,
+            stage=GuardrailExecutionStage.POST,
+            component=component_label(GuardrailScope.AGENT),
+            input_payload=_input_payload_from_messages(messages),
+        )
     if isinstance(modified, str) and modified != text:
         _apply_message_text_modification(msg, modified)
 
