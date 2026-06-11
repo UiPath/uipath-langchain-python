@@ -409,6 +409,49 @@ async def my_node(state: Input) -> Output:
     ...
 ```
 
+### Escalation action (human-in-the-loop)
+
+`EscalateAction` works on the decorator path exactly as it does for middleware — on a violation it suspends the run via `interrupt(CreateEscalation(...))`, creates a review task in a UiPath **Action App**, and resumes on Approve/Reject. It is the **same action class** as the middleware path; just pass it as the `action` of a `@guardrail` on the factory you want to guard. The escalation task's `Component` / `ExecutionStage` are **derived automatically** from the inferred scope of the decorated target — no extra configuration:
+
+```python
+from langchain.agents import create_agent
+from uipath_langchain.guardrails import (
+    guardrail,
+    EscalateAction,
+    PIIValidator,
+    GuardrailExecutionStage,
+    PIIDetectionEntity,
+)
+from uipath_langchain.guardrails.enums import PIIDetectionEntityType
+from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
+
+@guardrail(
+    validator=PIIValidator(
+        entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL, threshold=0.5)],
+    ),
+    action=EscalateAction(
+        app_name="Guardrail Escalation Action App",
+        app_folder_path="Shared",
+        # optional: route the review task to a specific recipient
+        recipient=TaskRecipient(
+            type=TaskRecipientType.EMAIL, value="reviewer@example.com"
+        ),
+    ),
+    name="Agent PII escalation",
+    stage=GuardrailExecutionStage.PRE,   # escalate once per run
+)
+def create_my_agent():
+    return create_agent(model=llm, tools=[analyze_text], system_prompt="...")
+
+agent = create_my_agent()
+```
+
+On resume: **Approve** continues, substituting the reviewer's edit if any — read from `ReviewedInputs` for a PRE (input) escalation and `ReviewedOutputs` for a POST (output) one, otherwise keeping the original; **Reject** raises `GuardrailBlockException` and terminates the run. The `app_name` / `app_folder_path` / `assignee` / `recipient` / `title` parameters and the auto-derived payload fields behave identically to the [middleware escalation action](#escalation-action-human-in-the-loop) above — refer to it for the full parameter list.
+
+> 💡 **Scope inference for the payload context.** `Component` / `ExecutionStage` are derived automatically for the adapter-handled LangChain targets — `@tool`, `BaseChatModel` factories, and `create_agent()` factories. On a plain LangGraph node or plain Python function (handled by the core `@guardrail`, which doesn't publish the LangChain runtime context) the escalation still suspends, but those two fields are not populated.
+
+> 💡 **Escalate once per run.** As with middleware, AGENT/LLM scope validates both *before* and *after* by default. Set `stage=GuardrailExecutionStage.PRE` (or `POST`) so only a single checkpoint is registered.
+
 ---
 
 ## Choosing between middleware and decorator

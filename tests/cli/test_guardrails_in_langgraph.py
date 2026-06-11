@@ -55,7 +55,9 @@ from uipath_langchain.guardrails import (
     GuardrailExecutionStage,
     PIIDetectionEntity,
     PIIDetectionEntityType,
+    PIIValidator,
     UiPathPIIDetectionMiddleware,
+    guardrail,
 )
 from uipath_langchain.runtime import register_runtime_factory
 
@@ -863,3 +865,176 @@ class TestMiddlewareEscalation:
         # The reviewer's edit was written back to the LLM output via after_model.
         assert "__interrupt__" not in final
         assert final["messages"][-1].content == "clean output"
+
+
+# ---------------------------------------------------------------------------
+# Decorator escalation (HITL) — interrupt → resume, via @guardrail + EscalateAction
+# ---------------------------------------------------------------------------
+
+
+class TestDecoratorEscalation:
+    """The decorator @guardrail EscalateAction suspends via interrupt() and resumes.
+
+    The adapter fires interrupt() before the guarded agent's real invoke, so — like
+    the joke-agent-decorator sample — the guarded agent is embedded in an outer
+    graph node, which gives interrupt() the graph/checkpoint context it needs.
+    Payload (Component/ExecutionStage/Inputs) matches TestMiddlewareEscalation.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup_env(self, mock_env_vars: dict[str, str]):
+        os.environ.clear()
+        os.environ.update(mock_env_vars)
+
+    def _build_graph(self) -> Any:
+        from typing import Annotated
+
+        from langgraph.graph import END, START, StateGraph
+        from langgraph.graph.message import add_messages
+        from typing_extensions import TypedDict
+
+        llm = UiPathChatOpenAI(model="gpt-4o-2024-11-20")  # type: ignore[call-arg]
+
+        @guardrail(
+            validator=PIIValidator(
+                entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5)]
+            ),
+            action=EscalateAction(app_name="EscApp", app_folder_path="Shared"),
+            name="PII escalation guardrail",
+            stage=GuardrailExecutionStage.PRE,
+        )
+        def create_joke_agent() -> Any:
+            return create_agent(model=llm, tools=[])
+
+        inner_agent = create_joke_agent()
+
+        class State(TypedDict):
+            messages: Annotated[list[Any], add_messages]
+
+        async def node(state: State) -> dict[str, Any]:
+            result = await inner_agent.ainvoke({"messages": state["messages"]})
+            return {"messages": result["messages"]}
+
+        builder = StateGraph(State)
+        builder.add_node("n", node)
+        builder.add_edge(START, "n")
+        builder.add_edge("n", END)
+        return builder.compile(checkpointer=MemorySaver())
+
+    @pytest.mark.asyncio
+    async def test_escalation_suspends_with_context_derived_payload(self) -> None:
+        graph = self._build_graph()
+        config = {"configurable": {"thread_id": "dec-esc-suspend"}}
+        with (
+            patch(
+                "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
+                side_effect=_final_llm,
+            ),
+            patch(
+                "uipath.platform.guardrails.GuardrailsService.evaluate_guardrail",
+                side_effect=_fail_on_email,
+            ),
+        ):
+            result = await graph.ainvoke(
+                {"messages": [HumanMessage(content="joke about a@b.com")]}, config
+            )
+
+        cre = _interrupt_value(result, graph, config)
+        assert isinstance(cre, CreateEscalation)
+        assert cre.app_name == "EscApp"
+        assert cre.app_folder_path == "Shared"
+        assert cre.data is not None
+        # Component + ExecutionStage derived from the runtime guardrail context the
+        # adapter publishes — identical to the middleware flavor.
+        assert cre.data["Component"] == "Agent"
+        assert cre.data["ExecutionStage"] == "PreExecution"
+        assert cre.data["Inputs"] == json.dumps("joke about a@b.com")
+        assert cre.data["GuardrailName"] == "PII escalation guardrail"
+
+    @pytest.mark.asyncio
+    async def test_escalation_approve_applies_reviewed_input(self) -> None:
+        graph = self._build_graph()
+        config = {"configurable": {"thread_id": "dec-esc-approve"}}
+        with (
+            patch(
+                "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
+                side_effect=_final_llm,
+            ),
+            patch(
+                "uipath.platform.guardrails.GuardrailsService.evaluate_guardrail",
+                side_effect=_fail_on_email,
+            ),
+        ):
+            await graph.ainvoke(
+                {"messages": [HumanMessage(content="joke about a@b.com")]}, config
+            )
+            final = await graph.ainvoke(
+                Command(
+                    resume={
+                        "action": "Approve",
+                        "data": {"ReviewedInputs": "clean topic"},
+                    }
+                ),
+                config,
+            )
+
+        # Run completed (no second escalation — stage=PRE) and the reviewed input
+        # was substituted into the message the agent ran on.
+        assert "__interrupt__" not in final
+        assert final["messages"][0].content == "clean topic"
+
+    @pytest.mark.asyncio
+    async def test_escalation_approve_without_edit_keeps_original_input(self) -> None:
+        graph = self._build_graph()
+        config = {"configurable": {"thread_id": "dec-esc-approve-noedit"}}
+        with (
+            patch(
+                "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
+                side_effect=_final_llm,
+            ),
+            patch(
+                "uipath.platform.guardrails.GuardrailsService.evaluate_guardrail",
+                side_effect=_fail_on_email,
+            ),
+        ):
+            await graph.ainvoke(
+                {"messages": [HumanMessage(content="joke about a@b.com")]}, config
+            )
+            final = await graph.ainvoke(
+                Command(resume={"action": "Approve", "data": {}}),
+                config,
+            )
+
+        # Approve without ReviewedInputs: the run completes on the *original*
+        # input (the action returns None, so the adapter leaves the message
+        # untouched) — no re-suspend despite the input still tripping the
+        # guardrail on replay.
+        assert "__interrupt__" not in final
+        assert final["messages"][0].content == "joke about a@b.com"
+        assert final["messages"][-1].content == "final answer"
+
+    @pytest.mark.asyncio
+    async def test_escalation_reject_terminates_run(self) -> None:
+        graph = self._build_graph()
+        config = {"configurable": {"thread_id": "dec-esc-reject"}}
+        with (
+            patch(
+                "uipath_langchain.chat.openai.UiPathChatOpenAI.ainvoke",
+                side_effect=_final_llm,
+            ),
+            patch(
+                "uipath.platform.guardrails.GuardrailsService.evaluate_guardrail",
+                side_effect=_fail_on_email,
+            ),
+        ):
+            await graph.ainvoke(
+                {"messages": [HumanMessage(content="joke about a@b.com")]}, config
+            )
+            with pytest.raises(AgentRuntimeError) as exc_info:
+                await graph.ainvoke(
+                    Command(
+                        resume={"action": "Reject", "data": {"Reason": "contains PII"}}
+                    ),
+                    config,
+                )
+        assert "contains PII" in str(exc_info.value)
