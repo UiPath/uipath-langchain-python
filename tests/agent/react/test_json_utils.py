@@ -2,6 +2,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, RootModel
 
+from uipath_langchain.agent.react.job_attachments import get_job_attachments
 from uipath_langchain.agent.react.json_utils import (
     coerce_json_strings,
     extract_values_by_paths,
@@ -477,3 +478,57 @@ class TestCoerceJsonStringsWithSchema:
         )
         assert result["child"]["value"] == '{"x": 1}'
         assert result["child"]["data"] == {"y": 2}
+
+
+class TestBuildOrderIndependence:
+    """Detection must not depend on which dynamic model was built last."""
+
+    _SCHEMA = {
+        "type": "object",
+        "properties": {"doc": {"$ref": "#/$defs/Job_attachment"}},
+        "$defs": {
+            "Job_attachment": {
+                "type": "object",
+                "properties": {
+                    "ID": {"type": "string"},
+                    "FullName": {"type": "string"},
+                    "MimeType": {"type": "string"},
+                },
+            }
+        },
+    }
+
+    _ATTACHMENT_ID = "123e4567-e89b-12d3-a456-426614174000"
+
+    def _data(self) -> dict[str, Any]:
+        return {
+            "doc": {
+                "ID": self._ATTACHMENT_ID,
+                "FullName": "file.pdf",
+                "MimeType": "application/pdf",
+            }
+        }
+
+    def test_first_model_still_detected_after_second_build(self) -> None:
+        """Building a second attachment model must not blank out the first."""
+        first = create_model(self._SCHEMA)
+        assert get_json_paths_by_type(first, "__Job_attachment") == ["$.doc"]
+
+        # The second build overwrites the shared module's marker; the first
+        # model's per-class marker keeps its detection working.
+        create_model(self._SCHEMA)
+        assert get_json_paths_by_type(first, "__Job_attachment") == ["$.doc"]
+
+    def test_get_job_attachments_after_second_build(self) -> None:
+        """User-facing attachment extraction must survive a later dynamic build."""
+        first = create_model(self._SCHEMA)
+
+        attachments = get_job_attachments(first, self._data())
+        assert [str(att.id) for att in attachments] == [self._ATTACHMENT_ID]
+
+        # Building a second model with the same JobAttachment definition must
+        # not blank out extraction on the first model.
+        create_model(self._SCHEMA)
+
+        attachments = get_job_attachments(first, self._data())
+        assert [str(att.id) for att in attachments] == [self._ATTACHMENT_ID]

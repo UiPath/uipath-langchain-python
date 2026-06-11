@@ -1,7 +1,7 @@
 import inspect
 import sys
 from types import ModuleType
-from typing import Any, Type
+from typing import Any, Type, cast
 
 from jsonschema_pydantic_converter import transform_with_modules
 from pydantic import BaseModel, PydanticUndefinedAnnotation
@@ -53,6 +53,8 @@ def create_model(
         setattr(pseudo_module, type_name, type_def)
         if inspect.isclass(type_def) and issubclass(type_def, BaseModel):
             type_def.__module__ = _DYNAMIC_MODULE_NAME
+            # per-class marker; survives the shared module being overwritten.
+            cast(Any, type_def).__uipath_marker_name__ = type_name
 
     setattr(pseudo_module, model.__name__, model)
     model.__module__ = _DYNAMIC_MODULE_NAME
