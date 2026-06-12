@@ -57,3 +57,24 @@ class TestGuardrailStageFiltering:
         assert post_filtered[0][0] == generic_guardrail
         # Other builtin should be there
         assert post_filtered[1][0] == other_builtin
+
+    def test_filter_by_stage_llm_as_judge(self):
+        """llm_as_judge guardrails should run in both PRE and POST execution."""
+        judge_guardrail = MagicMock(spec=BuiltInValidatorGuardrail)
+        judge_guardrail.validator_type = "llm_as_judge"
+        judge_guardrail.name = "LLM-as-Judge"
+
+        action = MagicMock(spec=GuardrailAction)
+        guardrails = [(judge_guardrail, action)]
+
+        pre_filtered = uipath_langchain.agent.react.guardrails.guardrails_subgraph._filter_guardrails_by_stage(
+            guardrails, ExecutionStage.PRE_EXECUTION
+        )
+        assert len(pre_filtered) == 1
+        assert pre_filtered[0][0] == judge_guardrail
+
+        post_filtered = uipath_langchain.agent.react.guardrails.guardrails_subgraph._filter_guardrails_by_stage(
+            guardrails, ExecutionStage.POST_EXECUTION
+        )
+        assert len(post_filtered) == 1
+        assert post_filtered[0][0] == judge_guardrail
