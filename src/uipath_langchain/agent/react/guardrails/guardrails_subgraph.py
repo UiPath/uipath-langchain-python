@@ -36,6 +36,7 @@ _VALIDATOR_ALLOWED_STAGES = {
     "harmful_content": {ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION},
     "intellectual_property": {ExecutionStage.POST_EXECUTION},
     "user_prompt_attacks": {ExecutionStage.PRE_EXECUTION},
+    "llm_as_judge": {ExecutionStage.PRE_EXECUTION, ExecutionStage.POST_EXECUTION},
 }
 
 
