@@ -91,8 +91,7 @@ def _create_guardrails_subgraph(
     """
     inner_name, inner_node = main_inner_node
 
-    CompleteAgentGuardrailsGraphState = create_guardrails_state_with_input(input_schema)
-    subgraph = StateGraph(CompleteAgentGuardrailsGraphState)
+    subgraph = StateGraph(create_guardrails_state_with_input(input_schema))
 
     subgraph.add_node(inner_name, inner_node)
 
@@ -356,8 +355,7 @@ def create_agent_init_guardrails_subgraph(
         return init_node[1]
 
     inner_name, inner_node = init_node
-    CompleteAgentGuardrailsGraphState = create_guardrails_state_with_input(input_schema)
-    subgraph = StateGraph(CompleteAgentGuardrailsGraphState)
+    subgraph = StateGraph(create_guardrails_state_with_input(input_schema))
     subgraph.add_node(inner_name, inner_node)
     subgraph.add_edge(START, inner_name)
 
