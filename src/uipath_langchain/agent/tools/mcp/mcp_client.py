@@ -15,7 +15,15 @@ from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStre
 from mcp import ClientSession
 from mcp.shared.exceptions import McpError
 from mcp.shared.message import SessionMessage
-from mcp.types import CallToolResult, ListToolsResult
+from mcp.types import (
+    CallToolRequest,
+    CallToolRequestParams,
+    CallToolResult,
+    ClientRequest,
+    CreateTaskResult,
+    ListToolsResult,
+    TaskMetadata,
+)
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.runtime.base import UiPathDisposableProtocol
 
@@ -364,6 +372,39 @@ class McpClient(UiPathDisposableProtocol):
         return await self._execute_with_retry(
             lambda session: session.call_tool(name, arguments=arguments),
             f"call_tool({name})",
+        )
+
+    async def call_tool_as_task(
+        self,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> CreateTaskResult:
+        """Call an MCP tool as a task (2025-11-25), returning a task handle.
+
+        Sends a task-augmented ``tools/call`` (``params.task``); a task-supporting
+        server responds with a ``CreateTaskResult`` (a handle to poll/await/drive)
+        instead of blocking for the tool result. The Python SDK has no client task
+        helper, so this sends the raw request via ``send_request``.
+
+        Args:
+            name: The name of the tool to call.
+            arguments: Optional arguments to pass to the tool.
+
+        Returns:
+            The ``CreateTaskResult`` returned by the server.
+        """
+        return await self._execute_with_retry(
+            lambda session: session.send_request(
+                ClientRequest(
+                    CallToolRequest(
+                        params=CallToolRequestParams(
+                            name=name, arguments=arguments, task=TaskMetadata()
+                        )
+                    )
+                ),
+                CreateTaskResult,
+            ),
+            f"call_tool_as_task({name})",
         )
 
     async def dispose(self) -> None:

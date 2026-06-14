@@ -1,3 +1,4 @@
+import json
 import logging
 from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any, AsyncGenerator
@@ -6,11 +7,21 @@ from langchain_core.tools import BaseTool
 from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
+    AgentMcpToolExecution,
     CachedToolsConfig,
     DynamicToolsConfig,
+    McpToolTaskSupport,
 )
 from uipath.eval.mocks import mockable
+from uipath.platform import UiPath
+from uipath.platform.common import WaitJobRaw
+from uipath.platform.orchestrator import Job, JobState
 
+from uipath_langchain._utils.durable_interrupt import durable_interrupt
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.tools.structured_tool_with_argument_properties import (
     StructuredToolWithArgumentProperties,
 )
@@ -19,6 +30,32 @@ from ..utils import sanitize_tool_name
 from .mcp_client import McpClient, SessionInfoFactory
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+# _meta keys AgentHubService stamps on a task result to mark it as a UiPath job (see PR adding
+# uipath.com/* markers). The MCP client reads them to drive the job as a suspendable child job.
+_UIPATH_SOURCE_META_KEY = "uipath.com/source"
+_UIPATH_JOB_KEY_META_KEY = "uipath.com/jobKey"
+_UIPATH_FOLDER_KEY_META_KEY = "uipath.com/folderKey"
+_UIPATH_ORCHESTRATOR_SOURCE = "orchestrator"
+
+
+def _execution_from_server_tool(tool: Any) -> AgentMcpToolExecution | None:
+    """Map an MCP server Tool's ``execution.taskSupport`` into the snapshot model (dynamic mode)."""
+    execution = getattr(tool, "execution", None)
+    task_support = getattr(execution, "taskSupport", None) if execution else None
+    if task_support is None:
+        return None
+    value = getattr(task_support, "value", task_support)
+    return AgentMcpToolExecution(task_support=McpToolTaskSupport(value))
+
+
+def _is_task_augmentable(mcp_tool: AgentMcpTool) -> bool:
+    """Whether the tool advertises MCP task support (``optional`` / ``required``)."""
+    execution = getattr(mcp_tool, "execution", None)
+    return execution is not None and execution.task_support in (
+        McpToolTaskSupport.OPTIONAL,
+        McpToolTaskSupport.REQUIRED,
+    )
 
 
 @asynccontextmanager
@@ -118,6 +155,7 @@ async def create_mcp_tools(
                     input_schema=tool.inputSchema,
                     output_schema=tool.outputSchema,
                     argument_properties=argument_properties,
+                    execution=_execution_from_server_tool(tool),
                 )
             )
     else:
@@ -155,6 +193,8 @@ def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
     else:
         output_schema = {"type": "object", "properties": {}}
 
+    task_augmentable = _is_task_augmentable(mcp_tool)
+
     @mockable(
         name=mcp_tool.name,
         description=mcp_tool.description,
@@ -162,11 +202,15 @@ def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
         output_schema=output_schema,
     )
     async def tool_fn(**kwargs: Any) -> Any:
-        """Execute MCP tool call with ephemeral session.
+        """Execute an MCP tool call with an ephemeral session.
 
-        If a session disconnect error occurs (e.g., 404 or session terminated),
-        the tool will retry once by re-initializing the session.
+        When the tool supports MCP tasks, the call starts a UiPath job and suspends the
+        agent until it completes (see :func:`_invoke_mcp_tool_as_job`). Otherwise the tool
+        is called synchronously; a session disconnect (404) retries once.
         """
+        if task_augmentable:
+            return await _invoke_mcp_tool_as_job(mcp_tool, mcpClient, kwargs)
+
         result = await mcpClient.call_tool(mcp_tool.name, arguments=kwargs)
         logger.info(f"Tool call successful for {mcp_tool.name}")
         content = result.content if hasattr(result, "content") else result
@@ -182,6 +226,69 @@ def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
         return content
 
     return tool_fn
+
+
+async def _invoke_mcp_tool_as_job(
+    mcp_tool: AgentMcpTool,
+    mcpClient: McpClient,
+    arguments: dict[str, Any],
+) -> Any:
+    """Call a task-supporting MCP tool and suspend the agent job until the child completes.
+
+    The task-augmented ``tools/call`` returns a ``CreateTaskResult`` whose ``_meta`` marks it
+    as a UiPath Orchestrator job. We then ``interrupt`` with a ``WaitJobRaw`` (exactly like
+    :func:`process_tool.create_process_tool`), so the runtime suspends the parent job and
+    resumes it with the child job's output when it finishes.
+
+    Args:
+        mcp_tool: The MCP tool being invoked.
+        mcpClient: The client used to start the task.
+        arguments: The tool-call arguments.
+
+    Returns:
+        The completed child job's output (parsed JSON when possible).
+    """
+
+    @durable_interrupt
+    async def start_mcp_job():
+        create_result = await mcpClient.call_tool_as_task(
+            mcp_tool.name, arguments=arguments
+        )
+        meta = create_result.meta or {}
+        if meta.get(_UIPATH_SOURCE_META_KEY) != _UIPATH_ORCHESTRATOR_SOURCE:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.UNEXPECTED_ERROR,
+                title=f"Tool '{mcp_tool.name}' did not start a UiPath job",
+                detail=(
+                    "The MCP server returned a task that is not a UiPath Orchestrator job "
+                    "(missing the uipath.com/source marker), which is not supported."
+                ),
+            )
+
+        return WaitJobRaw(
+            # The resume trigger keys off the job's GUID key (item_key = job.key) and re-fetches the
+            # job on resume; the numeric id is required by the model but unused here, hence the 0.
+            job=Job(
+                id=0,
+                key=meta.get(_UIPATH_JOB_KEY_META_KEY),
+                folder_key=meta.get(_UIPATH_FOLDER_KEY_META_KEY),
+            ),
+            process_folder_key=meta.get(_UIPATH_FOLDER_KEY_META_KEY),
+        )
+
+    # First run: starts the job and suspends. On resume: returns the resolved Job.
+    job = await start_mcp_job()
+
+    if (getattr(job, "state", None) or "").lower() == JobState.FAULTED:
+        return str(getattr(job, "info", None) or "Unknown error")
+
+    output_str = await UiPath().jobs.extract_output_async(job)
+    if output_str:
+        try:
+            return json.loads(output_str)
+        except (json.JSONDecodeError, TypeError):
+            return output_str
+    return output_str
 
 
 async def create_mcp_tools_and_clients(
