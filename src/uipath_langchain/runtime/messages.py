@@ -70,8 +70,36 @@ class UiPathChatMessagesMapper:
         self.tools_requiring_confirmation: dict[str, Any] = {}
         self.client_side_tools: dict[str, ClientSideToolInfo] = {}
         self.seen_message_ids: set[str] = set()
+        self._attachment_metadata: dict[str, dict[str, str]] = {}
         self._storage_lock = asyncio.Lock()
         self._citation_stream_processor = CitationStreamProcessor()
+
+    def _enrich_tool_call_input(self, args: Any) -> Any:
+        """Enrich attachment objects in tool call args with stored metadata.
+
+        Walks one level into the args dict, looking for values that are either
+        a single attachment dict ({"ID": "..."}) or a list of them, and merges
+        in FullName / MimeType so the conversation event carries the same
+        enriched data the C# Agents backend provided.
+        """
+        if not self._attachment_metadata or not isinstance(args, dict):
+            return args
+        result = dict(args)
+        for key, value in result.items():
+            if isinstance(value, dict) and "ID" in value:
+                att_id = str(value["ID"])
+                if att_id in self._attachment_metadata:
+                    result[key] = {**value, **self._attachment_metadata[att_id]}
+            elif isinstance(value, list):
+                result[key] = [
+                    {**item, **self._attachment_metadata[str(item["ID"])]}
+                    if isinstance(item, dict)
+                    and "ID" in item
+                    and str(item["ID"]) in self._attachment_metadata
+                    else item
+                    for item in value
+                ]
+        return result
 
     @staticmethod
     def _extract_text(content: Any) -> str:
@@ -161,15 +189,21 @@ class UiPathChatMessagesMapper:
                         attachment_id = self.parse_attachment_id_from_content_part_uri(
                             data.uri
                         )
-                        full_name = uipath_content_part.name
-                        if attachment_id and full_name:
+                        if attachment_id:
+                            resolved_name = (
+                                uipath_content_part.name or "attachment"
+                            )
                             attachments.append(
                                 {
                                     "id": attachment_id,
-                                    "full_name": full_name,
+                                    "full_name": resolved_name,
                                     "mime_type": uipath_content_part.mime_type,
                                 }
                             )
+                            self._attachment_metadata[attachment_id] = {
+                                "FullName": resolved_name,
+                                "MimeType": uipath_content_part.mime_type,
+                            }
 
             # Add attachment references as a text block for LLM visibility
             if attachments:
@@ -599,7 +633,7 @@ class UiPathChatMessagesMapper:
                 start=UiPathConversationToolCallStartEvent(
                     tool_name=tool_call["name"],
                     timestamp=self.get_timestamp(),
-                    input=tool_call["args"],
+                    input=self._enrich_tool_call_input(tool_call["args"]),
                     require_confirmation=require_confirmation,
                     input_schema=input_schema,
                     is_client_side_tool=is_client_side_tool,

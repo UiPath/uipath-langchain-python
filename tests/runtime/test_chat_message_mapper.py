@@ -1026,8 +1026,8 @@ class TestMapMessages:
         assert msg.content_blocks[0]["text"] == "Check this file"  # type: ignore[typeddict-item]
         assert "attachments" not in msg.additional_kwargs
 
-    def test_map_messages_external_value_without_name_skips_attachment(self):
-        """Should skip attachment when external value has no name."""
+    def test_map_messages_external_value_without_name_uses_fallback(self):
+        """Should use 'attachment' fallback name when external value has no name."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
         uipath_msg = UiPathConversationMessage(
             message_id="msg-1",
@@ -1055,9 +1055,15 @@ class TestMapMessages:
         assert len(result) == 1
         msg = result[0]
         assert isinstance(msg, HumanMessage)
-        # No content blocks at all (external value without name is skipped)
-        assert len(msg.content_blocks) == 0
-        assert "attachments" not in msg.additional_kwargs
+        assert len(msg.content_blocks) == 1
+        assert "<uip:attachments>" in msg.content_blocks[0]["text"]  # type: ignore[typeddict-item]
+        assert msg.additional_kwargs["attachments"] == [
+            {
+                "id": "a940a416-b97b-4146-3089-08de5f4d0a87",
+                "full_name": "attachment",
+                "mime_type": "application/pdf",
+            }
+        ]
 
     def test_map_messages_external_value_normalizes_uppercase_uuid(self):
         """Should normalize uppercase UUID in attachment URI to lowercase."""
@@ -1100,6 +1106,98 @@ class TestMapMessages:
                 "mime_type": "application/pdf",
             }
         ]
+
+    def test_enrich_tool_call_input_adds_attachment_metadata(self):
+        """startToolCall event should include FullName and MimeType from the user message."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="user",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-file",
+                    mime_type="application/pdf",
+                    data=UiPathExternalValue(
+                        uri="urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+                    ),
+                    name="report.pdf",
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+        mapper.map_messages([uipath_msg])
+
+        enriched = mapper._enrich_tool_call_input({
+            "attachments": [{"ID": "a940a416-b97b-4146-3089-08de5f4d0a87"}],
+            "analysisTask": "summarize",
+        })
+
+        assert enriched["analysisTask"] == "summarize"
+        assert enriched["attachments"][0]["ID"] == "a940a416-b97b-4146-3089-08de5f4d0a87"
+        assert enriched["attachments"][0]["FullName"] == "report.pdf"
+        assert enriched["attachments"][0]["MimeType"] == "application/pdf"
+
+    def test_enrich_tool_call_input_no_op_without_attachments(self):
+        """Should return args unchanged when no attachment metadata is stored."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        args = {"query": "hello", "attachments": [{"ID": "unknown-id"}]}
+        assert mapper._enrich_tool_call_input(args) == args
+
+    def test_enrich_tool_call_input_single_attachment(self):
+        """Should enrich a single attachment dict (not in a list)."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        mapper._attachment_metadata["abc-123"] = {
+            "FullName": "doc.txt",
+            "MimeType": "text/plain",
+        }
+
+        enriched = mapper._enrich_tool_call_input({
+            "file": {"ID": "abc-123"},
+            "task": "read",
+        })
+
+        assert enriched["file"]["FullName"] == "doc.txt"
+        assert enriched["file"]["MimeType"] == "text/plain"
+        assert enriched["task"] == "read"
+
+    def test_enrich_tool_call_input_fallback_name(self):
+        """Should use 'attachment' fallback when content part has no name."""
+        mapper = UiPathChatMessagesMapper("test-runtime", None)
+        uipath_msg = UiPathConversationMessage(
+            message_id="msg-1",
+            role="user",
+            created_at=TEST_TIMESTAMP,
+            updated_at=TEST_TIMESTAMP,
+            content_parts=[
+                UiPathConversationContentPart(
+                    content_part_id="part-file",
+                    mime_type="application/pdf",
+                    data=UiPathExternalValue(
+                        uri="urn:uipath:cas:file:orchestrator:a940a416-b97b-4146-3089-08de5f4d0a87"
+                    ),
+                    citations=[],
+                    created_at=TEST_TIMESTAMP,
+                    updated_at=TEST_TIMESTAMP,
+                ),
+            ],
+            tool_calls=[],
+            interrupts=[],
+        )
+        mapper.map_messages([uipath_msg])
+
+        enriched = mapper._enrich_tool_call_input({
+            "attachments": [{"ID": "a940a416-b97b-4146-3089-08de5f4d0a87"}],
+            "analysisTask": "summarize",
+        })
+
+        assert enriched["attachments"][0]["FullName"] == "attachment"
+        assert enriched["attachments"][0]["MimeType"] == "application/pdf"
 
 
 class TestMapEvent:
