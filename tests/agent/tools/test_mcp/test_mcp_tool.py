@@ -622,6 +622,7 @@ class TestMcpToolResultSerialization:
         mock_result.content = mock_content
 
         mock_client = MagicMock(spec=McpClient)
+        mock_client.is_job_aware = False
         mock_client.call_tool = AsyncMock(return_value=mock_result)
 
         tool_fn = build_mcp_tool(mcp_tool, mock_client)
@@ -642,6 +643,7 @@ class TestMcpToolResultSerialization:
         mock_result.content = [mock_item]
 
         mock_client = MagicMock(spec=McpClient)
+        mock_client.is_job_aware = False
         mock_client.call_tool = AsyncMock(return_value=mock_result)
 
         tool_fn = build_mcp_tool(mcp_tool, mock_client)
@@ -658,6 +660,7 @@ class TestMcpToolResultSerialization:
         mock_result.content = "plain string"
 
         mock_client = MagicMock(spec=McpClient)
+        mock_client.is_job_aware = False
         mock_client.call_tool = AsyncMock(return_value=mock_result)
 
         tool_fn = build_mcp_tool(mcp_tool, mock_client)
