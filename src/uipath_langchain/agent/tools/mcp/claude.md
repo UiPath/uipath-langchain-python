@@ -24,12 +24,15 @@ src/uipath_langchain/agent/tools/mcp/
 ├── __init__.py          # Public exports
 ├── mcp_client.py        # SessionInfoFactory, McpClient
 ├── mcp_tool.py          # Tool factory functions
+├── jobs.py              # uipath.com/job _meta contract + executors (neutral)
+├── job_executor.py      # LangGraphJobExecutor (uipath.com/job suspend/resume)
 └── streamable_http.py   # SessionInfo, StreamableHTTPTransport (copied from MCP SDK)
 ```
 
 ### Public Exports (`__init__.py`)
 
 ```python
+from .job_executor import LangGraphJobExecutor
 from .mcp_client import McpClient, SessionInfoFactory
 from .mcp_tool import (
     create_mcp_tools_and_clients,
@@ -501,6 +504,57 @@ uipath-agents (consumer)
 endpoint (`GET/PUT agenthub_/design/debugstate/{agentId}/{key}`).  It lives
 in `uipath-agents` because it depends on execution-type logic that belongs
 in the agent layer, not in the langchain tools layer.
+
+## `uipath.com/job` — long-running job support
+
+When a UiPath MCP server backs a tool with an Orchestrator **job**, the agent
+should *suspend* while the job runs and *resume* with its result instead of
+blocking. This is negotiated entirely through MCP `_meta` (no `agent.json`
+change), so a deployed agent gains the behavior on package upgrade.
+
+**Flow (single key `uipath.com/job`, all in `_meta`):**
+
+1. **Advertise** — on `initialize`, a job-capable server returns
+   `InitializeResult._meta["uipath.com/job"] = {"version": 1}`.
+   `McpClient._apply_job_advertisement()` reads it and sets `is_job_aware` /
+   `job_version`. Re-read on every fresh `initialize`, so the flag is stable
+   across a production suspend/resume.
+2. **START** — for a job-aware session, `mcp_tool._invoke_job_aware` sends
+   `params._meta["uipath.com/job"] = {"version": N}` (no `key`) on `tools/call`
+   via `McpClient.call_tool(..., meta=...)`. A job-backed tool returns
+   `result._meta["uipath.com/job"] = {"key", "folderKey"}` immediately.
+3. **Suspend** — the `McpJobExecutor` (default `LangGraphJobExecutor`) interrupts
+   with `WaitJobRaw(Job(id=0, key, folder_key), process_folder_key=folder_key)`
+   inside `@durable_interrupt` (same mechanism as `process_tool`). The runtime
+   persists a `JOB` resume trigger (`JOB_RAW` name → no output extraction);
+   Orchestrator resumes the agent when the child job is terminal.
+4. **FETCH** — on resume the body is skipped; `interrupt(None)` returns the
+   terminal `Job`. The executor re-derives `{key, folderKey}` from it and calls
+   the neutral `fetch`, which re-issues `tools/call` (no args) with
+   `params._meta["uipath.com/job"] = {"key", "folderKey"}`. The server returns
+   the formatted result — that `CallToolResult` is the tool's output.
+
+**Where the pieces live:**
+
+| Piece | Location | Notes |
+|-------|----------|-------|
+| `_meta` build/parse, `UiPathJobHandle`, `JobStart`, `McpJobExecutor`, `BlockingJobExecutor` | `jobs.py` (this package, self-contained) | Framework- and MCP-SDK-neutral (plain dicts); no base-SDK change |
+| `is_job_aware`, `job_version`, `job_executor`, `call_tool(meta=)`, `_apply_job_advertisement` | `mcp_client.py` | Reads the advertisement; threads `_meta` |
+| `_invoke_job_aware`, `_normalize_tool_result`, `create_mcp_tools_and_clients(job_executor=)` | `mcp_tool.py` | Builds the neutral `start`/`fetch`; default executor = `LangGraphJobExecutor` |
+| `LangGraphJobExecutor` (the only place `interrupt` is called) | `job_executor.py` | Suspend → resume → fetch |
+
+**Key invariants:**
+
+- `interrupt` is confined to `LangGraphJobExecutor`. The neutral core never
+  imports langgraph; the executor never imports `mcp`.
+- The job handle survives the suspend **only** via the `WaitJobRaw` payload
+  (re-derived from the resumed `Job`), never via closures — the
+  `@durable_interrupt` body does not re-run on resume.
+- Non-job tools on a job-aware server: the server returns a normal result (no
+  handle); `LangGraphJobExecutor` resolves it via `SkipInterruptValue`
+  (`_NonJobStartValue`) so the durable index stays aligned with no real suspend.
+- Old/non-UiPath servers never advertise → `is_job_aware` stays `False` → today's
+  plain blocking path (back-compat, zero behavior change).
 
 ## Tests
 

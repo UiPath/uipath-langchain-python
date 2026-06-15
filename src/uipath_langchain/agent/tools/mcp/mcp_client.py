@@ -15,17 +15,20 @@ from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStre
 from mcp import ClientSession
 from mcp.shared.exceptions import McpError
 from mcp.shared.message import SessionMessage
-from mcp.types import CallToolResult, ListToolsResult
+from mcp.types import CallToolResult, InitializeResult, ListToolsResult
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.runtime.base import UiPathDisposableProtocol
 
 from uipath_langchain._utils import get_execution_folder_path
 
+from .jobs import read_job_version
 from .streamable_http import SessionInfo, streamable_http_client
 
 if TYPE_CHECKING:
     from uipath.agent.models.agent import AgentMcpResourceConfig
     from uipath.platform.orchestrator.mcp import McpServer
+
+    from .jobs import McpJobExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +81,7 @@ class McpClient(UiPathDisposableProtocol):
         max_retries: int = 1,
         session_info_factory: SessionInfoFactory | None = None,
         terminate_on_close: bool = True,
+        job_executor: "McpJobExecutor | None" = None,
     ) -> None:
         """Initialize the MCP tool session.
 
@@ -90,12 +94,21 @@ class McpClient(UiPathDisposableProtocol):
             max_retries: Maximum number of retries on session disconnect errors.
             session_info_factory: Factory for creating SessionInfo instances.
                 Defaults to ``SessionInfoFactory`` which returns a plain SessionInfo.
+            terminate_on_close: Whether to terminate the MCP session on close.
+            job_executor: Executor that awaits a UiPath job the server starts behind
+                a ``tools/call`` (see ``uipath.com/job``). Only used when the server
+                advertised support on ``initialize``. ``None`` disables job handling.
         """
         self._config = config
         self._timeout = timeout or httpx.Timeout(600)
         self._max_retries = max_retries
         self._session_info_factory = session_info_factory or SessionInfoFactory()
         self._terminate_on_close = terminate_on_close
+        self._job_executor = job_executor
+
+        # uipath.com/job negotiation state (set from the initialize advertisement).
+        self._job_aware: bool = False
+        self._job_version: int | None = None
 
         # URL and headers are resolved lazily from SDK
         self._url: str | None = None
@@ -229,7 +242,8 @@ class McpClient(UiPathDisposableProtocol):
         )
 
         if existing_session_id is None:
-            await self._session.initialize()
+            init_result = await self._session.initialize()
+            self._apply_job_advertisement(init_result)
 
             # The transport calls set_session_id during initialize,
             # so we just read the current value here.
@@ -239,6 +253,35 @@ class McpClient(UiPathDisposableProtocol):
                 else None
             )
             logger.info(f"MCP session initialized with session ID: {new_session_id}")
+
+    def _apply_job_advertisement(self, init_result: InitializeResult) -> None:
+        """Read the ``uipath.com/job`` advertisement from the initialize result.
+
+        When the server advertises support (it has job-backed tools), mark the
+        session job-aware so the client opts in (sends the START ``_meta``) on
+        every ``tools/call``. Re-evaluated on every fresh ``initialize`` so the
+        flag is stable across a suspend/resume in production.
+        """
+        version = read_job_version(init_result.meta)
+        if version is not None:
+            self._job_aware = True
+            self._job_version = version
+            logger.info(f"MCP server advertised uipath.com/job v{version}")
+
+    @property
+    def is_job_aware(self) -> bool:
+        """Whether the server advertised ``uipath.com/job`` support on initialize."""
+        return self._job_aware
+
+    @property
+    def job_version(self) -> int | None:
+        """The advertised ``uipath.com/job`` contract version, if any."""
+        return self._job_version
+
+    @property
+    def job_executor(self) -> "McpJobExecutor | None":
+        """The executor used to await job-backed tool calls, if configured."""
+        return self._job_executor
 
     async def _ensure_session(self) -> ClientSession:
         """Ensure client and session are initialized, return the session.
@@ -351,18 +394,22 @@ class McpClient(UiPathDisposableProtocol):
         self,
         name: str,
         arguments: dict[str, Any] | None = None,
+        *,
+        meta: dict[str, Any] | None = None,
     ) -> CallToolResult:
         """Call an MCP tool by name.
 
         Args:
             name: The name of the tool to call.
             arguments: Optional arguments to pass to the tool.
+            meta: Optional request ``_meta`` (e.g. the ``uipath.com/job`` START or
+                FETCH marker). Mapped onto ``CallToolRequest.params._meta``.
 
         Returns:
             The tool call result.
         """
         return await self._execute_with_retry(
-            lambda session: session.call_tool(name, arguments=arguments),
+            lambda session: session.call_tool(name, arguments=arguments, meta=meta),
             f"call_tool({name})",
         )
 
