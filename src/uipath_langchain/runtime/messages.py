@@ -87,15 +87,15 @@ class UiPathChatMessagesMapper:
         result = dict(args)
         for key, value in result.items():
             if isinstance(value, dict) and "ID" in value:
-                att_id = str(value["ID"])
+                att_id = str(value["ID"]).lower()
                 if att_id in self._attachment_metadata:
                     result[key] = {**value, **self._attachment_metadata[att_id]}
             elif isinstance(value, list):
                 result[key] = [
-                    {**item, **self._attachment_metadata[str(item["ID"])]}
+                    {**item, **self._attachment_metadata[str(item["ID"]).lower()]}
                     if isinstance(item, dict)
                     and "ID" in item
-                    and str(item["ID"]) in self._attachment_metadata
+                    and str(item["ID"]).lower() in self._attachment_metadata
                     else item
                     for item in value
                 ]
@@ -122,6 +122,8 @@ class UiPathChatMessagesMapper:
         """
         if not isinstance(messages, list):
             raise TypeError("messages must be a list")
+
+        self._attachment_metadata.clear()
 
         if not messages:
             return []
