@@ -1447,10 +1447,8 @@ class TestEscalateAction:
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
-    async def test_interrupt_node_stores_reviewed_data_in_metadata(
-        self, mock_interrupt
-    ):
-        """Interrupt node stores reviewed inputs/outputs/reason in metadata."""
+    async def test_interrupt_node_stores_reviewed_data_in_state(self, mock_interrupt):
+        """Interrupt node publishes reviewed inputs/outputs/reason via inner_state."""
         action = _make_default_action()
         guardrail = _make_default_guardrail()
 
@@ -1476,14 +1474,16 @@ class TestEscalateAction:
             create_task_name=create_task_name,
         )
 
-        await interrupt_fn(state)
+        result = await interrupt_fn(state)
 
-        metadata = getattr(interrupt_fn, "__metadata__", None)
-        assert metadata is not None
-        assert metadata["escalation_data"]["reviewed_inputs"] == {"updated": "input"}
-        assert metadata["escalation_data"]["reviewed_outputs"] == {"updated": "output"}
-        assert metadata["escalation_data"]["reason"] == "Looks good"
-        assert metadata["escalation_data"]["reviewed_by"] == "Jane Doe"
+        # Review data is published via inner_state.escalation_review_data
+        update = result.update if isinstance(result, Command) else result
+        assert update is not None
+        review_data = update["inner_state"]["escalation_review_data"]
+        assert review_data["reviewed_inputs"] == {"updated": "input"}
+        assert review_data["reviewed_outputs"] == {"updated": "output"}
+        assert review_data["reason"] == "Looks good"
+        assert review_data["reviewed_by"] == "Jane Doe"
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.guardrails.actions.escalate_action.interrupt")
@@ -1509,11 +1509,12 @@ class TestEscalateAction:
             create_task_name=create_task_name,
         )
 
-        await interrupt_fn(state)
+        result = await interrupt_fn(state)
 
-        metadata = getattr(interrupt_fn, "__metadata__", None)
-        assert metadata is not None
-        assert metadata["escalation_data"]["reviewed_by"] == "jane@example.com"
+        update = result.update if isinstance(result, Command) else result
+        assert update is not None
+        review_data = update["inner_state"]["escalation_review_data"]
+        assert review_data["reviewed_by"] == "jane@example.com"
 
     # ── Content extraction (pure function tests – no change needed) ───────
 

@@ -1103,6 +1103,7 @@ graph = create_agent(
                         # Return approved escalation result as an object with attributes
                         mock_result = MagicMock()
                         mock_result.action = "Approve"
+                        mock_result.completed_by_user = None
                         mock_result.data = {
                             "ReviewedMessages": json.dumps(
                                 [
