@@ -607,7 +607,9 @@ def _build_response(self):
 | File | Purpose |
 |------|---------|
 | `test_mcp_client.py` | McpClient session tests (7 tests) |
-| `test_mcp_tool.py` | Tool factory tests (17 tests) |
+| `test_mcp_tool.py` | Tool factory tests (20 tests) |
+| `test_mcp_jobs.py` | `uipath.com/job` advertisement, START/FETCH `_meta`, `LangGraphJobExecutor` (9 tests) |
 | `src/.../mcp/mcp_client.py` | McpClient implementation |
 | `src/.../mcp/mcp_tool.py` | Tool factory implementation |
+| `src/.../mcp/job_executor.py` | LangGraphJobExecutor implementation |
 | `src/.../mcp/claude.md` | Implementation documentation |
