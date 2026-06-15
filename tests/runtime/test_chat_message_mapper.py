@@ -1133,13 +1133,17 @@ class TestMapMessages:
         )
         mapper.map_messages([uipath_msg])
 
-        enriched = mapper._enrich_tool_call_input({
-            "attachments": [{"ID": "a940a416-b97b-4146-3089-08de5f4d0a87"}],
-            "analysisTask": "summarize",
-        })
+        enriched = mapper._enrich_tool_call_input(
+            {
+                "attachments": [{"ID": "a940a416-b97b-4146-3089-08de5f4d0a87"}],
+                "analysisTask": "summarize",
+            }
+        )
 
         assert enriched["analysisTask"] == "summarize"
-        assert enriched["attachments"][0]["ID"] == "a940a416-b97b-4146-3089-08de5f4d0a87"
+        assert (
+            enriched["attachments"][0]["ID"] == "a940a416-b97b-4146-3089-08de5f4d0a87"
+        )
         assert enriched["attachments"][0]["FullName"] == "report.pdf"
         assert enriched["attachments"][0]["MimeType"] == "application/pdf"
 
@@ -1157,10 +1161,12 @@ class TestMapMessages:
             "MimeType": "text/plain",
         }
 
-        enriched = mapper._enrich_tool_call_input({
-            "file": {"ID": "abc-123"},
-            "task": "read",
-        })
+        enriched = mapper._enrich_tool_call_input(
+            {
+                "file": {"ID": "abc-123"},
+                "task": "read",
+            }
+        )
 
         assert enriched["file"]["FullName"] == "doc.txt"
         assert enriched["file"]["MimeType"] == "text/plain"
@@ -1191,10 +1197,12 @@ class TestMapMessages:
         )
         mapper.map_messages([uipath_msg])
 
-        enriched = mapper._enrich_tool_call_input({
-            "attachments": [{"ID": "a940a416-b97b-4146-3089-08de5f4d0a87"}],
-            "analysisTask": "summarize",
-        })
+        enriched = mapper._enrich_tool_call_input(
+            {
+                "attachments": [{"ID": "a940a416-b97b-4146-3089-08de5f4d0a87"}],
+                "analysisTask": "summarize",
+            }
+        )
 
         assert enriched["attachments"][0]["FullName"] == "attachment"
         assert enriched["attachments"][0]["MimeType"] == "application/pdf"

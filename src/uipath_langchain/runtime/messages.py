@@ -192,9 +192,7 @@ class UiPathChatMessagesMapper:
                             data.uri
                         )
                         if attachment_id:
-                            resolved_name = (
-                                uipath_content_part.name or "attachment"
-                            )
+                            resolved_name = uipath_content_part.name or "attachment"
                             attachments.append(
                                 {
                                     "id": attachment_id,
