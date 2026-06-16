@@ -13,6 +13,7 @@ Sub-graph definition is in ``datafabric_subgraph.py``.
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -28,6 +29,8 @@ from .models import DataFabricQueryInput
 logger = logging.getLogger(__name__)
 
 BASE_SYSTEM_PROMPT = "base_system_prompt"
+ONTOLOGY_NAME = "ontology_name"
+FOLDER_KEY = "folder_key"
 
 
 class DataFabricTextQueryHandler:
@@ -44,11 +47,15 @@ class DataFabricTextQueryHandler:
         llm: BaseChatModel,
         resource_description: str = "",
         base_system_prompt: str = "",
+        ontology_name: str | None = None,
+        folder_key: str | None = None,
     ) -> None:
         self._entity_set = entity_set
         self._llm = llm
         self._resource_description = resource_description
         self._base_system_prompt = base_system_prompt
+        self._ontology_name = ontology_name
+        self._folder_key = folder_key
         self._compiled: CompiledStateGraph[Any] | None = None
         self._init_lock = asyncio.Lock()
 
@@ -82,6 +89,8 @@ class DataFabricTextQueryHandler:
                 entities_service=resolution.entities_service,
                 resource_description=self._resource_description,
                 base_system_prompt=self._base_system_prompt,
+                ontology_name=self._ontology_name,
+                folder_key=self._folder_key,
             )
             return self._compiled
 
@@ -159,11 +168,18 @@ def create_datafabric_query_tool(
         DataFabricEntityItem.model_validate(item.model_dump(by_alias=True))
         for item in (resource.entity_set or [])
     ]
+    # Ontology name is pinned from configuration (not chosen by the LLM).
+    # Falls back to env vars for local/demo runs that have no Agent Builder UI.
+    # When unset, no fetch_ontology tool is added (fully backward compatible).
+    ontology_name = config.get(ONTOLOGY_NAME) or os.getenv("UIPATH_ONTOLOGY_NAME")
+    folder_key = config.get(FOLDER_KEY) or os.getenv("UIPATH_FOLDER_KEY")
     handler = DataFabricTextQueryHandler(
         entity_set=entity_set,
         llm=llm,
         resource_description=resource.description or "",
         base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
+        ontology_name=ontology_name,
+        folder_key=folder_key,
     )
     entity_lines = []
     for e in entity_set:

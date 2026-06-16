@@ -34,6 +34,7 @@ from uipath.platform.entities import EntitiesService, Entity
 from ..datafabric_query_tool import DataFabricQueryTool
 from . import datafabric_prompt_builder
 from .models import DataFabricExecuteSqlInput
+from .ontology_fetch_tool import create_ontology_fetch_tool
 
 logger = logging.getLogger(__name__)
 
@@ -88,18 +89,32 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
+        ontology_name: str | None = None,
+        folder_key: str | None = None,
     ) -> None:
         self._max_iterations = max_iterations
         self._execute_sql_tool = self._create_execute_sql_tool(
             entities_service, entities
         )
+        # Inner toolset: always execute_sql; optionally an LLM-decided
+        # fetch_ontology tool when an ontology name is configured.
+        inner_tools: list[BaseTool] = [self._execute_sql_tool]
+        if ontology_name:
+            inner_tools.append(
+                create_ontology_fetch_tool(
+                    entities_service, ontology_name, folder_key
+                )
+            )
+        self._tools_by_name: dict[str, BaseTool] = {
+            tool.name: tool for tool in inner_tools
+        }
         self._system_message = SystemMessage(
             content=datafabric_prompt_builder.build(
                 entities, resource_description, base_system_prompt
             )
         )
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
-            [self._execute_sql_tool]
+            inner_tools
         )
 
         # Build and compile the graph
@@ -139,19 +154,42 @@ class DataFabricGraph:
         }
 
     async def _execute_tool_call(self, tool_call: ToolCall) -> tuple[ToolMessage, bool]:
-        """Execute a single tool call and report whether it succeeded."""
+        """Execute a single tool call and report whether it is a terminal success.
+
+        Dispatches by tool name so the sub-graph can host more than one tool
+        (e.g. ``execute_sql`` and ``fetch_ontology``). Only a successful
+        ``execute_sql`` that returned rows is terminal; every other tool
+        (including ontology fetch) reports ``False`` so the router loops back to
+        the inner LLM, letting it use the result to write or refine SQL.
+        """
+        name = tool_call.get("name", "")
         args = tool_call.get("args", {})
+        tool = self._tools_by_name.get(name)
+        if tool is None:
+            return (
+                ToolMessage(
+                    content=f"Unknown tool: {name}",
+                    tool_call_id=tool_call["id"],
+                    name=name,
+                    status="error",
+                ),
+                False,
+            )
         try:
-            result = await self._execute_sql_tool.ainvoke(args)
+            result = await tool.ainvoke(args)
         except ValueError as e:
-            result = {
-                "records": [],
-                "total_count": 0,
-                "error": str(e),
-                "sql_query": args.get("sql_query", ""),
-            }
+            if name == self._execute_sql_tool.name:
+                result = {
+                    "records": [],
+                    "total_count": 0,
+                    "error": str(e),
+                    "sql_query": args.get("sql_query", ""),
+                }
+            else:
+                result = f"Tool '{name}' failed: {e}"
         succeeded = (
-            isinstance(result, dict)
+            name == self._execute_sql_tool.name
+            and isinstance(result, dict)
             and not result.get("error")
             and result.get("total_count", 0) > 0
         )
@@ -159,7 +197,7 @@ class DataFabricGraph:
             ToolMessage(
                 content=str(result),
                 tool_call_id=tool_call["id"],
-                name="execute_sql",
+                name=name,
             ),
             succeeded,
         )
@@ -226,6 +264,8 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
+        ontology_name: str | None = None,
+        folder_key: str | None = None,
     ) -> CompiledStateGraph[Any]:
         """Create and return a compiled Data Fabric sub-graph."""
         graph = DataFabricGraph(
@@ -235,5 +275,7 @@ class DataFabricGraph:
             max_iterations,
             resource_description,
             base_system_prompt,
+            ontology_name,
+            folder_key,
         )
         return graph.compiled_graph
