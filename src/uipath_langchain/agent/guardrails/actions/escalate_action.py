@@ -261,34 +261,39 @@ class EscalateAction(GuardrailAction):
                 )
             )
 
-            # Store reviewed inputs/outputs in metadata for observability
+            # Build review data for observability (passed via state, not metadata,
+            # because metadata dicts get shallow-copied by the LangGraph config
+            # pipeline and mutations from the node body are not visible to callbacks).
+            review_data: Dict[str, Any] = {}
             if escalation_result.data:
                 reviewed_inputs = escalation_result.data.get("ReviewedInputs")
                 reviewed_outputs = escalation_result.data.get("ReviewedOutputs")
                 reason = escalation_result.data.get("Reason")
                 if reviewed_inputs:
-                    metadata["escalation_data"]["reviewed_inputs"] = (
-                        _parse_reviewed_data(reviewed_inputs)
+                    review_data["reviewed_inputs"] = _parse_reviewed_data(
+                        reviewed_inputs
                     )
                 if reviewed_outputs:
-                    metadata["escalation_data"]["reviewed_outputs"] = (
-                        _parse_reviewed_data(reviewed_outputs)
+                    review_data["reviewed_outputs"] = _parse_reviewed_data(
+                        reviewed_outputs
                     )
                 if reason:
-                    metadata["escalation_data"]["reason"] = reason
+                    review_data["reason"] = reason
 
-            # Store reviewed_by from completed_by_user
             completed_by_user = getattr(escalation_result, "completed_by_user", None)
             if completed_by_user:
                 reviewed_by = completed_by_user.get(
                     "displayName"
                 ) or completed_by_user.get("emailAddress")
                 if reviewed_by:
-                    metadata["escalation_data"]["reviewed_by"] = reviewed_by
+                    review_data["reviewed_by"] = reviewed_by
 
-            # Clear the stored task data
+            # Clear the stored task data and publish review data for observability
             cleanup_update: Dict[str, Any] = {
-                "inner_state": {"hitl_task_info": {create_task_node_name: None}},
+                "inner_state": {
+                    "hitl_task_info": {create_task_node_name: None},
+                    "escalation_review_data": review_data if review_data else None,
+                },
             }
 
             if escalation_result.action == "Approve":
@@ -308,12 +313,14 @@ class EscalateAction(GuardrailAction):
                     result = cleanup_update
                 return result
 
-            raise AgentRuntimeError(
+            err = AgentRuntimeError(
                 code=AgentRuntimeErrorCode.TERMINATION_ESCALATION_REJECTED,
                 title="Escalation rejected",
                 detail=f"Action was rejected after reviewing the task created by guardrail [{guardrail.name}], with reason: {escalation_result.data.get('Reason', None)}",
                 category=UiPathErrorCategory.USER,
             )
+            err.escalation_review_data = review_data  # type: ignore[attr-defined]
+            raise err
 
         _interrupt_node.__metadata__ = metadata  # type: ignore[attr-defined]
 

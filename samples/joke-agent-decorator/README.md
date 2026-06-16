@@ -54,6 +54,7 @@ This sample uses a single unified `@guardrail` decorator with three components:
 | `@guardrail(validator=CustomValidator(...))` | `analyze_joke_syntax` tool | Custom (length check) | `BlockAction` — blocks jokes > 1000 chars |
 | `@guardrail(validator=CustomValidator(...))` | `analyze_joke_syntax` tool | Custom (always true) | `CustomFilterAction` — always-on output transform (POST) |
 | `@guardrail(validator=PIIValidator(...EMAIL, PHONE...))` | `analyze_joke_syntax` tool | PII (Email, Phone) | `LogAction(WARNING)` — logs email/phone |
+| `@guardrail(validator=PIIValidator(...EMAIL...))` | `create_joke_agent` factory | PII (Email) | `EscalateAction` — suspends for human review (HITL) |
 | `@guardrail(validator=PIIValidator(...PERSON...))` | `create_joke_agent` factory | PII (Person) | `BlockAction` — blocks person names |
 | `@guardrail(validator=PIIValidator(...PERSON...))` | `joke_node` graph node | PII (Person) | `BlockAction` — blocks person names in node input |
 | `@guardrail(validator=CustomValidator(...))` | `format_joke_for_display` function | Custom (word check) | `CustomFilterAction` — replaces "donkey" in display output |
@@ -124,6 +125,15 @@ def analyze_joke_syntax(joke: str) -> str:
 
 ```python
 @guardrail(
+    validator=pii_email,
+    action=EscalateAction(
+        app_name=ESCALATION_APP_NAME,
+        app_folder_path=ESCALATION_APP_FOLDER,
+    ),
+    name="Agent PII Escalation",
+    stage=GuardrailExecutionStage.PRE,
+)
+@guardrail(
     validator=PIIValidator(
         entities=[PIIDetectionEntity(PIIDetectionEntityType.PERSON, threshold=0.5)],
     ),
@@ -139,6 +149,19 @@ def create_joke_agent():
 
 agent = create_joke_agent()
 ```
+
+### Agent-level escalation (human-in-the-loop)
+
+`EscalateAction` turns a guardrail violation into a human review step. On an EMAIL
+PII violation in the agent input it suspends the run via the documented HITL
+`interrupt(CreateEscalation(...))` primitive, creating a task in the **Guardrail
+Escalation Action App**. A human approves (optionally editing the input) or
+rejects; on resume the run continues with the reviewed input, or terminates on a
+reject. The app name/folder default to the same deployment as the middleware
+`joke-agent` and can be overridden with the `GUARDRAIL_ESCALATION_APP_NAME` /
+`GUARDRAIL_ESCALATION_APP_FOLDER` environment variables. This is the
+decorator-style counterpart of the middleware sample's AGENT-scope escalation —
+no SDK change beyond the `@guardrail` action.
 
 ### Graph node guardrail
 
@@ -239,6 +262,23 @@ uv run uipath run agent '{"topic": "donkey, test@example.com"}'
 
 Both the agent-scope and LLM-scope PII guardrails log a `WARNING` when the email is detected. The tool-scope PII guardrail logs when the email reaches the tool input.
 
+**Scenario 4 — agent-scope escalation (HITL):** supply a topic containing an email address:
+
+```bash
+uv run uipath run agent '{"topic": "a joke about a@b.com"}'
+```
+
+The `Agent PII Escalation` guardrail detects the email and suspends the run,
+creating a review task in the Guardrail Escalation Action App. After a human
+approves (or rejects) the task in Action Center, resume the run:
+
+```bash
+uv run uipath run agent --resume
+```
+
+On approve the agent continues with the reviewed input; on reject the run
+terminates with a guardrail-violation error.
+
 ## Differences from the Middleware Approach (`joke-agent`)
 
 | Aspect | Middleware (`joke-agent`) | Decorator (`joke-agent-decorator`) |
@@ -256,4 +296,5 @@ Both the agent-scope and LLM-scope PII guardrails log a `WARNING` when the email
 - `"banana"` — normal run, all guardrails pass
 - `"donkey"` — triggers the word filter on `analyze_joke_syntax`
 - `"donkey, test@example.com"` — triggers word filter + PII guardrails at all scopes
+- `"a joke about a@b.com"` — triggers the agent-scope escalation (suspends for human review)
 - `"computer"`, `"coffee"`, `"pizza"`, `"weather"`

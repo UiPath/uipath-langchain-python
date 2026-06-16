@@ -23,11 +23,15 @@ from uipath.platform.guardrails.decorators import (
     LogAction,
 )
 
-from uipath_langchain.guardrails.enums import PIIDetectionEntityType
+from uipath_langchain.guardrails.enums import (
+    GuardrailExecutionStage,
+    PIIDetectionEntityType,
+)
 from uipath_langchain.guardrails.middlewares import (
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
     UiPathPIIDetectionMiddleware,
+    UiPathPromptInjectionMiddleware,
     UiPathUserPromptAttacksMiddleware,
 )
 from uipath_langchain.guardrails.models import PIIDetectionEntity
@@ -113,6 +117,25 @@ class TestUserPromptAttacksHookWiring:
         )
 
 
+class TestPromptInjectionHookWiring:
+    """UiPathPromptInjectionMiddleware registers only PRE (before_*) hooks."""
+
+    def test_llm_scope_registers_only_before_model(self) -> None:
+        """LLM scope produces a single before_model hook, no after_* hooks."""
+        middleware = UiPathPromptInjectionMiddleware(
+            scopes=[GuardrailScope.LLM],
+            action=_BLOCK,
+        )
+        names = _hook_names(middleware)
+        assert len(names) == 1
+        assert all("before" in n for n in names), (
+            f"Expected only before_* hooks, got: {names}"
+        )
+        assert not any("after" in n for n in names), (
+            f"No after_* hooks expected, got: {names}"
+        )
+
+
 class TestPIIDetectionHookWiringToolScope:
     """UiPathPIIDetectionMiddleware TOOL scope registers exactly one wrap_tool_call hook."""
 
@@ -140,6 +163,59 @@ class TestPIIDetectionHookWiringToolScope:
         assert not any("before" in n or "after" in n for n in names), (
             f"No before_*/after_* hooks expected for TOOL scope, got: {names}"
         )
+
+
+class TestPIIDetectionHookWiringStageGating:
+    """PII middleware honors ``stage`` for AGENT/LLM scopes (not just TOOL).
+
+    PRE registers only ``before_*``, POST only ``after_*``, PRE_AND_POST both.
+    """
+
+    def _pii(self, scope: GuardrailScope, stage: GuardrailExecutionStage):
+        return UiPathPIIDetectionMiddleware(
+            scopes=[scope],
+            action=_LOG,
+            entities=[PIIDetectionEntity(PIIDetectionEntityType.EMAIL)],
+            stage=stage,
+        )
+
+    def test_agent_pre_registers_only_before_agent(self) -> None:
+        names = _hook_names(
+            self._pii(GuardrailScope.AGENT, GuardrailExecutionStage.PRE)
+        )
+        assert names == ["PII_Detection_before_agent"]
+
+    def test_agent_post_registers_only_after_agent(self) -> None:
+        names = _hook_names(
+            self._pii(GuardrailScope.AGENT, GuardrailExecutionStage.POST)
+        )
+        assert names == ["PII_Detection_after_agent"]
+
+    def test_agent_pre_and_post_registers_both(self) -> None:
+        names = _hook_names(
+            self._pii(GuardrailScope.AGENT, GuardrailExecutionStage.PRE_AND_POST)
+        )
+        assert sorted(names) == [
+            "PII_Detection_after_agent",
+            "PII_Detection_before_agent",
+        ]
+
+    def test_llm_pre_registers_only_before_model(self) -> None:
+        names = _hook_names(self._pii(GuardrailScope.LLM, GuardrailExecutionStage.PRE))
+        assert names == ["PII_Detection_before_model"]
+
+    def test_llm_post_registers_only_after_model(self) -> None:
+        names = _hook_names(self._pii(GuardrailScope.LLM, GuardrailExecutionStage.POST))
+        assert names == ["PII_Detection_after_model"]
+
+    def test_llm_pre_and_post_registers_both(self) -> None:
+        names = _hook_names(
+            self._pii(GuardrailScope.LLM, GuardrailExecutionStage.PRE_AND_POST)
+        )
+        assert sorted(names) == [
+            "PII_Detection_after_model",
+            "PII_Detection_before_model",
+        ]
 
 
 class TestHarmfulContentHookWiringToolScope:
@@ -222,3 +298,55 @@ class TestHarmfulContentHookWiring:
         assert sum(1 for n in names if "after" in n) == 2, (
             f"Expected 2 after_* hooks: {names}"
         )
+
+
+class TestHarmfulContentHookWiringStageGating:
+    """Harmful content honors ``stage`` for AGENT/LLM scopes (mirrors PII).
+
+    PRE registers only ``before_*``, POST only ``after_*``, PRE_AND_POST both —
+    so ``stage=PRE`` no longer also wires ``after_*`` (which would escalate twice).
+    """
+
+    def _hc(self, scope: GuardrailScope, stage: GuardrailExecutionStage):
+        return UiPathHarmfulContentMiddleware(
+            scopes=[scope],
+            action=_LOG,
+            entities=[HarmfulContentEntity("Hate")],
+            stage=stage,
+        )
+
+    def test_agent_pre_registers_only_before_agent(self) -> None:
+        names = _hook_names(self._hc(GuardrailScope.AGENT, GuardrailExecutionStage.PRE))
+        assert names == ["Harmful_Content_Detection_before_agent"]
+
+    def test_agent_post_registers_only_after_agent(self) -> None:
+        names = _hook_names(
+            self._hc(GuardrailScope.AGENT, GuardrailExecutionStage.POST)
+        )
+        assert names == ["Harmful_Content_Detection_after_agent"]
+
+    def test_agent_pre_and_post_registers_both(self) -> None:
+        names = _hook_names(
+            self._hc(GuardrailScope.AGENT, GuardrailExecutionStage.PRE_AND_POST)
+        )
+        assert sorted(names) == [
+            "Harmful_Content_Detection_after_agent",
+            "Harmful_Content_Detection_before_agent",
+        ]
+
+    def test_llm_pre_registers_only_before_model(self) -> None:
+        names = _hook_names(self._hc(GuardrailScope.LLM, GuardrailExecutionStage.PRE))
+        assert names == ["Harmful_Content_Detection_before_model"]
+
+    def test_llm_post_registers_only_after_model(self) -> None:
+        names = _hook_names(self._hc(GuardrailScope.LLM, GuardrailExecutionStage.POST))
+        assert names == ["Harmful_Content_Detection_after_model"]
+
+    def test_llm_pre_and_post_registers_both(self) -> None:
+        names = _hook_names(
+            self._hc(GuardrailScope.LLM, GuardrailExecutionStage.PRE_AND_POST)
+        )
+        assert sorted(names) == [
+            "Harmful_Content_Detection_after_model",
+            "Harmful_Content_Detection_before_model",
+        ]

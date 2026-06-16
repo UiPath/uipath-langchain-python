@@ -1,0 +1,26 @@
+{
+    "version": "2.0",
+    "resources": [
+        {
+            "resource": "app",
+            "key": "Guardrail.Escalation.Action.App.2.Shared",
+            "value": {
+                "name": {
+                    "defaultValue": "Guardrail.Escalation.Action.App.2",
+                    "isExpression": false,
+                    "displayName": "App Name"
+                },
+                "folderPath": {
+                    "defaultValue": "Shared",
+                    "isExpression": false,
+                    "displayName": "App Folder Path"
+                }
+            },
+            "metadata": {
+                "ActivityName": "create_async",
+                "BindingsVersion": "2.2",
+                "DisplayLabel": "app_name"
+            }
+        }
+    ]
+}

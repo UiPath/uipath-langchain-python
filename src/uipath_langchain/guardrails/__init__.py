@@ -31,6 +31,7 @@ from uipath.platform.guardrails.decorators import (
 )
 
 from ._langchain_adapter import LangChainGuardrailAdapter
+from .escalate_action import EscalateAction
 from .middlewares import (
     UiPathDeterministicGuardrailMiddleware,
     UiPathHarmfulContentMiddleware,
@@ -67,6 +68,7 @@ __all__ = [
     # Actions
     "LogAction",
     "BlockAction",
+    "EscalateAction",
     "LoggingSeverityLevel",
     # Exception
     "GuardrailBlockException",

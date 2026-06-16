@@ -1151,6 +1151,53 @@ class TestSemanticSearchErrorHandling:
             with pytest.raises(EnrichedException):
                 await tool.coroutine(query="test query")
 
+    @pytest.mark.asyncio
+    async def test_index_not_found_raises_agent_runtime_error(self, semantic_config):
+        from uipath.platform.errors import ContextGroundingIndexNotFoundError
+
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.side_effect = ContextGroundingIndexNotFoundError(
+                "test_index"
+            )
+            mock_retriever_class.return_value = mock_retriever
+
+            tool = handle_semantic_search("test_search", semantic_config)
+            assert tool.coroutine is not None
+
+            with pytest.raises(AgentRuntimeError) as exc_info:
+                await tool.coroutine(query="test query")
+            assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
+            assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+                AgentRuntimeErrorCode.CONTEXT_GROUNDING_INDEX_NOT_FOUND
+            )
+
+    @pytest.mark.asyncio
+    async def test_ingestion_in_progress_raises_agent_runtime_error(
+        self, semantic_config
+    ):
+        from uipath.platform.errors import IngestionInProgressException
+
+        with patch(
+            "uipath_langchain.agent.tools.context_tool.ContextGroundingRetriever"
+        ) as mock_retriever_class:
+            mock_retriever = AsyncMock()
+            mock_retriever.ainvoke.side_effect = IngestionInProgressException(
+                "test_index"
+            )
+            mock_retriever_class.return_value = mock_retriever
+
+            tool = handle_semantic_search("test_search", semantic_config)
+            assert tool.coroutine is not None
+            with pytest.raises(AgentRuntimeError) as exc_info:
+                await tool.coroutine(query="test query")
+            assert exc_info.value.error_info.category == UiPathErrorCategory.USER
+            assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+                AgentRuntimeErrorCode.CONTEXT_GROUNDING_INDEX_INGESTION_IN_PROGRESS
+            )
+
 
 class TestSemanticSearchSystemIndexFallbackIntegration:
     """End-to-end mocked test that exercises the full SDK chain.

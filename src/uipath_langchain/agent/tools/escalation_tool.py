@@ -14,9 +14,11 @@ from uipath.agent.models.agent import (
     AgentEscalationRecipient,
     AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
+    AgentQuickFormEscalationChannel,
     ArgumentEmailRecipient,
     ArgumentGroupNameRecipient,
     AssetRecipient,
+    EscalationChannel,
     LowCodeAgentDefinition,
     StandardRecipient,
 )
@@ -37,7 +39,12 @@ from uipath_langchain.agent.tools.structured_tool_with_argument_properties impor
     StructuredToolWithArgumentProperties,
 )
 
-from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ..exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+    AgentStartupError,
+    AgentStartupErrorCode,
+)
 from ..react.types import AgentGraphState
 from .escalation_memory import (
     EscalationMemorySettings,
@@ -250,14 +257,79 @@ def _get_exported_trace_id(trace_id: str | None) -> str | None:
     return trace_id
 
 
+def _try_get_channel_app_name(channel: EscalationChannel) -> str | None:
+    return (
+        channel.properties.app_name
+        if isinstance(channel, AgentEscalationChannel)
+        else None
+    )
+
+
+async def create_task_for_channel(
+    client: UiPath,
+    channel: EscalationChannel,
+    *,
+    title: str,
+    data: dict[str, Any],
+    recipient: TaskRecipient | None,
+    folder_path: str | None,
+) -> Task:
+    """Create the human task backing an escalation channel."""
+    if isinstance(channel, AgentQuickFormEscalationChannel):
+        schema_id = channel.properties.schema_id
+        assert schema_id is not None
+        return await client.tasks.create_quickform_async(
+            title=title,
+            task_schema_key=schema_id,
+            schema=channel.properties.form_schema,
+            data=data,
+            folder_path=folder_path,
+            recipient=recipient,
+            priority=channel.priority,
+            labels=channel.labels,
+            is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
+            actionable_message_metadata=channel.properties.actionable_message_meta_data,
+        )
+    return await client.tasks.create_async(
+        title=title,
+        data=data,
+        app_name=channel.properties.app_name,
+        app_folder_path=folder_path,
+        recipient=recipient,
+        priority=channel.priority,
+        labels=channel.labels,
+        is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
+        actionable_message_metadata=channel.properties.actionable_message_meta_data,
+    )
+
+
+def _resolve_channel(resource: AgentEscalationResourceConfig) -> EscalationChannel:
+    """Return the escalation's channel, validating quick-form configuration."""
+    channel = resource.channels[0]
+    if (
+        isinstance(channel, AgentQuickFormEscalationChannel)
+        and channel.properties.schema_id is None
+    ):
+        raise AgentStartupError(
+            code=AgentStartupErrorCode.INVALID_TOOL_CONFIG,
+            title="Quick form escalation is missing a schema id",
+            detail=(
+                f"Escalation '{channel.name}' has a quick form "
+                "schema without a schemaId."
+            ),
+            category=UiPathErrorCategory.USER,
+        )
+    return channel
+
+
 def create_escalation_tool(
     resource: AgentEscalationResourceConfig,
     agent: LowCodeAgentDefinition | None = None,
 ) -> StructuredTool:
-    """Uses interrupt() for Action Center human-in-the-loop."""
+    """Build the human-in-the-loop escalation tool for an escalation resource."""
 
     tool_name: str = f"escalate_{sanitize_tool_name(resource.name)}"
-    channel: AgentEscalationChannel = resource.channels[0]
+    channel: EscalationChannel = _resolve_channel(resource)
 
     input_model: Any = create_model(channel.input_schema)
     output_model: Any = create_model(channel.output_schema)
@@ -327,16 +399,13 @@ def create_escalation_tool(
             @durable_interrupt
             async def create_escalation_task():
                 client = UiPath()
-                created_task = await client.tasks.create_async(
+                created_task = await create_task_for_channel(
+                    client,
+                    channel,
                     title=task_title,
                     data=serialized_data,
-                    app_name=channel.properties.app_name,
-                    app_folder_path=folder_path,
                     recipient=recipient,
-                    priority=channel.priority,
-                    labels=channel.labels,
-                    is_actionable_message_enabled=channel.properties.is_actionable_message_enabled,
-                    actionable_message_metadata=channel.properties.actionable_message_meta_data,
+                    folder_path=folder_path,
                 )
 
                 if created_task.id is not None:
@@ -345,7 +414,7 @@ def create_escalation_tool(
                 return WaitEscalation(
                     action=created_task,
                     app_folder_path=folder_path,
-                    app_name=channel.properties.app_name,
+                    app_name=_try_get_channel_app_name(channel),
                     recipient=recipient,
                 )
 
@@ -487,7 +556,7 @@ def create_escalation_tool(
         argument_properties=channel.argument_properties,
         metadata={
             "tool_type": "escalation",
-            "display_name": channel.properties.app_name,
+            "display_name": _try_get_channel_app_name(channel) or channel.name,
             "channel_type": channel.type,
             "recipient": None,
             "args_schema": input_model,

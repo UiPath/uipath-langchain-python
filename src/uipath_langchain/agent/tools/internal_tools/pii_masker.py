@@ -10,7 +10,7 @@ from typing import Any
 
 from uipath.core.feature_flags import FeatureFlags
 from uipath.platform import UiPath
-from uipath.platform.semantic_proxy import (
+from uipath.platform.pii_detection import (
     PiiDetectionRequest,
     PiiDetectionResponse,
     PiiDocument,
@@ -94,7 +94,7 @@ class PiiMasker:
             ],
             entity_thresholds=self._entity_thresholds_from_policy() or None,
         )
-        self._result = await self._client.semantic_proxy.detect_pii_async(request)
+        self._result = await self._client.pii_detection.detect_pii_async(request)
         logger.info(
             "PII detection completed: %d document entities, %d file entities",
             sum(len(d.pii_entities) for d in self._result.response),

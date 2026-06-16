@@ -23,6 +23,7 @@ from uipath_langchain.agent.react.utils import (
     find_latest_ai_message,
 )
 from uipath_langchain.chat.hitl import (
+    IS_CONVERSATIONAL_CLIENT_SIDE_TOOL,
     REQUIRE_CONVERSATIONAL_CONFIRMATION,
     request_conversational_tool_confirmation,
 )
@@ -279,10 +280,13 @@ def _wrap_tool_error_handling(
 
     tool = getattr(tool_node, "tool", None)
 
-    # Preserve tool ref so the runtime can discover which tools need confirmation
-    # (see runtime.py _get_tool_confirmation_info)
+    # Preserve tool ref so the runtime can discover tool metadata
+    # (confirmation requirements, client-side markers, etc.)
     metadata = getattr(tool, "metadata", None) or {}
-    if isinstance(tool, BaseTool) and metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION):
+    if isinstance(tool, BaseTool) and (
+        metadata.get(REQUIRE_CONVERSATIONAL_CONFIRMATION)
+        or metadata.get(IS_CONVERSATIONAL_CLIENT_SIDE_TOOL)
+    ):
         return RunnableCallableWithTool(
             func=_func, afunc=_afunc, name=tool_name, tool=tool
         )

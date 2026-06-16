@@ -10,6 +10,8 @@ from uipath.agent.models.agent import (
     AgentEscalationChannel,
     AgentEscalationChannelProperties,
     AgentIxpVsEscalationResourceConfig,
+    AgentQuickFormChannelProperties,
+    AgentQuickFormEscalationChannel,
 )
 from uipath.platform.common import WaitDocumentExtractionValidation
 from uipath.platform.documents import (
@@ -18,7 +20,7 @@ from uipath.platform.documents import (
     ValidateExtractionAction,
 )
 
-from uipath_langchain.agent.exceptions import AgentRuntimeError
+from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentStartupError
 from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphState
 from uipath_langchain.agent.tools.ixp_escalation_tool import create_ixp_escalation_tool
 
@@ -130,6 +132,45 @@ class TestIxpEscalationToolCreation:
         assert tool.metadata["tool_type"] == "vs_escalation"
         assert tool.metadata["ixp_tool_id"] == "some_tool_id"
         assert tool.metadata["storage_bucket_name"] == "some_bucket_name"
+
+    def test_tool_metadata_display_name_is_app_name(self, escalation_resource):
+        """Test that display_name comes from the Action Center channel app name."""
+        tool = create_ixp_escalation_tool(escalation_resource)
+        assert tool.metadata is not None
+        assert tool.metadata["display_name"] == "ApprovalApp"
+
+    def test_create_raises_for_quick_form_channel(self):
+        """Test that a VS escalation rejects a quick-form channel at construction."""
+        resource = AgentIxpVsEscalationResourceConfig(
+            name="validate_invoice",
+            description="Validate extracted invoice data",
+            input_schema={"type": "object", "properties": {}},
+            output_schema={"type": "object", "properties": {}},
+            vs_escalation_properties={
+                "ixpToolId": "some_tool_id",
+                "storageBucketName": "some_bucket_name",
+                "storageBucketFolderPath": "some_solution_folder",
+            },
+            channels=[
+                AgentQuickFormEscalationChannel(
+                    name="quick_form",
+                    type="actionCenterQuickForm",
+                    description="Quick Form channel",
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {}},
+                    properties=AgentQuickFormChannelProperties(
+                        form_schema={"schemaId": "schema-123", "fields": []},
+                    ),
+                    recipients=[],
+                )
+            ],
+        )
+
+        with pytest.raises(AgentStartupError) as exc_info:
+            create_ixp_escalation_tool(resource)
+
+        assert "INVALID_TOOL_CONFIG" in exc_info.value.error_info.code
+        assert "actionCenterQuickForm" in exc_info.value.error_info.detail
 
 
 class TestIxpEscalationToolWrapper:

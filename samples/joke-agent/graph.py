@@ -12,6 +12,7 @@ from uipath.core.guardrails import GuardrailScope
 from uipath_langchain.chat import UiPathChat
 from uipath_langchain.guardrails import (
     BlockAction,
+    EscalateAction,
     GuardrailExecutionStage,
     HarmfulContentEntity,
     LogAction,
@@ -93,13 +94,28 @@ agent = create_agent(
     system_prompt=SYSTEM_PROMPT,
     middleware=[
         *LoggingMiddleware,
+        # PII detection on the agent scope. On a violation it escalates to the
+        # Guardrail Escalation Action App for human review via the documented
+        # HITL interrupt(CreateEscalation(...)) — the run suspends until a human
+        # approves (optionally editing the content) or rejects.
         *UiPathPIIDetectionMiddleware(
-            name="My personal PII detector",
-            scopes=[GuardrailScope.AGENT, GuardrailScope.LLM],
-            action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
+            name="PII escalation guardrail",
+            scopes=[GuardrailScope.AGENT],
+            # PRE only → validate the input once, so the escalation triggers a
+            # single time per run (AGENT scope would otherwise check both
+            # before_agent and after_agent).
+            stage=GuardrailExecutionStage.PRE,
+            action=EscalateAction(
+                # Escalation Action App — declared as a binding in bindings.json
+                # (resource "app"). Studio/deploy resolves and can override it;
+                # locally these literal values are used.
+                app_name="Guardrail.Escalation.Action.App.2",
+                app_folder_path="Shared",
+            ),
             entities=[
                 PIIDetectionEntity(PIIDetectionEntityType.EMAIL, 0.5),
                 PIIDetectionEntity(PIIDetectionEntityType.CREDIT_CARD_NUMBER, 0.5),
+                PIIDetectionEntity(PIIDetectionEntityType.PHONE_NUMBER, 0.5),
             ],
         ),
         *UiPathPIIDetectionMiddleware(
@@ -182,26 +198,23 @@ agent = create_agent(
 )
 
 
-# Wrapper node to convert topic input to messages and call the agent
+# Wrapper node to convert topic input to messages and call the agent. The
+# guardrail middleware runs inside the agent; when the PII escalation guardrail
+# fires, interrupt(CreateEscalation(...)) suspends the run for human review.
 async def joke_node(state: Input) -> Output:
     """Convert topic to messages, call agent, and extract joke."""
-    # Convert topic to messages format
     messages = [
         HumanMessage(
             content=f"Generate a family-friendly joke based on the topic: {state.topic}"
         )
     ]
-
-    # Call the agent with messages
     result = await agent.ainvoke({"messages": messages})
-
-    # Extract the joke from the agent's response
     joke = result["messages"][-1].content
-
     return Output(joke=joke)
 
 
-# Build wrapper graph with custom input/output schemas
+# Build wrapper graph with custom input/output schemas. The runtime recompiles
+# this with a durable checkpointer, so interrupt()/resume works under `uipath run`.
 builder = StateGraph(Input, input_schema=Input, output_schema=Output)
 builder.add_node("joke", joke_node)
 builder.add_edge(START, "joke")

@@ -1,17 +1,10 @@
 """Intellectual property detection guardrail middleware."""
 
 import logging
-from typing import Any, Sequence
+from typing import Sequence
 from uuid import uuid4
 
-from langchain.agents.middleware import (
-    AgentMiddleware,
-    AgentState,
-    after_agent,
-    after_model,
-)
-from langchain_core.messages import AIMessage
-from langgraph.runtime import Runtime
+from langchain.agents.middleware import AgentMiddleware
 from uipath.core.guardrails import GuardrailSelector
 from uipath.platform.guardrails import (
     BuiltInValidatorGuardrail,
@@ -19,6 +12,7 @@ from uipath.platform.guardrails import (
     GuardrailScope,
 )
 
+from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction
 from ._base import BuiltInGuardrailMiddlewareMixin
 
@@ -80,36 +74,27 @@ class UiPathIntellectualPropertyMiddleware(BuiltInGuardrailMiddlewareMixin):
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
-        """Create middleware instances — POST only (after_agent, after_model)."""
-        instances = []
-        middleware_instance = self
+        """Create middleware instances — POST only (after_agent, after_model).
+
+        Built via the shared ``_build_message_hooks`` helper forced to ``POST``,
+        so IP only ever registers the ``after_*`` hooks (it validates generated
+        output, never input).
+        """
+        instances: list[AgentMiddleware] = []
         guardrail_name = self._name.replace(" ", "_")
 
         if GuardrailScope.AGENT in self.scopes:
-
-            async def _after_agent_func(
-                state: AgentState[Any], runtime: Runtime
-            ) -> None:
-                messages = state.get("messages", [])
-                middleware_instance._check_messages(list(messages))
-
-            _after_agent_func.__name__ = f"{guardrail_name}_after_agent"
-            _after_agent = after_agent(_after_agent_func)
-            instances.append(_after_agent)
-
+            instances.extend(
+                self._build_message_hooks(
+                    GuardrailScope.AGENT, GuardrailExecutionStage.POST, guardrail_name
+                )
+            )
         if GuardrailScope.LLM in self.scopes:
-
-            async def _after_model_func(
-                state: AgentState[Any], runtime: Runtime
-            ) -> None:
-                messages = state.get("messages", [])
-                ai_messages = [msg for msg in messages if isinstance(msg, AIMessage)]
-                if ai_messages:
-                    middleware_instance._check_messages([ai_messages[-1]])
-
-            _after_model_func.__name__ = f"{guardrail_name}_after_model"
-            _after_model = after_model(_after_model_func)
-            instances.append(_after_model)
+            instances.extend(
+                self._build_message_hooks(
+                    GuardrailScope.LLM, GuardrailExecutionStage.POST, guardrail_name
+                )
+            )
 
         return instances
 

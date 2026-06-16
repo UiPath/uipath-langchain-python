@@ -20,6 +20,7 @@ For more information on UiPath apps, refer to the [UiPath Apps User Guide](https
 -   **title** (str): The title of the action to create.
 -   **data** (Optional[Dict[str, Any]]): Values that the action will be populated with.
 -   **assignee** (Optional[str]): The username or email of the person assigned to handle the escalation.
+-   **recipient** (Optional[TaskRecipient]): A structured recipient that assigns the action to a specific user (by email or id) or group (by name or id). Takes precedence over **assignee** when both are set. See [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group).
 
 #### Example:
 
@@ -35,6 +36,57 @@ The human's decision (which Approve/Reject button was clicked, stored in `task.a
 
 For a practical implementation of the `CreateTask` model, refer to the [ticket-classification sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/ticket-classification). This sample demonstrates how to create an action with dynamic input.
 
+#### Assigning the action to a user or group
+
+`CreateTask` and `CreateEscalation` — together with their wait counterparts [`WaitTask`](#2-waittask) and [`WaitEscalation`](#4-waitescalation) — support two ways to assign the action:
+
+-   **assignee** (Optional[str]): The simple shortcut — a single username or email.
+-   **recipient** (Optional[TaskRecipient]): A structured recipient that can target a **user** (by email or id) or a **group** (by name or id). When both are provided, **`recipient` takes precedence over `assignee`**.
+
+`TaskRecipient` is imported from `uipath.platform.action_center.tasks` and has the following fields:
+
+-   **type** (TaskRecipientType): The kind of recipient (see the table below).
+-   **value** (str): The identifier — an email, group name, user id, or group id, matching `type`.
+-   **display_name** (Optional[str]): An optional human-readable name. For `USER_ID` and `GROUP_ID` recipients it is resolved automatically from the identity service.
+
+| TaskRecipientType | Assigns to | `value` holds |
+| --- | --- | --- |
+| `EMAIL` | a single user, by email | the user's email |
+| `USER_ID` | a single user, by id | the user id |
+| `GROUP_NAME` | a group, by name | the group name |
+| `GROUP_ID` | a group, by id | the group id |
+
+#### Example:
+
+```python
+from uipath.platform.common import CreateTask
+from uipath.platform.action_center.tasks import TaskRecipient, TaskRecipientType
+
+# Assign to a single user by email
+task_output = interrupt(
+    CreateTask(
+        app_name="AppName",
+        app_folder_path="MyFolderPath",
+        title="Escalate Issue",
+        data={"key": "value"},
+        recipient=TaskRecipient(type=TaskRecipientType.EMAIL, value="user@example.com"),
+    )
+)
+
+# Or assign to a group by name
+task_output = interrupt(
+    CreateTask(
+        app_name="AppName",
+        app_folder_path="MyFolderPath",
+        title="Escalate Issue",
+        data={"key": "value"},
+        recipient=TaskRecipient(type=TaskRecipientType.GROUP_NAME, value="Finance Approvers"),
+    )
+)
+```
+
+The same `recipient` field is available on `CreateEscalation`, `WaitTask`, and `WaitEscalation`.
+
 ---
 
 ### 2. WaitTask
@@ -45,6 +97,7 @@ The `WaitTask` model is used to wait for a task to be handled. This model is int
 
 -   **task** (Task): The instance of the task to wait for.
 -   **app_folder_path** (Optional[str]): The folder path of the app.
+-   **recipient** (Optional[TaskRecipient]): Optionally assign the task to a user or group while waiting. See [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group).
 
 #### Example:
 
@@ -62,7 +115,7 @@ Like `CreateTask`, the return value is the task output only. Use [`WaitEscalatio
 
 The `CreateEscalation` model creates an Action Center action the same way `CreateTask` does, but when the agent resumes it receives the **full `Task` object** instead of just `task.data`. Use this when the agent needs to branch on the human's decision (the button the reviewer clicked, stored in `task.action`) rather than only on the data fields written back by the app.
 
-Accepts the same attributes as [`CreateTask`](#1-createtask).
+Accepts the same attributes as [`CreateTask`](#1-createtask), including `assignee` and `recipient` (see [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group)).
 
 #### Example:
 
@@ -98,6 +151,7 @@ The return value is the full `Task` object (including `task.action`, `task.data`
 
 -   **action** (Task): The instance of the task to wait for.
 -   **app_folder_path** (Optional[str]): The folder path of the app.
+-   **recipient** (Optional[TaskRecipient]): Optionally assign the task to a user or group while waiting. See [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group).
 
 #### Example:
 

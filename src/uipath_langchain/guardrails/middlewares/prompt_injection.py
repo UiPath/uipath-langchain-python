@@ -1,15 +1,15 @@
 """Prompt injection detection guardrail middleware."""
 
 import logging
-from typing import Any, Sequence
+from typing import Sequence
 from uuid import uuid4
 
-from langchain.agents.middleware import AgentMiddleware, AgentState, before_model
-from langgraph.runtime import Runtime
+from langchain.agents.middleware import AgentMiddleware
 from uipath.core.guardrails import GuardrailSelector
 from uipath.platform.guardrails import BuiltInValidatorGuardrail, GuardrailScope
 from uipath.platform.guardrails.guardrails import NumberParameterValue
 
+from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction
 from ._base import BuiltInGuardrailMiddlewareMixin
 
@@ -85,20 +85,11 @@ class UiPathPromptInjectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
-        """Create middleware instances from decorated functions."""
-        instances = []
-        middleware_instance = self
+        """Create middleware instances — LLM scope, PRE only (before_model)."""
         guardrail_name = self._name.replace(" ", "_")
-
-        async def _before_model_func(state: AgentState[Any], runtime: Runtime) -> None:
-            messages = state.get("messages", [])
-            middleware_instance._check_messages(list(messages))
-
-        _before_model_func.__name__ = f"{guardrail_name}_before_model"
-        _before_model = before_model(_before_model_func)
-        instances.append(_before_model)
-
-        return instances
+        return self._build_message_hooks(
+            GuardrailScope.LLM, GuardrailExecutionStage.PRE, guardrail_name
+        )
 
     def __iter__(self):
         """Make the class iterable to return middleware instances."""
