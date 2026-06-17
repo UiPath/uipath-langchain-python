@@ -39,9 +39,15 @@ class _TraceContextHeadersCallback(BaseCallbackHandler):
 
     run_inline: bool = True
 
+    def __init__(self, trace_context_extra_baggage: list[str] | None = None) -> None:
+        super().__init__()
+        self._trace_context_extra_baggage = trace_context_extra_baggage
+
     def _merge_headers(self) -> None:
         existing = get_dynamic_request_headers()
-        existing.update(build_trace_context_headers(extra_baggage=["source=agents"]))
+        existing.update(
+            build_trace_context_headers(extra_baggage=self._trace_context_extra_baggage)
+        )
         set_dynamic_request_headers(existing)
 
     def on_chat_model_start(
@@ -78,6 +84,7 @@ def get_chat_model(
     callbacks: Callbacks = _UNSET,
     agenthub_config: str | None = None,
     use_new_llm_clients: bool = True,
+    trace_context_extra_baggage: list[str] | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create and configure a chat model, dispatching legacy vs new clients.
@@ -109,6 +116,9 @@ def get_chat_model(
         use_new_llm_clients: Routes to the new ``uipath_langchain_client``
             factory when True (default). When False, routes to the legacy
             in-repo clients.
+        trace_context_extra_baggage: Optional caller-owned trace baggage
+            additions, for example ``source=<product>``. This shared package does
+            not default product source attribution.
         **kwargs: Forwarded to the underlying factory. The legacy factory
             accepts ``disable_streaming``; the new factory forwards extras as
             model kwargs to the LangChain constructor.
@@ -120,7 +130,10 @@ def get_chat_model(
     # callback.  For the new path the UiPathHttpxClient reads the ContextVar
     # set by the callback; for the legacy path the callback is a no-op but
     # keeps the wiring consistent.
-    callbacks = _ensure_trace_context_callback(callbacks)
+    callbacks = _ensure_trace_context_callback(
+        callbacks,
+        trace_context_extra_baggage=trace_context_extra_baggage,
+    )
 
     if not use_new_llm_clients:
         return _legacy_chat_model(
@@ -129,6 +142,7 @@ def get_chat_model(
             max_tokens=max_tokens,
             agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
+            trace_context_extra_baggage=trace_context_extra_baggage,
             **kwargs,
         )
 
@@ -158,14 +172,31 @@ def get_chat_model(
     )
 
 
-def _ensure_trace_context_callback(callbacks: Callbacks) -> list[BaseCallbackHandler]:
-    """Append a ``_TraceContextHeadersCallback`` if one is not already present."""
+def _ensure_trace_context_callback(
+    callbacks: Callbacks,
+    *,
+    trace_context_extra_baggage: list[str] | None = None,
+) -> list[BaseCallbackHandler]:
+    """Append or update a ``_TraceContextHeadersCallback`` for trace headers."""
     if callbacks is _UNSET or callbacks is None:
         cb_list: list[BaseCallbackHandler] = []
     else:
         cb_list = list(callbacks)  # type: ignore[arg-type]
-    if not any(isinstance(cb, _TraceContextHeadersCallback) for cb in cb_list):
-        cb_list.append(_TraceContextHeadersCallback())
+
+    existing_callback = next(
+        (cb for cb in cb_list if isinstance(cb, _TraceContextHeadersCallback)),
+        None,
+    )
+    if existing_callback is not None:
+        if trace_context_extra_baggage is not None:
+            existing_callback._trace_context_extra_baggage = trace_context_extra_baggage
+        return cb_list
+
+    cb_list.append(
+        _TraceContextHeadersCallback(
+            trace_context_extra_baggage=trace_context_extra_baggage
+        )
+    )
     return cb_list
 
 
@@ -176,6 +207,7 @@ def _legacy_chat_model(
     max_tokens: int | None,
     agenthub_config: str | None,
     byo_connection_id: str | None,
+    trace_context_extra_baggage: list[str] | None,
     **kwargs: Any,
 ) -> BaseChatModel:
     if agenthub_config is None:
@@ -191,5 +223,6 @@ def _legacy_chat_model(
         max_tokens,
         agenthub_config,
         byo_connection_id,
+        trace_context_extra_baggage=trace_context_extra_baggage,
         **kwargs,
     )
