@@ -257,6 +257,39 @@ finally:
 
 Creates tools for a single MCP resource config using an existing McpClient.
 
+The discovery mode comes from `config.tools_configuration.discovery_mode`, defaulting
+to cached when `tools_configuration` is unset.
+
+**Cached mode + self-healing schema (`refresh_schema_before_call`):** `CachedToolsConfig`
+carries a `refresh_schema_before_call` flag (default `True`). When set, each tool's
+`tool_fn` calls `mcpClient.list_tools()` immediately before `call_tool()` and compares
+the live input schema with the cached one (`_refresh_tool_schema` + `_breaking_schema_change`):
+
+- **No breaking change** (identical, or only additive/cosmetic): the call proceeds
+  against the cached schema as normal.
+- **Breaking change** (a newly required param, a dropped/renamed cached param, or a
+  type change on a shared param): the tool is **not** executed. The cached snapshot
+  (`mcp_tool`) and the model-facing `args_schema` are updated in place to the live
+  schema, and `tool_fn` returns a retry instruction (`_schema_change_message`, which
+  lists each refreshed param with its type and optionality). The ReAct loop re-binds
+  tools on the next LLM turn (`llm_node.py` binds fresh every step),
+  so the model re-issues the call against the live schema and it succeeds on retry.
+- **Tool removed** (no longer in the live `list_tools()`): the tool is **not** executed;
+  `tool_fn` returns a message (`_tool_removed_message`) telling the model the tool is
+  gone, so it stops calling it instead of retrying a doomed call.
+
+The tool wrapper reference needed to mutate `args_schema` is passed to `build_mcp_tool`
+via a small `tool_holder` dict filled right after the tool is constructed. This keeps
+the whole mechanism inside the MCP tool (the tool does not import or know about the
+ReAct loop). `list_tools()` is **not** called at tool-creation time for cached mode.
+The flag is read directly from the cached `discovery_mode.refresh_schema_before_call`
+field (default `True`).
+
+**Limitation:** tools with static argument bindings (non-empty `argument_properties`)
+are re-bound each turn from a cached copy in `StaticArgsHandler`, so the `args_schema`
+mutation may not reach the model; those tools fall back to the server's validation
+error instead of self-healing.
+
 #### `open_mcp_tools(config)` → Context Manager
 
 Async context manager that wraps `create_mcp_tools_and_clients()` with automatic
