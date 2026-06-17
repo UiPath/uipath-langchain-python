@@ -22,9 +22,11 @@ from uipath.platform.entities import EntitiesService
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
 from .models import OntologyFetchInput
-from .ontology_client import fetch_ontology_owl
 
 logger = logging.getLogger(__name__)
+
+# Defensive cap so a malformed/oversized OWL can't blow up the prompt/token budget.
+_MAX_OWL_BYTES = 1_000_000
 
 
 def _notation_label(media_type: str) -> str:
@@ -72,9 +74,16 @@ class OntologyFetcher:
         if self._cached is not None:
             return self._cached
         try:
-            owl, media_type = await fetch_ontology_owl(
-                self._entities_service, self._ontology_name, self._folder_key
+            data = await self._entities_service.get_ontology_file_async(
+                self._ontology_name, "owl", self._folder_key
             )
+            owl = data.get("content") or ""
+            media_type = data.get("mediaType") or ""
+            if len(owl.encode("utf-8")) > _MAX_OWL_BYTES:
+                raise ValueError(
+                    f"Ontology '{self._ontology_name}' OWL exceeds "
+                    f"{_MAX_OWL_BYTES} bytes."
+                )
         except Exception as e:
             # Graceful degradation — ontology is an enhancement, not a hard
             # dependency. Do not surface internal error detail to the model.
