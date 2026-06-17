@@ -1,6 +1,45 @@
 # Chat Models
 
-UiPath provides two chat models `UiPathAzureChatOpenAI` and `UiPathChat`. These are compatible with LangGraph as drop in replacements. You do not need to add tokens from OpenAI or Anthropic, usage of these chat models will consume `Agent Units` on your account.
+UiPath provides chat model classes for several providers (OpenAI via `UiPathAzureChatOpenAI`, Anthropic on AWS Bedrock via `UiPathChatAnthropicBedrock`, Google Vertex AI via `UiPathChatGoogleGenerativeAI`, and more), plus the generic `UiPathChat`. These are compatible with LangGraph as drop in replacements. You do not need to add tokens from OpenAI, Anthropic, or Google, usage of these chat models will consume `Agent Units` on your account.
+
+## Available models
+
+LLM models are served through the UiPath LLM Gateway and are subject to [AI Trust Layer](https://docs.uipath.com/automation-cloud/automation-cloud/latest/admin-guide/about-ai-trust-layer) policies, so the exact set of models available to you depends on your tenant configuration. List the models you can use with the `uipath` CLI:
+
+```console
+$ uipath list-models
+                                   Available LLM Models
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓
+┃ AwsBedrock                               ┃ OpenAi                  ┃ VertexAi         ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩
+│ anthropic.claude-haiku-4-5-20251001-v1:0 │ gpt-4.1-2025-04-14      │ gemini-2.5-flash │
+│ anthropic.claude-opus-4-7                │ gpt-4.1-mini-2025-04-14 │ gemini-2.5-pro   │
+│ ...                                      │ ...                     │ ...              │
+└──────────────────────────────────────────┴─────────────────────────┴──────────────────┘
+```
+
+Pick a model id from the relevant provider column and pass it to the matching chat model class:
+
+```python
+from uipath_langchain.chat import (
+    UiPathAzureChatOpenAI,
+    UiPathChatAnthropicBedrock,
+    UiPathChatGoogleGenerativeAI,
+)
+
+# AWS Bedrock (Anthropic) models
+llm = UiPathChatAnthropicBedrock(model="anthropic.claude-haiku-4-5-20251001-v1:0")
+
+# OpenAI models
+llm = UiPathAzureChatOpenAI(model="gpt-4.1-mini-2025-04-14")
+
+# Google Vertex AI models
+llm = UiPathChatGoogleGenerativeAI(model="gemini-2.5-flash")
+```
+
+/// note | Passthrough vs normalized
+The provider-specific classes (`UiPathAzureChatOpenAI`, `UiPathChatAnthropicBedrock`, `UiPathChatGoogleGenerativeAI`) are passthrough: requests and responses go directly to the provider API, so you get the provider's full, native feature set. `UiPathChat` is normalized: it exposes a single unified interface across providers at the cost of provider-specific capabilities. We recommend the passthrough classes.
+///
 
 ## UiPathAzureChatOpenAI
 
@@ -41,9 +80,7 @@ llm = UiPathAzureChatOpenAI(
 )
 ```
 
-Currently, the following models can be used with `UiPathAzureChatOpenAI` (this list can be updated in the future):
-
--   `gpt-4`, `gpt-4-1106-Preview`, `gpt-4-32k`, `gpt-4-turbo-2024-04-09`, `gpt-4-vision-preview`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-mini-2024-07-18`, `gpt-4.1-mini-2025-04-14`, `o3-mini-2025-01-31`
+`UiPathAzureChatOpenAI` supports the OpenAI models (the `OpenAi` column of [`uipath list-models`](#available-models)).
 
 ## UiPathChat
 
@@ -81,9 +118,7 @@ llm = UiPathChat(
 )
 ```
 
-Currently the following models can be used with `UiPathChat` (this list can be updated in the future):
-
--   `anthropic.claude-3-5-sonnet-20240620-v1:0`, `anthropic.claude-3-5-sonnet-20241022-v2:0`, `anthropic.claude-3-7-sonnet-20250219-v1:0`, `anthropic.claude-3-haiku-20240307-v1:0`, `gemini-1.5-pro-001`, `gemini-2.0-flash-001`, `gpt-4o-2024-05-13`, `gpt-4o-2024-08-06`, `gpt-4o-2024-11-20`, `gpt-4o-mini-2024-07-18`, `o3-mini-2025-01-31`
+`UiPathChat` supports models from multiple vendors (AWS Bedrock, OpenAI, Google Vertex AI), so it can use any model from [`uipath list-models`](#available-models).
 
 /// warning
 Please note that you may get errors related to data residency, as some models are not available on all regions.
