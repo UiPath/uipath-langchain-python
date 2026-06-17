@@ -89,21 +89,18 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
-        ontology_name: str | None = None,
-        folder_key: str | None = None,
+        ontologies: list[tuple[str, str | None]] | None = None,
     ) -> None:
         self._max_iterations = max_iterations
         self._execute_sql_tool = self._create_execute_sql_tool(
             entities_service, entities
         )
         # Inner toolset: always execute_sql; optionally an LLM-decided
-        # fetch_ontology tool when an ontology name is configured.
+        # fetch_ontology tool when one or more ontologies are configured.
         inner_tools: list[BaseTool] = [self._execute_sql_tool]
-        if ontology_name:
+        if ontologies:
             inner_tools.append(
-                create_ontology_fetch_tool(
-                    entities_service, ontology_name, folder_key
-                )
+                create_ontology_fetch_tool(entities_service, ontologies)
             )
         self._tools_by_name: dict[str, BaseTool] = {
             tool.name: tool for tool in inner_tools
@@ -264,8 +261,7 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
-        ontology_name: str | None = None,
-        folder_key: str | None = None,
+        ontologies: list[tuple[str, str | None]] | None = None,
     ) -> CompiledStateGraph[Any]:
         """Create and return a compiled Data Fabric sub-graph."""
         graph = DataFabricGraph(
@@ -275,7 +271,6 @@ class DataFabricGraph:
             max_iterations,
             resource_description,
             base_system_prompt,
-            ontology_name,
-            folder_key,
+            ontologies,
         )
         return graph.compiled_graph

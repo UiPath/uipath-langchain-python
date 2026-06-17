@@ -47,15 +47,13 @@ class DataFabricTextQueryHandler:
         llm: BaseChatModel,
         resource_description: str = "",
         base_system_prompt: str = "",
-        ontology_name: str | None = None,
-        folder_key: str | None = None,
+        ontologies: list[tuple[str, str | None]] | None = None,
     ) -> None:
         self._entity_set = entity_set
         self._llm = llm
         self._resource_description = resource_description
         self._base_system_prompt = base_system_prompt
-        self._ontology_name = ontology_name
-        self._folder_key = folder_key
+        self._ontologies = ontologies or []
         self._compiled: CompiledStateGraph[Any] | None = None
         self._init_lock = asyncio.Lock()
 
@@ -89,8 +87,7 @@ class DataFabricTextQueryHandler:
                 entities_service=resolution.entities_service,
                 resource_description=self._resource_description,
                 base_system_prompt=self._base_system_prompt,
-                ontology_name=self._ontology_name,
-                folder_key=self._folder_key,
+                ontologies=self._ontologies,
             )
             return self._compiled
 
@@ -168,39 +165,37 @@ def create_datafabric_query_tool(
         DataFabricEntityItem.model_validate(item.model_dump(by_alias=True))
         for item in (resource.entity_set or [])
     ]
-    # Ontology name is pinned from configuration (not chosen by the LLM).
-    # Falls back to env vars for local/demo runs that have no Agent Builder UI.
-    # When unset, no fetch_ontology tool is added (fully backward compatible).
-    # Ontology binding — the first-class source, mirroring entity_set. The
-    # binding carries the ontology name AND its own folderId, so the ontology is
-    # resolved from its own folder (entities may span several folders).
-    ontology_binding = getattr(resource, "ontology", None)
-    # Single-folder derivation is only a last-resort fallback for legacy
-    # agent.json with no ontology binding (and only when entities share a folder).
+    # Ontologies are first-class bindings, mirroring entity_set: a LIST, each
+    # carrying its own folderId so it is resolved from its own folder (entities
+    # may also span several folders). Falls back to a single env-configured
+    # ontology for local/demo runs with no binding. Empty → no fetch tool added.
     entity_folders = {
         e.folder_key for e in entity_set if getattr(e, "folder_key", None)
     }
     derived_folder_key = (
         next(iter(entity_folders)) if len(entity_folders) == 1 else None
     )
-    ontology_name = (
-        (ontology_binding.name if ontology_binding else None)
-        or config.get(ONTOLOGY_NAME)
-        or os.getenv("UIPATH_ONTOLOGY_NAME")
-    )
-    folder_key = (
-        (ontology_binding.folder_key if ontology_binding else None)
-        or config.get(FOLDER_KEY)
-        or os.getenv("UIPATH_FOLDER_KEY")
-        or derived_folder_key
-    )
+    ontology_items = getattr(resource, "ontology_set", None) or []
+    ontologies: list[tuple[str, str | None]] = [
+        (o.name, o.folder_key or derived_folder_key)
+        for o in ontology_items
+        if getattr(o, "name", None)
+    ]
+    if not ontologies:
+        env_name = config.get(ONTOLOGY_NAME) or os.getenv("UIPATH_ONTOLOGY_NAME")
+        if env_name:
+            env_folder = (
+                config.get(FOLDER_KEY)
+                or os.getenv("UIPATH_FOLDER_KEY")
+                or derived_folder_key
+            )
+            ontologies = [(env_name, env_folder)]
     handler = DataFabricTextQueryHandler(
         entity_set=entity_set,
         llm=llm,
         resource_description=resource.description or "",
         base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
-        ontology_name=ontology_name,
-        folder_key=folder_key,
+        ontologies=ontologies,
     )
     entity_lines = []
     for e in entity_set:
