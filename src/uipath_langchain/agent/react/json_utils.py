@@ -160,16 +160,18 @@ def _create_type_matcher(type_name: str, target_type: Any) -> Any:
     """
 
     def matches_type(annotation: Any) -> bool:
-        """Check if an annotation matches the target type name."""
+        """Whether ``annotation`` refers to ``type_name``, by name or identity."""
         if isinstance(annotation, ForwardRef):
             return annotation.__forward_arg__ == type_name
         if isinstance(annotation, str):
             return annotation == type_name
-        if hasattr(annotation, "__name__") and annotation.__name__ == type_name:
-            return True
-        if target_type is not None and annotation is target_type:
-            return True
-        return False
+        # prefer the per-class marker: identity/target_type break when several
+        # dynamic models are built (they share the same module).
+        return (
+            getattr(annotation, "__uipath_marker_name__", None) == type_name
+            or getattr(annotation, "__name__", None) == type_name
+            or (target_type is not None and annotation is target_type)
+        )
 
     return matches_type
 
