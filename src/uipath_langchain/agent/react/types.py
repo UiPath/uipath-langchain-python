@@ -27,6 +27,7 @@ class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
 
     guardrail_validation_result: Optional[bool] = None
     guardrail_validation_details: Optional[str] = None
+    guardrail_span_id: Optional[str] = None
     agent_result: Optional[dict[str, Any]] = None
     hitl_task_info: Optional[Any] = {}
     escalation_review_data: Optional[dict[str, Any]] = None
