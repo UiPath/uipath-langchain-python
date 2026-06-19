@@ -666,6 +666,7 @@ class TestGuardrailHelperFunctions:
         command = _create_validation_command(result, "success_node", "failure_node")
 
         assert command.goto == "success_node"
+        assert command.update is not None
         assert "guardrail_span_id" not in command.update["inner_state"]
 
     def test_create_validation_command_feature_disabled_raises_exception(self):
