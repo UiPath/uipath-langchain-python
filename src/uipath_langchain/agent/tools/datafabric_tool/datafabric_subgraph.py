@@ -143,11 +143,15 @@ class DataFabricGraph:
             *[self._execute_tool_call(tc) for tc in last.tool_calls]
         )
         tool_messages = [msg for msg, _ in results]
-        all_succeeded = bool(results) and all(success for _, success in results)
+        # End as soon as ANY tool call is a terminal success (a row-returning
+        # execute_sql). `any` not `all`: a non-terminal tool (e.g. fetch_ontology)
+        # co-issued in the same turn must not prevent a successful SQL from ending
+        # the loop.
+        any_succeeded = any(success for _, success in results)
         return {
             "messages": tool_messages,
             "iteration_count": state.iteration_count + len(last.tool_calls),
-            "last_tool_success": all_succeeded,
+            "last_tool_success": any_succeeded,
         }
 
     async def _execute_tool_call(self, tool_call: ToolCall) -> tuple[ToolMessage, bool]:

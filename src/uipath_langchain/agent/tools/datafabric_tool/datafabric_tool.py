@@ -13,7 +13,6 @@ Sub-graph definition is in ``datafabric_subgraph.py``.
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -29,8 +28,6 @@ from .models import DataFabricQueryInput
 logger = logging.getLogger(__name__)
 
 BASE_SYSTEM_PROMPT = "base_system_prompt"
-ONTOLOGY_NAME = "ontology_name"
-FOLDER_KEY = "folder_key"
 
 
 class DataFabricTextQueryHandler:
@@ -167,8 +164,8 @@ def create_datafabric_query_tool(
     ]
     # Ontologies are first-class bindings, mirroring entity_set: a LIST, each
     # carrying its own folderId so it is resolved from its own folder (entities
-    # may also span several folders). Falls back to a single env-configured
-    # ontology for local/demo runs with no binding. Empty → no fetch tool added.
+    # may also span several folders). Empty → no fetch tool added. Config comes
+    # only from the agent definition (the binding), never from process env.
     entity_folders = {
         e.folder_key for e in entity_set if getattr(e, "folder_key", None)
     }
@@ -181,15 +178,6 @@ def create_datafabric_query_tool(
         for o in ontology_items
         if getattr(o, "name", None)
     ]
-    if not ontologies:
-        env_name = config.get(ONTOLOGY_NAME) or os.getenv("UIPATH_ONTOLOGY_NAME")
-        if env_name:
-            env_folder = (
-                config.get(FOLDER_KEY)
-                or os.getenv("UIPATH_FOLDER_KEY")
-                or derived_folder_key
-            )
-            ontologies = [(env_name, env_folder)]
     handler = DataFabricTextQueryHandler(
         entity_set=entity_set,
         llm=llm,
