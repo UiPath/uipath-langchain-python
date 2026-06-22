@@ -58,6 +58,7 @@ from uipath.platform.guardrails.decorators import (
     GuardrailAction,
     GuardrailBlockException,
 )
+from uipath.platform.hitl import HitlSchema
 
 from ._action_context import GuardrailActionContext, current_action_context
 from .enums import GuardrailExecutionStage

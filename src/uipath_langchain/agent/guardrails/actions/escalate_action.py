@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
+import uuid
 from typing import Any, Dict, Literal, cast
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
     AnyMessage,
     BaseMessage,
+    SystemMessage,
     ToolMessage,
 )
 from langgraph.types import Command, interrupt
@@ -25,6 +29,7 @@ from uipath.platform.guardrails import (
     BaseGuardrail,
     GuardrailScope,
 )
+from uipath.platform.hitl import HitlSchema
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ...exceptions import AgentRuntimeError, AgentRuntimeErrorCode
@@ -34,6 +39,23 @@ from ...react.utils import extract_current_tool_call_index, find_latest_ai_messa
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNodes
+
+
+_SCHEMA_GEN_PROMPT = SystemMessage(
+    "A guardrail policy was violated during the agent's tool execution. "
+    "Based on the conversation above — including the agent's purpose, the user's request, "
+    "and the tool call that triggered the violation — generate a human review form schema. "
+    "Input fields should show the reviewer the relevant context (read-only). "
+    "Output fields should capture the reviewer's decision and any corrections. "
+    "Keep the schema concise and specific to this escalation."
+)
+
+
+def _schema_key(schema: HitlSchema) -> str:
+    """Deterministic UUID from schema content so Orchestrator can upsert rather than duplicate."""
+    wire = json.dumps(schema.to_wire_format(), sort_keys=True)
+    digest = hashlib.sha256(wire.encode()).digest()[:16]
+    return str(uuid.UUID(bytes=digest))
 
 
 class EscalateAction(GuardrailAction):
@@ -50,19 +72,26 @@ class EscalateAction(GuardrailAction):
         app_folder_path: str,
         version: int,
         recipient: AgentEscalationRecipient,
+        model: BaseChatModel | None = None,
     ):
         """Initialize EscalateAction with escalation app configuration.
 
         Args:
-            app_name: Name of the escalation app.
+            app_name: Name of the escalation app.  Used when *model* is None
+                (static Action App path).
             app_folder_path: Folder path where the escalation app is located.
             version: Version of the escalation app.
             recipient: Recipient object (StandardRecipient or AssetRecipient).
+            model: Optional chat model injected by the agent runtime.  When set,
+                the schema for the HITL task is generated dynamically by the LLM
+                using the full conversation context at escalation time — no
+                pre-deployed Action App is needed.
         """
         self.app_name = app_name
         self.app_folder_path = app_folder_path
         self.version = version
         self.recipient = recipient
+        self.model = model
 
     @property
     def action_type(self) -> str:
@@ -202,15 +231,31 @@ class EscalateAction(GuardrailAction):
                 data["ToolInputs"] = input_content
                 data["ToolOutputs"] = output_content
 
-            # Create the escalation task via API
+            # Create the escalation task via API.
+            # Dynamic path: LLM generates a schema from the full conversation
+            # context so the reviewer form is specific to this escalation.
+            # Static path (fallback): use the pre-deployed Action App.
             client = UiPath()
-            created_task = await client.tasks.create_async(
-                title="Agents Guardrail Task",
-                data=data,
-                app_name=self.app_name,
-                app_folder_path=self.app_folder_path,
-                recipient=task_recipient,
-            )
+            if self.model is not None:
+                generated_schema: HitlSchema = await self.model.with_structured_output(
+                    HitlSchema
+                ).ainvoke(state.messages + [_SCHEMA_GEN_PROMPT])
+                created_task = await client.tasks.create_quickform_async(
+                    title="Agents Guardrail Task",
+                    task_schema_key=_schema_key(generated_schema),
+                    schema=generated_schema.to_wire_format(),
+                    data=data,
+                    folder_path=self.app_folder_path,
+                    recipient=task_recipient,
+                )
+            else:
+                created_task = await client.tasks.create_async(
+                    title="Agents Guardrail Task",
+                    data=data,
+                    app_name=self.app_name,
+                    app_folder_path=self.app_folder_path,
+                    recipient=task_recipient,
+                )
 
             # Store task URL in metadata for observability — before interrupt
             task_id = created_task.id

@@ -114,6 +114,14 @@ def create_agent(
             ):
                 node.awrapper = cas_deep_rag_citation_wrapper
 
+    # Inject the agent's model into any EscalateAction so it can generate
+    # HITL form schemas dynamically from the conversation context.
+    if guardrails:
+        from ..guardrails.actions.escalate_action import EscalateAction as _EscalateAction
+        for _, action in guardrails:
+            if isinstance(action, _EscalateAction) and action.model is None:
+                action.model = model
+
     tool_nodes_with_guardrails = create_tools_guardrails_subgraph(
         tool_nodes, guardrails, input_schema=input_schema
     )
