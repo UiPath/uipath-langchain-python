@@ -142,12 +142,19 @@ class DataFabricGraph:
         results = await asyncio.gather(
             *[self._execute_tool_call(tc) for tc in last.tool_calls]
         )
-        tool_messages = [msg for msg, _ in results]
         # End as soon as ANY tool call is a terminal success (a row-returning
         # execute_sql). `any` not `all`: a non-terminal tool (e.g. fetch_ontology)
         # co-issued in the same turn must not prevent a successful SQL from ending
         # the loop.
         any_succeeded = any(success for _, success in results)
+        # When short-circuiting to END, return ONLY the terminal-success
+        # ToolMessages so the outer agent's result is the query rows — not a
+        # co-issued fetch_ontology's OWL. On a non-terminal turn keep all messages
+        # so the inner LLM can use them on its next pass.
+        if any_succeeded:
+            tool_messages = [msg for msg, success in results if success]
+        else:
+            tool_messages = [msg for msg, _ in results]
         return {
             "messages": tool_messages,
             "iteration_count": state.iteration_count + len(last.tool_calls),
@@ -172,7 +179,6 @@ class DataFabricGraph:
                     content=f"Unknown tool: {name}",
                     tool_call_id=tool_call["id"],
                     name=name,
-                    status="error",
                 ),
                 False,
             )

@@ -99,7 +99,10 @@ async def test_tool_node_any_succeeds_with_mixed_batch(make_graph):
     # SQL returned rows → terminal, even though fetch_ontology (non-terminal)
     # was co-issued in the same turn. This is the all()->any() fix.
     assert out["last_tool_success"] is True
-    assert len(out["messages"]) == 2
+    # Only the terminal execute_sql message is returned; the non-terminal
+    # fetch_ontology output is dropped when short-circuiting to END.
+    assert len(out["messages"]) == 1
+    assert out["messages"][0].name == "execute_sql"
 
 
 async def test_tool_node_not_terminal_when_only_ontology(make_graph):
