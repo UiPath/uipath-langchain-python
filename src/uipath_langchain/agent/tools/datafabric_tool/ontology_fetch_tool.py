@@ -11,6 +11,7 @@ Ontology names/folders are pinned from configuration, not supplied by the LLM,
 so the model cannot redirect the fetch to an arbitrary resource.
 """
 
+import asyncio
 import logging
 from typing import Any
 
@@ -85,7 +86,11 @@ class OntologyFetcher:
             return self._cached
         if not self._ontologies:
             return "No ontologies are configured for this agent."
-        blocks = [await self._fetch_one(name, folder) for name, folder in self._ontologies]
+        # Fetch all ontologies concurrently — each fetch is independent; order is
+        # preserved by gather, so the concatenation is deterministic.
+        blocks = await asyncio.gather(
+            *(self._fetch_one(name, folder) for name, folder in self._ontologies)
+        )
         self._cached = "\n\n".join(blocks)
         return self._cached
 
