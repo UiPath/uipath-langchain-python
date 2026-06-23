@@ -6,13 +6,14 @@ import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
 from uipath.agent.react import END_EXECUTION_TOOL
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
 from uipath_langchain.agent.react.router import create_route_agent
-from uipath_langchain.agent.react.types import AgentGraphNode
+from uipath_langchain.agent.react.types import AgentGraphNode, AgentGraphState
 
 
 class MockInnerState(BaseModel):
@@ -31,17 +32,27 @@ class MockAgentGraphState(BaseModel):
 
 # Module-level fixtures available to all test classes
 
+# Routing targets used across the test states (tools + control nodes).
+_VALID_TARGETS: list[str] = [
+    AgentGraphNode.AGENT,
+    AgentGraphNode.TERMINATE,
+    "search_tool",
+    "calculator_tool",
+    "weather_tool",
+    "test_tool",
+]
+
 
 @pytest.fixture
 def route_function_no_limit():
     """Fixture for routing function with no thinking messages limit."""
-    return create_route_agent(thinking_messages_limit=0)
+    return create_route_agent(valid_targets=_VALID_TARGETS, thinking_messages_limit=0)
 
 
 @pytest.fixture
 def route_function_with_limit():
     """Fixture for routing function with thinking messages limit of 2."""
-    return create_route_agent(thinking_messages_limit=2)
+    return create_route_agent(valid_targets=_VALID_TARGETS, thinking_messages_limit=2)
 
 
 @pytest.fixture
@@ -217,7 +228,9 @@ class TestRouteAgentThinkingMessages:
 
     def test_thinking_messages_limit_zero_forbids_thinking(self):
         """Should not allow any thinking messages when limit is 0."""
-        route_func = create_route_agent(thinking_messages_limit=0)
+        route_func = create_route_agent(
+            valid_targets=_VALID_TARGETS, thinking_messages_limit=0
+        )
         ai_message = AIMessage(content="thinking")
         state = MockAgentGraphState(
             messages=[HumanMessage(content="query"), ai_message]
@@ -232,7 +245,9 @@ class TestRouteAgentThinkingMessages:
 
     def test_thinking_messages_after_tool_execution_resets_count(self):
         """Should reset thinking count after tool execution."""
-        route_func = create_route_agent(thinking_messages_limit=1)
+        route_func = create_route_agent(
+            valid_targets=_VALID_TARGETS, thinking_messages_limit=1
+        )
         messages = [
             HumanMessage(content="query"),
             AIMessage(
@@ -286,3 +301,56 @@ class TestRouteAgentErrorHandling:
         assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.ROUTING_ERROR
         )
+
+
+class TestRouteAgentTargetValidation:
+    """Test guarding of router return values against valid graph targets."""
+
+    def test_unknown_target_raises_routing_error(self):
+        """Should raise ROUTING_ERROR (SYSTEM) when the routed tool is unwired."""
+        route_func = create_route_agent(
+            valid_targets=[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE, "real_tool"],
+            thinking_messages_limit=0,
+        )
+        ai_message = AIMessage(
+            content="routing",
+            tool_calls=[{"name": "context", "args": {}, "id": "call_1"}],
+        )
+        state = AgentGraphState(messages=[HumanMessage(content="query"), ai_message])
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            route_func(state)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+
+    def test_known_target_returns_tool_name(self):
+        """Should return the tool name when it is in the valid target set."""
+        route_func = create_route_agent(
+            valid_targets=[AgentGraphNode.AGENT, AgentGraphNode.TERMINATE, "real_tool"],
+            thinking_messages_limit=0,
+        )
+        ai_message = AIMessage(
+            content="routing",
+            tool_calls=[{"name": "real_tool", "args": {}, "id": "call_1"}],
+        )
+        state = AgentGraphState(messages=[HumanMessage(content="query"), ai_message])
+
+        assert route_func(state) == "real_tool"
+
+    def test_default_valid_targets_skips_guard(self):
+        """Should skip the destination guard when valid_targets is left unset.
+
+        Backwards-compatible contract: callers predating valid_targets must keep
+        the old unguarded behavior, returning any routed tool name as-is.
+        """
+        route_func = create_route_agent(thinking_messages_limit=0)
+        ai_message = AIMessage(
+            content="routing",
+            tool_calls=[{"name": "unwired_tool", "args": {}, "id": "call_1"}],
+        )
+        state = AgentGraphState(messages=[HumanMessage(content="query"), ai_message])
+
+        assert route_func(state) == "unwired_tool"
