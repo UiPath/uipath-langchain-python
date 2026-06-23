@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage
 
-from uipath_langchain.agent.tools.datafabric_tool import datafabric_subgraph as dsg
+from uipath_langchain.agent.tools.datafabric_tool import datafabric_prompt_builder
 from uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph import (
     DataFabricGraph,
     DataFabricSubgraphState,
@@ -29,7 +29,7 @@ def entities_service():
 @pytest.fixture
 def make_graph(monkeypatch, entities_service):
     # Isolate from the prompt builder; we only exercise tools/routing here.
-    monkeypatch.setattr(dsg.datafabric_prompt_builder, "build", lambda *a, **k: "SYS")
+    monkeypatch.setattr(datafabric_prompt_builder, "build", lambda *a, **k: "SYS")
 
     def _make(ontologies=None):
         return DataFabricGraph(
@@ -124,7 +124,7 @@ async def test_execute_tool_call_sql_value_error_becomes_error_dict(make_graph):
 
 
 def test_create_returns_compiled_graph(monkeypatch, entities_service):
-    monkeypatch.setattr(dsg.datafabric_prompt_builder, "build", lambda *a, **k: "SYS")
+    monkeypatch.setattr(datafabric_prompt_builder, "build", lambda *a, **k: "SYS")
     compiled = DataFabricGraph.create(
         llm=MagicMock(),
         entities=[],

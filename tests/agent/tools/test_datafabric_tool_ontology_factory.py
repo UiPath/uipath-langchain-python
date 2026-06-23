@@ -33,16 +33,16 @@ def _entity_resource():
 
 def test_factory_passes_ontologies_through():
     tool = create_datafabric_query_tool(
-        _entity_resource(),  # type: ignore[arg-type]
+        _entity_resource(),
         MagicMock(),
         ontologies=[("library", "f1")],
     )
-    assert tool.coroutine._ontologies == [("library", "f1")]
+    assert tool.coroutine._ontologies == [("library", "f1")]  # type: ignore[attr-defined]
 
 
 def test_factory_no_ontologies_is_empty():
-    tool = create_datafabric_query_tool(_entity_resource(), MagicMock())  # type: ignore[arg-type]
-    assert tool.coroutine._ontologies == []
+    tool = create_datafabric_query_tool(_entity_resource(), MagicMock())
+    assert tool.coroutine._ontologies == []  # type: ignore[attr-defined]
 
 
 # --- resolver: ontology_refs → standalone ontology resources → (name, folder) ---
