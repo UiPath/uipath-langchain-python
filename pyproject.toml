@@ -5,9 +5,9 @@ description = "Python SDK that enables developers to build and deploy LangGraph 
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 dependencies = [
-    "uipath>=2.10.79, <2.12.0",
+    "uipath==2.11.10.dev1017286899",
     "uipath-core>=0.5.20, <0.6.0",
-    "uipath-platform>=0.1.71, <0.2.0",
+    "uipath-platform==0.1.74.dev1017286899",
     "uipath-runtime>=0.11.0, <0.12.0",
     "langgraph>=1.1.8, <2.0.0",
     "langchain-core>=1.2.27, <2.0.0",
@@ -154,6 +154,9 @@ exclude_lines = [
 
 [tool.uv]
 exclude-newer = "2 days"
+# TEMP: consume the SDK PR #1728 dev build (uipath 2.11.x not yet on PyPI).
+# Revert to range pins + drop tool.uv.sources when the SDK lands on PyPI.
+override-dependencies = ["uipath-platform==0.1.74.dev1017286899"]
 
 [tool.uv.exclude-newer-package]
 uipath = false
@@ -169,3 +172,9 @@ name = "testpypi"
 url = "https://test.pypi.org/simple/"
 publish-url = "https://test.pypi.org/legacy/"
 explicit = true
+
+# TEMP: pull uipath / uipath-platform from the SDK PR #1728 dev build on TestPyPI.
+# Revert this section when the SDK lands on PyPI.
+[tool.uv.sources]
+uipath = { index = "testpypi" }
+uipath-platform = { index = "testpypi" }
