@@ -1,13 +1,16 @@
 """Handles static arguments for tool calls."""
 
 import copy
+import functools
 import logging
 import re
-from typing import Any, Iterator, Mapping, Sequence, TypeVar
+from inspect import signature
+from typing import Any, Callable, Iterator, Mapping, Sequence, TypeVar
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
+from langchain_core.tools.base import _get_runnable_config_param
 from pydantic import BaseModel
 from typing_extensions import deprecated
 from uipath.agent.models.agent import (
@@ -346,6 +349,24 @@ class StaticArgsHandler:
                 tool_call["args"] = apply_static_args(static_values, tool_call["args"])
 
 
+def _runtime_passthrough_keys(target: Callable[..., Any]) -> set[str]:
+    """Keyword names LangChain injects by inspecting a tool callable's signature.
+
+    ``StructuredTool._arun`` / ``_run`` forward the child ``callbacks`` and the
+    runnable ``config`` into the callable only when its signature declares them.
+    These are runtime objects (a callback manager, a ``RunnableConfig``) that
+    must be forwarded untouched — never routed through ``apply_static_args``,
+    whose serialization sanitization would mangle them.
+    """
+    keys: set[str] = set()
+    if "callbacks" in signature(target).parameters:
+        keys.add("callbacks")
+    config_param = _get_runnable_config_param(target)
+    if config_param:
+        keys.add(config_param)
+    return keys
+
+
 def wrap_tool_with_static_args(tool: BaseTool) -> BaseTool:
     """Wrap a tool so its *static* parameters are hidden from the model and
     injected just before the underlying tool runs.
@@ -443,18 +464,31 @@ def wrap_tool_with_static_args(tool: BaseTool) -> BaseTool:
     coroutine = tool.coroutine
     if coroutine is not None:
         _coroutine = coroutine
+        _co_passthrough = _runtime_passthrough_keys(_coroutine)
 
+        # ``functools.wraps`` lets ``inspect.signature`` (used by StructuredTool
+        # to detect ``callbacks`` / ``config``) see through to the original
+        # callable, so LangChain's runtime injection keeps working after
+        # wrapping. Those injected kwargs are forwarded as-is, bypassing
+        # ``apply_static_args`` which only applies to the model-supplied args.
+        @functools.wraps(_coroutine)
         async def _acall(**kwargs: Any) -> Any:
-            return await _coroutine(**apply_static_args(inject_values, kwargs))
+            passthrough = {k: kwargs.pop(k) for k in _co_passthrough if k in kwargs}
+            return await _coroutine(
+                **apply_static_args(inject_values, kwargs), **passthrough
+            )
 
         update["coroutine"] = _acall
 
     func = tool.func
     if func is not None:
         _func = func
+        _fn_passthrough = _runtime_passthrough_keys(_func)
 
+        @functools.wraps(_func)
         def _call(**kwargs: Any) -> Any:
-            return _func(**apply_static_args(inject_values, kwargs))
+            passthrough = {k: kwargs.pop(k) for k in _fn_passthrough if k in kwargs}
+            return _func(**apply_static_args(inject_values, kwargs), **passthrough)
 
         update["func"] = _call
 

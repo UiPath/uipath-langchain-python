@@ -8,6 +8,7 @@ underlying tool runs (a per-tool, state-independent counterpart to
 
 from typing import Any
 
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 from uipath.agent.models.agent import (
     AgentToolArgumentArgumentProperties,
@@ -58,6 +59,44 @@ def _static(value: Any) -> AgentToolStaticArgumentProperties:
 
 def _argument(path: str) -> AgentToolArgumentArgumentProperties:
     return AgentToolArgumentArgumentProperties(argument_path=path, is_sensitive=False)
+
+
+async def test_wrapper_forwards_config_and_callbacks_to_coroutine() -> None:
+    """LangChain forwards ``config``/``callbacks`` into a tool coroutine only
+    when it can detect them in the signature. The wrapper stays transparent
+    (via functools.wraps) so a coroutine that declares them still receives them,
+    untouched by the static-arg merge."""
+    received: dict[str, Any] = {}
+
+    async def tool_fn(
+        *,
+        host: str,
+        port: int,
+        api_key: str,
+        config: RunnableConfig,
+        callbacks: Any = None,
+    ) -> str:
+        received.update(
+            host=host, port=port, api_key=api_key, config=config, callbacks=callbacks
+        )
+        return "ok"
+
+    tool = StructuredToolWithArgumentProperties(
+        name="rec",
+        description="A recording tool",
+        args_schema=_ToolInput,
+        coroutine=tool_fn,
+        output_type=None,
+        argument_properties={"$['host']": _static("localhost")},
+    )
+    wrapped = wrap_tool_with_static_args(tool)
+
+    await wrapped.ainvoke({"port": 9090, "api_key": "k"})
+
+    assert received["host"] == "localhost"  # static arg still injected
+    assert received["port"] == 9090
+    assert received["config"] is not None  # runnable config forwarded as-is
+    assert received["callbacks"] is not None  # child callbacks forwarded
 
 
 async def test_static_arg_hidden_from_schema_and_injected_on_call() -> None:
