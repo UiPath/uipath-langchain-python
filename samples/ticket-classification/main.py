@@ -78,7 +78,7 @@ def decide_next_node(state: GraphState) -> Literal["classify", "notify_team"]:
 
 async def classify(state: GraphState) -> Command:
     """Classify the support ticket using LLM."""
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = ChatOpenAI(model="gpt-4.1-mini-2025-04-14", temperature=0)
 
     if state.get("last_predicted_category", None):
         predicted_category = state["last_predicted_category"]
