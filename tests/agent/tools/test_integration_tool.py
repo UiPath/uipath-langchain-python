@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import BaseModel
 from uipath.agent.models.agent import (
     AgentIntegrationToolParameter,
     AgentIntegrationToolProperties,
@@ -855,7 +856,9 @@ class TestCreateIntegrationToolWithArgumentProperties:
 
         tool = create_integration_tool(resource)
 
-        assert isinstance(tool.args_schema, type)
+        assert isinstance(tool.args_schema, type) and issubclass(
+            tool.args_schema, BaseModel
+        )
         schema = tool.args_schema.model_json_schema()
         opp_field = schema["properties"]["opportunityID"]
         assert "enum" not in opp_field
