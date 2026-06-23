@@ -27,5 +27,5 @@ Always maintain an enthusiastic and knowledgeable tone about cinema. Provide acc
 DO NOT do any math calculations unless specifically related to movie statistics or box office figures.
 """
 
-llm = UiPathChatOpenAI(model="gpt-4o-mini-2024-07-18")
+llm = UiPathChatOpenAI(model="gpt-4.1-mini-2025-04-14")
 graph = create_agent(llm, tools=[search_tool], system_prompt=movie_system_prompt)

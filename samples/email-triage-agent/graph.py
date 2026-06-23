@@ -92,7 +92,7 @@ class GraphState(BaseModel):
     triage_count: int = 0
 
 
-llm = UiPathChat(model="gpt-4o-mini-2024-07-18")
+llm = UiPathChat(model="gpt-4.1-mini-2025-04-14")
 
 
 def _email_str(email: dict[str, Any], *path: str, default: str = "") -> str:
