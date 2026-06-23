@@ -161,14 +161,21 @@ def create_context_tool(
     if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
         if llm is None:
             raise ValueError("Data Fabric entity set tools require an LLM instance")
-        from .datafabric_tool import create_datafabric_query_tool
+        from .datafabric_tool import (
+            create_datafabric_query_tool,
+            resolve_context_ontologies,
+        )
         from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
 
+        ontologies = resolve_context_ontologies(
+            resource, agent.resources if agent else []
+        )
         return create_datafabric_query_tool(
             resource,
             llm,
             tool_name=tool_name,
             agent_config={BASE_SYSTEM_PROMPT: _extract_system_prompt(agent)},
+            ontologies=ontologies,
         )
 
     assert resource.settings is not None
