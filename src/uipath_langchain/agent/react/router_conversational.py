@@ -21,7 +21,7 @@ from .types import AgentGraphNode
 logger = logging.getLogger(__name__)
 
 
-def create_route_agent_conversational(valid_targets: Container[str]):
+def create_route_agent_conversational(valid_targets: Container[str] | None = None):
     """Create a routing function for conversational agents. It routes between agent and tool calls until
     the agent response has no tool calls, then it routes to the USER_MESSAGE_WAIT node which does an interrupt.
 
@@ -64,7 +64,7 @@ def create_route_agent_conversational(valid_targets: Container[str]):
             current_tool_call = last_message.tool_calls[current_index]
             current_tool_name = current_tool_call["name"]
 
-            if current_tool_name not in valid_targets:
+            if valid_targets is not None and current_tool_name not in valid_targets:
                 raise AgentRuntimeError(
                     code=AgentRuntimeErrorCode.ROUTING_ERROR,
                     title="Agent routed to an unknown destination",

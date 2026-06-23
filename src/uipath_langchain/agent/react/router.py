@@ -15,15 +15,14 @@ from .utils import (
 
 
 def create_route_agent(
-    valid_targets: Container[str],
     thinking_messages_limit: int = 0,
+    valid_targets: Container[str] | None = None,
 ):
     """Create a routing function configured with thinking_messages_limit.
 
     Args:
-        valid_targets: Allowed routing destinations
         thinking_messages_limit: Max consecutive thinking messages before error
-
+        valid_targets: Allowed routing destinations
     Returns:
         Routing function for LangGraph conditional edges
     """
@@ -95,7 +94,7 @@ def create_route_agent(
         if current_tool_name in FLOW_CONTROL_TOOLS:
             return AgentGraphNode.TERMINATE
 
-        if current_tool_name not in valid_targets:
+        if valid_targets is not None and current_tool_name not in valid_targets:
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.ROUTING_ERROR,
                 title="Agent routed to an unknown destination",

@@ -280,3 +280,18 @@ class TestRouteAgentConversationalTargetValidation:
         state = AgentGraphState(messages=[HumanMessage(content="query"), ai_message])
 
         assert route_func(state) == "real_tool"
+
+    def test_default_valid_targets_skips_guard(self):
+        """Should skip the destination guard when valid_targets is left unset.
+
+        Backwards-compatible contract: callers predating valid_targets must keep
+        the old unguarded behavior, returning any routed tool name as-is.
+        """
+        route_func = create_route_agent_conversational()
+        ai_message = AIMessage(
+            content="routing",
+            tool_calls=[{"name": "unwired_tool", "args": {}, "id": "call_1"}],
+        )
+        state = AgentGraphState(messages=[HumanMessage(content="query"), ai_message])
+
+        assert route_func(state) == "unwired_tool"
