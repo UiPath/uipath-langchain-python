@@ -1,5 +1,9 @@
 """Tests for client-side tool filtering logic."""
 
+import asyncio
+from collections.abc import Awaitable
+from typing import Any
+
 from uipath_langchain.agent.tools.client_side_tool import (
     ClientSideToolInfo,
     apply_tool_filter,
@@ -22,6 +26,19 @@ AGENT_TOOLS: dict[str, ClientSideToolInfo] = {
         "output_schema": None,
     },
 }
+
+
+def _run_sync(awaitable: Awaitable[Any]) -> Any:
+    """Run a coroutine on a fresh event loop.
+
+    Avoids asyncio.get_event_loop() raising 'no current event loop' once an
+    earlier pytest-asyncio test has closed the thread's loop.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(awaitable)
+    finally:
+        loop.close()
 
 
 class TestApplyToolFilter:
@@ -100,12 +117,8 @@ class TestToolNotAvailableEnforcement:
 
             tool = create_client_side_tool(resource)
 
-            import asyncio
-
             assert tool.coroutine is not None
-            result = asyncio.get_event_loop().run_until_complete(
-                tool.coroutine(tool_call_id="tc-1", query="test")
-            )
+            result = _run_sync(tool.coroutine(tool_call_id="tc-1", query="test"))
 
             assert result.status == "error"
             assert "not available" in result.content
@@ -145,12 +158,8 @@ class TestToolNotAvailableEnforcement:
                 ),
             ):
                 tool = create_client_side_tool(resource)
-                import asyncio
-
                 assert tool.coroutine is not None
-                result = asyncio.get_event_loop().run_until_complete(
-                    tool.coroutine(tool_call_id="tc-1", query="test")
-                )
+                result = _run_sync(tool.coroutine(tool_call_id="tc-1", query="test"))
                 if hasattr(result, "status"):
                     assert result.status != "error"
         finally:
@@ -190,12 +199,8 @@ class TestToolNotAvailableEnforcement:
             ):
                 tool = create_client_side_tool(resource)
 
-                import asyncio
-
                 assert tool.coroutine is not None
-                result = asyncio.get_event_loop().run_until_complete(
-                    tool.coroutine(tool_call_id="tc-1", q="test")
-                )
+                result = _run_sync(tool.coroutine(tool_call_id="tc-1", q="test"))
                 if hasattr(result, "status"):
                     assert result.status != "error"
         finally:
