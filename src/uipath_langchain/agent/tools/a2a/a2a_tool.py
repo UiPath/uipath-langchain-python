@@ -10,6 +10,7 @@ Client lifecycle is managed by the caller via ``A2aClient.dispose()`` or the
 
 import asyncio
 import json
+import os
 from contextlib import AsyncExitStack, asynccontextmanager
 from logging import getLogger
 from typing import AsyncGenerator
@@ -33,7 +34,9 @@ from langgraph.types import Command
 from pydantic import BaseModel, Field
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import AgentA2aResourceConfig
+from uipath.platform.common import UiPathConfig
 
+from uipath_langchain._utils import get_current_span_and_trace_ids
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
@@ -45,6 +48,63 @@ from uipath_langchain.agent.tools.tool_node import (
 from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
 logger = getLogger(__name__)
+
+
+def _normalize_trace_id(value: str) -> str:
+    """Normalize a trace id (UUID or hex form) to lowercase 32-char hex."""
+    normalized = value.replace("-", "").lower()
+    if len(normalized) != 32:
+        raise ValueError(f"Invalid trace ID format: {value}")
+    return normalized
+
+
+def _coerce_span_id(value: str | None) -> str | None:
+    """Return ``value`` as a 16-char lowercase hex span id, or ``None``."""
+    if not value:
+        return None
+    candidate = value.replace("-", "").lower()
+    if len(candidate) == 16 and all(c in "0123456789abcdef" for c in candidate):
+        return candidate
+    return None
+
+
+def _build_traceparent() -> str | None:
+    """Build a W3C ``traceparent`` carrying the running job's trace id.
+
+    The remote A2A proxy adopts this trace id so the spans it emits for the
+    call share the calling job's trace. Returns ``None`` when no job trace id
+    is available, in which case the proxy self-roots the session as before.
+    """
+    raw_trace_id = os.environ.get("UIPATH_TRACE_ID")
+    if not raw_trace_id:
+        return None
+    try:
+        trace_id = _normalize_trace_id(raw_trace_id)
+    except ValueError:
+        logger.warning("Ignoring invalid UIPATH_TRACE_ID: %s", raw_trace_id)
+        return None
+
+    parent_span_id = (
+        _coerce_span_id(os.environ.get("UIPATH_PARENT_SPAN_ID"))
+        or _coerce_span_id(get_current_span_and_trace_ids()[0])
+        or uuid4().hex[:16]
+    )
+    return f"00-{trace_id}-{parent_span_id}-01"
+
+
+def _build_client_headers(secret: str) -> dict[str, str]:
+    """Build the A2A client's default headers: bearer auth plus the caller's
+    trace and job context so the remote proxy can correlate the call's spans
+    with the calling job's trace and group them under that job.
+    """
+    headers = {"Authorization": f"Bearer {secret}"}
+    traceparent = _build_traceparent()
+    if traceparent:
+        headers["traceparent"] = traceparent
+    job_key = UiPathConfig.job_key
+    if job_key:
+        headers["X-UiPath-JobKey"] = job_key
+    return headers
 
 
 class A2aToolInput(BaseModel):
@@ -81,7 +141,7 @@ class A2aClient:
 
                     sdk = UiPath()
                     client_kwargs = get_httpx_client_kwargs(
-                        headers={"Authorization": f"Bearer {sdk._config.secret}"},
+                        headers=_build_client_headers(sdk._config.secret),
                     )
                     client_kwargs["timeout"] = httpx.Timeout(300.0, connect=10.0)
                     self._http_client = httpx.AsyncClient(**client_kwargs)
