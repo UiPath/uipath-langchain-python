@@ -1,0 +1,11 @@
+[project]
+name = "AssistmAIgic"
+version = "0.0.5"
+description = "AssistmAIgic is an AI-powered agent that automates customer support by handling queries received via email. It can understand and process emails, extract relevant information like order IDs, retrieve order details, categorize emails, analyze sentiment, and generate responses using a knowledge base. It also supports multilingual communication and can escalate complex cases to human agents."
+authors = [{ name = "Ashok Karale", email = "karaleashoks@gmail.com" }]
+dependencies = [
+    "uipath-langchain>=0.0.106",
+    "langchain-anthropic>=0.3.8",
+    "langchain-mcp-adapters>=0.1.11",
+]
+requires-python = ">=3.10"
