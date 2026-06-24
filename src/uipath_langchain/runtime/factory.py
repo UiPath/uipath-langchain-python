@@ -29,6 +29,8 @@ from uipath_langchain.runtime.graph import LangGraphLoader
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
 from uipath_langchain.runtime.storage import SqliteResumableStorage
 
+_PURPOSE_SCHEMA = "schema"
+
 
 class UiPathLangGraphRuntimeFactory:
     """Factory for creating LangGraph runtimes from langgraph.json configuration."""
@@ -295,9 +297,21 @@ class UiPathLangGraphRuntimeFactory:
             entrypoint: Graph name from langgraph.json
             runtime_id: Unique identifier for the runtime instance
 
+        Keyword Args:
+            purpose: Optional hint signalling how the caller will use the
+                runtime. ``"schema"`` indicates the caller will only invoke
+                ``get_schema()`` + ``dispose()`` — in that case the SQLite
+                checkpointer at ``__uipath/state.db`` is not opened, which
+                avoids cross-process lock contention when multiple ``uipath
+                init`` processes run concurrently. Any other value (default
+                ``"execute"``) yields the full runtime with persistence.
+
         Returns:
             Configured runtime instance with compiled graph
         """
+        if kwargs.get("purpose") == _PURPOSE_SCHEMA:
+            return await self._new_schema_only_runtime(entrypoint, runtime_id, **kwargs)
+
         # Get shared memory instance
         memory = await self._get_memory()
 
@@ -310,6 +324,24 @@ class UiPathLangGraphRuntimeFactory:
             runtime_id=runtime_id,
             entrypoint=entrypoint,
             **kwargs,
+        )
+
+    async def _new_schema_only_runtime(
+        self, entrypoint: str, runtime_id: str, **kwargs
+    ) -> UiPathRuntimeProtocol:
+        loaded_graph = await self._load_graph(entrypoint, **kwargs)
+        builder = (
+            loaded_graph.builder
+            if isinstance(loaded_graph, CompiledStateGraph)
+            else loaded_graph
+        )
+        compiled_graph = builder.compile()
+
+        return UiPathLangGraphRuntime(
+            graph=compiled_graph,
+            runtime_id=runtime_id,
+            entrypoint=entrypoint,
+            storage=None,
         )
 
     async def dispose(self) -> None:
