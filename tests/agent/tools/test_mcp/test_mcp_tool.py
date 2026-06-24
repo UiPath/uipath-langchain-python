@@ -12,12 +12,15 @@ from uipath.agent.models.agent import (
     AgentMcpResourceConfig,
     AgentMcpTool,
     AgentResourceType,
+    CachedToolsConfig,
     DynamicToolsConfig,
     ToolsConfiguration,
 )
 
 from uipath_langchain.agent.tools.mcp import McpClient
 from uipath_langchain.agent.tools.mcp.mcp_tool import (
+    _schema_change_message,
+    build_mcp_tool,
     create_mcp_tools,
     create_mcp_tools_and_clients,
     open_mcp_tools,
@@ -973,6 +976,287 @@ class TestToolsConfiguration:
         assert tools[0].description == "My local description"
         assert isinstance(tools[0].args_schema, dict)
         assert "local_param" in tools[0].args_schema["properties"]
+
+
+class TestCachedRefreshSchemaBeforeCall:
+    """Test the refresh_schema_before_call behaviour for cached discovery mode."""
+
+    @pytest.fixture
+    def mcp_tool(self):
+        return AgentMcpTool(
+            name="tool_a",
+            description="Tool A (cached)",
+            input_schema={"type": "object", "properties": {}},
+        )
+
+    @pytest.fixture
+    def server_tool(self):
+        return Tool(
+            name="tool_a",
+            description="Tool A from server",
+            inputSchema={"type": "object", "properties": {"x": {"type": "string"}}},
+        )
+
+    def _mock_client(self, server_tools, result_content="ok"):
+        client = MagicMock(spec=McpClient)
+        client.list_tools = AsyncMock(return_value=ListToolsResult(tools=server_tools))
+        mock_result = MagicMock()
+        mock_result.content = result_content
+        client.call_tool = AsyncMock(return_value=mock_result)
+        return client
+
+    @pytest.mark.asyncio
+    async def test_refresh_enabled_lists_tools_before_call(self, mcp_tool, server_tool):
+        """With refresh on, list_tools runs before call_tool."""
+        manager = MagicMock()
+        client = self._mock_client([server_tool])
+        manager.attach_mock(client.list_tools, "list_tools")
+        manager.attach_mock(client.call_tool, "call_tool")
+
+        tool_fn = build_mcp_tool(mcp_tool, client, refresh_schema_before_call=True)
+        await tool_fn()
+
+        client.list_tools.assert_awaited_once()
+        client.call_tool.assert_awaited_once()
+        called = [name for name, _, _ in manager.mock_calls]
+        assert called.index("list_tools") < called.index("call_tool")
+
+    @pytest.mark.asyncio
+    async def test_refresh_disabled_skips_list_tools(self, mcp_tool, server_tool):
+        """With refresh off, list_tools is not called at invocation."""
+        client = self._mock_client([server_tool])
+
+        tool_fn = build_mcp_tool(mcp_tool, client, refresh_schema_before_call=False)
+        await tool_fn()
+
+        client.list_tools.assert_not_awaited()
+        client.call_tool.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_refresh_falls_back_when_list_tools_fails(self, mcp_tool):
+        """A failing list_tools does not block the call; it falls back to the cached schema."""
+        client = MagicMock(spec=McpClient)
+        client.list_tools = AsyncMock(side_effect=RuntimeError("boom"))
+        mock_result = MagicMock()
+        mock_result.content = "ok"
+        client.call_tool = AsyncMock(return_value=mock_result)
+
+        tool_fn = build_mcp_tool(mcp_tool, client, refresh_schema_before_call=True)
+        result = await tool_fn()
+
+        client.call_tool.assert_awaited_once()
+        assert result == "ok"
+
+    @pytest.mark.asyncio
+    async def test_refresh_returns_removed_message_when_tool_missing(
+        self, mcp_tool, caplog
+    ):
+        """If the tool is gone from the live list, skip the call and tell the model."""
+        other_tool = Tool(
+            name="other_tool",
+            description="A different tool",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        client = self._mock_client([other_tool])
+
+        tool_fn = build_mcp_tool(mcp_tool, client, refresh_schema_before_call=True)
+        with caplog.at_level(logging.WARNING):
+            result = await tool_fn()
+
+        client.call_tool.assert_not_awaited()
+        assert "no longer available" in result
+        assert mcp_tool.name in result
+        assert any(
+            "is no longer exposed by the MCP server" in record.message
+            for record in caplog.records
+        )
+
+    @pytest.mark.asyncio
+    async def test_cached_default_enables_refresh(self):
+        """A cached resource defaults to refresh on, so the tool lists before calling."""
+        resource = AgentMcpResourceConfig(
+            name="cached_server",
+            description="Cached server",
+            folder_path="/Shared",
+            slug="cached",
+            tools_configuration=ToolsConfiguration(discovery_mode=CachedToolsConfig()),
+            available_tools=[
+                AgentMcpTool(
+                    name="tool_a",
+                    description="Tool A",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+            ],
+        )
+        server_tool = Tool(
+            name="tool_a",
+            description="Tool A from server",
+            inputSchema={"type": "object", "properties": {}},
+        )
+        client = self._mock_client([server_tool])
+
+        tools = await create_mcp_tools(resource, client)
+        # create_mcp_tools must not list tools for cached mode (refresh is per-call)
+        client.list_tools.assert_not_awaited()
+
+        await tools[0].ainvoke({})
+        client.list_tools.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cached_refresh_disabled_via_config(self):
+        """refresh_schema_before_call=False on the cached config disables the per-call refresh."""
+        resource = AgentMcpResourceConfig(
+            name="cached_server",
+            description="Cached server",
+            folder_path="/Shared",
+            slug="cached",
+            tools_configuration=ToolsConfiguration(
+                discovery_mode=CachedToolsConfig(refresh_schema_before_call=False)
+            ),
+            available_tools=[
+                AgentMcpTool(
+                    name="tool_a",
+                    description="Tool A",
+                    input_schema={"type": "object", "properties": {}},
+                ),
+            ],
+        )
+        client = self._mock_client([])
+
+        tools = await create_mcp_tools(resource, client)
+        await tools[0].ainvoke({})
+        client.list_tools.assert_not_awaited()
+
+    def _cached_resource(self, input_schema):
+        return AgentMcpResourceConfig(
+            name="cached_server",
+            description="Cached server",
+            folder_path="/Shared",
+            slug="cached",
+            tools_configuration=ToolsConfiguration(discovery_mode=CachedToolsConfig()),
+            available_tools=[
+                AgentMcpTool(
+                    name="ask_question",
+                    description="Ask a question",
+                    input_schema=input_schema,
+                ),
+            ],
+        )
+
+    @pytest.mark.asyncio
+    async def test_breaking_drift_heals_and_asks_retry(self):
+        """On a breaking schema change the tool is not executed: it refreshes the bound
+        schema and returns a retry instruction to the model."""
+        resource = self._cached_resource(
+            {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            }
+        )
+        live_tool = Tool(
+            name="ask_question",
+            description="Ask a question",
+            inputSchema={
+                "type": "object",
+                "properties": {"question": {"type": "string"}},
+                "required": ["question"],
+            },
+        )
+        client = self._mock_client([live_tool])
+
+        tools = await create_mcp_tools(resource, client)
+        tool = cast(StructuredToolWithArgumentProperties, tools[0])
+        assert tool.coroutine is not None
+        # Model issued the call using the stale cached parameter name.
+        result = await tool.coroutine(query="What is X?")
+
+        assert "ask_question" in result
+        # the refreshed param list now includes the type hint
+        assert "question (string)" in result
+        client.call_tool.assert_not_awaited()
+        # The schema bound to the model was healed to the live one.
+        assert tool.args_schema == live_tool.inputSchema
+
+    def test_schema_change_message_lists_param_types(self):
+        """The retry message lists each refreshed param with its type and optionality."""
+        msg = _schema_change_message(
+            "search",
+            {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer"},
+                    "filter": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                },
+                "required": ["query"],
+            },
+        )
+        assert "query (string)" in msg
+        assert "limit (integer, optional)" in msg
+        # no simple type -> name (+ optional) only, never a misleading type
+        assert "filter (optional)" in msg
+
+    @pytest.mark.asyncio
+    async def test_after_heal_next_call_executes(self):
+        """After healing, a call matching the live schema executes normally."""
+        resource = self._cached_resource(
+            {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            }
+        )
+        live_tool = Tool(
+            name="ask_question",
+            description="Ask a question",
+            inputSchema={
+                "type": "object",
+                "properties": {"question": {"type": "string"}},
+                "required": ["question"],
+            },
+        )
+        client = self._mock_client([live_tool])
+        tools = await create_mcp_tools(resource, client)
+        tool = cast(StructuredToolWithArgumentProperties, tools[0])
+        assert tool.coroutine is not None
+
+        # First call drifts and heals (the tool is not executed).
+        await tool.coroutine(query="What is X?")
+        client.call_tool.assert_not_awaited()
+
+        # Second call matches the healed schema and executes.
+        await tool.coroutine(question="What is X?")
+        client.call_tool.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_nonbreaking_change_executes_without_retry(self):
+        """An additive (non-breaking) schema change does not trigger a retry."""
+        resource = self._cached_resource(
+            {
+                "type": "object",
+                "properties": {"a": {"type": "string"}},
+                "required": ["a"],
+            }
+        )
+        live_tool = Tool(
+            name="ask_question",
+            description="Ask a question",
+            inputSchema={
+                "type": "object",
+                "properties": {"a": {"type": "string"}, "b": {"type": "string"}},
+                "required": ["a"],
+            },
+        )
+        client = self._mock_client([live_tool])
+        tools = await create_mcp_tools(resource, client)
+        tool = cast(StructuredToolWithArgumentProperties, tools[0])
+        assert tool.coroutine is not None
+
+        result = await tool.coroutine(a="x")
+
+        client.call_tool.assert_awaited_once()
+        assert result == "ok"
 
 
 class TestCreateMcpToolsFromConfig:
