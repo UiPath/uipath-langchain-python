@@ -155,8 +155,9 @@ def create_ontology_fetch_tool(
         tool_name: The tool name exposed to the LLM.
 
     Returns:
-        A ``BaseUiPathStructuredTool`` that fetches the OWL of every configured
-        ontology and returns them as the tool result (one ToolMessage).
+        A ``BaseUiPathStructuredTool`` that fetches the OWL schema (and, when
+        available, the R2RML mapping) of every configured ontology and returns
+        them concatenated as the tool result (one ToolMessage).
     """
     names = ", ".join(name for name, _ in ontologies) or "(none)"
     return BaseUiPathStructuredTool(
