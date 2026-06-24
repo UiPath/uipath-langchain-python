@@ -30,9 +30,11 @@ from a2a.types import (
 from langchain_core.messages import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
+from opentelemetry import trace as otel_trace
 from pydantic import BaseModel, Field
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import AgentA2aResourceConfig
+from uipath.core.tracing.span_utils import UiPathSpanUtils
 
 from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain.agent.react.types import AgentGraphState
@@ -251,10 +253,50 @@ def _create_a2a_tool(
         "slug": config.slug,
     }
 
+    async def _invoke(
+        *, message: str, task_id: str | None, context_id: str | None
+    ) -> tuple[str, str, str | None, str | None]:
+        """Send one message to the remote agent inside an A2A trace span.
+
+        The span is parented under the active tool-call span (via
+        ``UiPathSpanUtils.get_parent_context``) so the remote call nests under
+        the tool in the Execution Trace, and is marked
+        ``uipath.custom_instrumentation`` so the LLMOps exporter keeps it. The
+        a2a-sdk's own transport spans are disabled in this package's __init__,
+        so this is the single node representing the call.
+        """
+        parent_ctx = UiPathSpanUtils.get_parent_context()
+        tracer = otel_trace.get_tracer(__name__)
+        with tracer.start_as_current_span(raw_name, context=parent_ctx) as span:
+            # "openinference.span.kind" drives the SpanType shown in the UI;
+            # "toolCall" is the recognized type for a tool invocation.
+            span.set_attribute("openinference.span.kind", "toolCall")
+            span.set_attribute("type", "toolCall")
+            span.set_attribute("span_type", "toolCall")
+            span.set_attribute("uipath.custom_instrumentation", True)
+            span.set_attribute("tool_type", "a2a")
+            span.set_attribute("input", message)
+            span.set_attribute("input.value", message)
+
+            client = await a2a_client.get()
+            text, response_state, new_task_id, new_context_id = await _send_a2a_message(
+                client,
+                agent_label,
+                message=message,
+                task_id=task_id,
+                context_id=context_id,
+            )
+
+            span.set_attribute("output", text)
+            span.set_attribute("output.value", text)
+            span.set_attribute("task_state", response_state)
+            if response_state == "error":
+                span.set_status(otel_trace.StatusCode.ERROR, text)
+            return text, response_state, new_task_id, new_context_id
+
     async def _send(*, message: str) -> str:
-        client = await a2a_client.get()
-        text, state, _, _ = await _send_a2a_message(
-            client, agent_label, message=message, task_id=None, context_id=None
+        text, state, _, _ = await _invoke(
+            message=message, task_id=None, context_id=None
         )
         return _format_response(text, state)
 
@@ -267,10 +309,7 @@ def _create_a2a_tool(
         task_id = prior.get("task_id")
         context_id = prior.get("context_id")
 
-        client = await a2a_client.get()
-        text, task_state, new_task_id, new_context_id = await _send_a2a_message(
-            client,
-            agent_label,
+        text, task_state, new_task_id, new_context_id = await _invoke(
             message=call["args"]["message"],
             task_id=task_id,
             context_id=context_id,
