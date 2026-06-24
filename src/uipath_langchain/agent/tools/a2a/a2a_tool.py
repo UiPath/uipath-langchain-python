@@ -156,10 +156,10 @@ def _build_description(card: AgentCard) -> str:
 
 
 def _resolve_a2a_url(config: AgentA2aResourceConfig) -> str:
-    """Resolve the A2A endpoint URL from the cached agent card."""
-    if config.cached_agent_card and "url" in config.cached_agent_card:
-        return config.cached_agent_card["url"]
-    raise ValueError(f"A2A resource '{config.name}' has no URL in cachedAgentCard")
+    """Resolve the A2A endpoint URL, using the UiPath-hosted proxy URL."""
+    if config.a2a_url:
+        return config.a2a_url
+    raise ValueError(f"A2A resource '{config.name}' has no URL")
 
 
 async def _send_a2a_message(
@@ -340,6 +340,9 @@ def create_a2a_tools_and_clients(
                 default_input_modes=["text/plain"],
                 default_output_modes=["text/plain"],
             )
+
+        if resource.a2a_url:
+            agent_card.url = resource.a2a_url
 
         a2a_client = A2aClient(agent_card)
         tool = _create_a2a_tool(resource, a2a_client, agent_card)
