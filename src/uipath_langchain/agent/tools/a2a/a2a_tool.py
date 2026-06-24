@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import AgentA2aResourceConfig
 
+from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
@@ -65,8 +66,9 @@ class A2aClient:
     pool when done.
     """
 
-    def __init__(self, agent_card: AgentCard) -> None:
+    def __init__(self, agent_card: AgentCard, slug: str) -> None:
         self._agent_card = agent_card
+        self._slug = slug
         self._lock = asyncio.Lock()
         self._client: Client | None = None
         self._http_client: httpx.AsyncClient | None = None
@@ -80,6 +82,16 @@ class A2aClient:
                     from uipath.platform import UiPath
 
                     sdk = UiPath()
+                    folder_path = get_execution_folder_path()
+                    agent = await sdk.remote_a2a.retrieve_async(
+                        slug=self._slug, folder_path=folder_path
+                    )
+                    if not agent.a2a_url:
+                        raise ValueError(
+                            f"Remote A2A agent '{self._slug}' has no a2a_url configured"
+                        )
+                    self._agent_card.url = agent.a2a_url
+
                     client_kwargs = get_httpx_client_kwargs(
                         headers={"Authorization": f"Bearer {sdk._config.secret}"},
                     )
@@ -152,19 +164,16 @@ def _build_description(card: AgentCard) -> str:
                 skill_desc += f": {skill.description}"
             if skill_desc:
                 parts.append(f"Skill: {skill_desc}")
-    return " | ".join(parts) if parts else f"Remote A2A agent at {card.url}"
-
-
-def _resolve_a2a_url(config: AgentA2aResourceConfig) -> str:
-    """Resolve the A2A endpoint URL, using the UiPath-hosted proxy URL."""
-    if config.a2a_url:
-        return config.a2a_url
-    raise ValueError(f"A2A resource '{config.name}' has no URL")
+    if parts:
+        return " | ".join(parts)
+    # The card URL is resolved lazily at runtime, so it is empty or stale here;
+    # fall back to the agent name rather than exposing an internal/blank URL.
+    return f"Remote A2A agent: {card.name}" if card.name else "Remote A2A agent"
 
 
 async def _send_a2a_message(
     client: Client,
-    a2a_url: str,
+    agent_label: str,
     *,
     message: str,
     task_id: str | None,
@@ -177,10 +186,10 @@ async def _send_a2a_message(
     """
     if task_id or context_id:
         logger.info(
-            "A2A continue task=%s context=%s to %s", task_id, context_id, a2a_url
+            "A2A continue task=%s context=%s to %s", task_id, context_id, agent_label
         )
     else:
-        logger.info("A2A new message to %s", a2a_url)
+        logger.info("A2A new message to %s", agent_label)
 
     a2a_message = Message(
         role=Role.user,
@@ -218,7 +227,7 @@ async def _send_a2a_message(
         return (text or "No response received.", state, new_task_id, new_context_id)
 
     except Exception as e:
-        logger.exception("A2A request to %s failed", a2a_url)
+        logger.exception("A2A request to %s failed", agent_label)
         return (f"Error: {e}", "error", task_id, context_id)
 
 
@@ -234,7 +243,7 @@ def _create_a2a_tool(
     raw_name = agent_card.name or config.name
     tool_name = sanitize_tool_name(raw_name)
     tool_description = _build_description(agent_card)
-    a2a_url = _resolve_a2a_url(config)
+    agent_label = config.slug
 
     metadata = {
         "tool_type": "a2a",
@@ -245,7 +254,7 @@ def _create_a2a_tool(
     async def _send(*, message: str) -> str:
         client = await a2a_client.get()
         text, state, _, _ = await _send_a2a_message(
-            client, a2a_url, message=message, task_id=None, context_id=None
+            client, agent_label, message=message, task_id=None, context_id=None
         )
         return _format_response(text, state)
 
@@ -261,7 +270,7 @@ def _create_a2a_tool(
         client = await a2a_client.get()
         text, task_state, new_task_id, new_context_id = await _send_a2a_message(
             client,
-            a2a_url,
+            agent_label,
             message=call["args"]["message"],
             task_id=task_id,
             context_id=context_id,
@@ -341,10 +350,7 @@ def create_a2a_tools_and_clients(
                 default_output_modes=["text/plain"],
             )
 
-        if resource.a2a_url:
-            agent_card.url = resource.a2a_url
-
-        a2a_client = A2aClient(agent_card)
+        a2a_client = A2aClient(agent_card, resource.slug)
         tool = _create_a2a_tool(resource, a2a_client, agent_card)
         tools.append(tool)
         clients.append(a2a_client)
