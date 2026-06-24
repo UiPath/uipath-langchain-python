@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "LLMJudgeOutputEvaluator",
+  "evaluatorTypeId": "uipath-llm-judge-output-semantic-similarity",
+  "evaluatorConfig": {
+    "name": "LLMJudgeOutputEvaluator",
+    "model": "gpt-4o-2024-11-20",
+    "temperature": 0.0
+  }
+}
