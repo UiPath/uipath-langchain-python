@@ -298,3 +298,40 @@ def _skip_anyof_inlining_ref(
 
     _inline_ref_if_present(schema, container["anyOf"], target_index)
     return container["anyOf"][target_index]
+
+
+def remove_fields_from_schema(
+    schema: dict[str, Any],
+    json_paths: list[str],
+) -> set[str]:
+    """Remove the named fields at ``json_paths`` from the schema (in place).
+
+    For each path, navigate to the parent object and drop the named field from
+    its ``properties`` and ``required``. Used to hide statically-configured
+    parameters from the model-facing tool schema. Paths that do not resolve to a
+    named object field (array elements, or fields absent from the schema) are
+    skipped. Returns the set of paths that were actually removed.
+    """
+    removed: set[str] = set()
+    for json_path in json_paths:
+        try:
+            segments = parse_jsonpath_segments(json_path)
+        except Exception:
+            # A malformed path is simply not removable; leave the field in place.
+            continue
+        if not segments or segments[-1] == "*":
+            continue
+        field_name = segments[-1]
+        try:
+            parent = _navigate_schema_inlining_refs(schema, segments[:-1])
+        except SchemaNavigationError:
+            continue
+        properties = parent.get("properties")
+        if not isinstance(properties, dict) or field_name not in properties:
+            continue
+        del properties[field_name]
+        required = parent.get("required")
+        if isinstance(required, list) and field_name in required:
+            required.remove(field_name)
+        removed.add(json_path)
+    return removed
