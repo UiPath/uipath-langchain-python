@@ -5,12 +5,20 @@ through the binding-aware SDK (``remote_a2a.retrieve_async``), mirroring how
 MCP servers are resolved — not from a field baked into the resource config.
 """
 
+import os
 from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 from a2a.client import Client
 from a2a.types import AgentCard, Message, Part, Role, TextPart
+from opentelemetry import trace as otel_trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
+from opentelemetry.trace import StatusCode
 from uipath.agent.models.agent import AgentA2aResourceConfig
 
 import uipath_langchain.agent.tools.a2a.a2a_tool as a2a_tool
@@ -308,3 +316,68 @@ async def test_tool_wrapper_persists_conversation(
     stored = command.update["inner_state"]["tools_storage"][tool.name]
     assert stored["context_id"] == "ctx-9"
     assert "pong" in command.update["messages"][0].content
+
+
+def test_a2a_sdk_telemetry_suppressed_by_default() -> None:
+    """Importing the a2a package disables the a2a-sdk's own OTel transport spans.
+
+    The package __init__ runs (via the module imports above) before the a2a-sdk
+    is imported and sets the suppression default.
+    """
+    assert os.environ.get("OTEL_INSTRUMENTATION_A2A_SDK_ENABLED") == "false"
+
+
+async def test_tool_invocation_emits_custom_a2a_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invoking the tool emits one custom-instrumentation A2A span carrying the
+    toolCall kind and the message/response."""
+    provider = TracerProvider()
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(otel_trace, "get_tracer", provider.get_tracer)
+
+    resource = _make_resource(cached_agent_card=_cached_card())
+    tools, clients = create_a2a_tools_and_clients([resource])
+    fake = _FakeA2aClient([_agent_message("pong", context_id="ctx-1")])
+
+    async def _get():
+        return fake
+
+    monkeypatch.setattr(clients[0], "get", _get)
+
+    result = await tools[0].ainvoke({"message": "ping"})
+    assert "pong" in result
+
+    a2a_spans = [s for s in exporter.get_finished_spans() if s.name == "Remote Agent"]
+    assert len(a2a_spans) == 1
+    attrs = a2a_spans[0].attributes or {}
+    assert attrs["uipath.custom_instrumentation"] is True
+    assert attrs["openinference.span.kind"] == "toolCall"
+    assert attrs["tool_type"] == "a2a"
+    assert attrs["input.value"] == "ping"
+    assert attrs["output.value"] == "pong"
+
+
+async def test_tool_invocation_marks_span_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed remote call sets the A2A span status to ERROR."""
+    provider = TracerProvider()
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(otel_trace, "get_tracer", provider.get_tracer)
+
+    resource = _make_resource(cached_agent_card=_cached_card())
+    tools, clients = create_a2a_tools_and_clients([resource])
+
+    async def _get():
+        return _RaisingA2aClient()
+
+    monkeypatch.setattr(clients[0], "get", _get)
+
+    await tools[0].ainvoke({"message": "ping"})
+
+    a2a_spans = [s for s in exporter.get_finished_spans() if s.name == "Remote Agent"]
+    assert len(a2a_spans) == 1
+    assert a2a_spans[0].status.status_code == StatusCode.ERROR
