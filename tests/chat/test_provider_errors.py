@@ -117,9 +117,37 @@ class TestRaiseForProviderHttpError:
 
         info = exc_info.value.error_info
         assert info.status == 500
-        assert info.category == UiPathErrorCategory.UNKNOWN
         assert info.code.endswith(AgentRuntimeErrorCode.HTTP_ERROR.value)
         assert "boom" in info.detail  # str(e) fallback
+
+    @pytest.mark.parametrize(
+        ("status_code", "expected_category"),
+        [
+            (401, UiPathErrorCategory.DEPLOYMENT),
+            (403, UiPathErrorCategory.DEPLOYMENT),
+            (408, UiPathErrorCategory.SYSTEM),
+            (429, UiPathErrorCategory.SYSTEM),
+            (500, UiPathErrorCategory.SYSTEM),
+            (503, UiPathErrorCategory.SYSTEM),
+            (400, UiPathErrorCategory.UNKNOWN),
+            (404, UiPathErrorCategory.UNKNOWN),
+        ],
+    )
+    def test_status_code_maps_to_expected_category(
+        self, status_code: int, expected_category: UiPathErrorCategory
+    ) -> None:
+        class _ProviderError(Exception):
+            def __init__(self, status: int) -> None:
+                super().__init__("boom")
+                self.status_code = status
+                self.body: dict[str, str] = {}
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            raise_for_provider_http_error(_ProviderError(status_code))
+
+        info = exc_info.value.error_info
+        assert info.status == status_code
+        assert info.category == expected_category
 
     def test_no_status_does_not_raise(self) -> None:
         # No extractable HTTP status → no-op (the original exception is left to

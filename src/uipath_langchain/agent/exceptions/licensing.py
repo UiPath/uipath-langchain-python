@@ -21,6 +21,20 @@ _LLM_STATUS_CODE_MAP: dict[int, AgentRuntimeErrorCode] = {
 }
 
 
+def _category_for_status(status_code: int) -> UiPathErrorCategory:
+    """Map an LLM provider HTTP status to a runtime error category.
+
+    401/403 are tenant deployment/entitlement issues; 408, 429 and any 5xx are
+    system-side (timeout, throttling, provider/gateway failure). Anything else is
+    left UNKNOWN for the last-resort mapper to classify.
+    """
+    if status_code in (401, 403):
+        return UiPathErrorCategory.DEPLOYMENT
+    if status_code == 408 or status_code == 429 or status_code >= 500:
+        return UiPathErrorCategory.SYSTEM
+    return UiPathErrorCategory.UNKNOWN
+
+
 def raise_for_provider_http_error(e: BaseException) -> None:
     """Re-raise provider-specific HTTP errors as a structured AgentRuntimeError.
 
@@ -33,11 +47,7 @@ def raise_for_provider_http_error(e: BaseException) -> None:
         return
 
     code = _LLM_STATUS_CODE_MAP.get(err.status_code, AgentRuntimeErrorCode.HTTP_ERROR)
-    category = (
-        UiPathErrorCategory.DEPLOYMENT
-        if err.status_code == 403
-        else UiPathErrorCategory.UNKNOWN
-    )
+    category = _category_for_status(err.status_code)
 
     raise AgentRuntimeError(
         code=code,
