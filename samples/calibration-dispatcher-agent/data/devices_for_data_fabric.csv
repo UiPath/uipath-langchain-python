@@ -1,0 +1,21 @@
+Equipment ID,Device Name,Device Type,Serial Number,Clinic ID,Last Calibration Date,Calibration Interval (Days),Next Calibration Due,Priority,Manufacturer
+EQP001,AudioStar Pro 3000,Audiometer,AS3K-2024-001,CLI001,2024-11-01,365,2025-11-01,2,MedTech Solutions
+EQP002,HearTest Elite,Audiometer,HTE-2024-042,CLI002,2024-10-20,365,2025-10-20,1,AudioCorp
+EQP003,TympScan 500,Tympanometer,TS500-2024-118,CLI003,2024-11-05,365,2025-11-05,2,MedTech Solutions
+EQP004,AudioMaster Plus,Audiometer,AMP-2024-089,CLI004,2024-10-18,365,2025-10-18,1,HearingTech
+EQP005,PureTone Pro,Audiometer,PTP-2024-156,CLI005,2024-12-15,365,2025-12-15,4,AudioCorp
+EQP006,TympCheck Advanced,Tympanometer,TCA-2024-201,CLI006,2024-10-25,365,2025-10-25,1,DiagnosticSys
+EQP007,HearingTest 2000,Audiometer,HT2K-2024-067,CLI007,2024-11-10,365,2025-11-10,2,MedTech Solutions
+EQP008,AudioPro X1,Audiometer,APX1-2024-134,CLI008,2025-01-20,365,2026-01-20,5,HearingTech
+EQP009,TympMaster Elite,Tympanometer,TME-2024-245,CLI009,2024-10-22,365,2025-10-22,1,AudioCorp
+EQP010,PureTone Advanced,Audiometer,PTA-2024-178,CLI010,2024-11-08,365,2025-11-08,2,MedTech Solutions
+EQP011,AudioCheck Pro,Audiometer,ACP-2024-092,CLI011,2025-02-05,365,2026-02-05,5,DiagnosticSys
+EQP012,HearTest Pro 500,Audiometer,HTP5-2024-115,CLI012,2024-11-14,365,2025-11-14,3,AudioCorp
+EQP013,TympScan Ultra,Tympanometer,TSU-2024-267,CLI013,2024-10-28,365,2025-10-28,1,HearingTech
+EQP014,AudioMaster 3000,Audiometer,AM3K-2024-203,CLI014,2024-11-12,365,2025-11-12,2,MedTech Solutions
+EQP015,HearingPro Elite,Audiometer,HPE-2024-145,CLI015,2025-01-25,365,2026-01-25,5,AudioCorp
+EQP016,TympTest Advanced,Tympanometer,TTA-2024-289,CLI016,2024-10-30,365,2025-10-30,1,DiagnosticSys
+EQP017,AudioStar Elite,Audiometer,ASE-2024-167,CLI017,2024-11-18,365,2025-11-18,2,MedTech Solutions
+EQP018,PureTone Ultra,Audiometer,PTU-2024-189,CLI018,2025-03-10,365,2026-03-10,5,HearingTech
+EQP019,TympCheck Pro,Tympanometer,TCP-2024-312,CLI019,2024-11-02,365,2025-11-02,2,AudioCorp
+EQP020,AudioTest Advanced,Audiometer,ATA-2024-334,CLI020,2024-11-20,365,2025-11-20,3,MedTech Solutions
