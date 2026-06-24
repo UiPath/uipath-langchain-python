@@ -116,12 +116,12 @@ Generate your first UiPath LangChain agent:
 
 ```shell
 > uipath new my-agent
-⠋ Creating new agent my-agent in current directory ...
-✓  Created 'main.py' file.
-✓  Created 'langgraph.json' file.
-✓  Created 'pyproject.toml' file.
-💡  Initialize project: uipath init
-💡  Run agent: uipath run agent '{"topic": "UiPath"}'
+[INFO] Creating new agent my-agent in current directory ...
+[OK] Created 'main.py' file.
+[OK] Created 'langgraph.json' file.
+[OK] Created 'pyproject.toml' file.
+[HINT] Initialize project: uipath init
+[HINT] Run agent: uipath run agent '{"topic": "UiPath"}'
 ```
 
 This command creates the following files:
@@ -139,14 +139,14 @@ This command creates the following files:
 
 ```shell
 > uipath auth
-⠋ Authenticating with UiPath ...
-🔗 If a browser window did not open, please open the following URL in your browser: [LINK]
-👇 Select tenant:
+[INFO] Authenticating with UiPath ...
+[INFO] If a browser window did not open, please open the following URL in your browser: [LINK]
+[INPUT] Select tenant:
   0: Tenant1
   1: Tenant2
 Select tenant number: 0
 Selected tenant: Tenant1
-✓  Authentication successful.
+[OK] Authentication successful.
 ```
 
 ## Initialize Project
@@ -155,11 +155,11 @@ Selected tenant: Tenant1
 
 ```shell
 > uipath init
-⠋ Initializing UiPath project ...
-✓   Created '.env' file.
-✓   Created 'agent.mermaid' file.
-✓   Created 'entry-points.json' file.
-✓   Created 'bindings.json' file.
+[INFO] Initializing UiPath project ...
+[OK] Created '.env' file.
+[OK] Created 'agent.mermaid' file.
+[OK] Created 'entry-points.json' file.
+[OK] Created 'bindings.json' file.
 ```
 
 This command creates the following files:
@@ -170,6 +170,8 @@ This command creates the following files:
 | `entry-points.json` | Contains the input/output and graph schemas of your graphs                   |
 | `bindings.json`     | Allows you to configure overridable resource bindings                        |
 | `agent.mermaid`     | Graph visual representation                                                  |
+| `AGENTS.md`         | Agent guidance and instructions for this project                             |
+| `.agent/`           | Reference files (CLI, SDK, and required structure) for agent tooling          |
 
 ## Run The Agent Locally
 
@@ -248,12 +250,12 @@ authors = [{ name = "Your Name", email = "your.name@example.com" }]
 
 ```shell
 > uipath pack
-⠋ Packaging project ...
+[INFO] Packaging project ...
 Name       : test
 Version    : 0.1.0
 Description: Add your description here
 Authors    : Your Name
-✓  Project successfully packaged.
+[OK] Project successfully packaged.
 ```
 
 ### Publish To My Workspace
@@ -262,11 +264,11 @@ Authors    : Your Name
 
 ```shell
 > uipath publish --my-workspace
-⠙ Publishing most recent package: my-agent.0.0.1.nupkg ...
-✓  Package published successfully!
-⠦ Getting process information ...
-🔗 Process configuration link: [LINK]
-💡 Use the link above to configure any environment variables
+[INFO] Publishing most recent package: my-agent.0.0.1.nupkg ...
+[OK] Package published successfully!
+[INFO] Getting process information ...
+[INFO] Process configuration link: [LINK]
+[HINT] Use the link above to configure any environment variables
 ```
 
 /// info
@@ -291,10 +293,10 @@ Set the environment variables using the provided link:
 
 ```shell
 > uipath invoke agent '{"topic": "UiPath"}'
-⠴ Loading configuration ...
-⠴ Starting job ...
-✨ Job started successfully!
-🔗 Monitor your job here: [LINK]
+[INFO] Loading configuration ...
+[INFO] Starting job ...
+[OK] Job started successfully!
+[INFO] Monitor your job here: [LINK]
 ```
 
 Use the provided link to monitor your job and view detailed traces.
@@ -321,6 +323,6 @@ section, as agent input:
 
 ## Next Steps
 
-Congratulations! You have successfully set up, created, published, and run a UiPath LangChain Agent. 🚀
+Congratulations! You have successfully set up, created, published, and run a UiPath LangChain Agent.
 
 For more advanced agents and agent samples, please refer to our [samples section](https://github.com/UiPath/uipath-langchain-python/tree/main/samples) in GitHub.
