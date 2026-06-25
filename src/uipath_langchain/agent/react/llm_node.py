@@ -11,7 +11,7 @@ from langchain_core.messages import (
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 from uipath.agent.react import RAISE_ERROR_TOOL
-from uipath.llm_client import UiPathAPIError
+from uipath.llm_client import UiPathAPIError, UiPathError
 from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -19,6 +19,7 @@ from uipath_langchain.chat.handlers import get_payload_handler
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..exceptions.licensing import raise_for_provider_http_error
+from ..exceptions.llm import raise_for_llm_client_error
 from ..messages.message_utils import replace_tool_calls
 from ..tools.static_args import StaticArgsHandler
 from .constants import (
@@ -124,6 +125,9 @@ def create_llm_node(
         except UiPathAPIError as e:
             # New LLM clients surface provider HTTP errors as a normalized UiPathAPIError directly.
             raise_for_provider_http_error(e)
+        except UiPathError as e:
+            raise_for_llm_client_error(e)
+            raise
         except Exception as e:
             # Legacy in-repo clients (use_new_llm_clients=False) raise raw provider SDK exceptions.
             # Normalize via as_uipath_error and apply the same mapping when the error is HTTP-shaped; non-HTTP errors propagate.

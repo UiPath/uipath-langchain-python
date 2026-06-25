@@ -4477,7 +4477,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.14.0"
+version = "0.14.1"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4498,6 +4498,7 @@ dependencies = [
     { name = "uipath" },
     { name = "uipath-core" },
     { name = "uipath-langchain-client", extra = ["openai"] },
+    { name = "uipath-llm-client" },
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
@@ -4563,6 +4564,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["google"], marker = "extra == 'vertex'", specifier = ">=1.16.1,<1.17.0" },
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.16.1,<1.17.0" },
     { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.16.1,<1.17.0" },
+    { name = "uipath-llm-client", specifier = ">=1.16.2,<1.17.0" },
     { name = "uipath-platform", specifier = ">=0.2.0,<0.3.0" },
     { name = "uipath-runtime", specifier = ">=0.12.1,<0.13.0" },
 ]
@@ -4631,7 +4633,7 @@ vertexai = [
 
 [[package]]
 name = "uipath-llm-client"
-version = "1.16.0"
+version = "1.16.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -4640,9 +4642,9 @@ dependencies = [
     { name = "tenacity" },
     { name = "uipath-platform" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8e/4c/8ee6787ba632fcfe50f5928e50964320c9f4d64ec6df3bd1451e896a8aa2/uipath_llm_client-1.16.0.tar.gz", hash = "sha256:d81605938394fbc12c3130ecd98abd85d3cc4cf317bca65a41a8b8fadb7e1d74", size = 12512889, upload-time = "2026-07-03T12:10:32.681Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ee/aa/787e092ee901c763887e4ce2d68d2f7575e689db987b493242589a52f1ac/uipath_llm_client-1.16.2.tar.gz", hash = "sha256:6911d5b31552ec32100c036d6c902f9ca938f6142020230d3f88b78c0ca5fc23", size = 12516632, upload-time = "2026-07-06T15:42:50.911Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ed/03/c5a988b0a869d6207b1bb693c4674b92fdefb3771f5eb238b1b60cd28b02/uipath_llm_client-1.16.0-py3-none-any.whl", hash = "sha256:fd586a6c05ff6876e33773c915bb87cd643110bf9ff0936e3bb228e1167274bb", size = 67958, upload-time = "2026-07-03T12:10:31Z" },
+    { url = "https://files.pythonhosted.org/packages/63/c7/9ab74b89a990751210e7ae54735dd29472b00748a8fea2bd63ca885afd0a/uipath_llm_client-1.16.2-py3-none-any.whl", hash = "sha256:c9c1f964d6508b60d2fd0e45402154a5099c661e03b525773db80b16fd888993", size = 68729, upload-time = "2026-07-06T15:42:49.379Z" },
 ]
 
 [[package]]

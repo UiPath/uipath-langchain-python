@@ -12,7 +12,8 @@ from langchain_core.messages.content import create_text_block, create_tool_call
 from langchain_core.tools import BaseTool
 from langchain_openai import AzureChatOpenAI
 from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
-from uipath.llm_client import UiPathAPIError
+from uipath.llm_client import UiPathAPIError, UiPathError, UiPathLLMErrorCode
+from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions.exceptions import (
     AgentRuntimeError,
@@ -405,6 +406,33 @@ class TestLLMNodeProviderErrorHandling:
         info = exc_info.value.error_info
         assert info.status == 403
         assert info.code.endswith(AgentRuntimeErrorCode.LICENSE_NOT_AVAILABLE.value)
+
+    @pytest.mark.asyncio
+    async def test_new_client_unsupported_mime_error_maps_to_file_error(self):
+        node = self._node_raising(
+            UiPathError(
+                error_code=UiPathLLMErrorCode.UNSUPPORTED_MIME_TYPE,
+                detail="Unsupported MIME type: application/x-foo",
+            )
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await node(self.state)
+
+        info = exc_info.value.error_info
+        assert info.category == UiPathErrorCategory.USER
+        assert info.code.endswith(AgentRuntimeErrorCode.FILE_ERROR.value)
+        assert "application/x-foo" in info.detail
+
+    @pytest.mark.asyncio
+    async def test_unmapped_uipath_error_propagates_unchanged(self):
+        err = UiPathError(error_code="SOME_OTHER_CODE", detail="unrelated")
+        node = self._node_raising(err)
+
+        with pytest.raises(UiPathError) as exc_info:
+            await node(self.state)
+
+        assert exc_info.value is err
 
     @pytest.mark.asyncio
     async def test_non_http_error_propagates_unchanged(self):
