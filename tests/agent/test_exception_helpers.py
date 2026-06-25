@@ -138,3 +138,48 @@ class TestErrorProperties:
         with pytest.raises(AgentRuntimeError) as exc_info:
             raise_for_enriched(err, _KNOWN_ERRORS, title=_TITLE, tool="T")
         assert exc_info.value.__cause__ is err
+
+
+class TestRaiseForUnsupportedAttachment:
+    """Tests for raise_for_unsupported_attachment (provider MIME-verdict -> USER)."""
+
+    def test_translates_direct_unsupported_mime_valueerror(self) -> None:
+        from uipath_langchain.agent.exceptions.attachments import (
+            raise_for_unsupported_attachment,
+        )
+
+        exc = ValueError(
+            "Unsupported MIME type: application/octet-stream. Please refer to the "
+            "Bedrock Converse API documentation for supported formats."
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            raise_for_unsupported_attachment(exc)
+
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.FILE_ERROR
+        )
+
+    def test_translates_marker_in_cause_chain(self) -> None:
+        from uipath_langchain.agent.exceptions.attachments import (
+            raise_for_unsupported_attachment,
+        )
+
+        root = ValueError("Unsupported MIME type: application/x-foo")
+        wrapper = RuntimeError("model invocation failed")
+        wrapper.__cause__ = root
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            raise_for_unsupported_attachment(wrapper)
+
+        assert exc_info.value.error_info.category == UiPathErrorCategory.USER
+
+    def test_noop_for_unrelated_exception(self) -> None:
+        from uipath_langchain.agent.exceptions.attachments import (
+            raise_for_unsupported_attachment,
+        )
+
+        # No marker in the chain -> returns without raising, caller falls through.
+        raise_for_unsupported_attachment(ValueError("some other failure"))
+        raise_for_unsupported_attachment(RuntimeError("network down"))
