@@ -44,31 +44,48 @@ def test_factory_no_ontologies_is_empty():
 # --- resolver: nested ontologySet → (name, folder) pairs ---
 
 
-def _ctx(ontology_set):
-    config = {
-        "$resourceType": "context",
-        "name": "TestDF",
-        "description": "",
-        "contextType": "datafabricentityset",
-    }
-    if ontology_set is not None:
-        config["ontologySet"] = ontology_set
-    return AgentContextResourceConfig.model_validate(config)
-
-
-def test_resolve_ontology_set_to_name_and_folder():
-    ctx = _ctx(
-        [
-            {"name": "library", "folderId": "f1"},
-            {"name": "finance", "folderId": "f2", "referenceKey": "ont-2"},
-        ]
+def _entity_ctx():
+    return AgentContextResourceConfig.model_validate(
+        {
+            "$resourceType": "context",
+            "name": "Entities",
+            "description": "",
+            "contextType": "datafabricentityset",
+            "entitySet": [{"id": "e1", "name": "LibraryLoan", "folderId": "f1"}],
+        }
     )
-    assert resolve_context_ontologies(ctx) == [
+
+
+def _ontology_ctx(ontology_set):
+    return AgentContextResourceConfig.model_validate(
+        {
+            "$resourceType": "context",
+            "name": "Ontologies",
+            "description": "",
+            "contextType": "datafabricontology",
+            "ontologySet": ontology_set,
+        }
+    )
+
+
+def test_resolve_gathers_ontology_context_items():
+    # The agent has an entity context + a dedicated ontology context; only the
+    # ontology context's items are gathered, each as (name, folder_key).
+    resources = [
+        _entity_ctx(),
+        _ontology_ctx(
+            [
+                {"name": "library", "folderId": "f1"},
+                {"name": "finance", "folderId": "f2", "referenceKey": "ont-2"},
+            ]
+        ),
+    ]
+    assert resolve_context_ontologies(resources) == [
         ("library", "f1"),
         ("finance", "f2"),
     ]
 
 
-def test_resolve_no_ontology_set_is_empty():
-    ctx = _ctx(None)
-    assert resolve_context_ontologies(ctx) == []
+def test_resolve_no_ontology_context_is_empty():
+    # Only an entity context, no ontology context → nothing to ground with.
+    assert resolve_context_ontologies([_entity_ctx()]) == []

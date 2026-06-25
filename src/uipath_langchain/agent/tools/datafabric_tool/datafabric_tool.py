@@ -31,16 +31,25 @@ BASE_SYSTEM_PROMPT = "base_system_prompt"
 
 
 def resolve_context_ontologies(
-    resource: AgentContextResourceConfig,
+    resources: list[Any],
 ) -> list[tuple[str, str | None]]:
-    """Map a context's nested ``ontology_set`` to ``(name, folder_key)`` pairs.
+    """Gather ontologies from the agent's ontology context(s).
 
-    Ontologies are configured inline on the Data Fabric context (alongside the
-    entity set) as ``ontologySet`` items. Each carries its own ``folderId``, so
-    it is fetched from its own folder.
+    An ontology is configured in a dedicated ontology context (``contextType``
+    ``datafabricontology``) whose ``ontologySet`` mirrors the entity context's
+    ``entitySet`` — by convention at most one such context per agent. Its
+    ontologies ground the Data Fabric query tool; each carries its own
+    ``folderId``, so it is fetched from its own folder.
     """
-    items = getattr(resource, "ontology_set", None) or []
-    return [(item.name, item.folder_key) for item in items]
+    ontologies: list[tuple[str, str | None]] = []
+    for resource in resources:
+        if (
+            isinstance(resource, AgentContextResourceConfig)
+            and resource.is_datafabric_ontology
+        ):
+            for item in resource.ontology_set or []:
+                ontologies.append((item.name, item.folder_key))
+    return ontologies
 
 
 class DataFabricTextQueryHandler:

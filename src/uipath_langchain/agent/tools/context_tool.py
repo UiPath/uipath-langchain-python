@@ -158,6 +158,11 @@ def create_context_tool(
 ) -> StructuredTool | BaseTool | None:
     tool_name = sanitize_tool_name(resource.name)
 
+    # An ontology context is not a standalone tool — it only grounds the Data
+    # Fabric entity tool, which gathers it via resolve_context_ontologies.
+    if resource.context_type == AgentContextType.DATA_FABRIC_ONTOLOGY:
+        return None
+
     if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
         if llm is None:
             raise ValueError("Data Fabric entity set tools require an LLM instance")
@@ -167,7 +172,7 @@ def create_context_tool(
         )
         from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
 
-        ontologies = resolve_context_ontologies(resource)
+        ontologies = resolve_context_ontologies(agent.resources if agent else [])
         return create_datafabric_query_tool(
             resource,
             llm,
