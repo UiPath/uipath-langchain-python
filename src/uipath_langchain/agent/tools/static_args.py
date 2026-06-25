@@ -6,6 +6,7 @@ import re
 from typing import Any, Iterator, Mapping, Sequence, TypeVar
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
+from jsonpath_ng.exceptions import JsonPathParserError  # type: ignore[import-untyped]
 from langchain_core.messages import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
@@ -57,6 +58,7 @@ _SENSITIVE_ITEM_PLACEHOLDER = "<hidden>"
 def _resolve_argument_properties(
     argument_properties: Mapping[str, AgentToolArgumentProperties],
     agent_input: dict[str, Any],
+    tool_name: str | None = None,
 ) -> dict[str, ToolStaticArgument]:
     """Resolves the different variants of argument properties to static arguments."""
 
@@ -73,7 +75,21 @@ def _resolve_argument_properties(
                     is_sensitive=props.is_sensitive,
                 )
             case AgentToolArgumentArgumentProperties():
-                agent_argument = parse(props.argument_path).find(agent_input)
+                try:
+                    argument_expr = parse(props.argument_path)
+                except JsonPathParserError as e:
+                    tool_ref = f" of tool '{tool_name}'" if tool_name else ""
+                    raise AgentRuntimeError(
+                        code=AgentRuntimeErrorCode.INVALID_STATIC_ARGUMENT,
+                        title="Malformed argument path in tool configuration",
+                        detail=(
+                            f"The argument binding '{json_path}'{tool_ref} has a "
+                            f"malformed JSONPath expression {props.argument_path!r}: {e} "
+                            "Fix the argument path in the agent configuration."
+                        ),
+                        category=UiPathErrorCategory.SYSTEM,
+                    ) from e
+                agent_argument = argument_expr.find(agent_input)
                 if not agent_argument:
                     return None
                 else:
@@ -312,7 +328,7 @@ class StaticArgsHandler:
                 and tool.argument_properties
             ):
                 static_args = _resolve_argument_properties(
-                    tool.argument_properties, agent_input
+                    tool.argument_properties, agent_input, tool_name=tool.name
                 )
                 modified_tool, applied_paths = _apply_static_arguments_to_schema(
                     tool, static_args
