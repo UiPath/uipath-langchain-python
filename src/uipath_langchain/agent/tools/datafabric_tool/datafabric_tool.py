@@ -19,10 +19,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
-from uipath.agent.models.agent import (
-    AgentContextResourceConfig,
-    AgentOntologyResourceConfig,
-)
+from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.platform.entities import DataFabricEntityItem
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
@@ -35,34 +32,15 @@ BASE_SYSTEM_PROMPT = "base_system_prompt"
 
 def resolve_context_ontologies(
     resource: AgentContextResourceConfig,
-    resources: list[Any],
 ) -> list[tuple[str, str | None]]:
-    """Resolve a context's ``ontology_refs`` to ``(name, folder_key)`` pairs.
+    """Map a context's nested ``ontology_set`` to ``(name, folder_key)`` pairs.
 
-    Ontologies are standalone ``AgentOntologyResourceConfig`` resources; a Data
-    Fabric context references them by name via ``ontology_refs``. Each ontology
-    carries its own ``folderId``, so it is resolved from its own folder. A
-    dangling reference (no matching ontology resource) is skipped with a warning
-    so it can never break tool creation.
+    Ontologies are configured inline on the Data Fabric context (alongside the
+    entity set) as ``ontologySet`` items. Each carries its own ``folderId``, so
+    it is fetched from its own folder.
     """
-    refs = getattr(resource, "ontology_refs", None) or []
-    if not refs:
-        return []
-    by_name = {
-        r.name: r for r in resources if isinstance(r, AgentOntologyResourceConfig)
-    }
-    ontologies: list[tuple[str, str | None]] = []
-    for ref in refs:
-        onto = by_name.get(ref)
-        if onto is None:
-            logger.warning(
-                "Context %r references unknown ontology %r; skipping.",
-                resource.name,
-                ref,
-            )
-            continue
-        ontologies.append((onto.name, onto.folder_key))
-    return ontologies
+    items = getattr(resource, "ontology_set", None) or []
+    return [(item.name, item.folder_key) for item in items]
 
 
 class DataFabricTextQueryHandler:
@@ -193,10 +171,9 @@ def create_datafabric_query_tool(
         agent_config: Optional dict with agent-level config.
             Key ``base_system_prompt`` carries the outer agent's system prompt.
         ontologies: ``(name, folder_key)`` pairs resolved from the context's
-            ``ontology_refs`` against the agent's standalone ontology resources
-            (see ``resolve_context_ontologies``). Empty/None → no fetch tool is
-            added. Resolution comes only from the agent definition (the binding),
-            never from process env.
+            nested ``ontology_set`` (see ``resolve_context_ontologies``).
+            Empty/None → no fetch tool is added. Resolution comes only from the
+            agent definition (the binding), never from process env.
     """
     config = agent_config or {}
     entity_set = [

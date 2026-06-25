@@ -167,9 +167,7 @@ def create_context_tool(
         )
         from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
 
-        ontologies = resolve_context_ontologies(
-            resource, agent.resources if agent else []
-        )
+        ontologies = resolve_context_ontologies(resource)
         return create_datafabric_query_tool(
             resource,
             llm,

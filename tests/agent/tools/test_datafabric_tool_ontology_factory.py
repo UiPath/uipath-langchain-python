@@ -1,18 +1,14 @@
 """Tests for ontology resolution + (name, folder) mapping in the DF tool factory.
 
-Ontologies are standalone ``AgentOntologyResourceConfig`` resources; a Data
-Fabric context references them by name via ``ontology_refs``. The caller
-resolves those refs to ``(name, folder_key)`` pairs and passes them to the
-factory.
+Ontologies are configured inline on the Data Fabric context as a nested
+``ontologySet`` (alongside the entity set). The caller resolves those items to
+``(name, folder_key)`` pairs and passes them to the factory.
 """
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from uipath.agent.models.agent import (
-    AgentContextResourceConfig,
-    AgentOntologyResourceConfig,
-)
+from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.platform.entities import DataFabricEntityItem
 
 from uipath_langchain.agent.tools.datafabric_tool.datafabric_tool import (
@@ -45,48 +41,34 @@ def test_factory_no_ontologies_is_empty():
     assert tool.coroutine._ontologies == []  # type: ignore[attr-defined]
 
 
-# --- resolver: ontology_refs → standalone ontology resources → (name, folder) ---
+# --- resolver: nested ontologySet → (name, folder) pairs ---
 
 
-def _ctx(ontology_refs):
-    return AgentContextResourceConfig.model_validate(
-        {
-            "$resourceType": "context",
-            "name": "TestDF",
-            "description": "",
-            "contextType": "datafabricentityset",
-            "ontologyRefs": ontology_refs,
-        }
+def _ctx(ontology_set):
+    config = {
+        "$resourceType": "context",
+        "name": "TestDF",
+        "description": "",
+        "contextType": "datafabricentityset",
+    }
+    if ontology_set is not None:
+        config["ontologySet"] = ontology_set
+    return AgentContextResourceConfig.model_validate(config)
+
+
+def test_resolve_ontology_set_to_name_and_folder():
+    ctx = _ctx(
+        [
+            {"name": "library", "folderId": "f1"},
+            {"name": "finance", "folderId": "f2", "referenceKey": "ont-2"},
+        ]
     )
-
-
-def _onto(name, folder_id):
-    return AgentOntologyResourceConfig.model_validate(
-        {
-            "$resourceType": "ontology",
-            "name": name,
-            "description": "",
-            "folderId": folder_id,
-        }
-    )
-
-
-def test_resolve_refs_to_name_and_folder():
-    ctx = _ctx(["library", "finance"])
-    resources = [ctx, _onto("library", "f1"), _onto("finance", "f2")]
-    assert resolve_context_ontologies(ctx, resources) == [
+    assert resolve_context_ontologies(ctx) == [
         ("library", "f1"),
         ("finance", "f2"),
     ]
 
 
-def test_resolve_skips_dangling_ref():
-    ctx = _ctx(["library", "missing"])
-    resources = [ctx, _onto("library", "f1")]
-    # 'missing' has no matching ontology resource → skipped, not an error.
-    assert resolve_context_ontologies(ctx, resources) == [("library", "f1")]
-
-
-def test_resolve_no_refs_is_empty():
+def test_resolve_no_ontology_set_is_empty():
     ctx = _ctx(None)
-    assert resolve_context_ontologies(ctx, [ctx]) == []
+    assert resolve_context_ontologies(ctx) == []
