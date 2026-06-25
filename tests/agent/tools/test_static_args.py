@@ -205,6 +205,53 @@ class TestStaticArgsHandler:
         handler.apply_to_response([call])
         assert call["args"] == {"host": "h"}
 
+    @pytest.mark.parametrize(
+        "bad_path",
+        ["output.", "$.foo.", "foo[", "$.foo[*", "", "$['a'"],
+        ids=[
+            "trailing-dot",
+            "trailing-dot-dollar",
+            "open-bracket",
+            "open-filter",
+            "empty",
+            "open-quote",
+        ],
+    )
+    def test_initialize_raises_typed_error_on_malformed_argument_path(
+        self, bad_path: str
+    ):
+        """A malformed (truncated) JSONPath argument_path surfaces as a typed
+        SYSTEM AgentRuntimeError naming the tool, argument, and offending path -
+        not an opaque jsonpath_ng JsonPathParserError that lands as Unknown
+        (SRE-610701 cat-5)."""
+
+        class InputSchema(BaseModel):
+            present: str = ""
+
+        tool = _create_tool(
+            "verification_tool",
+            {
+                "$['query']": AgentToolArgumentArgumentProperties(
+                    is_sensitive=False, argument_path=bad_path
+                ),
+            },
+        )
+        handler = StaticArgsHandler()
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            handler.initialize([tool], InputSchema(), InputSchema)
+
+        error = exc_info.value
+        assert error.error_info.category == UiPathErrorCategory.SYSTEM
+        assert error.error_info.code.endswith(
+            AgentRuntimeErrorCode.INVALID_STATIC_ARGUMENT.value
+        )
+        # The offending path, argument key, and tool name must all be named so
+        # the failure is debuggable (the raw error names none of them).
+        assert repr(bad_path) in error.error_info.detail
+        assert "$['query']" in error.error_info.detail
+        assert "verification_tool" in error.error_info.detail
+
     def test_apply_to_response_merges_with_existing_args(self):
         """Test that apply_to_response merges static args with existing tool call args."""
         tool = _create_tool(
