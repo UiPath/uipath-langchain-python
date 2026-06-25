@@ -4,16 +4,59 @@ from typing import Any
 from unittest.mock import patch
 
 import botocore
+import pytest
 from langchain_aws import ChatBedrock
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.messages.content import create_file_block
 from langchain_core.outputs import ChatGeneration, ChatResult
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
 from uipath_langchain.chat._legacy.bedrock import (
     AwsBedrockCompletionsPassthroughClient,
     UiPathChatBedrock,
     UiPathChatBedrockConverse,
 )
+
+
+class TestModelResolutionValidation:
+    """An unresolvable model id is a deployment misconfiguration, not an Unknown.
+
+    A model id with no provider segment (no dot to split provider from model)
+    cannot be mapped to a known Bedrock provider, so langchain_aws raises an
+    opaque ``NotImplementedError`` ("Provider <id> model does not support chat")
+    deep at invoke time. Validate at construction and raise a typed,
+    Deployment-categorized error instead.
+    """
+
+    _ENV = {
+        "UIPATH_URL": "https://example.com",
+        "UIPATH_ORGANIZATION_ID": "org",
+        "UIPATH_TENANT_ID": "tenant",
+        "UIPATH_ACCESS_TOKEN": "token",
+    }
+
+    @patch.dict(os.environ, _ENV)
+    def test_unresolvable_model_raises_deployment_error(self):
+        with pytest.raises(AgentStartupError) as exc_info:
+            UiPathChatBedrock(model_name="not-a-real-bedrock-model")
+
+        error_info = exc_info.value.error_info
+        assert error_info.category == UiPathErrorCategory.DEPLOYMENT
+        assert error_info.code == AgentStartupError.full_code(
+            AgentStartupErrorCode.LLM_INVALID_MODEL
+        )
+
+    @patch.dict(os.environ, _ENV)
+    def test_unresolvable_model_raises_deployment_error_converse(self):
+        with pytest.raises(AgentStartupError) as exc_info:
+            UiPathChatBedrockConverse(model_name="not-a-real-bedrock-model")
+
+        assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
+
+    @patch.dict(os.environ, _ENV)
+    def test_known_model_constructs(self):
+        UiPathChatBedrock(model_name="anthropic.claude-haiku-4-5-20251001-v1:0")
 
 
 class TestGetClientSkipsImds:

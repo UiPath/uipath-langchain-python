@@ -58,6 +58,65 @@ from langchain_aws import (
     ChatBedrock,
     ChatBedrockConverse,
 )
+from uipath.runtime.errors import UiPathErrorCategory
+
+from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+
+_KNOWN_BEDROCK_PROVIDERS = frozenset(
+    {
+        "ai21",
+        "amazon",
+        "anthropic",
+        "cohere",
+        "deepseek",
+        "meta",
+        "mistral",
+        "openai",
+        "qwen",
+        "writer",
+    }
+)
+
+_REGION_PREFIXES = frozenset(
+    {"eu", "us", "us-gov", "apac", "sa", "amer", "global", "jp", "au"}
+)
+
+
+def _resolve_bedrock_provider(model_id: str) -> Optional[str]:
+    """Extract the Bedrock provider from a model id, mirroring langchain_aws.
+
+    Returns ``None`` for an ARN, which carries no inline provider segment and
+    is left to langchain_aws to validate against an explicit ``provider``.
+    """
+    if model_id.startswith("arn"):
+        return None
+    parts = model_id.split(".", maxsplit=2)
+    if len(parts) > 1 and parts[0].lower() in _REGION_PREFIXES:
+        return parts[1]
+    return parts[0]
+
+
+def _validate_bedrock_model(model_id: str) -> None:
+    """Reject a model id that cannot resolve to a known Bedrock provider.
+
+    A tenant-supplied alias with no provider segment (e.g. no dot to split
+    provider from model) otherwise reaches langchain_aws as an unknown provider
+    and surfaces only as an opaque ``NotImplementedError`` at invoke time. Fail
+    fast at construction with a Deployment-categorized error so the misconfigured
+    model is attributable instead of bucketing as Unknown.
+    """
+    provider = _resolve_bedrock_provider(model_id)
+    if provider is None or provider.lower() in _KNOWN_BEDROCK_PROVIDERS:
+        return
+    raise AgentStartupError(
+        code=AgentStartupErrorCode.LLM_INVALID_MODEL,
+        title="Invalid model",
+        detail=(
+            f"Model '{model_id}' does not resolve to a supported Bedrock provider. "
+            "Configure a valid Bedrock model id for the agent."
+        ),
+        category=UiPathErrorCategory.DEPLOYMENT,
+    )
 
 
 class AwsBedrockCompletionsPassthroughClient:
@@ -223,6 +282,8 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
                 "UIPATH_ACCESS_TOKEN environment variable or token parameter is required"
             )
 
+        _validate_bedrock_model(model_name)
+
         passthrough_client = AwsBedrockCompletionsPassthroughClient(
             model=model_name,
             token=token,
@@ -284,6 +345,8 @@ class UiPathChatBedrock(ChatBedrock):
             raise ValueError(
                 "UIPATH_ACCESS_TOKEN environment variable or token parameter is required"
             )
+
+        _validate_bedrock_model(model_name)
 
         header_capture = HeaderCapture(name=f"bedrock_headers_{id(self)}")
 
