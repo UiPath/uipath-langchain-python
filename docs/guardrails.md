@@ -241,7 +241,7 @@ agent = create_agent(
 
 ### Escalation action (human-in-the-loop)
 
-`EscalateAction` routes a violation to a **human reviewer** instead of logging or blocking it. On a violation it builds the review payload and calls the documented HITL primitive [`interrupt(CreateEscalation(...))`](https://uipath.github.io/uipath-python/langchain/human_in_the_loop/#3-createescalation) — creating a task in a UiPath **Action App** and **suspending the run** until the reviewer responds. On resume:
+`EscalateAction` routes a violation to a **human reviewer** instead of logging or blocking it. On a violation it builds the review payload and calls the documented HITL primitive [`interrupt(CreateEscalation(...))`](https://uipath.github.io/uipath-python/langchain/human_in_the_loop/#createescalation) — creating a task in a UiPath **Action App** and **suspending the run** until the reviewer responds. On resume:
 
 - **Approve** — if the reviewer edited the content, the edited value is substituted back into the flagged message / tool args / output; otherwise the original is kept. The edit is read from `ReviewedInputs` for a PRE (input) escalation and `ReviewedOutputs` for a POST (output) one.
 - **Reject** — raises `GuardrailBlockException`, terminating the run.
