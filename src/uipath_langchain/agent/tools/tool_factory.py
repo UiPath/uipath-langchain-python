@@ -125,7 +125,7 @@ async def _build_tool_for_resource(
         return create_ixp_escalation_tool(resource)
 
     elif isinstance(resource, AgentSkillToolResourceConfig):
-        return create_skill_tool(resource, llm=llm)
+        return create_skill_tool(resource)
 
     elif isinstance(resource, AgentClientSideToolResourceConfig):
         return create_client_side_tool(resource)
