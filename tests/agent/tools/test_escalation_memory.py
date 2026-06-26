@@ -311,6 +311,17 @@ class TestGetEscalationMemorySpaceId:
 
         assert result is None
 
+    def test_folder_path_returns_none_when_memory_disabled(self) -> None:
+        # No properties.memory.isEnabled and no isAgentMemoryEnabled -> disabled.
+        resource = _memory_resource()
+
+        assert _get_escalation_memory_folder_path(resource) is None
+
+    def test_space_name_returns_none_when_memory_disabled(self) -> None:
+        resource = _memory_resource()
+
+        assert _get_escalation_memory_space_name(resource) is None
+
 
 class TestGetMemorySpaceFolderOverride:
     def test_returns_none_without_matching_override(self) -> None:
@@ -1140,6 +1151,44 @@ class TestIngestEscalationMemory:
         assert write_span.attributes["savedToMemory"] is False
         assert write_span.recorded_errors == [error]
         assert write_span.statuses
+
+    @pytest.mark.asyncio
+    async def test_ingest_succeeds_without_opentelemetry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from uipath_langchain.agent.tools import escalation_memory
+
+        original_import = builtins.__import__
+
+        def import_without_otel(
+            name: str,
+            globals: dict[str, Any] | None = None,
+            locals: dict[str, Any] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> Any:
+            if name == "opentelemetry":
+                raise ImportError("opentelemetry unavailable")
+            return original_import(name, globals, locals, fromlist, level)
+
+        mock_sdk = MagicMock()
+        mock_sdk.memory.escalation_ingest_async = AsyncMock()
+        monkeypatch.setattr(builtins, "__import__", import_without_otel)
+        monkeypatch.setattr(
+            escalation_memory, "UiPath", MagicMock(return_value=mock_sdk)
+        )
+
+        # The ingest must still run when tracing is unavailable (no-op span).
+        await _ingest_escalation_memory(
+            "space-123",
+            answer='{"approved": true}',
+            attributes='{"input": "test"}',
+            parent_span_id="abc123",
+            trace_id="def456",
+            user_id=USER_GUID,
+        )
+
+        mock_sdk.memory.escalation_ingest_async.assert_called_once()
 
 
 class TestEscalationMemoryUtilities:
