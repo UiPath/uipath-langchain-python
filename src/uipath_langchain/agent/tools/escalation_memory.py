@@ -573,6 +573,7 @@ async def _ingest_escalation_memory(
     trace_id: str,
     user_id: str | None = None,
     folder_path: str | None = None,
+    memory_space_name: str | None = None,
 ) -> None:
     """Persist a resolved escalation outcome into memory."""
     normalized_user_id = _normalize_user_id(user_id)
@@ -602,6 +603,7 @@ async def _ingest_escalation_memory(
                 "type": "agentMemoryWrite",
                 "span_type": "agentMemoryWrite",
                 "uipath.custom_instrumentation": True,
+                "memorySpaceName": memory_space_name or "",
                 "memorySpaceId": memory_space_id,
                 "strategy": ESCALATION_MEMORY_STRATEGY,
             },
@@ -621,6 +623,14 @@ async def _ingest_escalation_memory(
                 attributes=attributes,
                 user_id=normalized_user_id,
             )
+            # Record what was saved as a JSON string; the exporter parses it
+            # back to an object and the Studio UI reads "request" to display
+            # the persisted memory item. Mirrors the lookup span's "request".
+            if ingest_span and hasattr(ingest_span, "set_attribute"):
+                ingest_span.set_attribute(
+                    "request",
+                    _json_dumps(request.model_dump(by_alias=True, exclude_none=True)),
+                )
             sdk = UiPath()
             await sdk.memory.escalation_ingest_async(
                 memory_space_id=memory_space_id,

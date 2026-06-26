@@ -1107,6 +1107,7 @@ class TestIngestEscalationMemory:
             parent_span_id="abc123",
             trace_id="def456",
             user_id=USER_GUID,
+            memory_space_name="MemorySpace",
         )
 
         assert tracer_names == ["uipath_langchain.memory"]
@@ -1116,10 +1117,16 @@ class TestIngestEscalationMemory:
         assert write_span.attributes["type"] == "agentMemoryWrite"
         assert write_span.attributes["span_type"] == "agentMemoryWrite"
         assert write_span.attributes["uipath.custom_instrumentation"] is True
+        assert write_span.attributes["memorySpaceName"] == "MemorySpace"
         assert write_span.attributes["memorySpaceId"] == "space-123"
         assert write_span.attributes["strategy"] == ESCALATION_MEMORY_STRATEGY
         assert write_span.attributes["fromMemory"] is False
         assert write_span.attributes["savedToMemory"] is True
+        # "request" captures what was saved as a JSON string the exporter
+        # parses back into an object for the Studio UI.
+        saved = json.loads(write_span.attributes["request"])
+        assert saved["answer"] == '{"approved": true}'
+        assert saved["attributes"] == '{"input": "test"}'
 
     @pytest.mark.asyncio
     async def test_sets_memory_write_span_to_error_on_ingest_failure(
