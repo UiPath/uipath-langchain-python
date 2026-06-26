@@ -34,6 +34,7 @@ from ...exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ...messages.message_utils import replace_tool_calls
 from ...react.types import AgentGuardrailsGraphState
 from ...react.utils import extract_current_tool_call_index, find_latest_ai_message
+from ...tools.escalation_recipient import resolve_recipient_value
 from ..types import ExecutionStage
 from ..utils import _extract_tool_args_from_message, get_message_content
 from .base_action import GuardrailAction, GuardrailActionNodes
@@ -117,9 +118,8 @@ class EscalateAction(GuardrailAction):
             if existing_task is not None:
                 return {}
 
-            # Lazy import to avoid circular dependency with escalation_tool
+            # Lazy imports to avoid circular dependencies within the agent package
             from ...react.types import AgentGraphState
-            from ...tools.escalation_tool import resolve_recipient_value
             from ...tools.utils import sanitize_dict_for_serialization
 
             internal_fields = set(AgentGraphState.model_fields.keys())

@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-import re
 from enum import Enum
 from typing import Any, Literal
 
@@ -12,25 +11,15 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
-    AgentEscalationRecipient,
-    AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
     AgentQuickFormEscalationChannel,
-    ArgumentEmailRecipient,
-    ArgumentGroupNameRecipient,
-    AssetRecipient,
-    CustomAssigneesRecipient,
     EscalationChannel,
     LowCodeAgentDefinition,
-    RoundRobinRecipient,
-    StandardRecipient,
-    WorkloadRecipient,
 )
-from uipath.agent.utils.text_tokens import safe_get_nested
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
-from uipath.platform.common import UiPathConfig, WaitEscalation
+from uipath.platform.action_center.tasks import Task, TaskRecipient
+from uipath.platform.common import WaitEscalation
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import (
@@ -57,9 +46,13 @@ from .escalation_memory import (
     _get_escalation_memory_settings,
     _get_escalation_memory_space_id,
     _get_escalation_memory_space_name,
-    _get_user_email,
     _ingest_escalation_memory,
     _resolve_user_id,
+)
+from .escalation_recipient import (
+    RESERVED_RECIPIENT_FIELD,
+    _build_llm_recipient,
+    resolve_recipient_value,
 )
 from .tool_node import ToolWrapperReturnType
 from .utils import (
@@ -76,194 +69,6 @@ class EscalationAction(str, Enum):
 
     CONTINUE = "continue"
     END = "end"
-
-
-_logger = logging.getLogger(__name__)
-
-
-# Reserved input-schema field that carries the agent-inferred ("Custom") recipient.
-# The LLM fills it; the runtime pops it out of the app payload and validates it.
-# NOTE: must NOT start with an underscore — leading-underscore names are reserved
-# by Pydantic for private attributes and can't be schema-generated model fields.
-RESERVED_RECIPIENT_FIELD = "escalationRecipient"
-# Bound the number of assignees accepted from an (untrusted) LLM-supplied value,
-# to cap blast radius and resource use.
-MAX_RECIPIENTS = 50
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
-async def _filter_to_directory_users(emails: list[str]) -> list[str]:
-    """Return only the emails that resolve to a real user in the tenant directory.
-
-    SECURITY: the recipient is LLM-supplied and therefore untrusted (a crafted
-    agent input could try to redirect an approval task to an external address).
-    Resolving each address against the org directory drops external / made-up
-    addresses before a human task is assigned. Uses the same identity
-    Directory/Search endpoint as reviewer resolution. On lookup failure we drop
-    the address (fail closed) rather than assume it is valid.
-    """
-    org_id = UiPathConfig.organization_id
-    if not org_id:
-        return []
-    client = UiPath()
-    valid: list[str] = []
-    for email in emails:
-        try:
-            response = await client.api_client.request_async(
-                "GET",
-                f"/identity_/api/Directory/Search/{org_id}",
-                scoped="org",
-                params={
-                    "startsWith": email,
-                    "sourceFilter": ["directoryUsers", "localUsers"],
-                },
-            )
-            if any(
-                _get_user_email(entry) == email for entry in (response.json() or [])
-            ):
-                valid.append(email)
-            else:
-                _logger.warning(
-                    "LLM recipient '%s' did not match a tenant directory user; dropping",
-                    email,
-                )
-        except Exception:
-            _logger.warning(
-                "Directory lookup failed for LLM recipient '%s'; dropping",
-                email,
-                exc_info=True,
-            )
-    return valid
-
-
-async def _build_llm_recipient(raw: Any) -> TaskRecipient | None:
-    """Validate an LLM-supplied recipient value and shape it into a TaskRecipient.
-
-    The value is untrusted (prompt-injectable). We (1) parse to candidate strings,
-    (2) format-validate and bound them, (3) resolve each against the tenant
-    directory, and (4) fail closed (return ``None`` -> task left unassigned) if
-    nothing valid remains. This is best-effort routing, NOT a hard guardrail: a
-    valid-but-wrong tenant user cannot be prevented here, so the Custom
-    (agent-inferred) criteria must be surfaced as best-effort in the UI.
-    """
-    if isinstance(raw, str):
-        candidates = [s.strip() for s in raw.split(",")]
-    elif isinstance(raw, list):
-        candidates = [str(s).strip() for s in raw]
-    else:
-        return None
-
-    emails = [c for c in candidates if c and _EMAIL_RE.match(c)][:MAX_RECIPIENTS]
-    if not emails:
-        _logger.warning(
-            "LLM recipient produced no valid email values; leaving task unassigned"
-        )
-        return None
-
-    valid = await _filter_to_directory_users(emails)
-    if not valid:
-        _logger.warning(
-            "LLM recipient values did not resolve to tenant users; "
-            "leaving task unassigned"
-        )
-        return None
-
-    return TaskRecipient(
-        value=valid[0],
-        values=valid,
-        type=TaskRecipientType.WORKLOAD,
-        # Surface the resolved assignee(s) for tracing/observability — the tool
-        # instrumentor reads `display_name` to set the span's `assignedTo`. Without
-        # it the task still assigns (via value/values) but the trace shows no
-        # assignee. Use the validated, directory-resolved emails.
-        displayName=", ".join(valid),
-    )
-
-
-async def resolve_recipient_value(
-    recipient: AgentEscalationRecipient,
-    input_args: dict[str, Any] | None = None,
-) -> TaskRecipient | None:
-    """Resolve recipient value based on recipient type."""
-    if isinstance(recipient, AssetRecipient):
-        value = await resolve_asset(recipient.asset_name, get_execution_folder_path())
-        type = None
-        if recipient.type == AgentEscalationRecipientType.ASSET_USER_EMAIL:
-            type = TaskRecipientType.EMAIL
-        elif recipient.type == AgentEscalationRecipientType.ASSET_GROUP_NAME:
-            type = TaskRecipientType.GROUP_NAME
-        return TaskRecipient(value=value, type=type, displayName=value)
-
-    if isinstance(recipient, ArgumentEmailRecipient):
-        value = safe_get_nested(input_args or {}, recipient.argument_path)
-        if value is None:
-            raise ValueError(
-                f"Argument '{recipient.argument_path}' has no value in agent input."
-            )
-        return TaskRecipient(
-            value=value, type=TaskRecipientType.EMAIL, displayName=value
-        )
-
-    if isinstance(recipient, ArgumentGroupNameRecipient):
-        value = safe_get_nested(input_args or {}, recipient.argument_path)
-        if value is None:
-            raise ValueError(
-                f"Argument '{recipient.argument_path}' has no value in agent input."
-            )
-        return TaskRecipient(
-            value=value, type=TaskRecipientType.GROUP_NAME, displayName=value
-        )
-
-    if isinstance(recipient, WorkloadRecipient):
-        # Action Center expects the group NAME in assigneeNamesOrEmails;
-        # `value` on the agent model is the group identifier, `display_name` is the name.
-        return TaskRecipient(
-            value=recipient.display_name,
-            type=TaskRecipientType.WORKLOAD,
-            displayName=recipient.display_name,
-        )
-
-    if isinstance(recipient, RoundRobinRecipient):
-        return TaskRecipient(
-            value=recipient.display_name,
-            type=TaskRecipientType.ROUND_ROBIN,
-            displayName=recipient.display_name,
-        )
-
-    if isinstance(recipient, CustomAssigneesRecipient):
-        # "LLM inferred" recipients are resolved earlier from the reserved input
-        # field (see _build_llm_recipient). A CustomAssignees recipient only reaches
-        # this design-time resolver as the empty UI sentinel, which is intentionally
-        # left unassigned. The old design-time literal-email path was never shipped.
-        return None
-
-    if isinstance(recipient, StandardRecipient):
-        type = TaskRecipientType(recipient.type)
-        if recipient.type == AgentEscalationRecipientType.USER_EMAIL:
-            type = TaskRecipientType.EMAIL
-        return TaskRecipient(
-            value=recipient.value, type=type, displayName=recipient.value
-        )
-
-    return None
-
-
-async def resolve_asset(asset_name: str, folder_path: str | None) -> str | None:
-    """Retrieve asset value."""
-    try:
-        client = UiPath()
-        result = await client.assets.retrieve_async(
-            name=asset_name, folder_path=folder_path
-        )
-
-        if not result or not result.value:
-            raise ValueError(f"Asset '{asset_name}' has no value configured.")
-
-        return result.value
-    except Exception as e:
-        raise ValueError(
-            f"Failed to resolve asset '{asset_name}' in folder '{folder_path}': {str(e)}"
-        ) from e
 
 
 def _parse_task_data(
@@ -488,18 +293,12 @@ def create_escalation_tool(
 
         serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
 
-        # Resolve the task recipient. When the channel uses an agent-inferred
-        # ("Custom") recipient, the LLM supplies the value in a reserved input
-        # field; pop it out of the app payload and validate it (it is untrusted —
-        # see ``_build_llm_recipient``). Otherwise fall back to the design-time
-        # recipient configuration.
         llm_recipient_raw = serialized_data.pop(RESERVED_RECIPIENT_FIELD, None)
         if llm_recipient_raw is not None:
             recipient: TaskRecipient | None = await _build_llm_recipient(
                 llm_recipient_raw
             )
         else:
-            # A channel carries a single design-time recipient; resolve it directly.
             recipient = (
                 await resolve_recipient_value(
                     channel.recipients[0],
