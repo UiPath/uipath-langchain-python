@@ -45,41 +45,38 @@ def get_json_paths_by_type(model: type[BaseModel], type_name: str) -> list[str]:
         current_model: type[BaseModel], current_path: str
     ) -> list[str]:
         """Recursively search for fields of the target type."""
-        json_paths = []
-
         target_type = _get_target_type(current_model, type_name)
         matches_type = _create_type_matcher(type_name, target_type)
 
-        for field_name, field_info in current_model.model_fields.items():
-            annotation = field_info.annotation
+        def _paths_for(annotation: Any, path: str) -> list[str]:
+            """Paths under ``path`` whose type reaches the target type, examined
+            across every non-None union member and through list/nested layers.
 
+            A field can reference the target via any branch of an anyOf/oneOf
+            union, so every member is searched — not just the first.
+            """
+            paths: list[str] = []
+            for member in _union_members(annotation):
+                if matches_type(member):
+                    paths.append(path)
+                elif get_origin(member) is list:
+                    inner_type, suffix = _unwrap_lists(member)
+                    paths.extend(_paths_for(inner_type, f"{path}{suffix}"))
+                elif _is_pydantic_model(member):
+                    paths.extend(_recursive_search(member, path))
+            return paths
+
+        json_paths: list[str] = []
+        for field_name, field_info in current_model.model_fields.items():
             json_key = _json_key(field_name, field_info)
             if current_path:
                 field_path = f"{current_path}.{json_key}"
             else:
                 field_path = f"$.{json_key}"
 
-            annotation = _unwrap_optional(annotation)
-            origin = get_origin(annotation)
-
-            if matches_type(annotation):
-                json_paths.append(field_path)
-                continue
-
-            if origin is list:
-                inner_type, suffix = _unwrap_lists(annotation)
-                inner_path = f"{field_path}{suffix}"
-                if matches_type(inner_type):
-                    json_paths.append(inner_path)
-                    continue
-                if _is_pydantic_model(inner_type):
-                    nested_paths = _recursive_search(inner_type, inner_path)
-                    json_paths.extend(nested_paths)
-                    continue
-
-            if _is_pydantic_model(annotation):
-                nested_paths = _recursive_search(annotation, field_path)
-                json_paths.extend(nested_paths)
+            for found in _paths_for(field_info.annotation, field_path):
+                if found not in json_paths:
+                    json_paths.append(found)
 
         return json_paths
 
@@ -192,6 +189,18 @@ def _unwrap_optional(annotation: Any) -> Any:
         if non_none_args:
             return non_none_args[0]
     return annotation
+
+
+def _union_members(annotation: Any) -> list[Any]:
+    """Return the non-None members of a Union, or ``[annotation]`` otherwise.
+
+    Unlike :func:`_unwrap_optional`, which collapses a Union to a single type
+    (correct only for Optional-stripping), this preserves every branch so a
+    target type reachable through any anyOf/oneOf member is not lost.
+    """
+    if get_origin(annotation) in (Union, types.UnionType):
+        return [arg for arg in get_args(annotation) if arg is not type(None)]
+    return [annotation]
 
 
 def _unwrap_lists(annotation: Any) -> tuple[Any, str]:
