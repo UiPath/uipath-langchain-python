@@ -1,18 +1,20 @@
-"""Convert LLM provider HTTP errors into structured AgentRuntimeErrors.
+"""Map a normalized LLM-client ``UiPathAPIError`` into an ``AgentRuntimeError``.
 
-Provider exceptions are first normalized to a common ``ProviderError`` (status_code + detail).
-This module maps that status code to an AgentRuntimeError so
-upstream handling (exception mapper, CAS bridge) can categorise by status code
-without provider-specific logic.
+The LLM client (uipath-llm-client / uipath-langchain-client) normalizes provider
+HTTP errors into a ``UiPathAPIError`` carrying ``status_code`` and ``body``. This
+module maps that status code to an ``AgentRuntimeError`` so upstream handling
+(exception mapper, CAS bridge) can categorise without provider-specific logic.
 """
 
+from typing import NoReturn
+
+from uipath.llm_client import UiPathAPIError
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
-from uipath_langchain.chat.provider_errors import extract_provider_error
 
 # Maps known LLM Gateway status codes to specific error codes.
 # Unknown status codes fall back to HTTP_ERROR.
@@ -21,28 +23,25 @@ _LLM_STATUS_CODE_MAP: dict[int, AgentRuntimeErrorCode] = {
 }
 
 
-def raise_for_provider_http_error(e: BaseException) -> None:
-    """Re-raise provider-specific HTTP errors as a structured AgentRuntimeError.
+def raise_for_provider_http_error(error: UiPathAPIError) -> NoReturn:
+    """Convert a normalized ``UiPathAPIError`` into a structured ``AgentRuntimeError``.
 
-    Extracts the HTTP status code and the gateway's ``detail``
-    from any LLM provider exception and converts it to an
-    AgentRuntimeError. Does nothing if no HTTP status code can be extracted.
+    Reads the HTTP status code and the gateway's ``detail`` (from ``error.body``)
+    and re-raises as an ``AgentRuntimeError`` chained on the original.
     """
-    err = extract_provider_error(e)
-    if err.status_code is None:
-        return
-
-    code = _LLM_STATUS_CODE_MAP.get(err.status_code, AgentRuntimeErrorCode.HTTP_ERROR)
+    status_code = error.status_code
+    code = _LLM_STATUS_CODE_MAP.get(status_code, AgentRuntimeErrorCode.HTTP_ERROR)
     category = (
         UiPathErrorCategory.DEPLOYMENT
-        if err.status_code == 403
+        if status_code == 403
         else UiPathErrorCategory.UNKNOWN
     )
+    detail = error.body.get("detail") if isinstance(error.body, dict) else None
 
     raise AgentRuntimeError(
         code=code,
-        title=f"LLM provider returned HTTP {err.status_code}",
-        detail=err.detail or str(e),
+        title=f"LLM provider returned HTTP {status_code}",
+        detail=detail or error.message or str(error),
         category=category,
-        status=err.status_code,
-    ) from e
+        status=status_code,
+    ) from error
