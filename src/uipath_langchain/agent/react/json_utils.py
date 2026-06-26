@@ -238,10 +238,14 @@ def _coerce_field(key: str, value: Any, schema: type[BaseModel] | None) -> Any:
 
     if get_origin(annotation) is list:
         item_args = get_args(annotation)
-        item_schema = None
-        if item_args and _is_pydantic_model(item_args[0]):
-            item_schema = item_args[0]
         if isinstance(value, list):
+            # str-typed items are protected like a scalar str field: a list[str]
+            # element that merely looks like JSON must stay a string.
+            if item_args and _unwrap_optional(item_args[0]) is str:
+                return value
+            item_schema = (
+                item_args[0] if item_args and _is_pydantic_model(item_args[0]) else None
+            )
             return [coerce_json_strings(item, item_schema) for item in value]
 
     return coerce_json_strings(value)
