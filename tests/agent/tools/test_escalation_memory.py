@@ -1124,7 +1124,9 @@ class TestIngestEscalationMemory:
         assert write_span.attributes["savedToMemory"] is True
         # "request" captures what was saved as a JSON string the exporter
         # parses back into an object for the Studio UI.
-        saved = json.loads(write_span.attributes["request"])
+        saved_request = write_span.attributes["request"]
+        assert isinstance(saved_request, str)
+        saved = json.loads(saved_request)
         assert saved["answer"] == '{"approved": true}'
         assert saved["attributes"] == '{"input": "test"}'
 
