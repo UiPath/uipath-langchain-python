@@ -172,6 +172,11 @@ async def _build_llm_recipient(raw: Any) -> TaskRecipient | None:
         value=valid[0],
         values=valid,
         type=TaskRecipientType.WORKLOAD,
+        # Surface the resolved assignee(s) for tracing/observability — the tool
+        # instrumentor reads `display_name` to set the span's `assignedTo`. Without
+        # it the task still assigns (via value/values) but the trace shows no
+        # assignee. Use the validated, directory-resolved emails.
+        displayName=", ".join(valid),
     )
 
 
@@ -226,16 +231,11 @@ async def resolve_recipient_value(
         )
 
     if isinstance(recipient, CustomAssigneesRecipient):
-        # A single CustomAssignees recipient becomes a one-element Workload assignment.
-        # Multi-assignee aggregation across recipients[] is handled by resolve_channel_recipients.
-        if not recipient.value:
-            return None
-        return TaskRecipient(
-            value=recipient.value,
-            values=[recipient.value],
-            type=TaskRecipientType.WORKLOAD,
-            displayName=recipient.display_name,
-        )
+        # "LLM inferred" recipients are resolved earlier from the reserved input
+        # field (see _build_llm_recipient). A CustomAssignees recipient only reaches
+        # this design-time resolver as the empty UI sentinel, which is intentionally
+        # left unassigned. The old design-time literal-email path was never shipped.
+        return None
 
     if isinstance(recipient, StandardRecipient):
         type = TaskRecipientType(recipient.type)
@@ -246,36 +246,6 @@ async def resolve_recipient_value(
         )
 
     return None
-
-
-async def resolve_channel_recipients(
-    recipients: list[AgentEscalationRecipient],
-    input_args: dict[str, Any] | None = None,
-) -> TaskRecipient | None:
-    """Resolve a channel's full recipients list into a single TaskRecipient.
-
-    For ``CustomAssignees`` channels — which carry one recipient per assignee email —
-    all values are collected into a single Workload assignment with the full email list.
-    For all other types only the first recipient is used (the channel always has one).
-    """
-    if not recipients:
-        return None
-
-    if isinstance(recipients[0], CustomAssigneesRecipient):
-        emails = [
-            r.value
-            for r in recipients
-            if isinstance(r, CustomAssigneesRecipient) and r.value
-        ]
-        if not emails:
-            return None
-        return TaskRecipient(
-            value=emails[0],
-            values=emails,
-            type=TaskRecipientType.WORKLOAD,
-        )
-
-    return await resolve_recipient_value(recipients[0], input_args=input_args)
 
 
 async def resolve_asset(asset_name: str, folder_path: str | None) -> str | None:
@@ -529,9 +499,10 @@ def create_escalation_tool(
                 llm_recipient_raw
             )
         else:
+            # A channel carries a single design-time recipient; resolve it directly.
             recipient = (
-                await resolve_channel_recipients(
-                    channel.recipients,
+                await resolve_recipient_value(
+                    channel.recipients[0],
                     input_args=agent_input,
                 )
                 if channel.recipients
