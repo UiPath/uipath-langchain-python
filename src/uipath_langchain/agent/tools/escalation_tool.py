@@ -489,6 +489,7 @@ def create_escalation_tool(
                 trace_id=trace_id,
                 user_id=user_id,
                 folder_path=_memory_folder_path or folder_path,
+                memory_space_name=_memory_space_name,
             )
             if user_id is None:
                 _escalation_logger.info(
