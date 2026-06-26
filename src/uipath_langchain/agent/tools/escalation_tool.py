@@ -3,10 +3,10 @@
 import json
 import logging
 import os
+import re
 from enum import Enum
-from typing import Any, Literal, Sequence
+from typing import Any, Literal
 
-from langchain_core.messages import BaseMessage, ToolMessage
 from langchain_core.messages.tool import ToolCall
 from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
@@ -24,14 +24,13 @@ from uipath.agent.models.agent import (
     LowCodeAgentDefinition,
     RoundRobinRecipient,
     StandardRecipient,
-    ToolOutputRecipient,
     WorkloadRecipient,
 )
 from uipath.agent.utils.text_tokens import safe_get_nested
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
 from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
-from uipath.platform.common import WaitEscalation
+from uipath.platform.common import UiPathConfig, WaitEscalation
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._utils import (
@@ -58,6 +57,7 @@ from .escalation_memory import (
     _get_escalation_memory_settings,
     _get_escalation_memory_space_id,
     _get_escalation_memory_space_name,
+    _get_user_email,
     _ingest_escalation_memory,
     _resolve_user_id,
 )
@@ -81,156 +81,105 @@ class EscalationAction(str, Enum):
 _logger = logging.getLogger(__name__)
 
 
-def _extract_tool_output_value(
-    tool_messages: Sequence[BaseMessage],
-    tool_name: str,
-    output_path: str,
-) -> Any:
-    """Walk the agent's message history backwards for the latest ToolMessage matching
-    ``tool_name``, parse its content as JSON, and return the field at ``output_path``.
+# Reserved input-schema field that carries the agent-inferred ("Custom") recipient.
+# The LLM fills it; the runtime pops it out of the app payload and validates it.
+# NOTE: must NOT start with an underscore — leading-underscore names are reserved
+# by Pydantic for private attributes and can't be schema-generated model fields.
+RESERVED_RECIPIENT_FIELD = "escalationRecipient"
+# Bound the number of assignees accepted from an (untrusted) LLM-supplied value,
+# to cap blast radius and resource use.
+MAX_RECIPIENTS = 50
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-    ``output_path`` is a top-level field name (v1). If the path is empty, the whole
-    parsed content is returned. Raises ``ValueError`` (fail-loud) when the tool was
-    never called or the path doesn't exist.
+
+async def _filter_to_directory_users(emails: list[str]) -> list[str]:
+    """Return only the emails that resolve to a real user in the tenant directory.
+
+    SECURITY: the recipient is LLM-supplied and therefore untrusted (a crafted
+    agent input could try to redirect an approval task to an external address).
+    Resolving each address against the org directory drops external / made-up
+    addresses before a human task is assigned. Uses the same identity
+    Directory/Search endpoint as reviewer resolution. On lookup failure we drop
+    the address (fail closed) rather than assume it is valid.
     """
-    # ToolMessages are constructed with `name=call["name"]` (see tool_node.py),
-    # which is the sanitized tool name. ToolOutputRecipient.tool_name may be
-    # configured against either the raw display name or the sanitized form, so
-    # match both for backwards-compatibility.
-    sanitized_tool_name = sanitize_tool_name(tool_name)
-    for msg in reversed(tool_messages):
-        msg_name = getattr(msg, "name", None) if isinstance(msg, ToolMessage) else None
-        if msg_name == tool_name or msg_name == sanitized_tool_name:
-            content = msg.content
-            # ToolMessage content is typically a string (the stringified tool output).
-            # If it's already structured, use it as-is.
-            parsed: Any
-            if isinstance(content, str):
-                try:
-                    parsed = json.loads(content)
-                except (json.JSONDecodeError, ValueError):
-                    parsed = content
+    org_id = UiPathConfig.organization_id
+    if not org_id:
+        return []
+    client = UiPath()
+    valid: list[str] = []
+    for email in emails:
+        try:
+            response = await client.api_client.request_async(
+                "GET",
+                f"/identity_/api/Directory/Search/{org_id}",
+                scoped="org",
+                params={
+                    "startsWith": email,
+                    "sourceFilter": ["directoryUsers", "localUsers"],
+                },
+            )
+            if any(
+                _get_user_email(entry) == email for entry in (response.json() or [])
+            ):
+                valid.append(email)
             else:
-                parsed = content
-
-            if not output_path:
-                return parsed
-
-            if isinstance(parsed, dict):
-                if output_path not in parsed:
-                    raise ValueError(
-                        f"Tool '{tool_name}' output does not contain field "
-                        f"'{output_path}'. Available fields: {list(parsed.keys())}."
-                    )
-                return parsed[output_path]
-
-            raise ValueError(
-                f"Tool '{tool_name}' output is not a JSON object — cannot extract "
-                f"field '{output_path}' from output of type {type(parsed).__name__}."
+                _logger.warning(
+                    "LLM recipient '%s' did not match a tenant directory user; dropping",
+                    email,
+                )
+        except Exception:
+            _logger.warning(
+                "Directory lookup failed for LLM recipient '%s'; dropping",
+                email,
+                exc_info=True,
             )
-
-    raise ValueError(
-        f"Tool '{tool_name}' has not been called yet; cannot resolve recipient "
-        f"binding (expected tool output field '{output_path}'). Make sure the agent "
-        f"invokes '{tool_name}' before this escalation."
-    )
+    return valid
 
 
-def _build_tool_output_task_recipient(
-    recipient_type: AgentEscalationRecipientType,
-    value: Any,
-) -> TaskRecipient | None:
-    """Map an extracted tool-output value to a TaskRecipient appropriate for the
-    target criteria type. Lists of emails go through the Workload path (matching
-    CustomAssignees semantics); single strings go through the type-specific path.
+async def _build_llm_recipient(raw: Any) -> TaskRecipient | None:
+    """Validate an LLM-supplied recipient value and shape it into a TaskRecipient.
+
+    The value is untrusted (prompt-injectable). We (1) parse to candidate strings,
+    (2) format-validate and bound them, (3) resolve each against the tenant
+    directory, and (4) fail closed (return ``None`` -> task left unassigned) if
+    nothing valid remains. This is best-effort routing, NOT a hard guardrail: a
+    valid-but-wrong tenant user cannot be prevented here, so the Custom
+    (agent-inferred) criteria must be surfaced as best-effort in the UI.
     """
-    if isinstance(value, list):
-        # Only criteria that support multi-value assignment can accept a list of
-        # recipients — CustomAssignees (agent-side) and Workload both route to
-        # the platform WORKLOAD path. For single-valued criteria (USER_ID,
-        # GROUP_ID, ROUND_ROBIN) a list output is ambiguous: silently demoting
-        # to WORKLOAD would change the assignment semantics out from under the
-        # author. Raise loud instead.
-        if recipient_type not in (
-            AgentEscalationRecipientType.CUSTOM_ASSIGNEES,
-            AgentEscalationRecipientType.WORKLOAD,
-        ):
-            raise ValueError(
-                f"Tool-output recipient for criteria {recipient_type.value} resolved "
-                f"to a list, but this criteria type expects a single value. Either "
-                f"bind the recipient to a single string output, or switch the "
-                f"criteria to CustomAssignees / Workload."
-            )
-        # Filter to truthy strings — tool outputs may contain nulls/empty entries.
-        emails = [str(v) for v in value if v]
-        if not emails:
-            raise ValueError(
-                f"Tool-output recipient resolved to an empty list for criteria "
-                f"{recipient_type.value}."
-            )
-        return TaskRecipient(
-            value=emails[0],
-            values=emails,
-            type=TaskRecipientType.WORKLOAD,
-        )
+    if isinstance(raw, str):
+        candidates = [s.strip() for s in raw.split(",")]
+    elif isinstance(raw, list):
+        candidates = [str(s).strip() for s in raw]
+    else:
+        return None
 
-    value_str = str(value) if value is not None else ""
-    if not value_str:
-        raise ValueError(
-            f"Tool-output recipient resolved to an empty value for criteria "
-            f"{recipient_type.value}."
+    emails = [c for c in candidates if c and _EMAIL_RE.match(c)][:MAX_RECIPIENTS]
+    if not emails:
+        _logger.warning(
+            "LLM recipient produced no valid email values; leaving task unassigned"
         )
+        return None
 
-    if recipient_type == AgentEscalationRecipientType.USER_ID:
-        return TaskRecipient(value=value_str, type=TaskRecipientType.USER_ID)
-    if recipient_type == AgentEscalationRecipientType.GROUP_ID:
-        return TaskRecipient(value=value_str, type=TaskRecipientType.GROUP_ID)
-    if recipient_type == AgentEscalationRecipientType.WORKLOAD:
-        return TaskRecipient(
-            value=value_str,
-            values=[value_str],
-            type=TaskRecipientType.WORKLOAD,
+    valid = await _filter_to_directory_users(emails)
+    if not valid:
+        _logger.warning(
+            "LLM recipient values did not resolve to tenant users; "
+            "leaving task unassigned"
         )
-    if recipient_type == AgentEscalationRecipientType.ROUND_ROBIN:
-        return TaskRecipient(
-            value=value_str,
-            values=[value_str],
-            type=TaskRecipientType.ROUND_ROBIN,
-        )
-    # CustomAssignees with a single string value — treat as comma-separated emails.
-    if recipient_type == AgentEscalationRecipientType.CUSTOM_ASSIGNEES:
-        emails = [s.strip() for s in value_str.split(",") if s.strip()]
-        if not emails:
-            return None
-        return TaskRecipient(
-            value=emails[0],
-            values=emails,
-            type=TaskRecipientType.WORKLOAD,
-        )
-    return None
+        return None
+
+    return TaskRecipient(
+        value=valid[0],
+        values=valid,
+        type=TaskRecipientType.WORKLOAD,
+    )
 
 
 async def resolve_recipient_value(
     recipient: AgentEscalationRecipient,
     input_args: dict[str, Any] | None = None,
-    tool_messages: Sequence[BaseMessage] | None = None,
 ) -> TaskRecipient | None:
-    """Resolve recipient value based on recipient type.
-
-    ``tool_messages`` is the agent's full message history (passed through from
-    the escalation wrapper). It's only consulted for ``ToolOutputRecipient``;
-    other recipient types ignore it.
-    """
-    if isinstance(recipient, ToolOutputRecipient):
-        # Fail loud: a misconfigured tool-output binding should not silently
-        # create an unassigned task.
-        value = _extract_tool_output_value(
-            tool_messages or [],
-            recipient.tool_name,
-            recipient.output_path,
-        )
-        return _build_tool_output_task_recipient(recipient.type, value)
-
+    """Resolve recipient value based on recipient type."""
     if isinstance(recipient, AssetRecipient):
         value = await resolve_asset(recipient.asset_name, get_execution_folder_path())
         type = None
@@ -302,27 +251,15 @@ async def resolve_recipient_value(
 async def resolve_channel_recipients(
     recipients: list[AgentEscalationRecipient],
     input_args: dict[str, Any] | None = None,
-    tool_messages: Sequence[BaseMessage] | None = None,
 ) -> TaskRecipient | None:
     """Resolve a channel's full recipients list into a single TaskRecipient.
 
     For ``CustomAssignees`` channels — which carry one recipient per assignee email —
     all values are collected into a single Workload assignment with the full email list.
     For all other types only the first recipient is used (the channel always has one).
-
-    ``tool_messages`` is the agent's message history, threaded through to support
-    ``ToolOutputRecipient`` resolution.
     """
     if not recipients:
         return None
-
-    # Tool-output binding takes precedence over per-type aggregation: if the first
-    # recipient is a tool-output, we delegate to the resolver and let it figure
-    # out the right TaskRecipient shape for the criteria type.
-    if isinstance(recipients[0], ToolOutputRecipient):
-        return await resolve_recipient_value(
-            recipients[0], input_args=input_args, tool_messages=tool_messages
-        )
 
     if isinstance(recipients[0], CustomAssigneesRecipient):
         emails = [
@@ -338,9 +275,7 @@ async def resolve_channel_recipients(
             type=TaskRecipientType.WORKLOAD,
         )
 
-    return await resolve_recipient_value(
-        recipients[0], input_args=input_args, tool_messages=tool_messages
-    )
+    return await resolve_recipient_value(recipients[0], input_args=input_args)
 
 
 async def resolve_asset(asset_name: str, folder_path: str | None) -> str | None:
@@ -579,29 +514,35 @@ def create_escalation_tool(
         agent_input: dict[str, Any] = (
             tool.metadata.get("agent_input") if tool.metadata else None
         ) or {}
-        # Tool-output recipient bindings resolve by walking the agent's message
-        # history. The wrapper stashes them in metadata before invoking the tool.
-        tool_messages: list[BaseMessage] = (
-            tool.metadata.get("agent_messages") if tool.metadata else None
-        ) or []
-        recipient: TaskRecipient | None = (
-            await resolve_channel_recipients(
-                channel.recipients,
-                input_args=agent_input,
-                tool_messages=tool_messages,
-            )
-            if channel.recipients
-            else None
-        )
         folder_path = get_execution_folder_path()
+
+        serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
+
+        # Resolve the task recipient. When the channel uses an agent-inferred
+        # ("Custom") recipient, the LLM supplies the value in a reserved input
+        # field; pop it out of the app payload and validate it (it is untrusted —
+        # see ``_build_llm_recipient``). Otherwise fall back to the design-time
+        # recipient configuration.
+        llm_recipient_raw = serialized_data.pop(RESERVED_RECIPIENT_FIELD, None)
+        if llm_recipient_raw is not None:
+            recipient: TaskRecipient | None = await _build_llm_recipient(
+                llm_recipient_raw
+            )
+        else:
+            recipient = (
+                await resolve_channel_recipients(
+                    channel.recipients,
+                    input_args=agent_input,
+                )
+                if channel.recipients
+                else None
+            )
 
         task_title = "Escalation Task"
         if tool.metadata is not None:
             # Recipient requires runtime resolution, store in metadata after resolving
             tool.metadata["recipient"] = recipient
             task_title = tool.metadata.get("task_title") or task_title
-
-        serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
 
         # --- Escalation memory: check cache before creating HITL task ---
         if _memory_space_id:
@@ -756,24 +697,6 @@ def create_escalation_tool(
             k: v for k, v in state_dict.items() if k not in internal_fields
         }
 
-        # Expose only the prior ToolMessage instances to the tool fn so it can
-        # resolve `ToolOutputRecipient` bindings against prior tool calls.
-        # We pull directly from `state` (not `state_dict`) so we preserve the
-        # original message objects (sanitized dicts lose
-        # `isinstance(..., ToolMessage)`). Filtering to ToolMessage only —
-        # rather than passing the whole history — avoids holding references to
-        # large AIMessage / multi-modal content in the tool's metadata, which
-        # the recipient resolver doesn't need.
-        # `state` may be either a Pydantic model (runtime) or a plain dict (tests).
-        raw_messages = (
-            getattr(state, "messages", None)
-            if not isinstance(state, dict)
-            else state.get("messages")
-        )
-        tool.metadata["agent_messages"] = [
-            m for m in (raw_messages or []) if isinstance(m, ToolMessage)
-        ]
-
         tool.metadata["_call_id"] = call.get("id")
         tool.metadata["_call_args"] = dict(call.get("args", {}))
 
@@ -800,39 +723,7 @@ def create_escalation_tool(
             "assigned_to": result.get("assigned_to"),
         }
 
-    # Augment the description so the LLM understands tool-output recipient
-    # dependencies: when a recipient is bound to the output of a specific tool,
-    # the LLM must call that tool first before invoking this escalation. Without
-    # this hint the dependency is invisible to the LLM (it doesn't see the
-    # recipient binding, only the tool's input schema).
     description = resource.description
-    tool_output_deps = [
-        (r.tool_name, r.output_path)
-        for r in channel.recipients
-        if isinstance(r, ToolOutputRecipient)
-    ]
-    if tool_output_deps:
-        # Deduplicate while preserving order.
-        seen: set[tuple[str, str]] = set()
-        unique_deps: list[tuple[str, str]] = []
-        for dep in tool_output_deps:
-            if dep not in seen:
-                seen.add(dep)
-                unique_deps.append(dep)
-        dep_lines = "\n".join(
-            f"- Output of tool `{tn}` (field `{op}`)"
-            if op
-            else f"- Output of tool `{tn}`"
-            for tn, op in unique_deps
-        )
-        description = (
-            f"{description or ''}\n\n"
-            "**Recipient routing notes:** this escalation's task assignment is "
-            "derived from the output of upstream tools. Before invoking this "
-            "escalation, make sure the following tools have been called and their "
-            "outputs are available in the agent's tool message history:\n"
-            f"{dep_lines}"
-        ).strip()
 
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,
