@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "timeout-parent-agent": "./graph.py:parent_graph"
+  },
+  "env": ".env"
+}

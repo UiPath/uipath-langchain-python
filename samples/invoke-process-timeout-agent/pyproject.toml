@@ -1,0 +1,15 @@
+[project]
+name = "invoke-process-timeout-agent"
+version = "0.0.1"
+description = "LangGraph sample showing InvokeProcess timeout handling"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "uipath",
+    "uipath-langchain",
+]
+
+[dependency-groups]
+dev = [
+    "uipath-dev",
+]

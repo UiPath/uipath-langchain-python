@@ -1,0 +1,15 @@
+[project]
+name = "wait-until-agent"
+version = "0.0.1"
+description = "LangGraph sample showing WaitUntil timer-based resume triggers"
+authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
+requires-python = ">=3.11"
+dependencies = [
+    "uipath",
+    "uipath-langchain",
+]
+
+[dependency-groups]
+dev = [
+    "uipath-dev",
+]
