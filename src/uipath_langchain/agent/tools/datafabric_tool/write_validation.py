@@ -26,11 +26,13 @@ def is_entity_writable(entity: Entity) -> bool:
     (with external_fields), ChoiceSets, SystemEntities, and InternalEntities
     are not writable through this path.
     """
-    # Only "Entity" type is writable (not ChoiceSet, SystemEntity, InternalEntity)
-    if entity.entity_type != "Entity":
+    # Only "Entity" type is writable (not ChoiceSet, SystemEntity, InternalEntity).
+    # Use getattr so partial/edge entity objects degrade to "not writable"
+    # (the safe default) instead of raising.
+    if getattr(entity, "entity_type", None) != "Entity":
         return False
     # Federated entities have external_fields — writes go to source system, not DF
-    if entity.external_fields:
+    if getattr(entity, "external_fields", None):
         return False
     return True
 

@@ -245,7 +245,12 @@ async def _async_main(args: argparse.Namespace) -> int:
         from uipath_langchain.chat import get_chat_model
 
         try:
-            llm = get_chat_model(args.model)
+            # agenthub_config carries the AgentHub OpCode that routes LLM
+            # licensing on the gateway. Without it the call defaults to an
+            # unlicensed product path and the gateway returns 403 "License
+            # not available for LLM usage". "agentsplayground" uses the
+            # developer's debug/playground quota — appropriate for a local run.
+            llm = get_chat_model(args.model, agenthub_config=args.agenthub_config)
         except Exception as exc:
             raise _AuthOrNetworkError(
                 f"could not construct chat model {args.model!r}: {exc}"
@@ -335,7 +340,13 @@ async def _async_main(args: argparse.Namespace) -> int:
 
     try:
         graph = create_agent(llm, tools, messages).compile()
-        result = await graph.ainvoke({"messages": [HumanMessage(content=args.prompt)]})
+        # The refund flow needs many steps (several reads, a decision, then 4
+        # writes). The default recursion_limit (25) can be exhausted before the
+        # terminal write batch executes, leaving the writes only *planned*.
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content=args.prompt)]},
+            config={"recursion_limit": 80},
+        )
     except Exception as exc:
         print(
             "\n--- Agent run failed ---\n"
@@ -384,6 +395,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--model",
         default=DEFAULT_MODEL,
         help=f"UiPath-gateway model name (default: {DEFAULT_MODEL}).",
+    )
+    parser.add_argument(
+        "--agenthub-config",
+        default="agentsplayground",
+        help="AgentHub OpCode for LLM-gateway licensing routing "
+        "(default: agentsplayground — uses the developer's playground quota). "
+        "Without a valid value the gateway returns 403 'License not available'.",
     )
     parser.add_argument(
         "--system-prompt",

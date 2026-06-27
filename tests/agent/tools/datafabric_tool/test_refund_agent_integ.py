@@ -68,6 +68,8 @@ def _make_entity(
     """Create a mock Entity object."""
     entity = MagicMock()
     entity.name = name
+    # id == name here so the handler's name->id translation is an identity.
+    entity.id = name
     entity.display_name = display_name or name
     entity.fields = fields
     entity.entity_type = entity_type

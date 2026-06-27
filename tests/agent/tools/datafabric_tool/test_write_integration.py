@@ -64,6 +64,9 @@ def _make_entity(
     """Create a mock Entity object with .name, .display_name, .fields."""
     entity = MagicMock()
     entity.name = name
+    # In these tests the entity id equals the name so the handler's name->id
+    # translation is an identity (a distinct-id case is covered separately).
+    entity.id = name
     entity.display_name = name
     entity.fields = fields
     entity.entity_type = entity_type
@@ -310,6 +313,45 @@ class TestWriteHandlerValidationAndExecution:
             resolution.entities_service.update_record_async.assert_awaited_once_with(
                 "Orders", "rec-1", {"Amount": 150}
             )
+
+    @pytest.mark.asyncio
+    async def test_entity_name_translated_to_id_for_crud(
+        self, mock_record: MagicMock
+    ) -> None:
+        """The LLM addresses the entity by name, but the CRUD call must use the
+        entity's GUID id. The handler translates name -> id before executing."""
+        orders = _make_entity("Orders", [_make_field("OrderName")])
+        orders.id = "orders-guid-123"  # id distinct from the name
+        resolution = _make_resolution([orders])
+        resolution.entities_service.insert_record_async = AsyncMock(
+            return_value=mock_record
+        )
+
+        with patch("uipath.platform.UiPath") as mock_uipath_cls:
+            mock_sdk = MagicMock()
+            mock_sdk.entities.resolve_entity_set_async = AsyncMock(
+                return_value=resolution
+            )
+            mock_uipath_cls.return_value = mock_sdk
+
+            tools = create_datafabric_tools(_make_context_resource(), _mock_llm())
+            result = json.loads(
+                await tools[1].ainvoke(
+                    {
+                        "entity_key": "Orders",  # name, as the LLM sees it
+                        "operation": "insert",
+                        "fields": {"OrderName": "X"},
+                    }
+                )
+            )
+
+            assert result["success"] is True
+            # Executor called with the GUID id, not the entity name.
+            resolution.entities_service.insert_record_async.assert_awaited_once_with(
+                "orders-guid-123", {"OrderName": "X"}
+            )
+            # The result still reports the friendly name back to the model.
+            assert result["entity_key"] == "Orders"
 
     @pytest.mark.asyncio
     async def test_delete_with_record_id_calls_api(

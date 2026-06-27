@@ -168,6 +168,7 @@ class DataFabricWriteHandler:
     ) -> None:
         self._entity_set = entity_set
         self._write_schemas: dict[str, EntityWriteSchema] | None = None
+        self._entity_id_by_key: dict[str, str] = {}
         self._write_tool_description: str | None = None
         self._compiled_ontology: CompiledOntology | None = None
         self._executor: Any | None = None
@@ -195,6 +196,11 @@ class DataFabricWriteHandler:
                 )
 
             self._write_schemas = {}
+            # The LLM addresses entities by name (matching the read schema and
+            # the write tool description), but the EntitiesService CRUD endpoints
+            # require the entity's GUID id. Keep a name -> id map to translate at
+            # execution time.
+            self._entity_id_by_key = {}
             for entity in resolution.entities:
                 if not is_entity_writable(entity):
                     continue
@@ -204,6 +210,8 @@ class DataFabricWriteHandler:
                     display_name=entity.display_name or entity.name,
                     writable_fields=writable,
                 )
+                if entity.id:
+                    self._entity_id_by_key[entity.name] = entity.id
 
             # Optional ontology layer: fetch + compile the OWL ontology if the
             # platform exposes get_ontology_file_async. This method may only
@@ -307,11 +315,20 @@ class DataFabricWriteHandler:
                 }
             )
 
-        # Execute
+        # Execute. The LLM addresses the entity by name, but the CRUD endpoints
+        # require the entity's GUID id — translate before executing, then
+        # restore the friendly name on the result for the model.
         from .write_executor import WriteExecutor
 
         assert isinstance(self._executor, WriteExecutor)
-        result = await self._executor.execute(intent)
+        resolved_key = self._entity_id_by_key.get(intent.entity_key, intent.entity_key)
+        exec_intent = (
+            intent.model_copy(update={"entity_key": resolved_key})
+            if resolved_key != intent.entity_key
+            else intent
+        )
+        result = await self._executor.execute(exec_intent)
+        result.entity_key = intent.entity_key
         return result.model_dump_json()
 
 

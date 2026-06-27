@@ -34,10 +34,29 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
     field_schemas: list[FieldSchema] = []
     numeric_field: str | None = None
     text_field: str | None = None
+    pk_field: str | None = None
+
+    # System fields (CreateTime, UpdatedBy, ...) are analytical noise and stay
+    # hidden. The one exception is the primary key on a *writable* entity: the
+    # agent needs it to retrieve record ids (the record_id for update/delete)
+    # and as a stable column to ORDER BY. Read-only entities keep all system
+    # fields hidden.
+    writable = is_entity_writable(entity)
+    seen_names: set[str] = set()
 
     for field in entity.fields or []:
-        if field.is_hidden_field or field.is_system_field:
+        is_pk = bool(getattr(field, "is_primary_key", False))
+        if field.is_hidden_field:
             continue
+        if field.is_system_field and not (writable and is_pk):
+            continue
+        # P3 collision guard: when a user/CSV field shares a system field's
+        # name (e.g. an imported "Id"), keep the first occurrence rather than
+        # emitting a duplicate column row. Full disambiguation is P3 work.
+        if field.name in seen_names:
+            continue
+        seen_names.add(field.name)
+
         type_name = field.sql_type.name if field.sql_type else "unknown"
         fs = FieldSchema(
             name=field.name,
@@ -51,6 +70,8 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
         )
         field_schemas.append(fs)
 
+        if is_pk and writable and pk_field is None:
+            pk_field = fs.name
         if not numeric_field and fs.is_numeric:
             numeric_field = fs.name
         if not text_field and fs.is_text:
@@ -62,13 +83,28 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
     group_field = text_field or (field_names[0] if field_names else "Category")
     agg_field = numeric_field or (field_names[1] if len(field_names) > 1 else "Amount")
     filter_field = text_field or (field_names[0] if field_names else "Name")
-    fields_sample = ", ".join(field_names[:5]) if field_names else "*"
-    count_col = field_names[0] if field_names else "id"
+    count_col = pk_field or (field_names[0] if field_names else "id")
+
+    # Put the primary key first in the projection so record-level reads return
+    # the id the agent reuses as record_id when writing.
+    if pk_field:
+        ordered = [pk_field] + [n for n in field_names if n != pk_field]
+    else:
+        ordered = field_names
+    fields_sample = ", ".join(ordered[:5]) if ordered else "*"
+    # A stable sort column for paginated reads. Prefer the primary key; this
+    # prevents the SQL-gen model from falling back to a non-existent pseudo
+    # column (e.g. "rowid") when a query needs ORDER BY + LIMIT.
+    stable_sort = pk_field or (field_names[0] if field_names else None)
 
     query_patterns = [
         QueryPattern(
             intent="Show all",
-            sql=f"SELECT {fields_sample} FROM {table} LIMIT 100",
+            sql=(
+                f"SELECT {fields_sample} FROM {table} ORDER BY {stable_sort} LIMIT 100"
+                if stable_sort
+                else f"SELECT {fields_sample} FROM {table} LIMIT 100"
+            ),
         ),
         QueryPattern(
             intent="Find by X",
@@ -91,6 +127,16 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
             sql=f"SELECT SUM({agg_field}) as total FROM {table}",
         ),
     ]
+    # For writable entities, give the model an explicit record-lookup pattern so
+    # it knows how to fetch a single row's id before an update/delete.
+    if pk_field:
+        query_patterns.insert(
+            1,
+            QueryPattern(
+                intent="Get a record's id to update/delete it",
+                sql=f"SELECT {fields_sample} FROM {table} WHERE {filter_field} = 'value' LIMIT 1",
+            ),
+        )
 
     schema = EntitySchema(
         id=entity.id,
