@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from uipath.platform.entities import Entity
 
+from .compiled_ontology import CompiledOntology
 from .models import (
     DataFabricWriteInput,
     EntityWriteOperation,
@@ -79,16 +80,25 @@ def derive_writable_fields(entity: Entity) -> list[WritableFieldInfo]:
 def validate_mutation_intent(
     intent: DataFabricWriteInput,
     write_schemas: dict[str, EntityWriteSchema] | None = None,
+    compiled_ontology: CompiledOntology | None = None,
 ) -> list[str]:
     """Validate a write intent before executing.
 
     v1 only writes to context-derived writable entities.  If the target
     entity is not present in *write_schemas* the request is rejected.
 
+    When a *compiled_ontology* is supplied (the optional OWL ontology layer,
+    see ``ontology_compiler``), the operation is additionally checked against
+    the ontology's per-entity access modes: an operation not listed in
+    ``entity_access[entity_key]`` is rejected.  When the ontology is ``None``
+    the metadata-only behaviour is unchanged.
+
     Args:
         intent: The write operation intent to validate.
         write_schemas: Mapping of entity_key -> EntityWriteSchema
             for writable context-derived entities.
+        compiled_ontology: Optional compiled OWL ontology. When present its
+            ``entity_access`` constrains the allowed operations per entity.
 
     Returns:
         Empty list if valid; list of human-readable error strings otherwise.
@@ -106,6 +116,24 @@ def validate_mutation_intent(
             f"Writable entities: {writable_list}"
         )
         return errors
+
+    # Ontology-derived: operation must be allowed for this entity.
+    # Only enforced when the ontology actually carries an access entry for
+    # this entity (graceful fallback when the ontology is partial/absent).
+    if compiled_ontology is not None:
+        allowed_ops = compiled_ontology.entity_access.get(intent.entity_key)
+        if allowed_ops is not None and op.value not in allowed_ops:
+            errors.append(
+                f"Operation '{op.value}' is not allowed on '{intent.entity_key}' "
+                f"by the ontology. Allowed operation(s): {sorted(allowed_ops)}"
+            )
+            return errors
+
+    # TODO(state-machine): when compiled_ontology.state_fields covers a field
+    # being written, validate that the new value is a legal transition from
+    # the current state. Requires reading the current record + the state
+    # machine's transition edges (df:fromState/df:toState). Deferred to v3
+    # per RFC §9. For now state fields are validated only structurally.
 
     # Structural: DELETE and UPDATE require record_id
     if op in (EntityWriteOperation.delete, EntityWriteOperation.update):

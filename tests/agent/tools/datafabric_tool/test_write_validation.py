@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from uipath_langchain.agent.tools.datafabric_tool.compiled_ontology import (
+    CompiledOntology,
+)
 from uipath_langchain.agent.tools.datafabric_tool.models import (
     DataFabricWriteInput,
     EntityWriteOperation,
@@ -431,3 +434,86 @@ class TestValidateMutationIntent:
         )
         errors = validate_mutation_intent(intent, self._schema())
         assert len(errors) == 2  # unknown field + missing required
+
+
+class TestValidateMutationIntentWithOntology:
+    """Ontology-constrained operation validation (optional layer)."""
+
+    def _schema(self) -> dict[str, EntityWriteSchema]:
+        return {
+            "Orders": EntityWriteSchema(
+                entity_key="Orders",
+                display_name="Orders",
+                writable_fields=[
+                    WritableFieldInfo(
+                        name="OrderName",
+                        display_name="Order Name",
+                        type_name="varchar",
+                        is_required=True,
+                    ),
+                    WritableFieldInfo(
+                        name="Amount",
+                        display_name="Amount",
+                        type_name="decimal",
+                        is_required=False,
+                    ),
+                ],
+            )
+        }
+
+    def test_ontology_disallows_operation_returns_error(self) -> None:
+        """Ontology allows only update on Orders -> insert is rejected."""
+        ontology = CompiledOntology(entity_access={"Orders": {"update"}})
+        intent = DataFabricWriteInput(
+            entity_key="Orders",
+            operation=EntityWriteOperation.insert,
+            fields={"OrderName": "Test"},
+        )
+        errors = validate_mutation_intent(intent, self._schema(), ontology)
+        assert len(errors) == 1
+        assert "not allowed" in errors[0]
+        assert "insert" in errors[0]
+        assert "update" in errors[0]  # lists allowed ops
+
+    def test_ontology_allows_operation_passes(self) -> None:
+        """Ontology allows insert -> a valid insert passes."""
+        ontology = CompiledOntology(entity_access={"Orders": {"insert", "update"}})
+        intent = DataFabricWriteInput(
+            entity_key="Orders",
+            operation=EntityWriteOperation.insert,
+            fields={"OrderName": "Test", "Amount": 50},
+        )
+        errors = validate_mutation_intent(intent, self._schema(), ontology)
+        assert errors == []
+
+    def test_ontology_allows_operation_update_passes(self) -> None:
+        ontology = CompiledOntology(entity_access={"Orders": {"update"}})
+        intent = DataFabricWriteInput(
+            entity_key="Orders",
+            operation=EntityWriteOperation.update,
+            record_id="rec-1",
+            fields={"Amount": 99},
+        )
+        errors = validate_mutation_intent(intent, self._schema(), ontology)
+        assert errors == []
+
+    def test_ontology_none_preserves_existing_behavior(self) -> None:
+        """ontology=None -> metadata-only validation, insert still allowed."""
+        intent = DataFabricWriteInput(
+            entity_key="Orders",
+            operation=EntityWriteOperation.insert,
+            fields={"OrderName": "Test", "Amount": 50},
+        )
+        errors = validate_mutation_intent(intent, self._schema(), None)
+        assert errors == []
+
+    def test_ontology_without_entry_for_entity_does_not_constrain(self) -> None:
+        """Entity absent from ontology.entity_access -> no op constraint applied."""
+        ontology = CompiledOntology(entity_access={"OtherEntity": {"update"}})
+        intent = DataFabricWriteInput(
+            entity_key="Orders",
+            operation=EntityWriteOperation.insert,
+            fields={"OrderName": "Test"},
+        )
+        errors = validate_mutation_intent(intent, self._schema(), ontology)
+        assert errors == []

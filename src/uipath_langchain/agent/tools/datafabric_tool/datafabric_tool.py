@@ -27,6 +27,7 @@ from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.platform.entities import DataFabricEntityItem
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
+from .compiled_ontology import CompiledOntology
 from .models import (
     DataFabricQueryInput,
     DataFabricWriteInput,
@@ -168,6 +169,7 @@ class DataFabricWriteHandler:
         self._entity_set = entity_set
         self._write_schemas: dict[str, EntityWriteSchema] | None = None
         self._write_tool_description: str | None = None
+        self._compiled_ontology: CompiledOntology | None = None
         self._executor: Any | None = None
         self._init_lock = asyncio.Lock()
 
@@ -203,11 +205,59 @@ class DataFabricWriteHandler:
                     writable_fields=writable,
                 )
 
+            # Optional ontology layer: fetch + compile the OWL ontology if the
+            # platform exposes get_ontology_file_async. This method may only
+            # exist on a feature branch — if it is absent we degrade gracefully
+            # to the metadata-only write path (compiled_ontology stays None).
+            self._compiled_ontology = await self._maybe_compile_ontology(
+                resolution.entities_service
+            )
+
+            entity_access = (
+                self._compiled_ontology.entity_access
+                if self._compiled_ontology
+                else None
+            )
             self._write_tool_description = build_write_tool_description(
-                self._write_schemas
+                self._write_schemas,
+                entity_access=entity_access,
             )
 
             self._executor = WriteExecutor(resolution.entities_service)
+
+    async def _maybe_compile_ontology(
+        self, entities_service: Any
+    ) -> CompiledOntology | None:
+        """Best-effort fetch + compile of the optional OWL ontology.
+
+        Returns the compiled ontology, or ``None`` when no ontology is
+        available or the platform package does not expose the fetch method.
+        Never raises — any failure degrades to the metadata-only path.
+        """
+        get_ontology = getattr(entities_service, "get_ontology_file_async", None)
+        if not callable(get_ontology):
+            logger.debug(
+                "EntitiesService has no get_ontology_file_async; "
+                "skipping ontology compilation (metadata-only writes)."
+            )
+            return None
+
+        from .ontology_compiler import compile_ontology
+
+        try:
+            owl_turtle = await get_ontology("owl")
+            if not owl_turtle:
+                logger.debug("No OWL ontology returned; metadata-only writes.")
+                return None
+            compiled = compile_ontology(owl_turtle)
+            logger.debug(
+                "Compiled ontology with %d writable entities.",
+                len(compiled.entity_access),
+            )
+            return compiled
+        except Exception as exc:  # graceful no-op on any fetch/parse failure
+            logger.debug("Ontology fetch/compile skipped: %s", exc)
+            return None
 
     async def __call__(
         self,
@@ -243,8 +293,10 @@ class DataFabricWriteHandler:
             fields=fields,
         )
 
-        # Validate
-        errors = validate_mutation_intent(intent, self._write_schemas)
+        # Validate (ontology, when present, constrains allowed operations)
+        errors = validate_mutation_intent(
+            intent, self._write_schemas, self._compiled_ontology
+        )
         if errors:
             return json.dumps(
                 {
