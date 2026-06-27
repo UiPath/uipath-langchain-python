@@ -155,16 +155,16 @@ def create_context_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel | None = None,
     agent: LowCodeAgentDefinition | None = None,
-) -> StructuredTool | BaseTool | None:
+) -> StructuredTool | BaseTool | list[BaseTool] | None:
     tool_name = sanitize_tool_name(resource.name)
 
     if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
         if llm is None:
             raise ValueError("Data Fabric entity set tools require an LLM instance")
-        from .datafabric_tool import create_datafabric_query_tool
+        from .datafabric_tool import create_datafabric_tools
         from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
 
-        return create_datafabric_query_tool(
+        return create_datafabric_tools(
             resource,
             llm,
             tool_name=tool_name,

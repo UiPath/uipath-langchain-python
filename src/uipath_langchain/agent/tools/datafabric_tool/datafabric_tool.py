@@ -1,17 +1,21 @@
 """Data Fabric tool creation and resource detection.
 
 This module provides an agentic ``query_datafabric`` tool with an inner
-LLM sub-graph.
+LLM sub-graph, and a ``write_datafabric`` tool for entity CRUD operations.
 
-The tool accepts natural language queries, runs an inner LangGraph
+The read tool accepts natural language queries, runs an inner LangGraph
 sub-graph for SQL generation + execution + self-correction, and
 returns a natural language answer.
+
+The write tool accepts structured write intents (insert/update/delete)
+with schema-level validation for context-derived entities.
 
 Prompt building is in ``datafabric_prompt_builder.py``.
 Sub-graph definition is in ``datafabric_subgraph.py``.
 """
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -23,7 +27,17 @@ from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.platform.entities import DataFabricEntityItem
 
 from ..base_uipath_structured_tool import BaseUiPathStructuredTool
-from .models import DataFabricQueryInput
+from .models import (
+    DataFabricQueryInput,
+    DataFabricWriteInput,
+    EntityWriteSchema,
+)
+from .write_schema_builder import build_write_tool_description
+from .write_validation import (
+    derive_writable_fields,
+    is_entity_writable,
+    validate_mutation_intent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +153,116 @@ class DataFabricTextQueryHandler:
         )
 
 
+class DataFabricWriteHandler:
+    """Manages lazy initialization and invocation of Data Fabric write operations.
+
+    On first call, resolves entity schemas via the platform layer and builds
+    EntityWriteSchema objects for context-derived entities. Subsequent calls
+    reuse the cached schemas and executor.
+    """
+
+    def __init__(
+        self,
+        entity_set: list[DataFabricEntityItem],
+    ) -> None:
+        self._entity_set = entity_set
+        self._write_schemas: dict[str, EntityWriteSchema] | None = None
+        self._write_tool_description: str | None = None
+        self._executor: Any | None = None
+        self._init_lock = asyncio.Lock()
+
+    async def _ensure_initialized(self) -> None:
+        """Lazy-init: resolve entities and build write schemas on first call."""
+        if self._executor is not None:
+            return
+
+        async with self._init_lock:
+            if self._executor is not None:
+                return
+
+            from uipath.platform import UiPath
+
+            from .write_executor import WriteExecutor
+
+            sdk = UiPath()
+            resolution = await sdk.entities.resolve_entity_set_async(self._entity_set)
+            if not resolution.entities:
+                raise ValueError(
+                    "No Data Fabric entity schemas could be fetched. "
+                    "Check entity identifiers and permissions."
+                )
+
+            self._write_schemas = {}
+            for entity in resolution.entities:
+                if not is_entity_writable(entity):
+                    continue
+                writable = derive_writable_fields(entity)
+                self._write_schemas[entity.name] = EntityWriteSchema(
+                    entity_key=entity.name,
+                    display_name=entity.display_name or entity.name,
+                    writable_fields=writable,
+                )
+
+            self._write_tool_description = build_write_tool_description(
+                self._write_schemas
+            )
+
+            self._executor = WriteExecutor(resolution.entities_service)
+
+    async def __call__(
+        self,
+        entity_key: str,
+        operation: str,
+        record_id: str | None = None,
+        fields: dict[str, Any] | None = None,
+    ) -> str:
+        """Execute a write operation against a Data Fabric entity.
+
+        Args:
+            entity_key: The entity name to write to.
+            operation: One of 'insert', 'update', 'delete'.
+            record_id: Record ID (required for update/delete).
+            fields: Field name-value pairs (required for insert/update).
+
+        Returns:
+            JSON string with the WriteResult.
+        """
+        logger.debug(
+            "write_datafabric called: entity=%s op=%s record_id=%s",
+            entity_key,
+            operation,
+            record_id,
+        )
+
+        await self._ensure_initialized()
+
+        intent = DataFabricWriteInput(
+            entity_key=entity_key,
+            operation=operation,
+            record_id=record_id,
+            fields=fields,
+        )
+
+        # Validate
+        errors = validate_mutation_intent(intent, self._write_schemas)
+        if errors:
+            return json.dumps(
+                {
+                    "success": False,
+                    "operation": operation,
+                    "entity_key": entity_key,
+                    "errors": errors,
+                }
+            )
+
+        # Execute
+        from .write_executor import WriteExecutor
+
+        assert isinstance(self._executor, WriteExecutor)
+        result = await self._executor.execute(intent)
+        return result.model_dump_json()
+
+
 def create_datafabric_query_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel,
@@ -185,3 +309,85 @@ def create_datafabric_query_tool(
         coroutine=handler,
         metadata={"tool_type": "datafabric_sql"},
     )
+
+
+def _build_initial_write_tool_description(
+    entity_set: list[DataFabricEntityItem],
+) -> str:
+    """Build a pre-resolution description for the write tool from the entity set.
+
+    This is the description used at tool-creation time, before entity
+    schemas have been lazily resolved.  It lists entity names and
+    descriptions from the ``DataFabricEntityItem`` objects available
+    in the agent config.  After first invocation the handler builds a
+    richer field-level description via ``build_write_tool_description``.
+    """
+    entity_lines = []
+    for e in entity_set:
+        line = f"- {e.name}"
+        if e.description:
+            line += f": {e.description}"
+        entity_lines.append(line)
+    entity_summary = "\n".join(entity_lines)
+
+    return (
+        "Modify Data Fabric entities using structured operations "
+        "(insert, update, delete).\n\n"
+        "Available entities:\n"
+        f"{entity_summary}\n\n"
+        "Operations:\n"
+        "- insert: provide entity_key and fields. "
+        "All required fields must be included.\n"
+        "- update: provide entity_key, record_id (from a prior read), "
+        "and fields to change.\n"
+        "- delete: provide entity_key and record_id. Requires confirmation.\n\n"
+        "Query the entity first (using the read tool) to discover record IDs "
+        "and current field values before updating or deleting."
+    )
+
+
+def create_datafabric_tools(
+    resource: AgentContextResourceConfig,
+    llm: BaseChatModel,
+    tool_name: str = "query_datafabric",
+    agent_config: dict[str, str] | None = None,
+) -> list[BaseTool]:
+    """Create both read and write Data Fabric tools.
+
+    Returns a list containing:
+    1. The ``query_datafabric`` read tool (NL-to-SQL subgraph)
+    2. The ``write_datafabric`` write tool (structured CRUD)
+
+    Args:
+        resource: The Data Fabric context resource configuration.
+        llm: The language model for the inner SQL generation loop.
+        tool_name: Sanitized tool name for the read tool.
+        agent_config: Optional dict with agent-level config.
+    """
+    # Read tool (unchanged)
+    read_tool = create_datafabric_query_tool(
+        resource, llm, tool_name=tool_name, agent_config=agent_config
+    )
+
+    # Write tool — always created; writability is enforced at handler level
+    # after async entity resolution (entity_type / external_fields are only
+    # available on resolved Entity objects, not on DataFabricEntityItem).
+    entity_set = [
+        DataFabricEntityItem.model_validate(item.model_dump(by_alias=True))
+        for item in (resource.entity_set or [])
+    ]
+    write_handler = DataFabricWriteHandler(entity_set=entity_set)
+    write_tool_name = f"{tool_name}_write"
+
+    write_tool = BaseUiPathStructuredTool(
+        name=write_tool_name,
+        description=_build_initial_write_tool_description(entity_set),
+        args_schema=DataFabricWriteInput,
+        coroutine=write_handler,
+        metadata={
+            "tool_type": "datafabric_write",
+            "require_conversational_confirmation": True,
+        },
+    )
+
+    return [read_tool, write_tool]
