@@ -17,11 +17,14 @@ from .datafabric_prompts import SQL_CONSTRAINTS
 from .models import (
     EntitySchema,
     EntitySQLContext,
+    EntityWriteSchema,
     FieldSchema,
     QueryPattern,
     SQLContext,
 )
 from .prompts import build_prompt_context, get_prompt_version
+from .write_schema_builder import build_write_tool_description
+from .write_validation import derive_writable_fields, is_entity_writable
 
 logger = logging.getLogger(__name__)
 
@@ -223,3 +226,41 @@ def build(
         prompt_version=prompt_version,
     )
     return format_sql_context(ctx)
+
+
+def build_write_context(entities: list[Entity]) -> str:
+    """Build write-relevant schema context for the system prompt.
+
+    Generates a natural-language description of writable entities, their
+    fields with types and constraints, ChoiceSet indicators, and allowed
+    operations.  This is appended to the outer agent's system prompt so
+    the LLM knows which entities can be written to and how.
+
+    Args:
+        entities: Resolved Entity objects from the platform.
+
+    Returns:
+        Formatted markdown string describing writable entities and
+        their schemas, or an empty string if no entities are writable.
+    """
+    write_schemas: dict[str, EntityWriteSchema] = {}
+    for entity in entities:
+        if not is_entity_writable(entity):
+            continue
+        writable_fields = derive_writable_fields(entity)
+        if writable_fields:
+            write_schemas[entity.name] = EntityWriteSchema(
+                entity_key=entity.name,
+                display_name=entity.display_name or entity.name,
+                writable_fields=writable_fields,
+            )
+
+    if not write_schemas:
+        return ""
+
+    lines: list[str] = [
+        "## Writable Data Fabric Entities",
+        "",
+        build_write_tool_description(write_schemas),
+    ]
+    return "\n".join(lines)
