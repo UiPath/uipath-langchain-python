@@ -1,5 +1,6 @@
 import os
 import tempfile
+from datetime import datetime, timezone
 from typing import Any, TypedDict
 
 import pytest
@@ -90,8 +91,7 @@ class ParallelTriggerHandler:
 class TimerLikeInterrupt(BaseModel):
     """Timer-shaped model used to verify typed interrupt pass-through."""
 
-    cron_expression: str = Field(alias="cronExpression")
-    time_zone_id: str = Field(default="UTC", alias="timeZoneId")
+    resume_time: datetime | str = Field(alias="resumeTime")
 
     model_config = ConfigDict(validate_by_name=True)
 
@@ -129,8 +129,7 @@ async def test_typed_time_interrupt_is_forwarded_to_trigger_handler():
     def wait_for_time(state: State) -> State:
         result = interrupt(
             TimerLikeInterrupt(
-                cron_expression="0 0/5 * * * ?",
-                time_zone_id="Europe/Bucharest",
+                resume_time=datetime(2026, 6, 27, 20, 14, 49, tzinfo=timezone.utc),
             )
         )
         return {"message": f"resumed with: {result}"}
@@ -168,13 +167,15 @@ async def test_typed_time_interrupt_is_forwarded_to_trigger_handler():
             assert result.status == UiPathRuntimeStatus.SUSPENDED
             assert len(trigger_handler.suspend_values) == 1
             suspend_value = trigger_handler.suspend_values[0]
-            assert suspend_value.cron_expression == "0 0/5 * * * ?"
-            assert suspend_value.time_zone_id == "Europe/Bucharest"
+            assert suspend_value.resume_time == datetime(
+                2026, 6, 27, 20, 14, 49, tzinfo=timezone.utc
+            )
             assert result.triggers is not None
             assert result.triggers[0].trigger_type == UiPathResumeTriggerType.TIMER
             assert result.triggers[0].payload == {
-                "cronExpression": "0 0/5 * * * ?",
-                "timeZoneId": "Europe/Bucharest",
+                "resumeTime": datetime(
+                    2026, 6, 27, 20, 14, 49, tzinfo=timezone.utc
+                ),
             }
     finally:
         os.unlink(temp_db.name)

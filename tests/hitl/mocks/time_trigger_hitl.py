@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from typing import TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -13,8 +14,7 @@ class State(TypedDict):
 def main_node(state: State) -> State:
     response = interrupt(
         WaitTimeTrigger(
-            cron_expression="0 0/5 * * * ?",
-            time_zone_id="Europe/Bucharest",
+            resume_time=datetime.now(timezone.utc) + timedelta(minutes=1),
         )
     )
     return {"message": str(response)}

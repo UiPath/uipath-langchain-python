@@ -472,21 +472,20 @@ For a practical implementation, refer to the [email-triage-agent sample](https:/
 
 ### WaitTimeTrigger
 
-Suspends the agent until an Orchestrator time trigger fires. The SDK stores the schedule as part of the resume condition, and Orchestrator resumes the suspended job when the configured time trigger fires.
+Suspends the agent until an Orchestrator timer fires. The SDK stores the resume timestamp as part of the resume condition, and Orchestrator resumes the suspended job when that time is reached.
 
 | Attribute | Type | Description |
 | --- | --- | --- |
-| `cron_expression` | `str` | Quartz cron expression for the schedule. Use the same six-field shape accepted by `uip or triggers create --type time --cron`, for example `0 0 9 ? * MON-FRI`. |
-| `time_zone_id` | `str` | IANA timezone used to evaluate the cron expression, for example `Europe/Bucharest`. Defaults to `UTC`. |
+| `resume_time` | `datetime \| str` | Absolute time when Orchestrator should resume the suspended job. Use a timezone-aware UTC `datetime` or an ISO 8601 timestamp. |
 
 ```python
 from langgraph.types import interrupt
 from uipath.platform.common import WaitTimeTrigger
+from datetime import datetime, timedelta, timezone
 
 resume_payload = interrupt(
     WaitTimeTrigger(
-        cron_expression="0 0/5 * * * ?",
-        time_zone_id="Europe/Bucharest",
+        resume_time=datetime.now(timezone.utc) + timedelta(minutes=5),
     )
 )
 ```
