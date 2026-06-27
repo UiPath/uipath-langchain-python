@@ -468,6 +468,33 @@ For a practical implementation, refer to the [email-triage-agent sample](https:/
 
 ---
 
+## Time triggers
+
+### WaitTimeTrigger
+
+Suspends the agent until an Orchestrator time trigger fires. The SDK stores the schedule as part of the resume condition, and Orchestrator resumes the suspended job when the configured time trigger fires.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `cron_expression` | `str` | Quartz cron expression for the schedule. Use the same six-field shape accepted by `uip or triggers create --type time --cron`, for example `0 0 9 ? * MON-FRI`. |
+| `time_zone_id` | `str` | IANA timezone used to evaluate the cron expression, for example `Europe/Bucharest`. Defaults to `UTC`. |
+
+```python
+from langgraph.types import interrupt
+from uipath.platform.common import WaitTimeTrigger
+
+resume_payload = interrupt(
+    WaitTimeTrigger(
+        cron_expression="0 0/5 * * * ?",
+        time_zone_id="Europe/Bucharest",
+    )
+)
+```
+
+This is intended for deployed jobs where Orchestrator owns the scheduler. In a local run there is no scheduler to fire the time trigger, so resume the interrupt explicitly when testing locally.
+
+---
+
 ## Resuming with a plain value (API trigger)
 
 All the models above are typed interrupts that tie the agent's wait state to a specific UiPath operation. When you call `interrupt(...)` with a value that is **not** one of those models, most commonly a plain string but any JSON-serializable value works, the SDK creates an **API resume trigger**. The agent suspends and waits to be resumed by an explicit external API call rather than by polling a UiPath operation.
