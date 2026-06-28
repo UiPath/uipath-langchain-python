@@ -66,6 +66,11 @@ ANALYZE_FILES_SYSTEM_MESSAGE = (
 # reads this and stamps it on the llmCall span as the ``attachments`` attribute.
 LLM_CALL_ATTACHMENTS_METADATA_KEY = "uipath_llm_call_attachments"
 
+# Tag applied to internal LLM calls to represent that the LLM call is part
+# of an internal tool execution. This is intended for the conversational runtime 
+# bridge to recognize that it should not forward the LLM call's response to the conversation.
+INTERNAL_TOOL_LLM_CALL_TAG = "uipath_internal_tool_llm_call"
+
 
 def _original_attachment_id(file: FileInfo) -> str:
     """Return the id to use for the original file in trace attachments.
@@ -136,6 +141,13 @@ def _llm_call_attachments_payload(files: list[FileInfo]) -> str | None:
             )
         )
     return json.dumps([att.model_dump(by_alias=True) for att in attachments])
+
+
+def _config_as_internal_llm_call(config: RunnableConfig | None) -> RunnableConfig:
+    """Return a config tagged so the runtime bridge ignores this LLM call's messages."""
+    new_config = cast(RunnableConfig, dict(config) if config else {})
+    new_config["tags"] = [*(new_config.get("tags") or []), INTERNAL_TOOL_LLM_CALL_TAG]
+    return new_config
 
 
 def _config_with_llm_call_attachments(
@@ -327,6 +339,7 @@ def create_analyze_file_tool(
             cast(AnyMessage, human_message_with_files),
         ]
         config = var_child_runnable_config.get(None)
+        config = _config_as_internal_llm_call(config)
         config = _config_with_llm_call_attachments(config, files)
         result = await non_streaming_llm.ainvoke(messages, config=config)
 
