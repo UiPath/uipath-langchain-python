@@ -52,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -278,7 +279,18 @@ async def _async_main(args: argparse.Namespace) -> int:
             # unlicensed product path and the gateway returns 403 "License
             # not available for LLM usage". "agentsplayground" uses the
             # developer's debug/playground quota — appropriate for a local run.
-            llm = get_chat_model(args.model, agenthub_config=args.agenthub_config)
+            # api_flavor forces the gateway/LangChain to use a specific API.
+            # The Responses API returns the terminal tool batch as raw
+            # function_call items that don't reliably map to LangChain
+            # .tool_calls — so the agent loop plans the writes but never
+            # dispatches them. Forcing 'chat-completions' yields standard
+            # tool_calls that the router executes.
+            flavor = args.api_flavor or None
+            llm = get_chat_model(
+                args.model,
+                agenthub_config=args.agenthub_config,
+                **({"api_flavor": flavor} if flavor else {}),
+            )
         except Exception as exc:
             raise _AuthOrNetworkError(
                 f"could not construct chat model {args.model!r}: {exc}"
@@ -386,18 +398,32 @@ async def _async_main(args: argparse.Namespace) -> int:
         )
         return 1
 
-    print("\n=== AGENT RUN RESULT ===")
+    print("\n=== AGENT RUN RESULT (calls + responses, in order) ===")
     result_messages = result.get("messages", []) if isinstance(result, dict) else []
     for msg in result_messages:
+        # Tool CALLS the model emitted (the NL query for reads, the structured
+        # intent for writes).
         tool_calls = getattr(msg, "tool_calls", None)
         if tool_calls:
             for call in tool_calls:
                 name = call.get("name") if isinstance(call, dict) else None
                 cargs = call.get("args") if isinstance(call, dict) else None
-                print(f"[tool call] {name}({cargs})")
+                print(f"\n[tool call] {name}({cargs})")
+        # Tool RESPONSES (ToolMessage) — for query_datafabric this is the
+        # natural-language answer derived from the executed SQL; for the write
+        # tool it's the WriteResult JSON.
+        if msg.__class__.__name__ == "ToolMessage":
+            tool_name = getattr(msg, "name", "?")
+            content = getattr(msg, "content", "")
+            print(f"[tool response: {tool_name}]\n{content}")
     final = result_messages[-1] if result_messages else None
     print("\n=== FINAL MESSAGE ===")
     print(getattr(final, "content", final) if final is not None else "(no messages)")
+    if not args.trace:
+        print(
+            "\n(tip: re-run with --trace to see the generated SQL the inner "
+            "NL->SQL subgraph produced for each read.)"
+        )
     return 0
 
 
@@ -457,11 +483,35 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "print the ontology facts and the generated write tool description, "
         "then exit. Degrades gracefully offline.",
     )
+    parser.add_argument(
+        "--api-flavor",
+        default="chat-completions",
+        help="LLM gateway API flavor. Default 'chat-completions' yields "
+        "standard tool_calls the agent loop can dispatch. Pass '' to let the "
+        "gateway pick (may select 'responses', whose terminal tool batch is "
+        "not reliably executed by the standalone harness).",
+    )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Enable DEBUG logging for the Data Fabric tool so the inner "
+        "NL->SQL subgraph prints each generated SQL statement "
+        "('execute_sql called with SQL: ...') and the read/write calls.",
+    )
     return parser
 
 
 def main() -> int:
     args = _build_arg_parser().parse_args()
+    if args.trace:
+        # Surface the inner subgraph's generated SQL + tool invocations.
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(levelname)s %(name)s: %(message)s",
+        )
+        logging.getLogger("uipath_langchain.agent.tools.datafabric_tool").setLevel(
+            logging.DEBUG
+        )
     return asyncio.run(_async_main(args))
 
 

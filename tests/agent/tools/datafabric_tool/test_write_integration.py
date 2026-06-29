@@ -171,11 +171,15 @@ class TestWriteToolMetadata:
         assert write_tool.metadata is not None
         assert write_tool.metadata["tool_type"] == "datafabric_write"
 
-    def test_require_conversational_confirmation_is_true(self) -> None:
+    def test_no_unconditional_conversational_confirmation(self) -> None:
+        """The write tool does not hardcode the HITL confirmation gate. It is
+        applied per-resource for conversational agents by tool_factory, not
+        unconditionally here (which would suspend non-conversational/coded
+        agents on an interrupt with nothing to approve it)."""
         tools = create_datafabric_tools(_make_context_resource(), _mock_llm())
         write_tool = tools[1]
         assert write_tool.metadata is not None
-        assert write_tool.metadata["require_conversational_confirmation"] is True
+        assert "require_conversational_confirmation" not in write_tool.metadata
 
 
 # ---------------------------------------------------------------------------

@@ -442,7 +442,6 @@ def create_datafabric_tools(
         coroutine=write_handler,
         metadata={
             "tool_type": "datafabric_write",
-            "require_conversational_confirmation": True,
         },
     )
 
