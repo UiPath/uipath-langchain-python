@@ -32,9 +32,6 @@ from uipath.runtime.events import (
 from uipath.runtime.schema import UiPathRuntimeSchema
 
 from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
-from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
-    INTERNAL_TOOL_LLM_CALL_TAG,
-)
 from uipath_langchain.chat.hitl import (
     IS_CONVERSATIONAL_CLIENT_SIDE_TOOL,
     get_confirmation_schema,
@@ -156,9 +153,7 @@ class UiPathLangGraphRuntime:
                 # Emit UiPathRuntimeMessageEvent for messages
                 if chunk_type == "messages":
                     if isinstance(data, tuple):
-                        message, metadata = data
-                        if INTERNAL_TOOL_LLM_CALL_TAG in (metadata.get("tags") or ()):
-                            continue
+                        message, _ = data
                         try:
                             events = await self.chat.map_event(message)
                         except Exception as e:
