@@ -93,6 +93,13 @@ async def main() -> int:
             "  ACTIVE — entity_access:",
             {k: sorted(v) for k, v in onto.entity_access.items()},
         )
+        # Always dump the raw OWL + human-readable IR for the POC.
+        from uipath_langchain.agent.tools.datafabric_tool.ontology_compiler import (
+            format_ontology_debug,
+        )
+
+        print()
+        print(format_ontology_debug(ONTOLOGY_TTL, onto))
     else:
         print("  INACTIVE (metadata-only)")
 
@@ -148,9 +155,12 @@ async def main() -> int:
     def g(rec, k):  # noqa: ANN001
         return rec.get(k) if isinstance(rec, dict) else getattr(rec, k, None)
 
-    order = await svc.get_record_async(by_suffix["PurchaseOrder"], ids["ORDER_ID"])
-    risk = await svc.get_record_async(by_suffix["CustomerRisk"], ids["RISK_ID"])
-    contact = await svc.get_record_async(by_suffix["Contact"], ids["CONTACT_ID"])
+    # get_record_async addresses the entity by its GUID id, not its name
+    # (same rule the write executor follows).
+    id_by_suffix = {it.name.rsplit("_", 1)[1]: it.id for it in items}
+    order = await svc.get_record_async(id_by_suffix["PurchaseOrder"], ids["ORDER_ID"])
+    risk = await svc.get_record_async(id_by_suffix["CustomerRisk"], ids["RISK_ID"])
+    contact = await svc.get_record_async(id_by_suffix["Contact"], ids["CONTACT_ID"])
 
     print("\n=== VERIFY (read-back) ===")
     checks = [

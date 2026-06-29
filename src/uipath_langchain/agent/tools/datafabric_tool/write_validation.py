@@ -92,8 +92,11 @@ def validate_mutation_intent(
     When a *compiled_ontology* is supplied (the optional OWL ontology layer,
     see ``ontology_compiler``), the operation is additionally checked against
     the ontology's per-entity access modes: an operation not listed in
-    ``entity_access[entity_key]`` is rejected.  When the ontology is ``None``
-    the metadata-only behaviour is unchanged.
+    ``entity_access[entity_key]`` is rejected, and a write to an entity the
+    ontology declares but grants no write operations (a read-only
+    ``df:ReadableEntity``) is rejected with a read-only message.  An entity
+    unknown to the ontology falls back to metadata-only validation.  When the
+    ontology is ``None`` the metadata-only behaviour is unchanged.
 
     Args:
         intent: The write operation intent to validate.
@@ -123,13 +126,24 @@ def validate_mutation_intent(
     # Only enforced when the ontology actually carries an access entry for
     # this entity (graceful fallback when the ontology is partial/absent).
     if compiled_ontology is not None:
-        allowed_ops = compiled_ontology.entity_access.get(intent.entity_key)
-        if allowed_ops is not None and op.value not in allowed_ops:
+        ek = intent.entity_key
+        allowed_ops = compiled_ontology.entity_access.get(ek)
+        if allowed_ops is not None:
+            if op.value not in allowed_ops:
+                errors.append(
+                    f"Operation '{op.value}' is not allowed on '{ek}' "
+                    f"by the ontology. Allowed operation(s): {sorted(allowed_ops)}"
+                )
+                return errors
+        elif compiled_ontology.is_known(ek):
+            # The ontology declares this entity but grants no write operations
+            # -> read-only (df:ReadableEntity).
             errors.append(
-                f"Operation '{op.value}' is not allowed on '{intent.entity_key}' "
-                f"by the ontology. Allowed operation(s): {sorted(allowed_ops)}"
+                f"Entity '{ek}' is read-only per the ontology "
+                f"(no write operations declared)."
             )
             return errors
+        # else: entity unknown to the ontology -> metadata-only fallback.
 
     # TODO(state-machine): when compiled_ontology.state_fields covers a field
     # being written, validate that the new value is a legal transition from

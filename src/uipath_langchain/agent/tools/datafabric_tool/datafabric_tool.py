@@ -33,6 +33,7 @@ from .models import (
     DataFabricWriteInput,
     EntityWriteSchema,
 )
+from .ontology_compiler import maybe_fetch_and_compile_ontology
 from .write_schema_builder import build_write_tool_description
 from .write_validation import (
     derive_writable_fields,
@@ -65,6 +66,7 @@ class DataFabricTextQueryHandler:
         self._resource_description = resource_description
         self._base_system_prompt = base_system_prompt
         self._compiled: CompiledStateGraph[Any] | None = None
+        self._compiled_ontology: CompiledOntology | None = None
         self._init_lock = asyncio.Lock()
 
     async def _ensure_datafabric_graph(self) -> CompiledStateGraph[Any]:
@@ -91,12 +93,18 @@ class DataFabricTextQueryHandler:
                     "No Data Fabric entity schemas could be fetched. "
                     "Check entity identifiers and permissions."
                 )
+            # Optional ontology layer enriches the read prompt (schema linking,
+            # P5). It does NOT restrict reads — best-effort and may be None.
+            self._compiled_ontology = await maybe_fetch_and_compile_ontology(
+                resolution.entities_service
+            )
             self._compiled = DataFabricGraph.create(
                 llm=self._llm,
                 entities=resolution.entities,
                 entities_service=resolution.entities_service,
                 resource_description=self._resource_description,
                 base_system_prompt=self._base_system_prompt,
+                compiled_ontology=self._compiled_ontology,
             )
             return self._compiled
 
@@ -217,9 +225,22 @@ class DataFabricWriteHandler:
             # platform exposes get_ontology_file_async. This method may only
             # exist on a feature branch — if it is absent we degrade gracefully
             # to the metadata-only write path (compiled_ontology stays None).
-            self._compiled_ontology = await self._maybe_compile_ontology(
+            self._compiled_ontology = await maybe_fetch_and_compile_ontology(
                 resolution.entities_service
             )
+
+            # Prune any entity the ontology marks read-only (a df:ReadableEntity)
+            # so the write tool description never advertises it (e.g. Customer).
+            # When the ontology is absent (None) nothing is pruned.
+            if self._compiled_ontology is not None:
+                read_only = [
+                    name
+                    for name in self._write_schemas
+                    if self._compiled_ontology.is_read_only(name)
+                ]
+                for name in read_only:
+                    del self._write_schemas[name]
+                    self._entity_id_by_key.pop(name, None)
 
             entity_access = (
                 self._compiled_ontology.entity_access
@@ -232,40 +253,6 @@ class DataFabricWriteHandler:
             )
 
             self._executor = WriteExecutor(resolution.entities_service)
-
-    async def _maybe_compile_ontology(
-        self, entities_service: Any
-    ) -> CompiledOntology | None:
-        """Best-effort fetch + compile of the optional OWL ontology.
-
-        Returns the compiled ontology, or ``None`` when no ontology is
-        available or the platform package does not expose the fetch method.
-        Never raises — any failure degrades to the metadata-only path.
-        """
-        get_ontology = getattr(entities_service, "get_ontology_file_async", None)
-        if not callable(get_ontology):
-            logger.debug(
-                "EntitiesService has no get_ontology_file_async; "
-                "skipping ontology compilation (metadata-only writes)."
-            )
-            return None
-
-        from .ontology_compiler import compile_ontology
-
-        try:
-            owl_turtle = await get_ontology("owl")
-            if not owl_turtle:
-                logger.debug("No OWL ontology returned; metadata-only writes.")
-                return None
-            compiled = compile_ontology(owl_turtle)
-            logger.debug(
-                "Compiled ontology with %d writable entities.",
-                len(compiled.entity_access),
-            )
-            return compiled
-        except Exception as exc:  # graceful no-op on any fetch/parse failure
-            logger.debug("Ontology fetch/compile skipped: %s", exc)
-            return None
 
     async def __call__(
         self,

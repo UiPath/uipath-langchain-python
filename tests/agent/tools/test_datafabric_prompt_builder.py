@@ -140,3 +140,47 @@ def test_system_pk_name_collision_with_user_field_not_duplicated():
     )
     names = _field_names(ctx)
     assert names.count("Id") == 1
+
+
+def test_build_appends_ontology_context_when_compiled_ontology_passed():
+    """When a compiled ontology is supplied, the read prompt gains an
+    '## Ontology Context' section with relationships and reference targets."""
+    from uipath_langchain.agent.tools.datafabric_tool.compiled_ontology import (
+        CompiledOntology,
+    )
+
+    ontology = CompiledOntology(
+        known_entities={"Ticket", "Customer"},
+        entity_access={"Ticket": {"update"}},
+        reference_fields={"Ticket.CustomerId": "Customer"},
+        state_fields={"Ticket.status": "TicketStatusChoiceSet"},
+        entity_relationships={"Ticket": ["Customer"]},
+    )
+    prompt = build([_fake_entity(_fake_field())], compiled_ontology=ontology)
+
+    assert "## Ontology Context" in prompt
+    # Access modes surfaced (informational).
+    assert "READ-ONLY" in prompt
+    assert "WRITABLE" in prompt
+    # A relationship line.
+    assert "Ticket -> Customer" in prompt
+    # A reference-target (FK) line for join-path guidance.
+    assert "Ticket.CustomerId -> Customer" in prompt
+    # A state-value-source line.
+    assert "TicketStatusChoiceSet" in prompt
+
+
+def test_build_without_ontology_has_no_ontology_context():
+    """When compiled_ontology is None the prompt is unchanged (no section)."""
+    prompt = build([_fake_entity(_fake_field())])
+    assert "## Ontology Context" not in prompt
+
+
+def test_build_with_empty_ontology_has_no_ontology_context():
+    """An empty compiled ontology adds no section."""
+    from uipath_langchain.agent.tools.datafabric_tool.compiled_ontology import (
+        CompiledOntology,
+    )
+
+    prompt = build([_fake_entity(_fake_field())], compiled_ontology=CompiledOntology())
+    assert "## Ontology Context" not in prompt

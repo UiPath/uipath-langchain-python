@@ -141,6 +141,30 @@ def _print_ontology_facts(compiled: Any, *, header: str) -> None:
     print(_fmt_set_map(compiled.entity_relationships))
 
 
+def _print_ontology_debug(
+    owl_turtle: str, compiled: Any, *, debug_ontology: bool
+) -> None:
+    """Print the human-readable IR and, when enabled, the raw OWL Turtle.
+
+    Uses ``ontology_compiler.format_ontology_debug`` so the CLI output mirrors
+    exactly what the runtime emits to debug logs.
+    """
+    if compiled is None:
+        return
+    from uipath_langchain.agent.tools.datafabric_tool.ontology_compiler import (
+        format_ontology_debug,
+    )
+
+    if debug_ontology:
+        # Full block: raw OWL + human-readable IR.
+        print()
+        print(format_ontology_debug(owl_turtle, compiled))
+    else:
+        # Human-readable IR only (no raw-OWL dump).
+        print("\n=== COMPILED ONTOLOGY (human-readable IR) ===")
+        print(compiled.to_human_readable())
+
+
 def _load_entity_set(path: Path) -> list[Any]:
     """Load a JSON list of DataFabricEntityItem dicts into model instances."""
     import json
@@ -200,6 +224,10 @@ async def _async_main(args: argparse.Namespace) -> int:
     print(f"Loaded ontology: {ontology_path}")
     _print_ontology_facts(
         standalone_compiled, header="ONTOLOGY FACTS (standalone compile)"
+    )
+    # Richer human-readable IR (and, when --debug-ontology, the raw OWL too).
+    _print_ontology_debug(
+        ttl_text, standalone_compiled, debug_ontology=args.debug_ontology
     )
 
     # --- Step 2: load entity set. --------------------------------------------
@@ -309,6 +337,7 @@ async def _async_main(args: argparse.Namespace) -> int:
     ):
         print("\nontology ACTIVE -- handler compiled and is using the ontology.")
         _print_ontology_facts(compiled, header="ONTOLOGY FACTS (active in handler)")
+        _print_ontology_debug(ttl_text, compiled, debug_ontology=args.debug_ontology)
     else:
         print(
             "\nontology INACTIVE (fell back to metadata-only). The handler did "
@@ -413,6 +442,13 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--resource-name",
         default="datafabric",
         help="Name for the Data Fabric context resource (default: datafabric).",
+    )
+    parser.add_argument(
+        "--debug-ontology",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Dump the raw OWL Turtle alongside the human-readable compiled IR "
+        "(default: on). Use --no-debug-ontology to print only the IR.",
     )
     parser.add_argument(
         "--dry-run",

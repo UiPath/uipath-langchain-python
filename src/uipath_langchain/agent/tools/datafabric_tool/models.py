@@ -72,6 +72,7 @@ class SQLContext(BaseModel):
     resource_description: str | None = None
     sql_expert_system_prompt: str | None = None
     constraints: str | None = None
+    ontology_context: str | None = None
     entity_contexts: list[EntitySQLContext]
 
 

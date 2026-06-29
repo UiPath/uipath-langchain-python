@@ -10,6 +10,7 @@ from uipath_langchain.agent.tools.datafabric_tool.compiled_ontology import (
 from uipath_langchain.agent.tools.datafabric_tool.ontology_compiler import (
     OntologyCompileError,
     compile_ontology,
+    format_ontology_debug,
 )
 
 # A small refund-domain ontology in the .ttl dialect (subClassOf + actions +
@@ -140,6 +141,64 @@ class TestCompileRefundOntology:
         rels = compiled.entity_relationships["RefundRequest"]
         assert set(rels) == {"Order", "Customer"}
         assert compiled.entity_relationships["CustomerRisk"] == ["Customer"]
+
+    def test_known_entities_populated(self, compiled: CompiledOntology) -> None:
+        # Every entity carrying df:entityKey is known, readable or writable.
+        assert compiled.known_entities == {
+            "Customer",
+            "RefundRequest",
+            "Order",
+            "CustomerRisk",
+        }
+
+    def test_is_known(self, compiled: CompiledOntology) -> None:
+        assert compiled.is_known("Customer") is True
+        assert compiled.is_known("RefundRequest") is True
+        assert compiled.is_known("NotAnEntity") is False
+
+    def test_is_read_only_for_readable_entity(self, compiled: CompiledOntology) -> None:
+        # Customer is df:ReadableEntity -> known but not writable -> read-only.
+        assert compiled.is_read_only("Customer") is True
+        assert compiled.is_writable("Customer") is False
+
+    def test_is_read_only_false_for_writable_entity(
+        self, compiled: CompiledOntology
+    ) -> None:
+        assert compiled.is_read_only("RefundRequest") is False
+        assert compiled.is_writable("RefundRequest") is True
+        # An entity unknown to the ontology is not read-only (it's just unknown).
+        assert compiled.is_read_only("NotAnEntity") is False
+
+
+class TestHumanReadableAndDebug:
+    """to_human_readable / format_ontology_debug smoke tests."""
+
+    @pytest.fixture
+    def compiled(self) -> CompiledOntology:
+        return compile_ontology(REFUND_OWL)
+
+    def test_human_readable_contains_entities_and_modes(
+        self, compiled: CompiledOntology
+    ) -> None:
+        text = compiled.to_human_readable()
+        assert "Customer" in text
+        assert "RefundRequest" in text
+        assert "READ-ONLY" in text
+        assert "WRITABLE" in text
+        # A relationship line should be present.
+        assert "RefundRequest ->" in text
+
+    def test_format_ontology_debug_has_both_sections(
+        self, compiled: CompiledOntology
+    ) -> None:
+        block = format_ontology_debug(REFUND_OWL, compiled)
+        assert "=== RAW ONTOLOGY (OWL Turtle) ===" in block
+        assert "=== COMPILED ONTOLOGY (human-readable IR) ===" in block
+        # Raw OWL content is present.
+        assert "df:entityKey" in block
+        # Human-readable facts are present.
+        assert "READ-ONLY" in block
+        assert "WRITABLE" in block
 
 
 class TestRfcDialect:

@@ -297,7 +297,13 @@ def compile_ontology(owl_turtle: str) -> CompiledOntology:
             if obj_key not in targets:
                 targets.append(obj_key)
 
+    # Every entity carrying df:entityKey is "known" to the ontology — this
+    # makes df:ReadableEntity first-class: a read-only entity is known but not
+    # in entity_access (distinguishable from "unknown to the ontology").
+    known_entities = set(entity_key_by_uri.values())
+
     compiled = CompiledOntology(
+        known_entities=known_entities,
         entity_access=entity_access,
         measure_fields=measure_fields,
         state_fields=state_fields,
@@ -306,8 +312,9 @@ def compile_ontology(owl_turtle: str) -> CompiledOntology:
         entity_relationships=entity_relationships,
     )
     logger.debug(
-        "Compiled ontology: %d writable entities, %d measure, %d state, "
-        "%d reference fields, %d HITL entities",
+        "Compiled ontology: %d known entities, %d writable, %d measure, "
+        "%d state, %d reference fields, %d HITL entities",
+        len(compiled.known_entities),
         len(compiled.entity_access),
         len(compiled.measure_fields),
         len(compiled.state_fields),
@@ -315,3 +322,64 @@ def compile_ontology(owl_turtle: str) -> CompiledOntology:
         len(compiled.hitl_operations),
     )
     return compiled
+
+
+def format_ontology_debug(owl_turtle: str, compiled: CompiledOntology) -> str:
+    """Render a debug block with both the raw OWL and the compiled IR.
+
+    Returns a single string containing two clearly-headed sections: the raw
+    OWL Turtle source and the human-readable compiled IR. Useful for debug
+    logs and the ontology CLI scripts.
+
+    Args:
+        owl_turtle: The raw OWL Turtle source the ontology was compiled from.
+        compiled: The compiled ontology IR.
+
+    Returns:
+        A multi-section debug string.
+    """
+    return (
+        "=== RAW ONTOLOGY (OWL Turtle) ===\n"
+        f"{owl_turtle.strip()}\n"
+        "\n=== COMPILED ONTOLOGY (human-readable IR) ===\n"
+        f"{compiled.to_human_readable()}"
+    )
+
+
+async def maybe_fetch_and_compile_ontology(
+    entities_service: object,
+) -> CompiledOntology | None:
+    """Best-effort fetch + compile of the optional OWL ontology.
+
+    Shared by both the Data Fabric read and write handlers. Looks for
+    ``entities_service.get_ontology_file_async`` (which may only exist on a
+    feature branch), fetches the OWL file, compiles it, and emits a debug log
+    of the raw + compiled IR. Never raises: any absence/failure degrades to
+    ``None`` (the metadata-only path).
+
+    Args:
+        entities_service: The resolved EntitiesService instance.
+
+    Returns:
+        The compiled ontology, or ``None`` when no ontology is available or
+        the platform package does not expose the fetch method.
+    """
+    get_ontology = getattr(entities_service, "get_ontology_file_async", None)
+    if not callable(get_ontology):
+        logger.debug(
+            "EntitiesService has no get_ontology_file_async; "
+            "skipping ontology compilation (metadata-only)."
+        )
+        return None
+
+    try:
+        owl_turtle = await get_ontology("owl")
+        if not owl_turtle:
+            logger.debug("No OWL ontology returned; metadata-only.")
+            return None
+        compiled = compile_ontology(owl_turtle)
+        logger.debug(format_ontology_debug(owl_turtle, compiled))
+        return compiled
+    except Exception as exc:  # graceful no-op on any fetch/parse failure
+        logger.debug("Ontology fetch/compile skipped: %s", exc)
+        return None

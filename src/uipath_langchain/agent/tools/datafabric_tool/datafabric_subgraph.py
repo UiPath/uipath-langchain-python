@@ -33,6 +33,7 @@ from uipath.platform.entities import EntitiesService, Entity
 
 from ..datafabric_query_tool import DataFabricQueryTool
 from . import datafabric_prompt_builder
+from .compiled_ontology import CompiledOntology
 from .models import DataFabricExecuteSqlInput
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,7 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
+        compiled_ontology: CompiledOntology | None = None,
     ) -> None:
         self._max_iterations = max_iterations
         self._execute_sql_tool = self._create_execute_sql_tool(
@@ -95,7 +97,10 @@ class DataFabricGraph:
         )
         self._system_message = SystemMessage(
             content=datafabric_prompt_builder.build(
-                entities, resource_description, base_system_prompt
+                entities,
+                resource_description,
+                base_system_prompt,
+                compiled_ontology=compiled_ontology,
             )
         )
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
@@ -226,8 +231,14 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
+        compiled_ontology: CompiledOntology | None = None,
     ) -> CompiledStateGraph[Any]:
-        """Create and return a compiled Data Fabric sub-graph."""
+        """Create and return a compiled Data Fabric sub-graph.
+
+        When *compiled_ontology* is supplied it enriches the read prompt with
+        schema-linking context (relationships, FK targets, state-value sources,
+        access modes). It never restricts reads.
+        """
         graph = DataFabricGraph(
             llm,
             entities,
@@ -235,5 +246,6 @@ class DataFabricGraph:
             max_iterations,
             resource_description,
             base_system_prompt,
+            compiled_ontology=compiled_ontology,
         )
         return graph.compiled_graph

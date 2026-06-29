@@ -13,6 +13,7 @@ import logging
 
 from uipath.platform.entities import Entity
 
+from .compiled_ontology import CompiledOntology
 from .datafabric_prompts import SQL_CONSTRAINTS
 from .models import (
     EntitySchema,
@@ -149,11 +150,71 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
     return EntitySQLContext(entity_schema=schema, query_patterns=query_patterns)
 
 
+def format_ontology_context(compiled_ontology: CompiledOntology) -> str:
+    """Render read-side schema-linking enrichment from a compiled ontology.
+
+    This is informational context for the NL-to-SQL model (the P5 goal). It
+    surfaces per-entity access modes, entity relationships, reference/FK fields
+    (to guide join-path selection), and state fields (with their valid-value
+    source). It does NOT restrict reads.
+
+    Args:
+        compiled_ontology: The compiled OWL ontology IR.
+
+    Returns:
+        A markdown ``## Ontology Context`` section, or an empty string when the
+        ontology carries no facts.
+    """
+    if compiled_ontology is None or compiled_ontology.is_empty():
+        return ""
+
+    lines: list[str] = ["## Ontology Context", ""]
+    lines.append(
+        "Ontology-derived schema-linking hints (informational; does not "
+        "restrict what you may read):"
+    )
+    lines.append("")
+
+    # Per-entity access mode (purely informational for the read model).
+    if compiled_ontology.known_entities:
+        lines.append("**Entity access modes:**")
+        for ek in sorted(compiled_ontology.known_entities):
+            mode = "WRITABLE" if compiled_ontology.is_writable(ek) else "READ-ONLY"
+            lines.append(f"- {ek}: {mode}")
+        lines.append("")
+
+    # Entity relationships (entity -> related entities).
+    if compiled_ontology.entity_relationships:
+        lines.append("**Entity relationships (entity -> related entities):**")
+        for ek in sorted(compiled_ontology.entity_relationships):
+            targets = ", ".join(compiled_ontology.entity_relationships[ek])
+            lines.append(f"- {ek} -> {targets}")
+        lines.append("")
+
+    # Reference / FK fields (guide join-path selection).
+    if compiled_ontology.reference_fields:
+        lines.append("**Reference / foreign-key fields (field -> target entity):**")
+        for k in sorted(compiled_ontology.reference_fields):
+            lines.append(f"- {k} -> {compiled_ontology.reference_fields[k]}")
+        lines.append("")
+
+    # State fields and their valid-value source.
+    if compiled_ontology.state_fields:
+        lines.append("**State fields (field -> valid-value source):**")
+        for k in sorted(compiled_ontology.state_fields):
+            src = compiled_ontology.state_fields[k] or "(unspecified)"
+            lines.append(f"- {k} -> {src}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def build_sql_context(
     entities: list[Entity],
     resource_description: str = "",
     base_system_prompt: str = "",
     prompt_version: str | None = None,
+    compiled_ontology: CompiledOntology | None = None,
 ) -> SQLContext:
     """Build the full SQL context from entities, prompts, and constraints.
 
@@ -173,11 +234,18 @@ def build_sql_context(
     )
     rendered_prompt = version.render(ctx)
 
+    ontology_context = (
+        format_ontology_context(compiled_ontology)
+        if compiled_ontology is not None
+        else ""
+    )
+
     return SQLContext(
         base_system_prompt=base_system_prompt or None,
         resource_description=None,
         sql_expert_system_prompt=rendered_prompt,
         constraints=SQL_CONSTRAINTS,
+        ontology_context=ontology_context or None,
         entity_contexts=[build_entity_context(e) for e in entities],
     )
 
@@ -208,6 +276,10 @@ def format_sql_context(ctx: SQLContext) -> str:
         lines.append("## Entity set description")
         lines.append("")
         lines.append(ctx.resource_description)
+        lines.append("")
+
+    if ctx.ontology_context:
+        lines.append(ctx.ontology_context.rstrip())
         lines.append("")
 
     lines.append("## All available Data Fabric Entities")
@@ -245,6 +317,7 @@ def build(
     resource_description: str = "",
     base_system_prompt: str = "",
     prompt_version: str | None = None,
+    compiled_ontology: CompiledOntology | None = None,
 ) -> str:
     """Build the full SQL prompt text for the inner sub-graph LLM.
 
@@ -258,6 +331,10 @@ def build(
         base_system_prompt: Optional system prompt from the outer agent.
         prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
             Defaults to the registry's default.
+        compiled_ontology: Optional compiled OWL ontology. When present an
+            ``## Ontology Context`` section is appended with read-side
+            schema-linking enrichment (relationships, FK targets, state-value
+            sources, access modes). Purely informational — never restricts reads.
 
     Returns:
         Formatted prompt string for the inner LLM system message.
@@ -270,6 +347,7 @@ def build(
         resource_description,
         base_system_prompt,
         prompt_version=prompt_version,
+        compiled_ontology=compiled_ontology,
     )
     return format_sql_context(ctx)
 

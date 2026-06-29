@@ -583,6 +583,89 @@ class TestFederatedEntitiesNotWritable:
 
 
 # ---------------------------------------------------------------------------
+# 5b. Ontology prunes read-only entities from the write tool description
+# ---------------------------------------------------------------------------
+
+
+# Refund-set ontology: Customer is read-only (df:ReadableEntity); the rest are
+# writable (df:WritableEntity) with action-derived operations.
+_REFUND_PRUNE_OWL = """
+@prefix df:   <https://ontology.uipath.com/datafabric#> .
+@prefix ex:   <https://ontology.example.com/refund#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+ex:Customer a owl:Class ; rdfs:subClassOf df:ReadableEntity ; df:entityKey "Customer" .
+ex:RefundRequest a owl:Class ; rdfs:subClassOf df:WritableEntity ; df:entityKey "RefundRequest" .
+ex:Order a owl:Class ; rdfs:subClassOf df:WritableEntity ; df:entityKey "Order" .
+ex:Risk a owl:Class ; rdfs:subClassOf df:WritableEntity ; df:entityKey "Risk" .
+ex:Contact a owl:Class ; rdfs:subClassOf df:WritableEntity ; df:entityKey "Contact" .
+
+ex:CreateRefund a df:InsertAction ; df:writeOperation "insert" ; df:targetEntity ex:RefundRequest .
+ex:UpdateOrder a df:UpdateAction ; df:writeOperation "update" ; df:targetEntity ex:Order .
+ex:UpdateRisk a df:UpdateAction ; df:writeOperation "update" ; df:targetEntity ex:Risk .
+ex:UpdateContact a df:UpdateAction ; df:writeOperation "update" ; df:targetEntity ex:Contact .
+"""
+
+
+class TestOntologyPrunesReadOnlyFromWriteDescription:
+    """The write tool description must not advertise read-only entities."""
+
+    @pytest.fixture
+    def refund_entities(self) -> list[MagicMock]:
+        """All five entities resolve as native/writable from metadata alone.
+
+        Customer is metadata-writable but the ontology marks it read-only, so
+        it must be pruned from the write schemas/description.
+        """
+        return [
+            _make_entity("Customer", [_make_field("Name", is_required=True)]),
+            _make_entity("RefundRequest", [_make_field("Amount", is_required=True)]),
+            _make_entity("Order", [_make_field("Status")]),
+            _make_entity("Risk", [_make_field("Score", sql_type_name="int")]),
+            _make_entity("Contact", [_make_field("Resolution")]),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_read_only_customer_pruned_from_write_schemas(
+        self, refund_entities: list[MagicMock]
+    ) -> None:
+        resolution = _make_resolution(refund_entities)
+        # Inject the ontology via the fetch hook the handler looks for.
+        resolution.entities_service.get_ontology_file_async = AsyncMock(
+            return_value=_REFUND_PRUNE_OWL
+        )
+
+        with patch("uipath.platform.UiPath") as mock_uipath_cls:
+            mock_sdk = MagicMock()
+            mock_sdk.entities.resolve_entity_set_async = AsyncMock(
+                return_value=resolution
+            )
+            mock_uipath_cls.return_value = mock_sdk
+
+            entity_items = [
+                {"id": n, "name": n, "folderId": "f1"}
+                for n in ["Customer", "RefundRequest", "Order", "Risk", "Contact"]
+            ]
+            resource = _make_context_resource(entity_items=entity_items)
+            tools = create_datafabric_tools(resource, _mock_llm())
+            write_handler = tools[1].coroutine
+
+            await write_handler._ensure_initialized()
+
+            schemas = write_handler._write_schemas
+            assert "Customer" not in schemas  # read-only -> pruned
+            assert set(schemas.keys()) == {"RefundRequest", "Order", "Risk", "Contact"}
+
+            description = write_handler._write_tool_description
+            assert "Customer" not in description
+            assert "RefundRequest" in description
+            assert "Order" in description
+            assert "Risk" in description
+            assert "Contact" in description
+
+
+# ---------------------------------------------------------------------------
 # 6. Read tool is unchanged (renumbered from 5)
 # ---------------------------------------------------------------------------
 

@@ -32,6 +32,11 @@ class CompiledOntology(BaseModel):
     valid (if sparse) ``CompiledOntology`` rather than raising.
     """
 
+    known_entities: set[str] = Field(default_factory=set)
+    """Every entity_key the ontology declares (has ``df:entityKey``), readable
+    or writable. A read-only ``df:ReadableEntity`` is "known but not in
+    ``entity_access``"; an entity absent here is unknown to the ontology."""
+
     entity_access: dict[str, set[str]] = Field(default_factory=dict)
     """entity_key -> set of allowed operations, e.g. ``{"insert", "update"}``."""
 
@@ -53,10 +58,87 @@ class CompiledOntology(BaseModel):
     def is_empty(self) -> bool:
         """True if no ontology facts were extracted (graceful-fallback signal)."""
         return not (
-            self.entity_access
+            self.known_entities
+            or self.entity_access
             or self.measure_fields
             or self.state_fields
             or self.reference_fields
             or self.hitl_operations
             or self.entity_relationships
         )
+
+    def is_known(self, entity_key: str) -> bool:
+        """True if the ontology declares this entity (readable or writable)."""
+        return entity_key in self.known_entities
+
+    def is_writable(self, entity_key: str) -> bool:
+        """True if the ontology grants any write access to this entity."""
+        return entity_key in self.entity_access
+
+    def is_read_only(self, entity_key: str) -> bool:
+        """True if the entity is declared by the ontology but grants no writes.
+
+        A ``df:ReadableEntity`` is "known but not in ``entity_access``".
+        """
+        return (
+            entity_key in self.known_entities and entity_key not in self.entity_access
+        )
+
+    def to_human_readable(self) -> str:
+        """Render a compact, grouped, human-readable summary of the IR.
+
+        Sections: entity access modes (with HITL ops), field semantics
+        (measure / state / reference), and entity relationships. Intended
+        for debug logs and the ontology CLI scripts.
+        """
+        lines: list[str] = []
+
+        # -- Entities (access mode + HITL) --
+        lines.append("Entities:")
+        if self.known_entities:
+            for ek in sorted(self.known_entities):
+                ops = self.entity_access.get(ek)
+                if ops is not None:
+                    mode = (
+                        f"WRITABLE [{','.join(sorted(ops))}]"
+                        if ops
+                        else "WRITABLE [no ops declared]"
+                    )
+                else:
+                    mode = "READ-ONLY"
+                line = f"  - {ek}: {mode}"
+                hitl = self.hitl_operations.get(ek)
+                if hitl:
+                    line += f" (HITL: {','.join(sorted(hitl))})"
+                lines.append(line)
+        else:
+            lines.append("  (none)")
+
+        # -- Field semantics --
+        lines.append("Field semantics:")
+        if self.measure_fields:
+            lines.append("  Measure fields (additive / replacement):")
+            for k in sorted(self.measure_fields):
+                lines.append(f"    - {k}: {self.measure_fields[k]}")
+        if self.state_fields:
+            lines.append("  State fields (choiceset / state-machine):")
+            for k in sorted(self.state_fields):
+                src = self.state_fields[k] or "(unspecified)"
+                lines.append(f"    - {k}: {src}")
+        if self.reference_fields:
+            lines.append("  Reference fields (-> target entity):")
+            for k in sorted(self.reference_fields):
+                lines.append(f"    - {k} -> {self.reference_fields[k]}")
+        if not (self.measure_fields or self.state_fields or self.reference_fields):
+            lines.append("  (none)")
+
+        # -- Relationships --
+        lines.append("Relationships:")
+        if self.entity_relationships:
+            for ek in sorted(self.entity_relationships):
+                targets = ", ".join(self.entity_relationships[ek])
+                lines.append(f"  - {ek} -> {targets}")
+        else:
+            lines.append("  (none)")
+
+        return "\n".join(lines)

@@ -517,3 +517,37 @@ class TestValidateMutationIntentWithOntology:
         )
         errors = validate_mutation_intent(intent, self._schema(), ontology)
         assert errors == []
+
+    def test_ontology_read_only_entity_rejected(self) -> None:
+        """Entity known to the ontology but with no write ops -> read-only reject."""
+        # Orders is declared (known) but not in entity_access -> read-only.
+        ontology = CompiledOntology(
+            known_entities={"Orders", "RefundRequest"},
+            entity_access={"RefundRequest": {"insert"}},
+        )
+        intent = DataFabricWriteInput(
+            entity_key="Orders",
+            operation=EntityWriteOperation.update,
+            record_id="rec-1",
+            fields={"Amount": 10},
+        )
+        errors = validate_mutation_intent(intent, self._schema(), ontology)
+        assert len(errors) == 1
+        assert "read-only" in errors[0]
+
+    def test_ontology_unknown_entity_falls_back_to_metadata(self) -> None:
+        """Entity unknown to the ontology (not in known_entities) is NOT rejected
+        on a read-only basis — it falls back to metadata validation."""
+        # Orders is neither in known_entities nor entity_access -> unknown.
+        ontology = CompiledOntology(
+            known_entities={"RefundRequest"},
+            entity_access={"RefundRequest": {"insert"}},
+        )
+        intent = DataFabricWriteInput(
+            entity_key="Orders",
+            operation=EntityWriteOperation.insert,
+            fields={"OrderName": "Test", "Amount": 50},
+        )
+        errors = validate_mutation_intent(intent, self._schema(), ontology)
+        # Passes metadata validation (no read-only rejection applied).
+        assert errors == []
