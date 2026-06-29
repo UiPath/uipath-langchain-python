@@ -115,10 +115,15 @@ def create_ontology_fetch_tool(
     return BaseUiPathStructuredTool(
         name=tool_name,
         description=(
-            f"Fetch the OWL 2 QL ontologies (the authoritative semantic schema) "
-            f"for: {names}. Call this BEFORE writing SQL: it gives the exact "
-            "class and property names, value formats, and relationships so your "
-            "SQL uses the real schema instead of guesses. Takes no arguments."
+            f"REQUIRED FIRST STEP — call this once before any execute_sql call. "
+            f"Fetches the authoritative OWL 2 QL ontology (the semantic schema) "
+            f"for: {names}. It gives the exact column names, value formats (date "
+            "formats, codes, zero-padding), allowed values, and the relationships "
+            "between entities. The entity field list in the system prompt is NOT "
+            "enough on its own — it omits these value formats and semantics, which "
+            "decide whether your WHERE/JOIN clauses match real data. Skipping this "
+            "leads to SQL that runs but returns wrong rows. The result is cached, "
+            "so calling it costs nothing after the first time. Takes no arguments."
         ),
         args_schema=OntologyFetchInput,
         coroutine=OntologyFetcher(entities_service, ontologies),

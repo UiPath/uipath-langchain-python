@@ -29,6 +29,7 @@ from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
+from uipath.core.feature_flags import FeatureFlags
 from uipath.platform.entities import EntitiesService, Entity
 
 from ..datafabric_query_tool import DataFabricQueryTool
@@ -37,6 +38,11 @@ from .models import DataFabricExecuteSqlInput
 from .ontology_fetch_tool import create_ontology_fetch_tool
 
 logger = logging.getLogger(__name__)
+
+# Feature flag gating the Data Fabric ontology grounding feature. Defaults off:
+# when disabled, the inner graph is constructed without the fetch_ontology tool
+# (the original entities-only graph), so the feature stays out of the default path.
+_DATAFABRIC_ONTOLOGY_FF = "DataFabricOntologyEnabled"
 
 
 class DataFabricSubgraphState(BaseModel):
@@ -96,18 +102,29 @@ class DataFabricGraph:
             entities_service, entities
         )
         # Inner toolset: always execute_sql; optionally an LLM-decided
-        # fetch_ontology tool when one or more ontologies are configured.
+        # fetch_ontology tool, added only when ontologies are configured AND the
+        # DataFabricOntologyEnabled feature flag is on. The flag decides which
+        # graph gets built — off → the original entities-only graph.
         inner_tools: list[BaseTool] = [self._execute_sql_tool]
-        if ontologies:
+        ontology_names: list[str] = []
+        if ontologies and FeatureFlags.is_flag_enabled(
+            _DATAFABRIC_ONTOLOGY_FF, default=False
+        ):
             inner_tools.append(
                 create_ontology_fetch_tool(entities_service, ontologies)
             )
+            ontology_names = [name for name, _ in ontologies]
         self._tools_by_name: dict[str, BaseTool] = {
             tool.name: tool for tool in inner_tools
         }
+        # Surface the ontology in the system prompt only when its fetch tool is
+        # actually bound — otherwise the LLM is told to call a tool it lacks.
         self._system_message = SystemMessage(
             content=datafabric_prompt_builder.build(
-                entities, resource_description, base_system_prompt
+                entities,
+                resource_description,
+                base_system_prompt,
+                ontology_names=ontology_names,
             )
         )
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(

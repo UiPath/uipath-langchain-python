@@ -8,12 +8,23 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage
+from uipath.core.feature_flags import FeatureFlags
 
 from uipath_langchain.agent.tools.datafabric_tool import datafabric_prompt_builder
 from uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph import (
+    _DATAFABRIC_ONTOLOGY_FF,
     DataFabricGraph,
     DataFabricSubgraphState,
 )
+
+
+@pytest.fixture(autouse=True)
+def _ontology_flag_on():
+    """The ontology feature is behind a flag (default off). These are the
+    feature's own tests, so enable it for them and reset the registry after."""
+    FeatureFlags.configure_flags({_DATAFABRIC_ONTOLOGY_FF: True})
+    yield
+    FeatureFlags.reset_flags()
 
 
 @pytest.fixture
@@ -53,6 +64,15 @@ def test_fetch_ontology_bound_only_when_ontologies(make_graph):
 
     with_onto = make_graph([("library", None)])
     assert "fetch_ontology" in with_onto._tools_by_name
+
+
+def test_fetch_ontology_not_bound_when_flag_off(make_graph):
+    # The feature flag decides which graph is built: even with ontologies
+    # configured, flag off → the original entities-only graph (no fetch_ontology).
+    FeatureFlags.configure_flags({_DATAFABRIC_ONTOLOGY_FF: False})
+    graph = make_graph([("library", None)])
+    assert "execute_sql" in graph._tools_by_name
+    assert "fetch_ontology" not in graph._tools_by_name
 
 
 async def test_execute_tool_call_unknown_tool(make_graph):

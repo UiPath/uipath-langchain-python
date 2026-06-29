@@ -133,14 +133,42 @@ def build_sql_context(
     )
 
 
-def format_sql_context(ctx: SQLContext) -> str:
-    """Format a SQLContext as text for system prompt injection."""
+def format_sql_context(ctx: SQLContext, ontology_names: list[str] | None = None) -> str:
+    """Format a SQLContext as text for system prompt injection.
+
+    Args:
+        ctx: The built SQL context (entities, prompts, constraints).
+        ontology_names: Names of the ontologies attached to this agent. When
+            non-empty, an "Available Ontology" section is added telling the LLM
+            to call ``fetch_ontology`` before writing SQL — mirroring how the
+            entity set is surfaced below.
+    """
     lines: list[str] = []
 
     if ctx.base_system_prompt:
         lines.append("## Agent Instructions")
         lines.append("")
         lines.append(ctx.base_system_prompt)
+        lines.append("")
+
+    if ontology_names:
+        names = ", ".join(f"`{n}`" for n in ontology_names)
+        lines.append("## Available Ontology (authoritative semantic schema)")
+        lines.append("")
+        lines.append(
+            f"This agent has a semantic ontology attached for these entities: "
+            f"{names}. It is the authoritative source for the exact column names, "
+            "value formats (date formats, codes, zero-padding), allowed values, "
+            "and the relationships between entities — richer and more reliable "
+            "than the field list below, which omits value formats and semantics."
+        )
+        lines.append("")
+        lines.append(
+            "**Before writing any SQL, call the `fetch_ontology` tool once** to "
+            "load it, then base your column names, filter values, and joins on "
+            "what it says. The entity tables below are a quick reference only; "
+            "the ontology is the source of truth when they disagree."
+        )
         lines.append("")
 
     if ctx.sql_expert_system_prompt:
@@ -196,6 +224,7 @@ def build(
     resource_description: str = "",
     base_system_prompt: str = "",
     prompt_version: str | None = None,
+    ontology_names: list[str] | None = None,
 ) -> str:
     """Build the full SQL prompt text for the inner sub-graph LLM.
 
@@ -209,6 +238,10 @@ def build(
         base_system_prompt: Optional system prompt from the outer agent.
         prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
             Defaults to the registry's default.
+        ontology_names: Names of ontologies attached to this agent. When
+            non-empty, an "Available Ontology" section instructs the LLM to call
+            ``fetch_ontology`` before writing SQL. Pass these only when the
+            fetch_ontology tool is actually bound.
 
     Returns:
         Formatted prompt string for the inner LLM system message.
@@ -222,4 +255,4 @@ def build(
         base_system_prompt,
         prompt_version=prompt_version,
     )
-    return format_sql_context(ctx)
+    return format_sql_context(ctx, ontology_names=ontology_names)
