@@ -532,3 +532,40 @@ class TestBuildOrderIndependence:
 
         attachments = get_job_attachments(first, self._data())
         assert [str(att.id) for att in attachments] == [self._ATTACHMENT_ID]
+
+
+# -- coerce_json_strings: list[str] items are protected by the schema ----------
+
+
+class TestCoerceListOfStrProtected:
+    """The elements of a list[str] field are str-typed per the schema and must be
+    left untouched, exactly as a scalar str field is — even when an element looks
+    like JSON or a Python repr."""
+
+    def test_list_str_items_not_coerced(self) -> None:
+        class Schema(BaseModel):
+            tags: list[str]
+
+        data = {"tags": ['{"not": "a dict"}', "hello", "[1, 2]"]}
+        assert coerce_json_strings(data, Schema) == {
+            "tags": ['{"not": "a dict"}', "hello", "[1, 2]"]
+        }
+
+    def test_optional_list_str_items_not_coerced(self) -> None:
+        class Schema(BaseModel):
+            tags: Optional[list[str]] = None
+
+        data = {"tags": ["{'a': 1}"]}
+        assert coerce_json_strings(data, Schema) == {"tags": ["{'a': 1}"]}
+
+    def test_list_model_items_still_coerced(self) -> None:
+        """Regression guard: model-typed list items must still be coerced."""
+
+        class Item(BaseModel):
+            data: dict[str, Any] | None = None
+
+        class Schema(BaseModel):
+            items: list[Item]
+
+        data = {"items": [{"data": '{"size": 1}'}]}
+        assert coerce_json_strings(data, Schema) == {"items": [{"data": {"size": 1}}]}
