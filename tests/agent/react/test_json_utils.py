@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, RootModel
 
@@ -532,3 +532,87 @@ class TestBuildOrderIndependence:
 
         attachments = get_job_attachments(first, self._data())
         assert [str(att.id) for att in attachments] == [self._ATTACHMENT_ID]
+
+
+# -- get_json_paths_by_type: multi-branch unions (anyOf / oneOf) ---------------
+
+
+class _Other(BaseModel):
+    note: str
+
+
+class _HasTarget(BaseModel):
+    t: Target
+
+
+class TestGetJsonPathsByTypeUnions:
+    """A field can reference the target type via ANY member of a multi-branch
+    union (a JSON-schema anyOf/oneOf), not only the first. Every member must be
+    searched — collapsing to the first non-None member silently drops the path
+    and, downstream, the value (e.g. a job attachment)."""
+
+    def test_target_in_second_union_branch(self) -> None:
+        class Model(BaseModel):
+            field: Union[_Other, Target]
+
+        assert get_json_paths_by_type(Model, "Target") == ["$.field"]
+
+    def test_target_in_optional_union(self) -> None:
+        class Model(BaseModel):
+            field: Optional[Union[_Other, Target]] = None
+
+        assert get_json_paths_by_type(Model, "Target") == ["$.field"]
+
+    def test_pep604_three_member_union(self) -> None:
+        class Model(BaseModel):
+            field: "str | Target | None" = None
+
+        assert get_json_paths_by_type(Model, "Target") == ["$.field"]
+
+    def test_list_of_union(self) -> None:
+        """The list-inner type is itself a union — both layers must be opened."""
+
+        class Model(BaseModel):
+            items: list[Union[_Other, Target]]
+
+        assert get_json_paths_by_type(Model, "Target") == ["$.items[*]"]
+
+    def test_union_member_is_a_container(self) -> None:
+        class Model(BaseModel):
+            field: Union[_Other, _HasTarget, None]
+
+        assert get_json_paths_by_type(Model, "Target") == ["$.field.t"]
+
+    def test_multiple_branches_reference_target(self) -> None:
+        class Model(BaseModel):
+            field: Union[Target, _HasTarget]
+
+        assert get_json_paths_by_type(Model, "Target") == ["$.field", "$.field.t"]
+
+    def test_target_in_first_branch_still_works(self) -> None:
+        class Model(BaseModel):
+            field: Union[Target, _Other]
+
+        assert get_json_paths_by_type(Model, "Target") == ["$.field"]
+
+    def test_anyof_ref_in_second_branch_dynamic(self) -> None:
+        """JSON-schema anyOf with the attachment $ref in a non-first branch."""
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "thing": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"$ref": "#/definitions/job-attachment"},
+                    ]
+                }
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {"ID": {"type": "string"}},
+                }
+            },
+        }
+        model = create_model(schema)
+        assert get_json_paths_by_type(model, "__Job_attachment") == ["$.thing"]
