@@ -6,9 +6,11 @@ from typing import Any, Sequence
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages import BaseMessage, HumanMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from uipath.platform.attachments import Attachment
+from uipath.runtime.errors import UiPathErrorCategory
 
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .json_utils import extract_values_by_paths, get_json_paths_by_type
 
 
@@ -23,18 +25,66 @@ def get_job_attachments(
         data: The data object (dict or Pydantic model) to extract attachments from
 
     Returns:
-        List of Attachment objects
+        List of Attachment objects.
+
+    Raises:
+        AgentRuntimeError: If a tool-output attachment fails validation (e.g. its
+            ID is not a valid UUID). This is unrecoverable invalid data and is
+            surfaced as a SYSTEM failure rather than silently skipped.
     """
     job_attachment_paths = get_job_attachment_paths(schema)
     job_attachments = extract_values_by_paths(data, job_attachment_paths)
 
-    result = [
-        Attachment.model_validate(att, from_attributes=True)
-        for att in job_attachments
-        if att
-    ]
+    result = []
+    for att in job_attachments:
+        if not att:
+            continue
+        attachment_id = (
+            att.get("ID") if isinstance(att, dict) else getattr(att, "ID", None)
+        )
+        try:
+            uuid.UUID(str(attachment_id))
+        except (ValueError, TypeError) as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID,
+                title="Invalid attachment id",
+                detail=(
+                    f"A tool returned a job attachment with id {attachment_id!r}, "
+                    f"which is not a valid UUID. The agent cannot proceed with an "
+                    f"invalid attachment."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            ) from e
+        try:
+            result.append(Attachment.model_validate(att, from_attributes=True))
+        except ValidationError as e:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.INVALID_ATTACHMENT,
+                title="Invalid job attachment",
+                detail=(
+                    f"A tool returned a job attachment (id {attachment_id!r}) that "
+                    f"does not match the expected shape — {_describe_validation_errors(e)}. "
+                    f"Verify the tool's output provides valid attachment fields; the "
+                    f"agent cannot proceed with an invalid attachment."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            ) from e
 
     return result
+
+
+def _describe_validation_errors(exc: ValidationError) -> str:
+    """Render a pydantic ValidationError as a short, human-readable field list.
+
+    Reports each failing field path and reason (e.g. ``'MimeType': Field required``)
+    without echoing the offending input values, so the message is actionable and
+    safe to surface.
+    """
+    issues = []
+    for err in exc.errors():
+        field = ".".join(str(part) for part in err.get("loc", ())) or "attachment"
+        issues.append(f"'{field}': {err.get('msg', 'invalid value')}")
+    return "; ".join(issues)
 
 
 def get_job_attachment_paths(model: type[BaseModel]) -> list[str]:

@@ -1,11 +1,17 @@
 import uuid
 from typing import Any
 
+import pytest
 from jsonschema_pydantic_converter import transform_with_modules
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel
 from uipath.platform.attachments import Attachment
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import (
+    AgentRuntimeError,
+    AgentRuntimeErrorCode,
+)
 from uipath_langchain.agent.react.job_attachments import (
     get_job_attachments,
     parse_attachments_from_conversation_messages,
@@ -445,6 +451,87 @@ class TestGetJobAttachments:
         assert len(result) == 3
         ids = {str(att.id) for att in result}
         assert ids == {uuid1, uuid2, uuid3}
+
+    def test_raises_system_error_on_non_uuid_attachment_id(self):
+        """A tool-output attachment with a non-UUID ID must fail loud as SYSTEM."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/job-attachment"},
+                }
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "FullName": {"type": "string"},
+                        "MimeType": {"type": "string"},
+                    },
+                    "required": ["ID"],
+                }
+            },
+        }
+        model = create_model(schema)
+        data = {
+            "attachments": [
+                {"ID": "att_x", "FullName": "bad.pdf", "MimeType": "application/pdf"},
+            ]
+        }
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            get_job_attachments(model, data)
+
+        error_info = exc_info.value.error_info
+        assert error_info.category == UiPathErrorCategory.SYSTEM
+        assert error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID
+        )
+        assert "att_x" in error_info.detail
+
+    def test_raises_system_error_with_field_on_invalid_attachment_shape(self):
+        """A valid-UUID attachment missing a required field fails loud as SYSTEM,
+        naming the offending field in a human-readable message."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/job-attachment"},
+                }
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "FullName": {"type": "string"},
+                        "MimeType": {"type": "string"},
+                    },
+                    "required": ["ID"],
+                }
+            },
+        }
+        model = create_model(schema)
+        valid_uuid = "550e8400-e29b-41d4-a716-446655440400"
+        data = {
+            "attachments": [
+                {"ID": valid_uuid, "FullName": "doc.pdf"},  # MimeType missing
+            ]
+        }
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            get_job_attachments(model, data)
+
+        error_info = exc_info.value.error_info
+        assert error_info.category == UiPathErrorCategory.SYSTEM
+        assert error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.INVALID_ATTACHMENT
+        )
+        assert "MimeType" in error_info.detail or "mime_type" in error_info.detail
+        assert valid_uuid in error_info.detail
 
     def test_filters_out_none_attachments_in_array(self):
         """Should filter out None items from attachment arrays."""
