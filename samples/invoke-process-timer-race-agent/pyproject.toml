@@ -1,7 +1,7 @@
 [project]
-name = "invoke-process-timeout-agent"
+name = "invoke-process-timer-race-agent"
 version = "0.0.1"
-description = "LangGraph sample showing InvokeProcess timeout handling"
+description = "LangGraph sample showing InvokeProcess and WaitUntil timer racing"
 authors = [{ name = "John Doe", email = "john.doe@myemail.com" }]
 requires-python = ">=3.11"
 dependencies = [

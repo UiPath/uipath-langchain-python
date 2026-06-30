@@ -18,8 +18,8 @@ This sample demonstrates a FastAPI server for managing human-in-the-loop workflo
 ## [Wait until agent](wait-until-agent)
 This sample demonstrates a LangGraph agent that suspends with `WaitUntil` and resumes when Orchestrator fires a timer resume trigger.
 
-## [Invoke process timeout agent](invoke-process-timeout-agent)
-This sample demonstrates `InvokeProcess(..., timeout=...)` and handling timeout resume values with the timeout helpers.
+## [Invoke process timer race agent](invoke-process-timer-race-agent)
+This sample demonstrates racing an `InvokeProcess` interrupt with a `WaitUntil` timer interrupt.
 
 ## [Multi agent supervisor, researcher, coder](multi-agent-supervisor-researcher-coder)
 This sample showcases a multi-agent system, involving a supervisor, a researcher, and a coder working in coordination to tackle complex tasks.

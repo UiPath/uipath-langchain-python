@@ -494,27 +494,30 @@ This is intended for deployed jobs where Orchestrator owns the scheduler. In a l
 
 ---
 
-## Interrupt timeouts
+## Racing Multiple Resume Conditions
 
-Typed interrupt models can also be given a timeout. The SDK creates both the requested resume trigger and a timer resume trigger; whichever fires first resumes the agent. Timeout resume values use reserved UiPath metadata so they cannot collide with user payload fields.
+Pass a list of interrupt models to suspend on multiple resume conditions at once. The SDK creates sibling triggers for the same interrupt; whichever trigger fires first resumes the agent, and Orchestrator removes the remaining sibling triggers for that interrupt.
 
 ```python
+from datetime import datetime, timedelta, timezone
+
 from langgraph.types import interrupt
-from uipath.platform.common import InvokeProcess
-from uipath.platform.resume_triggers import assert_no_timeout, is_timeout
+from uipath.platform.common import InvokeProcess, WaitUntil
 
 result = interrupt(
-    InvokeProcess(
-        name="long-running-agent",
-        input_arguments={"message": "start"},
-        timeout=10,
-    )
+    [
+        InvokeProcess(
+            name="long-running-agent",
+            input_arguments={"message": "start"},
+        ),
+        WaitUntil(
+            resume_time=datetime.now(timezone.utc) + timedelta(minutes=10),
+        ),
+    ]
 )
 
-if is_timeout(result):
-    result = retry_or_fallback()
-
-result = assert_no_timeout(result)
+if isinstance(result, dict) and "resumeTime" in result:
+    raise TimeoutError("Process did not finish before the timer fired.")
 ```
 
 ---
