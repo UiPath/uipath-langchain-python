@@ -15,6 +15,12 @@ This sample shows how to automate Outlook inbox organization with AI-powered rul
 ## [HITL inbox server](hitl-inbox-server)
 This sample demonstrates a FastAPI server for managing human-in-the-loop workflows with job submissions and inbox message approvals.
 
+## [Wait until agent](wait-until-agent)
+This sample demonstrates a LangGraph agent that suspends with `WaitUntil` and resumes when Orchestrator fires a timer resume trigger.
+
+## [Invoke process timer race agent](invoke-process-timer-race-agent)
+This sample demonstrates racing an `InvokeProcess` interrupt with a `WaitUntil` timer interrupt.
+
 ## [Multi agent supervisor, researcher, coder](multi-agent-supervisor-researcher-coder)
 This sample showcases a multi-agent system, involving a supervisor, a researcher, and a coder working in coordination to tackle complex tasks.
 
