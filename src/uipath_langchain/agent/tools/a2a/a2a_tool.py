@@ -30,10 +30,13 @@ from a2a.types import (
 from langchain_core.messages import ToolCall, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.types import Command
+from opentelemetry import trace as otel_trace
 from pydantic import BaseModel, Field
 from uipath._utils._ssl_context import get_httpx_client_kwargs
 from uipath.agent.models.agent import AgentA2aResourceConfig
+from uipath.core.tracing.span_utils import UiPathSpanUtils
 
+from uipath_langchain._utils import get_execution_folder_path
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
@@ -65,8 +68,9 @@ class A2aClient:
     pool when done.
     """
 
-    def __init__(self, agent_card: AgentCard) -> None:
+    def __init__(self, agent_card: AgentCard, slug: str) -> None:
         self._agent_card = agent_card
+        self._slug = slug
         self._lock = asyncio.Lock()
         self._client: Client | None = None
         self._http_client: httpx.AsyncClient | None = None
@@ -80,6 +84,16 @@ class A2aClient:
                     from uipath.platform import UiPath
 
                     sdk = UiPath()
+                    folder_path = get_execution_folder_path()
+                    agent = await sdk.remote_a2a.retrieve_async(
+                        slug=self._slug, folder_path=folder_path
+                    )
+                    if not agent.a2a_url:
+                        raise ValueError(
+                            f"Remote A2A agent '{self._slug}' has no a2a_url configured"
+                        )
+                    self._agent_card.url = agent.a2a_url
+
                     client_kwargs = get_httpx_client_kwargs(
                         headers={"Authorization": f"Bearer {sdk._config.secret}"},
                     )
@@ -152,19 +166,16 @@ def _build_description(card: AgentCard) -> str:
                 skill_desc += f": {skill.description}"
             if skill_desc:
                 parts.append(f"Skill: {skill_desc}")
-    return " | ".join(parts) if parts else f"Remote A2A agent at {card.url}"
-
-
-def _resolve_a2a_url(config: AgentA2aResourceConfig) -> str:
-    """Resolve the A2A endpoint URL from the cached agent card."""
-    if config.cached_agent_card and "url" in config.cached_agent_card:
-        return config.cached_agent_card["url"]
-    raise ValueError(f"A2A resource '{config.name}' has no URL in cachedAgentCard")
+    if parts:
+        return " | ".join(parts)
+    # The card URL is resolved lazily at runtime, so it is empty or stale here;
+    # fall back to the agent name rather than exposing an internal/blank URL.
+    return f"Remote A2A agent: {card.name}" if card.name else "Remote A2A agent"
 
 
 async def _send_a2a_message(
     client: Client,
-    a2a_url: str,
+    agent_label: str,
     *,
     message: str,
     task_id: str | None,
@@ -177,10 +188,10 @@ async def _send_a2a_message(
     """
     if task_id or context_id:
         logger.info(
-            "A2A continue task=%s context=%s to %s", task_id, context_id, a2a_url
+            "A2A continue task=%s context=%s to %s", task_id, context_id, agent_label
         )
     else:
-        logger.info("A2A new message to %s", a2a_url)
+        logger.info("A2A new message to %s", agent_label)
 
     a2a_message = Message(
         role=Role.user,
@@ -218,7 +229,7 @@ async def _send_a2a_message(
         return (text or "No response received.", state, new_task_id, new_context_id)
 
     except Exception as e:
-        logger.exception("A2A request to %s failed", a2a_url)
+        logger.exception("A2A request to %s failed", agent_label)
         return (f"Error: {e}", "error", task_id, context_id)
 
 
@@ -234,7 +245,7 @@ def _create_a2a_tool(
     raw_name = agent_card.name or config.name
     tool_name = sanitize_tool_name(raw_name)
     tool_description = _build_description(agent_card)
-    a2a_url = _resolve_a2a_url(config)
+    agent_label = config.slug
 
     metadata = {
         "tool_type": "a2a",
@@ -242,10 +253,50 @@ def _create_a2a_tool(
         "slug": config.slug,
     }
 
+    async def _invoke(
+        *, message: str, task_id: str | None, context_id: str | None
+    ) -> tuple[str, str, str | None, str | None]:
+        """Send one message to the remote agent inside an A2A trace span.
+
+        The span is parented under the active tool-call span (via
+        ``UiPathSpanUtils.get_parent_context``) so the remote call nests under
+        the tool in the Execution Trace, and is marked
+        ``uipath.custom_instrumentation`` so the LLMOps exporter keeps it. The
+        a2a-sdk's own transport spans are disabled in this package's __init__,
+        so this is the single node representing the call.
+        """
+        parent_ctx = UiPathSpanUtils.get_parent_context()
+        tracer = otel_trace.get_tracer(__name__)
+        with tracer.start_as_current_span(raw_name, context=parent_ctx) as span:
+            # "openinference.span.kind" drives the SpanType shown in the UI;
+            # "toolCall" is the recognized type for a tool invocation.
+            span.set_attribute("openinference.span.kind", "toolCall")
+            span.set_attribute("type", "toolCall")
+            span.set_attribute("span_type", "toolCall")
+            span.set_attribute("uipath.custom_instrumentation", True)
+            span.set_attribute("tool_type", "a2a")
+            span.set_attribute("input", message)
+            span.set_attribute("input.value", message)
+
+            client = await a2a_client.get()
+            text, response_state, new_task_id, new_context_id = await _send_a2a_message(
+                client,
+                agent_label,
+                message=message,
+                task_id=task_id,
+                context_id=context_id,
+            )
+
+            span.set_attribute("output", text)
+            span.set_attribute("output.value", text)
+            span.set_attribute("task_state", response_state)
+            if response_state == "error":
+                span.set_status(otel_trace.StatusCode.ERROR, text)
+            return text, response_state, new_task_id, new_context_id
+
     async def _send(*, message: str) -> str:
-        client = await a2a_client.get()
-        text, state, _, _ = await _send_a2a_message(
-            client, a2a_url, message=message, task_id=None, context_id=None
+        text, state, _, _ = await _invoke(
+            message=message, task_id=None, context_id=None
         )
         return _format_response(text, state)
 
@@ -258,10 +309,7 @@ def _create_a2a_tool(
         task_id = prior.get("task_id")
         context_id = prior.get("context_id")
 
-        client = await a2a_client.get()
-        text, task_state, new_task_id, new_context_id = await _send_a2a_message(
-            client,
-            a2a_url,
+        text, task_state, new_task_id, new_context_id = await _invoke(
             message=call["args"]["message"],
             task_id=task_id,
             context_id=context_id,
@@ -341,7 +389,7 @@ def create_a2a_tools_and_clients(
                 default_output_modes=["text/plain"],
             )
 
-        a2a_client = A2aClient(agent_card)
+        a2a_client = A2aClient(agent_card, resource.slug)
         tool = _create_a2a_tool(resource, a2a_client, agent_card)
         tools.append(tool)
         clients.append(a2a_client)

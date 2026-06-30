@@ -573,9 +573,9 @@ async def _ingest_escalation_memory(
     trace_id: str,
     user_id: str | None = None,
     folder_path: str | None = None,
+    memory_space_name: str | None = None,
 ) -> None:
     """Persist a resolved escalation outcome into memory."""
-    set_span_attribute("fromMemory", False)
     normalized_user_id = _normalize_user_id(user_id)
     if user_id is not None and normalized_user_id is None:
         logger.info(
@@ -584,32 +584,77 @@ async def _ingest_escalation_memory(
         )
 
     try:
-        request = EscalationMemoryIngestRequest(
-            span_id=parent_span_id,
-            trace_id=trace_id,
-            answer=answer,
-            attributes=attributes,
-            user_id=normalized_user_id,
+        # Keep the OTel import local to match the lookup path and keep this
+        # module importable in runtimes where tracing is not installed.
+        from opentelemetry import trace as otel_trace
+
+        tracer = otel_trace.get_tracer("uipath_langchain.memory")
+    except ImportError:
+        tracer = None
+        otel_trace = None  # type: ignore[assignment]
+
+    # Span attribute keys match what the LlmOpsHttpExporter and Studio UI expect;
+    # "openinference.span.kind" sets the SpanType.
+    ingest_span_ctx = (
+        tracer.start_as_current_span(
+            "Save escalation memory",
+            attributes={
+                "openinference.span.kind": "agentMemoryWrite",
+                "type": "agentMemoryWrite",
+                "span_type": "agentMemoryWrite",
+                "uipath.custom_instrumentation": True,
+                "memorySpaceName": memory_space_name or "",
+                "memorySpaceId": memory_space_id,
+                "strategy": ESCALATION_MEMORY_STRATEGY,
+            },
         )
-        sdk = UiPath()
-        await sdk.memory.escalation_ingest_async(
-            memory_space_id=memory_space_id,
-            request=request,
-            folder_path=folder_path,
-        )
-        set_span_attribute("savedToMemory", True)
-        logger.info(
-            "Ingested escalation outcome into memory space '%s'", memory_space_id
-        )
-    except Exception as error:
-        set_span_attribute("savedToMemory", False)
-        set_current_span_error(error)
-        logger.warning(
-            "Failed to ingest escalation outcome into memory space '%s': %s",
-            memory_space_id,
-            error,
-            exc_info=True,
-        )
+        if tracer
+        else _noop_context()
+    )
+
+    with ingest_span_ctx as ingest_span:
+        if ingest_span and hasattr(ingest_span, "set_attribute"):
+            ingest_span.set_attribute("fromMemory", False)
+        try:
+            request = EscalationMemoryIngestRequest(
+                span_id=parent_span_id,
+                trace_id=trace_id,
+                answer=answer,
+                attributes=attributes,
+                user_id=normalized_user_id,
+            )
+            # Record what was saved as a JSON string; the exporter parses it
+            # back to an object and the Studio UI reads "request" to display
+            # the persisted memory item. Mirrors the lookup span's "request".
+            if ingest_span and hasattr(ingest_span, "set_attribute"):
+                ingest_span.set_attribute(
+                    "request",
+                    _json_dumps(request.model_dump(by_alias=True, exclude_none=True)),
+                )
+            sdk = UiPath()
+            await sdk.memory.escalation_ingest_async(
+                memory_space_id=memory_space_id,
+                request=request,
+                folder_path=folder_path,
+            )
+            if ingest_span and hasattr(ingest_span, "set_attribute"):
+                ingest_span.set_attribute("savedToMemory", True)
+            logger.info(
+                "Ingested escalation outcome into memory space '%s'", memory_space_id
+            )
+        except Exception as error:
+            if ingest_span and hasattr(ingest_span, "set_attribute"):
+                ingest_span.set_attribute("savedToMemory", False)
+            if otel_trace and ingest_span and hasattr(ingest_span, "set_status"):
+                ingest_span.set_status(otel_trace.StatusCode.ERROR, repr(error))
+            if ingest_span and hasattr(ingest_span, "record_exception"):
+                ingest_span.record_exception(error)
+            logger.warning(
+                "Failed to ingest escalation outcome into memory space '%s': %s",
+                memory_space_id,
+                error,
+                exc_info=True,
+            )
 
 
 def _build_search_fields(

@@ -1,53 +1,130 @@
 # Human In The Loop
 
 Guide for **Human-In-The-Loop** scenarios within the UiPath-Langchain integration.
-It focuses on the **interrupt(model)** functionality, illustrating its role as a symbolic representation of an agent's
-wait state within the LangGraph framework.
+It focuses on the **interrupt(model)** functionality, which is a symbolic representation of an agent's wait state within the LangGraph framework.
 
-## Models Overview
+Each model below ties the agent's wait state to a specific UiPath operation. You pass the model to `interrupt(...)`, the agent suspends, and it resumes once the operation completes. The models are grouped by the kind of operation they wait on.
 
-### 1. CreateTask
+/// info
+Every model is imported from `uipath.platform.common`, for example `from uipath.platform.common import CreateTask`.
+///
 
-The `CreateTask` model is utilized to create an escalation action within the UiPath Action Center as part of an interrupt context. The action will rely on a previously created UiPath app.
-After addressing the escalation, the current agent will resume execution.
-For more information on UiPath apps, refer to the [UiPath Apps User Guide](https://docs.uipath.com/apps/automation-cloud/latest/user-guide/introduction).
+---
 
-#### Attributes:
+## Action Center tasks
 
--   **app_name** (Optional[str]): The name of the app.
--   **app_folder_path** (Optional[str]): The folder path of the app.
--   **app_key** (Optional[str]): The key of the app.
--   **title** (str): The title of the action to create.
--   **data** (Optional[Dict[str, Any]]): Values that the action will be populated with.
--   **assignee** (Optional[str]): The username or email of the person assigned to handle the escalation.
--   **recipient** (Optional[TaskRecipient]): A structured recipient that assigns the action to a specific user (by email or id) or group (by name or id). Takes precedence over **assignee** when both are set. See [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group).
+These models drive human review through a UiPath app in Action Center. The agent suspends while a person handles the action, then resumes.
 
-#### Example:
+### CreateTask
+
+Creates an action in Action Center backed by a previously created UiPath app. After the action is addressed, the agent resumes. For more information on UiPath apps, refer to the [UiPath Apps User Guide](https://docs.uipath.com/apps/automation-cloud/latest/user-guide/introduction).
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `title` | `str` | The title of the action to create. |
+| `data` | `dict[str, Any] | None` | Values the action is populated with. |
+| `assignee` | `str | None` | Username or email of the person assigned to handle the action. |
+| `recipient` | `TaskRecipient | None` | Structured recipient targeting a user or group. Takes precedence over `assignee`. See [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group). |
+| `app_name` | `str | None` | The name of the app. |
+| `app_folder_path` | `str | None` | The folder path of the app. |
+| `app_folder_key` | `str | None` | The folder key of the app. |
+| `app_key` | `str | None` | The key of the app. |
+| `priority` | `str | None` | Priority of the action, for example `Low`, `Medium`, `High`, or `Critical`. |
+| `labels` | `list[str] | None` | Labels to attach to the action. |
+| `is_actionable_message_enabled` | `bool | None` | Whether actionable-message delivery is enabled for the action. |
+| `actionable_message_metadata` | `dict[str, Any] | None` | Metadata for the actionable message. |
+| `source_name` | `str` | The source that created the action. Defaults to `Agent`. |
 
 ```python
 from uipath.platform.common import CreateTask
 task_output = interrupt(CreateTask(app_name="AppName", app_folder_path="MyFolderPath", title="Escalate Issue", data={"key": "value"}, assignee="user@example.com"))
 ```
-/// info
-The return value of the interrupt is the task output — only the data fields written back by the app, not the full task object. If the task did not produce any output, the return value will be the task status, e.g., `{"status": "completed"}`.
 
-The human's decision (which Approve/Reject button was clicked, stored in `task.action`) is **not** included in the return value. To branch on the outcome, either add an explicit output field to the app schema (e.g. a boolean `IsApproved` wired to the buttons), or use [`CreateEscalation`](#3-createescalation) instead, which returns the full task object.
+/// info
+The return value of the interrupt is the task output, meaning only the data fields written back by the app, not the full task object. If the task did not produce any output, the return value is the task status, for example `{"status": "completed"}`.
+
+The human's decision (which Approve/Reject button was clicked, stored in `task.action`) is **not** included in the return value. To branch on the outcome, either add an explicit output field to the app schema (for example a boolean `IsApproved` wired to the buttons), or use [`CreateEscalation`](#createescalation) instead, which returns the full task object.
 ///
 
-For a practical implementation of the `CreateTask` model, refer to the [ticket-classification sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/ticket-classification). This sample demonstrates how to create an action with dynamic input.
+For a practical implementation, refer to the [ticket-classification sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/ticket-classification), which creates an action with dynamic input.
 
-#### Assigning the action to a user or group
+### WaitTask
 
-`CreateTask` and `CreateEscalation` — together with their wait counterparts [`WaitTask`](#2-waittask) and [`WaitEscalation`](#4-waitescalation) — support two ways to assign the action:
+Waits for a task that has already been created to be handled.
 
--   **assignee** (Optional[str]): The simple shortcut — a single username or email.
--   **recipient** (Optional[TaskRecipient]): A structured recipient that can target a **user** (by email or id) or a **group** (by name or id). When both are provided, **`recipient` takes precedence over `assignee`**.
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `action` | `Task` | The instance of the task to wait for. |
+| `app_folder_path` | `str | None` | The folder path of the app. |
+| `app_folder_key` | `str | None` | The folder key of the app. |
+| `app_name` | `str | None` | The name of the app. |
+| `recipient` | `TaskRecipient | None` | Optionally assign the task to a user or group while waiting. See [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group). |
+
+```python
+from uipath.platform.common import WaitTask
+task_output = interrupt(WaitTask(action=my_task_instance, app_folder_path="MyFolderPath"))
+```
+
+/// info
+Like `CreateTask`, the return value is the task output only. Use [`WaitEscalation`](#waitescalation) if you need the full task object back, including the selected action.
+///
+
+### CreateEscalation
+
+Creates an Action Center action the same way `CreateTask` does, but on resume the agent receives the **full `Task` object** instead of just `task.data`. Use this when the agent needs to branch on the human's decision (the button the reviewer clicked, stored in `task.action`) rather than only on the data fields written back by the app.
+
+Accepts the same attributes as [`CreateTask`](#createtask), including `assignee` and `recipient`.
+
+```python
+from uipath.platform.common import CreateEscalation
+
+task = interrupt(
+    CreateEscalation(
+        app_name="ApprovalApp",
+        app_folder_path="MyFolderPath",
+        title="Approve expense",
+        data={"amount": 1200},
+        assignee="reviewer@example.com",
+    )
+)
+
+if task.action == "Approve":
+    ...
+else:
+    ...
+```
+
+/// info
+The return value is the full `Task` object (including `task.action`, `task.data`, `task.status`, and so on). If the task is deleted while the agent is suspended, the task object is still returned rather than raising, so the agent can handle the deletion gracefully.
+///
+
+### WaitEscalation
+
+The escalation counterpart of [`WaitTask`](#waittask): wait on an already-created task and receive the full `Task` object on resume.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `action` | `Task` | The instance of the task to wait for. |
+| `app_folder_path` | `str | None` | The folder path of the app. |
+| `recipient` | `TaskRecipient | None` | Optionally assign the task to a user or group while waiting. See [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group). |
+
+```python
+from uipath.platform.common import WaitEscalation
+task = interrupt(WaitEscalation(action=my_task_instance, app_folder_path="MyFolderPath"))
+```
+
+### Assigning the action to a user or group
+
+`CreateTask` and `CreateEscalation`, together with their wait counterparts [`WaitTask`](#waittask) and [`WaitEscalation`](#waitescalation), support two ways to assign the action:
+
+- **assignee** (`str | None`): The simple shortcut, a single username or email.
+- **recipient** (`TaskRecipient | None`): A structured recipient that can target a **user** (by email or id) or a **group** (by name or id). When both are provided, `recipient` takes precedence over `assignee`.
 
 `TaskRecipient` is imported from `uipath.platform.action_center.tasks` and has the following fields:
 
--   **type** (TaskRecipientType): The kind of recipient (see the table below).
--   **value** (str): The identifier — an email, group name, user id, or group id, matching `type`.
--   **display_name** (Optional[str]): An optional human-readable name. For `USER_ID` and `GROUP_ID` recipients it is resolved automatically from the identity service.
+- **type** (`TaskRecipientType`): The kind of recipient (see the table below).
+- **value** (`str`): The identifier, an email, group name, user id, or group id, matching `type`.
+- **display_name** (`str | None`): An optional human-readable name. For `USER_ID` and `GROUP_ID` recipients it is resolved automatically from the identity service.
 
 | TaskRecipientType | Assigns to | `value` holds |
 | --- | --- | --- |
@@ -55,8 +132,6 @@ For a practical implementation of the `CreateTask` model, refer to the [ticket-c
 | `USER_ID` | a single user, by id | the user id |
 | `GROUP_NAME` | a group, by name | the group name |
 | `GROUP_ID` | a group, by id | the group id |
-
-#### Example:
 
 ```python
 from uipath.platform.common import CreateTask
@@ -85,99 +160,21 @@ task_output = interrupt(
 )
 ```
 
-The same `recipient` field is available on `CreateEscalation`, `WaitTask`, and `WaitEscalation`.
-
 ---
 
-### 2. WaitTask
+## Processes and jobs
 
-The `WaitTask` model is used to wait for a task to be handled. This model is intended for scenarios where the task has already been created.
+These models suspend the agent until another process or job finishes. This enables **Robot/Agent-in-the-loop** scenarios, where one agent's execution is suspended until another robot or agent completes.
 
-#### Attributes:
+### InvokeProcess
 
--   **task** (Task): The instance of the task to wait for.
--   **app_folder_path** (Optional[str]): The folder path of the app.
--   **recipient** (Optional[TaskRecipient]): Optionally assign the task to a user or group while waiting. See [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group).
+Invokes a process within the UiPath cloud platform. The process can be an API workflow, an Agent, or an RPA automation. When it completes, the agent resumes automatically.
 
-#### Example:
-
-```python
-from uipath.platform.common import WaitTask
-task_output = interrupt(WaitTask(task=my_task_instance, app_folder_path="MyFolderPath"))
-```
-/// info
-Like `CreateTask`, the return value is the task output only. Use [`WaitEscalation`](#4-waitescalation) if you need the full task object back, including the selected action.
-///
-
----
-
-### 3. CreateEscalation
-
-The `CreateEscalation` model creates an Action Center action the same way `CreateTask` does, but when the agent resumes it receives the **full `Task` object** instead of just `task.data`. Use this when the agent needs to branch on the human's decision (the button the reviewer clicked, stored in `task.action`) rather than only on the data fields written back by the app.
-
-Accepts the same attributes as [`CreateTask`](#1-createtask), including `assignee` and `recipient` (see [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group)).
-
-#### Example:
-
-```python
-from uipath.platform.common import CreateEscalation
-
-task = interrupt(
-    CreateEscalation(
-        app_name="ApprovalApp",
-        app_folder_path="MyFolderPath",
-        title="Approve expense",
-        data={"amount": 1200},
-        assignee="reviewer@example.com",
-    )
-)
-
-if task.action == "Approve":
-    ...
-else:
-    ...
-```
-/// info
-The return value is the full `Task` object (including `task.action`, `task.data`, `task.status`, etc.). If the task is deleted while the agent is suspended, the task object is still returned rather than raising, so the agent can handle the deletion gracefully.
-///
-
----
-
-### 4. WaitEscalation
-
-`WaitEscalation` is the escalation counterpart of [`WaitTask`](#2-waittask): wait on an already-created task and receive the full `Task` object on resume.
-
-#### Attributes:
-
--   **action** (Task): The instance of the task to wait for.
--   **app_folder_path** (Optional[str]): The folder path of the app.
--   **recipient** (Optional[TaskRecipient]): Optionally assign the task to a user or group while waiting. See [Assigning the action to a user or group](#assigning-the-action-to-a-user-or-group).
-
-#### Example:
-
-```python
-from uipath.platform.common import WaitEscalation
-task = interrupt(WaitEscalation(action=my_task_instance, app_folder_path="MyFolderPath"))
-```
-
----
-
-> 💡The UiPath-LangChain SDK also supports **Robot/Agent-in-the-loop** scenarios. In this context, the execution of one agent
-> can be suspended until another robot or agent finishes its execution.
-
-### 5. InvokeProcess
-
-The `InvokeProcess` model is utilized to invoke a process within the UiPath cloud platform.
-This process can be of various types, including API workflows, Agents or RPA automation.
-Upon completion of the invoked process, the current agent will automatically resume execution.
-
-#### Attributes:
-
--   **name** (str): The name of the process to invoke.
--   **process_folder_path** (Optional[str]): The folder path of the process.
--   **input_arguments** (Optional[Dict[str, Any]]): A dictionary containing the input arguments required for the invoked process.
-
-#### Example:
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `name` | `str` | The name of the process to invoke. |
+| `process_folder_path` | `str | None` | The folder path of the process. |
+| `input_arguments` | `dict[str, Any] | None` | Input arguments for the invoked process. |
 
 ```python
 from uipath.platform.common import InvokeProcess
@@ -185,28 +182,25 @@ process_output = interrupt(InvokeProcess(name="MyProcess", process_folder_path="
 ```
 
 /// info
-The return value of the interrupt is the job output. If the job did not produce any output, the return value will be the job state, e.g., `{"state": "successful"}`.
+The return value of the interrupt is the job output. If the job did not produce any output, the return value is the job state, for example `{"state": "successful"}`.
+
+**Raw variant:** `InvokeProcessRaw` accepts the same attributes but returns the raw `Job` object without validating its terminal state. Use it when you want to inspect the job state and handle non-successful jobs yourself instead of having the SDK extract the output or raise.
 ///
 
 /// warning
-An agent can invoke itself if needed, but this must be done with caution. Be mindful that using the same name for invocation may lead to unintentional loops. To prevent recursion issues, implement safeguards like exit conditions.
+An agent can invoke itself if needed, but this must be done with caution. Using the same name for invocation may lead to unintentional loops. To prevent recursion issues, implement safeguards like exit conditions.
 ///
 
-For a practical implementation of the `InvokeProcess` model, refer to the [multi-agent-planner-researcher-coder-distributed sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/multi-agent-planner-researcher-coder-distributed). This sample demonstrates how to invoke a process with dynamic input arguments, showcasing the integration of the interrupt functionality within a multi-agent system or a system where an agent integrates with RPA processes and API workflows.
+For a practical implementation, refer to the [multi-agent-planner-researcher-coder-distributed sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/multi-agent-planner-researcher-coder-distributed), which invokes a process with dynamic input arguments.
 
----
+### WaitJob
 
-### 6. WaitJob
+Waits for a job to complete. Unlike `InvokeProcess`, which creates the job, this model is for jobs that have already been created.
 
-The `WaitJob` model is used to wait for a job completion. Unlike `InvokeProcess`, which automatically creates a job, this model is intended for scenarios where
-the job has already been created.
-
-#### Attributes:
-
--   **job** (Job): The instance of the job that the agent will wait for. This should be a valid job object that has been previously created.
--   **process_folder_path** (Optional[str]): The folder path of the process.
-
-#### Example:
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `job` | `Job` | The instance of the job to wait for. |
+| `process_folder_path` | `str | None` | The folder path of the process. |
 
 ```python
 from uipath.platform.common import WaitJob
@@ -214,5 +208,283 @@ job_output = interrupt(WaitJob(job=my_job_instance, process_folder_path="MyFolde
 ```
 
 /// info
-The return value of the interrupt is the job output. If the job did not produce any output, the return value will be the job state, e.g., `{"state": "successful"}`.
+The return value of the interrupt is the job output. If the job did not produce any output, the return value is the job state, for example `{"state": "successful"}`.
+
+**Raw variant:** `WaitJobRaw` accepts the same attributes but returns the raw `Job` object without state validation.
+///
+
+---
+
+## Context Grounding (RAG)
+
+These models drive Context Grounding operations: Deep RAG queries, ephemeral indexes, and batch transforms. Each `Create*` model starts an asynchronous operation and suspends the agent; the matching `Wait*` model resumes once the operation completes. Where a `Raw` variant exists, it returns the underlying response without validating its final status, so the agent can inspect the status itself.
+
+### CreateDeepRag
+
+Starts a Deep RAG query against a Context Grounding index and suspends the agent until the query completes.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `name` | `str` | A name for the Deep RAG task. |
+| `prompt` | `str` | The query to run against the index. |
+| `index_name` | `str | None` | The name of the Context Grounding index to query. |
+| `index_id` | `str | None` | The id of the index. Required when `is_ephemeral_index` is `True`. |
+| `glob_pattern` | `str` | Glob filter for which documents to consider. Defaults to `**`. |
+| `citation_mode` | `CitationMode` | `Skip` (default) or `Inline`. |
+| `index_folder_key` | `str | None` | The folder key of the index. |
+| `index_folder_path` | `str | None` | The folder path of the index. |
+| `is_ephemeral_index` | `bool | None` | Set to `True` when querying an ephemeral index (then `index_id` is required). |
+
+```python
+from uipath.platform.common import CreateDeepRag
+result = interrupt(CreateDeepRag(name="research", index_name="MyIndex", prompt="Summarize the contract terms"))
+```
+
+/// info
+The return value is the validated Deep RAG response (the SDK checks the task reached a successful status).
+
+**Raw variant:** `CreateDeepRagRaw` returns the raw Deep RAG response without status validation.
+///
+
+### WaitDeepRag
+
+Waits for an already-created Deep RAG task to complete.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `deep_rag` | `DeepRagCreationResponse` | The Deep RAG creation response to wait on. |
+| `index_folder_path` | `str | None` | The folder path of the index. |
+| `index_folder_key` | `str | None` | The folder key of the index. |
+
+```python
+from uipath.platform.common import WaitDeepRag
+result = interrupt(WaitDeepRag(deep_rag=my_deep_rag_response, index_folder_path="MyFolderPath"))
+```
+
+/// info
+**Raw variant:** `WaitDeepRagRaw` returns the raw Deep RAG response without status validation.
+///
+
+### CreateEphemeralIndex
+
+Creates a short-lived Context Grounding index from attachments and suspends the agent until the index is ready. Ephemeral indexes are typically created on the fly to back a Deep RAG or Batch Transform operation.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `usage` | `EphemeralIndexUsage` | What the index will be used for: `DeepRAG` or `BatchRAG`. |
+| `attachments` | `List[str]` | The attachment ids to index. |
+
+```python
+from uipath.platform.common import CreateEphemeralIndex
+from uipath.platform.context_grounding import EphemeralIndexUsage
+index = interrupt(CreateEphemeralIndex(usage=EphemeralIndexUsage.DEEP_RAG, attachments=["attachment-id-1"]))
+```
+
+/// info
+The return value is the validated index.
+
+**Raw variant:** `CreateEphemeralIndexRaw` returns the raw ephemeral index response without status validation.
+///
+
+### WaitEphemeralIndex
+
+Waits for an already-created ephemeral index to become ready.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `index` | `ContextGroundingIndex` | The index instance to wait on. |
+
+```python
+from uipath.platform.common import WaitEphemeralIndex
+index = interrupt(WaitEphemeralIndex(index=my_index))
+```
+
+/// info
+**Raw variant:** `WaitEphemeralIndexRaw` returns the raw index response without status validation.
+///
+
+### CreateBatchTransform
+
+Starts a Batch Transform (batch RAG) job that applies a prompt across a set of documents and writes structured output columns to a destination, then suspends the agent until the job completes.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `name` | `str` | A name for the batch transform task. |
+| `prompt` | `str` | The prompt applied to each document. |
+| `output_columns` | `List[BatchTransformOutputColumn]` | The structured columns to extract (each with a `name` and `description`). |
+| `destination_path` | `str` | Where the transformed output is written. |
+| `index_name` | `str | None` | The name of the index to use. |
+| `index_id` | `str | None` | The id of the index. Required when `is_ephemeral_index` is `True`. |
+| `storage_bucket_folder_path_prefix` | `str | None` | Storage bucket folder prefix for source documents. |
+| `enable_web_search_grounding` | `bool` | Whether to ground answers with web search. Defaults to `False`. |
+| `index_folder_key` | `str | None` | The folder key of the index. |
+| `index_folder_path` | `str | None` | The folder path of the index. |
+| `is_ephemeral_index` | `bool | None` | Set to `True` when using an ephemeral index (then `index_id` is required). |
+
+```python
+from uipath.platform.common import CreateBatchTransform
+from uipath.platform.context_grounding import BatchTransformOutputColumn
+
+result = interrupt(
+    CreateBatchTransform(
+        name="extract-fields",
+        index_name="MyIndex",
+        prompt="Extract the vendor and total amount",
+        output_columns=[
+            BatchTransformOutputColumn(name="vendor", description="The vendor name"),
+            BatchTransformOutputColumn(name="total", description="The total amount"),
+        ],
+        destination_path="output/results",
+    )
+)
+```
+
+### WaitBatchTransform
+
+Waits for an already-created Batch Transform job to complete.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `batch_transform` | `BatchTransformCreationResponse` | The batch transform creation response to wait on. |
+| `index_folder_path` | `str | None` | The folder path of the index. |
+| `index_folder_key` | `str | None` | The folder key of the index. |
+
+```python
+from uipath.platform.common import WaitBatchTransform
+result = interrupt(WaitBatchTransform(batch_transform=my_batch_transform_response, index_folder_path="MyFolderPath"))
+```
+
+---
+
+## Document Understanding (IXP)
+
+These models extract structured data from documents and, optionally, route the result to a human for validation.
+
+### DocumentExtraction
+
+Starts an IXP extraction over a document and suspends the agent until extraction completes. Provide the document via **exactly one** of `file` or `file_path`.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `project_name` | `str` | The IXP project to run extraction with. |
+| `tag` | `str` | The project tag or version to use. |
+| `file` | `FileContent | None` | The in-memory file content to extract from. |
+| `file_path` | `str | None` | The path to the file to extract from. |
+
+```python
+from uipath.platform.common import DocumentExtraction
+extraction = interrupt(DocumentExtraction(project_name="Invoices", tag="production", file_path="invoice.pdf"))
+```
+
+/// warning
+Provide exactly one of `file` or `file_path`. Supplying both or neither raises a validation error.
+///
+
+### WaitDocumentExtraction
+
+Waits for an already-started document extraction to complete.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `extraction` | `StartExtractionResponse` | The extraction-start response to wait on. |
+
+```python
+from uipath.platform.common import WaitDocumentExtraction
+result = interrupt(WaitDocumentExtraction(extraction=my_extraction_response))
+```
+
+### DocumentExtractionValidation
+
+Routes an extraction result to a human for validation in Action Center, creating a document validation action and suspending the agent until it is handled.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `extraction_response` | `ExtractionResponseIXP` | The extraction result to validate. |
+| `action_title` | `str` | The title of the validation action. |
+| `action_catalog` | `str | None` | The action catalog to use. |
+| `action_priority` | `ActionPriority | None` | `Low`, `Medium`, `High`, or `Critical`. |
+| `action_folder` | `str | None` | The folder for the validation action. |
+| `storage_bucket_name` | `str | None` | The storage bucket used for the document. |
+| `storage_bucket_directory_path` | `str | None` | The directory path within the storage bucket. |
+
+```python
+from uipath.platform.common import DocumentExtractionValidation
+from uipath.platform.documents import ActionPriority
+
+result = interrupt(
+    DocumentExtractionValidation(
+        extraction_response=my_extraction_result,
+        action_title="Validate invoice extraction",
+        action_priority=ActionPriority.HIGH,
+    )
+)
+```
+
+### WaitDocumentExtractionValidation
+
+Waits for an already-created document validation action to be handled.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `extraction_validation` | `StartExtractionValidationResponse` | The validation-start response to wait on. |
+| `task_url` | `str | None` | The URL of the validation task. |
+
+```python
+from uipath.platform.common import WaitDocumentExtractionValidation
+result = interrupt(WaitDocumentExtractionValidation(extraction_validation=my_validation_response))
+```
+
+---
+
+## Integration Services events
+
+### WaitIntegrationEvent
+
+Suspends the agent until a remote event is delivered through Integration Services (for example a Slack message or a Teams reply). The SDK resolves `connection_name` (scoped to `connection_folder_path` when provided) to the underlying connection id and subscribes to the described event via the Connections service.
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `connector` | `str` | The connector to subscribe through (for example Slack, Teams). |
+| `connection_name` | `str` | The name of the connection to use. |
+| `connection_folder_path` | `str | None` | The folder path scoping the connection. |
+| `operation` | `str` | The event operation to subscribe to. |
+| `object_name` | `str` | The remote object the event relates to. |
+| `filter_expression` | `str | None` | An optional filter narrowing which events resume the agent. |
+| `parameters` | `dict[str, str] | None` | Additional parameters for the subscription. |
+
+```python
+from uipath.platform.common import WaitIntegrationEvent
+event = interrupt(
+    WaitIntegrationEvent(
+        connector="slack",
+        connection_name="MySlackConnection",
+        operation="new_message",
+        object_name="message",
+    )
+)
+```
+
+For a practical implementation, refer to the [email-triage-agent sample](https://github.com/UiPath/uipath-langchain-python/tree/main/samples/email-triage-agent).
+
+---
+
+## Resuming with a plain value (API trigger)
+
+All the models above are typed interrupts that tie the agent's wait state to a specific UiPath operation. When you call `interrupt(...)` with a value that is **not** one of those models, most commonly a plain string but any JSON-serializable value works, the SDK creates an **API resume trigger**. The agent suspends and waits to be resumed by an explicit external API call rather than by polling a UiPath operation.
+
+When the trigger is created the SDK generates a fresh `inbox_id` and stores the interrupted value as the trigger's request payload. The agent stays suspended until a caller posts a payload to the job's resume inbox, and that payload becomes the return value of the `interrupt(...)` call.
+
+This is the right approach for human-in-the-loop or system-to-system handoffs driven from outside the agent (a custom UI, a webhook, another service) instead of a UiPath task, job, or RAG operation.
+
+While the job is suspended, open its job details page in Orchestrator and expand **Resume conditions**. The **API** condition exposes the resume URL, which you can copy with the button next to it. Post your payload to that URL to resume the job. For the full request shape and authentication, see the [Orchestrator API triggers documentation](https://docs.uipath.com/orchestrator/automation-cloud/latest/user-guide/api-triggers).
+
+```python
+from langgraph.types import interrupt
+
+# Suspend with an arbitrary prompt or payload; the resume value is whatever the caller posts back.
+human_response = interrupt("Please review the draft and reply with your decision.")
+```
+
+/// info
+The interrupt value can be any JSON-serializable object (string, dict, and so on), and the resume value is the payload delivered to the trigger's inbox. There is no status validation, so the agent resumes with exactly what the external caller provides.
 ///

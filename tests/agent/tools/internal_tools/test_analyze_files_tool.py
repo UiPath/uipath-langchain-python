@@ -8,6 +8,7 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import RunnableConfig
+from langgraph.constants import TAG_NOSTREAM
 from pydantic import BaseModel, ConfigDict, Field
 from uipath.agent.models.agent import (
     AgentInternalAnalyzeFilesToolProperties,
@@ -26,6 +27,7 @@ from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
     LLM_CALL_ATTACHMENTS_METADATA_KEY,
     _config_with_llm_call_attachments,
+    _config_without_streaming,
     _is_pii_scope_for_files,
     _resolve_job_attachment_arguments,
     create_analyze_file_tool,
@@ -1015,6 +1017,31 @@ class TestIsPiiScopeForFiles:
         )
 
 
+class TestConfigWithoutStreaming:
+    """Tests for _config_without_streaming — ensures TAG_NOSTREAM is injected."""
+
+    def test_adds_nostream_tag_to_empty_config(self) -> None:
+        result = _config_without_streaming(None)
+        assert TAG_NOSTREAM in result["tags"]
+
+    def test_adds_nostream_tag_to_existing_config(self) -> None:
+        config: RunnableConfig = {"tags": ["existing_tag"]}
+        result = _config_without_streaming(config)
+        assert "existing_tag" in result["tags"]
+        assert TAG_NOSTREAM in result["tags"]
+
+    def test_preserves_other_config_keys(self) -> None:
+        config: RunnableConfig = {"metadata": {"key": "value"}, "tags": ["t"]}
+        result = _config_without_streaming(config)
+        assert result["metadata"] == {"key": "value"}
+        assert TAG_NOSTREAM in result["tags"]
+
+    def test_handles_config_without_tags(self) -> None:
+        config: RunnableConfig = {"metadata": {"key": "value"}}
+        result = _config_without_streaming(config)
+        assert result["tags"] == [TAG_NOSTREAM]
+
+
 class TestConfigWithLlmCallAttachments:
     """The attachments payload travels to the llmCall span via langchain config metadata."""
 
@@ -1153,3 +1180,7 @@ class TestAnalyzeFileToolPassesAttachmentsViaConfig:
         attachments = json.loads(payload)
         assert attachments[0]["id"] == att_id
         assert attachments[0]["fileName"] == "doc.pdf"
+
+        # Verify TAG_NOSTREAM is set to prevent the internal LLM response
+        # from leaking into the conversation stream as a content part.
+        assert TAG_NOSTREAM in config_arg["tags"]
