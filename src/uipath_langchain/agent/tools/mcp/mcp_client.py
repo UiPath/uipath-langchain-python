@@ -104,6 +104,12 @@ class McpClient(UiPathDisposableProtocol):
         # Lock for both client initialization and session reinitialization
         self._lock = asyncio.Lock()
 
+        # Tool list cached in memory and fetched once per client lifetime, with its own
+        # lock so a concurrent first call does not deadlock against ``_lock`` (held by
+        # session initialization inside ``_execute_with_retry``).
+        self._tools_lock = asyncio.Lock()
+        self._tools_cache: ListToolsResult | None = None
+
         # Client state (created once, reused across session reinitializations)
         self._http_client: httpx.AsyncClient | None = None
         self._read_stream: (
@@ -340,12 +346,28 @@ class McpClient(UiPathDisposableProtocol):
 
         raise RuntimeError("Exited retry loop unexpectedly")
 
-    async def list_tools(self) -> ListToolsResult:
-        """List available tools from the MCP server."""
-        return await self._execute_with_retry(
-            lambda session: session.list_tools(),
-            "list_tools",
-        )
+    async def list_tools(self, *, force_refresh: bool = False) -> ListToolsResult:
+        """List available tools from the MCP server.
+
+        The result is cached in memory on the first successful call and reused for the
+        lifetime of this client. ``dispose()`` clears the cache, so a fresh client
+        fetches the list again on its next call. Pass ``force_refresh=True`` to re-query
+        the server and refresh the cache.
+
+        Args:
+            force_refresh: When True, re-query the server and refresh the cache.
+        """
+        if not force_refresh and self._tools_cache is not None:
+            return self._tools_cache
+        async with self._tools_lock:
+            if not force_refresh and self._tools_cache is not None:
+                return self._tools_cache
+            result = await self._execute_with_retry(
+                lambda session: session.list_tools(),
+                "list_tools",
+            )
+            self._tools_cache = result
+            return result
 
     async def call_tool(
         self,
@@ -374,19 +396,23 @@ class McpClient(UiPathDisposableProtocol):
         After calling dispose(), the client can be reused - a new call_tool()
         will reinitialize everything.
         """
-        async with self._lock:
-            if self._stack is not None:
-                try:
-                    await self._stack.__aexit__(None, None, None)
-                except Exception as e:
-                    logger.debug(f"Error during cleanup: {e}")
-                finally:
-                    self._stack = None
-                    self._session = None
-                    self._http_client = None
-                    self._read_stream = None
-                    self._write_stream = None
-                    self._session_info = None
-                    self._client_initialized = False
+        # Acquire _tools_lock before _lock (the same order list_tools uses) so the tool
+        # cache is cleared atomically with respect to an in-flight list_tools().
+        async with self._tools_lock:
+            self._tools_cache = None
+            async with self._lock:
+                if self._stack is not None:
+                    try:
+                        await self._stack.__aexit__(None, None, None)
+                    except Exception as e:
+                        logger.debug(f"Error during cleanup: {e}")
+                    finally:
+                        self._stack = None
+                        self._session = None
+                        self._http_client = None
+                        self._read_stream = None
+                        self._write_stream = None
+                        self._session_info = None
+                        self._client_initialized = False
 
-            logger.info("MCP client disposed")
+                logger.info("MCP client disposed")
