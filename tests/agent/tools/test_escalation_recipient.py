@@ -343,6 +343,21 @@ class TestBuildLlmRecipient:
         mock_filter.assert_not_called()
 
     @pytest.mark.asyncio
+    @patch(
+        "uipath_langchain.agent.tools.escalation_recipient._filter_to_directory_users"
+    )
+    async def test_overlong_candidate_is_dropped_before_matching(self, mock_filter):
+        """A candidate over the email length cap is rejected without running the regex/directory lookup."""
+        overlong = (
+            "a" * 250 + "@example.com"
+        )  # 262 chars, exceeds MAX_EMAIL_LENGTH (254)
+
+        result = await _build_llm_recipient(overlong)
+
+        assert result is None
+        mock_filter.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_non_string_non_list_returns_none(self):
         """Unsupported raw types (e.g. None, int) fail closed."""
         assert await _build_llm_recipient(None) is None

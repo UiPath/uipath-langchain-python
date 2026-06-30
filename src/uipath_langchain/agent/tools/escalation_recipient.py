@@ -36,6 +36,7 @@ _logger = logging.getLogger(__name__)
 RESERVED_RECIPIENT_FIELD = "escalationRecipient"
 
 MAX_RECIPIENTS = 50
+MAX_EMAIL_LENGTH = 254
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -102,7 +103,9 @@ async def _build_llm_recipient(raw: Any) -> TaskRecipient | None:
     else:
         return None
 
-    emails = [c for c in candidates if c and _EMAIL_RE.match(c)][:MAX_RECIPIENTS]
+    emails = [
+        c for c in candidates if c and len(c) <= MAX_EMAIL_LENGTH and _EMAIL_RE.match(c)
+    ][:MAX_RECIPIENTS]
     if not emails:
         _logger.warning(
             "LLM recipient produced no valid email values; leaving task unassigned"
