@@ -31,10 +31,12 @@ async def build_file_content_blocks_for(
 ) -> list[DataContentBlock]:
     """Build LangChain content blocks for a single file attachment.
 
-    Images become image blocks, TIFFs are split into per-page PNG blocks,
-    and every other MIME type — PDF, text, office documents, and any
-    arbitrary binary — is wrapped in a generic file block. Provider
-    compatibility for non-image formats is delegated to the LLM.
+    Images become image blocks, TIFFs are split into per-page PNG blocks, and
+    every other MIME type is wrapped in a generic file block. Format support for
+    non-image types is delegated to the LLM/provider (see #842): we do not gate
+    on a MIME allow-list here. A type the provider cannot read surfaces later as
+    a provider error at the model-invocation boundary, where it is translated
+    into a USER error.
 
     Args:
         file_info: File URL, name, and MIME type.
@@ -53,6 +55,8 @@ async def build_file_content_blocks_for(
         except ValueError as exc:
             raise ValueError(f"File '{file_info.name}': {exc}") from exc
 
+    mime_type = file_info.mime_type or "application/octet-stream"
+
     try:
         base64_file = await download_file_base64(file_info.url, max_size=max_size)
     except ValueError as exc:
@@ -61,7 +65,6 @@ async def build_file_content_blocks_for(
     if is_image(file_info.mime_type):
         return [create_image_block(base64=base64_file, mime_type=file_info.mime_type)]
 
-    mime_type = file_info.mime_type or "application/octet-stream"
     return [
         create_file_block(
             base64=base64_file,

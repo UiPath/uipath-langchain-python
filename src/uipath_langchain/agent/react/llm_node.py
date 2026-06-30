@@ -16,6 +16,7 @@ from uipath.runtime.errors import UiPathErrorCategory
 from uipath_langchain.chat.handlers import get_payload_handler
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ..exceptions.attachments import raise_for_unsupported_attachment
 from ..exceptions.licensing import raise_for_provider_http_error
 from ..messages.message_utils import replace_tool_calls
 from ..tools.static_args import StaticArgsHandler
@@ -121,8 +122,11 @@ def create_llm_node(
             response = await llm.ainvoke(messages)
         except Exception as e:
             # LLM errors arrive as provider-specific exceptions (OpenAI, Bedrock,
-            # Vertex). Convert to a structured AgentRuntimeError with the HTTP
-            # status code so upstream handlers can categorise (e.g. 403 → licensing).
+            # Vertex). A provider rejecting an attachment's MIME type is the user's
+            # file-type choice → USER (format support is delegated to the provider,
+            # #842). HTTP errors carry a status for upstream categorisation
+            # (e.g. 403 → licensing).
+            raise_for_unsupported_attachment(e)
             raise_for_provider_http_error(e)
             raise
         if not isinstance(response, AIMessage):
