@@ -57,13 +57,15 @@ def _tc(name, args=None, cid="c1"):
     return {"name": name, "args": args or {}, "id": cid, "type": "tool_call"}
 
 
-def test_fetch_ontology_bound_only_when_ontologies(make_graph):
+def test_fetch_ontology_bound_when_ontologies_present(make_graph):
+    with_onto = make_graph([("library", None)])
+    assert "fetch_ontology" in with_onto._tools_by_name
+
+
+def test_fetch_ontology_not_bound_when_ontologies_absent(make_graph):
     without = make_graph(None)
     assert "execute_sql" in without._tools_by_name
     assert "fetch_ontology" not in without._tools_by_name
-
-    with_onto = make_graph([("library", None)])
-    assert "fetch_ontology" in with_onto._tools_by_name
 
 
 def test_fetch_ontology_not_bound_when_flag_off(make_graph):

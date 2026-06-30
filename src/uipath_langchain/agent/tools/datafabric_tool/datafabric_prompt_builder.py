@@ -153,17 +153,13 @@ def format_sql_context(ctx: SQLContext, ontology_names: list[str] | None = None)
 
     if ontology_names:
         names = ", ".join(f"`{n}`" for n in ontology_names)
-        lines.append("## Available Ontology (authoritative semantic schema)")
-        lines.append("")
         lines.append(
+            "## Available Ontology (authoritative semantic schema)\n\n"
             f"This agent has a semantic ontology attached for these entities: "
             f"{names}. It is the authoritative source for the exact column names, "
             "value formats (date formats, codes, zero-padding), allowed values, "
             "and the relationships between entities — richer and more reliable "
-            "than the field list below, which omits value formats and semantics."
-        )
-        lines.append("")
-        lines.append(
+            "than the field list below, which omits value formats and semantics.\n\n"
             "**Before writing any SQL, call the `fetch_ontology` tool once** to "
             "load it, then base your column names, filter values, and joins on "
             "what it says. The entity tables below are a quick reference only; "
