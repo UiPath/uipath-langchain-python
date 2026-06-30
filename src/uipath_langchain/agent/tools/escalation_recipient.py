@@ -37,7 +37,7 @@ RESERVED_RECIPIENT_FIELD = "escalationRecipient"
 
 MAX_RECIPIENTS = 50
 MAX_EMAIL_LENGTH = 254
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$")
 
 
 async def _resolve_asset(asset_name: str, folder_path: str | None) -> str | None:
