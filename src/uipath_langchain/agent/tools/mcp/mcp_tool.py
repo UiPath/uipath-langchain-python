@@ -94,8 +94,9 @@ async def _refresh_tool_schema(
 ) -> str | None:
     """Fetch the live tool schema before invoking a cached tool and self-heal on drift.
 
-    Lists the tools from the server and compares the live input schema with the cached
-    one. If the change would break a call built from the cached schema, the cached
+    Lists the tools from the server (the McpClient caches this list for the lifetime of
+    the run) and compares the live input schema with the cached one. If the change would
+    break a call built from the cached schema, the cached
     snapshot and the schema the model is bound to are updated to the live schema and a
     retry instruction is returned; the caller must then NOT run the stale call. The
     ReAct loop re-binds tools on the next LLM turn, so the model re-issues the call
@@ -188,9 +189,11 @@ async def create_mcp_tools(
     Cached when tools_configuration is unset):
         - Cached: Uses the tools and schemas saved in config.available_tools. When
           the cached config has refresh_schema_before_call=True (the default), the
-          live tool schema is fetched immediately before each tool invocation; if it
+          live tool schema is fetched (once per run, cached on the McpClient) and
+          compared with the design-time snapshot before a tool invocation; if it
           changed in a breaking way, the bound schema is refreshed and the model is
-          asked to retry the call against the live schema (self-healing).
+          asked to retry the call against the live schema (self-healing). A resumed run
+          uses a fresh client, which fetches the live list again.
         - Dynamic with allow_all=True: Lists all tools from the MCP
           server via mcpClient, ignoring config.available_tools as a source
           of truth.
@@ -324,9 +327,10 @@ def build_mcp_tool(
         """Execute MCP tool call with ephemeral session.
 
         When ``refresh_schema_before_call`` is set (cached discovery mode), the live
-        tool schema is fetched first. If it changed in a breaking way, the tool is not
-        executed: the bound schema is refreshed and a retry instruction is returned so
-        the model re-issues the call against the live schema on the next turn.
+        tool schema is checked first against the McpClient's cached tool list (fetched
+        once per run). If it changed in a breaking way, the tool is not executed: the
+        bound schema is refreshed and a retry instruction is returned so the model
+        re-issues the call against the live schema on the next turn.
 
         If a session disconnect error occurs (e.g., 404 or session terminated),
         the tool will retry once by re-initializing the session.
