@@ -34,15 +34,11 @@ from uipath.platform.entities import EntitiesService, Entity
 
 from ..datafabric_query_tool import DataFabricQueryTool
 from . import datafabric_prompt_builder
+from .datafabric_tool import DATAFABRIC_ONTOLOGY_FF
 from .models import DataFabricExecuteSqlInput
 from .ontology_fetch_tool import create_ontology_fetch_tool
 
 logger = logging.getLogger(__name__)
-
-# Feature flag gating the Data Fabric ontology grounding feature. Defaults off:
-# when disabled, the inner graph is constructed without the fetch_ontology tool
-# (the original entities-only graph), so the feature stays out of the default path.
-_DATAFABRIC_ONTOLOGY_FF = "DataFabricOntologyEnabled"
 
 
 class DataFabricSubgraphState(BaseModel):
@@ -108,7 +104,7 @@ class DataFabricGraph:
         inner_tools: list[BaseTool] = [self._execute_sql_tool]
         ontology_names: list[str] = []
         if ontologies and FeatureFlags.is_flag_enabled(
-            _DATAFABRIC_ONTOLOGY_FF, default=False
+            DATAFABRIC_ONTOLOGY_FF, default=False
         ):
             inner_tools.append(
                 create_ontology_fetch_tool(entities_service, ontologies)

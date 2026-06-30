@@ -29,6 +29,12 @@ logger = logging.getLogger(__name__)
 
 BASE_SYSTEM_PROMPT = "base_system_prompt"
 
+# Feature flag gating the Data Fabric ontology grounding feature. Defaults off.
+# Checked at every entry into the feature: ontology resolution (context_tool)
+# and inner-tool binding (datafabric_subgraph). Single source of truth so the
+# flag name can never drift between call sites.
+DATAFABRIC_ONTOLOGY_FF = "DataFabricOntologyEnabled"
+
 
 def resolve_context_ontologies(
     resources: list[Any],

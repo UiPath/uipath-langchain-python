@@ -166,13 +166,25 @@ def create_context_tool(
     if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
         if llm is None:
             raise ValueError("Data Fabric entity set tools require an LLM instance")
+        from uipath.core.feature_flags import FeatureFlags
+
         from .datafabric_tool import (
             create_datafabric_query_tool,
             resolve_context_ontologies,
         )
-        from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
+        from .datafabric_tool.datafabric_tool import (
+            BASE_SYSTEM_PROMPT,
+            DATAFABRIC_ONTOLOGY_FF,
+        )
 
-        ontologies = resolve_context_ontologies(agent.resources if agent else [])
+        # Feature-gated at the entry: only gather ontologies when the flag is on,
+        # so with it off the feature is fully inert (no resolution, no prompt
+        # change) and the agent runs the original entities-only path.
+        ontologies = (
+            resolve_context_ontologies(agent.resources if agent else [])
+            if FeatureFlags.is_flag_enabled(DATAFABRIC_ONTOLOGY_FF, default=False)
+            else []
+        )
         return create_datafabric_query_tool(
             resource,
             llm,
