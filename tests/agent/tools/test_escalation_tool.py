@@ -12,21 +12,17 @@ from uipath.agent.models.agent import (
     AgentEscalationResourceConfig,
     AgentQuickFormChannelProperties,
     AgentQuickFormEscalationChannel,
-    AssetRecipient,
     StandardRecipient,
 )
 from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
 
 from uipath_langchain.agent.tools.escalation_memory import (
     EscalationMemoryCachedResult,
-    _get_user_email,
 )
 from uipath_langchain.agent.tools.escalation_tool import (
     _build_escalation_memory_payload,
     _parse_task_data,
     create_escalation_tool,
-    resolve_asset,
-    resolve_recipient_value,
 )
 
 
@@ -35,178 +31,6 @@ def _make_mock_task(**overrides):
     defaults = {"id": 1, "key": "task-key", "title": "Test Task"}
     defaults.update(overrides)
     return Task(**defaults)
-
-
-class TestResolveAsset:
-    """Test the resolve_asset function."""
-
-    @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    async def test_resolve_asset_success(self, mock_uipath_class):
-        """Test successful asset retrieval."""
-        # Setup mock
-        mock_client = MagicMock()
-        mock_uipath_class.return_value = mock_client
-        mock_result = MagicMock()
-        mock_result.value = "test@example.com"
-        mock_client.assets.retrieve_async = AsyncMock(return_value=mock_result)
-
-        # Execute
-        result = await resolve_asset("email_asset", "/Test/Folder")
-
-        # Assert
-        assert result == "test@example.com"
-        mock_client.assets.retrieve_async.assert_called_once_with(
-            name="email_asset", folder_path="/Test/Folder"
-        )
-
-    @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    async def test_resolve_asset_no_value(self, mock_uipath_class):
-        """Test asset with no value raises ValueError."""
-        # Setup mock
-        mock_client = MagicMock()
-        mock_uipath_class.return_value = mock_client
-        mock_result = MagicMock()
-        mock_result.value = None
-        mock_client.assets.retrieve_async = AsyncMock(return_value=mock_result)
-
-        # Execute and assert
-        with pytest.raises(ValueError) as exc_info:
-            await resolve_asset("empty_asset", "/Test/Folder")
-
-        assert "Asset 'empty_asset' has no value configured" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    async def test_resolve_asset_not_found(self, mock_uipath_class):
-        """Test asset not found raises ValueError."""
-        # Setup mock
-        mock_client = MagicMock()
-        mock_uipath_class.return_value = mock_client
-        mock_client.assets.retrieve_async = AsyncMock(return_value=None)
-
-        # Execute and assert
-        with pytest.raises(ValueError) as exc_info:
-            await resolve_asset("missing_asset", "/Test/Folder")
-
-        assert "Asset 'missing_asset' has no value configured" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.UiPath")
-    async def test_resolve_asset_retrieval_exception(self, mock_uipath_class):
-        """Test exception during asset retrieval raises ValueError with context."""
-        # Setup mock
-        mock_client = MagicMock()
-        mock_uipath_class.return_value = mock_client
-        mock_client.assets.retrieve_async = AsyncMock(
-            side_effect=Exception("Connection error")
-        )
-
-        # Execute and assert
-        with pytest.raises(ValueError) as exc_info:
-            await resolve_asset("problem_asset", "/Test/Folder")
-
-        assert (
-            "Failed to resolve asset 'problem_asset' in folder '/Test/Folder'"
-            in str(exc_info.value)
-        )
-        assert "Connection error" in str(exc_info.value)
-
-
-class TestResolveRecipientValue:
-    """Test the resolve_recipient_value function."""
-
-    @pytest.mark.asyncio
-    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
-    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_asset")
-    async def test_resolve_recipient_asset_user_email(self, mock_resolve_asset):
-        """Test ASSET_USER_EMAIL type calls resolve_asset."""
-        mock_resolve_asset.return_value = "resolved@example.com"
-
-        recipient = AssetRecipient(
-            type=AgentEscalationRecipientType.ASSET_USER_EMAIL,
-            asset_name="email_asset",
-            folder_path="/Test/Folder",
-        )
-
-        result = await resolve_recipient_value(recipient)
-
-        assert result == TaskRecipient(
-            value="resolved@example.com",
-            type=TaskRecipientType.EMAIL,
-            displayName="resolved@example.com",
-        )
-        mock_resolve_asset.assert_called_once_with("email_asset", "/Test/Folder")
-
-    @pytest.mark.asyncio
-    @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Test/Folder"})
-    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_asset")
-    async def test_resolve_recipient_asset_group_name(self, mock_resolve_asset):
-        """Test ASSET_GROUP_NAME type calls resolve_asset."""
-        mock_resolve_asset.return_value = "ResolvedGroup"
-
-        recipient = AssetRecipient(
-            type=AgentEscalationRecipientType.ASSET_GROUP_NAME,
-            asset_name="group_asset",
-            folder_path="/Test/Folder",
-        )
-
-        result = await resolve_recipient_value(recipient)
-
-        assert result == TaskRecipient(
-            value="ResolvedGroup",
-            type=TaskRecipientType.GROUP_NAME,
-            displayName="ResolvedGroup",
-        )
-        mock_resolve_asset.assert_called_once_with("group_asset", "/Test/Folder")
-
-    @pytest.mark.asyncio
-    async def test_resolve_recipient_user_email(self):
-        """Test USER_EMAIL type returns value directly."""
-        recipient = StandardRecipient(
-            type=AgentEscalationRecipientType.USER_EMAIL,
-            value="direct@example.com",
-        )
-
-        result = await resolve_recipient_value(recipient)
-
-        assert result == TaskRecipient(
-            value="direct@example.com",
-            type=TaskRecipientType.EMAIL,
-            displayName="direct@example.com",
-        )
-
-    @pytest.mark.asyncio
-    @patch("uipath_langchain.agent.tools.escalation_tool.resolve_asset")
-    async def test_resolve_recipient_propagates_error_when_asset_resolution_fails(
-        self, mock_resolve_asset
-    ):
-        """Test AssetRecipient when asset resolution fails."""
-        mock_resolve_asset.side_effect = ValueError("Asset not found")
-
-        recipient = AssetRecipient(
-            type=AgentEscalationRecipientType.ASSET_USER_EMAIL,
-            asset_name="nonexistent",
-            folder_path="Shared",
-        )
-
-        with pytest.raises(ValueError) as exc_info:
-            await resolve_recipient_value(recipient)
-
-        assert "Asset not found" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_resolve_recipient_no_value(self):
-        """Test recipient without value attribute returns None."""
-        # Create a minimal recipient object without value
-        recipient = MagicMock()
-        recipient.type = AgentEscalationRecipientType.USER_EMAIL
-        del recipient.value  # Simulate no value attribute
-
-        result = await resolve_recipient_value(recipient)
-
-        assert result is None
 
 
 class TestEscalationToolMetadata:
@@ -858,34 +682,6 @@ class TestEscalationToolOutputSchema:
             mock_check_memory_cache.await_args.kwargs["memory_space_name"]
             == "MemorySpace"
         )
-
-
-class TestGetUserEmail:
-    """Test the _get_user_email helper function."""
-
-    def test_none_returns_none(self):
-        """Test that None input returns None."""
-        assert _get_user_email(None) is None
-
-    def test_dict_with_email_address(self):
-        """Test extraction from dict with emailAddress field."""
-        user = {"emailAddress": "test@example.com", "name": "Test"}
-        assert _get_user_email(user) == "test@example.com"
-
-    def test_dict_without_email_address(self):
-        """Test dict without emailAddress returns None."""
-        user = {"name": "Test", "id": 123}
-        assert _get_user_email(user) is None
-
-    def test_object_with_email_address(self):
-        """Test extraction from object with emailAddress attribute."""
-        user = MagicMock(emailAddress="test@example.com")
-        assert _get_user_email(user) == "test@example.com"
-
-    def test_object_without_email_address(self):
-        """Test object without emailAddress attribute returns None."""
-        user = MagicMock(spec=["name", "id"])
-        assert _get_user_email(user) is None
 
 
 class TestEscalationToolTaskInfo:
