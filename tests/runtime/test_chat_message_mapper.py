@@ -2463,3 +2463,124 @@ class TestClientSideToolEndSuppression:
             e for e in result if e.tool_call is not None and e.tool_call.end is not None
         ]
         assert len(tool_end_events) == 1
+
+
+class TestFlowControlToolFiltering:
+    """`end_execution` and `raise_error` are internal flow-control tool calls.
+    They must NOT surface as visible tool-call events in the chat UI, and the
+    AIMessage that carries only them should fire a message_end_event (turn done)
+    rather than tool_call_start_events."""
+
+    @pytest.mark.asyncio
+    async def test_full_aimessage_with_only_end_execution_emits_message_end(self):
+        from uipath.agent.react import END_EXECUTION_TOOL
+
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        ai_message = AIMessage(
+            content="Here is your answer.",
+            id="msg-end-1",
+            tool_calls=[
+                {
+                    "id": "call-end",
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"summary": "ok"},
+                }
+            ],
+        )
+
+        result = await mapper.map_event(ai_message)
+        assert result is not None
+
+        # No tool_call_start events for end_execution
+        tool_start_events = [
+            e
+            for e in result
+            if e.tool_call is not None and e.tool_call.start is not None
+        ]
+        assert tool_start_events == []
+
+        # Should emit a message_end event since the only tool call is filtered out
+        message_end_events = [
+            e for e in result if e.end is not None and e.content_part is None
+        ]
+        assert len(message_end_events) == 1
+
+    @pytest.mark.asyncio
+    async def test_full_aimessage_with_end_execution_alongside_visible_tool_emits_only_visible(
+        self,
+    ):
+        from uipath.agent.react import END_EXECUTION_TOOL
+
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        ai_message = AIMessage(
+            content="Calling search.",
+            id="msg-mixed-1",
+            tool_calls=[
+                {
+                    "id": "call-search",
+                    "name": "search_web",
+                    "args": {"q": "foo"},
+                },
+                {
+                    "id": "call-end",
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"summary": "ok"},
+                },
+            ],
+        )
+
+        result = await mapper.map_event(ai_message)
+        assert result is not None
+
+        tool_start_events = [
+            e
+            for e in result
+            if e.tool_call is not None and e.tool_call.start is not None
+        ]
+        assert len(tool_start_events) == 1
+        assert tool_start_events[0].tool_call.start.tool_name == "search_web"
+
+    @pytest.mark.asyncio
+    async def test_chunked_aimessage_with_only_end_execution_emits_message_end(self):
+        from uipath.agent.react import END_EXECUTION_TOOL
+
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        first_chunk = AIMessageChunk(
+            content="",
+            id="msg-chunked-end",
+            tool_calls=[
+                {
+                    "id": "call-end",
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"summary": "ok"},
+                }
+            ],
+        )
+        await mapper.map_event(first_chunk)
+
+        last_chunk = AIMessageChunk(content="", id="msg-chunked-end")
+        object.__setattr__(last_chunk, "chunk_position", "last")
+
+        result = await mapper.map_event(last_chunk)
+        assert result is not None
+
+        tool_start_events = [
+            e
+            for e in result
+            if e.tool_call is not None and e.tool_call.start is not None
+        ]
+        assert tool_start_events == []
+
+        message_end_events = [
+            e for e in result if e.end is not None and e.content_part is None
+        ]
+        assert len(message_end_events) == 1

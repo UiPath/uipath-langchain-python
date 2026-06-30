@@ -75,8 +75,8 @@ def create_agent(
         config = AgentGraphConfig()
 
     agent_tools = list(tools)
-    flow_control_tools: list[BaseTool] = (
-        [] if config.is_conversational else create_flow_control_tools(output_schema)
+    flow_control_tools: list[BaseTool] = create_flow_control_tools(
+        output_schema, is_conversational=config.is_conversational
     )
     llm_tools: list[BaseTool] = [*agent_tools, *flow_control_tools]
 

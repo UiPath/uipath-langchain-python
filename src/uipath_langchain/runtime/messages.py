@@ -40,6 +40,7 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
+from uipath_langchain.agent.react.types import FLOW_CONTROL_TOOLS
 from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
 from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 
@@ -406,10 +407,11 @@ class UiPathChatMessagesMapper:
             self._citation_stream_processor = CitationStreamProcessor()
 
             events.append(self.map_to_content_part_end_event(message.id))
-            if (
-                self.current_message.tool_calls is not None
-                and len(self.current_message.tool_calls) > 0
-            ):
+            has_executing_tool_calls = any(
+                tc["name"] not in FLOW_CONTROL_TOOLS
+                for tc in (self.current_message.tool_calls or [])
+            )
+            if has_executing_tool_calls:
                 events.extend(
                     await self.map_current_message_to_start_tool_call_events()
                 )
@@ -441,7 +443,11 @@ class UiPathChatMessagesMapper:
             self._citation_stream_processor = CitationStreamProcessor()
 
         events.append(self.map_to_content_part_end_event(message.id))
-        if message.tool_calls:
+        has_executing_tool_calls = any(
+            tc["name"] not in FLOW_CONTROL_TOOLS
+            for tc in (self.current_message.tool_calls or [])
+        )
+        if has_executing_tool_calls:
             events.extend(await self.map_current_message_to_start_tool_call_events())
         else:
             events.append(self.map_to_message_end_event(message.id))
@@ -471,13 +477,17 @@ class UiPathChatMessagesMapper:
                     tool_call_id_to_message_id_map = {}
 
                 for tool_call in self.current_message.tool_calls:
+                    tool_name = tool_call["name"]
+                    # Flow-control tool calls are never visible to the chat UI.
+                    if tool_name in FLOW_CONTROL_TOOLS:
+                        continue
+
                     tool_call_id = tool_call["id"]
                     if tool_call_id is not None:
                         tool_call_id_to_message_id_map[tool_call_id] = (
                             self.current_message.id
                         )
 
-                        tool_name = tool_call["name"]
                         require_confirmation = (
                             tool_name in self.tools_requiring_confirmation
                         )
@@ -787,6 +797,9 @@ class UiPathChatMessagesMapper:
         uipath_tool_calls: list[UiPathConversationToolCallData] = []
         if message.tool_calls:
             for tool_call in message.tool_calls:
+                # Exclude flow-control tools from the outputted conversation messages
+                if tool_call["name"] in FLOW_CONTROL_TOOLS:
+                    continue
                 uipath_tool_call = UiPathConversationToolCallData(
                     name=tool_call["name"], input=tool_call.get("args", {})
                 )

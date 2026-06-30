@@ -295,3 +295,85 @@ class TestRouteAgentConversationalTargetValidation:
         state = AgentGraphState(messages=[HumanMessage(content="query"), ai_message])
 
         assert route_func(state) == "unwired_tool"
+
+
+class TestRouteAgentConversationalEndExecutionShortCircuit:
+    """When the LLM emits `end_execution`, the router must return TERMINATE
+    without invoking the tool-call-index helper, which would otherwise raise
+    STATE_ERROR for an unanswered tool call.
+
+    `raise_error` is NOT a conversational concept (the tool is not bound).
+    A hallucinated `raise_error` falls through to normal routing and is
+    caught as an unknown destination by the valid_targets guard.
+    """
+
+    def test_end_execution_alone_routes_to_terminate(self):
+        from uipath.agent.react import END_EXECUTION_TOOL
+
+        route_func = create_route_agent_conversational(valid_targets=_VALID_TARGETS)
+        ai_message = AIMessage(
+            content="Final answer",
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"summary": "ok"},
+                    "id": "call_end",
+                }
+            ],
+        )
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="query"), ai_message],
+        )
+
+        assert route_func(state) == AgentGraphNode.TERMINATE
+
+    def test_end_execution_alongside_regular_tool_routes_to_terminate(self):
+        """If both are present, end_execution wins — short-circuit fires first.
+        (In practice the llm_node filter drops end_execution upstream when a
+        regular tool call is present, but defense-in-depth here.)"""
+        from uipath.agent.react import END_EXECUTION_TOOL
+
+        route_func = create_route_agent_conversational(valid_targets=_VALID_TARGETS)
+        ai_message = AIMessage(
+            content="Final answer",
+            tool_calls=[
+                {"name": "search_tool", "args": {"q": "x"}, "id": "call_a"},
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"summary": "ok"},
+                    "id": "call_end",
+                },
+            ],
+        )
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="query"), ai_message],
+        )
+
+        assert route_func(state) == AgentGraphNode.TERMINATE
+
+    def test_hallucinated_raise_error_does_not_short_circuit(self):
+        """A hallucinated `raise_error` is not a conversational signal — it falls
+        through to normal routing and trips the valid_targets guard."""
+        from uipath.agent.react import RAISE_ERROR_TOOL
+
+        route_func = create_route_agent_conversational(valid_targets=_VALID_TARGETS)
+        ai_message = AIMessage(
+            content="Cannot proceed",
+            tool_calls=[
+                {
+                    "name": RAISE_ERROR_TOOL.name,
+                    "args": {"message": "Missing input"},
+                    "id": "call_err",
+                }
+            ],
+        )
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="query"), ai_message],
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            route_func(state)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.ROUTING_ERROR
+        )

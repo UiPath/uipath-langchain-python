@@ -242,7 +242,11 @@ class TestCreateAgent:
         )
         mock_route_agent.assert_not_called()
         mock_route_agent_conversational.assert_called_once()
-        mock_create_flow_control_tools.assert_not_called()
+        # Always invoked now; returns [] for conversational + no custom output schema,
+        # preserving the no-flow-control-tool behavior.
+        mock_create_flow_control_tools.assert_called_once_with(
+            None, is_conversational=True
+        )
         mock_create_init_node.assert_called_once_with(
             messages,
             None,  # input schema
@@ -292,4 +296,82 @@ class TestCreateAgent:
         )
         mock_route_agent.assert_not_called()
         mock_route_agent_conversational.assert_called_once()
-        mock_create_flow_control_tools.assert_not_called()
+        mock_create_flow_control_tools.assert_called_once_with(
+            None, is_conversational=True
+        )
+
+
+class TestCreateAgentConversationalCustomOutputSchema:
+    """Conversational agents with a custom output schema bind end_execution with
+    args_schema = output_schema minus uipath__agent_response_messages."""
+
+    @pytest.fixture
+    def mock_model(self):
+        return _make_mock_model()
+
+    @pytest.fixture
+    def messages(self):
+        return [SystemMessage(content="You are a helpful assistant.")]
+
+    def test_conversational_no_custom_schema_binds_no_flow_control_tools(
+        self, mock_model, messages
+    ):
+        """Conversational + no output_schema → llm sees zero flow-control tools."""
+        from pydantic import BaseModel as _BM
+        from uipath.core.chat import UiPathConversationMessageData
+
+        class DefaultSchema(_BM):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
+
+        with patch(
+            "uipath_langchain.agent.react.agent.create_llm_node"
+        ) as mock_create_llm_node:
+            mock_create_llm_node.return_value = lambda state: state
+
+            create_agent(
+                mock_model,
+                [],
+                messages,
+                output_schema=DefaultSchema,
+                config=AgentGraphConfig(is_conversational=True),
+            )
+
+            llm_tools = mock_create_llm_node.call_args.args[1]
+            tool_names = [t.name for t in llm_tools]
+            assert "end_execution" not in tool_names
+            assert "raise_error" not in tool_names
+
+    def test_conversational_custom_schema_binds_end_execution_with_trimmed_args(
+        self, mock_model, messages
+    ):
+        """Conversational + output_schema with custom fields → end_execution bound
+        with args_schema containing only the custom fields."""
+        from pydantic import BaseModel as _BM
+        from uipath.core.chat import UiPathConversationMessageData
+
+        class ResponseSchema(_BM):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
+            sentiment: str
+            score: float
+
+        with patch(
+            "uipath_langchain.agent.react.agent.create_llm_node"
+        ) as mock_create_llm_node:
+            mock_create_llm_node.return_value = lambda state: state
+
+            create_agent(
+                mock_model,
+                [],
+                messages,
+                output_schema=ResponseSchema,
+                config=AgentGraphConfig(is_conversational=True),
+            )
+
+            llm_tools = mock_create_llm_node.call_args.args[1]
+            end_execution_tools = [t for t in llm_tools if t.name == "end_execution"]
+            assert len(end_execution_tools) == 1
+            assert not any(t.name == "raise_error" for t in llm_tools)
+
+            args_schema_fields = set(end_execution_tools[0].args_schema.model_fields)
+            assert args_schema_fields == {"sentiment", "score"}
+            assert "uipath__agent_response_messages" not in args_schema_fields

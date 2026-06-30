@@ -9,12 +9,26 @@ from uipath.agent.react import (
     RAISE_ERROR_TOOL,
 )
 
+from ..utils import (
+    build_conversational_end_execution_input_schema,
+    has_custom_conversational_output_fields,
+)
+
 
 def create_end_execution_tool(
     agent_output_schema: type[BaseModel] | None = None,
+    *,
+    is_conversational: bool = False,
 ) -> StructuredTool:
-    """Never executed - routing intercepts and extracts args for successful termination."""
+    """Never executed - routing intercepts and extracts args for successful termination.
+
+    For conversational agents the argument schema is the user's output schema with the
+    implicit `uipath__agent_response_messages` field removed — only the custom fields
+    are surfaced to the LLM.
+    """
     input_schema = agent_output_schema or END_EXECUTION_TOOL.args_schema
+    if is_conversational:
+        input_schema = build_conversational_end_execution_input_schema(input_schema)
 
     async def end_execution_fn(**kwargs: Any) -> dict[str, Any]:
         return kwargs
@@ -43,7 +57,24 @@ def create_raise_error_tool() -> StructuredTool:
 
 def create_flow_control_tools(
     agent_output_schema: type[BaseModel] | None = None,
+    *,
+    is_conversational: bool = False,
 ) -> list[BaseTool]:
+    """Build the flow-control tools the LLM may call to finalize execution.
+
+    Autonomous: `[end_execution, raise_error]` regardless of schema.
+    Conversational + custom output schema: `[end_execution]` only.
+        Raising errors doesn't apply since conversational agents always respond.
+    Conversational + no custom output schema: `[]` — The agent simply terminates by
+        emitting an AIMessage without tool calls.
+    """
+    if is_conversational:
+        if has_custom_conversational_output_fields(agent_output_schema):
+            return [
+                create_end_execution_tool(agent_output_schema, is_conversational=True)
+            ]
+        return []
+
     return [
         create_end_execution_tool(agent_output_schema),
         create_raise_error_tool(),

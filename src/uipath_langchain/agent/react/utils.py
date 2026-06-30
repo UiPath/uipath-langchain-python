@@ -4,12 +4,16 @@ from typing import Any, Sequence, TypeVar, cast
 
 from langchain_core.messages import AIMessage, AnyMessage, BaseMessage, ToolMessage
 from pydantic import BaseModel
+from pydantic import create_model as pydantic_create_model
 from uipath.agent.react import END_EXECUTION_TOOL
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
+)
+from uipath_langchain.agent.react.constants import (
+    UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD,
 )
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.react.types import (
@@ -36,6 +40,43 @@ def resolve_output_model(
         return create_model(output_schema)
 
     return END_EXECUTION_TOOL.args_schema
+
+
+def has_custom_conversational_output_fields(
+    output_schema: type[BaseModel] | None,
+) -> bool:
+    """Return True iff the schema declares fields beyond `uipath__agent_response_messages`.
+
+    Used to decide whether a conversational agent should bind `end_execution` and
+    require a tool call to carry the structured output fields.
+    """
+    if output_schema is None:
+        return False
+    return any(
+        name != UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD
+        for name in output_schema.model_fields
+    )
+
+
+def build_conversational_end_execution_input_schema(
+    schema: type[BaseModel],
+) -> type[BaseModel]:
+    """Build an args_schema for `end_execution` containing only the user's custom fields.
+
+    The input `schema` includes the implicit `uipath__agent_response_messages` field,
+    which is populated from the message history at termination — not by the LLM. Stripping
+    it produces the schema the LLM should actually fill in.
+    """
+    custom_fields: dict[str, Any] = {
+        name: (field.annotation, field)
+        for name, field in schema.model_fields.items()
+        if name != UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD
+    }
+    return pydantic_create_model(
+        f"{schema.__name__}EndExecutionArgs",
+        __base__=BaseModel,
+        **custom_fields,
+    )
 
 
 def extract_input_data_from_state(

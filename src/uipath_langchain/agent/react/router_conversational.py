@@ -4,6 +4,7 @@ import logging
 from collections.abc import Container
 from typing import Literal
 
+from uipath.agent.react import END_EXECUTION_TOOL
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.agent.exceptions import (
@@ -22,30 +23,43 @@ logger = logging.getLogger(__name__)
 
 
 def create_route_agent_conversational(valid_targets: Container[str] | None = None):
-    """Create a routing function for conversational agents. It routes between agent and tool calls until
-    the agent response has no tool calls, then it routes to the USER_MESSAGE_WAIT node which does an interrupt.
+    """Create a routing function for conversational agents.
+
+    Routes between AGENT, tool nodes, and TERMINATE based on the latest AIMessage's
+    tool calls. Conversational agents terminate either by emitting an AIMessage with
+    no tool calls (the model has decided the turn is complete) or by calling a
+    flow-control tool (`end_execution`).
 
     Args:
-        valid_targets: Allowed routing destinations
+        valid_targets: Allowed routing destinations.
     Returns:
-        Routing function for LangGraph conditional edges
+        Routing function for LangGraph conditional edges.
     """
 
     def route_agent_conversational(
         state: AgentGraphState,
     ) -> str | Literal[AgentGraphNode.TERMINATE] | Literal[AgentGraphNode.AGENT]:
-        """Route after agent
+        """Routing logic for the conversational agent.
 
         Routing logic:
-        3. If tool calls, route to specific tool nodes (return list of tool names)
-        4. If no tool calls, route to user message wait node
+        1. No AIMessage in state → ROUTING_ERROR (SYSTEM).
+        2. Latest AIMessage carries an `end_execution` tool call → TERMINATE
+           (agent finalized its turn and provided custom output args).
+        3. Latest AIMessage has no tool calls → TERMINATE (agent finalized its
+           turn without a custom output schema).
+        4. Latest AIMessage has tool calls and at least one is still pending a
+           ToolMessage → route to that tool's node.
+        5. Latest AIMessage has tool calls and all have been answered → AGENT
+           (loop back so the model can continue its turn).
 
         Returns:
-            - str: Tool node name for sequential execution
-            - AgentGraphNode.USER_MESSAGE_WAIT: When there are no tool calls
+            - str: Tool node name to route to.
+            - AgentGraphNode.AGENT: Loop back to the model after all tools have responded.
+            - AgentGraphNode.TERMINATE: Turn complete.
 
         Raises:
-            AgentNodeRoutingException: When encountering unexpected state (empty messages, non-AIMessage, or excessive completions)
+            AgentRuntimeError: ROUTING_ERROR when state has no AIMessage, or when
+                a routed tool name is not in `valid_targets`.
         """
         last_message = find_latest_ai_message(state.messages)
         if last_message is None:
@@ -56,6 +70,13 @@ def create_route_agent_conversational(valid_targets: Container[str] | None = Non
                 category=UiPathErrorCategory.SYSTEM,
             )
         if last_message.tool_calls:
+            # `end_execution` signals the agent has finalized its turn (carries the
+            # structured output args).
+            if any(
+                tc["name"] == END_EXECUTION_TOOL.name for tc in last_message.tool_calls
+            ):
+                return AgentGraphNode.TERMINATE
+
             current_index = extract_current_tool_call_index(state.messages)
             # all tool calls completed, go back to agent
             if current_index is None:

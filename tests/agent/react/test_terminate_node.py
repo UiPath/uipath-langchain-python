@@ -207,6 +207,132 @@ class TestTerminateNodeConversational:
         assert "Done" in str(messages[0]["contentParts"][0]["data"])
 
 
+class TestTerminateNodeConversationalCustomOutputSchema:
+    """Conversational agents with output_schema fields beyond uipath__agent_response_messages
+    require the LLM to call end_execution to carry the structured fields."""
+
+    @staticmethod
+    def _custom_response_schema() -> type[BaseModel]:
+        class ResponseSchema(BaseModel):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
+            summary: str
+            confidence: float
+
+        return ResponseSchema
+
+    def test_merges_end_execution_args_into_output(self):
+        ResponseSchema = self._custom_response_schema()
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+        ai_message = AIMessage(
+            content="Here is your answer.",
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"summary": "All done", "confidence": 0.92},
+                    "id": "call_end",
+                }
+            ],
+        )
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="Hi"), ai_message],
+            inner_state=MockInnerState(initial_message_count=1),
+        )
+
+        result = terminate_node(state)
+
+        assert result["summary"] == "All done"
+        assert result["confidence"] == 0.92
+        assert "uipath__agent_response_messages" in result
+        messages = result["uipath__agent_response_messages"]
+        assert len(messages) == 1
+        assert "Here is your answer." in str(messages[0]["contentParts"][0]["data"])
+
+    def test_missing_end_execution_raises_output_validation_error(self):
+        ResponseSchema = self._custom_response_schema()
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+        # AIMessage with NO end_execution call — schema requires it
+        ai_message = AIMessage(content="Just text, no tool call")
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="Hi"), ai_message],
+            inner_state=MockInnerState(initial_message_count=1),
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            terminate_node(state)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR
+        )
+        # SYSTEM category: this is a routing/framework-level failure (the agent
+        # reached termination without the expected control-flow signal), not a
+        # validation issue with user-supplied data.
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+        assert "end_execution" in exc_info.value.error_info.detail
+
+    def test_invalid_end_execution_args_raise_output_validation_error(self):
+        ResponseSchema = self._custom_response_schema()
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+        ai_message = AIMessage(
+            content="Here.",
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    # Missing required `confidence`; bogus type for `summary`
+                    "args": {"summary": 123},
+                    "id": "call_end",
+                }
+            ],
+        )
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="Hi"), ai_message],
+            inner_state=MockInnerState(initial_message_count=1),
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            terminate_node(state)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR
+        )
+
+    def test_strips_end_execution_tool_call_from_rendered_messages(self):
+        ResponseSchema = self._custom_response_schema()
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+        ai_message = AIMessage(
+            content="Final response text",
+            tool_calls=[
+                {
+                    "name": END_EXECUTION_TOOL.name,
+                    "args": {"summary": "ok", "confidence": 0.5},
+                    "id": "call_end",
+                }
+            ],
+        )
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="Hi"), ai_message],
+            inner_state=MockInnerState(initial_message_count=1),
+        )
+
+        result = terminate_node(state)
+
+        messages = result["uipath__agent_response_messages"]
+        assert len(messages) == 1
+        # Tool calls list should be empty or absent — end_execution was stripped.
+        # When all tool calls are stripped, model_dump may set toolCalls to [].
+        rendered_tool_calls = messages[0].get("toolCalls") or []
+        assert all(
+            tc.get("name") != END_EXECUTION_TOOL.name for tc in rendered_tool_calls
+        )
+
+
 class TestTerminateNodeNonConversational:
     """Test cases for create_terminate_node with is_conversational=False (default)."""
 

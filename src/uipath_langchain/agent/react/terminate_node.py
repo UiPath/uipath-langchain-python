@@ -12,7 +12,9 @@ from uipath.runtime.errors import UiPathErrorCategory
 
 from ...runtime.messages import UiPathChatMessagesMapper
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from .constants import UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD
 from .types import AgentGraphState
+from .utils import has_custom_conversational_output_fields
 
 
 def _handle_end_execution(
@@ -50,7 +52,12 @@ def _handle_raise_error(args: dict[str, Any]) -> NoReturn:
 def _handle_end_conversational(
     state: AgentGraphState, response_schema: type[BaseModel] | None
 ) -> dict[str, Any]:
-    """Handle conversational agent termination by returning converted messages."""
+    """Handle conversational agent termination by returning converted messages.
+
+    When the response schema declares custom fields beyond `uipath__agent_response_messages`,
+    the agent is required to call `end_execution` to provide them. Its args are merged with
+    the converted message history for the final output.
+    """
     if state.inner_state.initial_message_count is None:
         raise AgentRuntimeError(
             code=AgentRuntimeErrorCode.STATE_ERROR,
@@ -70,26 +77,71 @@ def _handle_end_conversational(
     initial_count = state.inner_state.initial_message_count
     new_messages = state.messages[initial_count:]
 
+    custom_output_fields: dict[str, Any] = {}
+    is_custom_output_schema = has_custom_conversational_output_fields(response_schema)
+    if is_custom_output_schema:
+        last_ai_message = state.messages[-1]
+        if not isinstance(last_ai_message, AIMessage):
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.ROUTING_ERROR,
+                title=f"Expected last message to be AIMessage, got {type(last_ai_message).__name__}.",
+                detail="The terminate node requires the last message to be an AIMessage with control flow tool calls.",
+                category=UiPathErrorCategory.SYSTEM,
+            )
+        last_ai_tool_calls = (
+            last_ai_message.tool_calls if last_ai_message is not None and last_ai_message.tool_calls else []
+        )
+        end_execution_call = next(
+            (tc for tc in last_ai_tool_calls if tc["name"] == END_EXECUTION_TOOL.name),
+            None,
+        )
+        if end_execution_call is None:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR,
+                title="Conversational agent with custom output fields reached termination without calling end_execution.",
+                detail=(
+                    "The conversational agent's output schema declares fields beyond "
+                    f"`{UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD}` which must be provided "
+                    "via the `end_execution` tool. The agent completed its turn without calling it."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            )
+        custom_output_fields = end_execution_call["args"]
+
     converted_messages: list[UiPathConversationMessageData] = []
 
     # For the agent-output messages, don't include tool-results. Just include agent's LLM outputs and tool-calls + inputs.
     # This is primarily since evaluations don't check for tool-results; this output represents the agent's actual choices rather than tool-results.
     if new_messages:
+        # Note: This function filters out flow control tool-calls (`end_execution`) so they don't appear in the converted message output.
         converted_messages = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
                 messages=new_messages, include_tool_results=False
             )
         )
 
-    output = {
-        "uipath__agent_response_messages": [
+    # Combine the built-in `uipath__agent_response_messages` field with the custom output fields.
+    output: dict[str, Any] = {
+        **custom_output_fields,
+        UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD: [
             msg.model_dump(by_alias=True) for msg in converted_messages
-        ]
+        ],
     }
-    validated = response_schema.model_validate(output)
+
+    try:
+        validated = response_schema.model_validate(output)
+    except ValidationError as e:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR,
+            title="Conversational agent output did not match the expected schema",
+            detail=(
+                "The conversational agent's output does not satisfy the configured output schema. "
+                f"Verify the output, and adjust the schema or the prompt. Details:\n{e}"
+            ),
+            category=UiPathErrorCategory.USER,
+        ) from e
 
     # Dump with exclude_none to prevent UiPathConversation... fields with None values from being outputted (e.g. UiPathConversationContentPartData.isTranscript).
-    # May need to revisit if other output fields are added for conversational agents, where we want nulls outputted.
     return validated.model_dump(by_alias=True, exclude_none=True)
 
 
