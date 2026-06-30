@@ -76,7 +76,7 @@ def test_resolve_gathers_ontology_context_items():
         _ontology_ctx(
             [
                 {"name": "library", "folderId": "f1"},
-                {"name": "finance", "folderId": "f2", "referenceKey": "ont-2"},
+                {"name": "finance", "folderId": "f2"},
             ]
         ),
     ]
