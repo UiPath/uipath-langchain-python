@@ -15,8 +15,8 @@ _API_FLAVOR_TO_PROVIDER: dict[APIFlavor, LLMProvider] = {
     APIFlavor.OPENAI_COMPLETIONS: LLMProvider.OPENAI,
     APIFlavor.AWS_BEDROCK_CONVERSE: LLMProvider.BEDROCK,
     APIFlavor.AWS_BEDROCK_INVOKE: LLMProvider.BEDROCK,
+    APIFlavor.ANTHROPIC_MESSAGES: LLMProvider.BEDROCK,
     APIFlavor.VERTEX_GEMINI_GENERATE_CONTENT: LLMProvider.VERTEX,
-    APIFlavor.VERTEX_ANTHROPIC_CLAUDE: LLMProvider.VERTEX,
 }
 
 
@@ -103,7 +103,7 @@ def _create_bedrock_llm(
         sampling_kwargs["temperature"] = temperature
 
     match api_flavor:
-        case APIFlavor.AWS_BEDROCK_CONVERSE:
+        case APIFlavor.AWS_BEDROCK_CONVERSE | APIFlavor.ANTHROPIC_MESSAGES:
             return UiPathChatBedrockConverse(
                 model_name=model,
                 max_tokens=max_tokens,
@@ -154,8 +154,6 @@ def _create_vertex_llm(
                 **sampling_kwargs,
                 **kwargs,
             )
-        case APIFlavor.VERTEX_ANTHROPIC_CLAUDE:
-            raise ValueError(f"api_flavor={api_flavor} is not yet supported for Vertex")
         case _:
             raise ValueError(f"Unknown api_flavor={api_flavor} for Vertex")
 
@@ -166,7 +164,9 @@ def _resolve_vendor(api_flavor: APIFlavor) -> LLMProvider:
 
 def _resolve_api_flavor(vendor: LLMProvider, model_name: str) -> APIFlavor:
     if vendor == LLMProvider.VERTEX and "claude" in model_name:
-        return APIFlavor.VERTEX_ANTHROPIC_CLAUDE
+        raise ValueError(
+            f"Anthropic Claude on Vertex is not supported for model '{model_name}'"
+        )
     return _DEFAULT_API_FLAVOR[vendor]
 
 

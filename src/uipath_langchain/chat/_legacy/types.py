@@ -17,4 +17,4 @@ class APIFlavor(StrEnum):
     AWS_BEDROCK_CONVERSE = "AwsBedrockConverse"
     AWS_BEDROCK_INVOKE = "AwsBedrockInvoke"
     VERTEX_GEMINI_GENERATE_CONTENT = "GeminiGenerateContent"
-    VERTEX_ANTHROPIC_CLAUDE = "AnthropicClaude"
+    ANTHROPIC_MESSAGES = "AnthropicMessages"

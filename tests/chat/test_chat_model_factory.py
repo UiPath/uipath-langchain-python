@@ -125,15 +125,15 @@ class TestComputeVendorAndApiFlavor:
     def test_only_api_flavor_vertex_anthropic(self):
         """Test deriving vendor from AnthropicClaude api_flavor."""
         model = {
-            "modelName": "claude-3-sonnet",
+            "modelName": "anthropic.claude-sonnet-4-6",
             "vendor": None,
-            "apiFlavor": "AnthropicClaude",
+            "apiFlavor": "AnthropicMessages",
         }
 
         vendor, api_flavor = _compute_vendor_and_api_flavor(model)
 
-        assert vendor == LLMProvider.VERTEX
-        assert api_flavor == APIFlavor.VERTEX_ANTHROPIC_CLAUDE
+        assert vendor == LLMProvider.BEDROCK
+        assert api_flavor == APIFlavor.ANTHROPIC_MESSAGES
 
     def test_only_api_flavor_vendor_missing_key(self):
         """Test when vendor key is missing entirely (not just None)."""
@@ -189,17 +189,18 @@ class TestComputeVendorAndApiFlavor:
         assert api_flavor == APIFlavor.VERTEX_GEMINI_GENERATE_CONTENT
 
     def test_only_vendor_vertex_claude_special_case(self):
-        """Test Vertex vendor with Claude in model name uses VERTEX_ANTHROPIC_CLAUDE."""
+        """Test Vertex vendor with Claude in model name raises error."""
         model = {
             "modelName": "claude-3-sonnet@20240229",
             "vendor": "VertexAi",
             "apiFlavor": None,
         }
 
-        vendor, api_flavor = _compute_vendor_and_api_flavor(model)
+        with pytest.raises(ValueError) as exc_info:
+            _compute_vendor_and_api_flavor(model)
 
-        assert vendor == LLMProvider.VERTEX
-        assert api_flavor == APIFlavor.VERTEX_ANTHROPIC_CLAUDE
+        assert "Vertex" in str(exc_info.value)
+        assert "claude-3-sonnet@20240229" in str(exc_info.value)
 
     def test_only_vendor_vertex_claude_case_sensitive(self):
         """Test that 'claude' detection is case-sensitive (lowercase only)."""
@@ -385,6 +386,31 @@ class TestGetChatModelTemperatureGating:
 
         _, kwargs = mock_cls.call_args
         assert kwargs.get("temperature") == 0.7
+
+    def test_anthropic_messages_routes_to_bedrock_converse(self, mocker):
+        """Flavor AnthropicMessages flavor must be routed to UiPathChatBedrockConverse."""
+        pytest.importorskip("langchain_aws")
+        mocker.patch(
+            "uipath_langchain.chat._legacy.chat_model_factory._get_model_info",
+            return_value={
+                "modelName": "anthropic.claude-sonnet-4-6",
+                "vendor": "AwsBedrock",
+                "apiFlavor": "AnthropicMessages",
+                "modelDetails": {"shouldSkipTemperature": False},
+            },
+        )
+        mock_cls = mocker.patch(
+            "uipath_langchain.chat._legacy.bedrock.UiPathChatBedrockConverse"
+        )
+
+        get_chat_model(
+            model="anthropic.claude-sonnet-4-6",
+            temperature=0.7,
+            max_tokens=4096,
+            agenthub_config="cfg",
+        )
+
+        mock_cls.assert_called_once()
 
     def test_gpt_openai_responses_forwards_temperature_when_flag_absent(self, mocker):
         """Older discovery payloads have ``modelDetails: null``; the gate
