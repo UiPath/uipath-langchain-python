@@ -2,15 +2,18 @@
 
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
+from pydantic import BaseModel, Field
 
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
 )
 from uipath_langchain.agent.react.utils import (
+    build_conversational_output_args_schema,
     count_consecutive_thinking_messages,
     extract_current_tool_call_index,
     find_latest_ai_message,
+    has_custom_conversational_output_fields,
 )
 
 
@@ -401,3 +404,74 @@ class TestExtractCurrentToolCallIndex:
         assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.STATE_ERROR
         )
+
+
+class TestHasCustomConversationalOutputFields:
+    """Tests for has_custom_conversational_output_fields helper."""
+
+    def test_returns_false_for_none_schema(self):
+        assert has_custom_conversational_output_fields(None) is False
+
+    def test_returns_false_when_only_response_messages_field(self):
+        class ResponseOnly(BaseModel):
+            uipath__agent_response_messages: list = Field(default_factory=list)
+
+        assert has_custom_conversational_output_fields(ResponseOnly) is False
+
+    def test_returns_true_when_extra_field_exists(self):
+        class WithExtras(BaseModel):
+            uipath__agent_response_messages: list = Field(default_factory=list)
+            handoff_target: str = "none"
+
+        assert has_custom_conversational_output_fields(WithExtras) is True
+
+    def test_returns_true_when_no_response_messages_field(self):
+        """Defensive: a schema with only custom fields still requires the new
+        node (so set_conversational_output can populate them)."""
+
+        class CustomOnly(BaseModel):
+            web_searched: str = "no"
+
+        assert has_custom_conversational_output_fields(CustomOnly) is True
+
+
+class TestBuildConversationalOutputArgsSchema:
+    """Tests for build_conversational_output_args_schema helper."""
+
+    def test_strips_response_messages_field(self):
+        class FullSchema(BaseModel):
+            uipath__agent_response_messages: list = Field(default_factory=list)
+            handoff_target: str = "none"
+            ready_for_handoff: bool = False
+
+        args_schema = build_conversational_output_args_schema(FullSchema)
+        assert "uipath__agent_response_messages" not in args_schema.model_fields
+        assert "handoff_target" in args_schema.model_fields
+        assert "ready_for_handoff" in args_schema.model_fields
+
+    def test_preserves_field_types_and_defaults(self):
+        class FullSchema(BaseModel):
+            uipath__agent_response_messages: list = Field(default_factory=list)
+            urgency: str = "low"
+
+        args_schema = build_conversational_output_args_schema(FullSchema)
+        instance = args_schema.model_validate({"urgency": "high"})
+        assert instance.urgency == "high"
+
+    def test_no_response_messages_field_passes_through(self):
+        """When the field isn't present, the result mirrors the input schema."""
+
+        class CustomOnly(BaseModel):
+            web_searched: str = "no"
+
+        args_schema = build_conversational_output_args_schema(CustomOnly)
+        assert "web_searched" in args_schema.model_fields
+
+    def test_generated_schema_name_is_distinct(self):
+        class FullSchema(BaseModel):
+            uipath__agent_response_messages: list = Field(default_factory=list)
+            web_searched: str = "no"
+
+        args_schema = build_conversational_output_args_schema(FullSchema)
+        assert args_schema.__name__ != FullSchema.__name__
+        assert "SetConversationalOutputArgs" in args_schema.__name__

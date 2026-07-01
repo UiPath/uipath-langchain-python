@@ -9,6 +9,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.runnables.graph import Edge
 from langchain_core.tools import BaseTool
 from langgraph.graph import StateGraph
+from pydantic import BaseModel, Field
 
 from uipath_langchain.agent.react.agent import create_agent
 from uipath_langchain.agent.react.init_node import create_init_node
@@ -293,3 +294,74 @@ class TestCreateAgent:
         mock_route_agent.assert_not_called()
         mock_route_agent_conversational.assert_called_once()
         mock_create_flow_control_tools.assert_not_called()
+
+
+class _ConversationalOutputSchemaWithCustomFields(BaseModel):
+    """A conversational agent's `outputSchema` that exercises the new node."""
+
+    uipath__agent_response_messages: list = Field(default_factory=list)
+    handoff_target: str = "none"
+    ready_for_handoff: bool = False
+
+
+class _ConversationalOutputSchemaNoCustomFields(BaseModel):
+    uipath__agent_response_messages: list = Field(default_factory=list)
+
+
+class TestCreateAgentGenerateConversationalOutput:
+    """Topology assertions for the GENERATE_CONVERSATIONAL_OUTPUT node."""
+
+    @pytest.fixture
+    def mock_model(self):
+        return _make_mock_model()
+
+    @pytest.fixture
+    def mock_tool_a(self):
+        return _make_mock_tool(mock_tool_a_name)
+
+    @pytest.fixture
+    def messages(self):
+        return [SystemMessage(content="You are a helpful assistant.")]
+
+    def test_node_added_when_conversational_with_custom_output(
+        self, mock_model, mock_tool_a, messages
+    ):
+        result: StateGraph[Any] = create_agent(
+            mock_model,
+            [mock_tool_a],
+            messages,
+            output_schema=_ConversationalOutputSchemaWithCustomFields,
+            config=AgentGraphConfig(is_conversational=True),
+        )
+        graph = result.compile().get_graph()
+        assert AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT in graph.nodes
+        assert Edge(
+            AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT,
+            AgentGraphNode.TERMINATE,
+        ) in set(graph.edges)
+
+    def test_node_absent_when_conversational_without_custom_output(
+        self, mock_model, mock_tool_a, messages
+    ):
+        result: StateGraph[Any] = create_agent(
+            mock_model,
+            [mock_tool_a],
+            messages,
+            output_schema=_ConversationalOutputSchemaNoCustomFields,
+            config=AgentGraphConfig(is_conversational=True),
+        )
+        graph = result.compile().get_graph()
+        assert AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT not in graph.nodes
+
+    def test_node_absent_for_autonomous_agents(self, mock_model, mock_tool_a, messages):
+        """Even when output_schema has custom fields, autonomous agents do not
+        get the new node — it is conversational-only."""
+        result: StateGraph[Any] = create_agent(
+            mock_model,
+            [mock_tool_a],
+            messages,
+            output_schema=_ConversationalOutputSchemaWithCustomFields,
+            config=AgentGraphConfig(is_conversational=False),
+        )
+        graph = result.compile().get_graph()
+        assert AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT not in graph.nodes

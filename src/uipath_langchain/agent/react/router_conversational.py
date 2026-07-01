@@ -21,31 +21,47 @@ from .types import AgentGraphNode
 logger = logging.getLogger(__name__)
 
 
-def create_route_agent_conversational(valid_targets: Container[str] | None = None):
+def create_route_agent_conversational(
+    valid_targets: Container[str] | None = None,
+    with_generate_output_node: bool = False,
+):
     """Create a routing function for conversational agents. It routes between agent and tool calls until
-    the agent response has no tool calls, then it routes to the USER_MESSAGE_WAIT node which does an interrupt.
+    the agent response has no tool calls, then it routes to either the
+    GENERATE_CONVERSATIONAL_OUTPUT node (when the agent declares custom output
+    fields) or directly to TERMINATE.
 
     Args:
-        valid_targets: Allowed routing destinations
+        valid_targets: Allowed routing destinations.
+        with_generate_output_node: When True, route AGENT-without-tool-calls to the
+            GENERATE_CONVERSATIONAL_OUTPUT node so the structured output can
+            be extracted before TERMINATE. When False, route straight to
+            TERMINATE.
     Returns:
         Routing function for LangGraph conditional edges
     """
 
     def route_agent_conversational(
         state: AgentGraphState,
-    ) -> str | Literal[AgentGraphNode.TERMINATE] | Literal[AgentGraphNode.AGENT]:
-        """Route after agent
+    ) -> (
+        str
+        | Literal[AgentGraphNode.TERMINATE]
+        | Literal[AgentGraphNode.AGENT]
+        | Literal[AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT]
+    ):
+        """Route after agent.
 
         Routing logic:
-        3. If tool calls, route to specific tool nodes (return list of tool names)
-        4. If no tool calls, route to user message wait node
-
-        Returns:
-            - str: Tool node name for sequential execution
-            - AgentGraphNode.USER_MESSAGE_WAIT: When there are no tool calls
+        - If the latest AIMessage has tool calls
+            - If pending tools, route to the next pending tool node.
+            - Otherwise: route to AGENT as all tool calls completed.
+        - Otherwise:
+            - If schema declares custom output fields: route to 
+            GENERATE_CONVERSATIONAL_OUTPUT to generate the output fields.
+            - Otherwise: route straight to TERMINATE.
 
         Raises:
-            AgentNodeRoutingException: When encountering unexpected state (empty messages, non-AIMessage, or excessive completions)
+            AgentRuntimeError: ROUTING_ERROR when state has no AIMessage, or
+                when a routed tool name is not in `valid_targets`.
         """
         last_message = find_latest_ai_message(state.messages)
         if last_message is None:
@@ -77,6 +93,10 @@ def create_route_agent_conversational(valid_targets: Container[str] | None = Non
 
             return current_tool_name
         else:
-            return AgentGraphNode.TERMINATE
+            return (
+                AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT
+                if with_generate_output_node
+                else AgentGraphNode.TERMINATE
+            )
 
     return route_agent_conversational

@@ -27,7 +27,6 @@ from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
     LLM_CALL_ATTACHMENTS_METADATA_KEY,
     _config_with_llm_call_attachments,
-    _config_without_streaming,
     _is_pii_scope_for_files,
     _resolve_job_attachment_arguments,
     create_analyze_file_tool,
@@ -1015,31 +1014,6 @@ class TestIsPiiScopeForFiles:
         assert (
             _is_pii_scope_for_files({"data": {"pii-detection-scope": "both"}}) is False
         )
-
-
-class TestConfigWithoutStreaming:
-    """Tests for _config_without_streaming — ensures TAG_NOSTREAM is injected."""
-
-    def test_adds_nostream_tag_to_empty_config(self) -> None:
-        result = _config_without_streaming(None)
-        assert TAG_NOSTREAM in result["tags"]
-
-    def test_adds_nostream_tag_to_existing_config(self) -> None:
-        config: RunnableConfig = {"tags": ["existing_tag"]}
-        result = _config_without_streaming(config)
-        assert "existing_tag" in result["tags"]
-        assert TAG_NOSTREAM in result["tags"]
-
-    def test_preserves_other_config_keys(self) -> None:
-        config: RunnableConfig = {"metadata": {"key": "value"}, "tags": ["t"]}
-        result = _config_without_streaming(config)
-        assert result["metadata"] == {"key": "value"}
-        assert TAG_NOSTREAM in result["tags"]
-
-    def test_handles_config_without_tags(self) -> None:
-        config: RunnableConfig = {"metadata": {"key": "value"}}
-        result = _config_without_streaming(config)
-        assert result["tags"] == [TAG_NOSTREAM]
 
 
 class TestConfigWithLlmCallAttachments:

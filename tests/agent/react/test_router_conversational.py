@@ -295,3 +295,66 @@ class TestRouteAgentConversationalTargetValidation:
         state = AgentGraphState(messages=[HumanMessage(content="query"), ai_message])
 
         assert route_func(state) == "unwired_tool"
+
+
+class TestRouteAgentConversationalCustomOutput:
+    """Routing for conversational agents with custom output fields.
+
+    When the schema declares fields beyond `uipath__agent_response_messages`,
+    a GENERATE_CONVERSATIONAL_OUTPUT node sits between AGENT and TERMINATE.
+    """
+
+    def test_routes_to_generate_conversational_output_when_custom_output(self):
+        """No tool calls + has_custom_output=True → GENERATE_CONVERSATIONAL_OUTPUT."""
+        route_func = create_route_agent_conversational(
+            valid_targets=[
+                AgentGraphNode.TERMINATE,
+                AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT,
+            ],
+            with_generate_output_node=True,
+        )
+        ai_message = AIMessage(content="here is my reply", tool_calls=[])
+        state = AgentGraphState(messages=[HumanMessage(content="hi"), ai_message])
+
+        assert route_func(state) == AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT
+
+    def test_routes_to_terminate_when_no_custom_output(self):
+        """No tool calls + has_custom_output=False → TERMINATE (existing path)."""
+        route_func = create_route_agent_conversational(
+            valid_targets=[AgentGraphNode.TERMINATE],
+            with_generate_output_node=False,
+        )
+        ai_message = AIMessage(content="here is my reply", tool_calls=[])
+        state = AgentGraphState(messages=[HumanMessage(content="hi"), ai_message])
+
+        assert route_func(state) == AgentGraphNode.TERMINATE
+
+    def test_has_custom_output_does_not_affect_tool_routing(self):
+        """has_custom_output=True must not change tool-routing behavior — the
+        new branch only fires when the AIMessage has no tool calls."""
+        route_func = create_route_agent_conversational(
+            valid_targets=[
+                "real_tool",
+                AgentGraphNode.TERMINATE,
+                AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT,
+            ],
+            with_generate_output_node=True,
+        )
+        ai_message = AIMessage(
+            content="calling tool",
+            tool_calls=[{"name": "real_tool", "args": {}, "id": "call_1"}],
+        )
+        state = AgentGraphState(messages=[HumanMessage(content="query"), ai_message])
+
+        assert route_func(state) == "real_tool"
+
+    def test_has_custom_output_default_false_preserves_legacy_routing(self):
+        """The new parameter defaults to False so existing callers that don't
+        opt in keep routing to TERMINATE on AGENT-without-tool-calls."""
+        route_func = create_route_agent_conversational(
+            valid_targets=[AgentGraphNode.TERMINATE]
+        )
+        ai_message = AIMessage(content="reply", tool_calls=[])
+        state = AgentGraphState(messages=[HumanMessage(content="hi"), ai_message])
+
+        assert route_func(state) == AgentGraphNode.TERMINATE

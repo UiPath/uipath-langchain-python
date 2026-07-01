@@ -1,8 +1,11 @@
 """Tests for tools/utils.py module."""
 
+from langchain_core.runnables.config import RunnableConfig
+from langgraph.constants import TAG_NOSTREAM
 from pydantic import BaseModel
 
 from uipath_langchain.agent.tools.utils import (
+    config_without_streaming,
     sanitize_dict_for_serialization,
     sanitize_tool_name,
 )
@@ -122,3 +125,29 @@ class TestSanitizeDictForSerialization:
         result = sanitize_dict_for_serialization(input_dict)
 
         assert result["obj"] is obj
+
+
+class TestConfigWithoutStreaming:
+    """Ensures TAG_NOSTREAM is injected into the runnable config so LangGraph
+    skips the LLM call's tokens in the messages stream."""
+
+    def test_adds_nostream_tag_to_empty_config(self) -> None:
+        result = config_without_streaming(None)
+        assert TAG_NOSTREAM in result["tags"]
+
+    def test_adds_nostream_tag_to_existing_config(self) -> None:
+        config: RunnableConfig = {"tags": ["existing_tag"]}
+        result = config_without_streaming(config)
+        assert "existing_tag" in result["tags"]
+        assert TAG_NOSTREAM in result["tags"]
+
+    def test_preserves_other_config_keys(self) -> None:
+        config: RunnableConfig = {"metadata": {"key": "value"}, "tags": ["t"]}
+        result = config_without_streaming(config)
+        assert result["metadata"] == {"key": "value"}
+        assert TAG_NOSTREAM in result["tags"]
+
+    def test_handles_config_without_tags(self) -> None:
+        config: RunnableConfig = {"metadata": {"key": "value"}}
+        result = config_without_streaming(config)
+        assert result["tags"] == [TAG_NOSTREAM]

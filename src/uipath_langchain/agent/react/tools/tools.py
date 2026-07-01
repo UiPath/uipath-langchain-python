@@ -7,7 +7,10 @@ from pydantic import BaseModel
 from uipath.agent.react import (
     END_EXECUTION_TOOL,
     RAISE_ERROR_TOOL,
+    SET_CONVERSATIONAL_OUTPUT_TOOL,
 )
+
+from ..utils import build_conversational_output_args_schema
 
 
 def create_end_execution_tool(
@@ -38,6 +41,24 @@ def create_raise_error_tool() -> StructuredTool:
         description=RAISE_ERROR_TOOL.description,
         args_schema=RAISE_ERROR_TOOL.args_schema,
         coroutine=raise_error_fn,
+    )
+
+
+def create_set_conversational_output_tool(
+    agent_output_schema: type[BaseModel],
+) -> StructuredTool:
+    """Called by conversational-agents at the end of the loop when custom-output
+    fields are declared. Never executed — args are extracted and intercepted during termination."""
+    input_schema = build_conversational_output_args_schema(agent_output_schema)
+
+    async def set_conversational_output_fn(**kwargs: Any) -> dict[str, Any]:
+        return kwargs
+
+    return StructuredTool(
+        name=SET_CONVERSATIONAL_OUTPUT_TOOL.name,
+        description=SET_CONVERSATIONAL_OUTPUT_TOOL.description,
+        args_schema=input_schema,
+        coroutine=set_conversational_output_fn,
     )
 
 
