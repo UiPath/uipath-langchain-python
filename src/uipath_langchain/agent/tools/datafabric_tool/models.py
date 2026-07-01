@@ -17,6 +17,12 @@ class FieldSchema(BaseModel):
     is_required: bool = False
     is_unique: bool = False
     nullable: bool = True
+    # For relationship (foreign-key) fields: the related entity's SQL table and
+    # the column to join on. The field itself stores the related record's Id, so
+    # the join is always ``related.<ref_join_key> = <this table>.<name>``.
+    ref_entity_table: str | None = None
+    ref_join_key: str = "Id"
+    ref_field_name: str | None = None
 
     @property
     def display_type(self) -> str:
@@ -24,9 +30,16 @@ class FieldSchema(BaseModel):
         modifiers = []
         if self.is_required:
             modifiers.append("required")
+        if self.is_foreign_key:
+            modifiers.append("fk")
         if modifiers:
             return f"{self.type}, {', '.join(modifiers)}"
         return self.type
+
+    @property
+    def is_relationship(self) -> bool:
+        """True when this field references another entity that can be joined."""
+        return self.is_foreign_key and self.ref_entity_table is not None
 
     @property
     def is_numeric(self) -> bool:
