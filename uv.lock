@@ -4439,7 +4439,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.13.17"
+version = "0.13.18"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4502,7 +4502,7 @@ dev = [
 requires-dist = [
     { name = "a2a-sdk", specifier = ">=0.2.0,<1.0.0" },
     { name = "boto3-stubs", marker = "extra == 'bedrock'", specifier = ">=1.41.4" },
-    { name = "deepagents", specifier = ">=0.5.3,<0.6.0" },
+    { name = "deepagents", specifier = ">=0.5.9,<0.6.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "jsonpath-ng", specifier = ">=1.7.0" },
     { name = "jsonschema-pydantic-converter", specifier = ">=0.4.0" },

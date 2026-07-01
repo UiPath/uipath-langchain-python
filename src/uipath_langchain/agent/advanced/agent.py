@@ -6,6 +6,7 @@ from typing import Any
 from deepagents import CompiledSubAgent, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
 from deepagents.backends import BackendProtocol
+from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendFactory
 from langchain.agents.structured_output import ResponseFormat
 from langchain_core.language_models import BaseChatModel
@@ -18,7 +19,11 @@ from pydantic import BaseModel
 from uipath_langchain.agent.react.job_attachments import get_job_attachment_paths
 
 from .types import AdvancedAgentGraphState
-from .utils import create_state_with_input, resolve_input_attachments
+from .utils import (
+    MEMORY_INDEX_VIRTUAL_PATH,
+    create_state_with_input,
+    resolve_input_attachments,
+)
 
 
 def create_advanced_agent(
@@ -28,8 +33,14 @@ def create_advanced_agent(
     subagents: Sequence[SubAgent | CompiledSubAgent] = (),
     backend: BackendProtocol | BackendFactory | None = None,
     response_format: ResponseFormat[Any] | None = None,
+    memory: Sequence[str] = (),
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
-    """Create a deepagents agent with planning, filesystem, and sub-agent tools."""
+    """Create a deepagents agent with planning, filesystem, and sub-agent tools.
+
+    ``memory`` is a list of file paths loaded via deepagents' ``MemoryMiddleware``:
+    each is read from ``backend`` and injected into the system prompt every turn,
+    and the model maintains them with ``edit_file``. Empty disables the middleware.
+    """
     return _create_deep_agent(
         model=model,
         system_prompt=system_prompt,
@@ -37,6 +48,7 @@ def create_advanced_agent(
         subagents=list(subagents),
         backend=backend,
         response_format=response_format,
+        memory=list(memory) or None,
     )
 
 
@@ -53,14 +65,22 @@ def create_advanced_agent_graph(
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
     With a ``FilesystemBackend``, attachment-shaped inputs are downloaded into the
-    workspace and given a ``FilePath`` before the user message is built.
+    workspace and given a ``FilePath`` before the user message is built. A
+    ``FilesystemBackend`` also enables workspace memory: deepagents'
+    ``MemoryMiddleware`` reads ``/memory/MEMORY.md`` from the backend each turn.
+    Memory stays disabled for non-filesystem backends, which carry no workspace.
     """
+    memory_sources = (
+        [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
+    )
+
     inner_graph = create_advanced_agent(
         model=model,
         tools=tools,
         system_prompt=system_prompt,
         backend=backend,
         response_format=response_format,
+        memory=memory_sources,
     )
 
     wrapper_state = create_state_with_input(input_schema)

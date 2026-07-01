@@ -18,6 +18,18 @@ from .types import AdvancedAgentGraphState
 
 logger = logging.getLogger(__name__)
 
+# --- Workspace memory layout ---
+# Durable memory lives under <workspace>/memory/: MEMORY.md is the always-loaded
+# index, entries live in <workspace>/memory/<name>.md. deepagents' MemoryMiddleware
+# handles loading/injection, but backed by the agent's FilesystemBackend (run-scoped,
+# persisted via WorkspaceHydrator) rather than the cross-run StoreBackend.
+MEMORY_DIR_NAME = "memory"
+MEMORY_INDEX_FILENAME = "MEMORY.md"
+
+# Virtual path handed to MemoryMiddleware as a source; the agent's virtual-mode
+# FilesystemBackend resolves it under the workspace root.
+MEMORY_INDEX_VIRTUAL_PATH = f"/{MEMORY_DIR_NAME}/{MEMORY_INDEX_FILENAME}"
+
 
 def create_state_with_input(
     input_schema: type[BaseModel] | None,
