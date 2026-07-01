@@ -1,0 +1,138 @@
+%% LTL Claims Processing Agent - Complete Workflow Diagram
+%% This diagram reflects the actual implementation in main.py
+
+graph TB
+    START([Start: Claim Input]) --> INIT[Initialize Input Node]
+    
+    %% Initialize Input Node
+    INIT --> INIT_VALIDATE{Validate Input<br/>Fields}
+    INIT_VALIDATE -->|Valid| INIT_MEMORY{Long-term<br/>Memory Enabled?}
+    INIT_VALIDATE -->|Invalid| ERROR_INIT[Log Validation Errors]
+    ERROR_INIT --> END_ERROR([End: Validation Failed])
+    
+    %% Memory Loading
+    INIT_MEMORY -->|Yes| LOAD_MEMORY[Load Historical Context<br/>- Similar Claims<br/>- Decision Patterns]
+    INIT_MEMORY -->|No| CREATE_PLAN
+    LOAD_MEMORY --> CREATE_PLAN[Create Plan Node]
+    
+    %% Plan Creation
+    CREATE_PLAN --> PLAN_AGENT[Orchestrator Agent<br/>GPT-4o]
+    PLAN_AGENT --> PLAN_TOOLS{Use Tools?}
+    PLAN_TOOLS -->|Yes| PLAN_TOOLS_EXEC[Execute Planning Tools]
+    PLAN_TOOLS_EXEC --> PLAN_RESULT
+    PLAN_TOOLS -->|No| PLAN_RESULT[Generate Execution Plan]
+    PLAN_RESULT --> VALIDATE_DATA
+    
+    %% Data Validation
+    VALIDATE_DATA[Validate Data Node] --> DF_QUERY[Query Data Fabric<br/>- Validate Claim ID<br/>- Validate Shipment ID]
+    DF_QUERY --> DF_RESULT{Data Found?}
+    DF_RESULT -->|Yes| DF_ENRICH[Enrich State with<br/>Data Fabric Info]
+    DF_RESULT -->|No| DF_ERROR[Add Validation Error]
+    DF_ENRICH --> DOWNLOAD_DOCS
+    DF_ERROR --> DOWNLOAD_DOCS
+    
+    %% Document Processing
+    DOWNLOAD_DOCS[Download Documents Node] --> DOCS_CHECK{Documents<br/>Available?}
+    DOCS_CHECK -->|No| ASSESS_RISK
+    DOCS_CHECK -->|Yes| DOC_AGENT[Document Processor Agent<br/>GPT-4o-mini]
+    
+    DOC_AGENT --> DOC_DOWNLOAD[Download from Storage<br/>- Shipping Documents<br/>- Damage Evidence]
+    DOC_DOWNLOAD --> DOC_EXTRACT[Extract Data via IXP<br/>- Document Understanding<br/>- Confidence Scores]
+    DOC_EXTRACT --> DOC_CONFIDENCE{Low Confidence<br/>Fields?}
+    DOC_CONFIDENCE -->|Yes| DOC_FLAG[Flag for Review]
+    DOC_CONFIDENCE -->|No| DOC_COMPLETE
+    DOC_FLAG --> DOC_COMPLETE[Store Extracted Data]
+    DOC_COMPLETE --> ASSESS_RISK
+    
+    %% Risk Assessment
+    ASSESS_RISK[Assess Risk Node] --> RISK_FACTORS[Collect Risk Factors<br/>- High Amount<br/>- Claim Type<br/>- Low Confidence<br/>- Missing Docs<br/>- Policy Violations]
+    RISK_FACTORS --> RISK_CALC[Calculate Risk Score<br/>Weighted Algorithm]
+    RISK_CALC --> RISK_AGENT[Risk Assessor Agent<br/>GPT-4o-mini]
+    RISK_AGENT --> RISK_REASONING[Generate Risk Reasoning]
+    RISK_REASONING --> RISK_LEVEL{Risk Level?}
+    RISK_LEVEL -->|Low| RISK_LOW[Risk: Low]
+    RISK_LEVEL -->|Medium| RISK_MED[Risk: Medium]
+    RISK_LEVEL -->|High| RISK_HIGH[Risk: High]
+    RISK_LOW --> VALIDATE_POLICY
+    RISK_MED --> VALIDATE_POLICY
+    RISK_HIGH --> VALIDATE_POLICY
+    
+    %% Policy Validation
+    VALIDATE_POLICY[Validate Policy Node] --> COMP_AGENT[Compliance Validator Agent<br/>GPT-4o-mini]
+    COMP_AGENT --> COMP_SEARCH[Search Knowledge Base<br/>- Claims Policies<br/>- Carrier Liability<br/>- Procedures]
+    COMP_SEARCH --> COMP_CHECK[Check Violations<br/>- Amount Limits<br/>- Carrier Liability<br/>- Required Docs]
+    COMP_CHECK --> COMP_RESULT{Violations<br/>Found?}
+    COMP_RESULT -->|Yes| COMP_VIOLATIONS[Record Violations]
+    COMP_RESULT -->|No| COMP_COMPLIANT[Mark Compliant]
+    COMP_VIOLATIONS --> EVALUATE_PROGRESS
+    COMP_COMPLIANT --> EVALUATE_PROGRESS
+    
+    %% Progress Evaluation
+    EVALUATE_PROGRESS[Evaluate Progress Node] --> EVAL_CONFIDENCE{Confidence<br/>< Threshold?}
+    EVAL_CONFIDENCE -->|Yes| EVAL_ESCALATE[Flag for Review]
+    EVAL_CONFIDENCE -->|No| EVAL_RISK{Risk Level<br/>High?}
+    EVAL_RISK -->|Yes| EVAL_ESCALATE
+    EVAL_RISK -->|No| EVAL_VIOLATIONS{Policy<br/>Violations?}
+    EVAL_VIOLATIONS -->|Yes| EVAL_ESCALATE
+    EVAL_VIOLATIONS -->|No| EVAL_ERRORS{Critical<br/>Errors?}
+    EVAL_ERRORS -->|Yes| EVAL_ESCALATE
+    EVAL_ERRORS -->|No| EVAL_CONTINUE[Continue to Decision]
+    EVAL_ESCALATE --> ESCALATE_CHECK
+    EVAL_CONTINUE --> MAKE_DECISION
+    
+    %% Human Escalation
+    ESCALATE_CHECK{Action Center<br/>Enabled?}
+    ESCALATE_CHECK -->|No| ESCALATE_SKIP[Skip Escalation]
+    ESCALATE_CHECK -->|Yes| ESCALATE_TO_HUMAN[Escalate to Human Node]
+    ESCALATE_SKIP --> MAKE_DECISION
+    
+    ESCALATE_TO_HUMAN --> AC_CREATE[Create Action Center Task<br/>- Claim Details<br/>- Risk Factors<br/>- Extracted Data]
+    AC_CREATE --> AC_WAIT[Wait for Human Decision]
+    AC_WAIT --> AC_DECISION{Human<br/>Decision?}
+    AC_DECISION -->|Approved| AC_APPROVE[Set Decision: Approved]
+    AC_DECISION -->|Denied| AC_DENY[Set Decision: Denied]
+    AC_DECISION -->|Pending| AC_PENDING[Set Decision: Pending]
+    AC_APPROVE --> MAKE_DECISION
+    AC_DENY --> MAKE_DECISION
+    AC_PENDING --> MAKE_DECISION
+    
+    %% Decision Making
+    MAKE_DECISION[Make Decision Node] --> DECISION_LLM[Decision Strategy<br/>GPT-4o]
+    DECISION_LLM --> DECISION_CONTEXT[Build Decision Context<br/>- Claim Data<br/>- Risk Assessment<br/>- Policy Compliance<br/>- Historical Context]
+    DECISION_CONTEXT --> DECISION_INVOKE[Invoke LLM Decision]
+    DECISION_INVOKE --> DECISION_PARSE[Parse Decision Response<br/>- Decision<br/>- Confidence<br/>- Reasoning]
+    DECISION_PARSE --> DECISION_VALIDATE{Valid<br/>Decision?}
+    DECISION_VALIDATE -->|No| DECISION_FALLBACK[Use Rule-Based Fallback]
+    DECISION_VALIDATE -->|Yes| DECISION_RESULT
+    DECISION_FALLBACK --> DECISION_RESULT[Store Decision]
+    DECISION_RESULT --> UPDATE_SYSTEMS
+    
+    %% Update Systems
+    UPDATE_SYSTEMS[Update Systems Node] --> UPDATE_QUEUE{Transaction<br/>Key Exists?}
+    UPDATE_QUEUE -->|Yes| QUEUE_UPDATE[Update Queue Transaction<br/>- Status<br/>- Output Data<br/>- Error Messages]
+    UPDATE_QUEUE -->|No| QUEUE_SKIP[Skip Queue Update]
+    QUEUE_UPDATE --> UPDATE_DF
+    QUEUE_SKIP --> UPDATE_DF
+    
+    UPDATE_DF[Update Data Fabric<br/>- Claim Status<br/>- Processing History<br/>- Decision Details] --> FINALIZE
+    
+    %% Finalize Output
+    FINALIZE[Finalize Output Node] --> FINALIZE_MEMORY{Long-term<br/>Memory Enabled?}
+    FINALIZE_MEMORY -->|Yes| STORE_MEMORY[Store Outcome in Memory<br/>- Decision<br/>- Confidence<br/>- Reasoning<br/>- Outcome]
+    FINALIZE_MEMORY -->|No| BUILD_OUTPUT
+    STORE_MEMORY --> BUILD_OUTPUT
+    
+    BUILD_OUTPUT[Build Output Response<br/>- Success Status<br/>- Decision<br/>- Confidence<br/>- Reasoning<br/>- Audit Trail] --> END_SUCCESS([End: Processing Complete])
+    
+    %% Styling
+    classDef agentNode fill:#e1f5ff,stroke:#0288d1,stroke-width:2px
+    classDef decisionNode fill:#fff9c4,stroke:#f57f17,stroke-width:2px
+    classDef errorNode fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successNode fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef toolNode fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    
+    class PLAN_AGENT,DOC_AGENT,RISK_AGENT,COMP_AGENT,DECISION_LLM agentNode
+    class INIT_VALIDATE,INIT_MEMORY,DOCS_CHECK,DOC_CONFIDENCE,RISK_LEVEL,COMP_RESULT,EVAL_CONFIDENCE,EVAL_RISK,EVAL_VIOLATIONS,EVAL_ERRORS,ESCALATE_CHECK,AC_DECISION,DECISION_VALIDATE,UPDATE_QUEUE,FINALIZE_MEMORY decisionNode
+    class ERROR_INIT,DF_ERROR,DOC_FLAG,COMP_VIOLATIONS,EVAL_ESCALATE errorNode
+    class END_SUCCESS,COMP_COMPLIANT,EVAL_CONTINUE successNode
+    class PLAN_TOOLS_EXEC,DF_QUERY,DOC_DOWNLOAD,DOC_EXTRACT,COMP_SEARCH,AC_CREATE,QUEUE_UPDATE,UPDATE_DF,STORE_MEMORY toolNode
