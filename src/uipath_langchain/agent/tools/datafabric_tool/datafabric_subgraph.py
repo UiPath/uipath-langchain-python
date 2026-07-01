@@ -88,14 +88,21 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
+        ontology_text: str = "",
     ) -> None:
         self._max_iterations = max_iterations
         self._execute_sql_tool = self._create_execute_sql_tool(
             entities_service, entities
         )
+        # The ontology (when configured and enabled) is fetched deterministically
+        # upstream and embedded directly in the system prompt — the inner agent
+        # still has a single tool, execute_sql.
         self._system_message = SystemMessage(
             content=datafabric_prompt_builder.build(
-                entities, resource_description, base_system_prompt
+                entities,
+                resource_description,
+                base_system_prompt,
+                ontology_text=ontology_text,
             )
         )
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
@@ -226,6 +233,7 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
+        ontology_text: str = "",
     ) -> CompiledStateGraph[Any]:
         """Create and return a compiled Data Fabric sub-graph."""
         graph = DataFabricGraph(
@@ -235,5 +243,6 @@ class DataFabricGraph:
             max_iterations,
             resource_description,
             base_system_prompt,
+            ontology_text,
         )
         return graph.compiled_graph

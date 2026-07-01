@@ -133,14 +133,35 @@ def build_sql_context(
     )
 
 
-def format_sql_context(ctx: SQLContext) -> str:
-    """Format a SQLContext as text for system prompt injection."""
+def format_sql_context(ctx: SQLContext, ontology_text: str = "") -> str:
+    """Format a SQLContext as text for system prompt injection.
+
+    Args:
+        ctx: The built SQL context (entities, prompts, constraints).
+        ontology_text: The fetched ontology OWL content. When non-empty, an
+            "Available Ontology" section embeds it as the authoritative schema
+            the LLM should ground its SQL on — mirroring how the entity set is
+            surfaced below.
+    """
     lines: list[str] = []
 
     if ctx.base_system_prompt:
         lines.append("## Agent Instructions")
         lines.append("")
         lines.append(ctx.base_system_prompt)
+        lines.append("")
+
+    if ontology_text:
+        lines.append(
+            "## Available Ontology (authoritative semantic schema)\n\n"
+            "The ontology below is the authoritative source for the exact column "
+            "names, value formats (date formats, codes, zero-padding), allowed "
+            "values, and the relationships between entities — richer and more "
+            "reliable than the field list further down, which omits value formats "
+            "and semantics. Base your column names, filter values, and joins on "
+            "it; when it and the entity tables disagree, the ontology wins.\n\n"
+            f"{ontology_text}"
+        )
         lines.append("")
 
     if ctx.sql_expert_system_prompt:
@@ -196,6 +217,7 @@ def build(
     resource_description: str = "",
     base_system_prompt: str = "",
     prompt_version: str | None = None,
+    ontology_text: str = "",
 ) -> str:
     """Build the full SQL prompt text for the inner sub-graph LLM.
 
@@ -209,6 +231,9 @@ def build(
         base_system_prompt: Optional system prompt from the outer agent.
         prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
             Defaults to the registry's default.
+        ontology_text: The fetched ontology OWL content. When non-empty, an
+            "Available Ontology" section embeds it so the LLM grounds its SQL on
+            the ontology. Empty string → no ontology section.
 
     Returns:
         Formatted prompt string for the inner LLM system message.
@@ -222,4 +247,4 @@ def build(
         base_system_prompt,
         prompt_version=prompt_version,
     )
-    return format_sql_context(ctx)
+    return format_sql_context(ctx, ontology_text=ontology_text)
