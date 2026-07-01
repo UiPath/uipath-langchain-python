@@ -2,6 +2,7 @@ import asyncio
 import os
 from typing import Any, AsyncContextManager
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from openinference.instrumentation.langchain import (
@@ -9,6 +10,7 @@ from openinference.instrumentation.langchain import (
     get_ancestor_spans,
     get_current_span,
 )
+from uipath.core.adapters import EvaluatorProtocol
 from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager
 from uipath.platform.resume_triggers import (
     UiPathResumeTriggerHandler,
@@ -23,6 +25,7 @@ from uipath.runtime import (
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._tracing import _instrument_traceable_attributes
+from uipath_langchain.governance import GovernanceCallbackHandler
 from uipath_langchain.runtime.config import LangGraphConfig
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
 from uipath_langchain.runtime.graph import LangGraphLoader
@@ -263,6 +266,10 @@ class UiPathLangGraphRuntimeFactory:
             compiled_graph: The compiled graph
             runtime_id: Unique identifier for the runtime instance
             entrypoint: Graph entrypoint name
+            **kwargs: Forwarded factory kwargs. Recognized:
+                ``evaluator`` (``EvaluatorProtocol``) — when present, the
+                factory builds a :class:`GovernanceCallbackHandler` and
+                hands it to the runtime via its ``callbacks`` arg.
 
         Returns:
             Configured runtime instance
@@ -271,10 +278,24 @@ class UiPathLangGraphRuntimeFactory:
         storage = SqliteResumableStorage(memory)
         trigger_manager = UiPathResumeTriggerHandler()
 
+        evaluator: EvaluatorProtocol | None = kwargs.get("evaluator")
+        callbacks: list[BaseCallbackHandler] | None = (
+            [
+                GovernanceCallbackHandler(
+                    evaluator=evaluator,
+                    agent_name=entrypoint,
+                    session_id=runtime_id,
+                )
+            ]
+            if evaluator is not None
+            else None
+        )
+
         base_runtime = UiPathLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
+            callbacks=callbacks,
             storage=storage,
         )
 
@@ -286,7 +307,10 @@ class UiPathLangGraphRuntimeFactory:
         )
 
     async def new_runtime(
-        self, entrypoint: str, runtime_id: str, **kwargs
+        self,
+        entrypoint: str,
+        runtime_id: str,
+        **kwargs,
     ) -> UiPathRuntimeProtocol:
         """
         Create a new LangGraph runtime instance.
@@ -294,6 +318,10 @@ class UiPathLangGraphRuntimeFactory:
         Args:
             entrypoint: Graph name from langgraph.json
             runtime_id: Unique identifier for the runtime instance
+            **kwargs: Forwarded factory kwargs. Recognized:
+                ``evaluator`` (``EvaluatorProtocol``) — when present, the
+                factory wires a :class:`GovernanceCallbackHandler` into
+                the runtime's callback list.
 
         Returns:
             Configured runtime instance with compiled graph
