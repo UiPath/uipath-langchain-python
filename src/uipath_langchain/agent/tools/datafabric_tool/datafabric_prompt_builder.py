@@ -36,6 +36,14 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
         if field.is_hidden_field or field.is_system_field:
             continue
         type_name = field.sql_type.name if field.sql_type else "unknown"
+        ref_entity_table: str | None = None
+        ref_field_name: str | None = None
+        if field.is_foreign_key or field.field_display_type == "Relationship":
+            ref_entity = getattr(field, "reference_entity", None)
+            ref_entity_table = getattr(ref_entity, "name", None)
+            ref_field = getattr(field, "reference_field", None)
+            ref_definition = getattr(ref_field, "definition", None)
+            ref_field_name = getattr(ref_definition, "name", None)
         fs = FieldSchema(
             name=field.name,
             display_name=field.display_name,
@@ -45,6 +53,8 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
             is_required=field.is_required,
             is_unique=field.is_unique,
             nullable=not field.is_required,
+            ref_entity_table=ref_entity_table,
+            ref_field_name=ref_field_name,
         )
         field_schemas.append(fs)
 
@@ -164,6 +174,8 @@ def format_sql_context(ctx: SQLContext) -> str:
     lines.append("## All available Data Fabric Entities")
     lines.append("")
 
+    entity_tables = {ec.entity_schema.entity_name for ec in ctx.entity_contexts}
+
     for entity_ctx in ctx.entity_contexts:
         entity = entity_ctx.entity_schema
         lines.append(
@@ -179,6 +191,39 @@ def format_sql_context(ctx: SQLContext) -> str:
             lines.append(f"| {field.name} | {field.display_type} |")
 
         lines.append("")
+
+        # Relationship fields store the related record's Id; spell out the join
+        # so the model doesn't compare the FK column to a human-readable value.
+        # Only surface relationships whose target entity is in this set (and thus
+        # queryable) — a dangling reference would produce an unusable join.
+        relationships = [
+            field
+            for field in entity.fields
+            if field.is_relationship and field.ref_entity_table in entity_tables
+        ]
+        if relationships:
+            lines.append(f"**Relationships for {entity.entity_name}:**")
+            lines.append(
+                f"_Join on the related entity's Id. Use LEFT JOIN to keep all {entity.entity_name} "
+                "rows (relationship may be unset); INNER JOIN when the related record must exist or "
+                "you filter on it. Project the specific related column you need — not `*`._"
+            )
+            lines.append("")
+            for field in relationships:
+                join = (
+                    f"LEFT JOIN {field.ref_entity_table} "
+                    f"ON {field.ref_entity_table}.{field.ref_join_key} = {entity.entity_name}.{field.name}"
+                )
+                repr_hint = (
+                    f", representative field `{field.ref_entity_table}.{field.ref_field_name}`"
+                    if field.ref_field_name
+                    else ""
+                )
+                lines.append(
+                    f"- `{entity.entity_name}.{field.name}` → `{field.ref_entity_table}` "
+                    f"(`{join}`{repr_hint})"
+                )
+            lines.append("")
 
         lines.append(f"**Query Patterns for {entity.entity_name}:**")
         lines.append("")
