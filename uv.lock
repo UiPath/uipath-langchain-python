@@ -4395,7 +4395,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.12.1"
+version = "2.11.18"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -4418,9 +4418,9 @@ dependencies = [
     { name = "uipath-platform" },
     { name = "uipath-runtime" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/af/45/ad063d5fa447a0ddf7ef8d7579b2c55074ac01990c3ae3df39fcb0b8b444/uipath-2.12.1.tar.gz", hash = "sha256:ade52a3cd71eec28f49392fd2de2a1984f8c3ee0dcde3904e019be7bbab6f9f7", size = 4469561, upload-time = "2026-07-01T08:46:47.884Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/b6/034ae9a0b58541ca7d719cd8a7c92a5738527ac2d28bd8e3c5b9b4fc2e56/uipath-2.11.18.tar.gz", hash = "sha256:449dcf94b2f8643db6c172b11fc7c52d75e818c6768953ad3d82e9a41f840684", size = 4466993, upload-time = "2026-06-30T16:59:16.946Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/20/23/13bbfa3aa7ad2ac9bd7f5f8f7538334f6a069251f45819053e0361685157/uipath-2.12.1-py3-none-any.whl", hash = "sha256:7ab252549c319ffa4123bd11dbc15575749d3f930f1b7c555cc440072a7befb2", size = 409178, upload-time = "2026-07-01T08:46:45.827Z" },
+    { url = "https://files.pythonhosted.org/packages/50/b5/4c2dfc05799173b08d180ebc7052b0c4de316fdd0cb2881d8f7c63f5691c/uipath-2.11.18-py3-none-any.whl", hash = "sha256:d193066f22b7bf91189230714c738ec1b69f15f820d811a2304ed0ed74173762", size = 408128, upload-time = "2026-06-30T16:59:14.121Z" },
 ]
 
 [[package]]
@@ -4439,7 +4439,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.13.16"
+version = "0.13.17"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4516,7 +4516,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=12.1.1" },
     { name = "pydantic-settings", specifier = ">=2.6.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "uipath", specifier = ">=2.12.1,<2.13.0" },
+    { name = "uipath", specifier = ">=2.11.14,<2.12.0" },
     { name = "uipath-core", specifier = ">=0.5.20,<0.6.0" },
     { name = "uipath-langchain-client", extras = ["all"], marker = "extra == 'all'", specifier = ">=1.14.1,<1.15.0" },
     { name = "uipath-langchain-client", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.14.1,<1.15.0" },
