@@ -29,14 +29,11 @@ from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
-from uipath.core.feature_flags import FeatureFlags
 from uipath.platform.entities import EntitiesService, Entity
 
 from ..datafabric_query_tool import DataFabricQueryTool
 from . import datafabric_prompt_builder
-from .datafabric_tool import DATAFABRIC_ONTOLOGY_FF
 from .models import DataFabricExecuteSqlInput
-from .ontology_fetch_tool import create_ontology_fetch_tool
 
 logger = logging.getLogger(__name__)
 
@@ -91,40 +88,25 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
-        ontologies: list[tuple[str, str | None]] | None = None,
+        ontology_text: str = "",
     ) -> None:
         self._max_iterations = max_iterations
         self._execute_sql_tool = self._create_execute_sql_tool(
             entities_service, entities
         )
-        # Inner toolset: always execute_sql; optionally an LLM-decided
-        # fetch_ontology tool, added only when ontologies are configured AND the
-        # DataFabricOntologyEnabled feature flag is on. The flag decides which
-        # graph gets built — off → the original entities-only graph.
-        inner_tools: list[BaseTool] = [self._execute_sql_tool]
-        ontology_names: list[str] = []
-        if ontologies and FeatureFlags.is_flag_enabled(
-            DATAFABRIC_ONTOLOGY_FF, default=False
-        ):
-            inner_tools.append(
-                create_ontology_fetch_tool(entities_service, ontologies)
-            )
-            ontology_names = [name for name, _ in ontologies]
-        self._tools_by_name: dict[str, BaseTool] = {
-            tool.name: tool for tool in inner_tools
-        }
-        # Surface the ontology in the system prompt only when its fetch tool is
-        # actually bound — otherwise the LLM is told to call a tool it lacks.
+        # The ontology (when configured and enabled) is fetched deterministically
+        # upstream and embedded directly in the system prompt — the inner agent
+        # still has a single tool, execute_sql.
         self._system_message = SystemMessage(
             content=datafabric_prompt_builder.build(
                 entities,
                 resource_description,
                 base_system_prompt,
-                ontology_names=ontology_names,
+                ontology_text=ontology_text,
             )
         )
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
-            inner_tools
+            [self._execute_sql_tool]
         )
 
         # Build and compile the graph
@@ -155,61 +137,28 @@ class DataFabricGraph:
         results = await asyncio.gather(
             *[self._execute_tool_call(tc) for tc in last.tool_calls]
         )
-        # End as soon as ANY tool call is a terminal success (a row-returning
-        # execute_sql). `any` not `all`: a non-terminal tool (e.g. fetch_ontology)
-        # co-issued in the same turn must not prevent a successful SQL from ending
-        # the loop.
-        any_succeeded = any(success for _, success in results)
-        # When short-circuiting to END, return ONLY the terminal-success
-        # ToolMessages so the outer agent's result is the query rows — not a
-        # co-issued fetch_ontology's OWL. On a non-terminal turn keep all messages
-        # so the inner LLM can use them on its next pass.
-        if any_succeeded:
-            tool_messages = [msg for msg, success in results if success]
-        else:
-            tool_messages = [msg for msg, _ in results]
+        tool_messages = [msg for msg, _ in results]
+        all_succeeded = bool(results) and all(success for _, success in results)
         return {
             "messages": tool_messages,
             "iteration_count": state.iteration_count + len(last.tool_calls),
-            "last_tool_success": any_succeeded,
+            "last_tool_success": all_succeeded,
         }
 
     async def _execute_tool_call(self, tool_call: ToolCall) -> tuple[ToolMessage, bool]:
-        """Execute a single tool call and report whether it is a terminal success.
-
-        Dispatches by tool name so the sub-graph can host more than one tool
-        (e.g. ``execute_sql`` and ``fetch_ontology``). Only a successful
-        ``execute_sql`` that returned rows is terminal; every other tool
-        (including ontology fetch) reports ``False`` so the router loops back to
-        the inner LLM, letting it use the result to write or refine SQL.
-        """
-        name = tool_call.get("name", "")
+        """Execute a single tool call and report whether it succeeded."""
         args = tool_call.get("args", {})
-        tool = self._tools_by_name.get(name)
-        if tool is None:
-            return (
-                ToolMessage(
-                    content=f"Unknown tool: {name}",
-                    tool_call_id=tool_call["id"],
-                    name=name,
-                ),
-                False,
-            )
         try:
-            result = await tool.ainvoke(args)
+            result = await self._execute_sql_tool.ainvoke(args)
         except ValueError as e:
-            if name == self._execute_sql_tool.name:
-                result = {
-                    "records": [],
-                    "total_count": 0,
-                    "error": str(e),
-                    "sql_query": args.get("sql_query", ""),
-                }
-            else:
-                result = f"Tool '{name}' failed: {e}"
+            result = {
+                "records": [],
+                "total_count": 0,
+                "error": str(e),
+                "sql_query": args.get("sql_query", ""),
+            }
         succeeded = (
-            name == self._execute_sql_tool.name
-            and isinstance(result, dict)
+            isinstance(result, dict)
             and not result.get("error")
             and result.get("total_count", 0) > 0
         )
@@ -217,7 +166,7 @@ class DataFabricGraph:
             ToolMessage(
                 content=str(result),
                 tool_call_id=tool_call["id"],
-                name=name,
+                name="execute_sql",
             ),
             succeeded,
         )
@@ -284,7 +233,7 @@ class DataFabricGraph:
         max_iterations: int = 25,
         resource_description: str = "",
         base_system_prompt: str = "",
-        ontologies: list[tuple[str, str | None]] | None = None,
+        ontology_text: str = "",
     ) -> CompiledStateGraph[Any]:
         """Create and return a compiled Data Fabric sub-graph."""
         graph = DataFabricGraph(
@@ -294,6 +243,6 @@ class DataFabricGraph:
             max_iterations,
             resource_description,
             base_system_prompt,
-            ontologies,
+            ontology_text,
         )
         return graph.compiled_graph

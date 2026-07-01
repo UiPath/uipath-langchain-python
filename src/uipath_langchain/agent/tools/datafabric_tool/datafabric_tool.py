@@ -95,9 +95,11 @@ class DataFabricTextQueryHandler:
             if self._compiled is not None:
                 return self._compiled
 
+            from uipath.core.feature_flags import FeatureFlags
             from uipath.platform import UiPath
 
             from .datafabric_subgraph import DataFabricGraph
+            from .ontology_fetcher import fetch_ontology_text
 
             sdk = UiPath()
             resolution = await sdk.entities.resolve_entity_set_async(self._entity_set)
@@ -106,13 +108,23 @@ class DataFabricTextQueryHandler:
                     "No Data Fabric entity schemas could be fetched. "
                     "Check entity identifiers and permissions."
                 )
+            # Deterministically fetch the ontology (when configured AND the flag
+            # is on) and embed it in the inner system prompt — the LLM never has
+            # to decide to fetch it.
+            ontology_text = ""
+            if self._ontologies and FeatureFlags.is_flag_enabled(
+                DATAFABRIC_ONTOLOGY_FF, default=False
+            ):
+                ontology_text = await fetch_ontology_text(
+                    resolution.entities_service, self._ontologies
+                )
             self._compiled = DataFabricGraph.create(
                 llm=self._llm,
                 entities=resolution.entities,
                 entities_service=resolution.entities_service,
                 resource_description=self._resource_description,
                 base_system_prompt=self._base_system_prompt,
-                ontologies=self._ontologies,
+                ontology_text=ontology_text,
             )
             return self._compiled
 

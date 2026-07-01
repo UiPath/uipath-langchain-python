@@ -94,12 +94,3 @@ class DataFabricExecuteSqlInput(BaseModel):
             "Use exact table and column names from the entity schemas."
         ),
     )
-
-
-class OntologyFetchInput(BaseModel):
-    """Input schema for the ontology fetch tool — intentionally empty.
-
-    The ontology name is pinned from configuration, never supplied by the
-    LLM, so the model cannot redirect the fetch to an arbitrary resource. The
-    tool simply triggers a fetch of the configured ontology.
-    """
