@@ -72,12 +72,14 @@ class AwsBedrockCompletionsPassthroughClient:
         agenthub_config: Optional[str] = None,
         byo_connection_id: Optional[str] = None,
         header_capture: HeaderCapture | None = None,
+        trace_context_extra_baggage: Optional[list[str]] = None,
     ):
         self.model = model
         self.token = token
         self.api_flavor = api_flavor
         self.agenthub_config = agenthub_config
         self.byo_connection_id = byo_connection_id
+        self._trace_context_extra_baggage = trace_context_extra_baggage
         self._vendor = "awsbedrock"
         self._url: Optional[str] = None
         self._is_override: bool = False
@@ -182,7 +184,9 @@ class AwsBedrockCompletionsPassthroughClient:
         )
         headers["X-UiPath-LlmGateway-ApiFlavor"] = self.api_flavor
         headers["X-UiPath-Streaming-Enabled"] = streaming
-        headers.update(build_trace_context_headers(extra_baggage=["source=agents"]))
+        headers.update(
+            build_trace_context_headers(extra_baggage=self._trace_context_extra_baggage)
+        )
 
         request.headers.update(headers)
 
@@ -204,6 +208,7 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
         byo_connection_id: Optional[str] = None,
         retryer: Optional[Retrying] = None,
         aretryer: Optional[AsyncRetrying] = None,
+        trace_context_extra_baggage: Optional[list[str]] = None,
         **kwargs,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -229,6 +234,7 @@ class UiPathChatBedrockConverse(ChatBedrockConverse):
             api_flavor="converse",
             agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
+            trace_context_extra_baggage=trace_context_extra_baggage,
         )
 
         kwargs["client"] = passthrough_client.get_client()
@@ -266,6 +272,7 @@ class UiPathChatBedrock(ChatBedrock):
         byo_connection_id: Optional[str] = None,
         retryer: Optional[Retrying] = None,
         aretryer: Optional[AsyncRetrying] = None,
+        trace_context_extra_baggage: Optional[list[str]] = None,
         **kwargs,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -294,6 +301,7 @@ class UiPathChatBedrock(ChatBedrock):
             agenthub_config=agenthub_config,
             byo_connection_id=byo_connection_id,
             header_capture=header_capture,
+            trace_context_extra_baggage=trace_context_extra_baggage,
         )
 
         kwargs["client"] = passthrough_client.get_client()

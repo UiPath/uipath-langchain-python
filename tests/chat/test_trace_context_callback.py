@@ -68,7 +68,7 @@ class TestTraceContextHeadersCallback:
         ctx.span_id = 0x1122334455667788
         mock_span.get_span_context.return_value = ctx
 
-        cb = _TraceContextHeadersCallback()
+        cb = _TraceContextHeadersCallback(trace_context_extra_baggage=["source=agents"])
         with (
             patch(
                 "uipath.core.tracing.span_utils.UiPathSpanUtils"
@@ -86,6 +86,29 @@ class TestTraceContextHeadersCallback:
         assert headers["x-uipath-traceparent-id"].startswith("00-")
         assert "x-uipath-tracebaggage" in headers
         assert "source=agents" in headers["x-uipath-tracebaggage"]
+
+    def test_uses_no_extra_baggage_by_default(self) -> None:
+        cb = _TraceContextHeadersCallback()
+        with patch(
+            "uipath_langchain.chat.chat_model_factory.build_trace_context_headers",
+            return_value={},
+        ) as mock_build_trace_context_headers:
+            cb._merge_headers()
+
+        mock_build_trace_context_headers.assert_called_once_with(extra_baggage=None)
+
+    def test_forwards_extra_baggage(self) -> None:
+        extra_baggage = ["source=agents", "executionType=1", "jobKey=job-123"]
+        cb = _TraceContextHeadersCallback(trace_context_extra_baggage=extra_baggage)
+        with patch(
+            "uipath_langchain.chat.chat_model_factory.build_trace_context_headers",
+            return_value={},
+        ) as mock_build_trace_context_headers:
+            cb._merge_headers()
+
+        mock_build_trace_context_headers.assert_called_once_with(
+            extra_baggage=extra_baggage
+        )
 
     def test_returns_empty_when_flag_disabled(self) -> None:
         FeatureFlags.configure_flags({"EnableTraceContextHeaders": False})
@@ -131,11 +154,35 @@ class TestEnsureTraceContextCallback:
         count = sum(1 for cb in result if isinstance(cb, _TraceContextHeadersCallback))
         assert count == 1
 
+    def test_updates_existing_callback_with_extra_baggage(self) -> None:
+        callback = _TraceContextHeadersCallback()
+        extra_baggage = ["source=agents", "executionType=1"]
+
+        result = _ensure_trace_context_callback(
+            [callback],
+            trace_context_extra_baggage=extra_baggage,
+        )
+
+        assert result == [callback]
+        assert callback._trace_context_extra_baggage == extra_baggage
+
     def test_preserves_existing_callbacks(self) -> None:
         sentinel = MagicMock()
         result = _ensure_trace_context_callback([sentinel])
         assert sentinel in result
         assert any(isinstance(cb, _TraceContextHeadersCallback) for cb in result)
+
+    def test_adds_callback_with_extra_baggage(self) -> None:
+        extra_baggage = ["source=agents", "executionType=1"]
+        result = _ensure_trace_context_callback(
+            None,
+            trace_context_extra_baggage=extra_baggage,
+        )
+
+        callback = next(
+            cb for cb in result if isinstance(cb, _TraceContextHeadersCallback)
+        )
+        assert callback._trace_context_extra_baggage == extra_baggage
 
 
 # ---------------------------------------------------------------------------
@@ -148,24 +195,36 @@ class TestOpenAITransportTraceContextHeaders:
 
     def test_inject_trace_context_headers_adds_headers(self) -> None:
         request = httpx.Request("POST", "https://example.com/completions")
-        with _patch_build_trace_context_headers(
+        extra_baggage = ["source=agents", "executionType=1", "jobKey=job-123"]
+        with patch(
             "uipath_langchain.chat._legacy.openai.build_trace_context_headers",
-        ):
-            _inject_trace_context_headers(request)
+            return_value=dict(_MOCK_TRACE_HEADERS),
+        ) as mock_build_trace_context_headers:
+            _inject_trace_context_headers(
+                request,
+                trace_context_extra_baggage=extra_baggage,
+            )
 
         for key, value in _MOCK_TRACE_HEADERS.items():
             assert request.headers[key] == value
+        mock_build_trace_context_headers.assert_called_once_with(
+            extra_baggage=extra_baggage
+        )
 
     def test_sync_transport_calls_inject_trace_context(self) -> None:
         from uipath_langchain.chat._legacy.openai import UiPathSyncURLRewriteTransport
 
-        transport = UiPathSyncURLRewriteTransport()
+        extra_baggage = ["source=agents", "executionType=1"]
+        transport = UiPathSyncURLRewriteTransport(
+            trace_context_extra_baggage=extra_baggage
+        )
         request = httpx.Request("POST", "https://example.com/completions")
 
         with (
-            _patch_build_trace_context_headers(
+            patch(
                 "uipath_langchain.chat._legacy.openai.build_trace_context_headers",
-            ),
+                return_value=dict(_MOCK_TRACE_HEADERS),
+            ) as mock_build_trace_context_headers,
             patch.object(
                 httpx.HTTPTransport,
                 "handle_request",
@@ -176,17 +235,22 @@ class TestOpenAITransportTraceContextHeaders:
 
         for key, value in _MOCK_TRACE_HEADERS.items():
             assert request.headers[key] == value
+        mock_build_trace_context_headers.assert_called_once_with(
+            extra_baggage=extra_baggage
+        )
 
     async def test_async_transport_calls_inject_trace_context(self) -> None:
         from uipath_langchain.chat._legacy.openai import UiPathURLRewriteTransport
 
-        transport = UiPathURLRewriteTransport()
+        extra_baggage = ["source=agents", "executionType=1"]
+        transport = UiPathURLRewriteTransport(trace_context_extra_baggage=extra_baggage)
         request = httpx.Request("POST", "https://example.com/completions")
 
         with (
-            _patch_build_trace_context_headers(
+            patch(
                 "uipath_langchain.chat._legacy.openai.build_trace_context_headers",
-            ),
+                return_value=dict(_MOCK_TRACE_HEADERS),
+            ) as mock_build_trace_context_headers,
             patch.object(
                 httpx.AsyncHTTPTransport,
                 "handle_async_request",
@@ -197,6 +261,9 @@ class TestOpenAITransportTraceContextHeaders:
 
         for key, value in _MOCK_TRACE_HEADERS.items():
             assert request.headers[key] == value
+        mock_build_trace_context_headers.assert_called_once_with(
+            extra_baggage=extra_baggage
+        )
 
     def test_inject_trace_context_headers_noop_when_empty(self) -> None:
         """When build_trace_context_headers returns {}, no headers are added."""
@@ -204,10 +271,11 @@ class TestOpenAITransportTraceContextHeaders:
         with patch(
             "uipath_langchain.chat._legacy.openai.build_trace_context_headers",
             return_value={},
-        ):
+        ) as mock_build_trace_context_headers:
             _inject_trace_context_headers(request)
 
         assert "x-uipath-traceparent-id" not in request.headers
+        mock_build_trace_context_headers.assert_called_once_with(extra_baggage=None)
 
 
 # ---------------------------------------------------------------------------
@@ -222,8 +290,10 @@ class TestVertexTransportTraceContextHeaders:
         pytest.importorskip("google.genai")
         from uipath_langchain.chat._legacy.vertex import _UrlRewriteTransport
 
+        extra_baggage = ["source=agents", "executionType=1"]
         transport = _UrlRewriteTransport(
-            gateway_url="https://gateway.example.com/completions"
+            gateway_url="https://gateway.example.com/completions",
+            trace_context_extra_baggage=extra_baggage,
         )
         request = httpx.Request(
             "POST",
@@ -231,9 +301,10 @@ class TestVertexTransportTraceContextHeaders:
         )
 
         with (
-            _patch_build_trace_context_headers(
+            patch(
                 "uipath_langchain.chat._legacy.vertex.build_trace_context_headers",
-            ),
+                return_value=dict(_MOCK_TRACE_HEADERS),
+            ) as mock_build_trace_context_headers,
             patch.object(
                 httpx.HTTPTransport, "handle_request", return_value=httpx.Response(200)
             ),
@@ -242,13 +313,18 @@ class TestVertexTransportTraceContextHeaders:
 
         for key, value in _MOCK_TRACE_HEADERS.items():
             assert request.headers[key] == value
+        mock_build_trace_context_headers.assert_called_once_with(
+            extra_baggage=extra_baggage
+        )
 
     async def test_async_transport_injects_trace_headers(self) -> None:
         pytest.importorskip("google.genai")
         from uipath_langchain.chat._legacy.vertex import _AsyncUrlRewriteTransport
 
+        extra_baggage = ["source=agents", "executionType=1"]
         transport = _AsyncUrlRewriteTransport(
-            gateway_url="https://gateway.example.com/completions"
+            gateway_url="https://gateway.example.com/completions",
+            trace_context_extra_baggage=extra_baggage,
         )
         request = httpx.Request(
             "POST",
@@ -256,9 +332,10 @@ class TestVertexTransportTraceContextHeaders:
         )
 
         with (
-            _patch_build_trace_context_headers(
+            patch(
                 "uipath_langchain.chat._legacy.vertex.build_trace_context_headers",
-            ),
+                return_value=dict(_MOCK_TRACE_HEADERS),
+            ) as mock_build_trace_context_headers,
             patch.object(
                 httpx.AsyncHTTPTransport,
                 "handle_async_request",
@@ -269,6 +346,9 @@ class TestVertexTransportTraceContextHeaders:
 
         for key, value in _MOCK_TRACE_HEADERS.items():
             assert request.headers[key] == value
+        mock_build_trace_context_headers.assert_called_once_with(
+            extra_baggage=extra_baggage
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -285,10 +365,12 @@ class TestBedrockTransportTraceContextHeaders:
             AwsBedrockCompletionsPassthroughClient,
         )
 
+        extra_baggage = ["source=agents", "executionType=1", "jobKey=job-123"]
         passthrough = AwsBedrockCompletionsPassthroughClient(
             model="anthropic.claude-haiku-4-5-20251001",
             token="test-token",
             api_flavor="converse",
+            trace_context_extra_baggage=extra_baggage,
         )
 
         class _Req:
@@ -297,9 +379,10 @@ class TestBedrockTransportTraceContextHeaders:
 
         request = _Req()
         with (
-            _patch_build_trace_context_headers(
+            patch(
                 "uipath_langchain.chat._legacy.bedrock.build_trace_context_headers",
-            ),
+                return_value=dict(_MOCK_TRACE_HEADERS),
+            ) as mock_build_trace_context_headers,
             patch.object(
                 passthrough, "_resolve_url", return_value=("https://gateway/x", False)
             ),
@@ -308,6 +391,9 @@ class TestBedrockTransportTraceContextHeaders:
 
         for key, value in _MOCK_TRACE_HEADERS.items():
             assert request.headers[key] == value
+        mock_build_trace_context_headers.assert_called_once_with(
+            extra_baggage=extra_baggage
+        )
 
 
 # ---------------------------------------------------------------------------

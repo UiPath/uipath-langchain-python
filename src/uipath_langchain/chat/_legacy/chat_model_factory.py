@@ -43,6 +43,7 @@ def _create_openai_llm(
     max_tokens: int | None,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    trace_context_extra_baggage: list[str] | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create UiPathChatOpenAI for OpenAI models via LLMGateway."""
@@ -63,6 +64,7 @@ def _create_openai_llm(
                 api_version=azure_open_ai_latest_api_version,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
+                trace_context_extra_baggage=trace_context_extra_baggage,
                 output_version="v1",
                 **sampling_kwargs,
                 **kwargs,
@@ -75,6 +77,7 @@ def _create_openai_llm(
                 api_version=azure_open_ai_latest_api_version,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
+                trace_context_extra_baggage=trace_context_extra_baggage,
                 output_version="v1",
                 **sampling_kwargs,
                 **kwargs,
@@ -90,6 +93,7 @@ def _create_bedrock_llm(
     max_tokens: int | None,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    trace_context_extra_baggage: list[str] | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create UiPathChatBedrockConverse for Claude models via LLMGateway."""
@@ -109,6 +113,7 @@ def _create_bedrock_llm(
                 max_tokens=max_tokens,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
+                trace_context_extra_baggage=trace_context_extra_baggage,
                 output_version="v1",
                 **sampling_kwargs,
                 **kwargs,
@@ -119,6 +124,7 @@ def _create_bedrock_llm(
                 max_tokens=max_tokens,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
+                trace_context_extra_baggage=trace_context_extra_baggage,
                 output_version="v1",
                 **sampling_kwargs,
                 **kwargs,
@@ -134,6 +140,7 @@ def _create_vertex_llm(
     max_tokens: int | None,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    trace_context_extra_baggage: list[str] | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create UiPathChatVertex for Gemini models via LLMGateway."""
@@ -150,6 +157,7 @@ def _create_vertex_llm(
                 max_tokens=max_tokens,
                 agenthub_config=agenthub_config,
                 byo_connection_id=byo_connection_id,
+                trace_context_extra_baggage=trace_context_extra_baggage,
                 output_version="v1",
                 **sampling_kwargs,
                 **kwargs,
@@ -248,6 +256,7 @@ def get_chat_model(
     max_tokens: int | None,
     agenthub_config: str,
     byo_connection_id: str | None = None,
+    trace_context_extra_baggage: list[str] | None = None,
     **kwargs: Any,
 ) -> BaseChatModel:
     """Create and configure LLM instance using LLMGateway API.
@@ -272,7 +281,8 @@ def get_chat_model(
                 effective_temperature,
                 max_tokens,
                 agenthub_config,
-                byo_connection_id,
+                byo_connection_id=byo_connection_id,
+                trace_context_extra_baggage=trace_context_extra_baggage,
                 **kwargs,
             )
         case LLMProvider.BEDROCK:
@@ -282,7 +292,8 @@ def get_chat_model(
                 effective_temperature,
                 max_tokens,
                 agenthub_config,
-                byo_connection_id,
+                byo_connection_id=byo_connection_id,
+                trace_context_extra_baggage=trace_context_extra_baggage,
                 **kwargs,
             )
         case LLMProvider.VERTEX:
@@ -292,6 +303,7 @@ def get_chat_model(
                 effective_temperature,
                 max_tokens,
                 agenthub_config,
-                byo_connection_id,
+                byo_connection_id=byo_connection_id,
+                trace_context_extra_baggage=trace_context_extra_baggage,
                 **kwargs,
             )

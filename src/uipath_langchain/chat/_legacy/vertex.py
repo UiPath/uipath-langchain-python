@@ -79,10 +79,12 @@ class _UrlRewriteTransport(httpx.HTTPTransport):
         gateway_url: str,
         verify: bool = True,
         header_capture: HeaderCapture | None = None,
+        trace_context_extra_baggage: list[str] | None = None,
     ):
         super().__init__(verify=verify)
         self.gateway_url = gateway_url
         self.header_capture = header_capture
+        self._trace_context_extra_baggage = trace_context_extra_baggage
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         original_url = str(request.url)
@@ -98,7 +100,7 @@ class _UrlRewriteTransport(httpx.HTTPTransport):
             request.url = new_url
 
         for key, value in build_trace_context_headers(
-            extra_baggage=["source=agents"]
+            extra_baggage=self._trace_context_extra_baggage
         ).items():
             request.headers[key] = value
 
@@ -117,10 +119,12 @@ class _AsyncUrlRewriteTransport(httpx.AsyncHTTPTransport):
         gateway_url: str,
         verify: bool = True,
         header_capture: HeaderCapture | None = None,
+        trace_context_extra_baggage: list[str] | None = None,
     ):
         super().__init__(verify=verify)
         self.gateway_url = gateway_url
         self.header_capture = header_capture
+        self._trace_context_extra_baggage = trace_context_extra_baggage
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         original_url = str(request.url)
@@ -136,7 +140,7 @@ class _AsyncUrlRewriteTransport(httpx.AsyncHTTPTransport):
             request.url = new_url
 
         for key, value in build_trace_context_headers(
-            extra_baggage=["source=agents"]
+            extra_baggage=self._trace_context_extra_baggage
         ).items():
             request.headers[key] = value
 
@@ -176,6 +180,7 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         byo_connection_id: Optional[str] = None,
         retryer: Optional[Retrying] = None,
         aretryer: Optional[AsyncRetrying] = None,
+        trace_context_extra_baggage: Optional[list[str]] = None,
         **kwargs: Any,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -212,14 +217,20 @@ class UiPathChatVertex(ChatGoogleGenerativeAI):
         http_options = genai_types.HttpOptions(
             httpx_client=httpx.Client(
                 transport=_UrlRewriteTransport(
-                    uipath_url, verify=verify, header_capture=header_capture
+                    uipath_url,
+                    verify=verify,
+                    header_capture=header_capture,
+                    trace_context_extra_baggage=trace_context_extra_baggage,
                 ),
                 headers=merged_headers,
                 **client_kwargs,
             ),
             httpx_async_client=httpx.AsyncClient(
                 transport=_AsyncUrlRewriteTransport(
-                    uipath_url, verify=verify, header_capture=header_capture
+                    uipath_url,
+                    verify=verify,
+                    header_capture=header_capture,
+                    trace_context_extra_baggage=trace_context_extra_baggage,
                 ),
                 headers=merged_headers,
                 **client_kwargs,

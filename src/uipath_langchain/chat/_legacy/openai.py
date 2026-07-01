@@ -54,38 +54,53 @@ def _inject_license_ref_id(request: httpx.Request) -> None:
         request.headers["X-UiPath-License-RefId"] = license_ref_id
 
 
-def _inject_trace_context_headers(request: httpx.Request) -> None:
+def _inject_trace_context_headers(
+    request: httpx.Request,
+    trace_context_extra_baggage: list[str] | None = None,
+) -> None:
     """Inject trace context headers per-request from the active OTEL span."""
     for key, value in build_trace_context_headers(
-        extra_baggage=["source=agents"]
+        extra_baggage=trace_context_extra_baggage
     ).items():
         request.headers[key] = value
 
 
 class UiPathURLRewriteTransport(httpx.AsyncHTTPTransport):
-    def __init__(self, verify: bool = True, **kwargs):
+    def __init__(
+        self,
+        verify: bool = True,
+        trace_context_extra_baggage: list[str] | None = None,
+        **kwargs,
+    ):
         super().__init__(verify=verify, **kwargs)
+        self._trace_context_extra_baggage = trace_context_extra_baggage
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         new_url = _rewrite_openai_url(str(request.url), request.url.params)
         if new_url:
             request.url = new_url
         _inject_license_ref_id(request)
-        _inject_trace_context_headers(request)
+        _inject_trace_context_headers(request, self._trace_context_extra_baggage)
 
         return await super().handle_async_request(request)
 
 
 class UiPathSyncURLRewriteTransport(httpx.HTTPTransport):
-    def __init__(self, verify: bool = True, **kwargs):
+    def __init__(
+        self,
+        verify: bool = True,
+        trace_context_extra_baggage: list[str] | None = None,
+        **kwargs,
+    ):
         super().__init__(verify=verify, **kwargs)
+        self._trace_context_extra_baggage = trace_context_extra_baggage
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         new_url = _rewrite_openai_url(str(request.url), request.url.params)
         if new_url:
             request.url = new_url
         _inject_license_ref_id(request)
-        _inject_trace_context_headers(request)
+        _inject_trace_context_headers(request, self._trace_context_extra_baggage)
 
         return super().handle_request(request)
 
@@ -112,6 +127,7 @@ class UiPathChatOpenAI(AzureChatOpenAI):
         agenthub_config: Optional[str] = None,
         extra_headers: Optional[dict[str, str]] = None,
         byo_connection_id: Optional[str] = None,
+        trace_context_extra_baggage: Optional[list[str]] = None,
         **kwargs,
     ):
         org_id = org_id or os.getenv("UIPATH_ORGANIZATION_ID")
@@ -155,11 +171,17 @@ class UiPathChatOpenAI(AzureChatOpenAI):
             model_name=model_name,
             default_headers=self._build_headers(token, inject_routing=is_override),
             http_async_client=httpx.AsyncClient(
-                transport=UiPathURLRewriteTransport(verify=verify),
+                transport=UiPathURLRewriteTransport(
+                    verify=verify,
+                    trace_context_extra_baggage=trace_context_extra_baggage,
+                ),
                 **client_kwargs,
             ),
             http_client=httpx.Client(
-                transport=UiPathSyncURLRewriteTransport(verify=verify),
+                transport=UiPathSyncURLRewriteTransport(
+                    verify=verify,
+                    trace_context_extra_baggage=trace_context_extra_baggage,
+                ),
                 **client_kwargs,
             ),
             api_key=token,
