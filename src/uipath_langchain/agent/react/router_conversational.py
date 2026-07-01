@@ -55,7 +55,7 @@ def create_route_agent_conversational(
             - If pending tools, route to the next pending tool node.
             - Otherwise: route to AGENT as all tool calls completed.
         - Otherwise:
-            - If schema declares custom output fields: route to 
+            - If schema declares custom output fields: route to
             GENERATE_CONVERSATIONAL_OUTPUT to generate the output fields.
             - Otherwise: route straight to TERMINATE.
 

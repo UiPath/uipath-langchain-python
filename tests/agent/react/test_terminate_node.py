@@ -226,10 +226,14 @@ class TestTerminateNodeConversational:
             messages[0]["contentParts"][0]["data"]
         )
 
-    def test_conversational_custom_output_raises_when_no_tool_call(self):
-        """When the schema has custom fields but the last AIMessage doesn't
-        carry a set_conversational_output tool call, terminate raises a clear
-        OUTPUT_VALIDATION_ERROR."""
+    def test_conversational_missing_set_output_call_falls_through_to_schema_validation(
+        self,
+    ) -> None:
+        """When the schema has required custom fields but the last AIMessage
+        doesn't carry a set_conversational_output tool call, terminate does
+        NOT raise a routing error — it best-effort passes an empty custom
+        dict through, and the surrounding schema validation raises a clear
+        OUTPUT_VALIDATION_ERROR referencing the missing required field."""
 
         class ResponseSchema(BaseModel):
             uipath__agent_response_messages: list[UiPathConversationMessageData]
@@ -239,8 +243,8 @@ class TestTerminateNodeConversational:
             response_schema=ResponseSchema, is_conversational=True
         )
 
-        # Last AIMessage has no tool calls — GENERATE_CONVERSATIONAL_OUTPUT
-        # failed to call the tool (model behavior failure).
+        # Last AIMessage has no tool calls — feature could be off, or the
+        # extraction model didn't call the tool.
         agent_reply = AIMessage(content="Some reply")
         state = MockAgentGraphState(
             messages=[HumanMessage(content="hi"), agent_reply],
@@ -250,10 +254,37 @@ class TestTerminateNodeConversational:
         with pytest.raises(AgentRuntimeError) as exc_info:
             terminate_node(state)
 
+        # The error is a schema-validation error surfaced by Pydantic, not
+        # a routing error — the message references the missing required
+        # field on the response schema, not `set_conversational_output`.
         assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
             AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR
         )
-        assert "set_conversational_output" in exc_info.value.error_info.title
+        assert "handoff_target" in exc_info.value.error_info.detail
+
+    def test_conversational_no_custom_fields_no_set_output_call_succeeds(self):
+        """When the schema has no custom fields and no set_conversational_output
+        tool call was made, terminate succeeds without extracting anything."""
+
+        class ResponseSchema(BaseModel):
+            uipath__agent_response_messages: list[UiPathConversationMessageData]
+
+        terminate_node = create_terminate_node(
+            response_schema=ResponseSchema, is_conversational=True
+        )
+        agent_reply = AIMessage(content="Some reply")
+        state = MockAgentGraphState(
+            messages=[HumanMessage(content="hi"), agent_reply],
+            inner_state=MockInnerState(initial_message_count=1),
+        )
+
+        result = terminate_node(state)
+
+        # The final reply is preserved — no last-message slicing since no
+        # set_conversational_output call was found.
+        messages = result["uipath__agent_response_messages"]
+        assert len(messages) == 1
+        assert "Some reply" in str(messages[0]["contentParts"][0]["data"])
 
 
 class TestTerminateNodeNonConversational:

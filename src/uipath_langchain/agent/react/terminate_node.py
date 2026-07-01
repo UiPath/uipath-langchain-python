@@ -18,7 +18,6 @@ from ...runtime.messages import UiPathChatMessagesMapper
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from .constants import UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD
 from .types import AgentGraphState
-from .utils import has_custom_conversational_output_fields
 
 
 def _handle_end_execution(
@@ -81,22 +80,11 @@ def _handle_end_conversational(
             category=UiPathErrorCategory.SYSTEM,
         )
 
-    # Handle custom structured output fields if declared in the response schema, which are expected to be
-    # set via the set_conversational_output tool call in the last AIMessage from the GENERATE_CONVERSATIONAL_OUTPUT node.
-    has_custom_output = has_custom_conversational_output_fields(response_schema)
-    custom_output_fields: dict[str, Any] = {}
-    if has_custom_output:
-        last_ai_message = state.messages[-1] if state.messages else None
-        if not isinstance(last_ai_message, AIMessage):
-            raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.ROUTING_ERROR,
-                title=f"Expected last message to be AIMessage, got {type(last_ai_message).__name__}.",
-                detail=(
-                    "Custom output fields expected, but last message is not an AIMessage."
-                ),
-                category=UiPathErrorCategory.SYSTEM,
-            )
-        set_output_call = next(
+    # Extract structured output fields from the last AIMessage's 
+    # `set_conversational_output` tool call, when present.
+    last_ai_message = state.messages[-1] if state.messages else None
+    set_output_call = (
+        next(
             (
                 tc
                 for tc in (last_ai_message.tool_calls or [])
@@ -104,26 +92,20 @@ def _handle_end_conversational(
             ),
             None,
         )
-        if set_output_call is None:
-            raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR,
-                title="Expected set_conversational_output tool call for last AIMessage.",
-                detail=(
-                    "Custom output fields expected, but last AIMessage does not contain a "
-                    "set_conversational_output tool call."
-                ),
-                category=UiPathErrorCategory.SYSTEM,
-            )
-        custom_output_fields = dict(set_output_call["args"])
+        if isinstance(last_ai_message, AIMessage)
+        else None
+    )
+    custom_output_fields: dict[str, Any] = (
+        dict(set_output_call["args"]) if set_output_call is not None else {}
+    )
 
     initial_count = state.inner_state.initial_message_count
-    # When custom output fields are present, the last AIMessage is the
-    # GENERATE_CONVERSATIONAL_OUTPUT node's framework-internal tool call —
-    # it carries no user-visible content and must not appear in the
-    # converted `uipath__agent_response_messages` payload.
+    # Drop the GENERATE_CONVERSATIONAL_OUTPUT AIMessage from the converted
+    # response payload — it carries no user-visible content, only the
+    # framework-internal set_conversational_output tool call.
     new_messages = (
         state.messages[initial_count:-1]
-        if has_custom_output
+        if set_output_call is not None
         else state.messages[initial_count:]
     )
 

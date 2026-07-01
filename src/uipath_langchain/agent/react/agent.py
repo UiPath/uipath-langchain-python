@@ -134,6 +134,7 @@ def create_agent(
 
     with_conversational_output_node = (
         config.is_conversational
+        and config.conversational_outputs_enabled
         and has_custom_conversational_output_fields(output_schema)
     )
 

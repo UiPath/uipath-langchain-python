@@ -132,3 +132,7 @@ class AgentGraphConfig(BaseModel):
         default=False,
         description="If set, the LLM will guarantee schema validation of the tool calls.",
     )
+    conversational_outputs_enabled: bool = Field(
+        default=False,
+        description="Whether generation of custom-defined outputs for conversational agents is enabled.",
+    )
