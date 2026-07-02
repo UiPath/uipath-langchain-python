@@ -13,7 +13,7 @@ from uipath_langchain.agent.tools.datafabric_tool.ontology_fetcher import (
 
 def _entities_service(content: str = "BODY", media_type: str = "text/turtle"):
     es = MagicMock()
-    es.get_ontology_file_async = AsyncMock(
+    es.get_ontology_bundle_async = AsyncMock(
         return_value={"content": content, "mediaType": media_type}
     )
     return es
@@ -29,7 +29,7 @@ async def test_fetch_returns_content_and_media_type():
 
     assert content == "OWLBODY"
     assert media_type == "application/owl-functional"
-    es.get_ontology_file_async.assert_awaited_once_with("library", "owl", "folder-1")
+    es.get_ontology_bundle_async.assert_awaited_once_with("library", "owl", "folder-1")
 
 
 async def test_fetch_r2rml_file_type_is_passed_through():
@@ -37,12 +37,12 @@ async def test_fetch_r2rml_file_type_is_passed_through():
 
     await fetch_ontology_file(es, "library", "r2rml", None)
 
-    es.get_ontology_file_async.assert_awaited_once_with("library", "r2rml", None)
+    es.get_ontology_bundle_async.assert_awaited_once_with("library", "r2rml", None)
 
 
 async def test_fetch_raises_on_underlying_error():
     es = MagicMock()
-    es.get_ontology_file_async = AsyncMock(side_effect=RuntimeError("boom"))
+    es.get_ontology_bundle_async = AsyncMock(side_effect=RuntimeError("boom"))
 
     with pytest.raises(RuntimeError, match="boom"):
         await fetch_ontology_file(es, "library", "r2rml", None)
@@ -58,7 +58,7 @@ async def test_fetch_raises_when_oversized(monkeypatch):
 
 async def test_fetch_missing_content_defaults_empty():
     es = MagicMock()
-    es.get_ontology_file_async = AsyncMock(return_value={})
+    es.get_ontology_bundle_async = AsyncMock(return_value={})
 
     content, media_type = await fetch_ontology_file(es, "library", "owl", None)
 

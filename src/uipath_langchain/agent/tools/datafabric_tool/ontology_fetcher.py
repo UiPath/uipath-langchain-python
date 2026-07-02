@@ -2,7 +2,7 @@
 
 A Data Fabric ontology exposes typed files — OWL (the semantic schema) and R2RML
 (the ontology→table/column mapping) — via
-``EntitiesService.get_ontology_file_async``. This module provides:
+``EntitiesService.get_ontology_bundle_async``. This module provides:
 
 * :func:`fetch_ontology_file` — a thin fetch of one file's raw content, which
   **raises** on failure or oversize. Callers decide whether a given file is
@@ -48,7 +48,7 @@ async def fetch_ontology_file(
             ``ValueError`` if the body exceeds :data:`_MAX_ONTOLOGY_BYTES`.
             Callers apply the critical/optional policy (raise vs degrade).
     """
-    data = await entities_service.get_ontology_file_async(name, file_type, folder_key)
+    data = await entities_service.get_ontology_bundle_async(name, file_type, folder_key)
     content = data.get("content") or ""
     media_type = data.get("mediaType") or ""
     if len(content.encode("utf-8")) > _MAX_ONTOLOGY_BYTES:
