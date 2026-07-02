@@ -692,50 +692,40 @@ class TestCheckEscalationMemoryCache:
         )
 
         assert result is not None
+        # A single "Memory lookup" span; no "applyDynamicFewShot" child —
+        # the Studio UI renders that span type with the episodic feedback
+        # renderer, which cannot display escalation results.
         assert [span.name for span in fake_tracer.spans] == [
             "Find previous memories",
-            "Apply escalation memory",
         ]
         assert tracer_names == ["uipath_langchain.memory"]
-        lookup_span, apply_memory_span = fake_tracer.spans
-        assert lookup_span.attributes == {
-            "openinference.span.kind": "agentMemoryLookup",
-            "type": "agentMemoryLookup",
-            "span_type": "agentMemoryLookup",
-            "uipath.custom_instrumentation": True,
-            "memorySpaceName": "MemorySpace",
-            "memorySpaceId": "space-123",
-            "strategy": ESCALATION_MEMORY_STRATEGY,
-            "memoryItemsMatched": 1,
-            "result": json.dumps(
-                {
-                    "output": {
-                        "action": "approve",
-                        "reason": "meets criteria",
-                    },
-                    "outcome": "approved",
-                }
-            ),
-        }
-        assert (
-            apply_memory_span.attributes["openinference.span.kind"]
-            == "applyDynamicFewShot"
+        (lookup_span,) = fake_tracer.spans
+        assert lookup_span.attributes["openinference.span.kind"] == "agentMemoryLookup"
+        assert lookup_span.attributes["type"] == "agentMemoryLookup"
+        assert lookup_span.attributes["span_type"] == "agentMemoryLookup"
+        assert lookup_span.attributes["uipath.custom_instrumentation"] is True
+        assert lookup_span.attributes["memorySpaceName"] == "MemorySpace"
+        assert lookup_span.attributes["memorySpaceId"] == "space-123"
+        assert lookup_span.attributes["strategy"] == ESCALATION_MEMORY_STRATEGY
+        assert lookup_span.attributes["fromMemory"] is True
+        assert lookup_span.attributes["memoryItemsMatched"] == 1
+        assert lookup_span.attributes["result"] == json.dumps(
+            {
+                "output": {
+                    "action": "approve",
+                    "reason": "meets criteria",
+                },
+                "outcome": "approved",
+            }
         )
-        assert apply_memory_span.attributes["type"] == "applyDynamicFewShot"
-        assert apply_memory_span.attributes["span_type"] == "applyDynamicFewShot"
-        assert apply_memory_span.attributes["uipath.custom_instrumentation"] is True
-        assert apply_memory_span.attributes["memorySpaceName"] == "MemorySpace"
-        assert apply_memory_span.attributes["memorySpaceId"] == "space-123"
-        assert apply_memory_span.attributes["strategy"] == ESCALATION_MEMORY_STRATEGY
-        assert apply_memory_span.attributes["fromMemory"] is True
-        request_payload = json.loads(str(apply_memory_span.attributes["request"]))
+        request_payload = json.loads(str(lookup_span.attributes["request"]))
         assert request_payload["fields"][0]["keyPath"] == [
             "escalation-input",
             "Content",
         ]
         assert request_payload["fields"][0]["value"] == "Is the sky blue?"
         assert request_payload["definitionSystemPrompt"] == ""
-        response_payload = json.loads(str(apply_memory_span.attributes["response"]))
+        response_payload = json.loads(str(lookup_span.attributes["response"]))
         assert response_payload["results"][0]["answer"]["outcome"] == "approved"
         mock_record_metric.assert_called_once_with(MEMORY_CACHE_HIT_METRIC, "space-123")
 
@@ -778,16 +768,15 @@ class TestCheckEscalationMemoryCache:
 
         assert result is None
         assert tracer_names == ["uipath_langchain.memory"]
-        lookup_span, apply_memory_span = fake_tracer.spans
+        (lookup_span,) = fake_tracer.spans
         assert lookup_span.attributes["memoryItemsMatched"] == 0
         assert lookup_span.attributes["memorySpaceName"] == "MemorySpace"
+        assert lookup_span.attributes["strategy"] == ESCALATION_MEMORY_STRATEGY
+        assert lookup_span.attributes["fromMemory"] is False
         assert "result" not in lookup_span.attributes
-        assert apply_memory_span.attributes["memorySpaceName"] == "MemorySpace"
-        assert apply_memory_span.attributes["strategy"] == ESCALATION_MEMORY_STRATEGY
-        assert apply_memory_span.attributes["fromMemory"] is False
-        request_payload = json.loads(str(apply_memory_span.attributes["request"]))
+        request_payload = json.loads(str(lookup_span.attributes["request"]))
         assert request_payload["fields"][0]["value"] == "Is the sky blue?"
-        response_payload = json.loads(str(apply_memory_span.attributes["response"]))
+        response_payload = json.loads(str(lookup_span.attributes["response"]))
         assert response_payload == {"results": []}
         mock_record_metric.assert_called_once_with(
             MEMORY_CACHE_MISS_METRIC, "space-123"
@@ -813,10 +802,9 @@ class TestCheckEscalationMemoryCache:
                 uipath_sdk=mock_sdk,
             ).aretrieve({"Content": "Is the sky blue?"})
 
-        lookup_span, apply_memory_span = fake_tracer.spans
+        (lookup_span,) = fake_tracer.spans
         expected_status = (trace.StatusCode.ERROR, "RuntimeError('search down')")
         assert lookup_span.statuses == [expected_status]
-        assert apply_memory_span.statuses == [expected_status]
 
     @pytest.mark.asyncio
     @patch("uipath_langchain.agent.tools.escalation_memory._record_custom_metric")
@@ -1113,22 +1101,26 @@ class TestIngestEscalationMemory:
         assert tracer_names == ["uipath_langchain.memory"]
         assert [span.name for span in fake_tracer.spans] == ["Save escalation memory"]
         (write_span,) = fake_tracer.spans
-        assert write_span.attributes["openinference.span.kind"] == "agentMemoryWrite"
-        assert write_span.attributes["type"] == "agentMemoryWrite"
-        assert write_span.attributes["span_type"] == "agentMemoryWrite"
+        assert write_span.attributes["openinference.span.kind"] == "agentMemoryStore"
+        assert write_span.attributes["type"] == "agentMemoryStore"
+        assert write_span.attributes["span_type"] == "agentMemoryStore"
         assert write_span.attributes["uipath.custom_instrumentation"] is True
         assert write_span.attributes["memorySpaceName"] == "MemorySpace"
         assert write_span.attributes["memorySpaceId"] == "space-123"
         assert write_span.attributes["strategy"] == ESCALATION_MEMORY_STRATEGY
         assert write_span.attributes["fromMemory"] is False
         assert write_span.attributes["savedToMemory"] is True
-        # "request" captures what was saved as a JSON string the exporter
-        # parses back into an object for the Studio UI.
-        saved_request = write_span.attributes["request"]
-        assert isinstance(saved_request, str)
-        saved = json.loads(saved_request)
+        # "inputs" captures what was saved as a JSON string the exporter
+        # parses back into an object; the Studio UI shows inputs/outputs
+        # in the Results tab of "agentMemoryStore" spans.
+        saved_inputs = write_span.attributes["inputs"]
+        assert isinstance(saved_inputs, str)
+        saved = json.loads(saved_inputs)
         assert saved["answer"] == '{"approved": true}'
         assert saved["attributes"] == '{"input": "test"}'
+        assert json.loads(str(write_span.attributes["outputs"])) == {
+            "savedToMemory": True
+        }
 
     @pytest.mark.asyncio
     async def test_sets_memory_write_span_to_error_on_ingest_failure(
@@ -1158,6 +1150,9 @@ class TestIngestEscalationMemory:
 
         (write_span,) = fake_tracer.spans
         assert write_span.attributes["savedToMemory"] is False
+        assert json.loads(str(write_span.attributes["outputs"])) == {
+            "savedToMemory": False
+        }
         assert write_span.recorded_errors == [error]
         assert write_span.statuses
 
