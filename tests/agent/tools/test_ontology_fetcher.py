@@ -1,15 +1,17 @@
-"""Tests for ontology fetching (datafabric_tool/ontology_fetcher.py)."""
+"""Tests for ontology file fetching (datafabric_tool/ontology_fetcher.py)."""
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from uipath_langchain.agent.tools.datafabric_tool import ontology_fetcher
 from uipath_langchain.agent.tools.datafabric_tool.ontology_fetcher import (
-    _notation_label,
-    fetch_ontology_text,
+    fence_ontology_block,
+    fetch_ontology_file,
 )
 
 
-def _entities_service(content: str = "OWLDATA", media_type: str = "text/turtle"):
+def _entities_service(content: str = "BODY", media_type: str = "text/turtle"):
     es = MagicMock()
     es.get_ontology_file_async = AsyncMock(
         return_value={"content": content, "mediaType": media_type}
@@ -17,66 +19,67 @@ def _entities_service(content: str = "OWLDATA", media_type: str = "text/turtle")
     return es
 
 
-# --- _notation_label -------------------------------------------------------
+# --- fetch_ontology_file ----------------------------------------------------
 
 
-def test_notation_label_turtle():
-    assert _notation_label("text/turtle") == "Turtle"
-    assert _notation_label("application/ttl") == "Turtle"
+async def test_fetch_returns_content_and_media_type():
+    es = _entities_service(content="OWLBODY", media_type="application/owl-functional")
 
+    content, media_type = await fetch_ontology_file(es, "library", "owl", "folder-1")
 
-def test_notation_label_functional():
-    assert _notation_label("application/owl-functional") == "OWL Functional Notation"
-    assert _notation_label("text/ofn") == "OWL Functional Notation"
-
-
-def test_notation_label_unknown_defaults():
-    assert _notation_label("") == "Turtle or OWL Functional Notation"
-    assert _notation_label("application/json") == "Turtle or OWL Functional Notation"
-
-
-# --- fetch_ontology_text ---------------------------------------------------
-
-
-async def test_no_ontologies_returns_empty():
-    assert await fetch_ontology_text(_entities_service(), []) == ""
-
-
-async def test_single_ontology_returns_fenced_block():
-    es = _entities_service(content="OWLBODY", media_type="text/turtle")
-
-    result = await fetch_ontology_text(es, [("library", "folder-1")])
-
-    assert "ONTOLOGY: library" in result
-    assert "OWLBODY" in result
-    assert "Turtle" in result
+    assert content == "OWLBODY"
+    assert media_type == "application/owl-functional"
     es.get_ontology_file_async.assert_awaited_once_with("library", "owl", "folder-1")
 
 
-async def test_multiple_ontologies_concatenated():
-    es = _entities_service()
+async def test_fetch_r2rml_file_type_is_passed_through():
+    es = _entities_service(content="@prefix rr: <> .")
 
-    result = await fetch_ontology_text(es, [("library", None), ("finance", "f2")])
+    await fetch_ontology_file(es, "library", "r2rml", None)
 
-    assert "ONTOLOGY: library" in result
-    assert "ONTOLOGY: finance" in result
-    assert es.get_ontology_file_async.await_count == 2
+    es.get_ontology_file_async.assert_awaited_once_with("library", "r2rml", None)
 
 
-async def test_graceful_degrade_on_error():
+async def test_fetch_raises_on_underlying_error():
     es = MagicMock()
     es.get_ontology_file_async = AsyncMock(side_effect=RuntimeError("boom"))
 
-    result = await fetch_ontology_text(es, [("library", None)])
-
-    assert "unavailable" in result
-    assert "RuntimeError" in result  # the exception type is surfaced, not raised
+    with pytest.raises(RuntimeError, match="boom"):
+        await fetch_ontology_file(es, "library", "r2rml", None)
 
 
-async def test_oversized_owl_is_degraded(monkeypatch):
-    monkeypatch.setattr(ontology_fetcher, "_MAX_OWL_BYTES", 5)
+async def test_fetch_raises_when_oversized(monkeypatch):
+    monkeypatch.setattr(ontology_fetcher, "_MAX_ONTOLOGY_BYTES", 5)
     es = _entities_service(content="0123456789")  # 10 bytes > cap
 
-    result = await fetch_ontology_text(es, [("library", None)])
+    with pytest.raises(ValueError, match="size limit"):
+        await fetch_ontology_file(es, "library", "owl", None)
 
-    assert "unavailable" in result
+
+async def test_fetch_missing_content_defaults_empty():
+    es = MagicMock()
+    es.get_ontology_file_async = AsyncMock(return_value={})
+
+    content, media_type = await fetch_ontology_file(es, "library", "owl", None)
+
+    assert content == ""
+    assert media_type == ""
+
+
+# --- fence_ontology_block ---------------------------------------------------
+
+
+def test_fence_includes_type_name_and_media_type():
+    block = fence_ontology_block("library", "owl", "CONTENT", "text/turtle")
+
+    assert block.startswith("--- OWL, text/turtle: library ---")
+    assert "CONTENT" in block
+    assert block.endswith("--- END OWL: library ---")
+
+
+def test_fence_without_media_type():
+    block = fence_ontology_block("library", "r2rml", "MAP")
+
+    assert block.startswith("--- R2RML: library ---")
+    assert "MAP" in block
+    assert block.endswith("--- END R2RML: library ---")

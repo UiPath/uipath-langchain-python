@@ -1,9 +1,8 @@
-"""Tests for the ontology handling in the Data Fabric inner sub-graph.
+"""Tests for the Data Fabric inner sub-graph (``DataFabricGraph``).
 
-The ontology is fetched deterministically upstream and embedded in the inner
-system prompt; the sub-graph itself only ever binds ``execute_sql``. Covers:
-only execute_sql is bound, the ontology text is threaded into the prompt, and
-dispatch/terminal logic in the tool node.
+The sub-graph is prompt-agnostic: the caller passes a pre-built ``system_prompt``
+(entity tool and ontology tool use separate builders) and the sub-graph only ever
+binds ``execute_sql``. Covers the tool node's dispatch/terminal logic and compile.
 """
 
 from unittest.mock import AsyncMock, MagicMock
@@ -11,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.messages import AIMessage
 
-from uipath_langchain.agent.tools.datafabric_tool import datafabric_prompt_builder
 from uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph import (
     DataFabricGraph,
     DataFabricSubgraphState,
@@ -26,16 +24,13 @@ def entities_service():
 
 
 @pytest.fixture
-def make_graph(monkeypatch, entities_service):
-    # Isolate from the prompt builder; we only exercise tools/routing here.
-    monkeypatch.setattr(datafabric_prompt_builder, "build", lambda *a, **k: "SYS")
-
-    def _make(ontology_text=""):
+def make_graph(entities_service):
+    def _make(system_prompt="SYS"):
         return DataFabricGraph(
             llm=MagicMock(),
             entities=[],
             entities_service=entities_service,
-            ontology_text=ontology_text,
+            system_prompt=system_prompt,
         )
 
     return _make
@@ -45,20 +40,14 @@ def _tc(name, args=None, cid="c1"):
     return {"name": name, "args": args or {}, "id": cid, "type": "tool_call"}
 
 
-def test_ontology_text_threaded_into_prompt(monkeypatch, entities_service):
-    captured: dict = {}
-    monkeypatch.setattr(
-        datafabric_prompt_builder,
-        "build",
-        lambda *a, **k: captured.update(k) or "SYS",
-    )
-    DataFabricGraph(
+def test_system_prompt_used_verbatim(entities_service):
+    graph = DataFabricGraph(
         llm=MagicMock(),
         entities=[],
         entities_service=entities_service,
-        ontology_text="ONTOLOGY_XYZ",
+        system_prompt="MY_PROMPT",
     )
-    assert captured.get("ontology_text") == "ONTOLOGY_XYZ"
+    assert graph._system_message.content == "MY_PROMPT"
 
 
 async def test_execute_tool_call_sql_with_rows_is_terminal(make_graph):
@@ -100,12 +89,11 @@ async def test_tool_node_terminal_on_sql_rows(make_graph):
     assert out["messages"][0].name == "execute_sql"
 
 
-def test_create_returns_compiled_graph(monkeypatch, entities_service):
-    monkeypatch.setattr(datafabric_prompt_builder, "build", lambda *a, **k: "SYS")
+def test_create_returns_compiled_graph(entities_service):
     compiled = DataFabricGraph.create(
         llm=MagicMock(),
         entities=[],
         entities_service=entities_service,
-        ontology_text="onto",
+        system_prompt="SYS",
     )
     assert hasattr(compiled, "ainvoke")

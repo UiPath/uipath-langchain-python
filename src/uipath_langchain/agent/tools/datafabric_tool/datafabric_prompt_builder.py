@@ -133,57 +133,15 @@ def build_sql_context(
     )
 
 
-def format_sql_context(ctx: SQLContext, ontology_text: str = "") -> str:
-    """Format a SQLContext as text for system prompt injection.
+def render_entity_schema_sections(ctx: SQLContext) -> list[str]:
+    """Render the entity-schema tables + query patterns as prompt lines.
 
-    Args:
-        ctx: The built SQL context (entities, prompts, constraints).
-        ontology_text: The fetched ontology OWL content. When non-empty, an
-            "Available Ontology" section embeds it as the authoritative schema
-            the LLM should ground its SQL on — mirroring how the entity set is
-            surfaced below.
+    Shared by the entity-tool prompt (:func:`format_sql_context`) and the
+    ontology-tool prompt (``datafabric_ontology_prompt_builder``) so the
+    per-entity rendering stays in one place while each tool owns its own
+    top-level prompt assembly.
     """
-    lines: list[str] = []
-
-    if ctx.base_system_prompt:
-        lines.append("## Agent Instructions")
-        lines.append("")
-        lines.append(ctx.base_system_prompt)
-        lines.append("")
-
-    if ontology_text:
-        lines.append(
-            "## Available Ontology (authoritative semantic schema)\n\n"
-            "The ontology below is the authoritative source for the exact column "
-            "names, value formats (date formats, codes, zero-padding), allowed "
-            "values, and the relationships between entities — richer and more "
-            "reliable than the field list further down, which omits value formats "
-            "and semantics. Base your column names, filter values, and joins on "
-            "it; when it and the entity tables disagree, the ontology wins.\n\n"
-            f"{ontology_text}"
-        )
-        lines.append("")
-
-    if ctx.sql_expert_system_prompt:
-        lines.append("## SQL Query Generation Guidelines")
-        lines.append("")
-        lines.append(ctx.sql_expert_system_prompt)
-        lines.append("")
-
-    if ctx.constraints:
-        lines.append("## SQL Constraints")
-        lines.append("")
-        lines.append(ctx.constraints)
-        lines.append("")
-
-    if ctx.resource_description:
-        lines.append("## Entity set description")
-        lines.append("")
-        lines.append(ctx.resource_description)
-        lines.append("")
-
-    lines.append("## All available Data Fabric Entities")
-    lines.append("")
+    lines: list[str] = ["## All available Data Fabric Entities", ""]
 
     for entity_ctx in ctx.entity_contexts:
         entity = entity_ctx.entity_schema
@@ -209,6 +167,44 @@ def format_sql_context(ctx: SQLContext, ontology_text: str = "") -> str:
             lines.append(f"| '{p.intent}' | `{p.sql}` |")
         lines.append("")
 
+    return lines
+
+
+def format_sql_context(ctx: SQLContext) -> str:
+    """Format a SQLContext as the entity-tool inner system prompt.
+
+    This is the entity tool's prompt only — it carries no ontology content. The
+    ontology tool assembles its own prompt (OWL + R2RML) in
+    ``datafabric_ontology_prompt_builder`` so the two prompts stay independent.
+    """
+    lines: list[str] = []
+
+    if ctx.base_system_prompt:
+        lines.append("## Agent Instructions")
+        lines.append("")
+        lines.append(ctx.base_system_prompt)
+        lines.append("")
+
+    if ctx.sql_expert_system_prompt:
+        lines.append("## SQL Query Generation Guidelines")
+        lines.append("")
+        lines.append(ctx.sql_expert_system_prompt)
+        lines.append("")
+
+    if ctx.constraints:
+        lines.append("## SQL Constraints")
+        lines.append("")
+        lines.append(ctx.constraints)
+        lines.append("")
+
+    if ctx.resource_description:
+        lines.append("## Entity set description")
+        lines.append("")
+        lines.append(ctx.resource_description)
+        lines.append("")
+
+    lines.extend(render_entity_schema_sections(ctx))
+
     return "\n".join(lines)
 
 
@@ -217,12 +213,12 @@ def build(
     resource_description: str = "",
     base_system_prompt: str = "",
     prompt_version: str | None = None,
-    ontology_text: str = "",
 ) -> str:
-    """Build the full SQL prompt text for the inner sub-graph LLM.
+    """Build the entity-tool inner system prompt.
 
     Combines agent system prompt, the rendered SQL strategy prompt, the
-    Calcite constraint deny-list, and entity schemas + query patterns.
+    Calcite constraint deny-list, and entity schemas + query patterns. The
+    ontology tool has its own builder (``datafabric_ontology_prompt_builder``).
 
     Args:
         entities: List of Entity objects with schema information.
@@ -231,9 +227,6 @@ def build(
         base_system_prompt: Optional system prompt from the outer agent.
         prompt_version: Optional version key (e.g. ``"v0"``, ``"v1"``).
             Defaults to the registry's default.
-        ontology_text: The fetched ontology OWL content. When non-empty, an
-            "Available Ontology" section embeds it so the LLM grounds its SQL on
-            the ontology. Empty string → no ontology section.
 
     Returns:
         Formatted prompt string for the inner LLM system message.
@@ -247,4 +240,4 @@ def build(
         base_system_prompt,
         prompt_version=prompt_version,
     )
-    return format_sql_context(ctx, ontology_text=ontology_text)
+    return format_sql_context(ctx)

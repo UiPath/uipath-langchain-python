@@ -158,39 +158,45 @@ def create_context_tool(
 ) -> StructuredTool | BaseTool | None:
     tool_name = sanitize_tool_name(resource.name)
 
-    # An ontology context is not a standalone tool — it only grounds the Data
-    # Fabric entity tool, which gathers it via resolve_context_ontologies.
+    # A Data Fabric ontology context is a standalone tool (flag-gated): the agent
+    # selects ontologies and the tool derives its entities from the R2RML mapping.
+    # With the flag off it is inert (returns None) and the agent runs without it.
     if resource.context_type == AgentContextType.DATA_FABRIC_ONTOLOGY:
-        return None
-
-    if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
-        if llm is None:
-            raise ValueError("Data Fabric entity set tools require an LLM instance")
         from uipath.core.feature_flags import FeatureFlags
 
-        from .datafabric_tool import (
-            create_datafabric_query_tool,
-            resolve_context_ontologies,
-        )
         from .datafabric_tool.datafabric_tool import (
             BASE_SYSTEM_PROMPT,
             DATAFABRIC_ONTOLOGY_FF,
         )
 
-        # Feature-gated at the entry: only gather ontologies when the flag is on,
-        # so with it off the feature is fully inert (no resolution, no prompt
-        # change) and the agent runs the original entities-only path.
-        ontologies = (
-            resolve_context_ontologies(agent.resources if agent else [])
-            if FeatureFlags.is_flag_enabled(DATAFABRIC_ONTOLOGY_FF, default=False)
-            else []
+        if not FeatureFlags.is_flag_enabled(DATAFABRIC_ONTOLOGY_FF, default=False):
+            return None
+        if llm is None:
+            raise ValueError("Data Fabric ontology tools require an LLM instance")
+
+        from .datafabric_tool.datafabric_ontology_tool import (
+            create_datafabric_ontology_tool,
         )
+
+        return create_datafabric_ontology_tool(
+            resource,
+            llm,
+            tool_name=tool_name,
+            agent_config={BASE_SYSTEM_PROMPT: _extract_system_prompt(agent)},
+        )
+
+    if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
+        if llm is None:
+            raise ValueError("Data Fabric entity set tools require an LLM instance")
+
+        from .datafabric_tool import create_datafabric_query_tool
+        from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
+
         return create_datafabric_query_tool(
             resource,
             llm,
             tool_name=tool_name,
             agent_config={BASE_SYSTEM_PROMPT: _extract_system_prompt(agent)},
-            ontologies=ontologies,
         )
 
     assert resource.settings is not None

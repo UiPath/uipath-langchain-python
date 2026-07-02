@@ -32,7 +32,6 @@ from pydantic import BaseModel
 from uipath.platform.entities import EntitiesService, Entity
 
 from ..datafabric_query_tool import DataFabricQueryTool
-from . import datafabric_prompt_builder
 from .models import DataFabricExecuteSqlInput
 
 logger = logging.getLogger(__name__)
@@ -85,26 +84,17 @@ class DataFabricGraph:
         llm: BaseChatModel,
         entities: list[Entity],
         entities_service: EntitiesService,
+        system_prompt: str,
         max_iterations: int = 25,
-        resource_description: str = "",
-        base_system_prompt: str = "",
-        ontology_text: str = "",
     ) -> None:
         self._max_iterations = max_iterations
         self._execute_sql_tool = self._create_execute_sql_tool(
             entities_service, entities
         )
-        # The ontology (when configured and enabled) is fetched deterministically
-        # upstream and embedded directly in the system prompt — the inner agent
-        # still has a single tool, execute_sql.
-        self._system_message = SystemMessage(
-            content=datafabric_prompt_builder.build(
-                entities,
-                resource_description,
-                base_system_prompt,
-                ontology_text=ontology_text,
-            )
-        )
+        # The inner agent's system prompt is built by the caller — the entity tool
+        # and the ontology tool use separate builders — so the sub-graph is
+        # prompt-agnostic. The inner agent still has a single tool, execute_sql.
+        self._system_message = SystemMessage(content=system_prompt)
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
             [self._execute_sql_tool]
         )
@@ -230,19 +220,19 @@ class DataFabricGraph:
         llm: BaseChatModel,
         entities: list[Entity],
         entities_service: EntitiesService,
+        system_prompt: str,
         max_iterations: int = 25,
-        resource_description: str = "",
-        base_system_prompt: str = "",
-        ontology_text: str = "",
     ) -> CompiledStateGraph[Any]:
-        """Create and return a compiled Data Fabric sub-graph."""
+        """Create and return a compiled Data Fabric sub-graph.
+
+        The ``system_prompt`` is built by the caller (entity tool and ontology
+        tool use separate builders), keeping this sub-graph prompt-agnostic.
+        """
         graph = DataFabricGraph(
             llm,
             entities,
             entities_service,
+            system_prompt,
             max_iterations,
-            resource_description,
-            base_system_prompt,
-            ontology_text,
         )
         return graph.compiled_graph

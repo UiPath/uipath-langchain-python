@@ -29,33 +29,10 @@ logger = logging.getLogger(__name__)
 
 BASE_SYSTEM_PROMPT = "base_system_prompt"
 
-# Feature flag gating the Data Fabric ontology grounding feature. Defaults off.
-# Checked at every entry into the feature: ontology resolution (context_tool)
-# and inner-tool binding (datafabric_subgraph). Single source of truth so the
-# flag name can never drift between call sites.
+# Feature flag gating the standalone Data Fabric ontology tool. Defaults off. The
+# gate lives at the tool-factory entry (context_tool, DATA_FABRIC_ONTOLOGY branch).
+# Single source of truth so the flag name can never drift between call sites.
 DATAFABRIC_ONTOLOGY_FF = "DataFabricOntologyEnabled"
-
-
-def resolve_context_ontologies(
-    resources: list[Any],
-) -> list[tuple[str, str | None]]:
-    """Gather ontologies from the agent's ontology context(s).
-
-    An ontology is configured in a dedicated ontology context (``contextType``
-    ``datafabricontology``) whose ``ontologySet`` mirrors the entity context's
-    ``entitySet`` — by convention at most one such context per agent. Its
-    ontologies ground the Data Fabric query tool; each carries its own
-    ``folderId``, so it is fetched from its own folder.
-    """
-    ontologies: list[tuple[str, str | None]] = []
-    for resource in resources:
-        if (
-            isinstance(resource, AgentContextResourceConfig)
-            and resource.is_datafabric_ontology
-        ):
-            for item in resource.ontology_set or []:
-                ontologies.append((item.name, item.folder_key))
-    return ontologies
 
 
 class DataFabricTextQueryHandler:
@@ -72,13 +49,11 @@ class DataFabricTextQueryHandler:
         llm: BaseChatModel,
         resource_description: str = "",
         base_system_prompt: str = "",
-        ontologies: list[tuple[str, str | None]] | None = None,
     ) -> None:
         self._entity_set = entity_set
         self._llm = llm
         self._resource_description = resource_description
         self._base_system_prompt = base_system_prompt
-        self._ontologies = ontologies or []
         self._compiled: CompiledStateGraph[Any] | None = None
         self._init_lock = asyncio.Lock()
 
@@ -95,11 +70,10 @@ class DataFabricTextQueryHandler:
             if self._compiled is not None:
                 return self._compiled
 
-            from uipath.core.feature_flags import FeatureFlags
             from uipath.platform import UiPath
 
+            from . import datafabric_prompt_builder
             from .datafabric_subgraph import DataFabricGraph
-            from .ontology_fetcher import fetch_ontology_text
 
             sdk = UiPath()
             resolution = await sdk.entities.resolve_entity_set_async(self._entity_set)
@@ -108,23 +82,16 @@ class DataFabricTextQueryHandler:
                     "No Data Fabric entity schemas could be fetched. "
                     "Check entity identifiers and permissions."
                 )
-            # Deterministically fetch the ontology (when configured AND the flag
-            # is on) and embed it in the inner system prompt — the LLM never has
-            # to decide to fetch it.
-            ontology_text = ""
-            if self._ontologies and FeatureFlags.is_flag_enabled(
-                DATAFABRIC_ONTOLOGY_FF, default=False
-            ):
-                ontology_text = await fetch_ontology_text(
-                    resolution.entities_service, self._ontologies
-                )
+            system_prompt = datafabric_prompt_builder.build(
+                resolution.entities,
+                self._resource_description,
+                self._base_system_prompt,
+            )
             self._compiled = DataFabricGraph.create(
                 llm=self._llm,
                 entities=resolution.entities,
                 entities_service=resolution.entities_service,
-                resource_description=self._resource_description,
-                base_system_prompt=self._base_system_prompt,
-                ontology_text=ontology_text,
+                system_prompt=system_prompt,
             )
             return self._compiled
 
@@ -187,7 +154,6 @@ def create_datafabric_query_tool(
     llm: BaseChatModel,
     tool_name: str = "query_datafabric",
     agent_config: dict[str, str] | None = None,
-    ontologies: list[tuple[str, str | None]] | None = None,
 ) -> BaseTool:
     """Create the ``query_datafabric`` agentic tool.
 
@@ -197,23 +163,17 @@ def create_datafabric_query_tool(
         tool_name: Sanitized tool name from the resource.
         agent_config: Optional dict with agent-level config.
             Key ``base_system_prompt`` carries the outer agent's system prompt.
-        ontologies: ``(name, folder_key)`` pairs resolved from the context's
-            nested ``ontology_set`` (see ``resolve_context_ontologies``).
-            Empty/None → no fetch tool is added. Resolution comes only from the
-            agent definition (the binding), never from process env.
     """
     config = agent_config or {}
     entity_set = [
         DataFabricEntityItem.model_validate(item.model_dump(by_alias=True))
         for item in (resource.entity_set or [])
     ]
-    ontologies = ontologies or []
     handler = DataFabricTextQueryHandler(
         entity_set=entity_set,
         llm=llm,
         resource_description=resource.description or "",
         base_system_prompt=config.get(BASE_SYSTEM_PROMPT, ""),
-        ontologies=ontologies,
     )
     entity_lines = []
     for e in entity_set:
