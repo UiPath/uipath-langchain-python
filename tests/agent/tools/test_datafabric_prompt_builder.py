@@ -75,8 +75,15 @@ def test_build_includes_domain_guidance_in_rendered_prompt():
 
 
 def test_relationship_field_renders_join_when_target_entity_present():
-    order = _fake_entity(_fake_field(), _fake_fk_field(ref_field="Name"), name="Order", display_name="Order")
-    account = _fake_entity(_fake_field(name="Name"), name="Account", display_name="Account")
+    order = _fake_entity(
+        _fake_field(),
+        _fake_fk_field(ref_field="Name"),
+        name="Order",
+        display_name="Order",
+    )
+    account = _fake_entity(
+        _fake_field(name="Name"), name="Account", display_name="Account"
+    )
 
     prompt = build([order, account])
 
@@ -107,7 +114,9 @@ def test_relationship_subsection_absent_when_no_foreign_keys():
 def test_relationship_omitted_when_target_entity_not_in_set():
     # Order references Account, but Account is not part of the entity set, so a
     # join would be unusable — the relationship line must be suppressed.
-    order = _fake_entity(_fake_field(), _fake_fk_field(), name="Order", display_name="Order")
+    order = _fake_entity(
+        _fake_field(), _fake_fk_field(), name="Order", display_name="Order"
+    )
 
     prompt = build([order])
 
