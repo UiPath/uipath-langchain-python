@@ -134,19 +134,22 @@ record's Id (a GUID) — not its name, label, or any other attribute. Comparing 
 such a column to a human-readable value (e.g. ``WHERE Account = 'Acme'``) will \
 never match.
 - To filter on, or return, the related entity's attributes, JOIN the related \
-entity on its Id and project the SPECIFIC column(s) you need — never \
-``SELECT parent.*``:
+entity on its Id and project the specific column(s) you need:
     SELECT parent.<cols>, related.<field> FROM parent LEFT JOIN related ON related.Id = parent.<relField>
   then put your filter/selection on ``related``'s columns \
 (e.g. ``WHERE related.Name = 'Acme'``). The exact join and the related entity's \
 representative field are listed under "Relationships for <table>" in the entity \
 schemas above.
-- Choose the join type by intent:
-  - LEFT JOIN when you want every parent row, including those whose \
-relationship is unset (the related columns come back NULL). Prefer this when the \
-question is about the parent entity and only enriches it with related data.
-  - INNER JOIN when the related record must exist, or when you filter on the \
-related entity's columns (e.g. "orders whose account region is APAC").
+- Choose the join type by intent (the schema tags a relationship field \
+``required`` or not):
+  - LEFT JOIN when the relationship is optional (not ``required``) and you want \
+every parent row, including those where it is unset (the related columns come \
+back NULL). Use this when the question is about the parent entity and only \
+enriches it with related data.
+  - INNER JOIN when the relationship is marked ``required`` (the related record \
+always exists, so no parent rows are dropped), when the related record must \
+otherwise exist, or when you filter on the related entity's columns \
+(e.g. "orders whose account region is APAC").
 - If you only need the related record's identifier itself, select the \
 relationship field directly — no JOIN.
 - Only equi-joins on the related entity's Id are supported \
