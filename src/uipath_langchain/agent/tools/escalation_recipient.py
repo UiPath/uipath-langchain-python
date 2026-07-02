@@ -33,7 +33,7 @@ _logger = logging.getLogger(__name__)
 
 
 # Reserved input-schema field that carries the agent-inferred ("Custom") recipient.
-RESERVED_RECIPIENT_FIELD = "escalationRecipient"
+RESERVED_RECIPIENT_FIELD = "dynamic__escalationRecipient"
 
 MAX_RECIPIENTS = 50
 MAX_EMAIL_LENGTH = 254
