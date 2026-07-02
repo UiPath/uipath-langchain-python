@@ -36,9 +36,16 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
         if field.is_hidden_field or field.is_system_field:
             continue
         type_name = field.sql_type.name if field.sql_type else "unknown"
+        # A relationship is either a declared foreign key or a Relationship-typed
+        # field; use the same condition to tag it and to extract its target, so
+        # the two never disagree.
+        is_relationship = (
+            field.is_foreign_key
+            or getattr(field, "field_display_type", None) == "Relationship"
+        )
         ref_entity_table: str | None = None
         ref_field_name: str | None = None
-        if field.is_foreign_key or field.field_display_type == "Relationship":
+        if is_relationship:
             ref_entity = getattr(field, "reference_entity", None)
             ref_entity_table = getattr(ref_entity, "name", None)
             ref_field = getattr(field, "reference_field", None)
@@ -49,7 +56,7 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
             display_name=field.display_name,
             type=type_name,
             description=field.description,
-            is_foreign_key=field.is_foreign_key,
+            is_foreign_key=is_relationship,
             is_required=field.is_required,
             is_unique=field.is_unique,
             nullable=not field.is_required,

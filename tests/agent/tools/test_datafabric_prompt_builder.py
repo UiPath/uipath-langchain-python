@@ -95,6 +95,27 @@ def test_relationship_field_renders_join_when_target_entity_present():
     assert "representative field `Account.Name`" in prompt
 
 
+def test_relationship_detected_via_display_type_without_is_foreign_key():
+    # A Relationship-typed field with is_foreign_key unset must still be tagged
+    # fk and rendered in the Relationships section.
+    relationship_field = _fake_field(
+        name="account",
+        display_name="Account",
+        field_display_type="Relationship",
+        reference_entity=SimpleNamespace(name="Account"),
+        reference_field=SimpleNamespace(definition=SimpleNamespace(name="Name")),
+    )
+    order = _fake_entity(relationship_field, name="Order", display_name="Order")
+    account = _fake_entity(
+        _fake_field(name="Name"), name="Account", display_name="Account"
+    )
+
+    prompt = build([order, account])
+
+    assert "| account | varchar, fk |" in prompt
+    assert "LEFT JOIN Account ON Account.Id = Order.account" in prompt
+
+
 def test_v1_prompt_documents_left_vs_inner_join_intent():
     prompt = build([_fake_entity(_fake_field())])
 
