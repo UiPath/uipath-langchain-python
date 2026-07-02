@@ -121,7 +121,13 @@ class EscalationMemoryRetriever:
             otel_trace = None  # type: ignore[assignment]
 
         # Span attribute keys matching what the LlmOpsHttpExporter and
-        # Studio UI expect. "openinference.span.kind" sets SpanType.
+        # Studio UI expect. "openinference.span.kind" sets SpanType;
+        # "agentMemoryLookup" renders as "Memory lookup" in the trace view.
+        # Unlike episodic memory, escalation memory emits no
+        # "applyDynamicFewShot" child span: that span type's renderer only
+        # displays episodic feedback items (response.results[].feedback),
+        # which escalation results (results[].answer) never contain, so the
+        # child rendered as an empty "Dynamic few-shot" span.
         lookup_span_ctx = (
             tracer.start_as_current_span(
                 "Find previous memories",
@@ -140,81 +146,51 @@ class EscalationMemoryRetriever:
         )
 
         with lookup_span_ctx as lookup_span:
-            fewshot_span_ctx = (
-                tracer.start_as_current_span(
-                    "Apply escalation memory",
-                    attributes={
-                        # LlmOps/Studio still key memory rendering off this
-                        # exported span type; rename it when that contract changes.
-                        "openinference.span.kind": "applyDynamicFewShot",
-                        "type": "applyDynamicFewShot",
-                        "span_type": "applyDynamicFewShot",
-                        "uipath.custom_instrumentation": True,
-                        "memorySpaceName": self.memory_space_name,
-                        "memorySpaceId": self.memory_space_id,
-                        "strategy": ESCALATION_MEMORY_STRATEGY,
-                    },
-                )
-                if tracer
-                else _noop_context()
-            )
-
-            with fewshot_span_ctx as fewshot_span:
+            try:
                 try:
-                    try:
-                        response = await sdk.memory.escalation_search_async(
-                            memory_space_id=self.memory_space_id,
-                            request=request,
-                            folder_path=self.folder_path,
-                        )
-                    except ValidationError:
-                        # Some existing escalation memories store `answer` as a
-                        # JSON string that the SDK response model rejects. The
-                        # raw API payload is still usable and parsed below.
-                        response = await self._raw_escalation_search(sdk, request)
+                    response = await sdk.memory.escalation_search_async(
+                        memory_space_id=self.memory_space_id,
+                        request=request,
+                        folder_path=self.folder_path,
+                    )
+                except ValidationError:
+                    # Some existing escalation memories store `answer` as a
+                    # JSON string that the SDK response model rejects. The
+                    # raw API payload is still usable and parsed below.
+                    response = await self._raw_escalation_search(sdk, request)
 
-                    results = _read_value(response, "results") or []
-                    results_count = _safe_len(results)
-                    cached_result = _cached_result_from_search_response(response)
-                    # Set request/response on fewshot span as JSON strings.
-                    # The exporter parses JSON strings back to objects.
-                    # The UI reads "response" to display matched memory items.
-                    if fewshot_span and hasattr(fewshot_span, "set_attribute"):
-                        fewshot_span.set_attribute(
-                            "request",
-                            _json_dumps(
-                                request.model_dump(by_alias=True, exclude_none=True)
-                            ),
-                        )
-                        fewshot_span.set_attribute(
-                            "response",
-                            _serialize_search_response_for_trace(response),
-                        )
-                        fewshot_span.set_attribute(
-                            "fromMemory", cached_result is not None
-                        )
-                except Exception as error:
-                    error_detail = repr(error)
-                    if otel_trace:
-                        if fewshot_span and hasattr(fewshot_span, "set_status"):
-                            fewshot_span.set_status(
-                                otel_trace.StatusCode.ERROR, error_detail
-                            )
-                        if lookup_span and hasattr(lookup_span, "set_status"):
-                            lookup_span.set_status(
-                                otel_trace.StatusCode.ERROR, error_detail
-                            )
-                    raise
-
-            if lookup_span and hasattr(lookup_span, "set_attribute"):
-                lookup_span.set_attribute("memoryItemsMatched", results_count)
-                if cached_result is not None:
+                results = _read_value(response, "results") or []
+                results_count = _safe_len(results)
+                cached_result = _cached_result_from_search_response(response)
+                # Set request/response as JSON strings; the exporter parses
+                # them back to objects for the Studio UI.
+                if lookup_span and hasattr(lookup_span, "set_attribute"):
                     lookup_span.set_attribute(
-                        "result",
+                        "request",
                         _json_dumps(
-                            cached_result.model_dump(by_alias=True, exclude_none=True)
+                            request.model_dump(by_alias=True, exclude_none=True)
                         ),
                     )
+                    lookup_span.set_attribute(
+                        "response",
+                        _serialize_search_response_for_trace(response),
+                    )
+                    lookup_span.set_attribute("fromMemory", cached_result is not None)
+                    lookup_span.set_attribute("memoryItemsMatched", results_count)
+                    if cached_result is not None:
+                        lookup_span.set_attribute(
+                            "result",
+                            _json_dumps(
+                                cached_result.model_dump(
+                                    by_alias=True, exclude_none=True
+                                )
+                            ),
+                        )
+            except Exception as error:
+                error_detail = repr(error)
+                if otel_trace and lookup_span and hasattr(lookup_span, "set_status"):
+                    lookup_span.set_status(otel_trace.StatusCode.ERROR, error_detail)
+                raise
 
         return cached_result
 
@@ -594,14 +570,16 @@ async def _ingest_escalation_memory(
         otel_trace = None  # type: ignore[assignment]
 
     # Span attribute keys match what the LlmOpsHttpExporter and Studio UI expect;
-    # "openinference.span.kind" sets the SpanType.
+    # "openinference.span.kind" sets the SpanType. "agentMemoryStore" renders
+    # as "Memory store" in the trace view; its Results tab displays the
+    # "inputs"/"outputs" attributes set below.
     ingest_span_ctx = (
         tracer.start_as_current_span(
             "Save escalation memory",
             attributes={
-                "openinference.span.kind": "agentMemoryWrite",
-                "type": "agentMemoryWrite",
-                "span_type": "agentMemoryWrite",
+                "openinference.span.kind": "agentMemoryStore",
+                "type": "agentMemoryStore",
+                "span_type": "agentMemoryStore",
                 "uipath.custom_instrumentation": True,
                 "memorySpaceName": memory_space_name or "",
                 "memorySpaceId": memory_space_id,
@@ -624,11 +602,11 @@ async def _ingest_escalation_memory(
                 user_id=normalized_user_id,
             )
             # Record what was saved as a JSON string; the exporter parses it
-            # back to an object and the Studio UI reads "request" to display
-            # the persisted memory item. Mirrors the lookup span's "request".
+            # back to an object and the Studio UI shows "inputs"/"outputs"
+            # in the Results tab of "agentMemoryStore" spans.
             if ingest_span and hasattr(ingest_span, "set_attribute"):
                 ingest_span.set_attribute(
-                    "request",
+                    "inputs",
                     _json_dumps(request.model_dump(by_alias=True, exclude_none=True)),
                 )
             sdk = UiPath()
@@ -639,12 +617,18 @@ async def _ingest_escalation_memory(
             )
             if ingest_span and hasattr(ingest_span, "set_attribute"):
                 ingest_span.set_attribute("savedToMemory", True)
+                ingest_span.set_attribute(
+                    "outputs", _json_dumps({"savedToMemory": True})
+                )
             logger.info(
                 "Ingested escalation outcome into memory space '%s'", memory_space_id
             )
         except Exception as error:
             if ingest_span and hasattr(ingest_span, "set_attribute"):
                 ingest_span.set_attribute("savedToMemory", False)
+                ingest_span.set_attribute(
+                    "outputs", _json_dumps({"savedToMemory": False})
+                )
             if otel_trace and ingest_span and hasattr(ingest_span, "set_status"):
                 ingest_span.set_status(otel_trace.StatusCode.ERROR, repr(error))
             if ingest_span and hasattr(ingest_span, "record_exception"):
