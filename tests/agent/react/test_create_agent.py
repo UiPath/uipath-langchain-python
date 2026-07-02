@@ -323,7 +323,7 @@ class TestCreateAgentGenerateConversationalOutput:
     def messages(self):
         return [SystemMessage(content="You are a helpful assistant.")]
 
-    def test_node_added_when_conversational_with_custom_output_and_storage_version_supported(
+    def test_node_added_when_conversational_with_custom_output(
         self, mock_model, mock_tool_a, messages
     ):
         result: StateGraph[Any] = create_agent(
@@ -331,10 +331,7 @@ class TestCreateAgentGenerateConversationalOutput:
             [mock_tool_a],
             messages,
             output_schema=_ConversationalOutputSchemaWithCustomFields,
-            config=AgentGraphConfig(
-                is_conversational=True,
-                conversational_outputs_enabled=True,
-            ),
+            config=AgentGraphConfig(is_conversational=True),
         )
         graph = result.compile().get_graph()
         assert AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT in graph.nodes
@@ -351,10 +348,7 @@ class TestCreateAgentGenerateConversationalOutput:
             [mock_tool_a],
             messages,
             output_schema=_ConversationalOutputSchemaNoCustomFields,
-            config=AgentGraphConfig(
-                is_conversational=True,
-                conversational_outputs_enabled=True,
-            ),
+            config=AgentGraphConfig(is_conversational=True),
         )
         graph = result.compile().get_graph()
         assert AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT not in graph.nodes
@@ -367,45 +361,7 @@ class TestCreateAgentGenerateConversationalOutput:
             [mock_tool_a],
             messages,
             output_schema=_ConversationalOutputSchemaWithCustomFields,
-            config=AgentGraphConfig(
-                is_conversational=False,
-                conversational_outputs_enabled=True,
-            ),
-        )
-        graph = result.compile().get_graph()
-        assert AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT not in graph.nodes
-
-    def test_node_absent_when_storage_version_unsupported(
-        self, mock_model, mock_tool_a, messages
-    ):
-        """Legacy agents (storageVersion < 51.0.0) shipped a default
-        outputSchema that must not trigger the new node — even when the
-        schema has fields beyond `uipath__agent_response_messages`."""
-        result: StateGraph[Any] = create_agent(
-            mock_model,
-            [mock_tool_a],
-            messages,
-            output_schema=_ConversationalOutputSchemaWithCustomFields,
-            config=AgentGraphConfig(
-                is_conversational=True,
-                conversational_outputs_enabled=False,
-            ),
-        )
-        graph = result.compile().get_graph()
-        assert AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT not in graph.nodes
-
-    def test_node_absent_when_storage_version_flag_defaults_to_false(
-        self, mock_model, mock_tool_a, messages
-    ):
-        """Callers that don't opt in via the new flag get legacy behavior —
-        the field defaults to False so direct create_agent() usage without
-        an explicit opt-in is safe."""
-        result: StateGraph[Any] = create_agent(
-            mock_model,
-            [mock_tool_a],
-            messages,
-            output_schema=_ConversationalOutputSchemaWithCustomFields,
-            config=AgentGraphConfig(is_conversational=True),
+            config=AgentGraphConfig(is_conversational=False),
         )
         graph = result.compile().get_graph()
         assert AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT not in graph.nodes

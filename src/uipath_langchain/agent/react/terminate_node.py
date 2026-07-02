@@ -80,7 +80,7 @@ def _handle_end_conversational(
             category=UiPathErrorCategory.SYSTEM,
         )
 
-    # Extract structured output fields from the last AIMessage's 
+    # Extract structured output fields from the last AIMessage's
     # `set_conversational_output` tool call, when present.
     last_ai_message = state.messages[-1] if state.messages else None
     set_output_call = (
