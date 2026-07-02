@@ -28,7 +28,7 @@ The tests mock **only the HTTP layer** (`httpx.AsyncClient`), allowing the real 
 
 ```
 tests/agent/tools/test_mcp/
-├── test_mcp_client.py         # McpClient session tests (7 tests)
+├── test_mcp_client.py         # McpClient session + tool-list caching tests
 │   └── TestMcpClient (class)
 │       ├── create_mock_stream_response()
 │       ├── create_mock_http_client()
@@ -38,7 +38,10 @@ tests/agent/tools/test_mcp/
 │       ├── test_max_retries_exceeded
 │       ├── test_dispose_releases_resources
 │       ├── test_client_initialized_property
-│       └── test_session_can_be_reused_after_dispose
+│       ├── test_session_can_be_reused_after_dispose
+│       ├── test_list_tools_caches_result_across_calls   ← list_tools fetched once per lifetime
+│       ├── test_list_tools_force_refresh_bypasses_cache
+│       └── test_dispose_clears_tools_cache
 │
 └── test_mcp_tool.py           # Tool factory tests (17 tests)
     ├── TestMcpToolMetadata (class)
@@ -64,10 +67,46 @@ tests/agent/tools/test_mcp/
     ├── TestMcpToolInvocation (class)
     │   └── test_tool_invocation_initializes_session_and_returns_result
     │
-    └── TestMcpToolNameSanitization (class)
-        ├── test_tool_name_with_spaces
-        └── test_tool_name_with_special_chars
+    ├── TestMcpToolNameSanitization (class)
+    │   ├── test_tool_name_with_spaces
+    │   └── test_tool_name_with_special_chars
+    │
+    └── TestCachedRefreshSchemaBeforeCall (class)  ← refresh_schema_before_call + self-heal
+        ├── test_refresh_enabled_lists_tools_before_call
+        ├── test_refresh_disabled_skips_list_tools
+        ├── test_refresh_falls_back_when_list_tools_fails
+        ├── test_refresh_returns_removed_message_when_tool_missing
+        ├── test_cached_default_enables_refresh
+        ├── test_cached_refresh_disabled_via_config
+        ├── test_breaking_drift_heals_and_asks_retry
+        ├── test_after_heal_next_call_executes
+        ├── test_nonbreaking_change_executes_without_retry
+        └── test_schema_change_message_lists_param_types
 ```
+
+### TestCachedRefreshSchemaBeforeCall
+
+Covers the cached-mode `refresh_schema_before_call` flag (default `True`) and the
+self-healing behaviour. Asserts ordering via `manager.attach_mock` (list_tools before
+call_tool), graceful fallback when `list_tools` raises, a clear "tool removed" message
+when the tool is gone from the server, that `create_mcp_tools` does not list tools at
+creation time, and that
+`refresh_schema_before_call=False` disables the refresh.
+
+Self-heal cases: on a **breaking** schema change (cached `query` vs live `question`)
+the tool is not executed (`call_tool` not awaited), `tool_fn` returns a retry message
+listing each refreshed param with its type, and the wrapper's `args_schema` is healed
+to the live schema; a subsequent call against
+the healed schema executes; an **additive/non-breaking** change executes normally
+without a retry. These tests invoke the tool's `coroutine` directly (not `ainvoke`)
+because the stale arguments would fail `args_schema` validation before reaching the
+tool.
+
+`tool_fn` tests mock `mcpClient.list_tools` directly, so they exercise the refresh
+logic per invocation independent of the client's caching. The once-per-run caching
+itself lives in `McpClient.list_tools` and is covered in `test_mcp_client.py`
+(`test_list_tools_caches_result_across_calls`, `..._force_refresh_bypasses_cache`,
+`test_dispose_clears_tools_cache`).
 
 ## Mocking Strategy
 

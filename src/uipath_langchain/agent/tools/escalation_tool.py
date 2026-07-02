@@ -11,21 +11,14 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
 from uipath.agent.models.agent import (
     AgentEscalationChannel,
-    AgentEscalationRecipient,
-    AgentEscalationRecipientType,
     AgentEscalationResourceConfig,
     AgentQuickFormEscalationChannel,
-    ArgumentEmailRecipient,
-    ArgumentGroupNameRecipient,
-    AssetRecipient,
     EscalationChannel,
     LowCodeAgentDefinition,
-    StandardRecipient,
 )
-from uipath.agent.utils.text_tokens import safe_get_nested
 from uipath.eval.mocks import mockable
 from uipath.platform import UiPath
-from uipath.platform.action_center.tasks import Task, TaskRecipient, TaskRecipientType
+from uipath.platform.action_center.tasks import Task, TaskRecipient
 from uipath.platform.common import WaitEscalation
 from uipath.runtime.errors import UiPathErrorCategory
 
@@ -56,6 +49,11 @@ from .escalation_memory import (
     _ingest_escalation_memory,
     _resolve_user_id,
 )
+from .escalation_recipient import (
+    RESERVED_RECIPIENT_FIELD,
+    _build_llm_recipient,
+    resolve_recipient_value,
+)
 from .tool_node import ToolWrapperReturnType
 from .utils import (
     resolve_task_title,
@@ -71,69 +69,6 @@ class EscalationAction(str, Enum):
 
     CONTINUE = "continue"
     END = "end"
-
-
-async def resolve_recipient_value(
-    recipient: AgentEscalationRecipient,
-    input_args: dict[str, Any] | None = None,
-) -> TaskRecipient | None:
-    """Resolve recipient value based on recipient type."""
-    if isinstance(recipient, AssetRecipient):
-        value = await resolve_asset(recipient.asset_name, get_execution_folder_path())
-        type = None
-        if recipient.type == AgentEscalationRecipientType.ASSET_USER_EMAIL:
-            type = TaskRecipientType.EMAIL
-        elif recipient.type == AgentEscalationRecipientType.ASSET_GROUP_NAME:
-            type = TaskRecipientType.GROUP_NAME
-        return TaskRecipient(value=value, type=type, displayName=value)
-
-    if isinstance(recipient, ArgumentEmailRecipient):
-        value = safe_get_nested(input_args or {}, recipient.argument_path)
-        if value is None:
-            raise ValueError(
-                f"Argument '{recipient.argument_path}' has no value in agent input."
-            )
-        return TaskRecipient(
-            value=value, type=TaskRecipientType.EMAIL, displayName=value
-        )
-
-    if isinstance(recipient, ArgumentGroupNameRecipient):
-        value = safe_get_nested(input_args or {}, recipient.argument_path)
-        if value is None:
-            raise ValueError(
-                f"Argument '{recipient.argument_path}' has no value in agent input."
-            )
-        return TaskRecipient(
-            value=value, type=TaskRecipientType.GROUP_NAME, displayName=value
-        )
-
-    if isinstance(recipient, StandardRecipient):
-        type = TaskRecipientType(recipient.type)
-        if recipient.type == AgentEscalationRecipientType.USER_EMAIL:
-            type = TaskRecipientType.EMAIL
-        return TaskRecipient(
-            value=recipient.value, type=type, displayName=recipient.value
-        )
-
-    return None
-
-
-async def resolve_asset(asset_name: str, folder_path: str | None) -> str | None:
-    """Retrieve asset value."""
-    try:
-        client = UiPath()
-        result = await client.assets.retrieve_async(
-            name=asset_name, folder_path=folder_path
-        )
-
-        if not result or not result.value:
-            raise ValueError(f"Asset '{asset_name}' has no value configured.")
-
-        return result.value
-    except Exception as e:
-        raise ValueError(
-            f"Failed to resolve asset '{asset_name}' in folder '{folder_path}': {str(e)}"
-        ) from e
 
 
 def _parse_task_data(
@@ -354,20 +289,30 @@ def create_escalation_tool(
         agent_input: dict[str, Any] = (
             tool.metadata.get("agent_input") if tool.metadata else None
         ) or {}
-        recipient: TaskRecipient | None = (
-            await resolve_recipient_value(channel.recipients[0], input_args=agent_input)
-            if channel.recipients
-            else None
-        )
         folder_path = get_execution_folder_path()
+
+        serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
+
+        llm_recipient_raw = serialized_data.pop(RESERVED_RECIPIENT_FIELD, None)
+        if llm_recipient_raw is not None:
+            recipient: TaskRecipient | None = await _build_llm_recipient(
+                llm_recipient_raw
+            )
+        else:
+            recipient = (
+                await resolve_recipient_value(
+                    channel.recipients[0],
+                    input_args=agent_input,
+                )
+                if channel.recipients
+                else None
+            )
 
         task_title = "Escalation Task"
         if tool.metadata is not None:
             # Recipient requires runtime resolution, store in metadata after resolving
             tool.metadata["recipient"] = recipient
             task_title = tool.metadata.get("task_title") or task_title
-
-        serialized_data = input_model.model_validate(kwargs).model_dump(mode="json")
 
         # --- Escalation memory: check cache before creating HITL task ---
         if _memory_space_id:
@@ -489,6 +434,7 @@ def create_escalation_tool(
                 trace_id=trace_id,
                 user_id=user_id,
                 folder_path=_memory_folder_path or folder_path,
+                memory_space_name=_memory_space_name,
             )
             if user_id is None:
                 _escalation_logger.info(
@@ -547,9 +493,11 @@ def create_escalation_tool(
             "assigned_to": result.get("assigned_to"),
         }
 
+    description = resource.description
+
     tool = StructuredToolWithArgumentProperties(
         name=tool_name,
-        description=resource.description,
+        description=description,
         args_schema=input_model,
         output_type=output_model,
         coroutine=escalation_tool_fn,

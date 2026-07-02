@@ -278,7 +278,7 @@ class BuiltInGuardrailMiddlewareMixin:
             return await middleware_instance._run_tool_guardrail(request, handler)
 
         _wrap_tool_call_func.__name__ = f"{guardrail_name}_wrap_tool_call"
-        return wrap_tool_call(_wrap_tool_call_func)  # type: ignore[call-overload]
+        return wrap_tool_call(_wrap_tool_call_func)
 
     def _build_message_hooks(
         self,

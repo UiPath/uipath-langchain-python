@@ -13,7 +13,8 @@ retry path remains intact.
 
 import asyncio
 import logging
-from typing import Annotated, Any
+from contextlib import contextmanager
+from typing import Annotated, Any, Iterator
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
@@ -30,12 +31,24 @@ from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 from uipath.platform.entities import EntitiesService, Entity
+from uipath.platform.errors import EnrichedException
+
+try:
+    from uipath.platform.errors import DataFabricError
+except ImportError:
+    DataFabricError = None  # type: ignore[assignment,misc]
 
 from ..datafabric_query_tool import DataFabricQueryTool
 from . import datafabric_prompt_builder
 from .models import DataFabricExecuteSqlInput
 
 logger = logging.getLogger(__name__)
+CATEGORY_MARKER = "(category: "
+
+
+@contextmanager
+def _noop_context() -> Iterator[None]:
+    yield None
 
 
 class DataFabricSubgraphState(BaseModel):
@@ -44,33 +57,124 @@ class DataFabricSubgraphState(BaseModel):
     messages: Annotated[list[AnyMessage], add_messages] = []
     iteration_count: int = 0
     last_tool_success: bool = False
+    last_error_category: str = ""
+    last_error_detail: str = ""
 
 
 class QueryExecutor:
     """Executes SQL queries against Data Fabric."""
 
-    def __init__(self, entities_service: EntitiesService) -> None:
+    def __init__(
+        self, entities_service: EntitiesService, entities: list[Entity]
+    ) -> None:
         self._entities = entities_service
+        native = [e.name for e in entities if not e.external_fields]
+        federated = [e.name for e in entities if e.external_fields]
+        self._entity_attrs: dict[str, str | int] = {
+            "df.entity_count": len(entities),
+            "df.native_entity_count": len(native),
+            "df.federated_entity_count": len(federated),
+            "df.native_entities": ", ".join(native) if native else "",
+            "df.federated_entities": ", ".join(federated) if federated else "",
+        }
 
     async def __call__(self, sql_query: str) -> dict[str, Any]:
         logger.debug("execute_sql called with SQL: %s", sql_query)
+
         try:
-            records = await self._entities.query_entity_records_async(
-                sql_query=sql_query,
+            from opentelemetry import trace as otel_trace
+
+            tracer = otel_trace.get_tracer("uipath_langchain.datafabric")
+        except ImportError:
+            tracer = None
+
+        span_ctx = (
+            tracer.start_as_current_span(
+                "Data Fabric SQL query",
+                attributes={
+                    "openinference.span.kind": "TOOL",
+                    "span_type": "datafabricQuery",
+                    "uipath.custom_instrumentation": True,
+                    "df.sql_query": sql_query,
+                    **self._entity_attrs,
+                },
             )
-            return {
-                "records": records,
-                "total_count": len(records),
-                "sql_query": sql_query,
-            }
-        except Exception as e:
-            logger.error("SQL query failed: %s", e)
-            return {
-                "records": [],
-                "total_count": 0,
-                "error": str(e),
-                "sql_query": sql_query,
-            }
+            if tracer
+            else _noop_context()
+        )
+
+        with span_ctx as span:
+            try:
+                records = await self._entities.query_entity_records_async(
+                    sql_query=sql_query,
+                )
+                if span is not None:
+                    span.set_attribute("df.record_count", len(records))
+                    span.set_attribute("df.success", True)
+                return {
+                    "records": records,
+                    "total_count": len(records),
+                    "sql_query": sql_query,
+                }
+            except Exception as e:
+                return self._handle_query_error(e, span, sql_query)
+
+    def _handle_query_error(
+        self, e: Exception, span: Any, sql_query: str
+    ) -> dict[str, Any]:
+        """Handle a failed SQL query: log, record span attributes, return error dict."""
+        logger.error("SQL query failed: %s", e)
+
+        df_error = None
+        if isinstance(e, EnrichedException) and DataFabricError is not None:
+            df_error = DataFabricError.from_enriched_exception(e)
+
+        if span is not None:
+            self._record_error_span(span, e, df_error)
+
+        return {
+            "records": [],
+            "total_count": 0,
+            "error": self._build_error_detail(e, df_error),
+            "sql_query": sql_query,
+        }
+
+    @staticmethod
+    def _record_error_span(
+        span: Any, e: Exception, df_error: "DataFabricError | None"
+    ) -> None:
+        """Set error attributes on an OTEL span."""
+        span.set_attribute("df.success", False)
+        span.set_attribute("df.error.raw", str(e)[:500])
+        if df_error:
+            if df_error.code:
+                span.set_attribute("df.error.code", df_error.code)
+            if df_error.message:
+                span.set_attribute("df.error.message", df_error.message)
+            if df_error.trace_id:
+                span.set_attribute("df.error.trace_id", df_error.trace_id)
+            span.set_attribute("df.error.category", df_error.category.value)
+
+        from opentelemetry.trace import StatusCode
+
+        span.record_exception(e)
+        span.set_status(StatusCode.ERROR, str(e)[:200])
+
+    @staticmethod
+    def _build_error_detail(exc: Exception, df_error: "DataFabricError | None") -> str:
+        """Build a structured error string for the inner LLM."""
+        if df_error and df_error.code:
+            parts = [f"[{df_error.code}]"]
+            if df_error.category.value != "unknown":
+                parts.append(f"(category: {df_error.category.value})")
+            if df_error.message:
+                parts.append(df_error.message)
+            if df_error.is_retryable:
+                parts.append("— This error is transient, retry the same query.")
+            elif df_error.is_bad_sql:
+                parts.append("— Fix the SQL syntax and retry.")
+            return " ".join(parts)
+        return str(exc)
 
 
 class DataFabricGraph:
@@ -130,16 +234,33 @@ class DataFabricGraph:
         results = await asyncio.gather(
             *[self._execute_tool_call(tc) for tc in last.tool_calls]
         )
-        tool_messages = [msg for msg, _ in results]
-        all_succeeded = bool(results) and all(success for _, success in results)
+        tool_messages = [msg for msg, _, _, _ in results]
+        all_succeeded = bool(results) and all(ok for _, ok, _, _ in results)
+
+        # Capture last error info from the most recent failed call
+        last_category = ""
+        last_detail = ""
+        for _, ok, cat, detail in reversed(results):
+            if not ok and detail:
+                last_category = cat
+                last_detail = detail
+                break
+
         return {
             "messages": tool_messages,
             "iteration_count": state.iteration_count + len(last.tool_calls),
             "last_tool_success": all_succeeded,
+            "last_error_category": last_category or state.last_error_category,
+            "last_error_detail": last_detail or state.last_error_detail,
         }
 
-    async def _execute_tool_call(self, tool_call: ToolCall) -> tuple[ToolMessage, bool]:
-        """Execute a single tool call and report whether it succeeded."""
+    async def _execute_tool_call(
+        self, tool_call: ToolCall
+    ) -> tuple[ToolMessage, bool, str, str]:
+        """Execute a single tool call and report whether it succeeded.
+
+        Returns (message, succeeded, error_category, error_detail).
+        """
         args = tool_call.get("args", {})
         try:
             result = await self._execute_sql_tool.ainvoke(args)
@@ -150,11 +271,18 @@ class DataFabricGraph:
                 "error": str(e),
                 "sql_query": args.get("sql_query", ""),
             }
+        error_str = result.get("error", "") if isinstance(result, dict) else ""
         succeeded = (
             isinstance(result, dict)
-            and not result.get("error")
+            and not error_str
             and result.get("total_count", 0) > 0
         )
+        # Extract category from structured error like "[SQL_VALIDATION] (category: bad_sql) ..."
+        error_category = ""
+        if error_str and CATEGORY_MARKER in error_str:
+            start = error_str.index(CATEGORY_MARKER) + len(CATEGORY_MARKER)
+            end = error_str.index(")", start)
+            error_category = error_str[start:end]
         return (
             ToolMessage(
                 content=str(result),
@@ -162,21 +290,22 @@ class DataFabricGraph:
                 name="execute_sql",
             ),
             succeeded,
+            error_category,
+            error_str,
         )
 
     async def termination_node(self, state: DataFabricSubgraphState) -> dict[str, Any]:
         """Produce a clear message when max iterations is reached."""
-        return {
-            "messages": [
-                AIMessage(
-                    content=(
-                        "I was unable to resolve the query after "
-                        f"{state.iteration_count} SQL attempts. "
-                        "Please try rephrasing the question or narrowing the scope."
-                    )
-                )
-            ]
-        }
+        parts = [
+            f"I was unable to resolve the query after "
+            f"{state.iteration_count} SQL attempts.",
+        ]
+        if state.last_error_category:
+            parts.append(f"Last error category: {state.last_error_category}.")
+        if state.last_error_detail:
+            parts.append(f"Last error: {state.last_error_detail[:300]}")
+        parts.append("Please try rephrasing the question or narrowing the scope.")
+        return {"messages": [AIMessage(content=" ".join(parts))]}
 
     def router(self, state: DataFabricSubgraphState) -> str:
         """Route from ``inner_llm`` to tool, termination, or END."""
@@ -214,7 +343,7 @@ class DataFabricGraph:
                 "tables and columns. Retry with a corrected query on errors."
             ),
             args_schema=DataFabricExecuteSqlInput,
-            coroutine=QueryExecutor(entities_service),
+            coroutine=QueryExecutor(entities_service, entities),
             metadata={"tool_type": "datafabric_sql"},
         )
 

@@ -311,6 +311,17 @@ class TestGetEscalationMemorySpaceId:
 
         assert result is None
 
+    def test_folder_path_returns_none_when_memory_disabled(self) -> None:
+        # No properties.memory.isEnabled and no isAgentMemoryEnabled -> disabled.
+        resource = _memory_resource()
+
+        assert _get_escalation_memory_folder_path(resource) is None
+
+    def test_space_name_returns_none_when_memory_disabled(self) -> None:
+        resource = _memory_resource()
+
+        assert _get_escalation_memory_space_name(resource) is None
+
 
 class TestGetMemorySpaceFolderOverride:
     def test_returns_none_without_matching_override(self) -> None:
@@ -1066,6 +1077,127 @@ class TestIngestEscalationMemory:
             trace_id="def456",
             user_id="reviewer@example.com",
         )
+
+    @pytest.mark.asyncio
+    async def test_adds_memory_write_span(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from opentelemetry import trace
+
+        from uipath_langchain.agent.tools import escalation_memory
+
+        fake_tracer = _FakeTracer()
+        tracer_names: list[str] = []
+
+        def get_tracer(name: str) -> _FakeTracer:
+            tracer_names.append(name)
+            return fake_tracer
+
+        mock_sdk = MagicMock()
+        mock_sdk.memory.escalation_ingest_async = AsyncMock()
+        monkeypatch.setattr(trace, "get_tracer", get_tracer)
+        monkeypatch.setattr(
+            escalation_memory, "UiPath", MagicMock(return_value=mock_sdk)
+        )
+
+        await _ingest_escalation_memory(
+            "space-123",
+            answer='{"approved": true}',
+            attributes='{"input": "test"}',
+            parent_span_id="abc123",
+            trace_id="def456",
+            user_id=USER_GUID,
+            memory_space_name="MemorySpace",
+        )
+
+        assert tracer_names == ["uipath_langchain.memory"]
+        assert [span.name for span in fake_tracer.spans] == ["Save escalation memory"]
+        (write_span,) = fake_tracer.spans
+        assert write_span.attributes["openinference.span.kind"] == "agentMemoryWrite"
+        assert write_span.attributes["type"] == "agentMemoryWrite"
+        assert write_span.attributes["span_type"] == "agentMemoryWrite"
+        assert write_span.attributes["uipath.custom_instrumentation"] is True
+        assert write_span.attributes["memorySpaceName"] == "MemorySpace"
+        assert write_span.attributes["memorySpaceId"] == "space-123"
+        assert write_span.attributes["strategy"] == ESCALATION_MEMORY_STRATEGY
+        assert write_span.attributes["fromMemory"] is False
+        assert write_span.attributes["savedToMemory"] is True
+        # "request" captures what was saved as a JSON string the exporter
+        # parses back into an object for the Studio UI.
+        saved_request = write_span.attributes["request"]
+        assert isinstance(saved_request, str)
+        saved = json.loads(saved_request)
+        assert saved["answer"] == '{"approved": true}'
+        assert saved["attributes"] == '{"input": "test"}'
+
+    @pytest.mark.asyncio
+    async def test_sets_memory_write_span_to_error_on_ingest_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from opentelemetry import trace
+
+        from uipath_langchain.agent.tools import escalation_memory
+
+        fake_tracer = _FakeTracer()
+        monkeypatch.setattr(trace, "get_tracer", lambda _name: fake_tracer)
+        error = Exception("fail")
+        mock_sdk = MagicMock()
+        mock_sdk.memory.escalation_ingest_async = AsyncMock(side_effect=error)
+        monkeypatch.setattr(
+            escalation_memory, "UiPath", MagicMock(return_value=mock_sdk)
+        )
+
+        # Should swallow the error so a failed ingest never breaks the run.
+        await _ingest_escalation_memory(
+            "space-123",
+            answer="yes",
+            attributes="{}",
+            parent_span_id="abc123",
+            trace_id="def456",
+        )
+
+        (write_span,) = fake_tracer.spans
+        assert write_span.attributes["savedToMemory"] is False
+        assert write_span.recorded_errors == [error]
+        assert write_span.statuses
+
+    @pytest.mark.asyncio
+    async def test_ingest_succeeds_without_opentelemetry(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from uipath_langchain.agent.tools import escalation_memory
+
+        original_import = builtins.__import__
+
+        def import_without_otel(
+            name: str,
+            globals: dict[str, Any] | None = None,
+            locals: dict[str, Any] | None = None,
+            fromlist: tuple[str, ...] = (),
+            level: int = 0,
+        ) -> Any:
+            if name == "opentelemetry":
+                raise ImportError("opentelemetry unavailable")
+            return original_import(name, globals, locals, fromlist, level)
+
+        mock_sdk = MagicMock()
+        mock_sdk.memory.escalation_ingest_async = AsyncMock()
+        monkeypatch.setattr(builtins, "__import__", import_without_otel)
+        monkeypatch.setattr(
+            escalation_memory, "UiPath", MagicMock(return_value=mock_sdk)
+        )
+
+        # The ingest must still run when tracing is unavailable (no-op span).
+        await _ingest_escalation_memory(
+            "space-123",
+            answer='{"approved": true}',
+            attributes='{"input": "test"}',
+            parent_span_id="abc123",
+            trace_id="def456",
+            user_id=USER_GUID,
+        )
+
+        mock_sdk.memory.escalation_ingest_async.assert_called_once()
 
 
 class TestEscalationMemoryUtilities:

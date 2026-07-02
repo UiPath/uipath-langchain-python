@@ -13,7 +13,13 @@ from langgraph.graph.message import add_messages
 
 from uipath_langchain.agent.messages.message_utils import replace_tool_calls
 
-MessageItem = Union[BaseMessage, list[str], tuple[str, str], str, dict[str, Any]]
+MessageItem = Union[
+    BaseMessage,
+    list[str],
+    tuple[str, Union[str, list[Union[str, dict[str, Any]]]]],
+    str,
+    dict[str, Any],
+]
 
 
 class TestReplaceToolCalls:

@@ -15,6 +15,7 @@ from langchain_core.messages import (
 )
 from langchain_core.runnables.config import RunnableConfig, var_child_runnable_config
 from langchain_core.tools import StructuredTool
+from langgraph.constants import TAG_NOSTREAM
 from opentelemetry import trace as otel_trace
 from uipath.agent.models.agent import (
     AgentInternalToolResourceConfig,
@@ -136,6 +137,15 @@ def _llm_call_attachments_payload(files: list[FileInfo]) -> str | None:
             )
         )
     return json.dumps([att.model_dump(by_alias=True) for att in attachments])
+
+
+def _config_without_streaming(config: RunnableConfig | None) -> RunnableConfig:
+    """Tag config with TAG_NOSTREAM so LangGraph's StreamMessagesHandler skips
+    this LLM call — prevents its response from leaking into the conversation
+    stream as a visible content part."""
+    new_config = cast(RunnableConfig, dict(config) if config else {})
+    new_config["tags"] = [*(new_config.get("tags") or []), TAG_NOSTREAM]
+    return new_config
 
 
 def _config_with_llm_call_attachments(
@@ -327,6 +337,7 @@ def create_analyze_file_tool(
             cast(AnyMessage, human_message_with_files),
         ]
         config = var_child_runnable_config.get(None)
+        config = _config_without_streaming(config)
         config = _config_with_llm_call_attachments(config, files)
         result = await non_streaming_llm.ainvoke(messages, config=config)
 
