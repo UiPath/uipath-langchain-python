@@ -3,13 +3,7 @@
 This intermediate node runs after AGENT for conversational agents whose
 output schema declares custom fields beyond `uipath__agent_response_messages`.
 It performs a focused LLM call with only the `set_conversational_output`
-tool bound and `tool_choice="any"` to reliably extract the structured
-output for the turn — decoupling conversational quality from schema
-compliance.
-
-The LLM call is tagged with `TAG_NOSTREAM` so its tokens / events never
-reach the chat-UI message stream. TERMINATE then reads the tool call's
-args from `state.messages[-1]`.
+tool bound and `tool_choice="any"` to extract the structured output for the turn.
 """
 
 from typing import TypeVar
