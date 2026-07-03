@@ -17,6 +17,7 @@ class FieldSchema(BaseModel):
     is_required: bool = False
     is_unique: bool = False
     nullable: bool = True
+    is_system_field: bool = False
 
     @property
     def display_type(self) -> str:
@@ -24,6 +25,8 @@ class FieldSchema(BaseModel):
         modifiers = []
         if self.is_required:
             modifiers.append("required")
+        if self.is_system_field:
+            modifiers.append("system")
         if modifiers:
             return f"{self.type}, {', '.join(modifiers)}"
         return self.type

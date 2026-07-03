@@ -28,7 +28,7 @@ The tests mock **only the HTTP layer** (`httpx.AsyncClient`), allowing the real 
 
 ```
 tests/agent/tools/test_mcp/
-├── test_mcp_client.py         # McpClient session tests (7 tests)
+├── test_mcp_client.py         # McpClient session + tool-list caching tests
 │   └── TestMcpClient (class)
 │       ├── create_mock_stream_response()
 │       ├── create_mock_http_client()
@@ -38,7 +38,10 @@ tests/agent/tools/test_mcp/
 │       ├── test_max_retries_exceeded
 │       ├── test_dispose_releases_resources
 │       ├── test_client_initialized_property
-│       └── test_session_can_be_reused_after_dispose
+│       ├── test_session_can_be_reused_after_dispose
+│       ├── test_list_tools_caches_result_across_calls   ← list_tools fetched once per lifetime
+│       ├── test_list_tools_force_refresh_bypasses_cache
+│       └── test_dispose_clears_tools_cache
 │
 └── test_mcp_tool.py           # Tool factory tests (17 tests)
     ├── TestMcpToolMetadata (class)
@@ -98,6 +101,12 @@ the healed schema executes; an **additive/non-breaking** change executes normall
 without a retry. These tests invoke the tool's `coroutine` directly (not `ainvoke`)
 because the stale arguments would fail `args_schema` validation before reaching the
 tool.
+
+`tool_fn` tests mock `mcpClient.list_tools` directly, so they exercise the refresh
+logic per invocation independent of the client's caching. The once-per-run caching
+itself lives in `McpClient.list_tools` and is covered in `test_mcp_client.py`
+(`test_list_tools_caches_result_across_calls`, `..._force_refresh_bypasses_cache`,
+`test_dispose_clears_tools_cache`).
 
 ## Mocking Strategy
 

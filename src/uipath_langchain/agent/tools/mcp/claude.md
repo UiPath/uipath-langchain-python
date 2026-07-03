@@ -262,7 +262,7 @@ to cached when `tools_configuration` is unset.
 
 **Cached mode + self-healing schema (`refresh_schema_before_call`):** `CachedToolsConfig`
 carries a `refresh_schema_before_call` flag (default `True`). When set, each tool's
-`tool_fn` calls `mcpClient.list_tools()` immediately before `call_tool()` and compares
+`tool_fn` calls `mcpClient.list_tools()` before `call_tool()` and compares
 the live input schema with the cached one (`_refresh_tool_schema` + `_breaking_schema_change`):
 
 - **No breaking change** (identical, or only additive/cosmetic): the call proceeds
@@ -284,6 +284,13 @@ the whole mechanism inside the MCP tool (the tool does not import or know about 
 ReAct loop). `list_tools()` is **not** called at tool-creation time for cached mode.
 The flag is read directly from the cached `discovery_mode.refresh_schema_before_call`
 field (default `True`).
+
+`McpClient.list_tools()` caches its result in memory, so the live list is fetched
+**once per run** and reused; `dispose()` clears the cache, so a resumed run (fresh
+client) fetches it again. The self-heal is evaluated against a tool list refreshed once
+at the start of each run (and each resume), so a schema change that lands mid-run is
+picked up on the next run or resume. `force_refresh=True` bypasses the cache for a live
+re-query.
 
 **Limitation:** tools with static argument bindings (non-empty `argument_properties`)
 are re-bound each turn from a cached copy in `StaticArgsHandler`, so the `args_schema`

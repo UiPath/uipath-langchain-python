@@ -4,7 +4,7 @@ from uipath_langchain.agent.tools.datafabric_tool.datafabric_prompt_builder impo
 
 
 def _fake_field(**overrides):
-    return SimpleNamespace(
+    defaults = dict(
         name="status",
         display_name="Status",
         sql_type=SimpleNamespace(name="varchar"),
@@ -19,8 +19,9 @@ def _fake_field(**overrides):
         is_unique=False,
         is_hidden_field=False,
         is_system_field=False,
-        **overrides,
     )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
 
 
 def _fake_entity(*fields, **overrides):
@@ -65,3 +66,50 @@ def test_entity_prompt_never_contains_ontology_sections():
     prompt = build([_fake_entity(_fake_field())])
     assert "## Available Ontology" not in prompt
     assert "## Ontology→Table Mapping (R2RML)" not in prompt
+
+
+def _system_field(name, type_name="datetimeoffset", **overrides):
+    """A fake auto-added system/audit field (Id, CreateTime, ...)."""
+    return _fake_field(
+        name=name,
+        display_name=name,
+        sql_type=SimpleNamespace(name=type_name),
+        description="System built-in field",
+        is_system_field=True,
+        allowed_values=None,
+        examples=None,
+        good_for_aggregation=False,
+        good_for_grouping=False,
+        good_for_filtering=False,
+        **overrides,
+    )
+
+
+def test_surfaces_tagged_system_fields_with_descriptions():
+    """System fields are surfaced, tagged ``system``, in a Description-column table."""
+    entity = _fake_entity(
+        _fake_field(name="status"),
+        _system_field("CreateTime"),
+        _system_field("CreatedBy", type_name="uniqueidentifier"),
+    )
+    prompt = build([entity])
+
+    assert "| Field | Type | Description |" in prompt
+    assert "| CreateTime | datetimeoffset, system |" in prompt
+    assert "System built-in field" in prompt
+    # system/audit field-selection guidance is part of the prompt
+    assert "SYSTEM / AUDIT FIELDS" in prompt
+
+
+def test_query_patterns_exclude_system_fields():
+    """Surfaced system fields must never drive the derived query patterns."""
+    entity = _fake_entity(
+        _fake_field(name="status"),
+        _system_field("CreateTime"),
+        _system_field("Id", type_name="uniqueidentifier"),
+    )
+    prompt = build([entity])
+
+    patterns_block = prompt.split("Query Patterns for Ticket", 1)[1]
+    assert "CreateTime" not in patterns_block
+    assert "Id" not in patterns_block
