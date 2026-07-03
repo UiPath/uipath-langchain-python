@@ -609,6 +609,66 @@ class TestGuardrailHelperFunctions:
             }
         }
 
+    def test_create_validation_command_success_with_span_id(self):
+        """Test validation command includes guardrail_span_id when span_id is present."""
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _create_validation_command,
+        )
+
+        result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.PASSED,
+            reason="validation passed",
+        )
+        result.span_id = "span-123"
+        command = _create_validation_command(result, "success_node", "failure_node")
+
+        assert command.goto == "success_node"
+        assert command.update == {
+            "inner_state": {
+                "guardrail_validation_result": True,
+                "guardrail_validation_details": "validation passed",
+                "guardrail_span_id": "span-123",
+            }
+        }
+
+    def test_create_validation_command_failure_with_span_id(self):
+        """Test validation command includes guardrail_span_id on failure when span_id is present."""
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _create_validation_command,
+        )
+
+        result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.VALIDATION_FAILED,
+            reason="policy_violation",
+        )
+        result.span_id = "span-456"
+        command = _create_validation_command(result, "success_node", "failure_node")
+
+        assert command.goto == "failure_node"
+        assert command.update == {
+            "inner_state": {
+                "guardrail_validation_result": False,
+                "guardrail_validation_details": "policy_violation",
+                "guardrail_span_id": "span-456",
+            }
+        }
+
+    def test_create_validation_command_without_span_id(self):
+        """Test validation command excludes guardrail_span_id when span_id is absent."""
+        from uipath_langchain.agent.guardrails.guardrail_nodes import (
+            _create_validation_command,
+        )
+
+        result = GuardrailValidationResult(
+            result=GuardrailValidationResultType.PASSED,
+            reason="validation passed",
+        )
+        command = _create_validation_command(result, "success_node", "failure_node")
+
+        assert command.goto == "success_node"
+        assert command.update is not None
+        assert "guardrail_span_id" not in command.update["inner_state"]
+
     def test_create_validation_command_feature_disabled_raises_exception(self):
         """Test that FEATURE_DISABLED result raises AgentRuntimeError."""
         from uipath.runtime.errors import UiPathErrorCategory

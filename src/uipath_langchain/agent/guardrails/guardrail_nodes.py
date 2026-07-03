@@ -105,26 +105,30 @@ def _create_validation_command(
     Raises:
         AgentRuntimeError: If the result is neither PASSED nor VALIDATION_FAILED.
     """
+    span_id = getattr(guardrail_result, "span_id", None)
+
     if guardrail_result.result == GuardrailValidationResultType.PASSED:
+        inner_state: dict[str, Any] = {
+            "guardrail_validation_result": True,
+            "guardrail_validation_details": guardrail_result.reason,
+        }
+        if span_id:
+            inner_state["guardrail_span_id"] = span_id
         return Command(
             goto=success_node,
-            update={
-                "inner_state": {
-                    "guardrail_validation_result": True,
-                    "guardrail_validation_details": guardrail_result.reason,
-                }
-            },
+            update={"inner_state": inner_state},
         )
 
     if guardrail_result.result == GuardrailValidationResultType.VALIDATION_FAILED:
+        inner_state = {
+            "guardrail_validation_result": False,
+            "guardrail_validation_details": guardrail_result.reason,
+        }
+        if span_id:
+            inner_state["guardrail_span_id"] = span_id
         return Command(
             goto=failure_node,
-            update={
-                "inner_state": {
-                    "guardrail_validation_result": False,
-                    "guardrail_validation_details": guardrail_result.reason,
-                }
-            },
+            update={"inner_state": inner_state},
         )
 
     # For other results (FEATURE_DISABLED, ENTITLEMENTS_MISSING, etc.), interrupt execution

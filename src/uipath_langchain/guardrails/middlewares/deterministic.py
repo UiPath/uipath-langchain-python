@@ -212,7 +212,7 @@ class UiPathDeterministicGuardrailMiddleware:
             return tool_result
 
         _wrap_tool_call_func.__name__ = f"{guardrail_name}_wrap_tool_call"
-        _wrap_tool_call = wrap_tool_call(_wrap_tool_call_func)  # type: ignore[call-overload]
+        _wrap_tool_call = wrap_tool_call(_wrap_tool_call_func)
         instances.append(_wrap_tool_call)
 
         return instances

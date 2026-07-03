@@ -21,6 +21,134 @@ from .mcp_client import McpClient, SessionInfoFactory
 logger: logging.Logger = logging.getLogger(__name__)
 
 
+def _breaking_schema_change(cached: dict[str, Any], live: dict[str, Any]) -> bool:
+    """Whether the live input schema differs from the cached one in a way that would
+    break a call the model built from the cached schema.
+
+    Treated as breaking (the model cannot produce a valid call without seeing the new
+    schema): a newly required parameter, a cached parameter the server dropped or
+    renamed, or a type change on a shared parameter. Purely additive or cosmetic
+    changes (new optional params, reworded descriptions) are not breaking, so the call
+    proceeds against the cached schema.
+    """
+    cached_props = cached.get("properties") or {}
+    live_props = live.get("properties") or {}
+    cached_required = set(cached.get("required") or [])
+    live_required = set(live.get("required") or [])
+
+    if live_required - cached_required:
+        return True
+    if set(cached_props) - set(live_props):
+        return True
+    for name in set(cached_props) & set(live_props):
+        if (cached_props.get(name) or {}).get("type") != (
+            live_props.get(name) or {}
+        ).get("type"):
+            return True
+    return False
+
+
+def _describe_param(name: str, spec: Any, required: bool) -> str:
+    """Format a parameter for the schema-change message, e.g. ``city (string, optional)``.
+
+    Falls back to just the name (optionally with ``(optional)``) when the param has no
+    simple JSON-schema ``type`` (unions, ``$ref``, etc.), to avoid a misleading hint.
+    """
+    type_hint = spec.get("type") if isinstance(spec, dict) else None
+    attrs: list[str] = [type_hint] if isinstance(type_hint, str) else []
+    if not required:
+        attrs.append("optional")
+    return f"{name} ({', '.join(attrs)})" if attrs else name
+
+
+def _schema_change_message(name: str, schema: dict[str, Any]) -> str:
+    """Instruction returned to the model when a cached tool's schema changed, telling
+    it to re-issue the call against the refreshed schema."""
+    props = schema.get("properties") or {}
+    required = set(schema.get("required") or [])
+    if props:
+        params = ", ".join(_describe_param(p, props[p], p in required) for p in props)
+    else:
+        params = "no parameters"
+    return (
+        f"The schema for tool '{name}' changed on the MCP server, so the tool was not "
+        f"executed. Its parameters have been refreshed to: {params}. "
+        f"Call '{name}' again using these parameters."
+    )
+
+
+def _tool_removed_message(name: str) -> str:
+    """Instruction returned to the model when a cached tool is no longer exposed by the
+    MCP server, telling it to stop calling that tool."""
+    return (
+        f"The tool '{name}' is no longer available on the MCP server, so it was not "
+        f"executed. Do not call '{name}' again; use a different tool or tell the user "
+        f"it is unavailable."
+    )
+
+
+async def _refresh_tool_schema(
+    mcp_tool: AgentMcpTool,
+    mcpClient: McpClient,
+    tool_holder: dict[str, BaseTool] | None = None,
+) -> str | None:
+    """Fetch the live tool schema before invoking a cached tool and self-heal on drift.
+
+    Lists the tools from the server (the McpClient caches this list for the lifetime of
+    the run) and compares the live input schema with the cached one. If the change would
+    break a call built from the cached schema, the cached
+    snapshot and the schema the model is bound to are updated to the live schema and a
+    retry instruction is returned; the caller must then NOT run the stale call. The
+    ReAct loop re-binds tools on the next LLM turn, so the model re-issues the call
+    against the refreshed schema.
+
+    Returns None to let the call proceed against the cached schema when there is no
+    breaking change, or, as a non-fatal fallback, when the live schema cannot be
+    fetched. When the tool is missing from the live list (removed or renamed), returns
+    a message telling the model the tool is gone so it does not retry a doomed call.
+
+    Note: tools that carry static argument bindings (non-empty argument_properties) are
+    re-bound each turn from a cached copy, so the rebind may not reach the model; such
+    tools fall back to the server's own validation error rather than self-healing.
+    """
+    try:
+        result = await mcpClient.list_tools()
+    except Exception as exc:  # noqa: BLE001 - refresh is best effort
+        logger.warning(
+            f"Could not refresh schema for tool '{mcp_tool.name}' before call; "
+            f"using cached schema. Error: {exc}"
+        )
+        return None
+
+    fresh = next((t for t in result.tools if t.name == mcp_tool.name), None)
+    if fresh is None:
+        logger.warning(
+            f"Tool '{mcp_tool.name}' is no longer exposed by the MCP server; "
+            f"the model will be told to stop calling it"
+        )
+        return _tool_removed_message(mcp_tool.name)
+
+    if not _breaking_schema_change(mcp_tool.input_schema, fresh.inputSchema):
+        return None
+
+    logger.warning(
+        f"MCP tool '{mcp_tool.name}' schema changed on the server since design time; "
+        f"refreshing the bound schema and asking the model to retry"
+    )
+    # Heal: update the cached baseline and the schema the model is bound to, so the
+    # next LLM turn re-binds the live schema and the model can build a valid call.
+    mcp_tool.input_schema = fresh.inputSchema
+    mcp_tool.output_schema = fresh.outputSchema
+    if fresh.description:
+        mcp_tool.description = fresh.description
+    tool = tool_holder.get("tool") if tool_holder else None
+    if tool is not None:
+        tool.args_schema = fresh.inputSchema
+        if fresh.description:
+            tool.description = fresh.description
+    return _schema_change_message(mcp_tool.name, fresh.inputSchema)
+
+
 @asynccontextmanager
 async def open_mcp_tools(
     config: list[AgentMcpResourceConfig],
@@ -57,9 +185,15 @@ async def create_mcp_tools(
         List of BaseTool instances, one for each tool in the config.
         Returns empty list if config.is_enabled is False.
 
-    Behavior depends on config.tools_configuration.discovery_mode:
-        - Cached (default when unset): Uses the tools and schemas saved in
-          config.available_tools.
+    Behavior depends on config.tools_configuration.discovery_mode (defaults to
+    Cached when tools_configuration is unset):
+        - Cached: Uses the tools and schemas saved in config.available_tools. When
+          the cached config has refresh_schema_before_call=True (the default), the
+          live tool schema is fetched (once per run, cached on the McpClient) and
+          compared with the design-time snapshot before a tool invocation; if it
+          changed in a breaking way, the bound schema is refreshed and the model is
+          asked to retry the call against the live schema (self-healing). A resumed run
+          uses a fresh client, which fetches the live list again.
         - Dynamic with allow_all=True: Lists all tools from the MCP
           server via mcpClient, ignoring config.available_tools as a source
           of truth.
@@ -77,9 +211,14 @@ async def create_mcp_tools(
         if config.tools_configuration is not None
         else CachedToolsConfig()
     )
+    refresh_schema_before_call = (
+        isinstance(discovery_mode, CachedToolsConfig)
+        and discovery_mode.refresh_schema_before_call
+    )
     logger.info(
         f"Loading MCP tools for server '{config.slug}' "
-        f"(discovery_mode={discovery_mode.type})"
+        f"(discovery_mode={discovery_mode.type}, "
+        f"refresh_schema_before_call={refresh_schema_before_call})"
     )
 
     config_tools_by_name = {t.name: t for t in config.available_tools}
@@ -129,26 +268,49 @@ async def create_mcp_tools(
 
     tools: list[BaseTool] = []
     for mcp_tool in mcp_tools:
-        tools.append(
-            StructuredToolWithArgumentProperties(
-                name=sanitize_tool_name(mcp_tool.name),
-                description=mcp_tool.description,
-                args_schema=mcp_tool.input_schema,
-                coroutine=build_mcp_tool(mcp_tool, mcpClient),
-                output_type=Any,
-                metadata={
-                    "tool_type": "mcp",
-                    "display_name": mcp_tool.name,
-                    "folder_path": config.folder_path,
-                    "slug": config.slug,
-                },
-                argument_properties=mcp_tool.argument_properties,
-            )
+        # The holder gives the tool's coroutine a reference back to the tool wrapper so
+        # it can refresh its own args_schema on schema drift (see _refresh_tool_schema).
+        tool_holder: dict[str, BaseTool] = {}
+        structured_tool = StructuredToolWithArgumentProperties(
+            name=sanitize_tool_name(mcp_tool.name),
+            description=mcp_tool.description,
+            args_schema=mcp_tool.input_schema,
+            coroutine=build_mcp_tool(
+                mcp_tool, mcpClient, refresh_schema_before_call, tool_holder
+            ),
+            output_type=Any,
+            metadata={
+                "tool_type": "mcp",
+                "display_name": mcp_tool.name,
+                "folder_path": config.folder_path,
+                "slug": config.slug,
+            },
+            argument_properties=mcp_tool.argument_properties,
         )
+        tool_holder["tool"] = structured_tool
+        tools.append(structured_tool)
     return tools
 
 
-def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
+def _normalize_tool_result(result: Any) -> Any:
+    """Normalize an MCP ``call_tool`` result into JSON-serializable content."""
+    content = result.content if hasattr(result, "content") else result
+    if isinstance(content, list):
+        return [
+            item.model_dump(exclude_none=True) if hasattr(item, "model_dump") else item
+            for item in content
+        ]
+    if hasattr(content, "model_dump"):
+        return content.model_dump(exclude_none=True)
+    return content
+
+
+def build_mcp_tool(
+    mcp_tool: AgentMcpTool,
+    mcpClient: McpClient,
+    refresh_schema_before_call: bool = False,
+    tool_holder: dict[str, BaseTool] | None = None,
+) -> Any:
     output_schema: Any
     if mcp_tool.output_schema:
         output_schema = mcp_tool.output_schema
@@ -164,22 +326,22 @@ def build_mcp_tool(mcp_tool: AgentMcpTool, mcpClient: McpClient) -> Any:
     async def tool_fn(**kwargs: Any) -> Any:
         """Execute MCP tool call with ephemeral session.
 
+        When ``refresh_schema_before_call`` is set (cached discovery mode), the live
+        tool schema is checked first against the McpClient's cached tool list (fetched
+        once per run). If it changed in a breaking way, the tool is not executed: the
+        bound schema is refreshed and a retry instruction is returned so the model
+        re-issues the call against the live schema on the next turn.
+
         If a session disconnect error occurs (e.g., 404 or session terminated),
         the tool will retry once by re-initializing the session.
         """
+        if refresh_schema_before_call:
+            retry_message = await _refresh_tool_schema(mcp_tool, mcpClient, tool_holder)
+            if retry_message is not None:
+                return retry_message
         result = await mcpClient.call_tool(mcp_tool.name, arguments=kwargs)
         logger.info(f"Tool call successful for {mcp_tool.name}")
-        content = result.content if hasattr(result, "content") else result
-        if isinstance(content, list):
-            return [
-                item.model_dump(exclude_none=True)
-                if hasattr(item, "model_dump")
-                else item
-                for item in content
-            ]
-        if hasattr(content, "model_dump"):
-            return content.model_dump(exclude_none=True)
-        return content
+        return _normalize_tool_result(result)
 
     return tool_fn
 

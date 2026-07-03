@@ -750,10 +750,46 @@ class TestMcpClient:
 
     @pytest.mark.asyncio
     @patch("httpx.AsyncClient")
-    async def test_list_tools_reuses_session(
+    async def test_list_tools_caches_result_across_calls(
         self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
     ):
-        """Test that list_tools reuses existing session on subsequent calls."""
+        """list_tools caches its result: a second call reuses the session and the
+        cached tool list, issuing only one tools/list RPC."""
+        method_call_sequence: list[str] = []
+        initialize_count = [0]
+        tool_call_count = [0]
+
+        MockStreamResponse = self.create_mock_stream_response(
+            method_call_sequence, initialize_count, tool_call_count
+        )
+
+        mock_http_client = self.create_mock_http_client(MockStreamResponse)
+        mock_async_client_class.return_value = mock_http_client
+
+        client = McpClient(config=mcp_resource_config)
+
+        with patch(
+            "uipath.platform.UiPath",
+            return_value=mock_uipath_sdk,
+        ):
+            first = await client.list_tools()
+            assert initialize_count[0] == 1
+
+            second = await client.list_tools()
+            assert initialize_count[0] == 1  # Still only one initialization
+
+        # Fetched once per lifetime: second call returns the cached result, no new RPC.
+        assert method_call_sequence.count("tools/list") == 1
+        assert first is second
+
+        await client.dispose()
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_list_tools_force_refresh_bypasses_cache(
+        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
+    ):
+        """force_refresh=True re-queries the server instead of returning the cache."""
         method_call_sequence: list[str] = []
         initialize_count = [0]
         tool_call_count = [0]
@@ -772,15 +808,43 @@ class TestMcpClient:
             return_value=mock_uipath_sdk,
         ):
             await client.list_tools()
-            assert initialize_count[0] == 1
+            await client.list_tools(force_refresh=True)
 
-            await client.list_tools()
-            assert initialize_count[0] == 1  # Still only one initialization
-
-        list_tools_count = method_call_sequence.count("tools/list")
-        assert list_tools_count == 2
+        # Session reused, but the server is queried twice.
+        assert initialize_count[0] == 1
+        assert method_call_sequence.count("tools/list") == 2
 
         await client.dispose()
+
+    @pytest.mark.asyncio
+    @patch("httpx.AsyncClient")
+    async def test_dispose_clears_tools_cache(
+        self, mock_async_client_class, mcp_resource_config, mock_uipath_sdk
+    ):
+        """dispose() clears the cached tool list so a reused (or resumed) client
+        re-fetches it once."""
+        method_call_sequence: list[str] = []
+        initialize_count = [0]
+        tool_call_count = [0]
+
+        MockStreamResponse = self.create_mock_stream_response(
+            method_call_sequence, initialize_count, tool_call_count
+        )
+
+        mock_http_client = self.create_mock_http_client(MockStreamResponse)
+        mock_async_client_class.return_value = mock_http_client
+
+        client = McpClient(config=mcp_resource_config)
+
+        with patch(
+            "uipath.platform.UiPath",
+            return_value=mock_uipath_sdk,
+        ):
+            await client.list_tools()
+            assert client._tools_cache is not None
+
+        await client.dispose()
+        assert client._tools_cache is None
 
     @pytest.mark.asyncio
     @patch.dict(os.environ, {"UIPATH_FOLDER_PATH": "/Shared/TestFolder"})

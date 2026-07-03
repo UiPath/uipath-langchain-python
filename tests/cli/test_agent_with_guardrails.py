@@ -1169,7 +1169,7 @@ graph = create_agent(
                         return_value=mock_uipath_instance,
                     ),
                     patch(
-                        "uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value",
+                        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value",
                         mock_resolve,
                     ),
                 ):
@@ -1379,7 +1379,7 @@ graph = create_agent(
                         return_value=mock_uipath_instance,
                     ),
                     patch(
-                        "uipath_langchain.agent.tools.escalation_tool.resolve_recipient_value",
+                        "uipath_langchain.agent.guardrails.actions.escalate_action.resolve_recipient_value",
                         mock_resolve,
                     ),
                 ):
