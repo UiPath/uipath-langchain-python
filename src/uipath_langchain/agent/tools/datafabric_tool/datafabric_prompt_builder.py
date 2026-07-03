@@ -27,14 +27,24 @@ logger = logging.getLogger(__name__)
 
 
 def build_entity_context(entity: Entity) -> EntitySQLContext:
-    """Convert an Entity SDK object to schema + derived query patterns."""
+    """Convert an Entity SDK object to schema + derived query patterns.
+
+    Auto-added system/audit fields (Id, CreateTime, UpdateTime, CreatedBy,
+    UpdatedBy) are surfaced in the schema, tagged ``system`` via
+    :attr:`FieldSchema.is_system_field`, but are always excluded from the
+    derived query patterns so the examples reference only business fields.
+    """
     field_schemas: list[FieldSchema] = []
+    # Query patterns are derived from business fields only — system fields,
+    # even when surfaced in the schema, must never drive an example query.
+    business_field_names: list[str] = []
     numeric_field: str | None = None
     text_field: str | None = None
 
     for field in entity.fields or []:
-        if field.is_hidden_field or field.is_system_field:
+        if field.is_hidden_field:
             continue
+        is_system = field.is_system_field
         type_name = field.sql_type.name if field.sql_type else "unknown"
         # A relationship is either a declared foreign key or a Relationship-typed
         # field; use the same condition to tag it and to extract its target, so
@@ -60,17 +70,21 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
             is_required=field.is_required,
             is_unique=field.is_unique,
             nullable=not field.is_required,
+            is_system_field=is_system,
             ref_entity_table=ref_entity_table,
             ref_field_name=ref_field_name,
         )
         field_schemas.append(fs)
 
+        if is_system:
+            continue
+        business_field_names.append(fs.name)
         if not numeric_field and fs.is_numeric:
             numeric_field = fs.name
         if not text_field and fs.is_text:
             text_field = fs.name
 
-    field_names = [f.name for f in field_schemas]
+    field_names = business_field_names
     table = entity.name
 
     group_field = text_field or (field_names[0] if field_names else "Category")
@@ -191,11 +205,11 @@ def format_sql_context(ctx: SQLContext) -> str:
         if entity.description:
             lines.append(f"_{entity.description}_")
         lines.append("")
-        lines.append("| Field | Type |")
-        lines.append("|-------|------|")
-
+        lines.append("| Field | Type | Description |")
+        lines.append("|-------|------|-------------|")
         for field in entity.fields:
-            lines.append(f"| {field.name} | {field.display_type} |")
+            desc = (field.description or "").replace("|", r"\|").replace("\n", " ")
+            lines.append(f"| {field.name} | {field.display_type} | {desc} |")
 
         lines.append("")
 

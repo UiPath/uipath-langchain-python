@@ -17,6 +17,7 @@ class FieldSchema(BaseModel):
     is_required: bool = False
     is_unique: bool = False
     nullable: bool = True
+    is_system_field: bool = False
     # For relationship (foreign-key) fields: the related entity's SQL table and
     # the column to join on. The field itself stores the related record's Id, so
     # the join is always ``related.<ref_join_key> = <this table>.<name>``.
@@ -32,6 +33,8 @@ class FieldSchema(BaseModel):
             modifiers.append("required")
         if self.is_foreign_key:
             modifiers.append("fk")
+        if self.is_system_field:
+            modifiers.append("system")
         if modifiers:
             return f"{self.type}, {', '.join(modifiers)}"
         return self.type
