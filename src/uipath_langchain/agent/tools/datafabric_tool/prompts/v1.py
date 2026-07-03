@@ -57,6 +57,11 @@ asks "how many orders?" the answer is COUNT(order_id) — do NOT also select \
 customer_name, order_date, etc.
    e. Double-check: does every field in your SELECT directly appear in the \
 answer the user expects?
+   f. SYSTEM / AUDIT FIELDS — the schema may include auto-added system fields \
+tagged ``system`` (e.g. a record identifier or created/updated bookkeeping \
+columns). Use field names and descriptions to decide which field the question \
+refers to; when a business (non-system) field overlaps a system field's \
+concept and it is unclear which to use — prefer the BUSINESS field.
 4. WHERE FILTERS — What predicates belong in WHERE? What are the exact values \
 to filter on?
 5. VALUE RESOLUTION — Before finalising any equality / IN filter on a textual \
