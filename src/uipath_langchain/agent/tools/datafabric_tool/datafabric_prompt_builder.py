@@ -27,14 +27,24 @@ logger = logging.getLogger(__name__)
 
 
 def build_entity_context(entity: Entity) -> EntitySQLContext:
-    """Convert an Entity SDK object to schema + derived query patterns."""
+    """Convert an Entity SDK object to schema + derived query patterns.
+
+    Auto-added system/audit fields (Id, CreateTime, UpdateTime, CreatedBy,
+    UpdatedBy) are surfaced in the schema, tagged ``system`` via
+    :attr:`FieldSchema.is_system_field`, but are always excluded from the
+    derived query patterns so the examples reference only business fields.
+    """
     field_schemas: list[FieldSchema] = []
+    # Query patterns are derived from business fields only — system fields,
+    # even when surfaced in the schema, must never drive an example query.
+    business_field_names: list[str] = []
     numeric_field: str | None = None
     text_field: str | None = None
 
     for field in entity.fields or []:
-        if field.is_hidden_field or field.is_system_field:
+        if field.is_hidden_field:
             continue
+        is_system = field.is_system_field
         type_name = field.sql_type.name if field.sql_type else "unknown"
         fs = FieldSchema(
             name=field.name,
@@ -45,15 +55,19 @@ def build_entity_context(entity: Entity) -> EntitySQLContext:
             is_required=field.is_required,
             is_unique=field.is_unique,
             nullable=not field.is_required,
+            is_system_field=is_system,
         )
         field_schemas.append(fs)
 
+        if is_system:
+            continue
+        business_field_names.append(fs.name)
         if not numeric_field and fs.is_numeric:
             numeric_field = fs.name
         if not text_field and fs.is_text:
             text_field = fs.name
 
-    field_names = [f.name for f in field_schemas]
+    field_names = business_field_names
     table = entity.name
 
     group_field = text_field or (field_names[0] if field_names else "Category")
@@ -133,50 +147,8 @@ def build_sql_context(
     )
 
 
-def render_entity_schema_sections(ctx: SQLContext) -> list[str]:
-    """Render the entity-schema tables + query patterns as prompt lines.
-
-    Shared by the entity-tool prompt (:func:`format_sql_context`) and the
-    ontology-tool prompt (``datafabric_ontology_prompt_builder``) so the
-    per-entity rendering stays in one place while each tool owns its own
-    top-level prompt assembly.
-    """
-    lines: list[str] = ["## All available Data Fabric Entities", ""]
-
-    for entity_ctx in ctx.entity_contexts:
-        entity = entity_ctx.entity_schema
-        lines.append(
-            f"### Entity: {entity.display_name} (SQL table: `{entity.entity_name}`)"
-        )
-        if entity.description:
-            lines.append(f"_{entity.description}_")
-        lines.append("")
-        lines.append("| Field | Type |")
-        lines.append("|-------|------|")
-
-        for field in entity.fields:
-            lines.append(f"| {field.name} | {field.display_type} |")
-
-        lines.append("")
-
-        lines.append(f"**Query Patterns for {entity.entity_name}:**")
-        lines.append("")
-        lines.append("| User Intent | SQL Pattern |")
-        lines.append("|-------------|-------------|")
-        for p in entity_ctx.query_patterns:
-            lines.append(f"| '{p.intent}' | `{p.sql}` |")
-        lines.append("")
-
-    return lines
-
-
 def format_sql_context(ctx: SQLContext) -> str:
-    """Format a SQLContext as the entity-tool inner system prompt.
-
-    This is the entity tool's prompt only — it carries no ontology content. The
-    ontology tool assembles its own prompt (OWL + R2RML) in
-    ``datafabric_ontology_prompt_builder`` so the two prompts stay independent.
-    """
+    """Format a SQLContext as text for system prompt injection."""
     lines: list[str] = []
 
     if ctx.base_system_prompt:
@@ -203,7 +175,32 @@ def format_sql_context(ctx: SQLContext) -> str:
         lines.append(ctx.resource_description)
         lines.append("")
 
-    lines.extend(render_entity_schema_sections(ctx))
+    lines.append("## All available Data Fabric Entities")
+    lines.append("")
+
+    for entity_ctx in ctx.entity_contexts:
+        entity = entity_ctx.entity_schema
+        lines.append(
+            f"### Entity: {entity.display_name} (SQL table: `{entity.entity_name}`)"
+        )
+        if entity.description:
+            lines.append(f"_{entity.description}_")
+        lines.append("")
+        lines.append("| Field | Type | Description |")
+        lines.append("|-------|------|-------------|")
+        for field in entity.fields:
+            desc = (field.description or "").replace("|", r"\|").replace("\n", " ")
+            lines.append(f"| {field.name} | {field.display_type} | {desc} |")
+
+        lines.append("")
+
+        lines.append(f"**Query Patterns for {entity.entity_name}:**")
+        lines.append("")
+        lines.append("| User Intent | SQL Pattern |")
+        lines.append("|-------------|-------------|")
+        for p in entity_ctx.query_patterns:
+            lines.append(f"| '{p.intent}' | `{p.sql}` |")
+        lines.append("")
 
     return "\n".join(lines)
 
@@ -214,11 +211,10 @@ def build(
     base_system_prompt: str = "",
     prompt_version: str | None = None,
 ) -> str:
-    """Build the entity-tool inner system prompt.
+    """Build the full SQL prompt text for the inner sub-graph LLM.
 
     Combines agent system prompt, the rendered SQL strategy prompt, the
-    Calcite constraint deny-list, and entity schemas + query patterns. The
-    ontology tool has its own builder (``datafabric_ontology_prompt_builder``).
+    Calcite constraint deny-list, and entity schemas + query patterns.
 
     Args:
         entities: List of Entity objects with schema information.

@@ -3,21 +3,53 @@
 Separate from the entity tool's ``datafabric_prompt_builder`` so the two prompts
 can evolve independently. This builder assembles an ontology-grounded prompt:
 the OWL (authoritative semantic schema) and the R2RML (ontology→table/column
-mapping) come first, then the shared SQL strategy/constraints and the entity
-schema tables.
+mapping) come first, then the SQL strategy/constraints and the entity schema
+tables.
 
-It reuses the low-level entity-context building and schema rendering from
-``datafabric_prompt_builder`` (so per-entity rendering stays in one place), but
-owns its own top-level layout and ontology-specific framing.
+It reuses only ``build_sql_context`` (entity-context + strategy prompt
+construction) from ``datafabric_prompt_builder``; the top-level layout, the
+ontology-specific framing, and the entity-schema rendering are all owned here so
+the shared entity-tool builder is not modified by this feature.
 """
 
 from uipath.platform.entities import Entity
 
-from . import datafabric_prompt_builder
+from .datafabric_prompt_builder import SQLContext, build_sql_context
+
+
+def _render_entity_schema_sections(ctx: SQLContext) -> list[str]:
+    """Render the entity-schema tables + query patterns as prompt lines."""
+    lines: list[str] = ["## All available Data Fabric Entities", ""]
+
+    for entity_ctx in ctx.entity_contexts:
+        entity = entity_ctx.entity_schema
+        lines.append(
+            f"### Entity: {entity.display_name} (SQL table: `{entity.entity_name}`)"
+        )
+        if entity.description:
+            lines.append(f"_{entity.description}_")
+        lines.append("")
+        lines.append("| Field | Type | Description |")
+        lines.append("|-------|------|-------------|")
+        for field in entity.fields:
+            desc = (field.description or "").replace("|", r"\|").replace("\n", " ")
+            lines.append(f"| {field.name} | {field.display_type} | {desc} |")
+
+        lines.append("")
+
+        lines.append(f"**Query Patterns for {entity.entity_name}:**")
+        lines.append("")
+        lines.append("| User Intent | SQL Pattern |")
+        lines.append("|-------------|-------------|")
+        for p in entity_ctx.query_patterns:
+            lines.append(f"| '{p.intent}' | `{p.sql}` |")
+        lines.append("")
+
+    return lines
 
 
 def format_ontology_context(
-    ctx: datafabric_prompt_builder.SQLContext,
+    ctx: SQLContext,
     ontology_text: str = "",
     r2rml_text: str = "",
 ) -> str:
@@ -73,7 +105,7 @@ def format_ontology_context(
         lines.append(ctx.resource_description)
         lines.append("")
 
-    lines.extend(datafabric_prompt_builder.render_entity_schema_sections(ctx))
+    lines.extend(_render_entity_schema_sections(ctx))
 
     return "\n".join(lines)
 
@@ -102,7 +134,7 @@ def build(
     if not entities:
         return ""
 
-    ctx = datafabric_prompt_builder.build_sql_context(
+    ctx = build_sql_context(
         entities,
         resource_description,
         base_system_prompt,
