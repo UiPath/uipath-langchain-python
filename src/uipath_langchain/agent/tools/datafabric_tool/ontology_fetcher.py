@@ -15,11 +15,7 @@ A Data Fabric ontology exposes typed files — OWL (the semantic schema) and R2R
 Ontology names/folders are pinned from configuration, never supplied by the LLM.
 """
 
-import logging
-
 from uipath.platform.entities import EntitiesService
-
-logger = logging.getLogger(__name__)
 
 # Defensive cap per file so a malformed/oversized artifact can't blow up the
 # prompt/token budget. OWL + R2RML for a real ontology are comfortably under this.
