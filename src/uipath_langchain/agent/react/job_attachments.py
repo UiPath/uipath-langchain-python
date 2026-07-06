@@ -8,10 +8,42 @@ from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages import BaseMessage, HumanMessage
 from pydantic import BaseModel, ValidationError
 from uipath.platform.attachments import Attachment
+from uipath.platform.errors import EnrichedException
 from uipath.runtime.errors import UiPathErrorCategory
 
-from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode, raise_for_enriched
 from .json_utils import extract_values_by_paths, get_json_paths_by_type
+
+_JOB_ATTACHMENT_ERRORS: dict[
+    tuple[int, str | None], tuple[str, UiPathErrorCategory]
+] = {
+    (404, None): (
+        "Attachment '{attachment_name}' ({attachment_id}) was not found.",
+        UiPathErrorCategory.SYSTEM,
+    ),
+    (403, "1108"): (
+        "You don't have permissions to access attachment "
+        "'{attachment_name}' ({attachment_id}).",
+        UiPathErrorCategory.DEPLOYMENT,
+    ),
+}
+
+
+def raise_for_job_attachment_error(
+    e: EnrichedException,
+    *,
+    title: str,
+    attachment_name: str | None,
+    attachment_id: uuid.UUID,
+) -> None:
+    """Raise a structured error for known job attachment failures."""
+    raise_for_enriched(
+        e,
+        _JOB_ATTACHMENT_ERRORS,
+        title=title,
+        attachment_name=attachment_name or "<unknown>",
+        attachment_id=str(attachment_id),
+    )
 
 
 def get_job_attachments(
