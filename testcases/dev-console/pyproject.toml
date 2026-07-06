@@ -8,7 +8,7 @@ dependencies = [
     "langchain-core>=0.3.34",
     "python-dotenv>=1.0.1",
     "uipath-langchain",
-    "uipath-dev>=0.0.12",
+    "uipath-dev>=0.0.83",
     "pydantic>=2.10.6",
     "typing-extensions>=4.12.2",
     "pexpect>=4.9.0",

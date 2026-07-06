@@ -13,9 +13,10 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P2D"
 
 [options.exclude-newer-package]
+uipath-dev = false
+uipath-runtime = false
 uipath = false
 uipath-platform = false
-uipath-runtime = false
 uipath-llm-client = false
 jsonschema-pydantic-converter = false
 uipath-langchain-client = false

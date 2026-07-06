@@ -2,7 +2,7 @@
 set -e
 
 echo "Syncing dependencies..."
-uv sync
+uv sync --refresh-package uipath-dev
 
 echo "Authenticating with UiPath..."
 uv run uipath auth --client-id="$CLIENT_ID" --client-secret="$CLIENT_SECRET" --base-url="$BASE_URL"

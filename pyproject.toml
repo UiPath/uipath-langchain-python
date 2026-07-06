@@ -161,6 +161,7 @@ uipath = false
 uipath-core = false
 uipath-platform = false
 uipath-runtime = false
+uipath-dev = false
 uipath-langchain-client = false
 uipath-llm-client = false
 jsonschema-pydantic-converter = false
