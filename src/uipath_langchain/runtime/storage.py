@@ -133,18 +133,30 @@ class SqliteResumableStorage:
         self, runtime_id: str, trigger: UiPathResumeTrigger
     ) -> None:
         """Delete resume trigger from storage."""
+        await self.delete_triggers(runtime_id, [trigger])
+
+    async def delete_triggers(
+        self, runtime_id: str, triggers: list[UiPathResumeTrigger]
+    ) -> None:
+        """Delete resume triggers from storage."""
         await self._ensure_table()
 
+        interrupt_ids = [
+            trigger.interrupt_id
+            for trigger in triggers
+            if trigger.interrupt_id is not None
+        ]
+        if not interrupt_ids:
+            return
+
+        placeholders = ",".join("?" for _ in interrupt_ids)
         async with self.memory.lock, self.memory.conn.cursor() as cur:
             await cur.execute(
                 f"""
                 DELETE FROM {self.rs_table_name}
-                WHERE runtime_id = ? AND interrupt_id = ?
+                WHERE runtime_id = ? AND interrupt_id IN ({placeholders})
                 """,
-                (
-                    runtime_id,
-                    trigger.interrupt_id,
-                ),
+                (runtime_id, *interrupt_ids),
             )
             await self.memory.conn.commit()
 

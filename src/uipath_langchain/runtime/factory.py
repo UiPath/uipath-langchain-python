@@ -12,6 +12,7 @@ from openinference.instrumentation.langchain import (
 )
 from uipath.core.adapters import EvaluatorProtocol
 from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager
+from uipath.core.triggers import UiPathResumeTrigger
 from uipath.platform.resume_triggers import (
     UiPathResumeTriggerHandler,
 )
@@ -34,6 +35,13 @@ from uipath_langchain.runtime.storage import SqliteResumableStorage
 
 _AGENT_TYPE_CODED = "uipath_coded"
 _AGENT_FRAMEWORK = "langchain"
+
+
+class _LangGraphResumeTriggerHandler(UiPathResumeTriggerHandler):
+    """Adapter for the runtime's multi-trigger creation protocol."""
+
+    async def create_triggers(self, suspend_value: Any) -> list[UiPathResumeTrigger]:
+        return [await self.create_trigger(suspend_value)]
 
 
 class UiPathLangGraphRuntimeFactory:
@@ -285,7 +293,7 @@ class UiPathLangGraphRuntimeFactory:
         """
         memory = await self._get_memory()
         storage = SqliteResumableStorage(memory)
-        trigger_manager = UiPathResumeTriggerHandler()
+        trigger_manager = _LangGraphResumeTriggerHandler()
 
         evaluator: EvaluatorProtocol | None = kwargs.get("evaluator")
         callbacks: list[BaseCallbackHandler] | None = (
