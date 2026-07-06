@@ -322,7 +322,9 @@ class TestImportErrorFallback:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         try:
-            from uipath.tracing import ReferenceContextAccessor  # type: ignore[attr-defined]
+            from uipath.tracing import (
+                ReferenceContextAccessor,  # type: ignore[attr-defined]
+            )
         except ImportError:
             pytest.skip("installed uipath does not export ReferenceContext")
 
