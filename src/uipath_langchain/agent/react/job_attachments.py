@@ -42,24 +42,24 @@ def get_job_attachments(
         try:
             attachment = Attachment.model_validate(att, from_attributes=True)
         except ValidationError as e:
-            attachment_id = _extract_attachment_id(att)
-            if _has_attachment_id_error(e):
+            id_error = _attachment_id_uuid_error(e)
+            if id_error:
                 raise AgentRuntimeError(
                     code=AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID,
                     title="Invalid attachment id",
                     detail=(
-                        f"A tool returned a job attachment with id {attachment_id!r}, "
+                        f"A tool returned a job attachment with id {id_error.get('input')!r}, "
                         f"which is not a valid UUID. The agent cannot proceed with an "
                         f"invalid attachment."
                     ),
                     category=UiPathErrorCategory.SYSTEM,
                 ) from e
             raise AgentRuntimeError(
-                code=AgentRuntimeErrorCode.INVALID_ATTACHMENT,
+                code=AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR,
                 title="Invalid job attachment",
                 detail=(
-                    f"A tool returned a job attachment (id {attachment_id!r}) that "
-                    f"does not match the expected shape — {_describe_validation_errors(e)}. "
+                    f"A tool returned a job attachment that does not match the "
+                    f"expected shape — {_describe_validation_errors(e)}. "
                     f"Verify the tool's output provides valid attachment fields; the "
                     f"agent cannot proceed with an invalid attachment."
                 ),
@@ -70,30 +70,18 @@ def get_job_attachments(
     return result
 
 
-def _has_attachment_id_error(exc: ValidationError) -> bool:
-    id_field_names = _attachment_id_field_names()
-    return any(
-        err.get("loc") == (field_name,)
-        for err in exc.errors()
-        for field_name in id_field_names
-    )
-
-
-def _attachment_id_field_names() -> tuple[str, ...]:
+def _attachment_id_uuid_error(exc: ValidationError) -> Any | None:
     id_field = Attachment.model_fields["id"]
-    field_names = ["id"]
-    for alias in (id_field.validation_alias, id_field.alias):
-        if isinstance(alias, str) and alias not in field_names:
-            field_names.append(alias)
-    return tuple(field_names)
-
-
-def _extract_attachment_id(att: Any) -> Any:
-    for field_name in _attachment_id_field_names():
-        if isinstance(att, dict) and field_name in att:
-            return att[field_name]
-        if not isinstance(att, dict) and hasattr(att, field_name):
-            return getattr(att, field_name)
+    id_field_names = ("id", id_field.validation_alias, id_field.alias)
+    for err in exc.errors():
+        if err.get("type") not in ("uuid_parsing", "uuid_type"):
+            continue
+        if any(
+            err.get("loc") == (name,)
+            for name in id_field_names
+            if isinstance(name, str)
+        ):
+            return err
     return None
 
 

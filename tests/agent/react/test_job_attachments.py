@@ -567,10 +567,48 @@ class TestGetJobAttachments:
         error_info = exc_info.value.error_info
         assert error_info.category == UiPathErrorCategory.SYSTEM
         assert error_info.code == AgentRuntimeError.full_code(
-            AgentRuntimeErrorCode.INVALID_ATTACHMENT
+            AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR
         )
         assert "MimeType" in error_info.detail or "mime_type" in error_info.detail
-        assert valid_uuid in error_info.detail
+
+    def test_raises_output_validation_error_when_attachment_id_is_missing(self):
+        """A missing attachment id is an invalid shape, not an invalid UUID."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/job-attachment"},
+                }
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "FullName": {"type": "string"},
+                        "MimeType": {"type": "string"},
+                    },
+                    "required": ["ID", "FullName", "MimeType"],
+                }
+            },
+        }
+        model = create_model(schema)
+        data = {
+            "attachments": [
+                {"FullName": "missing-id.pdf", "MimeType": "application/pdf"},
+            ]
+        }
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            get_job_attachments(model, data)
+
+        error_info = exc_info.value.error_info
+        assert error_info.category == UiPathErrorCategory.SYSTEM
+        assert error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR
+        )
+        assert "ID" in error_info.detail or "id" in error_info.detail
 
     def test_filters_out_none_attachments_in_array(self):
         """Should filter out None items from attachment arrays."""
