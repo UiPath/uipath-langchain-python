@@ -1,17 +1,12 @@
 """Tests for ReferenceContext wiring in UiPathLangGraphRuntime."""
 
-import os
-import tempfile
 from typing import Any, TypedDict
 
 import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
-from uipath.platform.common._reference_context import (
-    ReferenceContext,
-    ReferenceContextAccessor,
-)
+from uipath.tracing import ReferenceContext, ReferenceContextAccessor
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
 
 
@@ -32,8 +27,7 @@ def _build_graph() -> Any:
 
 
 def _clear_accessor() -> None:
-    token = ReferenceContextAccessor.set(None)
-    ReferenceContextAccessor.reset(token)
+    ReferenceContextAccessor.set(None)
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +47,6 @@ class TestPushReferenceContext:
         monkeypatch.setenv("UIPATH_AGENT_ID", "550e8400-e29b-41d4-a716-446655440020")
         monkeypatch.delenv("UIPATH_PROCESS_VERSION", raising=False)
 
-        from langgraph.graph import StateGraph
         graph = _build_graph().compile()
         runtime = UiPathLangGraphRuntime(graph=graph, runtime_id="t")
 
@@ -139,10 +132,7 @@ async def test_context_cleared_after_execute(
     monkeypatch.setenv("UIPATH_AGENT_ID", "550e8400-e29b-41d4-a716-446655440020")
     monkeypatch.delenv("UIPATH_PROCESS_VERSION", raising=False)
 
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        db = f.name
-
-    async with AsyncSqliteSaver.from_conn_string(db) as memory:
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "mem.db")) as memory:
         await memory.setup()
         graph = _build_graph().compile(checkpointer=memory)
         runtime = UiPathLangGraphRuntime(graph=graph, runtime_id="exec-run")
@@ -168,10 +158,7 @@ async def test_context_cleared_after_execute_on_error(
     g.add_edge(START, "boom")
     g.add_edge("boom", END)
 
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        db = f.name
-
-    async with AsyncSqliteSaver.from_conn_string(db) as memory:
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "mem.db")) as memory:
         await memory.setup()
         compiled = g.compile(checkpointer=memory)
         runtime = UiPathLangGraphRuntime(graph=compiled, runtime_id="err-run")
@@ -192,10 +179,7 @@ async def test_context_cleared_after_stream(
     monkeypatch.setenv("UIPATH_AGENT_ID", "550e8400-e29b-41d4-a716-446655440020")
     monkeypatch.delenv("UIPATH_PROCESS_VERSION", raising=False)
 
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        db = f.name
-
-    async with AsyncSqliteSaver.from_conn_string(db) as memory:
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "mem.db")) as memory:
         await memory.setup()
         graph = _build_graph().compile(checkpointer=memory)
         runtime = UiPathLangGraphRuntime(graph=graph, runtime_id="stream-run")

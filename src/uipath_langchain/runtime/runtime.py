@@ -77,7 +77,7 @@ class UiPathLangGraphRuntime:
         self.chat.client_side_tools = self._get_client_side_tools()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
-    def _push_reference_context(self) -> contextvars.Token:
+    def _push_reference_context(self) -> contextvars.Token[ReferenceContext | None]:
         """Append this runtime's own entry to the ambient ReferenceContext.
 
         Reads any parent context already in the accessor (e.g. set by an
