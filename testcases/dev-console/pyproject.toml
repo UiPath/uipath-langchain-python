@@ -8,7 +8,7 @@ dependencies = [
     "langchain-core>=0.3.34",
     "python-dotenv>=1.0.1",
     "uipath-langchain",
-    "uipath-dev==0.0.84.dev1001120288",
+    "uipath-dev==0.0.84",
     "pydantic>=2.10.6",
     "typing-extensions>=4.12.2",
     "pexpect>=4.9.0",
@@ -20,19 +20,6 @@ requires-python = ">=3.11"
 
 [tool.uv.sources]
 uipath-langchain = { path = "../../", editable = true }
-uipath-dev = { index = "testpypi" }
-
-[[tool.uv.index]]
-name = "testpypi"
-url = "https://test.pypi.org/simple/"
-publish-url = "https://test.pypi.org/legacy/"
-explicit = true
-
-[tool.uv]
-override-dependencies = [
-    "uipath>=2.13.0,<2.14.0",
-    "uipath-runtime>=0.12.1,<0.13.0",
-]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
