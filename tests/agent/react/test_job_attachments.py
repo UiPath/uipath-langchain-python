@@ -491,6 +491,45 @@ class TestGetJobAttachments:
         )
         assert "att_x" in error_info.detail
 
+    def test_accepts_attachment_model_dump_output(self):
+        """Attachment.model_dump() output should use Attachment validation rules."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {"$ref": "#/definitions/job-attachment"},
+                }
+            },
+            "definitions": {
+                "job-attachment": {
+                    "type": "object",
+                    "properties": {
+                        "ID": {"type": "string"},
+                        "FullName": {"type": "string"},
+                        "MimeType": {"type": "string"},
+                    },
+                    "required": ["ID", "FullName", "MimeType"],
+                }
+            },
+        }
+        model = create_model(schema)
+        valid_uuid = "550e8400-e29b-41d4-a716-446655440401"
+        attachment = Attachment.model_validate(
+            {
+                "ID": valid_uuid,
+                "FullName": "model-dump.pdf",
+                "MimeType": "application/pdf",
+            }
+        )
+        data = {"attachments": [attachment.model_dump()]}
+
+        result = get_job_attachments(model, data)
+
+        assert len(result) == 1
+        assert str(result[0].id) == valid_uuid
+        assert result[0].full_name == "model-dump.pdf"
+
     def test_raises_system_error_with_field_on_invalid_attachment_shape(self):
         """A valid-UUID attachment missing a required field fails loud as SYSTEM,
         naming the offending field in a human-readable message."""
