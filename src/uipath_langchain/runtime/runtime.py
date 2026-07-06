@@ -19,7 +19,33 @@ from uipath.runtime import (
     UiPathRuntimeStorageProtocol,
     UiPathStreamOptions,
 )
-from uipath.tracing import ReferenceContext, ReferenceContextAccessor
+# Guarded import: ReferenceContext was added to uipath.tracing in a later release.
+# Older installed packages lack it; the noop shim keeps the runtime loadable while
+# silently disabling span propagation until the package is updated.
+_noop_ref_ctx: contextvars.ContextVar[None] = contextvars.ContextVar(
+    "_uipath_langchain_noop_ref_ctx", default=None
+)
+
+
+class _NoopReferenceContextAccessor:
+    @staticmethod
+    def get() -> None:
+        return None
+
+    @staticmethod
+    def set(value: Any) -> "contextvars.Token[None]":
+        return _noop_ref_ctx.set(None)
+
+    @staticmethod
+    def reset(token: Any) -> None:
+        _noop_ref_ctx.reset(token)
+
+
+try:
+    from uipath.tracing import ReferenceContext, ReferenceContextAccessor
+except ImportError:
+    ReferenceContext = None  # type: ignore[assignment,misc]
+    ReferenceContextAccessor = _NoopReferenceContextAccessor  # type: ignore[assignment]
 from uipath.runtime.errors import (
     UiPathBaseRuntimeError,
     UiPathErrorCategory,
@@ -77,14 +103,19 @@ class UiPathLangGraphRuntime:
         self.chat.client_side_tools = self._get_client_side_tools()
         self._middleware_node_names: set[str] = self._detect_middleware_nodes()
 
-    def _push_reference_context(self) -> contextvars.Token[ReferenceContext | None]:
+    def _push_reference_context(self) -> "contextvars.Token[Any]":
         """Append this runtime's own entry to the ambient ReferenceContext.
 
         Reads any parent context already in the accessor (e.g. set by an
         upstream middleware or the agents-python runtime), then appends a
         ``langgraph`` entry for this runtime.  Returns the ContextVar token
         so the caller can reset in a ``finally`` block.
+
+        Returns a no-op token when the installed uipath package predates
+        reference-context support.
         """
+        if ReferenceContext is None:
+            return ReferenceContextAccessor.set(None)
         agent_id = os.environ.get("UIPATH_AGENT_ID")
         agent_version = os.environ.get("UIPATH_PROCESS_VERSION") or None
         parent_ctx = ReferenceContextAccessor.get() or ReferenceContext.Empty

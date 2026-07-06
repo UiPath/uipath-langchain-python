@@ -271,3 +271,68 @@ class TestCreateBreakpointResult:
         snap = _snapshot(next_nodes=("n",), values={"out": "done"})
         result = self.rt._create_breakpoint_result(snap)
         assert result.current_state == {"out": "done"}
+
+
+# ---------------------------------------------------------------------------
+# ImportError fallback — _NoopReferenceContextAccessor
+# ---------------------------------------------------------------------------
+
+
+class TestImportErrorFallback:
+    """Cover the _NoopReferenceContextAccessor shim and the ReferenceContext=None
+    guard inside _push_reference_context."""
+
+    def test_noop_accessor_get_returns_none(self) -> None:
+        from uipath_langchain.runtime.runtime import _NoopReferenceContextAccessor
+
+        assert _NoopReferenceContextAccessor.get() is None
+
+    def test_noop_accessor_set_returns_token(self) -> None:
+        import contextvars
+
+        from uipath_langchain.runtime.runtime import _NoopReferenceContextAccessor
+
+        token = _NoopReferenceContextAccessor.set("anything")
+        assert isinstance(token, contextvars.Token)
+
+    def test_noop_accessor_reset_does_not_raise(self) -> None:
+        from uipath_langchain.runtime.runtime import _NoopReferenceContextAccessor
+
+        token = _NoopReferenceContextAccessor.set(None)
+        _NoopReferenceContextAccessor.reset(token)  # must not raise
+
+    def test_push_returns_token_when_reference_context_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import contextvars
+
+        import uipath_langchain.runtime.runtime as rt_mod
+        from uipath_langchain.runtime.runtime import _NoopReferenceContextAccessor
+
+        monkeypatch.setattr(rt_mod, "ReferenceContext", None)
+        monkeypatch.setattr(rt_mod, "ReferenceContextAccessor", _NoopReferenceContextAccessor)
+
+        rt = _make_runtime()
+        token = rt._push_reference_context()
+        assert isinstance(token, contextvars.Token)
+        # cleanup must not raise
+        _NoopReferenceContextAccessor.reset(token)
+
+    def test_push_does_not_set_real_accessor_when_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from uipath.tracing import ReferenceContextAccessor
+
+        import uipath_langchain.runtime.runtime as rt_mod
+        from uipath_langchain.runtime.runtime import _NoopReferenceContextAccessor
+
+        monkeypatch.setattr(rt_mod, "ReferenceContext", None)
+        monkeypatch.setattr(rt_mod, "ReferenceContextAccessor", _NoopReferenceContextAccessor)
+
+        rt = _make_runtime()
+        before = ReferenceContextAccessor.get()
+        token = rt._push_reference_context()
+        after = ReferenceContextAccessor.get()
+        _NoopReferenceContextAccessor.reset(token)
+
+        assert before == after
