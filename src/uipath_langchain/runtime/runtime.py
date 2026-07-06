@@ -19,33 +19,6 @@ from uipath.runtime import (
     UiPathRuntimeStorageProtocol,
     UiPathStreamOptions,
 )
-# Guarded import: ReferenceContext was added to uipath.tracing in a later release.
-# Older installed packages lack it; the noop shim keeps the runtime loadable while
-# silently disabling span propagation until the package is updated.
-_noop_ref_ctx: contextvars.ContextVar[None] = contextvars.ContextVar(
-    "_uipath_langchain_noop_ref_ctx", default=None
-)
-
-
-class _NoopReferenceContextAccessor:
-    @staticmethod
-    def get() -> None:
-        return None
-
-    @staticmethod
-    def set(value: Any) -> "contextvars.Token[None]":
-        return _noop_ref_ctx.set(None)
-
-    @staticmethod
-    def reset(token: Any) -> None:
-        _noop_ref_ctx.reset(token)
-
-
-try:
-    from uipath.tracing import ReferenceContext, ReferenceContextAccessor  # type: ignore[attr-defined]
-except ImportError:
-    ReferenceContext = None
-    ReferenceContextAccessor = _NoopReferenceContextAccessor
 from uipath.runtime.errors import (
     UiPathBaseRuntimeError,
     UiPathErrorCategory,
@@ -69,6 +42,37 @@ from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 from uipath_langchain.runtime.schema import get_entrypoints_schema, get_graph_schema
 
 from ._serialize import serialize_output
+
+# Guarded import: ReferenceContext was added to uipath.tracing in a later release.
+# Older installed packages lack it; the noop shim keeps the runtime loadable while
+# silently disabling span propagation until the package is updated.
+_noop_ref_ctx: contextvars.ContextVar[None] = contextvars.ContextVar(
+    "_uipath_langchain_noop_ref_ctx", default=None
+)
+
+
+class _NoopReferenceContextAccessor:
+    @staticmethod
+    def get() -> None:
+        return None
+
+    @staticmethod
+    def set(value: Any) -> "contextvars.Token[None]":
+        return _noop_ref_ctx.set(None)
+
+    @staticmethod
+    def reset(token: Any) -> None:
+        _noop_ref_ctx.reset(token)
+
+
+try:
+    from uipath.tracing import (  # type: ignore[attr-defined]
+        ReferenceContext,
+        ReferenceContextAccessor,
+    )
+except ImportError:
+    ReferenceContext = None
+    ReferenceContextAccessor = _NoopReferenceContextAccessor
 
 logger = logging.getLogger(__name__)
 
