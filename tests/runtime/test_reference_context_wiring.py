@@ -11,6 +11,7 @@ try:
         ReferenceContext,
         ReferenceContextAccessor,
     )
+
     _reference_context_available = True
 except ImportError:
     _reference_context_available = False
@@ -29,6 +30,7 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Minimal graph fixture
 # ---------------------------------------------------------------------------
+
 
 class _State(TypedDict):
     value: str
@@ -49,6 +51,7 @@ def _clear_accessor() -> None:
 # ---------------------------------------------------------------------------
 # _push_reference_context — unit tests (no graph needed)
 # ---------------------------------------------------------------------------
+
 
 class TestPushReferenceContext:
     def setup_method(self) -> None:
@@ -141,6 +144,7 @@ class TestPushReferenceContext:
 # execute() — context cleared after run
 # ---------------------------------------------------------------------------
 
+
 async def test_context_cleared_after_execute(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -188,6 +192,7 @@ async def test_context_cleared_after_execute_on_error(
 # stream() — context cleared after run
 # ---------------------------------------------------------------------------
 
+
 async def test_context_cleared_after_stream(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -222,7 +227,9 @@ async def test_context_cleared_after_stream_on_error(
     g.add_edge(START, "boom")
     g.add_edge("boom", END)
 
-    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "stream-err.db")) as memory:
+    async with AsyncSqliteSaver.from_conn_string(
+        str(tmp_path / "stream-err.db")
+    ) as memory:
         await memory.setup()
         compiled = g.compile(checkpointer=memory)
         runtime = UiPathLangGraphRuntime(graph=compiled, runtime_id="stream-err-run")

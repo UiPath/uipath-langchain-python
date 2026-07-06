@@ -48,10 +48,15 @@ class TestBuildNodeName:
         assert self.rt._build_node_name((), "agent") == "agent"
 
     def test_single_subgraph_prepends_subgraph_name(self) -> None:
-        assert self.rt._build_node_name(("coder:abc123",), "generate") == "coder:generate"
+        assert (
+            self.rt._build_node_name(("coder:abc123",), "generate") == "coder:generate"
+        )
 
     def test_nested_subgraphs_build_full_path(self) -> None:
-        assert self.rt._build_node_name(("coder:a", "debugger:b"), "analyze") == "coder:debugger:analyze"
+        assert (
+            self.rt._build_node_name(("coder:a", "debugger:b"), "analyze")
+            == "coder:debugger:analyze"
+        )
 
     def test_namespace_without_colon_uses_full_segment(self) -> None:
         assert self.rt._build_node_name(("subgraph",), "node") == "subgraph:node"
@@ -94,7 +99,10 @@ class TestExtractGraphResult:
 
     def test_multi_channel_unwraps_single_key_wrapping_dict(self) -> None:
         self.rt.graph.output_channels = ["x", "y"]
-        assert self.rt._extract_graph_result({"node": {"x": 10, "y": 20}}) == {"x": 10, "y": 20}
+        assert self.rt._extract_graph_result({"node": {"x": 10, "y": 20}}) == {
+            "x": 10,
+            "y": 20,
+        }
 
     def test_tuple_format_unwraps_second_element(self) -> None:
         self.rt.graph.output_channels = "val"
@@ -116,7 +124,9 @@ class TestCreateRuntimeError:
         self.rt = _make_runtime()
 
     def test_langgraph_runtime_error_returned_unchanged(self) -> None:
-        err = LangGraphRuntimeError(LangGraphErrorCode.GRAPH_LOAD_ERROR, "t", "d", UiPathErrorCategory.USER)
+        err = LangGraphRuntimeError(
+            LangGraphErrorCode.GRAPH_LOAD_ERROR, "t", "d", UiPathErrorCategory.USER
+        )
         assert self.rt.create_runtime_error(err) is err
 
     def test_graph_recursion_error_maps_to_graph_load_error(self) -> None:
@@ -147,19 +157,27 @@ class TestGetGraphConfig:
         rt = _make_runtime(runtime_id="my-run")
         assert rt._get_graph_config()["configurable"]["thread_id"] == "my-run"
 
-    def test_no_recursion_limit_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_recursion_limit_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("LANGCHAIN_RECURSION_LIMIT", raising=False)
         assert "recursion_limit" not in _make_runtime()._get_graph_config()
 
-    def test_recursion_limit_read_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_recursion_limit_read_from_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv("LANGCHAIN_RECURSION_LIMIT", "50")
         assert _make_runtime()._get_graph_config()["recursion_limit"] == 50
 
-    def test_no_max_concurrency_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_no_max_concurrency_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("LANGCHAIN_MAX_CONCURRENCY", raising=False)
         assert "max_concurrency" not in _make_runtime()._get_graph_config()
 
-    def test_max_concurrency_read_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_max_concurrency_read_from_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv("LANGCHAIN_MAX_CONCURRENCY", "4")
         assert _make_runtime()._get_graph_config()["max_concurrency"] == 4
 
@@ -228,7 +246,10 @@ class TestCreateSuccessResult:
         self.rt = _make_runtime()
 
     def test_status_is_successful(self) -> None:
-        assert self.rt._create_success_result({"k": "v"}).status == UiPathRuntimeStatus.SUCCESSFUL
+        assert (
+            self.rt._create_success_result({"k": "v"}).status
+            == UiPathRuntimeStatus.SUCCESSFUL
+        )
 
     def test_output_passed_through(self) -> None:
         assert self.rt._create_success_result({"key": "val"}).output == {"key": "val"}
@@ -310,7 +331,9 @@ class TestImportErrorFallback:
         from uipath_langchain.runtime.runtime import _NoopReferenceContextAccessor
 
         monkeypatch.setattr(rt_mod, "ReferenceContext", None)
-        monkeypatch.setattr(rt_mod, "ReferenceContextAccessor", _NoopReferenceContextAccessor)
+        monkeypatch.setattr(
+            rt_mod, "ReferenceContextAccessor", _NoopReferenceContextAccessor
+        )
 
         rt = _make_runtime()
         token = rt._push_reference_context()
@@ -332,7 +355,9 @@ class TestImportErrorFallback:
         from uipath_langchain.runtime.runtime import _NoopReferenceContextAccessor
 
         monkeypatch.setattr(rt_mod, "ReferenceContext", None)
-        monkeypatch.setattr(rt_mod, "ReferenceContextAccessor", _NoopReferenceContextAccessor)
+        monkeypatch.setattr(
+            rt_mod, "ReferenceContextAccessor", _NoopReferenceContextAccessor
+        )
 
         rt = _make_runtime()
         before = ReferenceContextAccessor.get()
