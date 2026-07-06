@@ -321,7 +321,10 @@ class TestImportErrorFallback:
     def test_push_does_not_set_real_accessor_when_unavailable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from uipath.tracing import ReferenceContextAccessor
+        try:
+            from uipath.tracing import ReferenceContextAccessor
+        except ImportError:
+            pytest.skip("installed uipath does not export ReferenceContext")
 
         import uipath_langchain.runtime.runtime as rt_mod
         from uipath_langchain.runtime.runtime import _NoopReferenceContextAccessor

@@ -6,8 +6,20 @@ import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
-from uipath.tracing import ReferenceContext, ReferenceContextAccessor
+try:
+    from uipath.tracing import ReferenceContext, ReferenceContextAccessor
+    _reference_context_available = True
+except ImportError:
+    _reference_context_available = False
+    ReferenceContext = None  # type: ignore[assignment,misc]
+    ReferenceContextAccessor = None  # type: ignore[assignment]
+
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
+
+pytestmark = pytest.mark.skipif(
+    not _reference_context_available,
+    reason="installed uipath does not export ReferenceContext",
+)
 
 
 # ---------------------------------------------------------------------------
