@@ -7,13 +7,17 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 try:
-    from uipath.tracing import ReferenceContext, ReferenceContextAccessor  # type: ignore[attr-defined]
+    from uipath.tracing import (  # type: ignore[attr-defined]
+        ReferenceContext,
+        ReferenceContextAccessor,
+    )
     _reference_context_available = True
 except ImportError:
     _reference_context_available = False
     ReferenceContext = None
     ReferenceContextAccessor = None
 
+from uipath_langchain.runtime.errors import LangGraphRuntimeError
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
 
 pytestmark = pytest.mark.skipif(
@@ -174,7 +178,7 @@ async def test_context_cleared_after_execute_on_error(
         await memory.setup()
         compiled = g.compile(checkpointer=memory)
         runtime = UiPathLangGraphRuntime(graph=compiled, runtime_id="err-run")
-        with pytest.raises(Exception):
+        with pytest.raises(LangGraphRuntimeError):
             await runtime.execute(input={"v": "x"})
 
     assert ReferenceContextAccessor.get() is None
