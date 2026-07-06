@@ -21,6 +21,12 @@ requires-python = ">=3.11"
 [tool.uv.sources]
 uipath-langchain = { path = "../../", editable = true }
 
+[tool.uv]
+override-dependencies = [
+    "uipath>=2.13.0,<2.14.0",
+    "uipath-runtime>=0.12.1,<0.13.0",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
