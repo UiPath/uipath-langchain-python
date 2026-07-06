@@ -7,12 +7,12 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 try:
-    from uipath.tracing import ReferenceContext, ReferenceContextAccessor
+    from uipath.tracing import ReferenceContext, ReferenceContextAccessor  # type: ignore[attr-defined]
     _reference_context_available = True
 except ImportError:
     _reference_context_available = False
-    ReferenceContext = None  # type: ignore[assignment,misc]
-    ReferenceContextAccessor = None  # type: ignore[assignment]
+    ReferenceContext = None
+    ReferenceContextAccessor = None
 
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
 
@@ -166,7 +166,7 @@ async def test_context_cleared_after_execute_on_error(
         raise ValueError("explode")
 
     g = StateGraph(_S)
-    g.add_node("boom", _boom)
+    g.add_node("boom", _boom)  # type: ignore[arg-type]
     g.add_edge(START, "boom")
     g.add_edge("boom", END)
 

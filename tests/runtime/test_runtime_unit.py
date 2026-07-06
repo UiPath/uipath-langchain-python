@@ -22,10 +22,10 @@ def _make_runtime(**kwargs: Any) -> UiPathLangGraphRuntime:
 
 
 def _snapshot(
-    next_nodes: tuple = (),
-    interrupts: tuple = (),
-    tasks: list | None = None,
-    values: dict | None = None,
+    next_nodes: tuple[Any, ...] = (),
+    interrupts: tuple[Any, ...] = (),
+    tasks: list[Any] | None = None,
+    values: dict[str, Any] | None = None,
 ) -> MagicMock:
     snap = MagicMock(spec=StateSnapshot)
     snap.next = next_nodes
@@ -322,7 +322,7 @@ class TestImportErrorFallback:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         try:
-            from uipath.tracing import ReferenceContextAccessor
+            from uipath.tracing import ReferenceContextAccessor  # type: ignore[attr-defined]
         except ImportError:
             pytest.skip("installed uipath does not export ReferenceContext")
 

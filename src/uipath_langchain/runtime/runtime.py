@@ -42,10 +42,10 @@ class _NoopReferenceContextAccessor:
 
 
 try:
-    from uipath.tracing import ReferenceContext, ReferenceContextAccessor
+    from uipath.tracing import ReferenceContext, ReferenceContextAccessor  # type: ignore[attr-defined]
 except ImportError:
-    ReferenceContext = None  # type: ignore[assignment,misc]
-    ReferenceContextAccessor = _NoopReferenceContextAccessor  # type: ignore[assignment]
+    ReferenceContext = None
+    ReferenceContextAccessor = _NoopReferenceContextAccessor
 from uipath.runtime.errors import (
     UiPathBaseRuntimeError,
     UiPathErrorCategory,
