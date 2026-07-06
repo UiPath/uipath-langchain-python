@@ -203,3 +203,31 @@ async def test_context_cleared_after_stream(
             pass
 
     assert ReferenceContextAccessor.get() is None
+
+
+async def test_context_cleared_after_stream_on_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    _clear_accessor()
+    monkeypatch.setenv("UIPATH_AGENT_ID", "550e8400-e29b-41d4-a716-446655440020")
+
+    class _S(TypedDict):
+        v: str
+
+    def _boom(s: _S) -> _S:
+        raise ValueError("explode")
+
+    g = StateGraph(_S)
+    g.add_node("boom", _boom)  # type: ignore[arg-type]
+    g.add_edge(START, "boom")
+    g.add_edge("boom", END)
+
+    async with AsyncSqliteSaver.from_conn_string(str(tmp_path / "stream-err.db")) as memory:
+        await memory.setup()
+        compiled = g.compile(checkpointer=memory)
+        runtime = UiPathLangGraphRuntime(graph=compiled, runtime_id="stream-err-run")
+        with pytest.raises(LangGraphRuntimeError):
+            async for _ in runtime.stream(input={"v": "x"}):
+                pass
+
+    assert ReferenceContextAccessor.get() is None
