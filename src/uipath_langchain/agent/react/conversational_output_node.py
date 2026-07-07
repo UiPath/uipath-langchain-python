@@ -88,7 +88,7 @@ def create_conversational_output_node(
                 code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
                 title=f"Structured-output LLM returned {type(response).__name__} invalid response.",
                 detail=(
-                    "The language model returned an unexpected response type."
+                    "The language model returned an unexpected response type. "
                     "If you are using a BYOM configuration, verify your model deployment.",
                 ),
                 category=UiPathErrorCategory.SYSTEM,
