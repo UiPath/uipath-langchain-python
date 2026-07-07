@@ -112,7 +112,7 @@ def _handle_end_conversational(
                 ),
                 category=UiPathErrorCategory.SYSTEM,
             )
-        
+
         custom_output_fields = dict(set_output_call["args"])
         new_conversation_messages = state.messages[initial_count:-1]
     else:
