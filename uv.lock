@@ -4432,7 +4432,7 @@ wheels = [
 
 [[package]]
 name = "uipath"
-version = "2.13.3"
+version = "2.13.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "applicationinsights" },
@@ -4477,7 +4477,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.14.1"
+version = "0.14.2"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4649,7 +4649,7 @@ wheels = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.2.2"
+version = "0.2.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
