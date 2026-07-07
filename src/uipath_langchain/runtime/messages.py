@@ -188,6 +188,11 @@ class UiPathChatMessagesMapper:
                                 )
                             )
                     elif isinstance(data, UiPathExternalValue):
+                        if uipath_message.role == "assistant":
+                            # Workspace files persisted by the advanced runtime
+                            # (hydrated into the file backend before the graph
+                            # runs); they are not attachments for the LLM.
+                            continue
                         attachment_id = self.parse_attachment_id_from_content_part_uri(
                             data.uri
                         )

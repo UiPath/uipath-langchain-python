@@ -12,3 +12,10 @@ class AdvancedAgentGraphState(BaseModel):
 
     messages: Annotated[list[AnyMessage], add_messages] = []
     structured_response: dict[str, Any] = {}
+
+
+class ConversationalAdvancedAgentGraphState(BaseModel):
+    """Graph state for the conversational advanced agent wrapper."""
+
+    messages: Annotated[list[AnyMessage], add_messages] = []
+    initial_message_count: int | None = None

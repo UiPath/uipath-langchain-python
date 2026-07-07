@@ -61,11 +61,10 @@ async def build_file_content_blocks_for(
     if is_image(file_info.mime_type):
         return [create_image_block(base64=base64_file, mime_type=file_info.mime_type)]
 
-    mime_type = file_info.mime_type or "application/octet-stream"
     return [
         create_file_block(
             base64=base64_file,
-            mime_type=mime_type,
+            mime_type=file_info.mime_type or "application/octet-stream",
             filename=sanitize_filename(file_info.name),
         )
     ]

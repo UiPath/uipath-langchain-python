@@ -15,10 +15,11 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
 from pydantic import BaseModel
+from uipath.core.chat import UiPathConversationMessageData
 
 from uipath_langchain.agent.react.job_attachments import get_job_attachment_paths
 
-from .types import AdvancedAgentGraphState
+from .types import AdvancedAgentGraphState, ConversationalAdvancedAgentGraphState
 from .utils import (
     MEMORY_INDEX_VIRTUAL_PATH,
     create_state_with_input,
@@ -116,6 +117,72 @@ def create_advanced_agent_graph(
     wrapper.add_node("transform_output", transform_output)
     wrapper.add_edge(START, "transform_input")
     wrapper.add_edge("transform_input", "advanced_agent")
+    wrapper.add_edge("advanced_agent", "transform_output")
+    wrapper.add_edge("transform_output", END)
+
+    return wrapper
+
+
+def create_conversational_advanced_agent_graph(
+    model: BaseChatModel,
+    tools: Sequence[BaseTool],
+    system_prompt: str,
+    backend: BackendProtocol | BackendFactory | None,
+) -> StateGraph[Any, Any, Any, Any]:
+    """Wrap the advanced agent in a parent graph that speaks the conversational contract.
+
+    Conversational agents receive the full conversation history in the
+    ``messages`` input each exchange and must output the newly produced
+    messages as ``uipath__agent_response_messages``. The deepagent already
+    operates on ``messages``, so the wrapper only records the incoming history
+    size and maps the new messages to the conversational output field.
+    """
+    # deferred: avoids a circular import (runtime.messages imports agent modules)
+    from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
+
+    memory_sources = (
+        [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
+    )
+
+    inner_graph = create_advanced_agent(
+        model=model,
+        tools=tools,
+        system_prompt=system_prompt,
+        backend=backend,
+        memory=memory_sources,
+    )
+
+    class ConversationalAdvancedAgentOutput(BaseModel):
+        uipath__agent_response_messages: list[UiPathConversationMessageData] = []
+
+    def capture_exchange_start(
+        state: ConversationalAdvancedAgentGraphState,
+    ) -> dict[str, Any]:
+        return {"initial_message_count": len(state.messages)}
+
+    def transform_output(
+        state: ConversationalAdvancedAgentGraphState,
+    ) -> dict[str, Any]:
+        initial_count = state.initial_message_count or 0
+        new_messages = state.messages[initial_count:]
+        converted = (
+            UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
+                messages=new_messages, include_tool_results=False
+            )
+            if new_messages
+            else []
+        )
+        return {"uipath__agent_response_messages": converted}
+
+    wrapper: StateGraph[Any, Any, Any, Any] = StateGraph(
+        ConversationalAdvancedAgentGraphState,
+        output_schema=ConversationalAdvancedAgentOutput,
+    )
+    wrapper.add_node("capture_exchange_start", capture_exchange_start)
+    wrapper.add_node("advanced_agent", inner_graph)
+    wrapper.add_node("transform_output", transform_output)
+    wrapper.add_edge(START, "capture_exchange_start")
+    wrapper.add_edge("capture_exchange_start", "advanced_agent")
     wrapper.add_edge("advanced_agent", "transform_output")
     wrapper.add_edge("transform_output", END)
 

@@ -6,10 +6,44 @@ from typing import Any, Sequence
 
 from jsonpath_ng import parse  # type: ignore[import-untyped]
 from langchain_core.messages import BaseMessage, HumanMessage
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from uipath.platform.attachments import Attachment
+from uipath.platform.errors import EnrichedException
+from uipath.runtime.errors import UiPathErrorCategory
 
+from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode, raise_for_enriched
 from .json_utils import extract_values_by_paths, get_json_paths_by_type
+
+_JOB_ATTACHMENT_ERRORS: dict[
+    tuple[int, str | None], tuple[str, UiPathErrorCategory]
+] = {
+    (404, None): (
+        "Attachment '{attachment_name}' ({attachment_id}) was not found.",
+        UiPathErrorCategory.SYSTEM,
+    ),
+    (403, "1108"): (
+        "You don't have permissions to access attachment "
+        "'{attachment_name}' ({attachment_id}).",
+        UiPathErrorCategory.DEPLOYMENT,
+    ),
+}
+
+
+def raise_for_job_attachment_error(
+    e: EnrichedException,
+    *,
+    title: str,
+    attachment_name: str | None,
+    attachment_id: uuid.UUID,
+) -> None:
+    """Raise a structured error for known job attachment failures."""
+    raise_for_enriched(
+        e,
+        _JOB_ATTACHMENT_ERRORS,
+        title=title,
+        attachment_name=attachment_name or "<unknown>",
+        attachment_id=str(attachment_id),
+    )
 
 
 def get_job_attachments(
@@ -23,18 +57,78 @@ def get_job_attachments(
         data: The data object (dict or Pydantic model) to extract attachments from
 
     Returns:
-        List of Attachment objects
+        List of Attachment objects.
+
+    Raises:
+        AgentRuntimeError: If a tool-output attachment fails validation (e.g. its
+            ID is not a valid UUID). This is unrecoverable invalid data and is
+            surfaced as a SYSTEM failure rather than silently skipped.
     """
     job_attachment_paths = get_job_attachment_paths(schema)
     job_attachments = extract_values_by_paths(data, job_attachment_paths)
 
-    result = [
-        Attachment.model_validate(att, from_attributes=True)
-        for att in job_attachments
-        if att
-    ]
+    result = []
+    for att in job_attachments:
+        if not att:
+            continue
+        try:
+            attachment = Attachment.model_validate(att, from_attributes=True)
+        except ValidationError as e:
+            id_error = _attachment_id_uuid_error(e)
+            if id_error:
+                raise AgentRuntimeError(
+                    code=AgentRuntimeErrorCode.INVALID_ATTACHMENT_ID,
+                    title="Invalid attachment id",
+                    detail=(
+                        f"A tool returned a job attachment with id {id_error.get('input')!r}, "
+                        f"which is not a valid UUID. The agent cannot proceed with an "
+                        f"invalid attachment."
+                    ),
+                    category=UiPathErrorCategory.SYSTEM,
+                ) from e
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR,
+                title="Invalid job attachment",
+                detail=(
+                    f"A tool returned a job attachment that does not match the "
+                    f"expected shape — {_describe_validation_errors(e)}. "
+                    f"Verify the tool's output provides valid attachment fields; the "
+                    f"agent cannot proceed with an invalid attachment."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            ) from e
+        result.append(attachment)
 
     return result
+
+
+def _attachment_id_uuid_error(exc: ValidationError) -> Any | None:
+    id_field = Attachment.model_fields["id"]
+    id_field_names = ("id", id_field.validation_alias, id_field.alias)
+    for err in exc.errors():
+        if err.get("type") not in ("uuid_parsing", "uuid_type"):
+            continue
+        if any(
+            err.get("loc") == (name,)
+            for name in id_field_names
+            if isinstance(name, str)
+        ):
+            return err
+    return None
+
+
+def _describe_validation_errors(exc: ValidationError) -> str:
+    """Render a pydantic ValidationError as a short, human-readable field list.
+
+    Reports each failing field path and reason (e.g. ``'MimeType': Field required``)
+    without echoing the offending input values, so the message is actionable and
+    safe to surface.
+    """
+    issues = []
+    for err in exc.errors():
+        field = ".".join(str(part) for part in err.get("loc", ())) or "attachment"
+        issues.append(f"'{field}': {err.get('msg', 'invalid value')}")
+    return "; ".join(issues)
 
 
 def get_job_attachment_paths(model: type[BaseModel]) -> list[str]:
