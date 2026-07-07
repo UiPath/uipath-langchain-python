@@ -69,7 +69,7 @@ async def test_resolve_builds_folders_map_and_caches_folder_key(monkeypatch):
         side_effect=lambda name, folder_key: SimpleNamespace(name=name)
     )
 
-    captured: dict = {}
+    captured: dict[str, object] = {}
     fake_service = object()
 
     def fake_entities_service(**kwargs):
