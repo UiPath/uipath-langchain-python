@@ -7,7 +7,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 try:
-    from uipath.tracing import (  # type: ignore[attr-defined]
+    from uipath.tracing import (
         ReferenceContext,
         ReferenceContextAccessor,
     )
@@ -15,8 +15,8 @@ try:
     _reference_context_available = True
 except ImportError:
     _reference_context_available = False
-    ReferenceContext = None
-    ReferenceContextAccessor = None
+    ReferenceContext = None  # type: ignore[assignment]
+    ReferenceContextAccessor = None  # type: ignore[assignment]
 
 from uipath_langchain.runtime.errors import LangGraphRuntimeError
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime

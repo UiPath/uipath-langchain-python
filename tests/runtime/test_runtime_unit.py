@@ -345,7 +345,7 @@ class TestImportErrorFallback:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         try:
-            from uipath.tracing import (  # type: ignore[attr-defined]
+            from uipath.tracing import (
                 ReferenceContextAccessor,
             )
         except ImportError:
