@@ -53,17 +53,12 @@ def _handle_raise_error(args: dict[str, Any]) -> NoReturn:
 
 
 def _handle_end_conversational(
-    state: AgentGraphState, response_schema: type[BaseModel] | None
+    state: AgentGraphState,
+    response_schema: type[BaseModel] | None,
+    with_conversational_output_node: bool = False,
 ) -> dict[str, Any]:
-    """Handle conversational agent termination by returning converted messages.
+    """Handle conversational agent termination by returning converted messages with optional structured output fields."""
 
-    When the agent's output schema declares custom fields beyond
-    `uipath__agent_response_messages`, the GENERATE_CONVERSATIONAL_OUTPUT node
-    runs immediately before TERMINATE and produces an AIMessage carrying a
-    `set_conversational_output` tool call. The custom field values are
-    extracted from that tool call's args and merged with the converted
-    message history for the final output.
-    """
     if state.inner_state.initial_message_count is None:
         raise AgentRuntimeError(
             code=AgentRuntimeErrorCode.STATE_ERROR,
@@ -80,11 +75,26 @@ def _handle_end_conversational(
             category=UiPathErrorCategory.SYSTEM,
         )
 
-    # Extract structured output fields from the last AIMessage's
-    # `set_conversational_output` tool call, when present.
-    last_ai_message = state.messages[-1] if state.messages else None
-    set_output_call = (
-        next(
+    initial_count = state.inner_state.initial_message_count
+
+    custom_output_fields: dict[str, Any] = {}
+    if with_conversational_output_node:
+        # with_conversational_output_node means that a node before TERMINATE
+        # produces an AIMessage carrying a `set_conversational_output` tool call.
+        # Extract the custom-field args from that call, and strip its AIMessage from message-history.
+        last_ai_message = state.messages[-1] if state.messages else None
+
+        if not isinstance(last_ai_message, AIMessage):
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.STATE_ERROR,
+                title="Expected last message to be an AIMessage for conversational agent termination.",
+                detail=(
+                    "Last message in state is expected to be an AIMessage containing a `set_conversational_output` tool call."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            )
+
+        set_output_call = next(
             (
                 tc
                 for tc in (last_ai_message.tool_calls or [])
@@ -92,31 +102,30 @@ def _handle_end_conversational(
             ),
             None,
         )
-        if isinstance(last_ai_message, AIMessage)
-        else None
-    )
-    custom_output_fields: dict[str, Any] = (
-        dict(set_output_call["args"]) if set_output_call is not None else {}
-    )
-
-    initial_count = state.inner_state.initial_message_count
-    # Drop the GENERATE_CONVERSATIONAL_OUTPUT AIMessage from the converted
-    # response payload — it carries no user-visible content, only the
-    # framework-internal set_conversational_output tool call.
-    new_messages = (
-        state.messages[initial_count:-1]
-        if set_output_call is not None
-        else state.messages[initial_count:]
-    )
+        if set_output_call is None:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.STATE_ERROR,
+                title="No set_conversational_output tool call found.",
+                detail=(
+                    "The conversational output node was expected to produce a set_conversational_output tool call "
+                    "in the last AIMessage, but none was found."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            )
+        
+        custom_output_fields = dict(set_output_call["args"])
+        new_conversation_messages = state.messages[initial_count:-1]
+    else:
+        new_conversation_messages = state.messages[initial_count:]
 
     converted_messages: list[UiPathConversationMessageData] = []
 
     # For the agent-output messages, don't include tool-results. Just include agent's LLM outputs and tool-calls + inputs.
     # This is primarily since evaluations don't check for tool-results; this output represents the agent's actual choices rather than tool-results.
-    if new_messages:
+    if new_conversation_messages:
         converted_messages = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
-                messages=new_messages, include_tool_results=False
+                messages=new_conversation_messages, include_tool_results=False
             )
         )
 
@@ -146,6 +155,7 @@ def _handle_end_conversational(
 def create_terminate_node(
     response_schema: type[BaseModel] | None = None,
     is_conversational: bool = False,
+    with_conversational_output_node: bool = False,
 ):
     """Handles Agent Graph termination for multiple sources and output or error propagation to Orchestrator.
 
@@ -157,7 +167,9 @@ def create_terminate_node(
 
     def terminate_node(state: AgentGraphState):
         if is_conversational:
-            return _handle_end_conversational(state, response_schema)
+            return _handle_end_conversational(
+                state, response_schema, with_conversational_output_node
+            )
         else:
             last_message = state.messages[-1]
             if not isinstance(last_message, AIMessage):

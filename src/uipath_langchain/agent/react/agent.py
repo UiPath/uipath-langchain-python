@@ -130,11 +130,13 @@ def create_agent(
             tool_nodes_with_guardrails
         )
 
-    terminate_node = create_terminate_node(output_schema, config.is_conversational)
-
     with_conversational_output_node = (
         config.is_conversational
         and has_custom_conversational_output_fields(output_schema)
+    )
+
+    terminate_node = create_terminate_node(
+        output_schema, config.is_conversational, with_conversational_output_node
     )
 
     CompleteAgentGraphState = create_state_with_input(
