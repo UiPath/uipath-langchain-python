@@ -6,6 +6,10 @@ import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
+ReferenceContext: Any = None
+ReferenceContextAccessor: Any = None
+_reference_context_available = False
+
 try:
     from uipath.tracing import (
         ReferenceContext,
@@ -14,9 +18,7 @@ try:
 
     _reference_context_available = True
 except ImportError:
-    _reference_context_available = False
-    ReferenceContext = None  # type: ignore[assignment]
-    ReferenceContextAccessor = None  # type: ignore[assignment]
+    pass
 
 from uipath_langchain.runtime.errors import LangGraphRuntimeError
 from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime

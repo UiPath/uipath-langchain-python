@@ -65,14 +65,16 @@ class _NoopReferenceContextAccessor:
         _noop_ref_ctx.reset(token)
 
 
+ReferenceContext: Any = None
+ReferenceContextAccessor: Any = _NoopReferenceContextAccessor
+
 try:
     from uipath.tracing import (
         ReferenceContext,
         ReferenceContextAccessor,
     )
 except ImportError:
-    ReferenceContext = None  # type: ignore[assignment]
-    ReferenceContextAccessor = _NoopReferenceContextAccessor  # type: ignore[assignment]
+    pass
 
 logger = logging.getLogger(__name__)
 
