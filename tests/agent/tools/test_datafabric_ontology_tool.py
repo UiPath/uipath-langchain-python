@@ -234,7 +234,9 @@ async def test_call_fallback_when_no_answer(monkeypatch):
 
 async def test_ensure_graph_empty_resolution_raises(monkeypatch):
     # pairs is non-empty (parse) but resolution yields no entities -> post-resolve guard.
-    _patch_ensure_graph_deps(monkeypatch, resolve=AsyncMock(return_value=([], object())))
+    _patch_ensure_graph_deps(
+        monkeypatch, resolve=AsyncMock(return_value=([], object()))
+    )
     handler = DataFabricOntologyQueryHandler(
         ontologies=[("california-schools", "f1")], llm=MagicMock()
     )

@@ -54,36 +54,57 @@ async def resolve_ontology_entities(
 ) -> tuple[list[Entity], EntitiesService]:
     """Resolve an R2RML allow-list into schemas + a folder-scoped service (b2).
 
-    For each ``(entity_name, folder_path)``: resolve the folder path to a key
-    (cached per distinct path), fetch the entity schema by name within that
-    folder, and accumulate a ``folders_map`` used to build an ``EntitiesService``
-    that routes each entity's record queries to its own folder.
+    Resolves the folder paths to keys and fetches the entity schemas
+    *concurrently* (via ``asyncio.gather``) rather than serially, so the inner
+    graph is ready after roughly one round-trip instead of one per entity —
+    the main latency win on first invocation. Distinct folder paths are resolved
+    once each; entity schemas are then fetched all at once, preserving the input
+    order.
 
     Folder keys come only from the trusted folder resolution of the R2RML
     ``uipath:folderPath`` — never from the LLM.
     """
-    entities: list[Entity] = []
-    folders_map: dict[str, str] = {}
-    folder_key_cache: dict[str, str] = {}
+    # Phase 1: resolve each *distinct* folder path -> key, concurrently.
+    distinct_paths = list(dict.fromkeys(folder_path for _, folder_path in pairs))
+    resolved_keys = await asyncio.gather(
+        *(sdk.folders.retrieve_key_async(folder_path=p) for p in distinct_paths)
+    )
+    folder_key_by_path: dict[str, str] = {}
+    for folder_path, folder_key in zip(distinct_paths, resolved_keys, strict=True):
+        if not folder_key:
+            raise ValueError(
+                f"Folder path '{folder_path}' could not be resolved to a "
+                "folder key. Check the R2RML uipath:folderPath and permissions."
+            )
+        folder_key_by_path[folder_path] = folder_key
 
-    for name, folder_path in pairs:
-        folder_key = folder_key_cache.get(folder_path)
-        if folder_key is None:
-            folder_key = await sdk.folders.retrieve_key_async(folder_path=folder_path)
-            if not folder_key:
-                raise ValueError(
-                    f"Folder path '{folder_path}' could not be resolved to a "
-                    "folder key. Check the R2RML uipath:folderPath and permissions."
-                )
-            folder_key_cache[folder_path] = folder_key
-
-        entity = await sdk.entities.retrieve_by_name_async(name, folder_key=folder_key)
-        entities.append(entity)
-        folders_map[entity.name] = folder_key
+    # Phase 2: fetch every entity schema concurrently (order preserved by gather).
+    folder_keys = [folder_key_by_path[folder_path] for _, folder_path in pairs]
+    entities: list[Entity] = list(
+        await asyncio.gather(
+            *(
+                sdk.entities.retrieve_by_name_async(name, folder_key=folder_key)
+                for (name, _), folder_key in zip(pairs, folder_keys, strict=True)
+            )
+        )
+    )
+    # The SDK routes each query by entity *name* -> folder (EntityRouting), and an
+    # entity name is unique within its folder — which is also the SQL table
+    # identifier used inside a single query. The same name living in two different
+    # folders is a valid catalog-wide situation; each entity is still resolved and
+    # shown to the model with its own folder here.
+    folders_map: dict[str, str] = {
+        entity.name: folder_key
+        for entity, folder_key in zip(entities, folder_keys, strict=True)
+    }
 
     # Build the folder-scoped service ourselves via the public folders_map param
     # (yields a FoldersMapRoutingStrategy). Reuse the SDK's already-resolved
     # auth/config so this service talks to the same tenant as sdk.entities.
+    # NOTE: config/execution_context are read from the SDK's private attributes
+    # because there is currently no public factory for a folder-scoped
+    # EntitiesService with a folders_map. This is a deliberate, contained
+    # trade-off; if the SDK later exposes such a factory, switch to it here.
     scoped_service = EntitiesService(
         config=sdk._config,
         execution_context=sdk._execution_context,

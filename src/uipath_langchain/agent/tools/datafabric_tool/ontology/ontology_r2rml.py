@@ -20,8 +20,12 @@ from rdflib import Graph, Namespace
 from rdflib.namespace import RDF
 
 # R2RML vocabulary and the UiPath extension carrying the folder path.
-RR = Namespace("http://www.w3.org/ns/r2rml#")
-UIPATH = Namespace("http://uipath.com/ns/datafabric#")
+# These are RDF namespace IRIs — opaque identifiers that must match the terms in
+# the parsed Turtle verbatim, not network endpoints. The R2RML namespace is
+# defined as http by the W3C spec; switching to https would stop the terms from
+# matching. NOSONAR suppresses the clear-text-protocol false positive (S5332).
+RR = Namespace("http://www.w3.org/ns/r2rml#")  # NOSONAR
+UIPATH = Namespace("http://uipath.com/ns/datafabric#")  # NOSONAR
 
 
 class R2RMLParseError(ValueError):
