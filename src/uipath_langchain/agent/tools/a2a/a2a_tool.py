@@ -49,6 +49,16 @@ from uipath_langchain.agent.tools.utils import sanitize_tool_name
 
 logger = getLogger(__name__)
 
+# The A2A terminal task states
+_TERMINAL_TASK_STATES = frozenset(
+    {
+        TaskState.completed.value,
+        TaskState.canceled.value,
+        TaskState.failed.value,
+        TaskState.rejected.value,
+    }
+)
+
 
 class A2aToolInput(BaseModel):
     """Input schema for A2A agent tool."""
@@ -314,6 +324,11 @@ def _create_a2a_tool(
             task_id=task_id,
             context_id=context_id,
         )
+
+        # The server rejects messages to a terminal task, so start a new task
+        # next turn, keeping context_id to stay in the same conversation.
+        if task_state in _TERMINAL_TASK_STATES:
+            new_task_id = None
 
         return Command(
             update={

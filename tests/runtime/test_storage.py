@@ -194,6 +194,68 @@ class TestTriggerStorage:
         assert triggers[0].interrupt_id == "interrupt2"
 
     @pytest.mark.asyncio
+    async def test_delete_triggers(self, storage: SqliteResumableStorage):
+        """Test deleting sibling triggers for the same interrupt."""
+        api_trigger = UiPathResumeTrigger(
+            interrupt_id="interrupt1",
+            trigger_type=UiPathResumeTriggerType.API,
+            trigger_name=UiPathResumeTriggerName.API,
+            payload="api-payload",
+        )
+        timer_trigger = UiPathResumeTrigger(
+            interrupt_id="interrupt1",
+            trigger_type=UiPathResumeTriggerType.TIMER,
+            trigger_name=UiPathResumeTriggerName.TIMER,
+            payload="timer-payload",
+        )
+        unrelated_trigger = UiPathResumeTrigger(
+            interrupt_id="interrupt2",
+            trigger_type=UiPathResumeTriggerType.TASK,
+            trigger_name=UiPathResumeTriggerName.TASK,
+            payload="unrelated-payload",
+        )
+        other_runtime_trigger = UiPathResumeTrigger(
+            interrupt_id="interrupt1",
+            trigger_type=UiPathResumeTriggerType.API,
+            trigger_name=UiPathResumeTriggerName.API,
+            payload="other-runtime-payload",
+        )
+        await storage.save_triggers(
+            "runtime1", [api_trigger, timer_trigger, unrelated_trigger]
+        )
+        await storage.save_triggers("runtime2", [other_runtime_trigger])
+
+        await storage.delete_triggers("runtime1", [api_trigger, timer_trigger])
+
+        triggers = await storage.get_triggers("runtime1")
+        assert triggers is not None
+        assert [trigger.interrupt_id for trigger in triggers] == ["interrupt2"]
+        assert triggers[0].payload == "unrelated-payload"
+
+        other_triggers = await storage.get_triggers("runtime2")
+        assert other_triggers is not None
+        assert len(other_triggers) == 1
+        assert other_triggers[0].payload == "other-runtime-payload"
+
+    @pytest.mark.asyncio
+    async def test_delete_triggers_empty_list(self, storage: SqliteResumableStorage):
+        """Test deleting an empty trigger list leaves storage unchanged."""
+        trigger = UiPathResumeTrigger(
+            interrupt_id="interrupt1",
+            trigger_type=UiPathResumeTriggerType.API,
+            trigger_name=UiPathResumeTriggerName.API,
+            payload="payload1",
+        )
+        await storage.save_triggers("runtime1", [trigger])
+
+        await storage.delete_triggers("runtime1", [])
+
+        triggers = await storage.get_triggers("runtime1")
+        assert triggers is not None
+        assert len(triggers) == 1
+        assert triggers[0].interrupt_id == "interrupt1"
+
+    @pytest.mark.asyncio
     async def test_get_nonexistent_triggers_returns_none(
         self, storage: SqliteResumableStorage
     ):
