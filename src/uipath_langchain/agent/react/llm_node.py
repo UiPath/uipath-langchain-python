@@ -11,6 +11,8 @@ from langchain_core.messages import (
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel
 from uipath.agent.react import RAISE_ERROR_TOOL
+from uipath.llm_client import UiPathAPIError
+from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.chat.handlers import get_payload_handler
@@ -119,11 +121,15 @@ def create_llm_node(
 
         try:
             response = await llm.ainvoke(messages)
-        except Exception as e:
-            # LLM errors arrive as provider-specific exceptions (OpenAI, Bedrock,
-            # Vertex). Convert to a structured AgentRuntimeError with the HTTP
-            # status code so upstream handlers can categorise (e.g. 403 → licensing).
+        except UiPathAPIError as e:
+            # New LLM clients surface provider HTTP errors as a normalized UiPathAPIError directly.
             raise_for_provider_http_error(e)
+        except Exception as e:
+            # Legacy in-repo clients (use_new_llm_clients=False) raise raw provider SDK exceptions.
+            # Normalize via as_uipath_error and apply the same mapping when the error is HTTP-shaped; non-HTTP errors propagate.
+            uipath_error = as_uipath_error(e)
+            if isinstance(uipath_error, UiPathAPIError):
+                raise_for_provider_http_error(uipath_error)
             raise
         if not isinstance(response, AIMessage):
             raise AgentRuntimeError(

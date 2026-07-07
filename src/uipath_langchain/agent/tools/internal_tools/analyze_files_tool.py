@@ -34,12 +34,12 @@ from uipath.tracing import (
 from uipath_langchain.agent.exceptions import (
     AgentRuntimeError,
     AgentRuntimeErrorCode,
-    raise_for_enriched,
 )
 from uipath_langchain.agent.multimodal import (
     FileInfo,
     build_file_content_blocks_for,
 )
+from uipath_langchain.agent.react.job_attachments import raise_for_job_attachment_error
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
 from uipath_langchain.agent.tools.internal_tools.pii_masker import (
     PiiMasker,
@@ -416,17 +416,11 @@ async def _resolve_job_attachment_arguments(
                 key=attachment_id
             )
         except EnrichedException as e:
-            raise_for_enriched(
+            raise_for_job_attachment_error(
                 e,
-                {
-                    (404, None): (
-                        "Attachment '{attachment_name}' ({attachment_id}) was not found.",
-                        UiPathErrorCategory.SYSTEM,
-                    ),
-                },
                 title="Failed to resolve job attachment",
                 attachment_name=attachment_name,
-                attachment_id=str(attachment_id),
+                attachment_id=attachment_id,
             )
             raise
 
