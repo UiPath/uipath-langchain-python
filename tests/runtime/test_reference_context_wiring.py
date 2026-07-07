@@ -6,6 +6,9 @@ import pytest
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
+from uipath_langchain.runtime.errors import LangGraphRuntimeError
+from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
+
 ReferenceContext: Any = None
 ReferenceContextAccessor: Any = None
 _reference_context_available = False
@@ -19,9 +22,6 @@ try:
     _reference_context_available = True
 except ImportError:
     pass
-
-from uipath_langchain.runtime.errors import LangGraphRuntimeError
-from uipath_langchain.runtime.runtime import UiPathLangGraphRuntime
 
 pytestmark = pytest.mark.skipif(
     not _reference_context_available,
