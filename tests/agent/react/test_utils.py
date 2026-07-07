@@ -1,5 +1,7 @@
 """Tests for ReAct agent utilities."""
 
+from typing import Any
+
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel, Field
@@ -414,13 +416,13 @@ class TestHasCustomConversationalOutputFields:
 
     def test_returns_false_when_only_response_messages_field(self):
         class ResponseOnly(BaseModel):
-            uipath__agent_response_messages: list = Field(default_factory=list)
+            uipath__agent_response_messages: list[Any] = Field(default_factory=list)
 
         assert has_custom_conversational_output_fields(ResponseOnly) is False
 
     def test_returns_true_when_extra_field_exists(self):
         class WithExtras(BaseModel):
-            uipath__agent_response_messages: list = Field(default_factory=list)
+            uipath__agent_response_messages: list[Any] = Field(default_factory=list)
             handoff_target: str = "none"
 
         assert has_custom_conversational_output_fields(WithExtras) is True
@@ -440,7 +442,7 @@ class TestBuildConversationalOutputArgsSchema:
 
     def test_strips_response_messages_field(self):
         class FullSchema(BaseModel):
-            uipath__agent_response_messages: list = Field(default_factory=list)
+            uipath__agent_response_messages: list[Any] = Field(default_factory=list)
             handoff_target: str = "none"
             ready_for_handoff: bool = False
 
@@ -451,12 +453,12 @@ class TestBuildConversationalOutputArgsSchema:
 
     def test_preserves_field_types_and_defaults(self):
         class FullSchema(BaseModel):
-            uipath__agent_response_messages: list = Field(default_factory=list)
+            uipath__agent_response_messages: list[Any] = Field(default_factory=list)
             urgency: str = "low"
 
         args_schema = build_conversational_output_args_schema(FullSchema)
         instance = args_schema.model_validate({"urgency": "high"})
-        assert instance.urgency == "high"
+        assert instance.model_dump()["urgency"] == "high"
 
     def test_no_response_messages_field_passes_through(self):
         """When the field isn't present, the result mirrors the input schema."""
@@ -469,7 +471,7 @@ class TestBuildConversationalOutputArgsSchema:
 
     def test_generated_schema_name_is_distinct(self):
         class FullSchema(BaseModel):
-            uipath__agent_response_messages: list = Field(default_factory=list)
+            uipath__agent_response_messages: list[Any] = Field(default_factory=list)
             web_searched: str = "no"
 
         args_schema = build_conversational_output_args_schema(FullSchema)

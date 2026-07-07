@@ -15,12 +15,15 @@ from pydantic import BaseModel
 from uipath.agent.react.conversational_prompts import (
     get_generate_output_prompt,
 )
+from uipath.llm_client import UiPathAPIError, UiPathError
+from uipath.llm_client.utils.exceptions import as_uipath_error
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain.chat.handlers import get_payload_handler
 
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from ..exceptions.licensing import raise_for_provider_http_error
+from ..exceptions.llm import raise_for_llm_client_error
 from ..tools.utils import config_without_streaming
 from .tools.tools import create_set_conversational_output_tool
 from .types import AgentGraphState
@@ -66,8 +69,18 @@ def create_conversational_output_node(
 
         try:
             response = await llm.ainvoke(messages, config=config)
-        except Exception as e:
+        except UiPathAPIError as e:
+            # New LLM clients surface provider HTTP errors as a normalized UiPathAPIError directly.
             raise_for_provider_http_error(e)
+        except UiPathError as e:
+            raise_for_llm_client_error(e)
+            raise
+        except Exception as e:
+            # Legacy in-repo clients (use_new_llm_clients=False) raise raw provider SDK exceptions.
+            # Normalize via as_uipath_error and apply the same mapping when the error is HTTP-shaped; non-HTTP errors propagate.
+            uipath_error = as_uipath_error(e)
+            if isinstance(uipath_error, UiPathAPIError):
+                raise_for_provider_http_error(uipath_error)
             raise
 
         if not isinstance(response, AIMessage):
@@ -80,6 +93,8 @@ def create_conversational_output_node(
                 ),
                 category=UiPathErrorCategory.SYSTEM,
             )
+
+        payload_handler.check_stop_reason(response)
 
         return {"messages": [response]}
 

@@ -157,6 +157,7 @@ class TestCreateAgent:
         mock_create_terminate_node.assert_called_once_with(
             None,  # output schema
             False,  # is_conversational
+            False,  # with_conversational_output_node
         )
 
     @_patch("create_route_agent_conversational")
@@ -253,6 +254,7 @@ class TestCreateAgent:
         mock_create_terminate_node.assert_called_once_with(
             None,  # output schema
             True,  # is_conversational
+            False,  # with_conversational_output_node (no custom output schema)
         )
 
     @_patch("create_route_agent_conversational")
@@ -299,13 +301,13 @@ class TestCreateAgent:
 class _ConversationalOutputSchemaWithCustomFields(BaseModel):
     """A conversational agent's `outputSchema` that exercises the new node."""
 
-    uipath__agent_response_messages: list = Field(default_factory=list)
+    uipath__agent_response_messages: list[Any] = Field(default_factory=list)
     handoff_target: str = "none"
     ready_for_handoff: bool = False
 
 
 class _ConversationalOutputSchemaNoCustomFields(BaseModel):
-    uipath__agent_response_messages: list = Field(default_factory=list)
+    uipath__agent_response_messages: list[Any] = Field(default_factory=list)
 
 
 class TestCreateAgentGenerateConversationalOutput:

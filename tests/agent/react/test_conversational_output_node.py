@@ -16,7 +16,7 @@ from uipath_langchain.agent.react.types import AgentGraphState, InnerAgentGraphS
 
 
 class _OutputSchema(BaseModel):
-    uipath__agent_response_messages: list = Field(default_factory=list)
+    uipath__agent_response_messages: list[Any] = Field(default_factory=list)
     handoff_target: str = "none"
     ready_for_handoff: bool = False
 

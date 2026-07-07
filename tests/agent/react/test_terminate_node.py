@@ -188,7 +188,9 @@ class TestTerminateNodeConversational:
             ready_for_handoff: bool
 
         terminate_node = create_terminate_node(
-            response_schema=ResponseSchema, is_conversational=True
+            response_schema=ResponseSchema,
+            is_conversational=True,
+            with_conversational_output_node=True,
         )
 
         agent_reply = AIMessage(content="Sure, I'll route you to billing.")
