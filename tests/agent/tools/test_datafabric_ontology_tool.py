@@ -8,9 +8,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import uipath.platform as _uipath_platform
+from langchain_core.messages import AIMessage, ToolMessage
 from uipath.agent.models.agent import AgentContextResourceConfig
+from uipath.core.feature_flags import FeatureFlags
 
+from uipath_langchain.agent.tools.datafabric_tool import (
+    datafabric_ontology_prompt_builder as _opb,
+)
 from uipath_langchain.agent.tools.datafabric_tool import datafabric_ontology_tool
+from uipath_langchain.agent.tools.datafabric_tool import datafabric_subgraph as _sg
 from uipath_langchain.agent.tools.datafabric_tool.datafabric_ontology_tool import (
     DataFabricOntologyQueryHandler,
     create_datafabric_ontology_tool,
@@ -119,3 +126,103 @@ async def test_resolve_raises_on_unresolved_folder(monkeypatch):
         raise AssertionError("expected ValueError")
     except ValueError as e:
         assert "could not be resolved" in str(e)
+
+
+# --- _ensure_graph (fetch -> parse -> resolve -> compile) -------------------
+
+
+def _patch_ensure_graph_deps(monkeypatch, *, fetch=None, parse=None, resolve=None):
+    """Patch the flag, SDK, and the fetch/parse/resolve/build/compile seam so
+    _ensure_graph can run without any real IO. Returns the sentinel graph."""
+    sentinel_graph = object()
+    monkeypatch.setattr(FeatureFlags, "is_flag_enabled", lambda *a, **k: True)
+    monkeypatch.setattr(_uipath_platform, "UiPath", lambda: MagicMock())
+    monkeypatch.setattr(
+        datafabric_ontology_tool,
+        "fetch_ontology_file",
+        fetch or AsyncMock(return_value=("BODY", "text/turtle")),
+    )
+    monkeypatch.setattr(
+        datafabric_ontology_tool,
+        "parse_r2rml_entities",
+        parse or (lambda _txt: [("frpm", "F/a")]),
+    )
+    monkeypatch.setattr(
+        datafabric_ontology_tool,
+        "resolve_ontology_entities",
+        resolve or AsyncMock(return_value=([SimpleNamespace(name="frpm")], object())),
+    )
+    monkeypatch.setattr(_opb, "build", lambda *a, **k: "SYSTEM_PROMPT")
+    monkeypatch.setattr(_sg.DataFabricGraph, "create", lambda **k: sentinel_graph)
+    return sentinel_graph
+
+
+async def test_ensure_graph_happy_path(monkeypatch):
+    sentinel = _patch_ensure_graph_deps(monkeypatch)
+    handler = DataFabricOntologyQueryHandler(
+        ontologies=[("california-schools", "f1")], llm=MagicMock()
+    )
+    compiled = await handler._ensure_graph()
+    assert compiled is sentinel
+    # cached on second call (no re-work)
+    assert await handler._ensure_graph() is sentinel
+
+
+async def test_ensure_graph_owl_failure_degrades(monkeypatch):
+    async def fetch(_es, _name, file_type, _fk):
+        if file_type == "owl":
+            raise RuntimeError("owl boom")
+        return ("R2RML", "text/turtle")
+
+    sentinel = _patch_ensure_graph_deps(monkeypatch, fetch=fetch)
+    handler = DataFabricOntologyQueryHandler(
+        ontologies=[("california-schools", "f1")], llm=MagicMock()
+    )
+    # R2RML is critical (present) so it still compiles; OWL failure degrades.
+    assert await handler._ensure_graph() is sentinel
+
+
+async def test_ensure_graph_no_entities_raises(monkeypatch):
+    _patch_ensure_graph_deps(monkeypatch, parse=lambda _txt: [])
+    handler = DataFabricOntologyQueryHandler(
+        ontologies=[("california-schools", "f1")], llm=MagicMock()
+    )
+    with pytest.raises(ValueError, match="declared no entities"):
+        await handler._ensure_graph()
+
+
+async def test_ensure_graph_returns_cached_without_work(monkeypatch):
+    handler = DataFabricOntologyQueryHandler(ontologies=[], llm=MagicMock())
+    handler._compiled = "CACHED"  # type: ignore[assignment]
+    # Flag intentionally OFF: if it did any work it would raise; cache short-circuits.
+    monkeypatch.setattr(FeatureFlags, "is_flag_enabled", lambda *a, **k: False)
+    assert await handler._ensure_graph() == "CACHED"
+
+
+# --- __call__ (invoke + terminal message handling) --------------------------
+
+
+def _handler_with_state(monkeypatch, messages):
+    handler = DataFabricOntologyQueryHandler(ontologies=[], llm=MagicMock())
+    graph = MagicMock()
+    graph.ainvoke = AsyncMock(return_value={"messages": messages})
+    monkeypatch.setattr(handler, "_ensure_graph", AsyncMock(return_value=graph))
+    return handler
+
+
+async def test_call_collapses_terminal_tool_messages(monkeypatch):
+    handler = _handler_with_state(
+        monkeypatch,
+        [AIMessage(content=""), ToolMessage(content="rows!", tool_call_id="c1")],
+    )
+    assert await handler("q") == "rows!"
+
+
+async def test_call_returns_ai_message_content(monkeypatch):
+    handler = _handler_with_state(monkeypatch, [AIMessage(content="the answer")])
+    assert await handler("q") == "the answer"
+
+
+async def test_call_fallback_when_no_answer(monkeypatch):
+    handler = _handler_with_state(monkeypatch, [AIMessage(content="")])
+    assert await handler("q") == "Unable to generate an answer from the available data."

@@ -77,3 +77,25 @@ def test_omits_sections_when_empty():
 
 def test_no_entities_returns_empty():
     assert build([], ontology_text="OWL", r2rml_text="MAP") == ""
+
+
+def test_format_context_renders_agent_instructions_and_ontology_description():
+    # `build()` folds resource_description into the strategy prompt (ctx.resource_description
+    # stays None), so exercise the Agent-Instructions + Ontology-description sections directly.
+    from uipath_langchain.agent.tools.datafabric_tool.datafabric_ontology_prompt_builder import (
+        format_ontology_context,
+    )
+    from uipath_langchain.agent.tools.datafabric_tool.models import SQLContext
+
+    ctx = SQLContext(
+        base_system_prompt="You are an agent.",
+        resource_description="Domain notes for the ontology.",
+        sql_expert_system_prompt="strategy",
+        constraints="constraints",
+        entity_contexts=[],
+    )
+    prompt = format_ontology_context(ctx)
+    assert "## Agent Instructions" in prompt
+    assert "You are an agent." in prompt
+    assert "## Ontology description" in prompt
+    assert "Domain notes for the ontology." in prompt
