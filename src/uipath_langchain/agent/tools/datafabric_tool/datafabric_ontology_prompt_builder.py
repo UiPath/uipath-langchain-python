@@ -14,7 +14,8 @@ the shared entity-tool builder is not modified by this feature.
 
 from uipath.platform.entities import Entity
 
-from .datafabric_prompt_builder import SQLContext, build_sql_context
+from .datafabric_prompt_builder import build_sql_context
+from .models import SQLContext
 
 
 def _render_entity_schema_sections(ctx: SQLContext) -> list[str]:
