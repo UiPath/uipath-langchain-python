@@ -1,14 +1,15 @@
-"""Inner LangGraph sub-graph for the Data Fabric agentic tool.
+"""Inner LangGraph sub-graph for the Data Fabric **ontology** tool.
 
-Implements a self-contained ReAct loop where an inner LLM translates
-natural-language questions into SQL, executes them via ``execute_sql``,
-and retries on errors — all within a single outer tool call.
+A duplicate of the entity tool's ``datafabric_subgraph`` that is *prompt-agnostic*:
+it accepts a ready-made ``system_prompt`` string rather than building one from
+entities/resource_description internally. This lets the ontology tool ground the
+inner LLM on the OWL + R2RML (assembled by ``ontology_prompt_builder``) without
+modifying the shared entity-tool sub-graph.
 
-On a successful SQL execution the graph short-circuits straight to END
-rather than invoking the LLM again to reformat the records into prose;
-the outer agent receives the raw tool result and produces the final
-natural-language answer. Errors still loop back to the inner LLM so the
-retry path remains intact.
+Behaviourally identical to the entity sub-graph: a self-contained ReAct loop that
+translates natural-language questions into SQL, executes them via ``execute_sql``,
+retries on errors, and short-circuits straight to END on a successful execution so
+the outer agent receives the raw tool result.
 """
 
 import asyncio
@@ -31,9 +32,8 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 from uipath.platform.entities import EntitiesService, Entity
 
-from ..datafabric_query_tool import DataFabricQueryTool
-from . import datafabric_prompt_builder
-from .models import DataFabricExecuteSqlInput
+from ...datafabric_query_tool import DataFabricQueryTool
+from ..models import DataFabricExecuteSqlInput
 
 logger = logging.getLogger(__name__)
 
@@ -74,10 +74,11 @@ class QueryExecutor:
 
 
 class DataFabricGraph:
-    """Inner ReAct sub-graph for Data Fabric SQL execution.
+    """Inner ReAct sub-graph for Data Fabric SQL execution (ontology tool).
 
     Each graph node is a method. The graph is compiled during __init__
-    and available via the ``compiled`` property.
+    and available via the ``compiled`` property. Unlike the entity tool's
+    sub-graph, the system prompt is supplied ready-made by the caller.
     """
 
     def __init__(
@@ -85,19 +86,14 @@ class DataFabricGraph:
         llm: BaseChatModel,
         entities: list[Entity],
         entities_service: EntitiesService,
+        system_prompt: str,
         max_iterations: int = 25,
-        resource_description: str = "",
-        base_system_prompt: str = "",
     ) -> None:
         self._max_iterations = max_iterations
         self._execute_sql_tool = self._create_execute_sql_tool(
             entities_service, entities
         )
-        self._system_message = SystemMessage(
-            content=datafabric_prompt_builder.build(
-                entities, resource_description, base_system_prompt
-            )
-        )
+        self._system_message = SystemMessage(content=system_prompt)
         self._inner_llm = llm.model_copy(update={"disable_streaming": True}).bind_tools(
             [self._execute_sql_tool]
         )
@@ -223,17 +219,15 @@ class DataFabricGraph:
         llm: BaseChatModel,
         entities: list[Entity],
         entities_service: EntitiesService,
+        system_prompt: str,
         max_iterations: int = 25,
-        resource_description: str = "",
-        base_system_prompt: str = "",
     ) -> CompiledStateGraph[Any]:
-        """Create and return a compiled Data Fabric sub-graph."""
+        """Create and return a compiled Data Fabric ontology sub-graph."""
         graph = DataFabricGraph(
             llm,
             entities,
             entities_service,
+            system_prompt,
             max_iterations,
-            resource_description,
-            base_system_prompt,
         )
         return graph.compiled_graph

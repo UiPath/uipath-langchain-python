@@ -164,19 +164,15 @@ def create_context_tool(
     if resource.context_type == AgentContextType.DATA_FABRIC_ONTOLOGY:
         from uipath.core.feature_flags import FeatureFlags
 
-        from .datafabric_tool.datafabric_tool import (
-            BASE_SYSTEM_PROMPT,
-            DATAFABRIC_ONTOLOGY_FF,
-        )
+        from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
+        from .datafabric_tool.ontology import DATAFABRIC_ONTOLOGY_FF
 
         if not FeatureFlags.is_flag_enabled(DATAFABRIC_ONTOLOGY_FF, default=False):
             return None
         if llm is None:
             raise ValueError("Data Fabric ontology tools require an LLM instance")
 
-        from .datafabric_tool.datafabric_ontology_tool import (
-            create_datafabric_ontology_tool,
-        )
+        from .datafabric_tool.ontology import create_datafabric_ontology_tool
 
         return create_datafabric_ontology_tool(
             resource,

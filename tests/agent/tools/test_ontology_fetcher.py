@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from uipath_langchain.agent.tools.datafabric_tool import ontology_fetcher
-from uipath_langchain.agent.tools.datafabric_tool.ontology_fetcher import (
+from uipath_langchain.agent.tools.datafabric_tool.ontology import ontology_fetcher
+from uipath_langchain.agent.tools.datafabric_tool.ontology.ontology_fetcher import (
     fence_ontology_block,
     fetch_ontology_file,
 )

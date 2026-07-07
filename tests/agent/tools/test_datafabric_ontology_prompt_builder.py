@@ -6,7 +6,7 @@ renders the shared entity-schema tables — separate from the entity tool's prom
 
 from types import SimpleNamespace
 
-from uipath_langchain.agent.tools.datafabric_tool.datafabric_ontology_prompt_builder import (  # noqa: E501
+from uipath_langchain.agent.tools.datafabric_tool.ontology.ontology_prompt_builder import (  # noqa: E501
     build,
 )
 
@@ -82,10 +82,10 @@ def test_no_entities_returns_empty():
 def test_format_context_renders_agent_instructions_and_ontology_description():
     # `build()` folds resource_description into the strategy prompt (ctx.resource_description
     # stays None), so exercise the Agent-Instructions + Ontology-description sections directly.
-    from uipath_langchain.agent.tools.datafabric_tool.datafabric_ontology_prompt_builder import (
+    from uipath_langchain.agent.tools.datafabric_tool.models import SQLContext
+    from uipath_langchain.agent.tools.datafabric_tool.ontology.ontology_prompt_builder import (
         format_ontology_context,
     )
-    from uipath_langchain.agent.tools.datafabric_tool.models import SQLContext
 
     ctx = SQLContext(
         base_system_prompt="You are an agent.",

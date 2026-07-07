@@ -7,12 +7,17 @@ The agent selects *ontologies* (not entities). On first invocation this tool:
 2. parses R2RML into the closed ``(entity_name, folder_path)`` allow-list,
 3. resolves each entity to its schema and builds a folder-scoped
    ``EntitiesService`` (see :func:`resolve_ontology_entities`),
-4. compiles the shared inner SQL sub-graph (:class:`DataFabricGraph`), grounded on
-   both the OWL and the R2RML.
+4. compiles the ontology sub-graph (:class:`ontology_subgraph.DataFabricGraph`),
+   grounded on both the OWL and the R2RML.
 
 Everything from the sub-graph down (``execute_sql`` → ``query_entity_records_async``)
-is reused unchanged from the entity tool. Ontology names/folders come only from the
-agent definition; the LLM never chooses which entity or folder to reach.
+mirrors the entity tool. Ontology names/folders come only from the agent
+definition; the LLM never chooses which entity or folder to reach.
+
+This package duplicates the sub-graph and prompt builder so the entity tool's
+``datafabric_tool``/``datafabric_subgraph`` are left untouched by this feature.
+The only symbol borrowed from the entity tool is the shared ``BASE_SYSTEM_PROMPT``
+agent-config key, so both tools read the outer prompt from the same place.
 """
 
 import asyncio
@@ -26,13 +31,9 @@ from langgraph.graph.state import CompiledStateGraph
 from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.platform.entities import EntitiesService, Entity
 
-from ..base_uipath_structured_tool import BaseUiPathStructuredTool
-from .datafabric_tool import (
-    BASE_SYSTEM_PROMPT,
-    DATAFABRIC_ONTOLOGY_FF,
-    DataFabricTextQueryHandler,
-)
-from .models import DataFabricQueryInput
+from ...base_uipath_structured_tool import BaseUiPathStructuredTool
+from ..datafabric_tool import BASE_SYSTEM_PROMPT
+from ..models import DataFabricQueryInput
 from .ontology_fetcher import fence_ontology_block, fetch_ontology_file
 from .ontology_r2rml import parse_r2rml_entities
 
@@ -40,6 +41,11 @@ if TYPE_CHECKING:
     from uipath.platform import UiPath
 
 logger = logging.getLogger(__name__)
+
+# Feature flag gating the whole ontology tool. Owned here (not in the entity
+# tool's module) so this feature is fully self-contained; ``context_tool`` and
+# the handler's defense-in-depth re-check both import it from this package.
+DATAFABRIC_ONTOLOGY_FF = "DataFabricOntologyEnabled"
 
 
 async def resolve_ontology_entities(
@@ -125,8 +131,8 @@ class DataFabricOntologyQueryHandler:
             from uipath.core.feature_flags import FeatureFlags
             from uipath.platform import UiPath
 
-            from . import datafabric_ontology_prompt_builder
-            from .datafabric_subgraph import DataFabricGraph
+            from . import ontology_prompt_builder
+            from .ontology_subgraph import DataFabricGraph
 
             # Defense in depth: the tool is only created when the flag is on
             # (the gate in context_tool). Re-check here — the last point before
@@ -185,7 +191,7 @@ class DataFabricOntologyQueryHandler:
                     "permissions."
                 )
 
-            system_prompt = datafabric_ontology_prompt_builder.build(
+            system_prompt = ontology_prompt_builder.build(
                 entities,
                 resource_description=self._resource_description,
                 base_system_prompt=self._base_system_prompt,
@@ -211,15 +217,16 @@ class DataFabricOntologyQueryHandler:
         last_message = messages[-1] if messages else None
 
         # Happy path: the sub-graph short-circuits at END after a successful
-        # execute_sql, leaving a trailing batch of ToolMessages. Reuse the entity
-        # tool's terminal-batch collapsing so the outer agent sees one result.
+        # execute_sql, leaving a trailing batch of ToolMessages. Collapse the
+        # trailing batch into one synthetic message so the outer agent sees the
+        # full result set.
         if isinstance(last_message, ToolMessage):
             trailing_tool_messages: list[ToolMessage] = []
             for msg in reversed(messages):
                 if not isinstance(msg, ToolMessage):
                     break
                 trailing_tool_messages.append(msg)
-            return DataFabricTextQueryHandler._format_terminal_tool_messages(
+            return self._format_terminal_tool_messages(
                 list(reversed(trailing_tool_messages))
             )
 
@@ -228,6 +235,27 @@ class DataFabricOntologyQueryHandler:
                 return str(msg.content)
 
         return "Unable to generate an answer from the available data."
+
+    @staticmethod
+    def _format_terminal_tool_messages(tool_messages: list[ToolMessage]) -> str:
+        """Build one returned message from the terminal ToolMessage batch."""
+        non_empty_contents = [
+            str(msg.content) for msg in tool_messages if getattr(msg, "content", None)
+        ]
+        if not non_empty_contents:
+            return "Unable to generate an answer from the available data."
+        if len(non_empty_contents) == 1:
+            return non_empty_contents[0]
+
+        rendered_results = [
+            f"Result {index}:\n{content}"
+            for index, content in enumerate(non_empty_contents, start=1)
+        ]
+        return (
+            "Multiple SQL queries executed successfully. "
+            "Use all of the following results to answer the user's question.\n\n"
+            + "\n\n".join(rendered_results)
+        )
 
 
 def create_datafabric_ontology_tool(

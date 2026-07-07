@@ -29,11 +29,6 @@ logger = logging.getLogger(__name__)
 
 BASE_SYSTEM_PROMPT = "base_system_prompt"
 
-# Feature flag gating the standalone Data Fabric ontology tool. Defaults off. The
-# gate lives at the tool-factory entry (context_tool, DATA_FABRIC_ONTOLOGY branch).
-# Single source of truth so the flag name can never drift between call sites.
-DATAFABRIC_ONTOLOGY_FF = "DataFabricOntologyEnabled"
-
 
 class DataFabricTextQueryHandler:
     """Manages lazy initialization and invocation of the Data Fabric sub-graph.
@@ -72,7 +67,6 @@ class DataFabricTextQueryHandler:
 
             from uipath.platform import UiPath
 
-            from . import datafabric_prompt_builder
             from .datafabric_subgraph import DataFabricGraph
 
             sdk = UiPath()
@@ -82,16 +76,12 @@ class DataFabricTextQueryHandler:
                     "No Data Fabric entity schemas could be fetched. "
                     "Check entity identifiers and permissions."
                 )
-            system_prompt = datafabric_prompt_builder.build(
-                resolution.entities,
-                self._resource_description,
-                self._base_system_prompt,
-            )
             self._compiled = DataFabricGraph.create(
                 llm=self._llm,
                 entities=resolution.entities,
                 entities_service=resolution.entities_service,
-                system_prompt=system_prompt,
+                resource_description=self._resource_description,
+                base_system_prompt=self._base_system_prompt,
             )
             return self._compiled
 

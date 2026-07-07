@@ -8,11 +8,13 @@ binds ``execute_sql``. Covers the tool node's dispatch/terminal logic and compil
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.constants import END
 
-from uipath_langchain.agent.tools.datafabric_tool.datafabric_subgraph import (
+from uipath_langchain.agent.tools.datafabric_tool.ontology.ontology_subgraph import (
     DataFabricGraph,
     DataFabricSubgraphState,
+    QueryExecutor,
 )
 
 
@@ -97,3 +99,84 @@ def test_create_returns_compiled_graph(entities_service):
         system_prompt="SYS",
     )
     assert hasattr(compiled, "ainvoke")
+
+
+# --- QueryExecutor ----------------------------------------------------------
+
+
+async def test_query_executor_returns_records(entities_service):
+    out = await QueryExecutor(entities_service)("SELECT 1")
+    assert out["records"] == [{"x": 1}]
+    assert out["total_count"] == 1
+    assert out["sql_query"] == "SELECT 1"
+
+
+async def test_query_executor_wraps_exception(entities_service):
+    entities_service.query_entity_records_async = AsyncMock(
+        side_effect=RuntimeError("db down")
+    )
+    out = await QueryExecutor(entities_service)("SELECT 1")
+    assert out["total_count"] == 0
+    assert "db down" in out["error"]
+
+
+# --- graph nodes ------------------------------------------------------------
+
+
+async def test_llm_node_invokes_inner_llm(make_graph):
+    graph = make_graph()
+    graph._inner_llm.ainvoke = AsyncMock(return_value=AIMessage(content="hi"))
+    out = await graph.llm_node(
+        DataFabricSubgraphState(messages=[HumanMessage(content="q")])
+    )
+    assert out["messages"][0].content == "hi"
+
+
+async def test_tool_node_without_tool_calls_is_noop(make_graph):
+    graph = make_graph()
+    state = DataFabricSubgraphState(
+        messages=[AIMessage(content="final")], iteration_count=3
+    )
+    assert await graph.tool_node(state) == {"iteration_count": 3}
+
+
+async def test_termination_node_reports_attempts(make_graph):
+    graph = make_graph()
+    out = await graph.termination_node(DataFabricSubgraphState(iteration_count=7))
+    assert "7 SQL attempts" in out["messages"][0].content
+
+
+def test_router_to_tool_when_calls_under_limit(make_graph):
+    graph = make_graph()
+    ai = AIMessage(content="", tool_calls=[_tc("execute_sql", cid="a")])
+    state = DataFabricSubgraphState(messages=[ai], iteration_count=0)
+    assert graph.router(state) == "inner_tool"
+
+
+def test_router_to_termination_at_limit(make_graph):
+    graph = make_graph()  # default max_iterations=25
+    ai = AIMessage(content="", tool_calls=[_tc("execute_sql", cid="a")])
+    state = DataFabricSubgraphState(messages=[ai], iteration_count=25)
+    assert graph.router(state) == "termination"
+
+
+def test_router_ends_without_tool_calls(make_graph):
+    graph = make_graph()
+    state = DataFabricSubgraphState(messages=[AIMessage(content="final")])
+    assert graph.router(state) == END
+
+
+def test_router_ends_without_messages(make_graph):
+    graph = make_graph()
+    assert graph.router(DataFabricSubgraphState(messages=[])) == END
+
+
+def test_tool_router_ends_on_success(make_graph):
+    graph = make_graph()
+    assert graph.tool_router(DataFabricSubgraphState(last_tool_success=True)) == END
+
+
+def test_tool_router_loops_on_failure(make_graph):
+    graph = make_graph()
+    state = DataFabricSubgraphState(last_tool_success=False)
+    assert graph.tool_router(state) == "inner_llm"

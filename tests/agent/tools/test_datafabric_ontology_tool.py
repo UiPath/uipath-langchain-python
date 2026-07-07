@@ -1,4 +1,4 @@
-"""Tests for the standalone ontology tool (datafabric_tool/datafabric_ontology_tool.py).
+"""Tests for the standalone ontology tool (datafabric_tool/ontology/ontology_tool.py).
 
 Covers the factory (reads ontology_set → handler) and the b2 resolver
 (folderPath→key caching, name→Entity, folders_map construction).
@@ -13,12 +13,16 @@ from langchain_core.messages import AIMessage, ToolMessage
 from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.core.feature_flags import FeatureFlags
 
-from uipath_langchain.agent.tools.datafabric_tool import (
-    datafabric_ontology_prompt_builder as _opb,
+from uipath_langchain.agent.tools.datafabric_tool.ontology import (
+    ontology_prompt_builder as _opb,
 )
-from uipath_langchain.agent.tools.datafabric_tool import datafabric_ontology_tool
-from uipath_langchain.agent.tools.datafabric_tool import datafabric_subgraph as _sg
-from uipath_langchain.agent.tools.datafabric_tool.datafabric_ontology_tool import (
+from uipath_langchain.agent.tools.datafabric_tool.ontology import (
+    ontology_subgraph as _sg,
+)
+from uipath_langchain.agent.tools.datafabric_tool.ontology import (
+    ontology_tool as datafabric_ontology_tool,
+)
+from uipath_langchain.agent.tools.datafabric_tool.ontology.ontology_tool import (
     DataFabricOntologyQueryHandler,
     create_datafabric_ontology_tool,
     resolve_ontology_entities,
@@ -226,3 +230,35 @@ async def test_call_returns_ai_message_content(monkeypatch):
 async def test_call_fallback_when_no_answer(monkeypatch):
     handler = _handler_with_state(monkeypatch, [AIMessage(content="")])
     assert await handler("q") == "Unable to generate an answer from the available data."
+
+
+async def test_ensure_graph_empty_resolution_raises(monkeypatch):
+    # pairs is non-empty (parse) but resolution yields no entities -> post-resolve guard.
+    _patch_ensure_graph_deps(monkeypatch, resolve=AsyncMock(return_value=([], object())))
+    handler = DataFabricOntologyQueryHandler(
+        ontologies=[("california-schools", "f1")], llm=MagicMock()
+    )
+    with pytest.raises(ValueError, match="could be resolved"):
+        await handler._ensure_graph()
+
+
+# --- terminal-message formatting --------------------------------------------
+
+
+def test_format_terminal_collapses_multiple_results():
+    out = DataFabricOntologyQueryHandler._format_terminal_tool_messages(
+        [
+            ToolMessage(content="rows-a", tool_call_id="1"),
+            ToolMessage(content="rows-b", tool_call_id="2"),
+        ]
+    )
+    assert "Multiple SQL queries" in out
+    assert "Result 1:\nrows-a" in out
+    assert "Result 2:\nrows-b" in out
+
+
+def test_format_terminal_all_empty_returns_fallback():
+    out = DataFabricOntologyQueryHandler._format_terminal_tool_messages(
+        [ToolMessage(content="", tool_call_id="1")]
+    )
+    assert out == "Unable to generate an answer from the available data."
