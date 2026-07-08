@@ -4,6 +4,7 @@ import asyncio
 import copy
 import logging
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
@@ -29,6 +30,28 @@ MEMORY_INDEX_FILENAME = "MEMORY.md"
 # Virtual path handed to MemoryMiddleware as a source; the agent's virtual-mode
 # FilesystemBackend resolves it under the workspace root.
 MEMORY_INDEX_VIRTUAL_PATH = f"/{MEMORY_DIR_NAME}/{MEMORY_INDEX_FILENAME}"
+
+# Skills live under <workspace>/skills/
+SKILLS_DIR_NAME = "skills"
+
+SKILLS_VIRTUAL_PATH = f"/{SKILLS_DIR_NAME}/"
+
+
+def resolve_skill_sources(
+    backend: BackendProtocol | BackendFactory | None,
+    skills: Sequence[str] | None,
+) -> list[str]:
+    """Resolve the skill sources for ``SkillsMiddleware``.
+
+    With a ``FilesystemBackend`` the workspace ``skills/`` dir is prepended to the
+    declared ``skills``; other backends carry no workspace, so only ``skills`` is used.
+    """
+    if not skills:
+        return []
+    sources = list(skills)
+    if isinstance(backend, FilesystemBackend) and SKILLS_VIRTUAL_PATH not in sources:
+        sources.insert(0, SKILLS_VIRTUAL_PATH)
+    return sources
 
 
 def create_state_with_input(

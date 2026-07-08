@@ -24,6 +24,7 @@ from .utils import (
     MEMORY_INDEX_VIRTUAL_PATH,
     create_state_with_input,
     resolve_input_attachments,
+    resolve_skill_sources,
 )
 
 
@@ -35,12 +36,14 @@ def create_advanced_agent(
     backend: BackendProtocol | BackendFactory | None = None,
     response_format: ResponseFormat[Any] | None = None,
     memory: Sequence[str] = (),
+    skills: Sequence[str] = (),
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Create a deepagents agent with planning, filesystem, and sub-agent tools.
 
-    ``memory`` is a list of file paths loaded via deepagents' ``MemoryMiddleware``:
-    each is read from ``backend`` and injected into the system prompt every turn,
-    and the model maintains them with ``edit_file``. Empty disables the middleware.
+    ``memory`` (file paths) and ``skills`` (source directories) are loaded via
+    deepagents' ``MemoryMiddleware`` and ``SkillsMiddleware``; an empty sequence
+    disables each. Workspace tools like ``uipath_cli`` are supplied by the caller
+    via ``tools``.
     """
     return _create_deep_agent(
         model=model,
@@ -50,6 +53,7 @@ def create_advanced_agent(
         backend=backend,
         response_format=response_format,
         memory=list(memory) or None,
+        skills=list(skills) or None,
     )
 
 
@@ -62,14 +66,14 @@ def create_advanced_agent_graph(
     input_schema: type[BaseModel] | None,
     output_schema: type[BaseModel],
     build_user_message: Callable[[dict[str, Any]], str],
+    skills: Sequence[str] | None = None,
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
     With a ``FilesystemBackend``, attachment-shaped inputs are downloaded into the
-    workspace and given a ``FilePath`` before the user message is built. A
-    ``FilesystemBackend`` also enables workspace memory: deepagents'
-    ``MemoryMiddleware`` reads ``/memory/MEMORY.md`` from the backend each turn.
-    Memory stays disabled for non-filesystem backends, which carry no workspace.
+    workspace, memory (``/memory/MEMORY.md``) is enabled, and the workspace
+    ``skills/`` dir is prepended to any declared ``skills``. Both stay disabled for
+    non-filesystem backends, which carry no workspace.
     """
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -82,6 +86,7 @@ def create_advanced_agent_graph(
         backend=backend,
         response_format=response_format,
         memory=memory_sources,
+        skills=resolve_skill_sources(backend, skills),
     )
 
     wrapper_state = create_state_with_input(input_schema)
