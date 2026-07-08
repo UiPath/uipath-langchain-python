@@ -41,3 +41,6 @@ This sample shows how to build a LangGraph agent that connects to a remote UiPat
 
 ## [Ticket classification](ticket-classification)
 This sample demonstrates automatic classification of support tickets into categories. It includes a human approval step via UiPath Action Center.
+
+## [Wait until timeout agent](wait-until-timeout-agent)
+This sample demonstrates waiting for whichever happens first: a child UiPath process completes, or a timer expires.
