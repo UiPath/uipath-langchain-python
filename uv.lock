@@ -4565,7 +4565,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.16.1,<1.17.0" },
     { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.16.1,<1.17.0" },
     { name = "uipath-llm-client", specifier = ">=1.16.2,<1.17.0" },
-    { name = "uipath-platform", specifier = ">=0.2.2,<0.3.0" },
+    { name = "uipath-platform", specifier = ">=0.2.4,<0.3.0" },
     { name = "uipath-runtime", specifier = ">=0.12.1,<0.13.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "all"]
