@@ -6,12 +6,17 @@ from typing import Any, NoReturn
 
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel, ValidationError
-from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
+from uipath.agent.react import (
+    END_EXECUTION_TOOL,
+    RAISE_ERROR_TOOL,
+    SET_CONVERSATIONAL_OUTPUT_TOOL,
+)
 from uipath.core.chat import UiPathConversationMessageData
 from uipath.runtime.errors import UiPathErrorCategory
 
 from ...runtime.messages import UiPathChatMessagesMapper
 from ..exceptions import AgentRuntimeError, AgentRuntimeErrorCode
+from .constants import UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD
 from .types import AgentGraphState
 
 
@@ -48,9 +53,12 @@ def _handle_raise_error(args: dict[str, Any]) -> NoReturn:
 
 
 def _handle_end_conversational(
-    state: AgentGraphState, response_schema: type[BaseModel] | None
+    state: AgentGraphState,
+    response_schema: type[BaseModel] | None,
+    with_conversational_output_node: bool = False,
 ) -> dict[str, Any]:
-    """Handle conversational agent termination by returning converted messages."""
+    """Handle conversational agent termination by returning converted messages with optional structured output fields."""
+
     if state.inner_state.initial_message_count is None:
         raise AgentRuntimeError(
             code=AgentRuntimeErrorCode.STATE_ERROR,
@@ -68,34 +76,86 @@ def _handle_end_conversational(
         )
 
     initial_count = state.inner_state.initial_message_count
-    new_messages = state.messages[initial_count:]
+
+    custom_output_fields: dict[str, Any] = {}
+    if with_conversational_output_node:
+        # with_conversational_output_node means that a node before TERMINATE
+        # produces an AIMessage carrying a `set_conversational_output` tool call.
+        # Extract the custom-field args from that call, and strip its AIMessage from message-history.
+        last_ai_message = state.messages[-1] if state.messages else None
+
+        if not isinstance(last_ai_message, AIMessage):
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.STATE_ERROR,
+                title="Expected last message to be an AIMessage for conversational agent termination.",
+                detail=(
+                    "Last message in state is expected to be an AIMessage containing a `set_conversational_output` tool call."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            )
+
+        set_output_call = next(
+            (
+                tc
+                for tc in (last_ai_message.tool_calls or [])
+                if tc["name"] == SET_CONVERSATIONAL_OUTPUT_TOOL.name
+            ),
+            None,
+        )
+        if set_output_call is None:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.STATE_ERROR,
+                title="No set_conversational_output tool call found.",
+                detail=(
+                    "The conversational output node was expected to produce a set_conversational_output tool call "
+                    "in the last AIMessage, but none was found."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            )
+
+        custom_output_fields = dict(set_output_call["args"])
+        new_conversation_messages = state.messages[initial_count:-1]
+    else:
+        new_conversation_messages = state.messages[initial_count:]
 
     converted_messages: list[UiPathConversationMessageData] = []
 
     # For the agent-output messages, don't include tool-results. Just include agent's LLM outputs and tool-calls + inputs.
     # This is primarily since evaluations don't check for tool-results; this output represents the agent's actual choices rather than tool-results.
-    if new_messages:
+    if new_conversation_messages:
         converted_messages = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
-                messages=new_messages, include_tool_results=False
+                messages=new_conversation_messages, include_tool_results=False
             )
         )
 
-    output = {
-        "uipath__agent_response_messages": [
+    output: dict[str, Any] = {
+        **custom_output_fields,
+        UIPATH_CONVERSATIONAL_AGENT_RESPONSE_MESSAGES_FIELD: [
             msg.model_dump(by_alias=True) for msg in converted_messages
-        ]
+        ],
     }
-    validated = response_schema.model_validate(output)
+    try:
+        validated = response_schema.model_validate(output)
+    except ValidationError as e:
+        raise AgentRuntimeError(
+            code=AgentRuntimeErrorCode.OUTPUT_VALIDATION_ERROR,
+            title="Conversational agent output did not match the expected schema",
+            detail=(
+                "The conversational agent's output does not satisfy the configured output schema. "
+                f"Verify the output, and adjust the schema or the prompt. Details:\n{e}"
+            ),
+            category=UiPathErrorCategory.USER,
+        ) from e
 
     # Dump with exclude_none to prevent UiPathConversation... fields with None values from being outputted (e.g. UiPathConversationContentPartData.isTranscript).
-    # May need to revisit if other output fields are added for conversational agents, where we want nulls outputted.
     return validated.model_dump(by_alias=True, exclude_none=True)
 
 
 def create_terminate_node(
     response_schema: type[BaseModel] | None = None,
     is_conversational: bool = False,
+    with_conversational_output_node: bool = False,
 ):
     """Handles Agent Graph termination for multiple sources and output or error propagation to Orchestrator.
 
@@ -107,7 +167,9 @@ def create_terminate_node(
 
     def terminate_node(state: AgentGraphState):
         if is_conversational:
-            return _handle_end_conversational(state, response_schema)
+            return _handle_end_conversational(
+                state, response_schema, with_conversational_output_node
+            )
         else:
             last_message = state.messages[-1]
             if not isinstance(last_message, AIMessage):
