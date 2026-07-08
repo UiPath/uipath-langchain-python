@@ -29,7 +29,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.state import CompiledStateGraph
 from uipath.agent.models.agent import AgentContextResourceConfig
-from uipath.platform.entities import EntitiesService, Entity
+from uipath.platform.entities import DataFabricEntityItem, EntitiesService, Entity
 
 from ...base_uipath_structured_tool import BaseUiPathStructuredTool
 from ..datafabric_tool import BASE_SYSTEM_PROMPT
@@ -52,19 +52,25 @@ async def resolve_ontology_entities(
     sdk: "UiPath",
     pairs: list[tuple[str, str]],
 ) -> tuple[list[Entity], EntitiesService]:
-    """Resolve an R2RML allow-list into schemas + a folder-scoped service (b2).
+    """Resolve an R2RML allow-list into schemas + a folder-scoped service.
 
-    Resolves the folder paths to keys and fetches the entity schemas
-    *concurrently* (via ``asyncio.gather``) rather than serially, so the inner
-    graph is ready after roughly one round-trip instead of one per entity —
-    the main latency win on first invocation. Distinct folder paths are resolved
-    once each; entity schemas are then fetched all at once, preserving the input
-    order.
+    Two steps, both concurrent (via ``asyncio.gather``):
 
+    1. Resolve each distinct folder path → key, then fetch each entity **by name**
+       within its folder to discover its ``id`` — R2RML declares entities by
+       ``rr:tableName`` + ``uipath:folderPath``, not by key.
+    2. Hand the resolved ``(id, name, folder_key)`` set to the SDK's public
+       :meth:`EntitiesService.resolve_entity_set_async`, which fetches the schemas
+       and builds the folder-scoped ``EntitiesService`` (routing each entity's
+       queries to its own folder) — so we don't construct that service from SDK
+       internals here.
+
+    Name→folder routing, and same-name-in-different-folders handling, are whatever
+    the SDK's shared entity-set resolution does — identical to the entity tool.
     Folder keys come only from the trusted folder resolution of the R2RML
     ``uipath:folderPath`` — never from the LLM.
     """
-    # Phase 1: resolve each *distinct* folder path -> key, concurrently.
+    # Step 1a: resolve each *distinct* folder path -> key, concurrently.
     distinct_paths = list(dict.fromkeys(folder_path for _, folder_path in pairs))
     resolved_keys = await asyncio.gather(
         *(sdk.folders.retrieve_key_async(folder_path=p) for p in distinct_paths)
@@ -78,40 +84,23 @@ async def resolve_ontology_entities(
             )
         folder_key_by_path[folder_path] = folder_key
 
-    # Phase 2: fetch every entity schema concurrently (order preserved by gather).
+    # Step 1b: fetch each entity by name (concurrent) to discover its id.
     folder_keys = [folder_key_by_path[folder_path] for _, folder_path in pairs]
-    entities: list[Entity] = list(
-        await asyncio.gather(
-            *(
-                sdk.entities.retrieve_by_name_async(name, folder_key=folder_key)
-                for (name, _), folder_key in zip(pairs, folder_keys, strict=True)
-            )
+    named_entities = await asyncio.gather(
+        *(
+            sdk.entities.retrieve_by_name_async(name, folder_key=folder_key)
+            for (name, _), folder_key in zip(pairs, folder_keys, strict=True)
         )
     )
-    # The SDK routes each query by entity *name* -> folder (EntityRouting), and an
-    # entity name is unique within its folder — which is also the SQL table
-    # identifier used inside a single query. The same name living in two different
-    # folders is a valid catalog-wide situation; each entity is still resolved and
-    # shown to the model with its own folder here.
-    folders_map: dict[str, str] = {
-        entity.name: folder_key
-        for entity, folder_key in zip(entities, folder_keys, strict=True)
-    }
 
-    # Build the folder-scoped service ourselves via the public folders_map param
-    # (yields a FoldersMapRoutingStrategy). Reuse the SDK's already-resolved
-    # auth/config so this service talks to the same tenant as sdk.entities.
-    # NOTE: config/execution_context are read from the SDK's private attributes
-    # because there is currently no public factory for a folder-scoped
-    # EntitiesService with a folders_map. This is a deliberate, contained
-    # trade-off; if the SDK later exposes such a factory, switch to it here.
-    scoped_service = EntitiesService(
-        config=sdk._config,
-        execution_context=sdk._execution_context,
-        folders_service=sdk.folders,
-        folders_map=folders_map,
-    )
-    return entities, scoped_service
+    # Step 2: delegate to the SDK's public entity-set resolver, which builds the
+    # folder-scoped EntitiesService for us (no reliance on SDK-private attrs).
+    items = [
+        DataFabricEntityItem(id=entity.id, name=entity.name, folder_key=folder_key)
+        for entity, folder_key in zip(named_entities, folder_keys, strict=True)
+    ]
+    resolution = await sdk.entities.resolve_entity_set_async(items)
+    return resolution.entities, resolution.entities_service
 
 
 class DataFabricOntologyQueryHandler:

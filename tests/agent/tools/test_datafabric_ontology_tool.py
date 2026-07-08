@@ -69,42 +69,50 @@ def test_factory_empty_ontology_set():
 # --- resolver (b2) ----------------------------------------------------------
 
 
-async def test_resolve_builds_folders_map_and_caches_folder_key(monkeypatch):
+async def test_resolve_fetches_by_name_then_delegates_to_sdk_resolver(monkeypatch):
     folder_keys = {"F/a": "key-a", "F/b": "key-b"}
 
     sdk = MagicMock()
     sdk.folders.retrieve_key_async = AsyncMock(
         side_effect=lambda folder_path: folder_keys[folder_path]
     )
+    # by-name fetch just discovers each entity's id
     sdk.entities.retrieve_by_name_async = AsyncMock(
-        side_effect=lambda name, folder_key: SimpleNamespace(name=name)
+        side_effect=lambda name, folder_key: SimpleNamespace(id=f"id-{name}", name=name)
     )
 
     captured: dict[str, object] = {}
+    fake_entities = [SimpleNamespace(name="alpha")]
     fake_service = object()
 
-    def fake_entities_service(**kwargs):
-        captured.update(kwargs)
-        return fake_service
+    async def fake_resolve_entity_set(items):
+        captured["items"] = items
+        return SimpleNamespace(entities=fake_entities, entities_service=fake_service)
 
-    monkeypatch.setattr(
-        datafabric_ontology_tool, "EntitiesService", fake_entities_service
+    sdk.entities.resolve_entity_set_async = AsyncMock(
+        side_effect=fake_resolve_entity_set
     )
 
     entities, service = await resolve_ontology_entities(
         sdk, [("alpha", "F/a"), ("beta", "F/b"), ("gamma", "F/a")]
     )
 
-    assert [e.name for e in entities] == ["alpha", "beta", "gamma"]
-    assert captured["folders_map"] == {
-        "alpha": "key-a",
-        "beta": "key-b",
-        "gamma": "key-a",
-    }
+    # the SDK resolver's output is returned verbatim (schemas + scoped service)
+    assert entities is fake_entities
     assert service is fake_service
-    # F/a resolved once (cached), F/b once → 2 folder lookups for 3 entities.
+    # F/a resolved once, F/b once → 2 folder lookups; 3 by-name fetches for ids;
+    # one delegation to the public entity-set resolver.
     assert sdk.folders.retrieve_key_async.await_count == 2
     assert sdk.entities.retrieve_by_name_async.await_count == 3
+    assert sdk.entities.resolve_entity_set_async.await_count == 1
+    # items carry the resolved id + folder key per entry
+    items = captured["items"]
+    assert [(i.name, i.folder_key) for i in items] == [
+        ("alpha", "key-a"),
+        ("beta", "key-b"),
+        ("gamma", "key-a"),
+    ]
+    assert [i.id for i in items] == ["id-alpha", "id-beta", "id-gamma"]
 
 
 async def test_ensure_graph_guarded_when_flag_off(monkeypatch):
@@ -123,7 +131,6 @@ async def test_ensure_graph_guarded_when_flag_off(monkeypatch):
 async def test_resolve_raises_on_unresolved_folder(monkeypatch):
     sdk = MagicMock()
     sdk.folders.retrieve_key_async = AsyncMock(return_value=None)
-    monkeypatch.setattr(datafabric_ontology_tool, "EntitiesService", MagicMock())
 
     try:
         await resolve_ontology_entities(sdk, [("alpha", "F/missing")])
