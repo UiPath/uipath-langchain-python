@@ -107,6 +107,7 @@ async def test_resolve_fetches_by_name_then_delegates_to_sdk_resolver(monkeypatc
     assert sdk.entities.resolve_entity_set_async.await_count == 1
     # items carry the resolved id + folder key per entry
     items = captured["items"]
+    assert isinstance(items, list)
     assert [(i.name, i.folder_key) for i in items] == [
         ("alpha", "key-a"),
         ("beta", "key-b"),
