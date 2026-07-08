@@ -32,6 +32,9 @@ from uipath.agent.models.agent import AgentContextResourceConfig
 from uipath.platform.entities import DataFabricEntityItem, EntitiesService, Entity
 
 from ...base_uipath_structured_tool import BaseUiPathStructuredTool
+
+# ``..datafabric_tool`` is the sibling *module* datafabric_tool.py (which defines
+# BASE_SYSTEM_PROMPT), not the datafabric_tool package __init__.
 from ..datafabric_tool import BASE_SYSTEM_PROMPT
 from ..models import DataFabricQueryInput
 from .ontology_fetcher import fence_ontology_block, fetch_ontology_file

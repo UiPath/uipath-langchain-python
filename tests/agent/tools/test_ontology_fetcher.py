@@ -1,4 +1,4 @@
-"""Tests for ontology file fetching (datafabric_tool/ontology_fetcher.py)."""
+"""Tests for ontology file fetching (datafabric_tool/ontology/ontology_fetcher.py)."""
 
 from unittest.mock import AsyncMock, MagicMock
 
