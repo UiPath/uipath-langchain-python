@@ -45,6 +45,7 @@ from uipath_langchain.guardrails import (
     UiPathDeterministicGuardrailMiddleware,
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
+    UiPathLLMAsJudgeMiddleware,
     UiPathPIIDetectionMiddleware,
     UiPathUserPromptAttacksMiddleware,
     PIIDetectionEntity,
@@ -67,9 +68,10 @@ from uipath.core.guardrails import GuardrailScope
 | `UiPathHarmfulContentMiddleware` | AGENT, LLM, TOOL | PRE / POST / PRE_AND_POST | `entities`, `tools`, `stage` |
 | `UiPathUserPromptAttacksMiddleware` | LLM only | PRE only | — |
 | `UiPathIntellectualPropertyMiddleware` | AGENT, LLM only | POST only | `entities` |
+| `UiPathLLMAsJudgeMiddleware` | AGENT, LLM, TOOL | PRE / POST / PRE_AND_POST | `guardrail_text`, `model`, `threshold`, `positive_examples`, `negative_examples`, `tools`, `stage` |
 | `UiPathDeterministicGuardrailMiddleware` | TOOL only | PRE / POST / PRE_AND_POST | `tools`, `rules`, `stage` |
 
-TOOL scope for `UiPathPIIDetectionMiddleware` and `UiPathHarmfulContentMiddleware` requires passing `tools=[...]` to restrict `wrap_tool_call` hooks to specific tools.
+TOOL scope for `UiPathPIIDetectionMiddleware`, `UiPathHarmfulContentMiddleware`, and `UiPathLLMAsJudgeMiddleware` requires passing `tools=[...]` to restrict `wrap_tool_call` hooks to specific tools.
 
 All classes share these common parameters:
 
@@ -83,6 +85,7 @@ Additional parameters per class:
 - **`UiPathPIIDetectionMiddleware`** / **`UiPathHarmfulContentMiddleware`**: `entities` (list of entity configs), `tools` (restrict TOOL-scope hooks to specific tools), `stage`.
 - **`UiPathUserPromptAttacksMiddleware`**: no extra parameters.
 - **`UiPathIntellectualPropertyMiddleware`**: `entities` (list of `IntellectualPropertyEntityType` values).
+- **`UiPathLLMAsJudgeMiddleware`**: `guardrail_text` (required — the plain-language rule the judge evaluates against, ≤ 4000 chars), `model` (required — judge model id, e.g. `"gpt-4o-2024-08-06"`; must be a model your governance policy allows for the LLM-as-judge guardrail — LLM Gateway enforces the permitted list), `threshold` (`0` strictest … `6` most lenient, default `2`), `positive_examples` / `negative_examples` (optional calibration payloads — ≤ 2 each, ≤ 1000 chars each), `tools` (required only when `GuardrailScope.TOOL` is used), `stage`. See the [core guardrails documentation](https://uipath.github.io/uipath-python/core/guardrails/#llm-as-judge) for the full parameter reference.
 - **`UiPathDeterministicGuardrailMiddleware`**: `tools` (required — list of tools to guard), `rules` (list of lambda functions), `stage`.
 
 ### Full example
@@ -98,6 +101,7 @@ from uipath_langchain.guardrails import (
     UiPathDeterministicGuardrailMiddleware,
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
+    UiPathLLMAsJudgeMiddleware,
     UiPathPIIDetectionMiddleware,
     UiPathUserPromptAttacksMiddleware,
     PIIDetectionEntity,
@@ -167,6 +171,18 @@ agent = create_agent(
             scopes=[GuardrailScope.LLM],
             action=LogAction(severity_level=LoggingSeverityLevel.WARNING),
             entities=[IntellectualPropertyEntityType.TEXT],
+        ),
+        # LLM-as-judge: block responses that violate a plain-language rule (POST)
+        *UiPathLLMAsJudgeMiddleware(
+            name="No financial advice",
+            scopes=[GuardrailScope.AGENT],
+            action=BlockAction(),
+            guardrail_text=(
+                "The response must remain professional and must not contain "
+                "financial or investment advice."
+            ),
+            model="gpt-4o-2024-08-06",
+            stage=GuardrailExecutionStage.POST,
         ),
         # Deterministic: block tool input longer than 1000 chars
         *UiPathDeterministicGuardrailMiddleware(
@@ -384,6 +400,33 @@ from uipath_langchain.guardrails.enums import HarmfulContentEntityType
     action=BlockAction(),
     name="Block harmful content",
     stage=GuardrailExecutionStage.PRE,
+)
+def create_my_agent():
+    return create_agent(model=llm, tools=[analyze_text], system_prompt="...")
+
+agent = create_my_agent()
+```
+
+### LLM-as-judge
+
+Use `LLMAsJudgeValidator` to check content against a plain-language rule via a judge LLM. Scope is inferred from the decorated target (here, the agent factory → AGENT scope). See the [core guardrails documentation](https://uipath.github.io/uipath-python/core/guardrails/#llm-as-judge) for the full parameter reference (`threshold`, `positive_examples`, `negative_examples`, and their limits).
+
+```python
+from langchain.agents import create_agent
+from uipath_langchain.guardrails import guardrail, LLMAsJudgeValidator, BlockAction, GuardrailExecutionStage
+
+@guardrail(
+    validator=LLMAsJudgeValidator(
+        guardrail_text=(
+            "The response must remain professional and must not contain "
+            "financial or investment advice."
+        ),
+        model="gpt-4o-2024-08-06",
+        threshold=2,
+    ),
+    action=BlockAction(),
+    name="No financial advice",
+    stage=GuardrailExecutionStage.POST,
 )
 def create_my_agent():
     return create_agent(model=llm, tools=[analyze_text], system_prompt="...")
