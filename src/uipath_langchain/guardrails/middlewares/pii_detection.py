@@ -17,7 +17,6 @@ from uipath.platform.guardrails import (
 from ..enums import GuardrailExecutionStage
 from ..models import GuardrailAction, PIIDetectionEntity
 from ._base import BuiltInGuardrailMiddlewareMixin
-from ._utils import sanitize_tool_name
 
 logger = logging.getLogger(__name__)
 
@@ -111,28 +110,9 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         if not isinstance(enabled_for_evals, bool):
             raise ValueError("enabled_for_evals must be a boolean")
 
-        self._tool_names: list[str] | None = None
-        if tools is not None:
-            tool_name_list = []
-            for tool_or_name in tools:
-                if isinstance(tool_or_name, BaseTool):
-                    tool_name_list.append(sanitize_tool_name(tool_or_name.name))
-                elif isinstance(tool_or_name, str):
-                    tool_name_list.append(sanitize_tool_name(tool_or_name))
-                else:
-                    raise ValueError(
-                        f"tool_names must contain strings or BaseTool objects, got {type(tool_or_name)}"
-                    )
-            self._tool_names = tool_name_list
-
+        self._tool_names = self._resolve_tool_names(tools)
         scopes_list = list(scopes)
-        if GuardrailScope.TOOL in scopes_list:
-            if self._tool_names is None or len(self._tool_names) == 0:
-                raise ValueError(
-                    "Tool scope is specified but tool_names is None or empty. "
-                    "Tool scope guardrails require at least one tool name to be specified. "
-                    "Please provide tool_names when using GuardrailScope.TOOL."
-                )
+        self._require_tools_for_tool_scope(scopes_list)
 
         self.scopes = scopes_list
         self.action = action
@@ -149,32 +129,8 @@ class UiPathPIIDetectionMiddleware(BuiltInGuardrailMiddlewareMixin):
         self._middleware_instances = self._create_middleware_instances()
 
     def _create_middleware_instances(self) -> list[AgentMiddleware]:
-        """Create middleware instances from decorated functions.
-
-        AGENT/LLM hooks are built by the shared, stage-gated
-        ``_build_message_hooks`` helper (``PRE`` → ``before_*`` only, ``POST`` →
-        ``after_*`` only, ``PRE_AND_POST`` → both), so a guardrail validates (and
-        acts, e.g. escalates) at a single checkpoint instead of twice per run.
-        """
-        instances: list[AgentMiddleware] = []
-        guardrail_name = self._name.replace(" ", "_")
-
-        if GuardrailScope.AGENT in self.scopes:
-            instances.extend(
-                self._build_message_hooks(
-                    GuardrailScope.AGENT, self._tool_stage, guardrail_name
-                )
-            )
-        if GuardrailScope.LLM in self.scopes:
-            instances.extend(
-                self._build_message_hooks(
-                    GuardrailScope.LLM, self._tool_stage, guardrail_name
-                )
-            )
-        if GuardrailScope.TOOL in self.scopes:
-            instances.append(self._create_tool_wrap_hook(guardrail_name))
-
-        return instances
+        """Create scope-gated middleware instances (see ``_build_scope_instances``)."""
+        return self._build_scope_instances(self._name.replace(" ", "_"))
 
     def __iter__(self):
         """Make the class iterable to return middleware instances."""

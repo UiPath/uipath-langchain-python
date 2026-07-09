@@ -16,6 +16,7 @@ from langchain.agents.middleware import (
     wrap_tool_call,
 )
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
+from langchain_core.tools import BaseTool
 from langgraph.errors import GraphBubbleUp
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.runtime import Runtime
@@ -110,9 +111,63 @@ class BuiltInGuardrailMiddlewareMixin:
     _guardrail: BuiltInValidatorGuardrail
     _name: str
     action: GuardrailAction
+    scopes: Sequence[GuardrailScope]
     _tool_names: list[str] | None = None
     _tool_stage: GuardrailExecutionStage = GuardrailExecutionStage.PRE_AND_POST
     _uipath: UiPath | None = None
+
+    def _resolve_tool_names(
+        self, tools: Sequence[str | BaseTool] | None
+    ) -> list[str] | None:
+        """Normalize a mix of tool names / ``BaseTool`` objects to sanitized names.
+
+        Shared by the multi-scope built-in middlewares so their tool handling can't
+        drift apart. Returns ``None`` when no tools are given.
+        """
+        if tools is None:
+            return None
+        names: list[str] = []
+        for tool_or_name in tools:
+            if isinstance(tool_or_name, BaseTool):
+                names.append(sanitize_tool_name(tool_or_name.name))
+            elif isinstance(tool_or_name, str):
+                names.append(sanitize_tool_name(tool_or_name))
+            else:
+                raise ValueError(
+                    f"tools must contain strings or BaseTool objects, got {type(tool_or_name)}"
+                )
+        return names
+
+    def _require_tools_for_tool_scope(self, scopes: Sequence[GuardrailScope]) -> None:
+        """Ensure a TOOL-scoped guardrail specifies at least one tool."""
+        if GuardrailScope.TOOL in scopes and not self._tool_names:
+            raise ValueError(
+                "Tool scope is specified but tools is None or empty. "
+                "Tool scope guardrails require at least one tool to be specified."
+            )
+
+    def _build_scope_instances(self, guardrail_name: str) -> list["AgentMiddleware"]:
+        """Build hooks for each configured scope: AGENT/LLM message hooks + TOOL wrap.
+
+        Shared by the multi-scope built-in middlewares (PII / harmful content /
+        LLM-as-judge) so their scope wiring stays consistent.
+        """
+        instances: list[AgentMiddleware] = []
+        if GuardrailScope.AGENT in self.scopes:
+            instances.extend(
+                self._build_message_hooks(
+                    GuardrailScope.AGENT, self._tool_stage, guardrail_name
+                )
+            )
+        if GuardrailScope.LLM in self.scopes:
+            instances.extend(
+                self._build_message_hooks(
+                    GuardrailScope.LLM, self._tool_stage, guardrail_name
+                )
+            )
+        if GuardrailScope.TOOL in self.scopes:
+            instances.append(self._create_tool_wrap_hook(guardrail_name))
+        return instances
 
     def _get_uipath(self) -> UiPath:
         """Get or create UiPath instance."""

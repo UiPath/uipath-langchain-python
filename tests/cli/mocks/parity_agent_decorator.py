@@ -8,6 +8,7 @@ parity between the two guardrail flavors.
 Guardrails configured:
 - "Agent PII Detection"                — AGENT scope, PII (PERSON), PRE, BlockAction
 - "Agent Harmful Content Detection"    — AGENT scope, HarmfulContent (Violence), PRE, BlockAction
+- "Agent LLM Judge"                    — AGENT scope, LLMAsJudge, POST, BlockAction
 - "LLM User Prompt Attacks Detection"  — LLM scope, UserPromptAttacks, PRE, BlockAction
 - "LLM PII Detection"                  — LLM scope, PII (EMAIL), PRE, LogAction(WARNING)
 - "LLM IP Detection"                   — LLM scope, IntellectualProperty (Text), POST, LogAction
@@ -42,6 +43,7 @@ from uipath_langchain.guardrails import (
     HarmfulContentEntity,
     HarmfulContentValidator,
     IntellectualPropertyValidator,
+    LLMAsJudgeValidator,
     LogAction,
     PIIDetectionEntity,
     PIIValidator,
@@ -239,6 +241,16 @@ llm = create_llm()
 # ---------------------------------------------------------------------------
 
 
+@guardrail(
+    validator=LLMAsJudgeValidator(
+        guardrail_text="The generated joke must be appropriate for children and families.",
+        model="gpt-4o-2024-08-06",
+        threshold=2,
+    ),
+    action=BlockAction(),
+    name="Agent LLM Judge",
+    stage=GuardrailExecutionStage.POST,
+)
 @guardrail(
     validator=HarmfulContentValidator(
         entities=[HarmfulContentEntity(HarmfulContentEntityType.VIOLENCE, threshold=2)],
