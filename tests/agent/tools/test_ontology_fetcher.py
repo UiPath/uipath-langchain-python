@@ -1,5 +1,6 @@
 """Tests for ontology file fetching (datafabric_tool/ontology/ontology_fetcher.py)."""
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -48,12 +49,15 @@ async def test_fetch_raises_on_underlying_error():
         await fetch_ontology_file(es, "library", "r2rml", None)
 
 
-async def test_fetch_raises_when_oversized(monkeypatch):
+async def test_fetch_rejects_and_logs_when_oversized(monkeypatch, caplog):
     monkeypatch.setattr(ontology_fetcher, "_MAX_ONTOLOGY_BYTES", 5)
     es = _entities_service(content="0123456789")  # 10 bytes > cap
 
-    with pytest.raises(ValueError, match="size limit"):
-        await fetch_ontology_file(es, "library", "owl", None)
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="byte limit"):
+            await fetch_ontology_file(es, "library", "owl", None)
+    # rejection reason is logged, not just raised
+    assert "refusing to inject" in caplog.text
 
 
 async def test_fetch_missing_content_defaults_empty():

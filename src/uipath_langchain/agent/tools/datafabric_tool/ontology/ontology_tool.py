@@ -87,12 +87,26 @@ async def resolve_ontology_entities(
             )
         folder_key_by_path[folder_path] = folder_key
 
-    # Step 1b: fetch each entity by name (concurrent) to discover its id.
+    # Step 1b: fetch each entity by name (concurrent) to discover its id. Wrap each
+    # fetch so a failure names the offending entity + folder — a bare gather would
+    # surface only the first exception with no indication of which entity failed.
     folder_keys = [folder_key_by_path[folder_path] for _, folder_path in pairs]
+
+    async def _fetch(name: str, folder_path: str, folder_key: str) -> Entity:
+        try:
+            return await sdk.entities.retrieve_by_name_async(
+                name, folder_key=folder_key
+            )
+        except Exception as e:
+            raise ValueError(
+                f"Failed to resolve ontology entity '{name}' in folder "
+                f"'{folder_path}': {e}"
+            ) from e
+
     named_entities = await asyncio.gather(
         *(
-            sdk.entities.retrieve_by_name_async(name, folder_key=folder_key)
-            for (name, _), folder_key in zip(pairs, folder_keys, strict=True)
+            _fetch(name, folder_path, folder_key)
+            for (name, folder_path), folder_key in zip(pairs, folder_keys, strict=True)
         )
     )
 

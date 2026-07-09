@@ -16,16 +16,13 @@ The extracted ``(entity_name, folder_path)`` set is the closed allow-list of
 entities the ontology tool is permitted to resolve and query.
 """
 
-from rdflib import Graph, Namespace
-from rdflib.namespace import RDF
-
-# R2RML vocabulary and the UiPath extension carrying the folder path.
-# These are RDF namespace IRIs — opaque identifiers that must match the terms in
+# R2RML vocabulary and the UiPath extension carrying the folder path, as plain
+# IRI strings. These are RDF namespace *identifiers* that must match the terms in
 # the parsed Turtle verbatim, not network endpoints. The R2RML namespace is
 # defined as http by the W3C spec; switching to https would stop the terms from
 # matching. NOSONAR suppresses the clear-text-protocol false positive (S5332).
-RR = Namespace("http://www.w3.org/ns/r2rml#")  # NOSONAR
-UIPATH = Namespace("http://uipath.com/ns/datafabric#")  # NOSONAR
+_RR_NS = "http://www.w3.org/ns/r2rml#"  # NOSONAR
+_UIPATH_NS = "http://uipath.com/ns/datafabric#"  # NOSONAR
 
 
 class R2RMLParseError(ValueError):
@@ -51,13 +48,22 @@ def parse_r2rml_entities(r2rml_text: str) -> list[tuple[str, str]]:
             ``rr:TriplesMap``, or a TriplesMap does not declare exactly one
             ``rr:tableName`` and one ``uipath:folderPath``.
     """
+    # Import rdflib lazily (module-local) so that merely importing the ontology
+    # package — e.g. to read the feature flag when it is disabled — does not pull
+    # in rdflib/pyparsing. It loads only when a mapping is actually parsed.
+    from rdflib import Graph, Namespace
+    from rdflib.namespace import RDF
+
+    rr = Namespace(_RR_NS)
+    uipath = Namespace(_UIPATH_NS)
+
     graph = Graph()
     try:
         graph.parse(data=r2rml_text, format="turtle")
     except Exception as e:  # rdflib raises assorted parser errors
         raise R2RMLParseError(f"R2RML mapping is not valid Turtle: {e}") from e
 
-    triples_maps = list(graph.subjects(RDF.type, RR.TriplesMap))
+    triples_maps = list(graph.subjects(RDF.type, rr.TriplesMap))
     if not triples_maps:
         raise R2RMLParseError("No `rr:TriplesMap` found in the R2RML mapping.")
 
@@ -67,11 +73,11 @@ def parse_r2rml_entities(r2rml_text: str) -> list[tuple[str, str]]:
     for triples_map in triples_maps:
         table_names = [
             str(name)
-            for logical_table in graph.objects(triples_map, RR.logicalTable)
-            for name in graph.objects(logical_table, RR.tableName)
+            for logical_table in graph.objects(triples_map, rr.logicalTable)
+            for name in graph.objects(logical_table, rr.tableName)
         ]
         folder_paths = [
-            str(folder) for folder in graph.objects(triples_map, UIPATH.folderPath)
+            str(folder) for folder in graph.objects(triples_map, uipath.folderPath)
         ]
         if len(table_names) != 1 or len(folder_paths) != 1:
             raise R2RMLParseError(

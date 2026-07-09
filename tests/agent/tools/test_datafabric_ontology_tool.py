@@ -140,6 +140,17 @@ async def test_resolve_raises_on_unresolved_folder(monkeypatch):
         assert "could not be resolved" in str(e)
 
 
+async def test_resolve_names_the_entity_that_failed(monkeypatch):
+    # A by-name fetch failure must name the offending entity + folder, not just
+    # surface the bare underlying error.
+    sdk = MagicMock()
+    sdk.folders.retrieve_key_async = AsyncMock(return_value="key-a")
+    sdk.entities.retrieve_by_name_async = AsyncMock(side_effect=RuntimeError("boom"))
+
+    with pytest.raises(ValueError, match=r"entity 'alpha' in folder 'F/a'"):
+        await resolve_ontology_entities(sdk, [("alpha", "F/a")])
+
+
 # --- _ensure_graph (fetch -> parse -> resolve -> compile) -------------------
 
 

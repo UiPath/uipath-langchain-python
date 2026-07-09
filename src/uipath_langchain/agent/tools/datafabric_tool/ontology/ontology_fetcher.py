@@ -15,11 +15,17 @@ A Data Fabric ontology exposes typed files — OWL (the semantic schema) and R2R
 Ontology names/folders are pinned from configuration, never supplied by the LLM.
 """
 
+import logging
+
 from uipath.platform.entities import EntitiesService
 
-# Defensive cap per file so a malformed/oversized artifact can't blow up the
-# prompt/token budget. OWL + R2RML for a real ontology are comfortably under this.
-_MAX_ONTOLOGY_BYTES = 2_000_000
+logger = logging.getLogger(__name__)
+
+# Hard cap per file. Above this, an ontology file would consume too much of the
+# prompt/token budget once injected and degrade answer quality, so it is rejected
+# outright (not truncated) rather than silently bloating the prompt. Real OWL/R2RML
+# files for a typical ontology are well under this (tens of KB).
+_MAX_ONTOLOGY_BYTES = 256_000
 
 
 async def fetch_ontology_file(
@@ -47,10 +53,21 @@ async def fetch_ontology_file(
     data = await entities_service.get_ontology_file_async(name, file_type, folder_key)
     content = data.get("content") or ""
     media_type = data.get("mediaType") or ""
-    if len(content.encode("utf-8")) > _MAX_ONTOLOGY_BYTES:
+    size = len(content.encode("utf-8"))
+    if size > _MAX_ONTOLOGY_BYTES:
+        logger.warning(
+            "Ontology '%s' %s is %d bytes, over the %d-byte limit; refusing to "
+            "inject it — it would consume too much of the prompt/token budget and "
+            "degrade answer quality.",
+            name,
+            file_type,
+            size,
+            _MAX_ONTOLOGY_BYTES,
+        )
         raise ValueError(
-            f"Ontology '{name}' {file_type} exceeds the size limit "
-            f"({_MAX_ONTOLOGY_BYTES} bytes)."
+            f"Ontology '{name}' {file_type} is {size} bytes, over the "
+            f"{_MAX_ONTOLOGY_BYTES}-byte limit; not injected into the prompt "
+            "(would consume too much of the token budget)."
         )
     return content, media_type
 
