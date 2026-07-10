@@ -60,6 +60,14 @@ def test_build_includes_domain_guidance_in_rendered_prompt():
     assert "Use business-friendly ticket language." in prompt
 
 
+def test_entity_prompt_never_contains_ontology_sections():
+    # The entity tool's prompt is ontology-free; ontology content lives only in
+    # datafabric_ontology_prompt_builder.
+    prompt = build([_fake_entity(_fake_field())])
+    assert "## Available Ontology" not in prompt
+    assert "## Ontology→Table Mapping (R2RML)" not in prompt
+
+
 def _system_field(name, type_name="datetimeoffset", **overrides):
     """A fake auto-added system/audit field (Id, CreateTime, ...)."""
     return _fake_field(
