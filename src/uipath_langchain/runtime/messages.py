@@ -377,7 +377,7 @@ class UiPathChatMessagesMapper:
             # of type `response.created` (id=`resp_...`) before any actual content;
             # LangChain then streams the content under a different id (`lc_run--...`).
             # This guard prevents emitting phantom startMessage/startContentPart events
-            # for envelope events. The `chunk_position != "last"` clause preserves the
+            # for envelope events like this. The `chunk_position != "last"` clause preserves the
             # rare single-empty-chunk case (e.g. a refusal) so we still emit start + end.
             if (
                 not message.content_blocks
