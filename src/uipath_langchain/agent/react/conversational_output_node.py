@@ -105,7 +105,7 @@ def create_conversational_output_node(
         if set_output_call is None:
             raise AgentRuntimeError(
                 code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
-                title="Structured-output LLM did not return set_conversational_output.",
+                title="Structured-output LLM did not call set_conversational_output.",
                 detail=(
                     "The language model was expected to call the set_conversational_output tool "
                     "to return the structured output for the turn, but no such call was made."
