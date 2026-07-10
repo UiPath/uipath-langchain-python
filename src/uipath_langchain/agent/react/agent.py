@@ -135,9 +135,7 @@ def create_agent(
         and has_custom_conversational_output_fields(output_schema)
     )
 
-    terminate_node = create_terminate_node(
-        output_schema, config.is_conversational, with_conversational_output_node
-    )
+    terminate_node = create_terminate_node(output_schema, config.is_conversational)
 
     CompleteAgentGraphState = create_state_with_input(
         input_schema if input_schema is not None else BaseModel

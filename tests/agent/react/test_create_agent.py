@@ -157,7 +157,6 @@ class TestCreateAgent:
         mock_create_terminate_node.assert_called_once_with(
             None,  # output schema
             False,  # is_conversational
-            False,  # with_conversational_output_node
         )
 
     @_patch("create_route_agent_conversational")
@@ -254,7 +253,6 @@ class TestCreateAgent:
         mock_create_terminate_node.assert_called_once_with(
             None,  # output schema
             True,  # is_conversational
-            False,  # with_conversational_output_node (no custom output schema)
         )
 
     @_patch("create_route_agent_conversational")

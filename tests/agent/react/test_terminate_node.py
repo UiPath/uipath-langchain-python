@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from uipath.agent.react import (
     END_EXECUTION_TOOL,
     RAISE_ERROR_TOOL,
-    SET_CONVERSATIONAL_OUTPUT_TOOL,
 )
 from uipath.core.chat import UiPathConversationMessageData
 from uipath.runtime.errors import UiPathErrorCategory
@@ -25,6 +24,7 @@ class MockInnerState(BaseModel):
 
     job_attachments: dict[str, Any] = {}
     initial_message_count: int | None = None
+    conversational_output: dict[str, Any] | None = None
 
 
 class MockAgentGraphState(BaseModel):
@@ -178,9 +178,9 @@ class TestTerminateNodeConversational:
         assert messages[0]["toolCalls"][0]["input"] == {"param": "value"}
 
     def test_conversational_extracts_custom_output_fields(self):
-        """When the response schema has custom fields, the terminate node
-        reads them from the last AIMessage's set_conversational_output tool
-        call and merges them with the response_messages."""
+        """When inner_state.conversational_output is populated (by the
+        upstream GENERATE_CONVERSATIONAL_OUTPUT node), the terminate node
+        merges those args into the schema-shaped output."""
 
         class ResponseSchema(BaseModel):
             uipath__agent_response_messages: list[UiPathConversationMessageData]
@@ -188,40 +188,28 @@ class TestTerminateNodeConversational:
             ready_for_handoff: bool
 
         terminate_node = create_terminate_node(
-            response_schema=ResponseSchema,
-            is_conversational=True,
-            with_conversational_output_node=True,
+            response_schema=ResponseSchema, is_conversational=True
         )
 
         agent_reply = AIMessage(content="Sure, I'll route you to billing.")
-        set_output_msg = AIMessage(
-            content="",
-            tool_calls=[
-                {
-                    "name": SET_CONVERSATIONAL_OUTPUT_TOOL.name,
-                    "args": {
-                        "handoff_target": "billing",
-                        "ready_for_handoff": True,
-                    },
-                    "id": "call_1",
-                }
-            ],
-        )
         state = MockAgentGraphState(
             messages=[
                 HumanMessage(content="I have a billing issue"),
                 agent_reply,
-                set_output_msg,
             ],
-            inner_state=MockInnerState(initial_message_count=1),
+            inner_state=MockInnerState(
+                initial_message_count=1,
+                conversational_output={
+                    "handoff_target": "billing",
+                    "ready_for_handoff": True,
+                },
+            ),
         )
 
         result = terminate_node(state)
 
         assert result["handoff_target"] == "billing"
         assert result["ready_for_handoff"] is True
-        # The conversational reply is preserved; the set_conversational_output
-        # AIMessage is dropped by the flow-control filter in the converter.
         messages = result["uipath__agent_response_messages"]
         assert len(messages) == 1
         assert "Sure, I'll route you to billing." in str(

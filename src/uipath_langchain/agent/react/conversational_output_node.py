@@ -12,6 +12,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables.config import var_child_runnable_config
 from pydantic import BaseModel
+from uipath.agent.react import SET_CONVERSATIONAL_OUTPUT_TOOL
 from uipath.agent.react.conversational_prompts import (
     get_generate_output_prompt,
 )
@@ -35,7 +36,7 @@ def create_conversational_output_node(
     model: BaseChatModel,
     agent_output_schema: type[BaseModel],
 ):
-    """Build the focused structured-output extraction node.
+    """Build the conversational structured-output node.
 
     Args:
         model: The chat model to invoke for the extraction call. Reused from
@@ -61,9 +62,6 @@ def create_conversational_output_node(
     output_prompt = get_generate_output_prompt()
 
     async def conversational_output_node(state: StateT):
-        # The appended HumanMessage stays local to this LLM call — only the
-        # response is returned to state, so the framework instruction never
-        # enters the persisted conversation history.
         messages = [*state.messages, HumanMessage(content=output_prompt)]
         config = config_without_streaming(var_child_runnable_config.get(None))
 
@@ -96,6 +94,25 @@ def create_conversational_output_node(
 
         payload_handler.check_stop_reason(response)
 
-        return {"messages": [response]}
+        set_output_call = next(
+            (
+                tc
+                for tc in (response.tool_calls or [])
+                if tc["name"] == SET_CONVERSATIONAL_OUTPUT_TOOL.name
+            ),
+            None,
+        )
+        if set_output_call is None:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.LLM_INVALID_RESPONSE,
+                title="Structured-output LLM did not call set_conversational_output.",
+                detail=(
+                    "The language model was expected to call the set_conversational_output tool "
+                    "to return the structured output for the turn, but no such call was made."
+                ),
+                category=UiPathErrorCategory.SYSTEM,
+            )
+
+        return {"inner_state": {"conversational_output": set_output_call["args"]}}
 
     return conversational_output_node
