@@ -405,3 +405,53 @@ class TestCreateToolsFromResources:
             function_resource, run_as_me=False
         )
         assert tool is not None
+
+    async def test_run_as_me_propagates_to_process_tool(
+        self, process_resource, mock_uipath_sdk
+    ):
+        """run_as_me passed into create_tools_from_resources is forwarded to create_process_tool."""
+        process_resource.is_enabled = True
+        agent = LowCodeAgentDefinition(
+            input_schema={"type": "object", "properties": {}},
+            output_schema={"type": "object", "properties": {}},
+            messages=[],
+            settings=Mock(spec=AgentSettings),
+            resources=[process_resource],
+        )
+        mock_llm = AsyncMock(spec=BaseChatModel)
+        with patch(
+            "uipath_langchain.agent.tools.tool_factory.create_process_tool"
+        ) as mock_create_process_tool:
+            mock_create_process_tool.return_value = MagicMock(
+                spec=BaseUiPathStructuredTool
+            )
+            await create_tools_from_resources(agent, mock_llm, run_as_me=True)
+
+        mock_create_process_tool.assert_called_once_with(
+            process_resource, run_as_me=True
+        )
+
+    async def test_run_as_me_defaults_false_when_not_provided(
+        self, process_resource, mock_uipath_sdk
+    ):
+        """run_as_me defaults to False when omitted (non-conversational agents)."""
+        process_resource.is_enabled = True
+        agent = LowCodeAgentDefinition(
+            input_schema={"type": "object", "properties": {}},
+            output_schema={"type": "object", "properties": {}},
+            messages=[],
+            settings=Mock(spec=AgentSettings),
+            resources=[process_resource],
+        )
+        mock_llm = AsyncMock(spec=BaseChatModel)
+        with patch(
+            "uipath_langchain.agent.tools.tool_factory.create_process_tool"
+        ) as mock_create_process_tool:
+            mock_create_process_tool.return_value = MagicMock(
+                spec=BaseUiPathStructuredTool
+            )
+            await create_tools_from_resources(agent, mock_llm)
+
+        mock_create_process_tool.assert_called_once_with(
+            process_resource, run_as_me=False
+        )
