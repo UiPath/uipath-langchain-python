@@ -65,10 +65,6 @@ def _make_mock_model() -> tuple[MagicMock, MagicMock, MagicMock]:
 class TestCreateConversationalOutputNode:
     @pytest.mark.asyncio
     async def test_returns_extracted_args_via_inner_state(self):
-        """The extracted set_conversational_output args land on
-        inner_state.conversational_output_args, not on `messages` — that
-        keeps the synthetic tool call off LangGraph's messages-stream
-        sweep so it never leaks to CAS."""
         model, _non_streaming, _bound = _make_mock_model()
         node = create_conversational_output_node(model, _OutputSchema)
 
