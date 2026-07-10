@@ -373,6 +373,20 @@ class UiPathChatMessagesMapper:
 
         # For every new message_id, start a new message
         if message.id not in self.seen_message_ids:
+            # Edge-case: OpenAI Responses API (e.g. gpt-5.4) emits an initial envelope chunk
+            # of type `response.created` (id=`resp_...`) before any actual content;
+            # LangChain then streams the content under a different id (`lc_run--...`).
+            # This guard prevents emitting phantom startMessage/startContentPart events
+            # for envelope events. The `chunk_position != "last"` clause preserves the
+            # rare single-empty-chunk case (e.g. a refusal) so we still emit start + end.
+            if (
+                not message.content_blocks
+                and not message.tool_calls
+                and not (isinstance(message.content, str) and message.content)
+                and message.chunk_position != "last"
+            ):
+                return []
+
             self.current_message = message
             self.seen_message_ids.add(message.id)
             self._citation_stream_processor = CitationStreamProcessor()

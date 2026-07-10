@@ -1223,26 +1223,41 @@ class TestMapEvent:
 
     @pytest.mark.asyncio
     async def test_map_event_starts_new_message_for_new_id(self):
-        """Should emit start event for new message id."""
+        """Should emit start event for new (content-bearing) message id.
+
+        Envelope-only chunks (empty content, no tool calls, not the final
+        `chunk_position="last"` marker) are skipped — see
+        `TestEnvelopeOnlyChunkSkip` — so this test uses a chunk that carries
+        content to fire the start event.
+        """
         mapper = UiPathChatMessagesMapper("test-runtime", None)
-        chunk = AIMessageChunk(content="", id="msg-123")
+        chunk = AIMessageChunk(
+            content="",
+            id="msg-123",
+            content_blocks=[{"type": "text", "text": "hi"}],
+        )
 
         result = await mapper.map_event(chunk)
 
         assert result is not None
-        assert len(result) == 1
-        event = result[0]
-        assert event.message_id == "msg-123"
-        assert event.start is not None
-        assert event.start.role == "assistant"
-        assert event.content_part is not None
-        assert event.content_part.start is not None
+        # First event is the combined start (message start + content_part start);
+        # subsequent events carry the text chunks.
+        start_event = result[0]
+        assert start_event.message_id == "msg-123"
+        assert start_event.start is not None
+        assert start_event.start.role == "assistant"
+        assert start_event.content_part is not None
+        assert start_event.content_part.start is not None
 
     @pytest.mark.asyncio
     async def test_map_event_tracks_seen_message_ids(self):
-        """Should track seen message ids."""
+        """Should track seen message ids for content-bearing chunks."""
         mapper = UiPathChatMessagesMapper("test-runtime", None)
-        chunk = AIMessageChunk(content="", id="msg-123")
+        chunk = AIMessageChunk(
+            content="",
+            id="msg-123",
+            content_blocks=[{"type": "text", "text": "hi"}],
+        )
 
         await mapper.map_event(chunk)
 
@@ -1250,13 +1265,22 @@ class TestMapEvent:
 
     @pytest.mark.asyncio
     async def test_map_event_emits_text_chunk_for_subsequent_messages(self):
-        """Should emit text chunk event for subsequent messages with same id."""
+        """Should emit text chunk event for subsequent messages with same id.
+
+        The first chunk (content-bearing) fires startMessage + startContentPart
+        + the text chunk. The second chunk with the same id should emit only
+        the text chunk event, not another start.
+        """
         mapper = UiPathChatMessagesMapper("test-runtime", None)
-        # First chunk starts the message
-        first_chunk = AIMessageChunk(content="", id="msg-123")
+        # First (content-bearing) chunk starts the message.
+        first_chunk = AIMessageChunk(
+            content="",
+            id="msg-123",
+            content_blocks=[{"type": "text", "text": "initial"}],
+        )
         await mapper.map_event(first_chunk)
 
-        # Second chunk with text content
+        # Second chunk with text content and the same id.
         second_chunk = AIMessageChunk(
             content="",
             id="msg-123",
@@ -1273,13 +1297,21 @@ class TestMapEvent:
 
     @pytest.mark.asyncio
     async def test_map_event_handles_raw_string_content(self):
-        """Should handle raw string content on chunk."""
+        """Should handle raw string content on chunk.
+
+        Uses a content-bearing first chunk to start the message; a subsequent
+        chunk with raw string content should emit only the chunk event.
+        """
         mapper = UiPathChatMessagesMapper("test-runtime", None)
-        # First chunk starts the message
-        first_chunk = AIMessageChunk(content="", id="msg-123")
+        # First (content-bearing) chunk starts the message.
+        first_chunk = AIMessageChunk(
+            content="",
+            id="msg-123",
+            content_blocks=[{"type": "text", "text": "initial"}],
+        )
         await mapper.map_event(first_chunk)
 
-        # Second chunk with string content
+        # Second chunk with raw string content and the same id.
         second_chunk = AIMessageChunk(content="raw content", id="msg-123")
         result = await mapper.map_event(second_chunk)
 
@@ -2463,3 +2495,66 @@ class TestClientSideToolEndSuppression:
             e for e in result if e.tool_call is not None and e.tool_call.end is not None
         ]
         assert len(tool_end_events) == 1
+
+
+class TestEnvelopeOnlyChunkSkip:
+    """OpenAI's Responses API emits a `response.created` frame first, carrying a
+    `resp_...` id and no content. LangChain then streams actual content chunks
+    under a different id (the run id `lc_run--...`). The mapper must skip that
+    envelope chunk so we don't fire a phantom `startMessage` for the `resp_...`
+    id and then a second `startMessage` for the run id."""
+
+    @pytest.mark.asyncio
+    async def test_envelope_chunk_emits_no_events(self):
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        envelope = AIMessageChunk(content="", id="resp_01env")
+        result = await mapper.map_event(envelope)
+
+        assert result == []
+        assert "resp_01env" not in mapper.seen_message_ids
+
+    @pytest.mark.asyncio
+    async def test_content_chunk_after_envelope_fires_single_start(self):
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        # Envelope frame (Responses API `response.created`) — should be skipped.
+        envelope = AIMessageChunk(content="", id="resp_01env")
+        envelope_events = await mapper.map_event(envelope)
+        assert envelope_events == []
+
+        # LangChain then streams under a different id (the run id).
+        content_chunk = AIMessageChunk(content="Hi", id="lc_run--abc")
+        content_events = await mapper.map_event(content_chunk)
+
+        # Exactly one startMessage event should be emitted, for the run id.
+        start_events = [e for e in (content_events or []) if e.start is not None]
+        assert len(start_events) == 1
+        assert content_events is not None
+        assert start_events[0].message_id == "lc_run--abc"
+
+    @pytest.mark.asyncio
+    async def test_truly_empty_last_chunk_still_starts_and_ends(self):
+        """When a stream produces only a single empty chunk marked
+        `chunk_position="last"` (e.g. a refusal with no text), the mapper must
+        NOT drop it — the chat UI still needs start + end events to close out
+        the turn."""
+        storage = create_mock_storage()
+        storage.get_value.return_value = {}
+        mapper = UiPathChatMessagesMapper("test-runtime", storage)
+
+        empty_last = AIMessageChunk(content="", id="msg-empty")
+        object.__setattr__(empty_last, "chunk_position", "last")
+
+        result = await mapper.map_event(empty_last)
+        assert result is not None
+
+        # Should have fired start events AND a message_end (single-chunk turn).
+        start_events = [e for e in result if e.start is not None]
+        end_events = [e for e in result if e.end is not None and e.content_part is None]
+        assert len(start_events) == 1
+        assert len(end_events) == 1
