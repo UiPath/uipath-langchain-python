@@ -64,18 +64,24 @@ def _make_mock_model() -> tuple[MagicMock, MagicMock, MagicMock]:
 
 class TestCreateConversationalOutputNode:
     @pytest.mark.asyncio
-    async def test_returns_response_with_tool_call(self):
+    async def test_returns_extracted_args_via_inner_state(self):
+        """The extracted set_conversational_output args land on
+        inner_state.conversational_output_args, not on `messages` — that
+        keeps the synthetic tool call off LangGraph's messages-stream
+        sweep so it never leaks to CAS."""
         model, _non_streaming, _bound = _make_mock_model()
         node = create_conversational_output_node(model, _OutputSchema)
 
         state = _make_state([SystemMessage(content="sys"), HumanMessage(content="hi")])
         result = await node(state)
 
-        assert len(result["messages"]) == 1
-        ai = result["messages"][0]
-        assert isinstance(ai, AIMessage)
-        assert ai.tool_calls[0]["name"] == SET_CONVERSATIONAL_OUTPUT_TOOL.name
-        assert ai.tool_calls[0]["args"]["handoff_target"] == "billing"
+        assert "messages" not in result
+        assert result["inner_state"] == {
+            "conversational_output": {
+                "handoff_target": "billing",
+                "ready_for_handoff": True,
+            }
+        }
 
     @pytest.mark.asyncio
     async def test_appends_human_instruction_for_llm_call(self):
@@ -101,8 +107,8 @@ class TestCreateConversationalOutputNode:
         assert isinstance(invoked_messages[-1], HumanMessage)
         assert "set_conversational_output" in invoked_messages[-1].content
 
-        # The instruction was NOT persisted into the returned messages.
-        assert len(result["messages"]) == 1
+        # Nothing is written to the messages channel — args flow via inner_state.
+        assert "messages" not in result
 
     @pytest.mark.asyncio
     async def test_binds_only_set_conversational_output_tool(self):
@@ -141,3 +147,32 @@ class TestCreateConversationalOutputNode:
         update_arg = model.model_copy.call_args.kwargs.get("update")
         assert update_arg is not None
         assert update_arg.get("disable_streaming") is True
+
+    @pytest.mark.asyncio
+    async def test_raises_when_llm_omits_set_conversational_output_call(self):
+        """When the internal LLM returns an AIMessage without the expected
+        set_conversational_output tool call, the node raises a structured
+        AgentRuntimeError rather than propagating an empty inner_state
+        payload downstream."""
+        from uipath_langchain.agent.exceptions import (
+            AgentRuntimeError,
+            AgentRuntimeErrorCode,
+        )
+
+        response = AIMessage(content="no tool call here", tool_calls=[])
+        bound = MagicMock()
+        bound.ainvoke = AsyncMock(return_value=response)
+        non_streaming = MagicMock()
+        non_streaming.bind_tools = MagicMock(return_value=bound)
+        model = MagicMock()
+        model.model_copy = MagicMock(return_value=non_streaming)
+
+        node = create_conversational_output_node(model, _OutputSchema)
+        state = _make_state([SystemMessage(content="sys"), HumanMessage(content="hi")])
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await node(state)
+
+        assert exc_info.value.error_info.code == AgentRuntimeError.full_code(
+            AgentRuntimeErrorCode.LLM_INVALID_RESPONSE
+        )

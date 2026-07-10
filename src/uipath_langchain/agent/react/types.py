@@ -28,6 +28,7 @@ class InnerAgentGraphState(BaseModel):
     initial_message_count: int | None = None
     tools_storage: Annotated[dict[Hashable, Any], merge_dicts] = {}
     memory_injection: str = ""
+    conversational_output: dict[str, Any] | None = None
 
 
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
