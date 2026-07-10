@@ -77,16 +77,16 @@ def _handle_end_conversational(
     # Populated by GENERATE_CONVERSATIONAL_OUTPUT when the output schema has custom
     # fields; None otherwise. Missing required fields surface via schema validation below.
     custom_output_fields = state.inner_state.conversational_output or {}
-    new_conversation_messages = state.messages[initial_count:]
+    new_messages = state.messages[initial_count:]
 
     converted_messages: list[UiPathConversationMessageData] = []
 
     # For the agent-output messages, don't include tool-results. Just include agent's LLM outputs and tool-calls + inputs.
     # This is primarily since evaluations don't check for tool-results; this output represents the agent's actual choices rather than tool-results.
-    if new_conversation_messages:
+    if new_messages:
         converted_messages = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
-                messages=new_conversation_messages, include_tool_results=False
+                messages=new_messages, include_tool_results=False
             )
         )
 
