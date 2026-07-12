@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
+import httpx
 import pytest
 from uipath.agent.models.agent import (
     AgentIxpExtractionResourceConfig,
@@ -10,11 +11,30 @@ from uipath.agent.models.agent import (
 )
 from uipath.platform.attachments import Attachment
 from uipath.platform.documents import ExtractionResponseIXP
+from uipath.platform.errors import EnrichedException
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError
 from uipath_langchain.agent.tools.extraction_tool import (
     ExtractionToolInputSchema,
     create_ixp_extraction_tool,
 )
+
+
+def _make_attachment_error(status_code: int, content: bytes) -> EnrichedException:
+    req = httpx.Request(
+        "GET", "https://cloud.uipath.com/orchestrator_/odata/Attachments(x)"
+    )
+    resp = httpx.Response(
+        status_code,
+        request=req,
+        content=content,
+        headers={"content-type": "application/json"},
+    )
+    err = httpx.HTTPStatusError(str(status_code), request=req, response=resp)
+    enriched = EnrichedException(err)
+    enriched.__cause__ = err
+    return enriched
 
 
 class TestExtractionToolMetadata:
@@ -243,6 +263,67 @@ class TestExtractionToolFunctionality:
             )
 
         assert "Download failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    @patch("uipath.platform.UiPath")
+    async def test_extraction_tool_permission_denied_raises_deployment(
+        self, mock_uipath_class, extraction_resource
+    ):
+        """A 403/1108 from Orchestrator surfaces as a DEPLOYMENT error, not UNKNOWN."""
+        enriched = _make_attachment_error(
+            403,
+            (
+                b'{"message":"You don\'t have permissions to access this attachment.",'
+                b'"errorCode":1108}'
+            ),
+        )
+
+        mock_client = MagicMock()
+        mock_uipath_class.return_value = mock_client
+        mock_client.attachments.download_async = AsyncMock(side_effect=enriched)
+
+        tool = create_ixp_extraction_tool(extraction_resource)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.ainvoke(
+                {
+                    "id": "fa93f4ca-bd3f-473a-93e5-e6e5b5a8f27f",
+                    "full_name": "file.pdf",
+                    "mime_type": "application/pdf",
+                }
+            )
+
+        assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
+        assert "permissions" in exc_info.value.error_info.detail
+
+    @pytest.mark.asyncio
+    @patch("uipath.platform.UiPath")
+    async def test_extraction_tool_missing_attachment_raises_system(
+        self, mock_uipath_class, extraction_resource
+    ):
+        """A missing attachment uses the same structured mapping as attachment URI resolution."""
+        mock_client = MagicMock()
+        mock_uipath_class.return_value = mock_client
+        mock_client.attachments.download_async = AsyncMock(
+            side_effect=_make_attachment_error(
+                404,
+                b'{"message":"Attachment not found"}',
+            )
+        )
+
+        tool = create_ixp_extraction_tool(extraction_resource)
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await tool.ainvoke(
+                {
+                    "id": "fa93f4ca-bd3f-473a-93e5-e6e5b5a8f27f",
+                    "full_name": "file.pdf",
+                    "mime_type": "application/pdf",
+                }
+            )
+
+        assert exc_info.value.error_info.category == UiPathErrorCategory.SYSTEM
+        assert "file.pdf" in exc_info.value.error_info.detail
 
     @pytest.mark.asyncio
     @patch("uipath.platform.UiPath")

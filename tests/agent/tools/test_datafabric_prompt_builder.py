@@ -152,6 +152,14 @@ def test_v1_prompt_documents_relationship_fields():
     assert "RELATIONSHIP FIELDS" in prompt
 
 
+def test_entity_prompt_never_contains_ontology_sections():
+    # The entity tool's prompt is ontology-free; ontology content lives only in
+    # datafabric_ontology_prompt_builder.
+    prompt = build([_fake_entity(_fake_field())])
+    assert "## Available Ontology" not in prompt
+    assert "## Ontology→Table Mapping (R2RML)" not in prompt
+
+
 def _system_field(name, type_name="datetimeoffset", **overrides):
     """A fake auto-added system/audit field (Id, CreateTime, ...)."""
     return _fake_field(

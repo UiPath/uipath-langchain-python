@@ -15,6 +15,9 @@ from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 from ...runtime._citations import cas_deep_rag_citation_wrapper
 from ..guardrails.actions import GuardrailAction
 from ..tools.structured_tool_with_output_type import StructuredToolWithOutputType
+from .conversational_output_node import (
+    create_conversational_output_node,
+)
 from .guardrails.guardrails_subgraph import (
     create_agent_init_guardrails_subgraph,
     create_agent_terminate_guardrails_subgraph,
@@ -42,7 +45,10 @@ from .types import (
     AgentGraphState,
     MemoryConfig,
 )
-from .utils import create_state_with_input
+from .utils import (
+    create_state_with_input,
+    has_custom_conversational_output_fields,
+)
 
 InputT = TypeVar("InputT", bound=BaseModel)
 OutputT = TypeVar("OutputT", bound=BaseModel)
@@ -124,6 +130,11 @@ def create_agent(
             tool_nodes_with_guardrails
         )
 
+    with_conversational_output_node = (
+        config.is_conversational
+        and has_custom_conversational_output_fields(output_schema)
+    )
+
     terminate_node = create_terminate_node(output_schema, config.is_conversational)
 
     CompleteAgentGraphState = create_state_with_input(
@@ -149,6 +160,16 @@ def create_agent(
         input_schema=input_schema,
     )
     builder.add_node(AgentGraphNode.TERMINATE, terminate_with_guardrails_subgraph)
+
+    if with_conversational_output_node and output_schema is not None:
+        builder.add_node(
+            AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT,
+            create_conversational_output_node(model, output_schema),
+        )
+        builder.add_edge(
+            AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT,
+            AgentGraphNode.TERMINATE,
+        )
 
     if memory:
         memory_recall = create_memory_recall_node(memory, input_schema=input_schema)
@@ -182,7 +203,12 @@ def create_agent(
             *tool_node_names,
             AgentGraphNode.TERMINATE,
         ]
-        route_agent = create_route_agent_conversational(valid_targets=target_node_names)
+        if with_conversational_output_node:
+            target_node_names.append(AgentGraphNode.GENERATE_CONVERSATIONAL_OUTPUT)
+        route_agent = create_route_agent_conversational(
+            valid_targets=target_node_names,
+            with_generate_output_node=with_conversational_output_node,
+        )
     else:
         target_node_names = [
             AgentGraphNode.AGENT,

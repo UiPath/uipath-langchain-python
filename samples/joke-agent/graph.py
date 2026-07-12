@@ -20,6 +20,7 @@ from uipath_langchain.guardrails import (
     UiPathDeterministicGuardrailMiddleware,
     UiPathHarmfulContentMiddleware,
     UiPathIntellectualPropertyMiddleware,
+    UiPathLLMAsJudgeMiddleware,
     UiPathPIIDetectionMiddleware,
     UiPathUserPromptAttacksMiddleware,
 )
@@ -193,6 +194,30 @@ agent = create_agent(
             ),
             stage=GuardrailExecutionStage.POST,
             name="Joke Content Always Filter",
+        ),
+        # LLM-as-judge: family-appropriateness filter. PRE_AND_POST so it judges
+        # both the requested topic (input) and the produced joke (output). Block
+        # action aborts the run on a violation — the input topic is rejected at
+        # AGENT PRE before the LLM is ever called.
+        *UiPathLLMAsJudgeMiddleware(
+            name="Family Friendly Topic Judge",
+            scopes=[GuardrailScope.AGENT],
+            stage=GuardrailExecutionStage.PRE_AND_POST,
+            action=BlockAction(),
+            guardrail_text=(
+                "The content must be appropriate for children and families. Flag it "
+                "if the requested topic or the joke involves drugs, alcohol, sexual "
+                "content, violence, weapons, hate, or anything unsuitable for kids."
+            ),
+            model="gpt-4o-2024-08-06",
+            positive_examples=[
+                "Generate a family-friendly joke based on the topic: banana"
+            ],
+            negative_examples=[
+                "Generate a family-friendly joke based on the topic: buying cocaine"
+            ],
+            threshold=2,
+            enabled_for_evals=False,
         ),
     ],
 )

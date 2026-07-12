@@ -12,7 +12,9 @@ from uipath.agent.models.agent import AgentIxpExtractionResourceConfig
 from uipath.eval.mocks import mockable
 from uipath.platform.common import DocumentExtraction
 from uipath.platform.documents import ExtractionResponseIXP
+from uipath.platform.errors import EnrichedException
 
+from uipath_langchain.agent.react.job_attachments import raise_for_job_attachment_error
 from uipath_langchain.agent.react.types import AgentGraphState
 from uipath_langchain.agent.tools.tool_node import (
     ToolWrapperMixin,
@@ -80,9 +82,18 @@ def create_ixp_extraction_tool(
         # TODO: current workaround. DocumentExtraction model should support attachment_id and use the
         # start_ixp_extraction_from_attachment sdk method once support is added
 
-        attachment_local_file_path = await uipath.attachments.download_async(
-            key=attachment.id, destination_path=attachment.full_name
-        )
+        try:
+            attachment_local_file_path = await uipath.attachments.download_async(
+                key=attachment.id, destination_path=attachment.full_name
+            )
+        except EnrichedException as e:
+            raise_for_job_attachment_error(
+                e,
+                title="Failed to download job attachment",
+                attachment_name=attachment.full_name,
+                attachment_id=attachment.id,
+            )
+            raise
         document_extraction_response = interrupt(
             DocumentExtraction(
                 project_name=project_name,

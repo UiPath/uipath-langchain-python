@@ -27,7 +27,6 @@ from uipath_langchain.agent.tools.internal_tools.analyze_files_tool import (
     ANALYZE_FILES_SYSTEM_MESSAGE,
     LLM_CALL_ATTACHMENTS_METADATA_KEY,
     _config_with_llm_call_attachments,
-    _config_without_streaming,
     _is_pii_scope_for_files,
     _resolve_job_attachment_arguments,
     create_analyze_file_tool,
@@ -45,6 +44,25 @@ def _make_enriched_404() -> EnrichedException:
         headers={"content-type": "application/json"},
     )
     err = httpx.HTTPStatusError("404", request=req, response=resp)
+    enriched = EnrichedException(err)
+    enriched.__cause__ = err
+    return enriched
+
+
+def _make_enriched_403_1108() -> EnrichedException:
+    req = httpx.Request(
+        "GET", "https://cloud.uipath.com/orchestrator_/odata/Attachments(x)"
+    )
+    resp = httpx.Response(
+        403,
+        request=req,
+        content=(
+            b'{"message":"You don\'t have permissions to access this attachment.",'
+            b'"errorCode":1108}'
+        ),
+        headers={"content-type": "application/json"},
+    )
+    err = httpx.HTTPStatusError("403", request=req, response=resp)
     enriched = EnrichedException(err)
     enriched.__cause__ = err
     return enriched
@@ -592,6 +610,25 @@ class TestResolveJobAttachmentArguments:
         detail = exc_info.value.error_info.detail
         assert "document.pdf" in detail
 
+    async def test_resolve_attachment_permission_denied_raises(
+        self, mock_uipath_client
+    ):
+        """A 403/1108 from Orchestrator surfaces as a DEPLOYMENT error, not UNKNOWN."""
+        mock_attachment = MockAttachment(
+            ID="11111111-1111-1111-1111-111111111111",
+            FullName="document.pdf",
+            MimeType="application/pdf",
+        )
+        mock_uipath_client.attachments.get_blob_file_access_uri_async = AsyncMock(
+            side_effect=_make_enriched_403_1108()
+        )
+
+        with pytest.raises(AgentRuntimeError) as exc_info:
+            await _resolve_job_attachment_arguments([mock_attachment])
+        assert exc_info.value.error_info.category == UiPathErrorCategory.DEPLOYMENT
+        assert "permissions" in exc_info.value.error_info.detail
+        assert "document.pdf" in exc_info.value.error_info.detail
+
     async def test_resolve_attachments_mixed_valid_and_invalid(
         self, mock_uipath_client
     ):
@@ -1015,31 +1052,6 @@ class TestIsPiiScopeForFiles:
         assert (
             _is_pii_scope_for_files({"data": {"pii-detection-scope": "both"}}) is False
         )
-
-
-class TestConfigWithoutStreaming:
-    """Tests for _config_without_streaming — ensures TAG_NOSTREAM is injected."""
-
-    def test_adds_nostream_tag_to_empty_config(self) -> None:
-        result = _config_without_streaming(None)
-        assert TAG_NOSTREAM in result["tags"]
-
-    def test_adds_nostream_tag_to_existing_config(self) -> None:
-        config: RunnableConfig = {"tags": ["existing_tag"]}
-        result = _config_without_streaming(config)
-        assert "existing_tag" in result["tags"]
-        assert TAG_NOSTREAM in result["tags"]
-
-    def test_preserves_other_config_keys(self) -> None:
-        config: RunnableConfig = {"metadata": {"key": "value"}, "tags": ["t"]}
-        result = _config_without_streaming(config)
-        assert result["metadata"] == {"key": "value"}
-        assert TAG_NOSTREAM in result["tags"]
-
-    def test_handles_config_without_tags(self) -> None:
-        config: RunnableConfig = {"metadata": {"key": "value"}}
-        result = _config_without_streaming(config)
-        assert result["tags"] == [TAG_NOSTREAM]
 
 
 class TestConfigWithLlmCallAttachments:

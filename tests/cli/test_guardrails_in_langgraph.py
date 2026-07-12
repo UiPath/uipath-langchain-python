@@ -5,15 +5,18 @@ produce identical runtime behavior for each guardrail scenario. Every test runs
 twice — once with the middleware agent and once with the decorator agent — so any
 behavioral divergence between the two flavors is immediately visible.
 
-Scenarios covered (× 2 flavors = 16 test runs total):
-  1. test_happy_path                     — all guardrails configured, none trigger
-  2. test_agent_pii_block                — AGENT-scope PII → BlockAction
-  3. test_llm_user_prompt_attacks_block  — LLM-scope user prompt attacks → BlockAction
-  4. test_tool_pii_block                 — TOOL-scope PII → BlockAction
-  5. test_tool_deterministic_word_filter — deterministic PRE filter replaces "donkey"
+Scenarios covered (× 2 flavors):
+  1. test_happy_path                      — all guardrails configured, none trigger
+  2. test_agent_pii_block                 — AGENT-scope PII → BlockAction
+  3. test_llm_user_prompt_attacks_block   — LLM-scope user prompt attacks → BlockAction
+  4. test_tool_pii_block                  — TOOL-scope PII → BlockAction
+  5. test_tool_deterministic_word_filter  — deterministic PRE filter replaces "donkey"
   6. test_tool_deterministic_length_block — deterministic PRE block for joke > 1000 chars
-  7. test_harmful_content_block          — AGENT-scope harmful content → BlockAction
-  8. test_intellectual_property_log      — LLM-scope IP → LogAction (no block)
+  7. test_harmful_content_block           — AGENT-scope harmful content → BlockAction
+  8. test_tool_pii_post_block             — TOOL-scope PII on tool output (POST) → BlockAction
+  9. test_tool_harmful_content_post_block — TOOL-scope harmful content (POST) → BlockAction
+ 10. test_intellectual_property_log       — LLM-scope IP → LogAction (no block)
+ 11. test_llm_as_judge_block             — AGENT-scope LLM-as-judge (POST) → BlockAction
 
 Mock files:
   tests/cli/mocks/parity_agent_middleware.py
@@ -560,6 +563,53 @@ class TestGuardrailsParity:
             assert output["joke"], f"[{flavor}] joke is empty"
             await runtime.dispose()
             await factory.dispose()
+
+    @pytest.mark.asyncio
+    async def test_llm_as_judge_block(self, agent_setup):
+        """LLM-as-judge (AGENT scope, POST) flags the model output → BlockAction.
+
+        The judge runs at POST, so it evaluates what the LLM returns. The mock LLM
+        returns a flagged joke for a benign input topic, so the trigger comes from
+        the output — not the input. Both flavors build a validator_type
+        "llm_as_judge" guardrail and block identically.
+        """
+        flavor, script, langgraph_json = agent_setup
+
+        mock_llm = _make_tool_calling_llm(
+            joke="Why did the chicken cross the road?",
+            final_content="You should gamble your savings away at the casino!",
+            call_id="call_judge_1",
+        )
+
+        seen_guardrails = []
+
+        def mock_evaluate(text, guardrail):
+            if guardrail.name == "Agent LLM Judge":
+                seen_guardrails.append(guardrail)
+                if "gamble" in str(text).lower():
+                    return _GUARDRAIL_FAILED
+            return _GUARDRAIL_PASSED
+
+        async with _patched_run(mock_llm, mock_evaluate) as temp_dir:
+            with pytest.raises(Exception) as exc_info:
+                await _run_agent(
+                    temp_dir, script, langgraph_json, flavor, {"topic": "money"}
+                )
+            cause = exc_info.value.__cause__
+            assert isinstance(cause, AgentRuntimeError)
+            assert (
+                cause.error_info.code == "AGENT_RUNTIME.TERMINATION_GUARDRAIL_VIOLATION"
+            )
+            assert (
+                cause.error_info.title
+                == "Guardrail [Agent LLM Judge] blocked execution"
+            )
+            assert cause.error_info.detail == "Guardrail triggered"
+            assert cause.error_info.category == UiPathErrorCategory.USER
+
+        # Both flavors must build an llm_as_judge validator guardrail (parity point)
+        assert seen_guardrails, f"[{flavor}] judge guardrail was never evaluated"
+        assert all(g.validator_type == "llm_as_judge" for g in seen_guardrails)
 
 
 # ---------------------------------------------------------------------------

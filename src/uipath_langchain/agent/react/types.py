@@ -4,7 +4,11 @@ from typing import Annotated, Any, Hashable, Literal, Optional
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field, model_validator
-from uipath.agent.react import END_EXECUTION_TOOL, RAISE_ERROR_TOOL
+from uipath.agent.react import (
+    END_EXECUTION_TOOL,
+    RAISE_ERROR_TOOL,
+    SET_CONVERSATIONAL_OUTPUT_TOOL,
+)
 from uipath.platform.attachments import Attachment
 
 from uipath_langchain.agent.react.reducers import (
@@ -12,7 +16,11 @@ from uipath_langchain.agent.react.reducers import (
     merge_objects,
 )
 
-FLOW_CONTROL_TOOLS = [END_EXECUTION_TOOL.name, RAISE_ERROR_TOOL.name]
+FLOW_CONTROL_TOOLS = [
+    END_EXECUTION_TOOL.name,
+    RAISE_ERROR_TOOL.name,
+    SET_CONVERSATIONAL_OUTPUT_TOOL.name,
+]
 
 
 class InnerAgentGraphState(BaseModel):
@@ -20,6 +28,7 @@ class InnerAgentGraphState(BaseModel):
     initial_message_count: int | None = None
     tools_storage: Annotated[dict[Hashable, Any], merge_dicts] = {}
     memory_injection: str = ""
+    conversational_output: dict[str, Any] | None = None
 
 
 class InnerAgentGuardrailsGraphState(InnerAgentGraphState):
@@ -56,6 +65,7 @@ class AgentGraphNode(StrEnum):
     AGENT = "agent"
     LLM = "llm"
     TOOLS = "tools"
+    GENERATE_CONVERSATIONAL_OUTPUT = "generate-conversational-output"
     TERMINATE = "terminate"
     GUARDED_TERMINATE = "guarded-terminate"
     MEMORY_RECALL = "memory_recall"

@@ -27,6 +27,7 @@ from uipath_langchain.guardrails import (
     HarmfulContentEntity,
     HarmfulContentValidator,
     IntellectualPropertyValidator,
+    LLMAsJudgeValidator,
     LogAction,
     LoggingSeverityLevel,
     PIIDetectionEntity,
@@ -265,6 +266,33 @@ Remember to always include the 'joke' property in your output to match the requi
 # (optionally editing the input) or rejects. PRE only, so it triggers once per
 # run. This is the decorator-style counterpart of the middleware joke-agent's
 # AGENT-scope PII escalation.
+# LLM-as-judge: family-appropriateness filter (AGENT scope, PRE_AND_POST) so it
+# judges both the requested topic (input) and the produced joke (output). Block
+# action aborts the run on a violation — an unsuitable topic is rejected at PRE
+# before the LLM is ever called. Decorator-style counterpart of the middleware
+# joke-agent's "Family Friendly Topic Judge".
+@guardrail(
+    validator=LLMAsJudgeValidator(
+        guardrail_text=(
+            "The content must be appropriate for children and families. Flag it "
+            "if the requested topic or the joke involves drugs, alcohol, sexual "
+            "content, violence, weapons, hate, or anything unsuitable for kids."
+        ),
+        model="gpt-4o-2024-08-06",
+        # Real few-shot calibration payloads (the judge sees these as example
+        # inputs), not descriptions of them.
+        positive_examples=[
+            "Generate a family-friendly joke based on the topic: banana"
+        ],
+        negative_examples=[
+            "Generate a family-friendly joke based on the topic: buying cocaine"
+        ],
+        threshold=2,
+    ),
+    action=BlockAction(),
+    name="Family Friendly Topic Judge",
+    stage=GuardrailExecutionStage.PRE_AND_POST,
+)
 @guardrail(
     validator=pii_email,
     action=EscalateAction(

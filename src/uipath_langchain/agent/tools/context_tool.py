@@ -158,9 +158,33 @@ def create_context_tool(
 ) -> StructuredTool | BaseTool | None:
     tool_name = sanitize_tool_name(resource.name)
 
+    # A Data Fabric ontology context is a standalone tool (flag-gated): the agent
+    # selects ontologies and the tool derives its entities from the R2RML mapping.
+    # With the flag off it is inert (returns None) and the agent runs without it.
+    if resource.context_type == AgentContextType.DATA_FABRIC_ONTOLOGY:
+        from uipath.core.feature_flags import FeatureFlags
+
+        from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
+        from .datafabric_tool.ontology import DATAFABRIC_ONTOLOGY_FF
+
+        if not FeatureFlags.is_flag_enabled(DATAFABRIC_ONTOLOGY_FF, default=False):
+            return None
+        if llm is None:
+            raise ValueError("Data Fabric ontology tools require an LLM instance")
+
+        from .datafabric_tool.ontology import create_datafabric_ontology_tool
+
+        return create_datafabric_ontology_tool(
+            resource,
+            llm,
+            tool_name=tool_name,
+            agent_config={BASE_SYSTEM_PROMPT: _extract_system_prompt(agent)},
+        )
+
     if resource.context_type == AgentContextType.DATA_FABRIC_ENTITY_SET:
         if llm is None:
             raise ValueError("Data Fabric entity set tools require an LLM instance")
+
         from .datafabric_tool import create_datafabric_query_tool
         from .datafabric_tool.datafabric_tool import BASE_SYSTEM_PROMPT
 

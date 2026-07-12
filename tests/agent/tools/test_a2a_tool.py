@@ -11,7 +11,17 @@ from typing import Any, cast
 
 import pytest
 from a2a.client import Client
-from a2a.types import AgentCard, Message, Part, Role, TextPart
+from a2a.types import (
+    AgentCard,
+    Artifact,
+    Message,
+    Part,
+    Role,
+    Task,
+    TaskState,
+    TaskStatus,
+    TextPart,
+)
 from opentelemetry import trace as otel_trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -316,6 +326,93 @@ async def test_tool_wrapper_persists_conversation(
     stored = command.update["inner_state"]["tools_storage"][tool.name]
     assert stored["context_id"] == "ctx-9"
     assert "pong" in command.update["messages"][0].content
+
+
+def _completed_task(
+    *, task_id: str = "task-1", context_id: str = "ctx-1", text: str = "done"
+) -> Task:
+    return Task(
+        id=task_id,
+        context_id=context_id,
+        status=TaskStatus(state=TaskState.completed),
+        artifacts=[
+            Artifact(
+                artifact_id="artifact-1",
+                parts=[Part(root=TextPart(text=text))],
+            )
+        ],
+    )
+
+
+def _input_required_task(
+    *, task_id: str = "task-1", context_id: str = "ctx-1", text: str = "need more"
+) -> Task:
+    return Task(
+        id=task_id,
+        context_id=context_id,
+        status=TaskStatus(
+            state=TaskState.input_required,
+            message=Message(
+                role=Role.agent,
+                parts=[Part(root=TextPart(text=text))],
+                message_id="status-msg",
+            ),
+        ),
+    )
+
+
+async def test_tool_wrapper_drops_task_id_after_terminal_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A completed (terminal) task is not reused: the next turn starts a new
+    task while keeping the conversation context."""
+    resource = _make_resource(cached_agent_card=_cached_card())
+    tools, clients = create_a2a_tools_and_clients([resource])
+    tool = cast(A2aStructuredToolWithWrapper, tools[0])
+    fake = _FakeA2aClient(
+        [(_completed_task(task_id="task-1", context_id="ctx-1"), None)]
+    )
+
+    async def _get():
+        return fake
+
+    monkeypatch.setattr(clients[0], "get", _get)
+    wrapper: Any = tool.awrapper
+    assert wrapper is not None
+
+    call = {"name": tool.name, "args": {"message": "ping"}, "id": "call-1"}
+    command = await wrapper(tool, call, AgentGraphState())
+
+    stored = command.update["inner_state"]["tools_storage"][tool.name]
+    assert stored["task_id"] is None
+    assert stored["context_id"] == "ctx-1"
+
+
+async def test_tool_wrapper_keeps_task_id_when_not_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-terminal task (input-required) keeps its task_id so the next turn
+    continues the same task."""
+    resource = _make_resource(cached_agent_card=_cached_card())
+    tools, clients = create_a2a_tools_and_clients([resource])
+    tool = cast(A2aStructuredToolWithWrapper, tools[0])
+    fake = _FakeA2aClient(
+        [(_input_required_task(task_id="task-1", context_id="ctx-1"), None)]
+    )
+
+    async def _get():
+        return fake
+
+    monkeypatch.setattr(clients[0], "get", _get)
+    wrapper: Any = tool.awrapper
+    assert wrapper is not None
+
+    call = {"name": tool.name, "args": {"message": "ping"}, "id": "call-1"}
+    command = await wrapper(tool, call, AgentGraphState())
+
+    stored = command.update["inner_state"]["tools_storage"][tool.name]
+    assert stored["task_id"] == "task-1"
+    assert stored["context_id"] == "ctx-1"
 
 
 def test_a2a_sdk_telemetry_suppressed_by_default() -> None:
