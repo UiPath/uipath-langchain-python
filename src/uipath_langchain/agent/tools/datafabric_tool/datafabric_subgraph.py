@@ -37,6 +37,10 @@ from .models import DataFabricExecuteSqlInput
 
 logger = logging.getLogger(__name__)
 
+# Sent as the x-uipath-source header on query/execute so FQS types relationship
+# (FK) fields as their scalar id, letting `rel = Other.Id` joins validate.
+LOW_CODE_AGENT = "LOW_CODE_AGENT"
+
 
 class DataFabricSubgraphState(BaseModel):
     """State for the inner Data Fabric ReAct sub-graph."""
@@ -57,6 +61,7 @@ class QueryExecutor:
         try:
             records = await self._entities.query_entity_records_async(
                 sql_query=sql_query,
+                source=LOW_CODE_AGENT,
             )
             return {
                 "records": records,
