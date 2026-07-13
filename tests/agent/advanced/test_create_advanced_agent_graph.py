@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from uipath_langchain.agent.advanced.agent import create_advanced_agent_graph
@@ -84,6 +84,41 @@ async def test_transform_input_without_schema_builds_single_user_message() -> No
     assert isinstance(message, HumanMessage)
     assert message.content == "hi there"
     assert message.id == "user-input"
+
+
+@pytest.mark.asyncio
+async def test_transform_input_includes_dynamic_system_message() -> None:
+    """Runtime input can render a system message before the user message."""
+    graph = _build(
+        input_schema=_Input,
+        build_system_message=lambda args: f"system:{args['question']}",
+        build_user_message=lambda args: f"user:{args['question']}",
+    )
+    state_cls = create_state_with_input(_Input)
+    state = state_cls(question="q")
+
+    out = await graph.nodes["transform_input"].runnable.ainvoke(state)
+
+    system_message, user_message = out["messages"]
+    assert isinstance(system_message, SystemMessage)
+    assert system_message.content == "system:q"
+    assert system_message.id == "system-input"
+    assert isinstance(user_message, HumanMessage)
+    assert user_message.content == "user:q"
+    assert user_message.id == "user-input"
+
+
+@pytest.mark.asyncio
+async def test_transform_input_omits_empty_dynamic_system_message() -> None:
+    """An empty rendered system prompt does not create a blank message."""
+    graph = _build(build_system_message=lambda _args: "")
+
+    out = await graph.nodes["transform_input"].runnable.ainvoke(
+        AdvancedAgentGraphState()
+    )
+
+    assert len(out["messages"]) == 1
+    assert isinstance(out["messages"][0], HumanMessage)
 
 
 @pytest.mark.asyncio

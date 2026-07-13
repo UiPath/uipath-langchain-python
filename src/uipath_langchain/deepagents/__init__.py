@@ -2,6 +2,7 @@
 
 from .agent import (
     UiPathDeepAgent,
+    UiPathDeepAgentPrompt,
     create_uipath_deep_agent,
     create_uipath_deep_agent_graph,
 )
@@ -16,6 +17,7 @@ from .metadata import (
 __all__ = [
     "UiPathDeepAgent",
     "UiPathDeepAgentHydrationPolicy",
+    "UiPathDeepAgentPrompt",
     "UiPathDeepAgentRuntimeSpec",
     "create_uipath_deep_agent",
     "create_uipath_deep_agent_graph",

@@ -13,6 +13,7 @@ bucket backend.
 ## What It Shows
 
 - Typed coded-agent input and output with Pydantic models.
+- System and user prompts rendered from typed input.
 - A standard LangChain tool used by the main DeepAgent.
 - A DeepAgents subagent used for risk review.
 - Runtime-provided workspace persistence through the UiPath contract.

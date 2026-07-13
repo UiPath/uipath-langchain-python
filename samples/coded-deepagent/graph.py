@@ -55,11 +55,15 @@ RISK_REVIEWER = {
     "model": MODEL,
 }
 
-SYSTEM_PROMPT = """You are a product launch planning agent.
+
+def build_system_prompt(args: dict) -> str:
+    return f"""You are a product launch planning agent for {args["product_name"]}.
 
 Use the planning tools provided by DeepAgents. Use score_launch_readiness to get
 a deterministic readiness signal. Delegate a plan review to risk_reviewer before
 finalizing the answer.
+
+Tailor all planning to this audience: {args["audience"]}.
 
 The UiPath runtime provides your DeepAgents filesystem through the tagged graph
 contract. Write these workspace files before producing the final answer:
@@ -70,7 +74,7 @@ Return structured output matching the schema. Include the workspace file paths
 you wrote in workspace_files."""
 
 
-def build_user_message(args: dict) -> str:
+def build_user_prompt(args: dict) -> str:
     constraints = args.get("constraints") or []
     constraint_lines = "\n".join(f"- {item}" for item in constraints) or "- None"
     return f"""Create a launch brief.
@@ -87,8 +91,8 @@ graph = create_uipath_deep_agent_graph(
     model=MODEL,
     input_schema=BriefInput,
     output_schema=BriefOutput,
-    system_prompt=SYSTEM_PROMPT,
+    system_prompt=build_system_prompt,
+    user_prompt=build_user_prompt,
     tools=[score_launch_readiness],
     subagents=[RISK_REVIEWER],
-    build_user_message=build_user_message,
 )

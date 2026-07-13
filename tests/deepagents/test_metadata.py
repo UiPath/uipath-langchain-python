@@ -91,3 +91,46 @@ def test_subagents_are_forwarded_to_advanced_agent_graph() -> None:
         )
 
     assert mock_create.call_args.kwargs["subagents"] == [subagent]
+
+
+def test_dynamic_system_prompt_is_forwarded_as_runtime_renderer() -> None:
+    def build_system_prompt(args: dict[str, str]) -> str:
+        return f"System for {args['topic']}"
+
+    with patch(
+        "uipath_langchain.deepagents.agent.create_advanced_agent_graph",
+        return_value=_graph(),
+    ) as mock_create:
+        create_uipath_deep_agent_graph(
+            model=object(),  # type: ignore[arg-type]
+            output_schema=Output,
+            system_prompt=build_system_prompt,
+        )
+
+    assert mock_create.call_args.kwargs["system_prompt"] == ""
+    assert mock_create.call_args.kwargs["build_system_message"] is build_system_prompt
+
+
+def test_static_user_prompt_is_forwarded_as_user_renderer() -> None:
+    with patch(
+        "uipath_langchain.deepagents.agent.create_advanced_agent_graph",
+        return_value=_graph(),
+    ) as mock_create:
+        create_uipath_deep_agent_graph(
+            model=object(),  # type: ignore[arg-type]
+            output_schema=Output,
+            user_prompt="Create the brief.",
+        )
+
+    build_user_message = mock_create.call_args.kwargs["build_user_message"]
+    assert build_user_message({}) == "Create the brief."
+
+
+def test_user_prompt_and_build_user_message_are_mutually_exclusive() -> None:
+    with pytest.raises(ValueError, match="either user_prompt or build_user_message"):
+        create_uipath_deep_agent_graph(
+            model=object(),  # type: ignore[arg-type]
+            output_schema=Output,
+            user_prompt="Create the brief.",
+            build_user_message=lambda _args: "Create the brief.",
+        )

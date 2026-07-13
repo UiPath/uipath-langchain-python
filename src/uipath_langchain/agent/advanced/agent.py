@@ -9,7 +9,7 @@ from deepagents.backends import BackendProtocol
 from deepagents.backends.protocol import BackendFactory
 from langchain.agents.structured_output import ResponseFormat
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
@@ -63,6 +63,7 @@ def create_advanced_agent_graph(
     input_schema: type[BaseModel] | None,
     output_schema: type[BaseModel],
     build_user_message: Callable[[dict[str, Any]], str],
+    build_system_message: Callable[[dict[str, Any]], str] | None = None,
     subagents: Sequence[SubAgent | CompiledSubAgent] = (),
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
@@ -112,8 +113,14 @@ def create_advanced_agent_graph(
                 state=state,
                 config=config,
             )
+        messages = []
+        if build_system_message is not None:
+            system_text = build_system_message(input_args)
+            if system_text:
+                messages.append(SystemMessage(content=system_text, id="system-input"))
         user_text = build_user_message(input_args)
-        return {"messages": [HumanMessage(content=user_text, id="user-input")]}
+        messages.append(HumanMessage(content=user_text, id="user-input"))
+        return {"messages": messages}
 
     def transform_output(state: BaseModel) -> dict[str, Any]:
         structured = getattr(state, "structured_response", {})
