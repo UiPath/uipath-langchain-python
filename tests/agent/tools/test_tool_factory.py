@@ -41,6 +41,9 @@ from uipath.platform.connections import Connection
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
 )
+from uipath_langchain.agent.tools.structured_tool_with_output_type import (
+    StructuredToolWithOutputType,
+)
 from uipath_langchain.agent.tools.tool_factory import (
     _build_tool_for_resource,
     create_tools_from_resources,
@@ -492,6 +495,7 @@ class TestCreateToolsFromResources:
         # Must not raise (this previously threw AGENT_STARTUP.INVALID_TOOL_CONFIG).
         tool = await _build_tool_for_resource(resource, AsyncMock(spec=BaseChatModel))
 
-        assert_tool_is_base_uipath(tool)
-        # Output model degraded to an empty schema rather than crashing startup.
+        # Tool still built (not None / a list), with its output model degraded to
+        # an empty schema rather than crashing startup.
+        assert isinstance(tool, StructuredToolWithOutputType)
         assert tool.output_type.model_json_schema().get("properties", {}) == {}
