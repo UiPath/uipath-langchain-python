@@ -23,7 +23,10 @@ from uipath_langchain.agent.exceptions import (
     AgentStartupErrorCode,
     raise_for_enriched,
 )
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    create_model,
+    create_output_model,
+)
 
 from .schema_editing import strip_enum
 from .structured_tool_with_argument_properties import (
@@ -301,7 +304,9 @@ def create_integration_tool(
     input_model = create_model(cleaned_input_schema)
     # note: IS tools output schemas were recently added and are most likely not present in all resources
     output_model: Any = (
-        create_model(remove_asterisk_from_properties(resource.output_schema))
+        create_output_model(
+            remove_asterisk_from_properties(resource.output_schema), resource.name
+        )
         if resource.output_schema
         else create_model({"type": "object", "properties": {}})
     )

@@ -1,4 +1,5 @@
 import inspect
+import logging
 import sys
 from types import ModuleType
 from typing import Any, Type, cast
@@ -7,6 +8,12 @@ from jsonschema_pydantic_converter import transform_with_modules
 from pydantic import BaseModel, PydanticUndefinedAnnotation
 
 from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErrorCode
+
+logger = logging.getLogger(__name__)
+
+# Empty, always-parseable output model used as a non-fatal fallback
+# (see create_output_model).
+_EMPTY_OUTPUT_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
 
 # Shared pseudo-module for all dynamically created types
 # This allows get_type_hints() to resolve forward references
@@ -60,3 +67,27 @@ def create_model(
     model.__module__ = _DYNAMIC_MODULE_NAME
 
     return model
+
+
+def create_output_model(
+    schema: dict[str, Any],
+    tool_name: str,
+) -> Type[BaseModel]:
+    """Convert a tool's OUTPUT JSON schema to a Pydantic model, non-fatally.
+
+    Unlike input schemas, a tool's output schema is used only at design time
+    (guardrail definitions and eval simulations) and is never used to validate
+    output during execution.
+
+    Returns:
+        The converted model, or an empty model if the schema is unparseable.
+    """
+    try:
+        return create_model(schema)
+    except AgentStartupError as e:
+        logger.warning(
+            "Tool %r has an unparseable output schema; ignoring it (non-blocking): %s",
+            tool_name,
+            e.error_info.detail,
+        )
+        return create_model(_EMPTY_OUTPUT_SCHEMA)

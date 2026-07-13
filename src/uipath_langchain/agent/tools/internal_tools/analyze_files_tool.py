@@ -39,7 +39,10 @@ from uipath_langchain.agent.multimodal import (
     build_file_content_blocks_for,
 )
 from uipath_langchain.agent.react.job_attachments import raise_for_job_attachment_error
-from uipath_langchain.agent.react.jsonschema_pydantic_converter import create_model
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    create_model,
+    create_output_model,
+)
 from uipath_langchain.agent.tools.internal_tools.pii_masker import (
     PiiMasker,
     masked_name_for,
@@ -247,7 +250,7 @@ def create_analyze_file_tool(
 
     tool_name = sanitize_tool_name(resource.name)
     input_model = create_model(resource.input_schema)
-    output_model = create_model(resource.output_schema)
+    output_model = create_output_model(resource.output_schema, resource.name)
 
     # Explicitly disable streaming - for conversational, no streaming is needed as this
     # internal tool-call does not produce streamed conversation events.
