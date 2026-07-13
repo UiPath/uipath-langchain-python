@@ -480,14 +480,12 @@ class TestCreateToolsFromResources:
     async def test_malformed_output_schema_is_non_blocking(
         self, resource_fixture, mock_uipath_sdk, request
     ):
-        """Each of the 5 tool factories that convert an output schema must tolerate
-        a malformed one instead of failing agent startup.
+        """A malformed output schema must not fail agent startup.
 
-        Output schemas are design-time only (guardrails + eval simulation) and are
-        never used during execution, so a dangling ``$ref`` (e.g. a .NET
-        ``Nullableofdecimal`` with no ``$defs``) must not raise
-        ``AGENT_STARTUP.INVALID_TOOL_CONFIG``. The tool is still built, with its
-        output model degraded to an empty schema.
+        An output schema drives only best-effort features (not the core tool call),
+        so a dangling ``$ref`` (e.g. a .NET ``Nullableofdecimal`` with no ``$defs``)
+        must not raise ``AGENT_STARTUP.INVALID_TOOL_CONFIG``; the tool is still
+        built, with its output model degraded to an empty schema.
         """
         resource = request.getfixturevalue(resource_fixture)
         _set_malformed_output_schema(resource)

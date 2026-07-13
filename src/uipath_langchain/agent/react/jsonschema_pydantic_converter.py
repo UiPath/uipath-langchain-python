@@ -75,9 +75,9 @@ def create_output_model(
 ) -> Type[BaseModel]:
     """Convert a tool's OUTPUT JSON schema to a Pydantic model, non-fatally.
 
-    Unlike input schemas, a tool's output schema is used only at design time
-    (guardrail definitions and eval simulations) and is never used to validate
-    output during execution.
+    An output schema drives only best-effort features (job-attachment discovery,
+    output guardrails, eval simulations), not the core tool call, so an
+    unparseable one falls back to an empty model instead of failing startup.
 
     Returns:
         The converted model, or an empty model if the schema is unparseable.
