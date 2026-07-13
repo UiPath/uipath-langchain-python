@@ -38,6 +38,9 @@ from uipath.agent.models.agent import (
 )
 from uipath.platform.connections import Connection
 
+from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
+    _UNRESOLVED_TYPE_TITLE,
+)
 from uipath_langchain.agent.tools.base_uipath_structured_tool import (
     BaseUiPathStructuredTool,
 )
@@ -335,11 +338,13 @@ def assert_tool_is_base_uipath(tool):
 
 
 # A tool output schema with a dangling $ref (no matching $defs entry) -- the shape
-# Studio Web emits for a .NET decimal? output argument. See create_output_model.
+# Studio Web emits for a .NET decimal? output argument -- alongside a valid sibling
+# that must survive. See create_output_model.
 _MALFORMED_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "left": {"$ref": "#/$defs/Nullableofdecimal", "type": "object"},
+        "status": {"type": "string"},  # valid sibling -- must be preserved
+        "left": {"$ref": "#/$defs/Nullableofdecimal", "type": "object"},  # dangling
     },
 }
 
@@ -484,8 +489,9 @@ class TestCreateToolsFromResources:
 
         An output schema drives only best-effort features (not the core tool call),
         so a dangling ``$ref`` (e.g. a .NET ``Nullableofdecimal`` with no ``$defs``)
-        must not raise ``AGENT_STARTUP.INVALID_TOOL_CONFIG``; the tool is still
-        built, with its output model degraded to an empty schema.
+        must not raise ``AGENT_STARTUP.INVALID_TOOL_CONFIG``. The tool is still built;
+        the dangling-ref field is neutralized to a permissive placeholder while valid
+        sibling fields are preserved.
         """
         resource = request.getfixturevalue(resource_fixture)
         _set_malformed_output_schema(resource)
@@ -493,7 +499,8 @@ class TestCreateToolsFromResources:
         # Must not raise (this previously threw AGENT_STARTUP.INVALID_TOOL_CONFIG).
         tool = await _build_tool_for_resource(resource, AsyncMock(spec=BaseChatModel))
 
-        # Tool still built (not None / a list), with its output model degraded to
-        # an empty schema rather than crashing startup.
         assert isinstance(tool, StructuredToolWithOutputType)
-        assert tool.output_type.model_json_schema().get("properties", {}) == {}
+        properties = tool.output_type.model_json_schema().get("properties", {})
+        # Valid sibling survives; dangling-ref field is neutralized (not dropped).
+        assert "status" in properties
+        assert properties["left"]["title"] == _UNRESOLVED_TYPE_TITLE
