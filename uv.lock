@@ -4498,7 +4498,7 @@ wheels = [
 
 [[package]]
 name = "uipath-langchain"
-version = "0.14.6"
+version = "0.14.7"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -4588,7 +4588,7 @@ requires-dist = [
     { name = "uipath-langchain-client", extras = ["openai"], specifier = ">=1.16.1,<1.17.0" },
     { name = "uipath-langchain-client", extras = ["vertexai"], marker = "extra == 'vertex'", specifier = ">=1.16.1,<1.17.0" },
     { name = "uipath-llm-client", specifier = ">=1.16.3,<1.17.0" },
-    { name = "uipath-platform", specifier = ">=0.2.5,<0.3.0" },
+    { name = "uipath-platform", specifier = ">=0.2.9,<0.3.0" },
     { name = "uipath-runtime", specifier = ">=0.12.1,<0.13.0" },
 ]
 provides-extras = ["anthropic", "vertex", "bedrock", "fireworks", "all"]
@@ -4672,7 +4672,7 @@ wheels = [
 
 [[package]]
 name = "uipath-platform"
-version = "0.2.5"
+version = "0.2.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -4682,9 +4682,9 @@ dependencies = [
     { name = "truststore" },
     { name = "uipath-core" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/06/d5/497e6d681f8f19a6621875956562cc6da8c514568fb89b773844899c8656/uipath_platform-0.2.5.tar.gz", hash = "sha256:8e9e02111ca9485ee7289d75613a62d882c95d34beccb6f8b59c76050882cf2d", size = 424528, upload-time = "2026-07-08T08:58:56.058Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/4e/c555419c622b77a3b939f512faceaa73407669e51337c155b3c9697abce0/uipath_platform-0.2.9.tar.gz", hash = "sha256:86abad2c124f016b8da739ca9b794a3e3dc7fa10515750b8402278979c787783", size = 426699, upload-time = "2026-07-13T18:07:58.296Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/45/bf/11bb0b11777568c4e079d37f3ec003e816ca9be4e57f0455cafbccc67212/uipath_platform-0.2.5-py3-none-any.whl", hash = "sha256:ee14cd49e88ac1cdfc81e392025cc6f5c54b924fd20491d72ad6d55a5bc15db7", size = 279891, upload-time = "2026-07-08T08:58:53.575Z" },
+    { url = "https://files.pythonhosted.org/packages/de/75/94769a5107c69c0bbf0e3bbf625378bd9c0697b32bb2d602c2d6f860beb8/uipath_platform-0.2.9-py3-none-any.whl", hash = "sha256:2693668b9f00eb8c958c6f7615850b4123ced4bd735027cba28a04ba166ccada", size = 280892, upload-time = "2026-07-13T18:07:56.692Z" },
 ]
 
 [[package]]
