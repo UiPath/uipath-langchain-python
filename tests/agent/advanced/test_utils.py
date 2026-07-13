@@ -72,6 +72,51 @@ async def test_resolve_input_attachments_downloads_and_adds_filepath(
 
 
 @pytest.mark.asyncio
+async def test_resolve_input_attachments_uses_marked_runtime_workspace_factory(
+    tmp_path: Path,
+) -> None:
+    """Runtime workspace factories resolve from RunnableConfig before download."""
+    attachment_id = uuid.uuid4()
+    input_args = {
+        "book": {
+            "ID": str(attachment_id),
+            "FullName": "novel.txt",
+            "MimeType": "text/plain",
+        },
+    }
+
+    seen_config: dict[str, Any] = {}
+
+    def backend_factory(runtime: Any) -> FilesystemBackend:
+        seen_config.update(runtime.config)
+        return FilesystemBackend(
+            root_dir=runtime.config["configurable"]["workspace"],
+            virtual_mode=True,
+        )
+
+    backend_factory.is_uipath_workspace_filesystem_backend = True  # type: ignore[attr-defined]
+
+    mock_client = MagicMock()
+    mock_client.attachments.download_async = AsyncMock()
+    with patch(
+        "uipath_langchain.agent.advanced.utils.UiPath",
+        return_value=mock_client,
+    ):
+        result = await resolve_input_attachments(
+            backend_factory,
+            ["$.book"],
+            input_args,
+            config={"configurable": {"workspace": str(tmp_path)}},
+        )
+
+    assert seen_config == {"configurable": {"workspace": str(tmp_path)}}
+    expected_name = f"{attachment_id}_novel.txt"
+    call_kwargs = mock_client.attachments.download_async.call_args.kwargs
+    assert call_kwargs["destination_path"] == str(tmp_path / expected_name)
+    assert result["book"]["FilePath"] == f"/{expected_name}"
+
+
+@pytest.mark.asyncio
 async def test_resolve_input_attachments_skips_non_ticket_matches(
     tmp_path: Path,
 ) -> None:

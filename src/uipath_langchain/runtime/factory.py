@@ -1,5 +1,6 @@
 import asyncio
 import os
+from pathlib import Path
 from typing import Any, AsyncContextManager
 
 from langchain_core.callbacks import BaseCallbackHandler
@@ -12,19 +13,30 @@ from openinference.instrumentation.langchain import (
 )
 from uipath.core.adapters import EvaluatorProtocol
 from uipath.core.tracing import UiPathSpanUtils, UiPathTraceManager
+from uipath.platform import UiPath
 from uipath.platform.resume_triggers import (
     UiPathResumeTriggerHandler,
 )
 from uipath.runtime import (
+    HydrationPolicy,
+    HydrationRuntime,
     UiPathResumableRuntime,
     UiPathRuntimeContext,
     UiPathRuntimeFactorySettings,
     UiPathRuntimeProtocol,
     UiPathRuntimeStorageProtocol,
+    Workspace,
+    WorkspaceHydrator,
+    WorkspaceRegistryStore,
 )
 from uipath.runtime.errors import UiPathErrorCategory
 
 from uipath_langchain._tracing import _instrument_traceable_attributes
+from uipath_langchain.deepagents import (
+    UiPathDeepAgentRuntimeSpec,
+    get_uipath_deep_agent_runtime_spec,
+    set_uipath_deep_agent_runtime_spec,
+)
 from uipath_langchain.governance import GovernanceCallbackHandler
 from uipath_langchain.runtime.config import LangGraphConfig
 from uipath_langchain.runtime.errors import LangGraphErrorCode, LangGraphRuntimeError
@@ -222,6 +234,9 @@ class UiPathLangGraphRuntimeFactory:
             loaded_graph = await self._load_graph(entrypoint, **kwargs)
 
             compiled_graph = await self._compile_graph(loaded_graph, memory)
+            spec = get_uipath_deep_agent_runtime_spec(loaded_graph)
+            if spec is not None:
+                set_uipath_deep_agent_runtime_spec(compiled_graph, spec)
 
             self._graph_cache[entrypoint] = compiled_graph
 
@@ -300,20 +315,77 @@ class UiPathLangGraphRuntimeFactory:
             else None
         )
 
+        spec = get_uipath_deep_agent_runtime_spec(compiled_graph)
+        workspace = self._create_deep_agent_workspace(runtime_id, spec)
+        configurable = (
+            {spec.workspace_config_key: str(workspace.path)}
+            if spec is not None and workspace is not None
+            else None
+        )
+
         base_runtime = UiPathLangGraphRuntime(
             graph=compiled_graph,
             runtime_id=runtime_id,
             entrypoint=entrypoint,
             callbacks=callbacks,
             storage=storage,
+            configurable=configurable,
         )
 
-        return UiPathResumableRuntime(
+        resumable_runtime: UiPathRuntimeProtocol = UiPathResumableRuntime(
             delegate=base_runtime,
             storage=storage,
             trigger_manager=trigger_manager,
             runtime_id=runtime_id,
         )
+
+        if spec is None or workspace is None:
+            return resumable_runtime
+
+        sdk = UiPath()
+        registry_runtime_id = self._deep_agent_registry_runtime_id(runtime_id, spec)
+        return HydrationRuntime(
+            delegate=resumable_runtime,
+            workspace=workspace,
+            hydrator=WorkspaceHydrator(
+                workspace_path=workspace.path,
+                attachments=sdk.attachments,
+                jobs=getattr(sdk, "jobs", None),
+                current_job_key=self.context.job_id,
+                folder_key=self.context.folder_key,
+                attachment_prefix=spec.attachment_prefix,
+            ),
+            registry_store=WorkspaceRegistryStore(
+                storage,
+                registry_runtime_id,
+            ),
+            policy=HydrationPolicy(spec.hydration_policy),
+        )
+
+    def _create_deep_agent_workspace(
+        self,
+        runtime_id: str,
+        spec: UiPathDeepAgentRuntimeSpec | None,
+    ) -> Workspace | None:
+        if spec is None:
+            return None
+        if spec.interaction_mode == "conversation":
+            raise NotImplementedError(
+                "Conversational UiPath DeepAgents require a chat-runtime adapter. "
+                "Task-mode DeepAgents are supported by this PoC."
+            )
+
+        base_dir = Path(self.context.runtime_dir or "__uipath") / "workspaces"
+        return Workspace.create(base_dir / runtime_id, cleanup=True)
+
+    def _deep_agent_registry_runtime_id(
+        self,
+        runtime_id: str,
+        spec: UiPathDeepAgentRuntimeSpec,
+    ) -> str:
+        if spec.workspace_scope == "conversation" and self.context.conversation_id:
+            return self.context.conversation_id
+        return runtime_id
 
     async def new_runtime(
         self,

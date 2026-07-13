@@ -91,6 +91,7 @@ class UiPathLangGraphRuntime:
         entrypoint: str | None = None,
         callbacks: list[BaseCallbackHandler] | None = None,
         storage: UiPathRuntimeStorageProtocol | None = None,
+        configurable: dict[str, Any] | None = None,
     ):
         """
         Initialize the runtime.
@@ -104,6 +105,7 @@ class UiPathLangGraphRuntime:
         self.runtime_id: str = runtime_id or "default"
         self.entrypoint: str | None = entrypoint
         self.callbacks: list[BaseCallbackHandler] = callbacks or []
+        self.configurable = configurable or {}
         self.chat = UiPathChatMessagesMapper(self.runtime_id, storage)
         self.chat.tools_requiring_confirmation = self._get_tool_confirmation_info()
         self.chat.client_side_tools = self._get_client_side_tools()
@@ -349,7 +351,7 @@ class UiPathLangGraphRuntime:
     def _get_graph_config(self) -> RunnableConfig:
         """Build graph execution configuration."""
         graph_config: RunnableConfig = {
-            "configurable": {"thread_id": self.runtime_id},
+            "configurable": {"thread_id": self.runtime_id, **self.configurable},
             "callbacks": self.callbacks,
         }
 

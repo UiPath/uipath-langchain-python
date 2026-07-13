@@ -1,0 +1,15 @@
+flowchart TB
+  __start__(__start__)
+  transform_input(transform_input)
+  advanced_agent(advanced_agent)
+  risk_reviewer([risk_reviewer subagent])
+  workspace[(runtime workspace)]
+  transform_output(transform_output)
+  __end__(__end__)
+
+  __start__ --> transform_input
+  transform_input --> advanced_agent
+  advanced_agent -. delegates review .-> risk_reviewer
+  advanced_agent -. writes files .-> workspace
+  advanced_agent --> transform_output
+  transform_output --> __end__

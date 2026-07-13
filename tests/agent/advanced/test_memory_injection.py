@@ -68,6 +68,16 @@ class TestWorkspaceMemoryWiring:
         backend = FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
         assert _memory_kwarg(backend) == [MEMORY_INDEX_VIRTUAL_PATH]
 
+    def test_enables_memory_for_marked_runtime_workspace_factory(
+        self, tmp_path: Any
+    ) -> None:
+        def backend_factory(runtime: Any) -> FilesystemBackend:
+            return FilesystemBackend(root_dir=tmp_path, virtual_mode=True)
+
+        backend_factory.is_uipath_workspace_filesystem_backend = True  # type: ignore[attr-defined]
+
+        assert _memory_kwarg(backend_factory) == [MEMORY_INDEX_VIRTUAL_PATH]
+
     def test_disables_memory_for_non_filesystem_backend(self) -> None:
         # The default in-state backend (None) carries no durable workspace, so
         # passing memory=None leaves MemoryMiddleware out of the stack entirely.

@@ -1,0 +1,10 @@
+{
+  "product_name": "Invoice Exception Copilot",
+  "audience": "accounts payable operations managers",
+  "objective": "prepare a pilot launch plan for three enterprise customers",
+  "constraints": [
+    "security review must complete before external rollout",
+    "deadline is six weeks away",
+    "support team needs enablement material"
+  ]
+}

@@ -6,11 +6,11 @@ from typing import Any
 from deepagents import CompiledSubAgent, SubAgent
 from deepagents import create_deep_agent as _create_deep_agent
 from deepagents.backends import BackendProtocol
-from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.backends.protocol import BackendFactory
 from langchain.agents.structured_output import ResponseFormat
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables.config import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
@@ -23,6 +23,7 @@ from .types import AdvancedAgentGraphState, ConversationalAdvancedAgentGraphStat
 from .utils import (
     MEMORY_INDEX_VIRTUAL_PATH,
     create_state_with_input,
+    is_workspace_filesystem_backend,
     resolve_input_attachments,
 )
 
@@ -62,22 +63,24 @@ def create_advanced_agent_graph(
     input_schema: type[BaseModel] | None,
     output_schema: type[BaseModel],
     build_user_message: Callable[[dict[str, Any]], str],
+    subagents: Sequence[SubAgent | CompiledSubAgent] = (),
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that maps typed I/O to/from messages.
 
-    With a ``FilesystemBackend``, attachment-shaped inputs are downloaded into the
-    workspace and given a ``FilePath`` before the user message is built. A
-    ``FilesystemBackend`` also enables workspace memory: deepagents'
+    With a filesystem workspace backend, attachment-shaped inputs are downloaded
+    into the workspace and given a ``FilePath`` before the user message is built.
+    Filesystem workspaces also enable workspace memory: deepagents'
     ``MemoryMiddleware`` reads ``/memory/MEMORY.md`` from the backend each turn.
-    Memory stays disabled for non-filesystem backends, which carry no workspace.
+    Memory stays disabled for backends which carry no workspace.
     """
     memory_sources = (
-        [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
+        [MEMORY_INDEX_VIRTUAL_PATH] if is_workspace_filesystem_backend(backend) else []
     )
 
     inner_graph = create_advanced_agent(
         model=model,
         tools=tools,
+        subagents=subagents,
         system_prompt=system_prompt,
         backend=backend,
         response_format=response_format,
@@ -90,7 +93,10 @@ def create_advanced_agent_graph(
         get_job_attachment_paths(input_schema) if input_schema is not None else []
     )
 
-    async def transform_input_async(state: BaseModel) -> dict[str, Any]:
+    async def transform_input_async(
+        state: BaseModel,
+        config: RunnableConfig,
+    ) -> dict[str, Any]:
         state_data = state.model_dump()
         input_data = {k: v for k, v in state_data.items() if k not in internal_fields}
         input_args = (
@@ -100,7 +106,11 @@ def create_advanced_agent_graph(
         )
         if attachment_paths:
             input_args = await resolve_input_attachments(
-                backend, attachment_paths, input_args
+                backend,
+                attachment_paths,
+                input_args,
+                state=state,
+                config=config,
             )
         user_text = build_user_message(input_args)
         return {"messages": [HumanMessage(content=user_text, id="user-input")]}
@@ -128,6 +138,7 @@ def create_conversational_advanced_agent_graph(
     tools: Sequence[BaseTool],
     system_prompt: str,
     backend: BackendProtocol | BackendFactory | None,
+    subagents: Sequence[SubAgent | CompiledSubAgent] = (),
 ) -> StateGraph[Any, Any, Any, Any]:
     """Wrap the advanced agent in a parent graph that speaks the conversational contract.
 
@@ -141,12 +152,13 @@ def create_conversational_advanced_agent_graph(
     from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
     memory_sources = (
-        [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
+        [MEMORY_INDEX_VIRTUAL_PATH] if is_workspace_filesystem_backend(backend) else []
     )
 
     inner_graph = create_advanced_agent(
         model=model,
         tools=tools,
+        subagents=subagents,
         system_prompt=system_prompt,
         backend=backend,
         memory=memory_sources,

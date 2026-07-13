@@ -56,6 +56,23 @@ def test_wrapper_graph_has_io_nodes() -> None:
     assert {"transform_input", "advanced_agent", "transform_output"} <= set(graph.nodes)
 
 
+def test_subagents_are_passed_to_inner_advanced_agent() -> None:
+    """The typed I/O wrapper preserves DeepAgents sub-agent delegation."""
+    subagent = {
+        "name": "researcher",
+        "description": "Researches one part of the task",
+        "system_prompt": "Research carefully.",
+    }
+
+    with patch(
+        "uipath_langchain.agent.advanced.agent.create_advanced_agent",
+        return_value=MagicMock(),
+    ) as mock_create:
+        _build(subagents=[subagent])
+
+    assert mock_create.call_args.kwargs["subagents"] == [subagent]
+
+
 @pytest.mark.asyncio
 async def test_transform_input_without_schema_builds_single_user_message() -> None:
     """With no input schema, the built message comes straight from build_user_message."""
