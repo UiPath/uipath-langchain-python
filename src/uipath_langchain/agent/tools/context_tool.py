@@ -155,6 +155,7 @@ def create_context_tool(
     resource: AgentContextResourceConfig,
     llm: BaseChatModel | None = None,
     agent: LowCodeAgentDefinition | None = None,
+    source: str | None = None,
 ) -> StructuredTool | BaseTool | None:
     tool_name = sanitize_tool_name(resource.name)
 
@@ -193,6 +194,7 @@ def create_context_tool(
             llm,
             tool_name=tool_name,
             agent_config={BASE_SYSTEM_PROMPT: _extract_system_prompt(agent)},
+            source=source,
         )
 
     assert resource.settings is not None
