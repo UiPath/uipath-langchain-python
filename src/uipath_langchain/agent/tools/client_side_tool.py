@@ -2,13 +2,16 @@
 
 import json
 from contextvars import ContextVar
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, StructuredTool
 from uipath.agent.models.agent import AgentClientSideToolResourceConfig
 from uipath.eval.mocks import mockable
 
+from uipath_langchain._client_side_tool_types import (
+    ClientSideToolInfo as ClientSideToolInfo,
+)
 from uipath_langchain._utils.durable_interrupt import durable_interrupt
 from uipath_langchain.agent.react.jsonschema_pydantic_converter import (
     create_model as create_model_from_schema,
@@ -24,11 +27,6 @@ available_client_side_tools: ContextVar[set[str] | None] = ContextVar(
 )
 
 UIPATH_CLIENT_SIDE_TOOLS_INPUT_KEY = "uipath__client_side_tools"
-
-
-class ClientSideToolInfo(TypedDict):
-    input_schema: dict[str, Any] | None
-    output_schema: dict[str, Any] | None
 
 
 def apply_tool_filter(

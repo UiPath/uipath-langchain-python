@@ -14,10 +14,13 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START
 from langgraph.graph.state import CompiledStateGraph, StateGraph
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from uipath.core.chat import UiPathConversationMessageData
+from uipath.runtime.errors import UiPathErrorCategory
 
+from uipath_langchain.agent.exceptions import AgentRuntimeError, AgentRuntimeErrorCode
 from uipath_langchain.agent.react.job_attachments import get_job_attachment_paths
+from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
 
 from .types import AdvancedAgentGraphState, ConversationalAdvancedAgentGraphState
 from .utils import (
@@ -129,16 +132,7 @@ def create_conversational_advanced_agent_graph(
     system_prompt: str,
     backend: BackendProtocol | BackendFactory | None,
 ) -> StateGraph[Any, Any, Any, Any]:
-    """Wrap the advanced agent in a parent graph that speaks the conversational contract.
-
-    Conversational agents receive the full conversation history in the
-    ``messages`` input each exchange and must output the newly produced
-    messages as ``uipath__agent_response_messages``. The deepagent already
-    operates on ``messages``, so the wrapper only records the incoming history
-    size and maps the new messages to the conversational output field.
-    """
-    # deferred: avoids a circular import (runtime.messages imports agent modules)
-    from uipath_langchain.runtime.messages import UiPathChatMessagesMapper
+    """Map conversation history and new deepagent messages to the CAS contract."""
 
     memory_sources = (
         [MEMORY_INDEX_VIRTUAL_PATH] if isinstance(backend, FilesystemBackend) else []
@@ -153,7 +147,9 @@ def create_conversational_advanced_agent_graph(
     )
 
     class ConversationalAdvancedAgentOutput(BaseModel):
-        uipath__agent_response_messages: list[UiPathConversationMessageData] = []
+        uipath__agent_response_messages: list[UiPathConversationMessageData] = Field(
+            default_factory=list
+        )
 
     def capture_exchange_start(
         state: ConversationalAdvancedAgentGraphState,
@@ -163,7 +159,14 @@ def create_conversational_advanced_agent_graph(
     def transform_output(
         state: ConversationalAdvancedAgentGraphState,
     ) -> dict[str, Any]:
-        initial_count = state.initial_message_count or 0
+        if state.initial_message_count is None:
+            raise AgentRuntimeError(
+                code=AgentRuntimeErrorCode.STATE_ERROR,
+                title="Conversation state is incomplete",
+                detail="The initial message count was not captured before execution.",
+                category=UiPathErrorCategory.SYSTEM,
+            )
+        initial_count = state.initial_message_count
         new_messages = state.messages[initial_count:]
         converted = (
             UiPathChatMessagesMapper.map_langchain_messages_to_uipath_message_data_list(
