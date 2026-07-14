@@ -32,7 +32,7 @@ from uipath.runtime.events import (
 )
 from uipath.runtime.schema import UiPathRuntimeSchema
 
-from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
+from uipath_langchain._client_side_tool_types import ClientSideToolInfo
 from uipath_langchain.chat.hitl import (
     IS_CONVERSATIONAL_CLIENT_SIDE_TOOL,
     get_confirmation_schema,

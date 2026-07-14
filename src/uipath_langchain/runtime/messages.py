@@ -40,7 +40,7 @@ from uipath.core.chat import (
 )
 from uipath.runtime import UiPathRuntimeStorageProtocol
 
-from uipath_langchain.agent.tools.client_side_tool import ClientSideToolInfo
+from uipath_langchain._client_side_tool_types import ClientSideToolInfo
 from uipath_langchain.chat.hitl import IS_CONVERSATIONAL_CLIENT_SIDE_TOOL
 
 from ._citations import (
@@ -188,9 +188,7 @@ class UiPathChatMessagesMapper:
                                 )
                             )
                     elif isinstance(data, UiPathExternalValue):
-                        part_metadata = getattr(
-                            uipath_content_part, "metadata", None
-                        )
+                        part_metadata = getattr(uipath_content_part, "metadata", None)
                         has_workspace_metadata = (
                             isinstance(part_metadata, dict)
                             and part_metadata.get("fileKind") == "workspace"

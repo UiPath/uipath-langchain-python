@@ -41,7 +41,7 @@ def test_assistant_file_parts_are_skipped() -> None:
                 data=UiPathInlineValue(inline="done, see the plan"),
                 citations=[],
             ),
-            _file_part("p2", "plan/todo.md", metadata={"fileKind": "workspace"}),
+            _file_part("ws-a1-0", "plan/todo.md", metadata={"fileKind": "workspace"}),
         ],
         tool_calls=[],
     )
