@@ -463,14 +463,15 @@ class TestCreateOutputModel:
             {"f1": 1, "f2": "x", "f3": None, "f4": [1], "f5": {"a": 1}}
         )
 
-    def test_last_resort_empty_model_on_non_ref_failure(
+    def test_non_ref_conversion_failure_is_fatal(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """If conversion still raises AgentStartupError after neutralizing refs
-        (a non-$ref failure), degrade to an empty model rather than crash."""
+        """A conversion failure that is NOT a dangling ref must propagate (fail
+        loud) -- there is deliberately no last-resort fallback that would swallow
+        an unexpected malformation into a degraded model."""
         import uipath_langchain.agent.react.jsonschema_pydantic_converter as mod
 
-        # Capture a real AgentStartupError from the low-level converter.
+        # Capture a real AgentStartupError, then make create_model raise it.
         try:
             mod.create_model(
                 {"type": "object", "properties": {"x": {"$ref": "#/$defs/Missing"}}}
@@ -479,19 +480,15 @@ class TestCreateOutputModel:
         except AgentStartupError as exc:
             captured = exc
 
-        real_create_model = mod.create_model
+        def always_raise(_schema: dict[str, Any]) -> Any:
+            raise captured
 
-        def fake_create_model(schema: dict[str, Any]) -> Any:
-            if schema is not mod._EMPTY_OUTPUT_SCHEMA:
-                raise captured
-            return real_create_model(schema)
+        monkeypatch.setattr(mod, "create_model", always_raise)
 
-        monkeypatch.setattr(mod, "create_model", fake_create_model)
-
-        model = mod.create_output_model(
-            {"type": "object", "properties": {"y": {"type": "string"}}}, "t"
-        )
-        assert model.model_json_schema().get("properties", {}) == {}
+        with pytest.raises(AgentStartupError):
+            mod.create_output_model(
+                {"type": "object", "properties": {"y": {"type": "string"}}}, "t"
+            )
 
     def test_neutralized_refs_are_logged_with_tool_and_ref(
         self, caplog: pytest.LogCaptureFixture

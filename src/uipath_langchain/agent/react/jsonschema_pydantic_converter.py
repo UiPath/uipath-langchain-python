@@ -11,10 +11,6 @@ from uipath_langchain.agent.exceptions import AgentStartupError, AgentStartupErr
 
 logger = logging.getLogger(__name__)
 
-# Empty, always-parseable output model used as a last-resort non-fatal fallback
-# (see create_output_model).
-_EMPTY_OUTPUT_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
-
 # Marker left on any OUTPUT-schema node whose $ref target could not be resolved.
 # The converter discards $defs names and non-standard (x-*) keys but preserves the
 # standard `title`/`description` annotations on a property, so the marker lives as
@@ -136,18 +132,24 @@ def create_output_model(
     schema: dict[str, Any],
     tool_name: str,
 ) -> Type[BaseModel]:
-    """Convert a tool's OUTPUT JSON schema to a Pydantic model, non-fatally.
+    """Convert a tool's OUTPUT JSON schema to a Pydantic model.
 
-    An output schema drives only best-effort features (job-attachment discovery,
-    output guardrails, eval simulations), not the core tool call, so it must never
-    block agent startup. Unresolvable ``$ref``s (the common failure -- see
-    _neutralize_dangling_refs) are neutralized in place so all valid fields are
-    kept. As a last resort, any remaining conversion failure degrades to an empty
-    model.
+    Unresolvable ``$ref``s -- the malformed output schema seen in practice (see
+    _neutralize_dangling_refs) -- are neutralized in place so all valid fields are
+    kept; since an output schema drives only best-effort features (job-attachment
+    discovery, output guardrails, eval simulations), losing a single unresolvable
+    field is preferable to failing startup.
+
+    Any *other* conversion failure is deliberately left fatal: we would rather fail
+    loudly at startup than swallow an unexpected malformation into a degraded model
+    that fails obscurely at runtime.
 
     Returns:
-        The converted model (dangling refs neutralized), or an empty model if the
-        schema is still unparseable.
+        The converted model, with dangling refs neutralized.
+
+    Raises:
+        AgentStartupError: If the schema is unparseable for a reason other than a
+            dangling ``$ref``.
     """
     sanitized, dropped = _neutralize_dangling_refs(schema)
     if dropped:
@@ -160,16 +162,4 @@ def create_output_model(
             ", ".join(sorted(set(dropped))),
             _UNRESOLVED_TYPE_TITLE,
         )
-    try:
-        return create_model(sanitized)
-    except AgentStartupError as e:
-        # Last-resort net for a non-$ref failure we didn't neutralize. Intentionally
-        # narrow (AgentStartupError only): other errors are unexpected and should
-        # surface rather than be silently swallowed.
-        logger.warning(
-            "Tool %r output schema still unparseable after neutralizing dangling "
-            "refs; falling back to an empty model (non-blocking): %s",
-            tool_name,
-            e.error_info.detail,
-        )
-        return create_model(_EMPTY_OUTPUT_SCHEMA)
+    return create_model(sanitized)
